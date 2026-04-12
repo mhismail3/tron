@@ -25,6 +25,7 @@ struct SessionSidebar: View {
     @Binding var selectedSessionId: String?
     @State private var sessionToArchive: String?
     @State private var showArchiveConfirmation = false
+    @State private var selectedWorkspace: String?
 
     // Convenience accessor
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -34,13 +35,59 @@ struct SessionSidebar: View {
     let onVoiceNote: () -> Void
     let actions: DashboardToolbarActions
 
+    private var recentWorkspaces: [(path: String, name: String)] {
+        CachedSession.recentWorkspaces(from: eventStoreManager.sortedSessions)
+    }
+
+    private var filteredSessions: [CachedSession] {
+        guard let workspace = selectedWorkspace else { return eventStoreManager.sortedSessions }
+        return eventStoreManager.sortedSessions.filter { $0.workingDirectory == workspace }
+    }
+
+    private var workspaceFilterPills: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(recentWorkspaces, id: \.path) { workspace in
+                    let isSelected = selectedWorkspace == workspace.path
+                    Button {
+                        withAnimation(.smooth(duration: 0.25)) {
+                            selectedWorkspace = isSelected ? nil : workspace.path
+                        }
+                    } label: {
+                        Text(workspace.name)
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                            .foregroundStyle(isSelected ? .white : .tronEmerald)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                    }
+                    .background {
+                        Capsule().fill(Color.tronBackground)
+                        Capsule().fill(Color.tronEmerald.opacity(isSelected ? 0.6 : 0.25))
+                    }
+                    .overlay(Capsule().strokeBorder(Color.tronEmerald.opacity(isSelected ? 0.5 : 0.3), lineWidth: 0.5))
+                }
+            }
+            .padding(.horizontal, 8)
+        }
+        .mask(
+            HStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 12)
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 12)
+            }
+            .padding(.vertical, -50)
+        )
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
                 // Always render List so NavigationSplitView can push on compact
                 List(selection: $selectedSessionId) {
                     Section {
-                        ForEach(eventStoreManager.sortedSessions) { session in
+                        ForEach(filteredSessions) { session in
                             CachedSessionSidebarRow(
                                 session: session,
                                 isSelected: session.id == selectedSessionId,
@@ -95,13 +142,20 @@ struct SessionSidebar: View {
             }
 
             // Bottom floating bar
-            HStack {
+            HStack(alignment: .center) {
                 FloatingVoiceNotesButton(action: onVoiceNote, size: 56)
-                Spacer()
+
+                if recentWorkspaces.count > 1 {
+                    workspaceFilterPills
+                } else {
+                    Spacer()
+                }
+
                 FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress, size: 56)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
+            .contentShape(Rectangle())
         }
         .background {
             Color.clear
