@@ -20,15 +20,18 @@ Run these checks before doing anything else:
 # 1. Is gws installed?
 which gws || brew install googleworkspace-cli
 
-# 2. Is it up to date?
-gws --version
-brew outdated googleworkspace-cli && brew upgrade googleworkspace-cli
+# 2. Are client credentials available? (needed for login and API calls)
+CLIENT_ID=$(~/.tron/skills/vault/scripts/vault.sh get google-workspace-client --field username 2>/dev/null)
+CLIENT_SECRET=$(~/.tron/skills/vault/scripts/vault.sh get google-workspace-client --field password 2>/dev/null)
+[ -z "$CLIENT_ID" ] && echo "ERROR: No client credentials in vault. See account.md for setup."
 
-# 3. Is auth valid?
+# 3. Is auth valid? (set client env vars so gws can find the OAuth app)
+GOOGLE_WORKSPACE_CLI_CLIENT_ID="$CLIENT_ID" \
+GOOGLE_WORKSPACE_CLI_CLIENT_SECRET="$CLIENT_SECRET" \
 gws auth status
 ```
 
-If auth is expired or missing, tell the user to run `gws auth login` manually — it requires an interactive browser flow. After re-login, refresh the vault entry per `account.md`.
+If auth is expired or missing, see `account.md` — the re-login flow pulls client credentials from the vault automatically. The user only needs to complete the browser consent flow.
 
 ## Routing table
 
