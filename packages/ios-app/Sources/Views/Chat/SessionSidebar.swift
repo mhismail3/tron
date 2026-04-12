@@ -101,7 +101,7 @@ struct SessionSidebar: View {
                 FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress, size: 56)
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 24)
+            .padding(.bottom, 8)
         }
         .background {
             Color.clear
@@ -162,7 +162,7 @@ struct CachedSessionSidebarRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Header: title + stats
+            // Header: title
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 6) {
                     if session.isFork == true {
@@ -178,17 +178,6 @@ struct CachedSessionSidebarRow: View {
                         .lineLimit(1)
 
                     Spacer()
-
-                    HStack(spacing: 4) {
-                        Text("↑\(session.totalInputTokens.formattedTokenCount)")
-                        Text("↓\(session.outputTokens.formattedTokenCount)")
-                        Text(session.formattedCost)
-                        Text("·")
-                        Text(session.compactDate)
-                    }
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronTextMuted)
-                    .fixedSize()
                 }
 
             }
@@ -211,7 +200,16 @@ struct CachedSessionSidebarRow: View {
 
                 Spacer()
 
-                Text(session.shortModel)
+                HStack(spacing: 4) {
+                    Text("↑\(session.totalInputTokens.formattedTokenCount)")
+                    Text("↓\(session.outputTokens.formattedTokenCount)")
+                    Text(session.formattedCost)
+                    Text("·")
+                    Text(session.shortModel)
+                    Text("·")
+                    Text(session.compactDate)
+                }
+                .fixedSize()
             }
             .font(TronTypography.mono(size: TronTypography.sizeXS))
             .foregroundStyle(.tronTextMuted.opacity(0.5))

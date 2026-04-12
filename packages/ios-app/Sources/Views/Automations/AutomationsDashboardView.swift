@@ -47,7 +47,7 @@ struct AutomationsDashboardView: View {
                 .glassEffect(.regular.tint(Color.tronCoral.opacity(0.25)).interactive(), in: .circle)
                 .onTapGesture { showCreateSheet = true }
                 .padding(.trailing, 20)
-                .padding(.bottom, 24)
+                .padding(.bottom, 8)
         }
         .tronScreenBackground()
         .navigationBarTitleDisplayMode(.inline)

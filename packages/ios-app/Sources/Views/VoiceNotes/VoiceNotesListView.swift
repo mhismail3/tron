@@ -31,7 +31,7 @@ struct VoiceNotesListView: View {
             // Floating mic button
             FloatingVoiceNotesButton(action: onVoiceNote, size: 56)
                 .padding(.trailing, 20)
-                .padding(.bottom, 24)
+                .padding(.bottom, 8)
         }
         .background {
             Color.clear

@@ -378,7 +378,7 @@ struct ContentView: View {
                         FloatingNewSessionButton(action: { showNewSessionSheet = true }, onLongPress: { createQuickSession() })
                     }
                     .padding(.trailing, 20)
-                    .padding(.bottom, 24)
+                    .padding(.bottom, 8)
                 }
             }
             .geometryGroup()
@@ -533,7 +533,7 @@ struct WelcomePage: View {
                         FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress)
                     }
                     .padding(.trailing, 20)
-                    .padding(.bottom, 24)
+                    .padding(.bottom, 8)
                 }
             }
             .geometryGroup() // Ensures geometry changes animate together with NavigationSplitView
