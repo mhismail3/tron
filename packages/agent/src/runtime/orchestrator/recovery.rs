@@ -222,7 +222,6 @@ fn cleanup_empty_session_dir(journal_path: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use tempfile::TempDir;
 
     // Note: Full integration tests require a real EventStore with DB setup.

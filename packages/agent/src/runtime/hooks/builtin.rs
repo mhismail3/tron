@@ -166,8 +166,6 @@ pub fn list_builtins() -> Vec<BuiltinHookInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::hooks::engine::HookEngine;
-    use crate::runtime::hooks::registry::HookRegistry;
     use crate::settings::types::BuiltinHookSetting;
 
     // We can't create a real SubagentManager in unit tests, but we can

@@ -394,7 +394,6 @@ pub fn get_oauth_credentials(auth_path: &std::path::Path) -> Option<(String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::auth::types::GoogleProviderAuth;
 
     #[test]
     fn cloud_code_assist_config_values() {
