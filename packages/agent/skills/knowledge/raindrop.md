@@ -41,10 +41,10 @@ If not found, tell the user:
 # Resolve collection ID (0 = Unsorted, or look up by name)
 curl -s -H "Authorization: Bearer $TOKEN" \
   "https://api.raindrop.io/rest/v1/raindrops/$COLLECTION_ID?perpage=25&sort=-created" \
-  | jq '.items[] | select(.tags | index("wiki-ingested") | not) | {id: ._id, title: .title, url: .link, tags: .tags, created: .created}'
+  | jq '.items[] | select((.tags | index("wiki-ingested") | not) and (.tags | index("wiki-error") | not)) | {id: ._id, title: .title, url: .link, tags: .tags, created: .created}'
 ```
 
-Fetches the 25 most recent bookmarks from the selected collection not yet ingested (no `wiki-ingested` tag).
+Fetches the 25 most recent bookmarks from the selected collection not yet processed (no `wiki-ingested` or `wiki-error` tag).
 
 ### Step 2: Process each bookmark (max 10 per run)
 
@@ -58,7 +58,9 @@ For each unprocessed bookmark:
    - Create/update topic notes in WIKI_TOPICS for key concepts
    - Cross-link selectively with existing topic notes
 
-3. **Tag in Raindrop:** Mark as processed. Preserve existing tags, add `wiki-ingested`:
+3. **Tag in Raindrop:** Mark the bookmark based on outcome. Preserve existing tags.
+
+**On success** — add `wiki-ingested`:
 
 ```bash
 # Read current bookmark to get existing tags
@@ -72,6 +74,24 @@ curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
   -d '{"tags": <merged_tags_array>}' \
   "https://api.raindrop.io/rest/v1/raindrop/<id>"
 ```
+
+**On error** (WebFetch failure, JS-rendered page, login wall, etc.) — add `wiki-error` and write a note in the bookmark:
+
+```bash
+# Merge tags: existing + wiki-error
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tags": <merged_tags_with_wiki_error>, "note": "<error reason>"}' \
+  "https://api.raindrop.io/rest/v1/raindrop/<id>"
+```
+
+The `note` field should contain a concise error description, e.g.:
+- `"wiki-error: JS-rendered page — WebFetch returned empty/script-only content"`
+- `"wiki-error: Login required — page returned 403 or login redirect"`
+- `"wiki-error: PDF extraction failed — <details>"`
+- `"wiki-error: Timeout — page did not respond within fetch window"`
+
+This persists the failure reason in Raindrop itself so it's visible when browsing bookmarks and queryable for later retry or tooling improvements. A stub source note should still be created in WIKI_SOURCES with `ingest_status: "blocked"` and the `blocker` field describing the error — see `ingest.md`.
 
 ### Step 3: Update state
 
@@ -92,7 +112,8 @@ This is an **optimization** — it lets subsequent runs skip pages already seen.
 Update WIKI_INDEX, append to WIKI_LOG:
 
 ```
-2026-04-07T16:00:00Z | raindrop | source | 2026-04-07-author-title | Raindrop ID: 12345678
+2026-04-07T16:00:00Z | raindrop | source | 2026-04-07-author-title | Raindrop ID: 12345678 — full extraction
+2026-04-07T16:00:00Z | raindrop | source | 2026-04-07-author-title | Raindrop ID: 12345679 — BLOCKED: JS-rendered page
 2026-04-07T16:00:00Z | raindrop | topic | concept-slug | From raindrop ingest
 ```
 
@@ -103,10 +124,10 @@ cd WIKI_ROOT && git add -A && git commit -m "knowledge: raindrop — processed N
 
 ### Step 5: Report
 
-1. Bookmarks processed (count)
-2. Notes created/updated (list with paths)
-3. Bookmarks skipped (already tagged, fetch failed)
-4. Errors encountered
+1. Bookmarks successfully ingested (count + list with source note paths)
+2. Topic notes created/updated (list with what was added)
+3. Bookmarks that errored (count + list with bookmark title, URL, and error reason)
+4. Bookmarks skipped (already tagged `wiki-ingested` or `wiki-error`)
 
 ---
 
@@ -143,8 +164,15 @@ Collection `0` = Unsorted. Use `/rest/v1/collections` to resolve collection name
 |---|---|
 | 401 Unauthorized | Token expired/invalid. Ask user to regenerate and re-store in vault. |
 | 429 Rate Limited | Raindrop limits ~120 req/min. The 10-bookmark cap keeps well under this. |
-| WebFetch failure | Skip the bookmark, log the error, continue. Don't tag it as ingested. |
+| WebFetch failure (JS-rendered, login wall, timeout, etc.) | Tag bookmark `wiki-error` with reason in `note` field. Create stub source note with `ingest_status: "blocked"`. Log to WIKI_LOG. Continue to next bookmark. |
 | Network failure | Stop the run, preserve state. Next run picks up. |
 | Vault token missing | Write error to output file and exit. Don't ask for input (cron runs unattended). |
+
+### Retrying errors
+
+Bookmarks tagged `wiki-error` are skipped in normal runs. To retry them:
+1. Remove the `wiki-error` tag from the bookmark in Raindrop (manually or via API)
+2. The next run will pick it up as unprocessed
+3. If the underlying issue persists (e.g., site still requires JS), it will be re-tagged `wiki-error`
 
 ## Gotchas
