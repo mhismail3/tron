@@ -22,7 +22,7 @@
 //! ## Submodules
 //!
 //! - [`types`] — Config, model registry, availability checking
-//! - [`message_converter`] — Tron messages → OpenAI chat completions format (shared with Kimi)
+//! - [`message_converter`] — Tron messages → Ollama native `/api/chat` format
 //! - [`stream_handler`] — NDJSON chunk parsing → unified [`StreamEvent`]s
 //! - [`provider`] — [`OllamaProvider`] implementing the [`Provider`] trait
 

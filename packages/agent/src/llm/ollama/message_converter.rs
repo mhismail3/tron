@@ -1,7 +1,12 @@
-//! Message format conversion: Tron messages → OpenAI chat completions format.
+//! Message format conversion: Tron messages → Ollama native `/api/chat` format.
 //!
-//! Ollama uses the same OpenAI-compatible chat completions format as Kimi.
-//! This module converts Tron's internal message types to the wire format.
+//! Ollama's native API is similar to OpenAI chat completions but differs in two
+//! key ways for tool calling:
+//!
+//! - **Tool call arguments** are JSON objects, not JSON-encoded strings.
+//! - **Tool result messages** use `tool_name` (function name) instead of `tool_call_id`.
+//!
+//! This module converts Tron's internal message types to the native wire format.
 
 use std::collections::HashMap;
 
@@ -15,7 +20,7 @@ use crate::llm::id_remapping::{IdFormat, build_tool_call_id_mapping, remap_tool_
 
 // ─── Wire types ──────────────────────────────────────────────────────────────
 
-/// A chat completion message in OpenAI format.
+/// A chat message in Ollama's native `/api/chat` format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatMessage {
     /// Message role: `"system"`, `"user"`, `"assistant"`, or `"tool"`.
@@ -26,12 +31,15 @@ pub struct ChatMessage {
     /// Tool calls made by the assistant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
-    /// Tool call ID (for tool result messages).
+    /// Tool name (for tool result messages).
+    ///
+    /// Ollama's native `/api/chat` uses `tool_name` (the function name) to match
+    /// results to calls, not `tool_call_id` like OpenAI's API.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+    pub tool_name: Option<String>,
 }
 
-/// A tool call in OpenAI format.
+/// A tool call in Ollama's native format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatToolCall {
     /// Unique tool call ID.
@@ -44,15 +52,18 @@ pub struct ChatToolCall {
 }
 
 /// Function name + arguments in a tool call.
+///
+/// Uses `Value` (not `String`) for `arguments` because Ollama's native `/api/chat`
+/// endpoint expects a JSON object, not a JSON-encoded string like OpenAI's API.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatFunction {
     /// Function name.
     pub name: String,
-    /// JSON-encoded arguments string.
-    pub arguments: String,
+    /// Arguments as a JSON object (native Ollama format, NOT a string).
+    pub arguments: Value,
 }
 
-/// Tool definition in OpenAI format.
+/// Tool definition for Ollama's native API.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatToolDef {
     /// Always `"function"`.
@@ -105,7 +116,7 @@ fn convert_user_message(content: &UserMessageContent, supports_images: bool) -> 
             role: "user".into(),
             content: Some(Value::String(text.clone())),
             tool_calls: None,
-            tool_call_id: None,
+            tool_name: None,
         },
         UserMessageContent::Blocks(blocks) => {
             let parts: Vec<Value> = blocks
@@ -121,14 +132,14 @@ fn convert_user_message(content: &UserMessageContent, supports_images: bool) -> 
                     role: "user".into(),
                     content: Some(parts[0]["text"].clone()),
                     tool_calls: None,
-                    tool_call_id: None,
+                    tool_name: None,
                 }
             } else {
                 ChatMessage {
                     role: "user".into(),
                     content: Some(Value::Array(parts)),
                     tool_calls: None,
-                    tool_call_id: None,
+                    tool_name: None,
                 }
             }
         }
@@ -189,14 +200,12 @@ fn convert_assistant_message(
                 ..
             } => {
                 let remapped_id = remap_tool_call_id(id, id_mapping).to_string();
-                let args_str =
-                    serde_json::to_string(&Value::Object(arguments.clone())).unwrap_or_default();
                 tool_calls.push(ChatToolCall {
                     id: remapped_id,
                     call_type: "function".into(),
                     function: ChatFunction {
                         name: name.clone(),
-                        arguments: args_str,
+                        arguments: Value::Object(arguments.clone()),
                     },
                 });
             }
@@ -225,12 +234,15 @@ fn convert_assistant_message(
         role: "assistant".into(),
         content: text,
         tool_calls: tool_calls_opt,
-        tool_call_id: None,
+        tool_name: None,
     })
 }
 
 /// Convert a tool result to chat format.
-fn convert_tool_result(tool_call_id: &str, content: &ToolResultMessageContent) -> ChatMessage {
+///
+/// Ollama's native `/api/chat` matches tool results to calls via `tool_name`
+/// (the function name), not `tool_call_id` like OpenAI's API.
+fn convert_tool_result(tool_name: &str, content: &ToolResultMessageContent) -> ChatMessage {
     let text = match content {
         ToolResultMessageContent::Text(t) => t.clone(),
         ToolResultMessageContent::Blocks(blocks) => {
@@ -249,13 +261,39 @@ fn convert_tool_result(tool_call_id: &str, content: &ToolResultMessageContent) -
         role: "tool".into(),
         content: Some(Value::String(text)),
         tool_calls: None,
-        tool_call_id: Some(tool_call_id.to_string()),
+        tool_name: Some(tool_name.to_string()),
     }
 }
 
-/// Convert Tron messages to OpenAI chat completion messages.
+/// Build a mapping from tool call IDs (both original and remapped) to function names.
+///
+/// Ollama's native API uses `tool_name` on result messages, so we need to recover
+/// the function name for each `ToolResult` by scanning the preceding assistant messages.
+fn build_tool_name_mapping(
+    messages: &[Message],
+    id_mapping: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut name_map = HashMap::new();
+    for msg in messages {
+        if let Message::Assistant { content, .. } = msg {
+            for block in content {
+                if let AssistantContent::ToolUse { id, name, .. } = block {
+                    let _ = name_map.insert(id.clone(), name.clone());
+                    let remapped = remap_tool_call_id(id, id_mapping);
+                    if remapped != id {
+                        let _ = name_map.insert(remapped.to_string(), name.clone());
+                    }
+                }
+            }
+        }
+    }
+    name_map
+}
+
+/// Convert Tron messages to Ollama native `/api/chat` messages.
 pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<ChatMessage> {
     let id_mapping = build_id_mapping(messages);
+    let tool_name_mapping = build_tool_name_mapping(messages, &id_mapping);
     let mut result = Vec::new();
 
     for msg in messages {
@@ -273,8 +311,11 @@ pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<Chat
                 content,
                 ..
             } => {
-                let remapped_id = remap_tool_call_id(tool_call_id, &id_mapping).to_string();
-                result.push(convert_tool_result(&remapped_id, content));
+                let tool_name = tool_name_mapping
+                    .get(tool_call_id.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| "unknown".to_string());
+                result.push(convert_tool_result(&tool_name, content));
             }
         }
     }
@@ -282,7 +323,7 @@ pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<Chat
     result
 }
 
-/// Convert Tron tool definitions to OpenAI chat completion tool definitions.
+/// Convert Tron tool definitions to Ollama native API tool definitions.
 pub fn convert_tools(tools: &[Tool]) -> Vec<ChatToolDef> {
     tools
         .iter()
@@ -348,8 +389,8 @@ mod tests {
         assert_eq!(tc.len(), 1);
         assert_eq!(tc[0].function.name, "read_file");
         assert!(tc[0].id.starts_with("call_"));
-        let parsed: serde_json::Value = serde_json::from_str(&tc[0].function.arguments).unwrap();
-        assert_eq!(parsed["path"], "/tmp/test");
+        // Native Ollama API: arguments must be a JSON object, not a string
+        assert_eq!(tc[0].function.arguments, json!({"path": "/tmp/test"}));
     }
 
     #[test]
@@ -419,11 +460,8 @@ mod tests {
             result[1].content,
             Some(Value::String("command output".into()))
         );
-        assert!(result[1].tool_call_id.is_some());
-        // Tool call IDs should match (both remapped from toolu_ to call_)
-        let tc_id = &result[0].tool_calls.as_ref().unwrap()[0].id;
-        let result_id = result[1].tool_call_id.as_ref().unwrap();
-        assert_eq!(tc_id, result_id);
+        // Native Ollama API: tool results use tool_name, not tool_call_id
+        assert_eq!(result[1].tool_name, Some("bash".into()));
     }
 
     #[test]
@@ -523,5 +561,458 @@ mod tests {
         assert!(result[0].content.is_some());
         assert!(result[0].tool_calls.is_some());
         assert_eq!(result[0].tool_calls.as_ref().unwrap().len(), 1);
+    }
+
+    // ── Phase 1: Arguments serialize as JSON objects ─────────────────────
+
+    #[test]
+    fn tool_call_arguments_serialize_as_object() {
+        let mut args = serde_json::Map::new();
+        let _ = args.insert("command".into(), json!("echo hello"));
+        let messages = vec![Message::Assistant {
+            content: vec![AssistantContent::ToolUse {
+                id: "toolu_01".into(),
+                name: "bash".into(),
+                arguments: args,
+                thought_signature: None,
+            }],
+            usage: None,
+            cost: None,
+            stop_reason: None,
+            thinking: None,
+        }];
+        let result = convert_messages(&messages, true);
+
+        // Serialize the whole message to JSON and verify arguments is an object
+        let wire = serde_json::to_value(&result[0]).unwrap();
+        let wire_args = &wire["tool_calls"][0]["function"]["arguments"];
+        assert!(wire_args.is_object(), "arguments must be a JSON object on the wire, got: {wire_args}");
+        assert_eq!(wire_args["command"], "echo hello");
+    }
+
+    #[test]
+    fn tool_call_empty_arguments_serialize_as_object() {
+        let messages = vec![Message::Assistant {
+            content: vec![AssistantContent::ToolUse {
+                id: "toolu_01".into(),
+                name: "bash".into(),
+                arguments: serde_json::Map::new(),
+                thought_signature: None,
+            }],
+            usage: None,
+            cost: None,
+            stop_reason: None,
+            thinking: None,
+        }];
+        let result = convert_messages(&messages, true);
+        let wire = serde_json::to_value(&result[0]).unwrap();
+        let wire_args = &wire["tool_calls"][0]["function"]["arguments"];
+        assert!(wire_args.is_object());
+        assert_eq!(wire_args.as_object().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn tool_call_nested_arguments_serialize_as_object() {
+        let mut args = serde_json::Map::new();
+        let _ = args.insert(
+            "config".into(),
+            json!({"key": "value", "nested": {"deep": true}}),
+        );
+        let messages = vec![Message::Assistant {
+            content: vec![AssistantContent::ToolUse {
+                id: "call_abc".into(),
+                name: "configure".into(),
+                arguments: args,
+                thought_signature: None,
+            }],
+            usage: None,
+            cost: None,
+            stop_reason: None,
+            thinking: None,
+        }];
+        let result = convert_messages(&messages, true);
+        let wire = serde_json::to_value(&result[0]).unwrap();
+        let wire_args = &wire["tool_calls"][0]["function"]["arguments"];
+        assert!(wire_args.is_object());
+        assert_eq!(wire_args["config"]["nested"]["deep"], true);
+    }
+
+    #[test]
+    fn tool_call_arguments_with_special_chars() {
+        let mut args = serde_json::Map::new();
+        let _ = args.insert(
+            "command".into(),
+            json!("echo \"hello\\nworld\" | grep 'test'"),
+        );
+        let messages = vec![Message::Assistant {
+            content: vec![AssistantContent::ToolUse {
+                id: "toolu_01".into(),
+                name: "bash".into(),
+                arguments: args,
+                thought_signature: None,
+            }],
+            usage: None,
+            cost: None,
+            stop_reason: None,
+            thinking: None,
+        }];
+        let result = convert_messages(&messages, true);
+        let wire = serde_json::to_value(&result[0]).unwrap();
+        let wire_args = &wire["tool_calls"][0]["function"]["arguments"];
+        assert!(wire_args.is_object());
+        assert_eq!(
+            wire_args["command"],
+            "echo \"hello\\nworld\" | grep 'test'"
+        );
+    }
+
+    #[test]
+    fn multiple_tool_calls_arguments_all_objects() {
+        let mut args1 = serde_json::Map::new();
+        let _ = args1.insert("path".into(), json!("/tmp/a"));
+        let mut args2 = serde_json::Map::new();
+        let _ = args2.insert("path".into(), json!("/tmp/b"));
+        let messages = vec![Message::Assistant {
+            content: vec![
+                AssistantContent::ToolUse {
+                    id: "toolu_01".into(),
+                    name: "read".into(),
+                    arguments: args1,
+                    thought_signature: None,
+                },
+                AssistantContent::ToolUse {
+                    id: "toolu_02".into(),
+                    name: "read".into(),
+                    arguments: args2,
+                    thought_signature: None,
+                },
+            ],
+            usage: None,
+            cost: None,
+            stop_reason: None,
+            thinking: None,
+        }];
+        let result = convert_messages(&messages, true);
+        let wire = serde_json::to_value(&result[0]).unwrap();
+        for (i, tc) in wire["tool_calls"].as_array().unwrap().iter().enumerate() {
+            assert!(
+                tc["function"]["arguments"].is_object(),
+                "tool_call[{i}] arguments must be a JSON object"
+            );
+        }
+    }
+
+    // ── Phase 2: Tool results use tool_name ─────────────────────────────
+
+    #[test]
+    fn tool_result_has_tool_name() {
+        let messages = vec![
+            Message::Assistant {
+                content: vec![AssistantContent::ToolUse {
+                    id: "toolu_01".into(),
+                    name: "bash".into(),
+                    arguments: serde_json::Map::new(),
+                    thought_signature: None,
+                }],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "toolu_01".into(),
+                content: ToolResultMessageContent::Text("ok".into()),
+                is_error: None,
+            },
+        ];
+        let result = convert_messages(&messages, true);
+        let wire = serde_json::to_value(&result[1]).unwrap();
+        assert_eq!(wire["tool_name"], "bash");
+        assert!(wire.get("tool_call_id").is_none());
+    }
+
+    #[test]
+    fn tool_result_after_provider_switch() {
+        // Anthropic-origin IDs (toolu_*) must still resolve to tool_name
+        let messages = vec![
+            Message::Assistant {
+                content: vec![AssistantContent::ToolUse {
+                    id: "toolu_01abc".into(),
+                    name: "read_file".into(),
+                    arguments: serde_json::Map::new(),
+                    thought_signature: None,
+                }],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "toolu_01abc".into(),
+                content: ToolResultMessageContent::Text("file contents".into()),
+                is_error: None,
+            },
+        ];
+        let result = convert_messages(&messages, true);
+        assert_eq!(result[1].tool_name, Some("read_file".into()));
+    }
+
+    #[test]
+    fn tool_result_with_blocks_content() {
+        use crate::core::content::ToolResultContent;
+        let messages = vec![
+            Message::Assistant {
+                content: vec![AssistantContent::ToolUse {
+                    id: "call_abc".into(),
+                    name: "search".into(),
+                    arguments: serde_json::Map::new(),
+                    thought_signature: None,
+                }],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "call_abc".into(),
+                content: ToolResultMessageContent::Blocks(vec![
+                    ToolResultContent::text("line1"),
+                    ToolResultContent::text("line2"),
+                ]),
+                is_error: None,
+            },
+        ];
+        let result = convert_messages(&messages, true);
+        assert_eq!(result[1].tool_name, Some("search".into()));
+        assert_eq!(
+            result[1].content,
+            Some(Value::String("line1\nline2".into()))
+        );
+    }
+
+    #[test]
+    fn tool_result_with_is_error_still_converts() {
+        // is_error is silently dropped (Ollama native API doesn't support it)
+        let messages = vec![
+            Message::Assistant {
+                content: vec![AssistantContent::ToolUse {
+                    id: "toolu_err".into(),
+                    name: "bash".into(),
+                    arguments: serde_json::Map::new(),
+                    thought_signature: None,
+                }],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "toolu_err".into(),
+                content: ToolResultMessageContent::Text("Error: permission denied".into()),
+                is_error: Some(true),
+            },
+        ];
+        let result = convert_messages(&messages, true);
+        assert_eq!(result[1].role, "tool");
+        assert_eq!(result[1].tool_name, Some("bash".into()));
+        assert_eq!(
+            result[1].content,
+            Some(Value::String("Error: permission denied".into()))
+        );
+    }
+
+    #[test]
+    fn full_roundtrip_conversation() {
+        // Full conversation: user → assistant+tool_call → tool_result
+        let mut args = serde_json::Map::new();
+        let _ = args.insert("command".into(), json!("echo hello"));
+        let messages = vec![
+            Message::user("Run a command for me"),
+            Message::Assistant {
+                content: vec![AssistantContent::ToolUse {
+                    id: "toolu_01".into(),
+                    name: "bash".into(),
+                    arguments: args,
+                    thought_signature: None,
+                }],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "toolu_01".into(),
+                content: ToolResultMessageContent::Text("hello".into()),
+                is_error: None,
+            },
+        ];
+        let result = convert_messages(&messages, true);
+        assert_eq!(result.len(), 3);
+
+        // Serialize full conversation to verify wire format
+        let wire: Vec<Value> = result.iter().map(|m| serde_json::to_value(m).unwrap()).collect();
+
+        // User message
+        assert_eq!(wire[0]["role"], "user");
+
+        // Assistant message with tool call — arguments is an object
+        assert_eq!(wire[1]["role"], "assistant");
+        assert!(wire[1]["tool_calls"][0]["function"]["arguments"].is_object());
+        assert_eq!(
+            wire[1]["tool_calls"][0]["function"]["arguments"]["command"],
+            "echo hello"
+        );
+
+        // Tool result — uses tool_name, no tool_call_id
+        assert_eq!(wire[2]["role"], "tool");
+        assert_eq!(wire[2]["tool_name"], "bash");
+        assert_eq!(wire[2]["content"], "hello");
+        assert!(wire[2].get("tool_call_id").is_none());
+    }
+
+    #[test]
+    fn multiple_tool_calls_multiple_results() {
+        let mut args1 = serde_json::Map::new();
+        let _ = args1.insert("path".into(), json!("/a"));
+        let mut args2 = serde_json::Map::new();
+        let _ = args2.insert("command".into(), json!("ls"));
+        let messages = vec![
+            Message::Assistant {
+                content: vec![
+                    AssistantContent::ToolUse {
+                        id: "toolu_01".into(),
+                        name: "read_file".into(),
+                        arguments: args1,
+                        thought_signature: None,
+                    },
+                    AssistantContent::ToolUse {
+                        id: "toolu_02".into(),
+                        name: "bash".into(),
+                        arguments: args2,
+                        thought_signature: None,
+                    },
+                ],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "toolu_01".into(),
+                content: ToolResultMessageContent::Text("file contents".into()),
+                is_error: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "toolu_02".into(),
+                content: ToolResultMessageContent::Text("dir listing".into()),
+                is_error: None,
+            },
+        ];
+        let result = convert_messages(&messages, true);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[1].tool_name, Some("read_file".into()));
+        assert_eq!(result[2].tool_name, Some("bash".into()));
+    }
+
+    #[test]
+    fn tool_result_orphaned_id_fallback() {
+        // ToolResult with no matching assistant tool call → fallback to "unknown"
+        let messages = vec![Message::ToolResult {
+            tool_call_id: "orphan_id".into(),
+            content: ToolResultMessageContent::Text("result".into()),
+            is_error: None,
+        }];
+        let result = convert_messages(&messages, true);
+        assert_eq!(result[0].tool_name, Some("unknown".into()));
+    }
+
+    // ── Phase 3: Edge case verification ─────────────────────────────────
+
+    #[test]
+    fn assistant_only_tool_calls_no_text() {
+        let messages = vec![Message::Assistant {
+            content: vec![AssistantContent::ToolUse {
+                id: "call_abc".into(),
+                name: "bash".into(),
+                arguments: serde_json::Map::new(),
+                thought_signature: None,
+            }],
+            usage: None,
+            cost: None,
+            stop_reason: None,
+            thinking: None,
+        }];
+        let result = convert_messages(&messages, true);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].content.is_none());
+        assert!(result[0].tool_calls.is_some());
+    }
+
+    #[test]
+    fn assistant_thinking_text_and_tool_calls() {
+        let mut args = serde_json::Map::new();
+        let _ = args.insert("q".into(), json!("rust"));
+        let messages = vec![Message::Assistant {
+            content: vec![
+                AssistantContent::Thinking {
+                    thinking: "Let me plan this...".into(),
+                    signature: None,
+                },
+                AssistantContent::text("I'll search for that."),
+                AssistantContent::ToolUse {
+                    id: "toolu_01".into(),
+                    name: "search".into(),
+                    arguments: args,
+                    thought_signature: None,
+                },
+            ],
+            usage: None,
+            cost: None,
+            stop_reason: None,
+            thinking: None,
+        }];
+        let result = convert_messages(&messages, true);
+        assert_eq!(result.len(), 1);
+        // Thinking is dropped
+        assert_eq!(
+            result[0].content,
+            Some(Value::String("I'll search for that.".into()))
+        );
+        // Tool call preserved with object arguments
+        let tc = result[0].tool_calls.as_ref().unwrap();
+        assert_eq!(tc[0].function.name, "search");
+        assert_eq!(tc[0].function.arguments, json!({"q": "rust"}));
+    }
+
+    #[test]
+    fn tool_call_id_already_openai_format() {
+        // IDs already in OpenAI format → no remapping needed, tool_name still resolves
+        let messages = vec![
+            Message::Assistant {
+                content: vec![AssistantContent::ToolUse {
+                    id: "call_already_openai".into(),
+                    name: "bash".into(),
+                    arguments: serde_json::Map::new(),
+                    thought_signature: None,
+                }],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "call_already_openai".into(),
+                content: ToolResultMessageContent::Text("done".into()),
+                is_error: None,
+            },
+        ];
+        let result = convert_messages(&messages, true);
+        // ID passed through unchanged
+        assert_eq!(
+            result[0].tool_calls.as_ref().unwrap()[0].id,
+            "call_already_openai"
+        );
+        // tool_name still resolved correctly
+        assert_eq!(result[1].tool_name, Some("bash".into()));
     }
 }
