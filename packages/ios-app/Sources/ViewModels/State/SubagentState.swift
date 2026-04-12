@@ -358,7 +358,7 @@ final class SubagentState {
     ///   - subagentSessionId: The session ID of the subagent
     ///   - eventDB: The event database to load from
     ///   - forceReload: If true, reloads even if already loaded (e.g., after sync)
-    func loadEventsFromDatabase(for subagentSessionId: String, eventDB: any EventDatabaseProtocol, forceReload: Bool = false) {
+    func loadEventsFromDatabase(for subagentSessionId: String, eventDB: any EventDatabaseProtocol, forceReload: Bool = false) async {
         // Skip if already loaded (unless force reload)
         if !forceReload && subagentEvents[subagentSessionId] != nil {
             return
@@ -373,7 +373,7 @@ final class SubagentState {
         }
 
         do {
-            let rawEvents = try eventDB.events.getBySession(subagentSessionId)
+            let rawEvents = try await eventDB.events.getBySession(subagentSessionId)
             let messages = UnifiedEventTransformer.transformPersistedEvents(rawEvents)
             var items = convertMessagesToEventItems(messages)
 

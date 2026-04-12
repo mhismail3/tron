@@ -3,21 +3,20 @@ import SQLite3
 @testable import TronMobile
 
 /// Tests for SessionRepository — SQLite CRUD for sessions table
+@MainActor
 final class SessionRepositoryTests: XCTestCase {
 
     var database: EventDatabase!
 
-    @MainActor
     override func setUp() async throws {
         database = EventDatabase()
         try await database.initialize()
-        try database.clearAll()
+        try await database.clearAll()
     }
 
-    @MainActor
     override func tearDown() async throws {
-        try? database.clearAll()
-        database.close()
+        try? await database.clearAll()
+        await database.close()
     }
 
     // MARK: - Helpers
@@ -98,12 +97,11 @@ final class SessionRepositoryTests: XCTestCase {
 
     // MARK: - Insert + Get Round Trip
 
-    @MainActor
-    func testInsertAndGetRoundTrip() throws {
+    func testInsertAndGetRoundTrip() async throws {
         let session = makeSession()
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
-        let retrieved = try database.sessions.get("sess-1")
+        let retrieved = try await database.sessions.get("sess-1")
         XCTAssertNotNil(retrieved)
         XCTAssertEqual(retrieved?.id, "sess-1")
         XCTAssertEqual(retrieved?.workspaceId, "ws-1")
@@ -128,8 +126,7 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertEqual(retrieved?.isChat, false)
     }
 
-    @MainActor
-    func testInsertWithAllOptionalFieldsNil() throws {
+    func testInsertWithAllOptionalFieldsNil() async throws {
         let session = makeSession(
             rootEventId: nil,
             headEventId: nil,
@@ -139,9 +136,9 @@ final class SessionRepositoryTests: XCTestCase {
             serverOrigin: nil,
             lastActivityLines: nil
         )
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
-        let retrieved = try database.sessions.get("sess-1")
+        let retrieved = try await database.sessions.get("sess-1")
         XCTAssertNotNil(retrieved)
         XCTAssertNil(retrieved?.rootEventId)
         XCTAssertNil(retrieved?.headEventId)
@@ -151,190 +148,178 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertNil(retrieved?.lastActivityLines)
     }
 
-    @MainActor
-    func testInsertWithArchivedSession() throws {
+    func testInsertWithArchivedSession() async throws {
         let session = makeSession(archivedAt: "2026-04-02T00:00:00Z")
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
-        let retrieved = try database.sessions.get("sess-1")
+        let retrieved = try await database.sessions.get("sess-1")
         XCTAssertEqual(retrieved?.archivedAt, "2026-04-02T00:00:00Z")
         XCTAssertTrue(retrieved?.isArchived == true)
     }
 
-    @MainActor
-    func testInsertWithChatSession() throws {
+    func testInsertWithChatSession() async throws {
         let session = makeSession(isChat: true)
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
-        let retrieved = try database.sessions.get("sess-1")
+        let retrieved = try await database.sessions.get("sess-1")
         XCTAssertEqual(retrieved?.isChat, true)
     }
 
-    @MainActor
-    func testInsertWithForkSession() throws {
+    func testInsertWithForkSession() async throws {
         let session = makeSession(isFork: true)
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
-        let retrieved = try database.sessions.get("sess-1")
+        let retrieved = try await database.sessions.get("sess-1")
         XCTAssertEqual(retrieved?.isFork, true)
     }
 
-    @MainActor
-    func testGetNonExistent() throws {
-        let result = try database.sessions.get("non-existent")
+    func testGetNonExistent() async throws {
+        let result = try await database.sessions.get("non-existent")
         XCTAssertNil(result)
     }
 
     // MARK: - Upsert Behavior
 
-    @MainActor
-    func testInsertOrReplaceUpdatesExisting() throws {
+    func testInsertOrReplaceUpdatesExisting() async throws {
         let session1 = makeSession(title: "Original Title")
-        try database.sessions.insert(session1)
+        try await database.sessions.insert(session1)
 
         let session2 = makeSession(title: "Updated Title")
-        try database.sessions.insert(session2)
+        try await database.sessions.insert(session2)
 
-        let retrieved = try database.sessions.get("sess-1")
+        let retrieved = try await database.sessions.get("sess-1")
         XCTAssertEqual(retrieved?.title, "Updated Title")
 
         // Should still be only 1 session
-        let all = try database.sessions.getAll()
+        let all = try await database.sessions.getAll()
         XCTAssertEqual(all.count, 1)
     }
 
     // MARK: - GetAll Ordering
 
-    @MainActor
-    func testGetAllOrderedByLastActivityDescending() throws {
-        try database.sessions.insert(makeSession(id: "old", lastActivityAt: "2026-04-01T00:00:00Z"))
-        try database.sessions.insert(makeSession(id: "newest", lastActivityAt: "2026-04-03T00:00:00Z"))
-        try database.sessions.insert(makeSession(id: "middle", lastActivityAt: "2026-04-02T00:00:00Z"))
+    func testGetAllOrderedByLastActivityDescending() async throws {
+        try await database.sessions.insert(makeSession(id: "old", lastActivityAt: "2026-04-01T00:00:00Z"))
+        try await database.sessions.insert(makeSession(id: "newest", lastActivityAt: "2026-04-03T00:00:00Z"))
+        try await database.sessions.insert(makeSession(id: "middle", lastActivityAt: "2026-04-02T00:00:00Z"))
 
-        let all = try database.sessions.getAll()
+        let all = try await database.sessions.getAll()
         XCTAssertEqual(all.count, 3)
         XCTAssertEqual(all[0].id, "newest")
         XCTAssertEqual(all[1].id, "middle")
         XCTAssertEqual(all[2].id, "old")
     }
 
-    @MainActor
-    func testGetAllEmptyTable() throws {
-        let all = try database.sessions.getAll()
+    func testGetAllEmptyTable() async throws {
+        let all = try await database.sessions.getAll()
         XCTAssertTrue(all.isEmpty)
     }
 
     // MARK: - Exists
 
-    @MainActor
-    func testExistsReturnsTrue() throws {
-        try database.sessions.insert(makeSession())
-        XCTAssertTrue(try database.sessions.exists("sess-1"))
+    func testExistsReturnsTrue() async throws {
+        try await database.sessions.insert(makeSession())
+        let exists = try await database.sessions.exists("sess-1")
+        XCTAssertTrue(exists)
     }
 
-    @MainActor
-    func testExistsReturnsFalse() throws {
-        XCTAssertFalse(try database.sessions.exists("non-existent"))
+    func testExistsReturnsFalse() async throws {
+        let exists = try await database.sessions.exists("non-existent")
+        XCTAssertFalse(exists)
     }
 
     // MARK: - Delete
 
-    @MainActor
-    func testDeleteRemovesSession() throws {
-        try database.sessions.insert(makeSession())
-        XCTAssertTrue(try database.sessions.exists("sess-1"))
+    func testDeleteRemovesSession() async throws {
+        try await database.sessions.insert(makeSession())
+        let existsBefore = try await database.sessions.exists("sess-1")
+        XCTAssertTrue(existsBefore)
 
-        try database.sessions.delete("sess-1")
-        XCTAssertFalse(try database.sessions.exists("sess-1"))
-        XCTAssertNil(try database.sessions.get("sess-1"))
+        try await database.sessions.delete("sess-1")
+        let existsAfter = try await database.sessions.exists("sess-1")
+        XCTAssertFalse(existsAfter)
+        let session = try await database.sessions.get("sess-1")
+        XCTAssertNil(session)
     }
 
-    @MainActor
-    func testDeleteNonExistentDoesNotThrow() throws {
-        XCTAssertNoThrow(try database.sessions.delete("non-existent"))
+    func testDeleteNonExistentDoesNotThrow() async throws {
+        try await database.sessions.delete("non-existent")
     }
 
     // MARK: - Origin Filtering
 
-    @MainActor
-    func testGetByOriginNilReturnsAll() throws {
-        try database.sessions.insert(makeSession(id: "s1", serverOrigin: "prod:8080"))
-        try database.sessions.insert(makeSession(id: "s2", serverOrigin: "dev:8080"))
-        try database.sessions.insert(makeSession(id: "s3", serverOrigin: nil))
+    func testGetByOriginNilReturnsAll() async throws {
+        try await database.sessions.insert(makeSession(id: "s1", serverOrigin: "prod:8080"))
+        try await database.sessions.insert(makeSession(id: "s2", serverOrigin: "dev:8080"))
+        try await database.sessions.insert(makeSession(id: "s3", serverOrigin: nil))
 
-        let all = try database.sessions.getByOrigin(nil)
+        let all = try await database.sessions.getByOrigin(nil)
         XCTAssertEqual(all.count, 3)
     }
 
-    @MainActor
-    func testGetByOriginStrictMatchReturnsOnlyMatching() throws {
-        try database.sessions.insert(makeSession(id: "s1", serverOrigin: "prod:8080"))
-        try database.sessions.insert(makeSession(id: "s2", serverOrigin: "dev:8080"))
-        try database.sessions.insert(makeSession(id: "s3", serverOrigin: nil))
+    func testGetByOriginStrictMatchReturnsOnlyMatching() async throws {
+        try await database.sessions.insert(makeSession(id: "s1", serverOrigin: "prod:8080"))
+        try await database.sessions.insert(makeSession(id: "s2", serverOrigin: "dev:8080"))
+        try await database.sessions.insert(makeSession(id: "s3", serverOrigin: nil))
 
-        let prod = try database.sessions.getByOrigin("prod:8080")
+        let prod = try await database.sessions.getByOrigin("prod:8080")
         XCTAssertEqual(prod.count, 1)
         XCTAssertEqual(prod[0].id, "s1")
     }
 
-    @MainActor
-    func testGetByOriginExcludesNullOrigins() throws {
-        try database.sessions.insert(makeSession(id: "s1", serverOrigin: nil))
-        try database.sessions.insert(makeSession(id: "s2", serverOrigin: nil))
+    func testGetByOriginExcludesNullOrigins() async throws {
+        try await database.sessions.insert(makeSession(id: "s1", serverOrigin: nil))
+        try await database.sessions.insert(makeSession(id: "s2", serverOrigin: nil))
 
-        let filtered = try database.sessions.getByOrigin("prod:8080")
+        let filtered = try await database.sessions.getByOrigin("prod:8080")
         XCTAssertTrue(filtered.isEmpty)
     }
 
-    @MainActor
-    func testGetByOriginNoMatchReturnsEmpty() throws {
-        try database.sessions.insert(makeSession(id: "s1", serverOrigin: "dev:8080"))
+    func testGetByOriginNoMatchReturnsEmpty() async throws {
+        try await database.sessions.insert(makeSession(id: "s1", serverOrigin: "dev:8080"))
 
-        let filtered = try database.sessions.getByOrigin("prod:9090")
+        let filtered = try await database.sessions.getByOrigin("prod:9090")
         XCTAssertTrue(filtered.isEmpty)
     }
 
-    @MainActor
-    func testGetByOriginOrderedByLastActivity() throws {
-        try database.sessions.insert(makeSession(id: "s1", lastActivityAt: "2026-04-01T00:00:00Z", serverOrigin: "prod:8080"))
-        try database.sessions.insert(makeSession(id: "s2", lastActivityAt: "2026-04-03T00:00:00Z", serverOrigin: "prod:8080"))
+    func testGetByOriginOrderedByLastActivity() async throws {
+        try await database.sessions.insert(makeSession(id: "s1", lastActivityAt: "2026-04-01T00:00:00Z", serverOrigin: "prod:8080"))
+        try await database.sessions.insert(makeSession(id: "s2", lastActivityAt: "2026-04-03T00:00:00Z", serverOrigin: "prod:8080"))
 
-        let results = try database.sessions.getByOrigin("prod:8080")
+        let results = try await database.sessions.getByOrigin("prod:8080")
         XCTAssertEqual(results.count, 2)
         XCTAssertEqual(results[0].id, "s2") // Most recent first
     }
 
     // MARK: - GetOrigin
 
-    @MainActor
-    func testGetOriginReturnsValue() throws {
-        try database.sessions.insert(makeSession(serverOrigin: "prod:8080"))
-        XCTAssertEqual(try database.sessions.getOrigin("sess-1"), "prod:8080")
+    func testGetOriginReturnsValue() async throws {
+        try await database.sessions.insert(makeSession(serverOrigin: "prod:8080"))
+        let origin = try await database.sessions.getOrigin("sess-1")
+        XCTAssertEqual(origin, "prod:8080")
     }
 
-    @MainActor
-    func testGetOriginReturnsNilForNullOrigin() throws {
-        try database.sessions.insert(makeSession(serverOrigin: nil))
-        XCTAssertNil(try database.sessions.getOrigin("sess-1"))
+    func testGetOriginReturnsNilForNullOrigin() async throws {
+        try await database.sessions.insert(makeSession(serverOrigin: nil))
+        let origin = try await database.sessions.getOrigin("sess-1")
+        XCTAssertNil(origin)
     }
 
-    @MainActor
-    func testGetOriginReturnsNilForNonExistentSession() throws {
-        XCTAssertNil(try database.sessions.getOrigin("non-existent"))
+    func testGetOriginReturnsNilForNonExistentSession() async throws {
+        let origin = try await database.sessions.getOrigin("non-existent")
+        XCTAssertNil(origin)
     }
 
     // MARK: - Activity Lines JSON
 
-    @MainActor
-    func testActivityLinesRoundTrip() throws {
+    func testActivityLinesRoundTrip() async throws {
         let lines = [
             ActivityLine(kind: .text, text: "Hello world"),
             ActivityLine(kind: .toolStart, text: "Running test", toolName: "Bash", status: .running),
         ]
         let session = makeSession(lastActivityLines: lines)
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
-        let retrieved = try database.sessions.get("sess-1")
+        let retrieved = try await database.sessions.get("sess-1")
         XCTAssertNotNil(retrieved?.lastActivityLines)
         XCTAssertEqual(retrieved?.lastActivityLines?.count, 2)
         XCTAssertEqual(retrieved?.lastActivityLines?[0].kind, .text)
@@ -343,39 +328,36 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertEqual(retrieved?.lastActivityLines?[1].toolName, "Bash")
     }
 
-    @MainActor
-    func testActivityLinesNilRoundTrip() throws {
+    func testActivityLinesNilRoundTrip() async throws {
         let session = makeSession(lastActivityLines: nil)
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
-        let retrieved = try database.sessions.get("sess-1")
+        let retrieved = try await database.sessions.get("sess-1")
         XCTAssertNil(retrieved?.lastActivityLines)
     }
 
     // MARK: - Special Characters
 
-    @MainActor
-    func testSpecialCharactersInFields() throws {
+    func testSpecialCharactersInFields() async throws {
         let session = makeSession(
             title: "Test 日本語 🚀 \"quotes\" & <brackets>",
             workingDirectory: "/path/with spaces/and'quotes"
         )
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
-        let retrieved = try database.sessions.get("sess-1")
+        let retrieved = try await database.sessions.get("sess-1")
         XCTAssertEqual(retrieved?.title, "Test 日本語 🚀 \"quotes\" & <brackets>")
         XCTAssertEqual(retrieved?.workingDirectory, "/path/with spaces/and'quotes")
     }
 
     // MARK: - Fork Operations
 
-    @MainActor
-    func testGetForkedFromEvent() throws {
+    func testGetForkedFromEvent() async throws {
         // Insert a source session
-        try database.sessions.insert(makeSession(id: "source-session"))
+        try await database.sessions.insert(makeSession(id: "source-session"))
 
         // Insert a forked session
-        try database.sessions.insert(makeSession(id: "forked-session", isFork: true))
+        try await database.sessions.insert(makeSession(id: "forked-session", isFork: true))
 
         // Insert session.fork event linking them
         let forkPayload: [String: Any] = [
@@ -383,71 +365,66 @@ final class SessionRepositoryTests: XCTestCase {
             "sourceEventId": "evt-fork-point"
         ]
         let forkEvent = makeEvent(id: "fork-evt-1", sessionId: "forked-session", type: "session.fork", payload: forkPayload)
-        try database.events.insert(forkEvent)
+        try await database.events.insert(forkEvent)
 
-        let forked = try database.sessions.getForked(fromEventId: "evt-fork-point")
+        let forked = try await database.sessions.getForked(fromEventId: "evt-fork-point")
         XCTAssertEqual(forked.count, 1)
         XCTAssertEqual(forked[0].id, "forked-session")
     }
 
-    @MainActor
-    func testGetForkedReturnsEmptyWhenNoForks() throws {
-        let forked = try database.sessions.getForked(fromEventId: "non-existent-event")
+    func testGetForkedReturnsEmptyWhenNoForks() async throws {
+        let forked = try await database.sessions.getForked(fromEventId: "non-existent-event")
         XCTAssertTrue(forked.isEmpty)
     }
 
-    @MainActor
-    func testGetForkedMultipleForks() throws {
-        try database.sessions.insert(makeSession(id: "fork-a"))
-        try database.sessions.insert(makeSession(id: "fork-b"))
+    func testGetForkedMultipleForks() async throws {
+        try await database.sessions.insert(makeSession(id: "fork-a"))
+        try await database.sessions.insert(makeSession(id: "fork-b"))
 
         let payload: [String: Any] = [
             "sourceSessionId": "source",
             "sourceEventId": "evt-shared-fork"
         ]
-        try database.events.insert(makeEvent(id: "fe1", sessionId: "fork-a", type: "session.fork", payload: payload))
-        try database.events.insert(makeEvent(id: "fe2", sessionId: "fork-b", type: "session.fork", payload: payload, sequence: 2))
+        try await database.events.insert(makeEvent(id: "fe1", sessionId: "fork-a", type: "session.fork", payload: payload))
+        try await database.events.insert(makeEvent(id: "fe2", sessionId: "fork-b", type: "session.fork", payload: payload, sequence: 2))
 
-        let forked = try database.sessions.getForked(fromEventId: "evt-shared-fork")
+        let forked = try await database.sessions.getForked(fromEventId: "evt-shared-fork")
         XCTAssertEqual(forked.count, 2)
         let ids = Set(forked.map(\.id))
         XCTAssertTrue(ids.contains("fork-a"))
         XCTAssertTrue(ids.contains("fork-b"))
     }
 
-    @MainActor
-    func testGetSiblingsExcludesCurrentSession() throws {
-        try database.sessions.insert(makeSession(id: "fork-a"))
-        try database.sessions.insert(makeSession(id: "fork-b"))
+    func testGetSiblingsExcludesCurrentSession() async throws {
+        try await database.sessions.insert(makeSession(id: "fork-a"))
+        try await database.sessions.insert(makeSession(id: "fork-b"))
 
         let payload: [String: Any] = [
             "sourceSessionId": "source",
             "sourceEventId": "evt-fork"
         ]
-        try database.events.insert(makeEvent(id: "fe1", sessionId: "fork-a", type: "session.fork", payload: payload))
-        try database.events.insert(makeEvent(id: "fe2", sessionId: "fork-b", type: "session.fork", payload: payload, sequence: 2))
+        try await database.events.insert(makeEvent(id: "fe1", sessionId: "fork-a", type: "session.fork", payload: payload))
+        try await database.events.insert(makeEvent(id: "fe2", sessionId: "fork-b", type: "session.fork", payload: payload, sequence: 2))
 
-        let siblings = try database.sessions.getSiblings(forEventId: "evt-fork", excluding: "fork-a")
+        let siblings = try await database.sessions.getSiblings(forEventId: "evt-fork", excluding: "fork-a")
         XCTAssertEqual(siblings.count, 1)
         XCTAssertEqual(siblings[0].id, "fork-b")
     }
 
-    @MainActor
-    func testGetForkedWithUnparseablePayloadSkipsGracefully() throws {
-        try database.sessions.insert(makeSession(id: "fork-a"))
+    func testGetForkedWithUnparseablePayloadSkipsGracefully() async throws {
+        try await database.sessions.insert(makeSession(id: "fork-a"))
 
         // Insert event with payload that won't produce a valid SessionForkPayload (missing required fields)
         let badPayload: [String: Any] = ["unrelated": "data"]
-        try database.events.insert(makeEvent(id: "fe1", sessionId: "fork-a", type: "session.fork", payload: badPayload))
+        try await database.events.insert(makeEvent(id: "fe1", sessionId: "fork-a", type: "session.fork", payload: badPayload))
 
-        let forked = try database.sessions.getForked(fromEventId: "evt-fork-point")
+        let forked = try await database.sessions.getForked(fromEventId: "evt-fork-point")
         XCTAssertTrue(forked.isEmpty)
     }
 
     // MARK: - Computed Properties
 
-    @MainActor
-    func testIsArchivedComputed() throws {
+    func testIsArchivedComputed() async throws {
         let unarchived = makeSession(archivedAt: nil)
         XCTAssertFalse(unarchived.isArchived)
 
@@ -455,14 +432,12 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertTrue(archived.isArchived)
     }
 
-    @MainActor
-    func testTotalInputTokensComputed() throws {
+    func testTotalInputTokensComputed() async throws {
         let session = makeSession(inputTokens: 1000, cacheReadTokens: 500)
         XCTAssertEqual(session.totalInputTokens, 1500)
     }
 
-    @MainActor
-    func testTotalTokensComputed() throws {
+    func testTotalTokensComputed() async throws {
         let session = makeSession(inputTokens: 1000, outputTokens: 500, cacheReadTokens: 200)
         XCTAssertEqual(session.totalTokens, 1700) // (1000 + 200) + 500
     }

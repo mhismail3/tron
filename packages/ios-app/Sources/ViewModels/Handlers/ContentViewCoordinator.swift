@@ -117,7 +117,7 @@ final class ContentViewCoordinator {
                     model: dependencies.defaultModel
                 )
 
-                try eventStoreManager.cacheNewSession(
+                try await eventStoreManager.cacheNewSession(
                     sessionId: result.sessionId,
                     workspaceId: workspace,
                     model: result.model,

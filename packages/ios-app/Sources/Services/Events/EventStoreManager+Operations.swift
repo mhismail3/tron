@@ -10,7 +10,7 @@ extension EventStoreManager {
         workspaceId: String,
         model: String,
         workingDirectory: String
-    ) throws {
+    ) async throws {
         let now = DateParser.now
 
         // CRITICAL: Tag with current server origin for filtering
@@ -38,7 +38,7 @@ extension EventStoreManager {
             serverOrigin: serverOrigin
         )
 
-        try eventDB.sessions.insert(session)
+        try await eventDB.sessions.insert(session)
         loadSessions()
         logger.info("Cached new session: \(sessionId) with origin: \(serverOrigin)", category: .session)
     }
@@ -72,9 +72,9 @@ extension EventStoreManager {
         // 4. Server confirmed — now clean up locally
         _ = removeSessionLocally(sessionId)
         do {
-            try eventDB.sessions.delete(sessionId)
-            try eventDB.events.deleteBySession(sessionId)
-            draftStore?.deleteSessionDraft(sessionId: sessionId)
+            try await eventDB.sessions.delete(sessionId)
+            try await eventDB.events.deleteBySession(sessionId)
+            await draftStore?.deleteSessionDraft(sessionId: sessionId)
         } catch {
             logger.error("Local cleanup failed after server archive: \(error.localizedDescription)", category: .session)
         }
@@ -109,9 +109,9 @@ extension EventStoreManager {
             do {
                 try await rpcClient.session.archive(session.id)
                 _ = removeSessionLocally(session.id)
-                try eventDB.sessions.delete(session.id)
-                try eventDB.events.deleteBySession(session.id)
-                draftStore?.deleteSessionDraft(sessionId: session.id)
+                try await eventDB.sessions.delete(session.id)
+                try await eventDB.events.deleteBySession(session.id)
+                await draftStore?.deleteSessionDraft(sessionId: session.id)
             } catch {
                 // Revert this session's deleting state; continue with others
                 markSessionDeleting(session.id, isDeleting: false)
@@ -139,8 +139,8 @@ extension EventStoreManager {
         cacheReadTokens: Int,
         cacheCreationTokens: Int,
         cost: Double
-    ) throws {
-        guard var session = try eventDB.sessions.get(sessionId) else {
+    ) async throws {
+        guard var session = try await eventDB.sessions.get(sessionId) else {
             logger.warning("Cannot update tokens: session \(sessionId) not found", category: .session)
             return
         }
@@ -152,7 +152,7 @@ extension EventStoreManager {
         session.cacheCreationTokens = cacheCreationTokens
         session.cost = cost
 
-        try eventDB.sessions.insert(session)
+        try await eventDB.sessions.insert(session)
 
         // Reload sessions to update in-memory array
         loadSessions()
@@ -193,7 +193,7 @@ extension EventStoreManager {
 
         // Get current session state for logging
         do {
-            if let session = try eventDB.sessions.get(sessionId) {
+            if let session = try await eventDB.sessions.get(sessionId) {
                 logger.info("[FORK] Source session state: headEventId=\(session.headEventId ?? "nil"), eventCount=\(session.eventCount)", category: .session)
             }
         } catch {
@@ -227,14 +227,14 @@ extension EventStoreManager {
 
                 // Store ancestor events (ignoring duplicates that already exist)
                 if !sessionEvents.isEmpty {
-                    let inserted = try eventDB.events.insertIgnoringDuplicates(sessionEvents)
+                    let inserted = try await eventDB.events.insertIgnoringDuplicates(sessionEvents)
                     logger.info("[FORK] Stored \(inserted) new ancestor events (\(sessionEvents.count - inserted) already existed)", category: .session)
 
                     // Verify the fork event's parent is now in DB
                     if let forkEvent = sessionEvents.last {
                         if let parentId = forkEvent.parentId {
                             do {
-                                if let parentEvent = try eventDB.events.get(parentId) {
+                                if let parentEvent = try await eventDB.events.get(parentId) {
                                     logger.info("[FORK] Fork event parent found in DB: \(parentEvent.id.prefix(12)), type=\(parentEvent.type)", category: .session)
                                 } else {
                                     logger.warning("[FORK] Fork event parent NOT in DB: \(parentId)", category: .session)
@@ -260,7 +260,7 @@ extension EventStoreManager {
         // Get source session info from local DB if available, otherwise use fork result
         let sourceSession: CachedSession?
         do {
-            sourceSession = try eventDB.sessions.get(sessionId)
+            sourceSession = try await eventDB.sessions.get(sessionId)
         } catch {
             logger.warning("[FORK] Failed to read source session \(sessionId): \(error)", category: .database)
             sourceSession = nil
@@ -296,7 +296,7 @@ extension EventStoreManager {
             isFork: true,
             serverOrigin: serverOrigin
         )
-        try eventDB.sessions.insert(forkedSession)
+        try await eventDB.sessions.insert(forkedSession)
         logger.info("[FORK] Inserted forked session into local DB", category: .session)
 
         // Update session metadata from events
@@ -304,8 +304,8 @@ extension EventStoreManager {
 
         // Verify the sync worked
         do {
-            if let newSession = try eventDB.sessions.get(result.newSessionId) {
-                let events = try eventDB.events.getBySession(result.newSessionId)
+            if let newSession = try await eventDB.sessions.get(result.newSessionId) {
+                let events = try await eventDB.events.getBySession(result.newSessionId)
                 logger.info("[FORK] New session synced: headEventId=\(newSession.headEventId ?? "nil"), eventCount=\(events.count)", category: .session)
             }
         } catch {
@@ -317,13 +317,13 @@ extension EventStoreManager {
     }
 
     /// Get events for a session
-    func getSessionEvents(_ sessionId: String) throws -> [SessionEvent] {
-        try eventDB.events.getBySession(sessionId)
+    func getSessionEvents(_ sessionId: String) async throws -> [SessionEvent] {
+        try await eventDB.events.getBySession(sessionId)
     }
 
     /// Get tree visualization for a session
-    func getTreeVisualization(_ sessionId: String) throws -> [EventTreeNode] {
-        try eventDB.tree.build(sessionId)
+    func getTreeVisualization(_ sessionId: String) async throws -> [EventTreeNode] {
+        try await eventDB.tree.build(sessionId)
     }
 
     // MARK: - Lifecycle
@@ -343,8 +343,8 @@ extension EventStoreManager {
     }
 
     /// Clear all local data
-    func clearAll() throws {
-        try eventDB.clearAll()
+    func clearAll() async throws {
+        try await eventDB.clearAll()
         clearSessions()
         setActiveSessionId(nil)
         UserDefaults.standard.removeObject(forKey: "tron.activeSessionId")

@@ -3,13 +3,12 @@ import SQLite3
 
 /// Repository for thinking-related queries.
 /// Extracted from EventDatabase for single responsibility.
-@MainActor
-final class ThinkingRepository {
+final class ThinkingRepository: @unchecked Sendable {
 
-    private weak var transport: DatabaseTransport?
+    private weak var transport: (any DatabaseTransport)?
     private let eventRepository: EventRepository
 
-    init(transport: DatabaseTransport, eventRepository: EventRepository) {
+    init(transport: any DatabaseTransport, eventRepository: EventRepository) {
         self.transport = transport
         self.eventRepository = eventRepository
     }
@@ -21,75 +20,77 @@ final class ThinkingRepository {
     ///   - sessionId: The session to query
     ///   - previewOnly: If true, only returns preview data (for listing). If false, loads full content.
     /// - Returns: Array of ThinkingBlock objects for UI display
-    func getEvents(sessionId: String, previewOnly: Bool = true) throws -> [ThinkingBlock] {
+    func getEvents(sessionId: String, previewOnly: Bool = true) async throws -> [ThinkingBlock] {
         guard let transport = transport else {
             throw EventDatabaseError.executeFailed("Database transport not available")
         }
 
-        // Query message.assistant events which contain thinking in content blocks
-        let sql = """
-            SELECT id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload
-            FROM events
-            WHERE session_id = ? AND type = 'message.assistant'
-            ORDER BY sequence ASC
-        """
+        return try await transport.withDB { db in
+            // Query message.assistant events which contain thinking in content blocks
+            let sql = """
+                SELECT id, parent_id, session_id, workspace_id, type, timestamp, sequence, payload
+                FROM events
+                WHERE session_id = ? AND type = 'message.assistant'
+                ORDER BY sequence ASC
+            """
 
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(transport.db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw EventDatabaseError.prepareFailed(transport.errorMessage)
-        }
-        defer { sqlite3_finalize(stmt) }
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
+            }
+            defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, sessionId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            sqlite3_bind_text(stmt, 1, sessionId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
 
-        var blocks: [ThinkingBlock] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            do {
-                let event = try parseEventRow(stmt, transport: transport)
+            var blocks: [ThinkingBlock] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                do {
+                    let event = try Self.parseEventRow(stmt)
 
-                // Extract thinking from content blocks
-                guard let contentArray = event.payload["content"]?.value as? [[String: Any]] else {
-                    continue
-                }
-
-                // Find thinking block in content array
-                for (blockIndex, block) in contentArray.enumerated() {
-                    guard let blockType = block["type"] as? String,
-                          blockType == ContentBlockType.thinking.rawValue,
-                          let thinkingText = block["thinking"] as? String,
-                          !thinkingText.isEmpty else {
+                    // Extract thinking from content blocks
+                    guard let contentArray = event.payload["content"]?.value as? [[String: Any]] else {
                         continue
                     }
 
-                    // Extract turn number from payload
-                    let turnNumber = event.payload["turn"]?.value as? Int ?? 1
+                    // Find thinking block in content array
+                    for (blockIndex, block) in contentArray.enumerated() {
+                        guard let blockType = block["type"] as? String,
+                              blockType == ContentBlockType.thinking.rawValue,
+                              let thinkingText = block["thinking"] as? String,
+                              !thinkingText.isEmpty else {
+                            continue
+                        }
 
-                    // Create preview (first 3 lines, max 120 chars)
-                    let preview = thinkingText.thinkingPreview()
+                        // Extract turn number from payload
+                        let turnNumber = event.payload["turn"]?.value as? Int ?? 1
 
-                    // Create block with composite ID (eventId:blockIndex) for lazy loading
-                    let thinkingBlock = ThinkingBlock(
-                        eventId: "\(event.id):\(blockIndex)",
-                        turnNumber: turnNumber,
-                        preview: preview,
-                        characterCount: thinkingText.count,
-                        model: event.payload["model"]?.value as? String,
-                        timestamp: DateParser.parseOrNow(event.timestamp)
-                    )
-                    blocks.append(thinkingBlock)
+                        // Create preview (first 3 lines, max 120 chars)
+                        let preview = thinkingText.thinkingPreview()
+
+                        // Create block with composite ID (eventId:blockIndex) for lazy loading
+                        let thinkingBlock = ThinkingBlock(
+                            eventId: "\(event.id):\(blockIndex)",
+                            turnNumber: turnNumber,
+                            preview: preview,
+                            characterCount: thinkingText.count,
+                            model: event.payload["model"]?.value as? String,
+                            timestamp: DateParser.parseOrNow(event.timestamp)
+                        )
+                        blocks.append(thinkingBlock)
+                    }
+                } catch {
+                    logger.warning("Failed to parse assistant message for thinking: \(error.localizedDescription)", category: .session)
                 }
-            } catch {
-                logger.warning("Failed to parse assistant message for thinking: \(error.localizedDescription)", category: .session)
             }
-        }
 
-        return blocks
+            return blocks
+        }
     }
 
     /// Get full thinking content for a specific event ID (for lazy loading in sheet)
     /// - Parameter eventId: Composite ID in format "eventId:blockIndex" or plain event ID
     /// - Returns: The full thinking content string, or nil if not found
-    func getContent(eventId: String) throws -> String? {
+    func getContent(eventId: String) async throws -> String? {
         // Parse composite ID format: "eventId:blockIndex"
         let components = eventId.split(separator: ":")
         let actualEventId: String
@@ -102,12 +103,12 @@ final class ThinkingRepository {
             actualEventId = components.dropLast().joined(separator: ":")
             blockIndex = index
         } else {
-            // Plain event ID (legacy format)
+            // Plain event ID
             actualEventId = eventId
             blockIndex = 0
         }
 
-        guard let event = try eventRepository.get(actualEventId) else {
+        guard let event = try await eventRepository.get(actualEventId) else {
             return nil
         }
 
@@ -146,9 +147,9 @@ final class ThinkingRepository {
     // MARK: - Private Helpers
 
     /// Parse an event row from SQL result
-    private func parseEventRow(_ stmt: OpaquePointer?, transport: DatabaseTransport) throws -> SessionEvent {
+    private static func parseEventRow(_ stmt: OpaquePointer?) throws -> SessionEvent {
         let id = String(cString: sqlite3_column_text(stmt, 0))
-        let parentId = transport.getOptionalText(stmt, 1)
+        let parentId = sqliteGetOptionalText(stmt, 1)
         let sessionId = String(cString: sqlite3_column_text(stmt, 2))
         let workspaceId = String(cString: sqlite3_column_text(stmt, 3))
         let type = String(cString: sqlite3_column_text(stmt, 4))

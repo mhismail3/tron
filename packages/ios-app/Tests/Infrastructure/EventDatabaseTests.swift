@@ -3,21 +3,20 @@ import SQLite3
 @testable import TronMobile
 
 /// Tests for the EventDatabase SQLite store
+@MainActor
 final class EventDatabaseTests: XCTestCase {
 
     var database: EventDatabase!
 
-    @MainActor
     override func setUp() async throws {
         database = EventDatabase()
         try await database.initialize()
-        try database.clearAll()
+        try await database.clearAll()
     }
 
-    @MainActor
     override func tearDown() async throws {
-        try? database.clearAll()
-        database.close()
+        try? await database.clearAll()
+        await database.close()
     }
 
     // MARK: - Helper
@@ -56,7 +55,6 @@ final class EventDatabaseTests: XCTestCase {
 
     // MARK: - Event Operations
 
-    @MainActor
     func testInsertAndGetEvent() async throws {
         let event = SessionEvent(
             id: "event-1",
@@ -69,16 +67,15 @@ final class EventDatabaseTests: XCTestCase {
             payload: ["model": AnyCodable("claude-sonnet-4")]
         )
 
-        try database.events.insert(event)
+        try await database.events.insert(event)
 
-        let retrieved = try database.events.get("event-1")
+        let retrieved = try await database.events.get("event-1")
         XCTAssertNotNil(retrieved)
         XCTAssertEqual(retrieved?.id, "event-1")
         XCTAssertEqual(retrieved?.type, "session.start")
         XCTAssertNil(retrieved?.parentId)
     }
 
-    @MainActor
     func testInsertMultipleEvents() async throws {
         let events = [
             SessionEvent(
@@ -113,16 +110,15 @@ final class EventDatabaseTests: XCTestCase {
             )
         ]
 
-        try database.events.insertBatch(events)
+        try await database.events.insertBatch(events)
 
-        let sessionEvents = try database.events.getBySession("session-1")
+        let sessionEvents = try await database.events.getBySession("session-1")
         XCTAssertEqual(sessionEvents.count, 3)
     }
 
-    @MainActor
     func testGetEventsBySession() async throws {
         // Insert events for two sessions
-        try database.events.insert(SessionEvent(
+        try await database.events.insert(SessionEvent(
             id: "s1-e1",
             parentId: nil,
             sessionId: "session-1",
@@ -133,7 +129,7 @@ final class EventDatabaseTests: XCTestCase {
             payload: [:]
         ))
 
-        try database.events.insert(SessionEvent(
+        try await database.events.insert(SessionEvent(
             id: "s2-e1",
             parentId: nil,
             sessionId: "session-2",
@@ -144,18 +140,17 @@ final class EventDatabaseTests: XCTestCase {
             payload: [:]
         ))
 
-        let session1Events = try database.events.getBySession("session-1")
+        let session1Events = try await database.events.getBySession("session-1")
         XCTAssertEqual(session1Events.count, 1)
         XCTAssertEqual(session1Events.first?.id, "s1-e1")
 
-        let session2Events = try database.events.getBySession("session-2")
+        let session2Events = try await database.events.getBySession("session-2")
         XCTAssertEqual(session2Events.count, 1)
         XCTAssertEqual(session2Events.first?.id, "s2-e1")
     }
 
     // MARK: - Ancestor Traversal
 
-    @MainActor
     func testGetAncestors() async throws {
         // Create a chain of events
         let events = [
@@ -165,14 +160,13 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "child3", parentId: "child2", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:03:00Z", sequence: 4, payload: [:])
         ]
 
-        try database.events.insertBatch(events)
+        try await database.events.insertBatch(events)
 
-        let ancestors = try database.events.getAncestors("child3")
+        let ancestors = try await database.events.getAncestors("child3")
         XCTAssertEqual(ancestors.count, 4)
         XCTAssertEqual(ancestors.map { $0.id }, ["root", "child1", "child2", "child3"])
     }
 
-    @MainActor
     func testGetAncestorsCrossSession() async throws {
         // Create parent session events
         let parentEvents = [
@@ -188,7 +182,7 @@ final class EventDatabaseTests: XCTestCase {
                          timestamp: "2024-01-01T00:02:00Z", sequence: 3,
                          payload: ["content": AnyCodable([["type": "text", "text": "Hi there!"] as [String: Any]])])
         ]
-        try database.events.insertBatch(parentEvents)
+        try await database.events.insertBatch(parentEvents)
 
         // Create forked session with root linking to parent session
         let forkedEvents = [
@@ -196,10 +190,10 @@ final class EventDatabaseTests: XCTestCase {
                          workspaceId: "/test", type: "session.fork",
                          timestamp: "2024-01-01T00:03:00Z", sequence: 1, payload: [:])
         ]
-        try database.events.insertBatch(forkedEvents)
+        try await database.events.insertBatch(forkedEvents)
 
         // getAncestors should traverse across session boundary
-        let ancestors = try database.events.getAncestors("f-root")
+        let ancestors = try await database.events.getAncestors("f-root")
 
         XCTAssertEqual(ancestors.count, 4) // p-root, p-user, p-assistant, f-root
         XCTAssertEqual(ancestors.map { $0.id }, ["p-root", "p-user", "p-assistant", "f-root"])
@@ -209,7 +203,6 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(messages.count, 2) // user + assistant from parent
     }
 
-    @MainActor
     func testGetChildren() async throws {
         // Create a branching structure
         let events = [
@@ -218,39 +211,37 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "branch2", parentId: "root", sessionId: "s1", workspaceId: "/test", type: "session.fork", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [:])
         ]
 
-        try database.events.insertBatch(events)
+        try await database.events.insertBatch(events)
 
-        let children = try database.events.getChildren("root")
+        let children = try await database.events.getChildren("root")
         XCTAssertEqual(children.count, 2)
     }
 
-    @MainActor
     func testDeleteEventsBySession() async throws {
-        try database.events.insertBatch([
+        try await database.events.insertBatch([
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01", sequence: 1, payload: [:]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01", sequence: 2, payload: [:])
         ])
 
-        var events = try database.events.getBySession("s1")
+        var events = try await database.events.getBySession("s1")
         XCTAssertEqual(events.count, 2)
 
-        try database.events.deleteBySession("s1")
+        try await database.events.deleteBySession("s1")
 
-        events = try database.events.getBySession("s1")
+        events = try await database.events.getBySession("s1")
         XCTAssertEqual(events.count, 0)
     }
 
-    @MainActor
     func testInsertEventsIgnoringDuplicates() async throws {
         // Insert initial events
         let initialEvents = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [:])
         ]
-        try database.events.insertBatch(initialEvents)
+        try await database.events.insertBatch(initialEvents)
 
         // Verify initial state
-        var allEvents = try database.events.getBySession("s1")
+        var allEvents = try await database.events.getBySession("s1")
         XCTAssertEqual(allEvents.count, 2)
 
         // Try to insert mix of duplicates and new events
@@ -259,24 +250,23 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [:]), // duplicate
             SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [:]) // new
         ]
-        let insertedCount = try database.events.insertIgnoringDuplicates(mixedEvents)
+        let insertedCount = try await database.events.insertIgnoringDuplicates(mixedEvents)
 
         // Should only insert the new event
         XCTAssertEqual(insertedCount, 1)
 
         // Verify total count
-        allEvents = try database.events.getBySession("s1")
+        allEvents = try await database.events.getBySession("s1")
         XCTAssertEqual(allEvents.count, 3)
 
         // Verify the new event exists
-        let newEvent = try database.events.get("e3")
+        let newEvent = try await database.events.get("e3")
         XCTAssertNotNil(newEvent)
         XCTAssertEqual(newEvent?.type, "message.assistant")
     }
 
     // MARK: - Session Operations
 
-    @MainActor
     func testInsertAndGetSession() async throws {
         let session = CachedSession(
             id: "session-1",
@@ -296,9 +286,9 @@ final class EventDatabaseTests: XCTestCase {
             cost: 0.0
         )
 
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
-        let retrieved = try database.sessions.get("session-1")
+        let retrieved = try await database.sessions.get("session-1")
         XCTAssertNotNil(retrieved)
         XCTAssertEqual(retrieved?.id, "session-1")
         XCTAssertEqual(retrieved?.title, "Test Session")
@@ -306,9 +296,8 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(retrieved?.outputTokens, 200)
     }
 
-    @MainActor
     func testGetAllSessions() async throws {
-        try database.sessions.insert(CachedSession(
+        try await database.sessions.insert(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: nil, headEventId: nil,
             title: "Session 1", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
@@ -316,7 +305,7 @@ final class EventDatabaseTests: XCTestCase {
             eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
-        try database.sessions.insert(CachedSession(
+        try await database.sessions.insert(CachedSession(
             id: "s2", workspaceId: "/test", rootEventId: nil, headEventId: nil,
             title: "Session 2", latestModel: "claude-opus-4",
             workingDirectory: "/test",
@@ -324,15 +313,14 @@ final class EventDatabaseTests: XCTestCase {
             eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
-        let sessions = try database.sessions.getAll()
+        let sessions = try await database.sessions.getAll()
         XCTAssertEqual(sessions.count, 2)
         // Should be sorted by lastActivityAt desc
         XCTAssertEqual(sessions.first?.id, "s2")
     }
 
-    @MainActor
     func testDeleteSession() async throws {
-        try database.sessions.insert(CachedSession(
+        try await database.sessions.insert(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: nil, headEventId: nil,
             title: "Test", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
@@ -340,18 +328,17 @@ final class EventDatabaseTests: XCTestCase {
             eventCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
-        var session = try database.sessions.get("s1")
+        var session = try await database.sessions.get("s1")
         XCTAssertNotNil(session)
 
-        try database.sessions.delete("s1")
+        try await database.sessions.delete("s1")
 
-        session = try database.sessions.get("s1")
+        session = try await database.sessions.get("s1")
         XCTAssertNil(session)
     }
 
     // MARK: - State Reconstruction (Unified Transformer)
 
-    @MainActor
     func testTransformEventsToMessages() async throws {
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
@@ -359,10 +346,10 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: ["content": AnyCodable([["type": "text", "text": "Hi there!"] as [String: Any]])])
         ]
 
-        try database.events.insertBatch(events)
+        try await database.events.insertBatch(events)
 
         // Use unified transformer to get messages
-        let ancestors = try database.events.getAncestors("e3")
+        let ancestors = try await database.events.getAncestors("e3")
         let messages = UnifiedEventTransformer.transformPersistedEvents(ancestors)
 
         XCTAssertEqual(messages.count, 2)
@@ -370,7 +357,6 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(messages[1].role, .assistant)
     }
 
-    @MainActor
     func testReconstructSessionState() async throws {
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
@@ -384,8 +370,8 @@ final class EventDatabaseTests: XCTestCase {
             ])
         ]
 
-        try database.events.insertBatch(events)
-        try database.sessions.insert(CachedSession(
+        try await database.events.insertBatch(events)
+        try await database.sessions.insert(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: "e1", headEventId: "e3",
             title: "Test", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
@@ -394,7 +380,7 @@ final class EventDatabaseTests: XCTestCase {
         ))
 
         // Use unified transformer to reconstruct state
-        let ancestors = try database.events.getAncestors("e3")
+        let ancestors = try await database.events.getAncestors("e3")
         let state = UnifiedEventTransformer.reconstructSessionState(from: ancestors)
 
         XCTAssertEqual(state.messages.count, 2)
@@ -403,7 +389,6 @@ final class EventDatabaseTests: XCTestCase {
 
     // MARK: - Tree Visualization
 
-    @MainActor
     func testBuildTreeVisualization() async throws {
         let events = [
             SessionEvent(id: "root", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
@@ -411,8 +396,8 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "msg2", parentId: "msg1", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: ["content": AnyCodable([["type": "text", "text": "Hi"] as [String: Any]])])
         ]
 
-        try database.events.insertBatch(events)
-        try database.sessions.insert(CachedSession(
+        try await database.events.insertBatch(events)
+        try await database.sessions.insert(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: "root", headEventId: "msg2",
             title: "Test", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
@@ -420,7 +405,7 @@ final class EventDatabaseTests: XCTestCase {
             eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
-        let tree = try database.tree.build("s1")
+        let tree = try await database.tree.build("s1")
         XCTAssertEqual(tree.count, 3)
 
         // Check root
@@ -436,7 +421,6 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(head?.depth, 2)
     }
 
-    @MainActor
     func testBranchPointDetection() async throws {
         // Create a branching structure
         let events = [
@@ -446,8 +430,8 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "branch-b", parentId: "fork-point", sessionId: "s1", workspaceId: "/test", type: "session.fork", timestamp: "2024-01-01T00:02:00Z", sequence: 4, payload: [:])
         ]
 
-        try database.events.insertBatch(events)
-        try database.sessions.insert(CachedSession(
+        try await database.events.insertBatch(events)
+        try await database.sessions.insert(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: "root", headEventId: "branch-a",
             title: "Test", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
@@ -455,7 +439,7 @@ final class EventDatabaseTests: XCTestCase {
             eventCount: 4, messageCount: 1, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
         ))
 
-        let tree = try database.tree.build("s1")
+        let tree = try await database.tree.build("s1")
 
         let forkPoint = tree.first { $0.id == "fork-point" }
         XCTAssertNotNil(forkPoint)
@@ -465,7 +449,6 @@ final class EventDatabaseTests: XCTestCase {
 
     // MARK: - Sync State
 
-    @MainActor
     func testSyncState() async throws {
         let syncState = SyncState(
             key: "session-1",
@@ -474,9 +457,9 @@ final class EventDatabaseTests: XCTestCase {
             pendingEventIds: ["event-6", "event-7"]
         )
 
-        try database.sync.update(syncState)
+        try await database.sync.update(syncState)
 
-        let retrieved = try database.sync.getState("session-1")
+        let retrieved = try await database.sync.getState("session-1")
         XCTAssertNotNil(retrieved)
         XCTAssertEqual(retrieved?.key, "session-1")
         XCTAssertEqual(retrieved?.lastSyncedEventId, "event-5")
@@ -485,7 +468,6 @@ final class EventDatabaseTests: XCTestCase {
 
     // MARK: - Phase 1: Enriched Message Metadata
 
-    @MainActor
     func testEnrichedAssistantMessageMetadata() async throws {
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
@@ -503,8 +485,8 @@ final class EventDatabaseTests: XCTestCase {
             ])
         ]
 
-        try database.events.insertBatch(events)
-        try database.sessions.insert(CachedSession(
+        try await database.events.insertBatch(events)
+        try await database.sessions.insert(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: "e1", headEventId: "e3",
             title: "Test", latestModel: "claude-sonnet-4",
             workingDirectory: "/test",
@@ -513,7 +495,7 @@ final class EventDatabaseTests: XCTestCase {
         ))
 
         // Use unified transformer to reconstruct state
-        let ancestors = try database.events.getAncestors("e3")
+        let ancestors = try await database.events.getAncestors("e3")
         let state = UnifiedEventTransformer.reconstructSessionState(from: ancestors)
 
         XCTAssertEqual(state.messages.count, 2)
@@ -944,56 +926,69 @@ final class EventDatabaseTests: XCTestCase {
 
     // MARK: - Session Drafts Table
 
-    @MainActor
-    func testSessionDraftsTableExists() throws {
+    func testSessionDraftsTableExists() async throws {
         // The session_drafts table should exist after initialization
-        var stmt: OpaquePointer?
-        let sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='session_drafts'"
-        XCTAssertEqual(sqlite3_prepare_v2(database.db, sql, -1, &stmt, nil), SQLITE_OK)
-        defer { sqlite3_finalize(stmt) }
-
-        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
-        let name = String(cString: sqlite3_column_text(stmt, 0))
+        let name: String = try await database.withDB { db in
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            let sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='session_drafts'"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK,
+                  sqlite3_step(stmt) == SQLITE_ROW,
+                  let ptr = sqlite3_column_text(stmt, 0) else { return "" }
+            return String(cString: ptr)
+        }
         XCTAssertEqual(name, "session_drafts")
     }
 
-    @MainActor
-    func testSessionDraftsTable_basicCRUD() throws {
-        // Insert
+    func testSessionDraftsTable_basicCRUD() async throws {
+        // Insert via withDB
         let insertSQL = """
             INSERT INTO session_drafts (session_id, text, skills_json, spells_json, attachment_metadata_json, updated_at)
             VALUES ('test-session', 'hello world', '[]', '[]', '[]', '2026-04-03T00:00:00Z')
         """
-        try database.execute(insertSQL)
+        try await database.withDB { db in
+            guard sqlite3_exec(db, insertSQL, nil, nil, nil) == SQLITE_OK else {
+                throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))
+            }
+        }
 
-        // Select
-        var stmt: OpaquePointer?
-        let selectSQL = "SELECT text FROM session_drafts WHERE session_id = 'test-session'"
-        XCTAssertEqual(sqlite3_prepare_v2(database.db, selectSQL, -1, &stmt, nil), SQLITE_OK)
-        defer { sqlite3_finalize(stmt) }
-
-        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
-        let text = String(cString: sqlite3_column_text(stmt, 0))
+        // Select via withDB
+        let text: String = try await database.withDB { db in
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            let selectSQL = "SELECT text FROM session_drafts WHERE session_id = 'test-session'"
+            guard sqlite3_prepare_v2(db, selectSQL, -1, &stmt, nil) == SQLITE_OK,
+                  sqlite3_step(stmt) == SQLITE_ROW,
+                  let ptr = sqlite3_column_text(stmt, 0) else { return "" }
+            return String(cString: ptr)
+        }
         XCTAssertEqual(text, "hello world")
     }
 
-    @MainActor
-    func testClearAll_includesSessionDrafts() throws {
-        // Insert a draft
-        try database.execute("""
-            INSERT INTO session_drafts (session_id, text, skills_json, spells_json, attachment_metadata_json, updated_at)
-            VALUES ('test-session', 'draft text', '[]', '[]', '[]', '2026-04-03T00:00:00Z')
-        """)
+    func testClearAll_includesSessionDrafts() async throws {
+        // Insert a draft via withDB
+        try await database.withDB { db in
+            let sql = """
+                INSERT INTO session_drafts (session_id, text, skills_json, spells_json, attachment_metadata_json, updated_at)
+                VALUES ('test-session', 'draft text', '[]', '[]', '[]', '2026-04-03T00:00:00Z')
+            """
+            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+                throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))
+            }
+        }
 
         // Clear all
-        try database.clearAll()
+        try await database.clearAll()
 
-        // Verify draft is gone
-        var stmt: OpaquePointer?
-        let sql = "SELECT COUNT(*) FROM session_drafts"
-        XCTAssertEqual(sqlite3_prepare_v2(database.db, sql, -1, &stmt, nil), SQLITE_OK)
-        defer { sqlite3_finalize(stmt) }
-        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
-        XCTAssertEqual(sqlite3_column_int(stmt, 0), 0)
+        // Verify draft is gone via withDB
+        let count: Int32 = try await database.withDB { db in
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            let sql = "SELECT COUNT(*) FROM session_drafts"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK,
+                  sqlite3_step(stmt) == SQLITE_ROW else { return -1 }
+            return sqlite3_column_int(stmt, 0)
+        }
+        XCTAssertEqual(count, 0)
     }
 }

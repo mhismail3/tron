@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Cached Session
 
 /// Session metadata cached locally
-struct CachedSession: Identifiable, Codable {
+struct CachedSession: Identifiable, Codable, Sendable {
     let id: String
     let workspaceId: String
     var rootEventId: String?

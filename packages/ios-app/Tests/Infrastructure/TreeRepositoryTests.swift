@@ -3,21 +3,20 @@ import SQLite3
 @testable import TronMobile
 
 /// Tests for TreeRepository — event tree visualization builder
+@MainActor
 final class TreeRepositoryTests: XCTestCase {
 
     var database: EventDatabase!
 
-    @MainActor
     override func setUp() async throws {
         database = EventDatabase()
         try await database.initialize()
-        try database.clearAll()
+        try await database.clearAll()
     }
 
-    @MainActor
     override func tearDown() async throws {
-        try? database.clearAll()
-        database.close()
+        try? await database.clearAll()
+        await database.close()
     }
 
     // MARK: - Helpers
@@ -72,57 +71,52 @@ final class TreeRepositoryTests: XCTestCase {
 
     // MARK: - Empty Session
 
-    @MainActor
-    func testBuildEmptySessionReturnsEmpty() throws {
+    func testBuildEmptySessionReturnsEmpty() async throws {
         // Session exists but has no events
-        try database.sessions.insert(makeSession())
-        let nodes = try database.tree.build("sess-1")
+        try await database.sessions.insert(makeSession())
+        let nodes = try await database.tree.build("sess-1")
         XCTAssertTrue(nodes.isEmpty)
     }
 
-    @MainActor
-    func testBuildNonExistentSessionReturnsEmpty() throws {
-        let nodes = try database.tree.build("no-such-session")
+    func testBuildNonExistentSessionReturnsEmpty() async throws {
+        let nodes = try await database.tree.build("no-such-session")
         XCTAssertTrue(nodes.isEmpty)
     }
 
     // MARK: - Single Event
 
-    @MainActor
-    func testBuildSingleEvent() throws {
-        try database.sessions.insert(makeSession(headEventId: "evt-1"))
-        try database.events.insert(makeEvent(id: "evt-1"))
+    func testBuildSingleEvent() async throws {
+        try await database.sessions.insert(makeSession(headEventId: "evt-1"))
+        try await database.events.insert(makeEvent(id: "evt-1"))
 
-        let nodes = try database.tree.build("sess-1")
+        let nodes = try await database.tree.build("sess-1")
         XCTAssertEqual(nodes.count, 1)
         XCTAssertEqual(nodes[0].id, "evt-1")
     }
 
     // MARK: - Linear Chain
 
-    @MainActor
-    func testBuildLinearChain() throws {
-        try database.sessions.insert(makeSession(headEventId: "evt-3"))
-        try database.events.insert(makeEvent(id: "evt-1", sequence: 1))
-        try database.events.insert(makeEvent(id: "evt-2", parentId: "evt-1", sequence: 2))
-        try database.events.insert(makeEvent(id: "evt-3", parentId: "evt-2", sequence: 3))
+    func testBuildLinearChain() async throws {
+        try await database.sessions.insert(makeSession(headEventId: "evt-3"))
+        try await database.events.insert(makeEvent(id: "evt-1", sequence: 1))
+        try await database.events.insert(makeEvent(id: "evt-2", parentId: "evt-1", sequence: 2))
+        try await database.events.insert(makeEvent(id: "evt-3", parentId: "evt-2", sequence: 3))
 
-        let nodes = try database.tree.build("sess-1")
+        let nodes = try await database.tree.build("sess-1")
         XCTAssertEqual(nodes.count, 3)
     }
 
     // MARK: - Branching
 
-    @MainActor
-    func testBuildBranchingTree() throws {
-        try database.sessions.insert(makeSession(headEventId: "evt-2"))
+    func testBuildBranchingTree() async throws {
+        try await database.sessions.insert(makeSession(headEventId: "evt-2"))
         // Root event
-        try database.events.insert(makeEvent(id: "evt-1", sequence: 1))
+        try await database.events.insert(makeEvent(id: "evt-1", sequence: 1))
         // Two children of the same parent (branch point)
-        try database.events.insert(makeEvent(id: "evt-2", parentId: "evt-1", sequence: 2))
-        try database.events.insert(makeEvent(id: "evt-3", parentId: "evt-1", sequence: 3))
+        try await database.events.insert(makeEvent(id: "evt-2", parentId: "evt-1", sequence: 2))
+        try await database.events.insert(makeEvent(id: "evt-3", parentId: "evt-1", sequence: 3))
 
-        let nodes = try database.tree.build("sess-1")
+        let nodes = try await database.tree.build("sess-1")
         XCTAssertEqual(nodes.count, 3)
 
         // The parent should be marked as a branch point
@@ -132,24 +126,22 @@ final class TreeRepositoryTests: XCTestCase {
 
     // MARK: - Head Event
 
-    @MainActor
-    func testHeadEventMarked() throws {
-        try database.sessions.insert(makeSession(headEventId: "evt-2"))
-        try database.events.insert(makeEvent(id: "evt-1", sequence: 1))
-        try database.events.insert(makeEvent(id: "evt-2", parentId: "evt-1", sequence: 2))
+    func testHeadEventMarked() async throws {
+        try await database.sessions.insert(makeSession(headEventId: "evt-2"))
+        try await database.events.insert(makeEvent(id: "evt-1", sequence: 1))
+        try await database.events.insert(makeEvent(id: "evt-2", parentId: "evt-1", sequence: 2))
 
-        let nodes = try database.tree.build("sess-1")
+        let nodes = try await database.tree.build("sess-1")
         let headNodes = nodes.filter(\.isHead)
         XCTAssertEqual(headNodes.count, 1)
         XCTAssertEqual(headNodes[0].id, "evt-2")
     }
 
-    @MainActor
-    func testNilHeadEventIdBuildsTreeWithoutHead() throws {
-        try database.sessions.insert(makeSession(headEventId: nil))
-        try database.events.insert(makeEvent(id: "evt-1", sequence: 1))
+    func testNilHeadEventIdBuildsTreeWithoutHead() async throws {
+        try await database.sessions.insert(makeSession(headEventId: nil))
+        try await database.events.insert(makeEvent(id: "evt-1", sequence: 1))
 
-        let nodes = try database.tree.build("sess-1")
+        let nodes = try await database.tree.build("sess-1")
         XCTAssertEqual(nodes.count, 1)
         // No node should be marked as head
         XCTAssertTrue(nodes.allSatisfy { !$0.isHead })

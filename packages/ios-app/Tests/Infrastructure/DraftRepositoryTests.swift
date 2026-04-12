@@ -3,21 +3,20 @@ import SQLite3
 @testable import TronMobile
 
 /// Tests for DraftRepository — SQLite CRUD for session_drafts table
+@MainActor
 final class DraftRepositoryTests: XCTestCase {
 
     var database: EventDatabase!
 
-    @MainActor
     override func setUp() async throws {
         database = EventDatabase()
         try await database.initialize()
-        try database.clearAll()
+        try await database.clearAll()
     }
 
-    @MainActor
     override func tearDown() async throws {
-        try? database.clearAll()
-        database.close()
+        try? await database.clearAll()
+        await database.close()
     }
 
     // MARK: - Helpers
@@ -45,9 +44,8 @@ final class DraftRepositoryTests: XCTestCase {
 
     // MARK: - Save and Load
 
-    @MainActor
-    func testSaveAndLoadDraft_textOnly() throws {
-        try database.drafts.save(
+    func testSaveAndLoadDraft_textOnly() async throws {
+        try await database.drafts.save(
             sessionId: "s1",
             text: "Hello, world!",
             skills: [],
@@ -55,7 +53,7 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: []
         )
 
-        let result = try database.drafts.load(sessionId: "s1")
+        let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.text, "Hello, world!")
         XCTAssertTrue(result?.skills.isEmpty ?? false)
@@ -63,11 +61,10 @@ final class DraftRepositoryTests: XCTestCase {
         XCTAssertTrue(result?.attachmentMetadata.isEmpty ?? false)
     }
 
-    @MainActor
-    func testSaveAndLoadDraft_withSkills() throws {
+    func testSaveAndLoadDraft_withSkills() async throws {
         let skills = [makeSkill(name: "code-review"), makeSkill(name: "testing", source: .project)]
 
-        try database.drafts.save(
+        try await database.drafts.save(
             sessionId: "s1",
             text: "",
             skills: skills,
@@ -75,7 +72,7 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: []
         )
 
-        let result = try database.drafts.load(sessionId: "s1")
+        let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.skills.count, 2)
         XCTAssertEqual(result?.skills[0].name, "code-review")
@@ -84,11 +81,10 @@ final class DraftRepositoryTests: XCTestCase {
         XCTAssertEqual(result?.skills[1].source, .project)
     }
 
-    @MainActor
-    func testSaveAndLoadDraft_withSpells() throws {
+    func testSaveAndLoadDraft_withSpells() async throws {
         let spells = [makeSkill(name: "old-english")]
 
-        try database.drafts.save(
+        try await database.drafts.save(
             sessionId: "s1",
             text: "test",
             skills: [],
@@ -96,14 +92,13 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: []
         )
 
-        let result = try database.drafts.load(sessionId: "s1")
+        let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.spells.count, 1)
         XCTAssertEqual(result?.spells[0].name, "old-english")
     }
 
-    @MainActor
-    func testSaveAndLoadDraft_withAttachmentMetadata() throws {
+    func testSaveAndLoadDraft_withAttachmentMetadata() async throws {
         let attachmentId = UUID()
         let metadata = [
             DraftAttachmentMetadata(
@@ -117,7 +112,7 @@ final class DraftRepositoryTests: XCTestCase {
             ),
         ]
 
-        try database.drafts.save(
+        try await database.drafts.save(
             sessionId: "s1",
             text: "",
             skills: [],
@@ -125,7 +120,7 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: metadata
         )
 
-        let result = try database.drafts.load(sessionId: "s1")
+        let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.attachmentMetadata.count, 1)
 
@@ -139,13 +134,12 @@ final class DraftRepositoryTests: XCTestCase {
         XCTAssertEqual(loaded.originalMimeType, "image/gif")
     }
 
-    @MainActor
-    func testSaveAndLoadDraft_fullDraft() throws {
+    func testSaveAndLoadDraft_fullDraft() async throws {
         let skills = [makeSkill(name: "review")]
         let spells = [makeSkill(name: "formal")]
         let attachments = [makeAttachmentMetadata(), makeAttachmentMetadata(type: .pdf, mimeType: "application/pdf", fileName: "doc.pdf")]
 
-        try database.drafts.save(
+        try await database.drafts.save(
             sessionId: "s1",
             text: "Please review this",
             skills: skills,
@@ -153,7 +147,7 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: attachments
         )
 
-        let result = try database.drafts.load(sessionId: "s1")
+        let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.text, "Please review this")
         XCTAssertEqual(result?.skills.count, 1)
@@ -161,9 +155,8 @@ final class DraftRepositoryTests: XCTestCase {
         XCTAssertEqual(result?.attachmentMetadata.count, 2)
     }
 
-    @MainActor
-    func testSaveAndLoadDraft_emptyArrays() throws {
-        try database.drafts.save(
+    func testSaveAndLoadDraft_emptyArrays() async throws {
+        try await database.drafts.save(
             sessionId: "s1",
             text: "",
             skills: [],
@@ -171,7 +164,7 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: []
         )
 
-        let result = try database.drafts.load(sessionId: "s1")
+        let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.text, "")
         XCTAssertTrue(result?.skills.isEmpty ?? false)
@@ -181,17 +174,15 @@ final class DraftRepositoryTests: XCTestCase {
 
     // MARK: - Load Non-Existent
 
-    @MainActor
-    func testLoadDraft_nonExistentSession_returnsNil() throws {
-        let result = try database.drafts.load(sessionId: "no-such-session")
+    func testLoadDraft_nonExistentSession_returnsNil() async throws {
+        let result = try await database.drafts.load(sessionId: "no-such-session")
         XCTAssertNil(result)
     }
 
     // MARK: - Overwrite (UPSERT)
 
-    @MainActor
-    func testSaveDraft_overwritesExisting() throws {
-        try database.drafts.save(
+    func testSaveDraft_overwritesExisting() async throws {
+        try await database.drafts.save(
             sessionId: "s1",
             text: "first version",
             skills: [],
@@ -199,7 +190,7 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: []
         )
 
-        try database.drafts.save(
+        try await database.drafts.save(
             sessionId: "s1",
             text: "second version",
             skills: [makeSkill(name: "added-later")],
@@ -207,7 +198,7 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: []
         )
 
-        let result = try database.drafts.load(sessionId: "s1")
+        let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertEqual(result?.text, "second version")
         XCTAssertEqual(result?.skills.count, 1)
         XCTAssertEqual(result?.skills[0].name, "added-later")
@@ -215,9 +206,8 @@ final class DraftRepositoryTests: XCTestCase {
 
     // MARK: - Delete
 
-    @MainActor
-    func testDeleteDraft() throws {
-        try database.drafts.save(
+    func testDeleteDraft() async throws {
+        try await database.drafts.save(
             sessionId: "s1",
             text: "will be deleted",
             skills: [],
@@ -225,38 +215,38 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: []
         )
 
-        try database.drafts.delete(sessionId: "s1")
+        try await database.drafts.delete(sessionId: "s1")
 
-        let result = try database.drafts.load(sessionId: "s1")
+        let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertNil(result)
     }
 
-    @MainActor
-    func testDeleteDraft_nonExistent_noError() throws {
+    func testDeleteDraft_nonExistent_noError() async throws {
         // Should not throw
-        try database.drafts.delete(sessionId: "no-such-session")
+        try await database.drafts.delete(sessionId: "no-such-session")
     }
 
-    @MainActor
-    func testDeleteAll() throws {
-        try database.drafts.save(sessionId: "s1", text: "a", skills: [], spells: [], attachmentMetadata: [])
-        try database.drafts.save(sessionId: "s2", text: "b", skills: [], spells: [], attachmentMetadata: [])
-        try database.drafts.save(sessionId: "s3", text: "c", skills: [], spells: [], attachmentMetadata: [])
+    func testDeleteAll() async throws {
+        try await database.drafts.save(sessionId: "s1", text: "a", skills: [], spells: [], attachmentMetadata: [])
+        try await database.drafts.save(sessionId: "s2", text: "b", skills: [], spells: [], attachmentMetadata: [])
+        try await database.drafts.save(sessionId: "s3", text: "c", skills: [], spells: [], attachmentMetadata: [])
 
-        try database.drafts.deleteAll()
+        try await database.drafts.deleteAll()
 
-        XCTAssertNil(try database.drafts.load(sessionId: "s1"))
-        XCTAssertNil(try database.drafts.load(sessionId: "s2"))
-        XCTAssertNil(try database.drafts.load(sessionId: "s3"))
+        let r1 = try await database.drafts.load(sessionId: "s1")
+        let r2 = try await database.drafts.load(sessionId: "s2")
+        let r3 = try await database.drafts.load(sessionId: "s3")
+        XCTAssertNil(r1)
+        XCTAssertNil(r2)
+        XCTAssertNil(r3)
     }
 
     // MARK: - Special Characters
 
-    @MainActor
-    func testSaveDraft_specialCharactersInText() throws {
+    func testSaveDraft_specialCharactersInText() async throws {
         let text = "Hello 🌍! \"Quotes\" & <brackets> \n\ttabs\n日本語テスト"
 
-        try database.drafts.save(
+        try await database.drafts.save(
             sessionId: "s1",
             text: text,
             skills: [],
@@ -264,15 +254,14 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: []
         )
 
-        let result = try database.drafts.load(sessionId: "s1")
+        let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertEqual(result?.text, text)
     }
 
-    @MainActor
-    func testSaveDraft_veryLongText() throws {
+    func testSaveDraft_veryLongText() async throws {
         let text = String(repeating: "x", count: 100_000)
 
-        try database.drafts.save(
+        try await database.drafts.save(
             sessionId: "s1",
             text: text,
             skills: [],
@@ -280,22 +269,25 @@ final class DraftRepositoryTests: XCTestCase {
             attachmentMetadata: []
         )
 
-        let result = try database.drafts.load(sessionId: "s1")
+        let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertEqual(result?.text.count, 100_000)
     }
 
     // MARK: - Corrupt JSON Handling
 
-    @MainActor
-    func testLoadDraft_corruptSkillsJson_returnsNil() throws {
+    func testLoadDraft_corruptSkillsJson_returnsNil() async throws {
         // Manually insert a row with corrupt JSON
         let sql = """
             INSERT INTO session_drafts (session_id, text, skills_json, spells_json, attachment_metadata_json, updated_at)
             VALUES ('corrupt', 'text', '{NOT VALID JSON}', '[]', '[]', '2026-04-03T00:00:00Z')
         """
-        try database.execute(sql)
+        try await database.withDB { db in
+            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+                throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))
+            }
+        }
 
-        let result = try database.drafts.load(sessionId: "corrupt")
+        let result = try await database.drafts.load(sessionId: "corrupt")
         XCTAssertNil(result)
     }
 }

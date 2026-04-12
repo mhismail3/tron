@@ -60,7 +60,7 @@ extension ChatViewModel: TurnLifecycleContext {
             return
         }
 
-        guard let session = try? database.sessions.get(sessionId) else {
+        guard let session = try? await database.sessions.get(sessionId) else {
             logger.warning("Cannot persist thinking - session not found", category: .session)
             return
         }
@@ -77,7 +77,7 @@ extension ChatViewModel: TurnLifecycleContext {
         )
 
         do {
-            try database.events.insert(event)
+            try await database.events.insert(event)
             logger.debug("Persisted thinking event for turn \(payload.turnNumber)", category: .session)
         } catch {
             logger.error("Failed to persist thinking event: \(error.localizedDescription)", category: .session)
@@ -144,9 +144,9 @@ extension ChatViewModel: TurnLifecycleContext {
     // MARK: - Session Persistence (Protocol Methods)
 
     /// Update session tokens in database (TurnLifecycleContext)
-    func updateSessionTokens(inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int, cost: Double) throws {
+    func updateSessionTokens(inputTokens: Int, outputTokens: Int, lastTurnInputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int, cost: Double) async throws {
         guard let manager = eventStoreManager else { return }
-        try manager.updateSessionTokens(
+        try await manager.updateSessionTokens(
             sessionId: sessionId,
             inputTokens: contextState.accumulatedInputTokens,
             outputTokens: contextState.accumulatedOutputTokens,

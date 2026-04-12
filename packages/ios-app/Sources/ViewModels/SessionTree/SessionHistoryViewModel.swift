@@ -61,27 +61,27 @@ final class SessionHistoryViewModel {
             try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
 
             // Check if this is a forked session
-            let session = try? eventStoreManager.eventDB.sessions.get(sessionId)
+            let session = try? await eventStoreManager.eventDB.sessions.get(sessionId)
             let isFork = session?.isFork == true
 
             if isFork, let rootEventId = session?.rootEventId {
                 // For forked sessions, load the full ancestor chain
-                events = try eventStoreManager.eventDB.events.getAncestors(rootEventId)
+                events = try await eventStoreManager.eventDB.events.getAncestors(rootEventId)
 
                 // Also get any events after the root (children of root in this session)
-                let sessionEvents = try eventStoreManager.getSessionEvents(sessionId)
+                let sessionEvents = try await eventStoreManager.getSessionEvents(sessionId)
                 let rootIds = Set(events.map { $0.id })
                 for event in sessionEvents where !rootIds.contains(event.id) {
                     events.append(event)
                 }
 
                 // Build fork context for UI display
-                forkContext = buildForkContext(events: events, currentSessionId: sessionId)
+                forkContext = await buildForkContext(events: events, currentSessionId: sessionId)
 
                 logger.info("Loaded forked session with \(events.count) events (including parent history)", category: .session)
             } else {
                 // Regular session - just get session events
-                events = try eventStoreManager.getSessionEvents(sessionId)
+                events = try await eventStoreManager.getSessionEvents(sessionId)
                 forkContext = nil
             }
 
@@ -99,7 +99,7 @@ final class SessionHistoryViewModel {
         // Find events that have children in other sessions (fork points)
         for event in events {
             do {
-                let siblings = try eventStoreManager.eventDB.sessions.getSiblings(
+                let siblings = try await eventStoreManager.eventDB.sessions.getSiblings(
                     forEventId: event.id,
                     excluding: sessionId
                 )
@@ -130,7 +130,7 @@ final class SessionHistoryViewModel {
         }
 
         do {
-            let branchEvents = try eventStoreManager.getSessionEvents(branchSessionId)
+            let branchEvents = try await eventStoreManager.getSessionEvents(branchSessionId)
             branches[index].events = branchEvents
             siblingBranches[eventId] = branches
         } catch {
@@ -158,7 +158,7 @@ final class SessionHistoryViewModel {
     }
 
     /// Build fork context from events to identify parent session events
-    private func buildForkContext(events: [SessionEvent], currentSessionId: String) -> SessionForkContext? {
+    private func buildForkContext(events: [SessionEvent], currentSessionId: String) async -> SessionForkContext? {
         // Find the session.fork event in this session
         let forkEvents = events.filter { event in
             event.eventType == .sessionFork && event.sessionId == currentSessionId
@@ -175,7 +175,7 @@ final class SessionHistoryViewModel {
         }
 
         // Get parent session title
-        let parentSession = try? eventStoreManager.eventDB.sessions.get(parentSessionId)
+        let parentSession = try? await eventStoreManager.eventDB.sessions.get(parentSessionId)
         let parentTitle = parentSession?.displayTitle
 
         // Identify which events belong to parent session(s)

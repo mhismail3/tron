@@ -55,7 +55,7 @@ extension ChatViewModel {
         // 5. Restore token state for context progress pill
         //    Without this, contextWindowTokens stays 0 and the pill shows empty.
         if let manager = eventStoreManager {
-            updateTokenState(from: state, using: manager)
+            await updateTokenState(from: state, using: manager)
         } else {
             let usage = state.totalTokenUsage
             contextState.setAccumulatedTokens(from: usage)

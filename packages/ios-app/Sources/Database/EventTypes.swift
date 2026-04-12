@@ -38,7 +38,7 @@ struct WorkspaceId: Hashable, Codable, CustomStringConvertible {
 // MARK: - Session Event
 
 /// A single event in the event-sourced session tree
-struct SessionEvent: Identifiable, Codable, EventTransformable {
+struct SessionEvent: Identifiable, Codable, EventTransformable, Sendable {
     let id: String
     let parentId: String?
     let sessionId: String
@@ -71,7 +71,7 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
 }
 
 /// Known session event types
-enum SessionEventType: String, Codable {
+enum SessionEventType: String, Codable, Sendable {
     case sessionStart = "session.start"
     case sessionEnd = "session.end"
     case sessionFork = "session.fork"
@@ -160,7 +160,7 @@ enum SessionEventType: String, Codable {
 // MARK: - Sync State
 
 /// Tracks synchronization state with server
-struct SyncState: Codable {
+struct SyncState: Codable, Sendable {
     let key: String
     var lastSyncedEventId: String?
     var lastSyncTimestamp: String?
@@ -170,7 +170,7 @@ struct SyncState: Codable {
 // MARK: - Tree Node
 
 /// Node for tree visualization
-struct EventTreeNode: Identifiable {
+struct EventTreeNode: Identifiable, Sendable {
     let id: String
     let parentId: String?
     let type: String

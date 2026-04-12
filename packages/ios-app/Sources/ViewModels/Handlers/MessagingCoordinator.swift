@@ -165,7 +165,7 @@ final class MessagingCoordinator {
         context.selectedImages = []
 
         // Clear persisted draft now that input state is consumed
-        context.draftStore?.clearDraft(sessionId: context.sessionId)
+        await context.draftStore?.clearDraft(sessionId: context.sessionId)
 
         // Send to server
         do {

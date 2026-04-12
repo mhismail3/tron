@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Skill Source
 
 /// Where a skill was loaded from
-enum SkillSource: String, Codable {
+enum SkillSource: String, Codable, Sendable {
     case global  // ~/.tron/skills/
     case project // .tron/skills/ (relative to project)
 }
@@ -11,7 +11,7 @@ enum SkillSource: String, Codable {
 // MARK: - Skill Model
 
 /// Skill information for listing
-struct Skill: Identifiable, Codable, Equatable {
+struct Skill: Identifiable, Codable, Equatable, Sendable {
     /// Skill name (folder name, used as @reference)
     let name: String
     /// Human-readable display name (from frontmatter, falls back to folder name)

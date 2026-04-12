@@ -209,17 +209,19 @@ final class TurnLifecycleCoordinator {
             )
 
             // Update session tokens in database
-            do {
-                try context.updateSessionTokens(
-                    inputTokens: record.source.rawInputTokens,
-                    outputTokens: record.source.rawOutputTokens,
-                    lastTurnInputTokens: contextSize,
-                    cacheReadTokens: record.source.rawCacheReadTokens,
-                    cacheCreationTokens: record.source.rawCacheCreationTokens,
-                    cost: pluginResult.cost ?? 0
-                )
-            } catch {
-                context.logError("Failed to update session tokens: \(error.localizedDescription)")
+            Task {
+                do {
+                    try await context.updateSessionTokens(
+                        inputTokens: record.source.rawInputTokens,
+                        outputTokens: record.source.rawOutputTokens,
+                        lastTurnInputTokens: contextSize,
+                        cacheReadTokens: record.source.rawCacheReadTokens,
+                        cacheCreationTokens: record.source.rawCacheCreationTokens,
+                        cost: pluginResult.cost ?? 0
+                    )
+                } catch {
+                    context.logError("Failed to update session tokens: \(error.localizedDescription)")
+                }
             }
         }
     }

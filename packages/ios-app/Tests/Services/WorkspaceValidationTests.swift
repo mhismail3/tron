@@ -2,6 +2,7 @@ import XCTest
 @testable import TronMobile
 
 /// Tests for workspace path validation and deleted workspace handling
+@MainActor
 final class WorkspaceValidationTests: XCTestCase {
 
     var database: EventDatabase!
@@ -10,13 +11,13 @@ final class WorkspaceValidationTests: XCTestCase {
     override func setUp() async throws {
         database = EventDatabase()
         try await database.initialize()
-        try database.clearAll()
+        try await database.clearAll()
     }
 
     @MainActor
     override func tearDown() async throws {
-        try? database.clearAll()
-        database.close()
+        try? await database.clearAll()
+        await database.close()
     }
 
     // MARK: - Workspace Path Validation Tests
@@ -179,16 +180,18 @@ final class WorkspaceValidationTests: XCTestCase {
     func testArchiveSessionRemovesFromDatabase() async throws {
         // Given: A session in the database
         let session = createCachedSession(id: "test-session", workingDirectory: "/deleted/workspace")
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
         // Verify it exists
-        XCTAssertNotNil(try database.sessions.get("test-session"))
+        let before = try await database.sessions.get("test-session")
+        XCTAssertNotNil(before)
 
         // When: Deleting/archiving the session
-        try database.sessions.delete("test-session")
+        try await database.sessions.delete("test-session")
 
         // Then: Session should no longer exist
-        XCTAssertNil(try database.sessions.get("test-session"))
+        let after = try await database.sessions.get("test-session")
+        XCTAssertNil(after)
     }
 
     /// Test that archiving removes associated events
@@ -196,7 +199,7 @@ final class WorkspaceValidationTests: XCTestCase {
     func testArchiveSessionRemovesEvents() async throws {
         // Given: A session with events
         let session = createCachedSession(id: "test-session", workingDirectory: "/workspace")
-        try database.sessions.insert(session)
+        try await database.sessions.insert(session)
 
         let event = SessionEvent(
             id: "e1",
@@ -208,18 +211,18 @@ final class WorkspaceValidationTests: XCTestCase {
             sequence: 1,
             payload: [:]
         )
-        try database.events.insertBatch([event])
+        try await database.events.insertBatch([event])
 
         // Verify events exist
-        let eventsBefore = try database.events.getBySession("test-session")
+        let eventsBefore = try await database.events.getBySession("test-session")
         XCTAssertEqual(eventsBefore.count, 1)
 
         // When: Deleting the session and its events
-        try database.sessions.delete("test-session")
-        try database.events.deleteBySession("test-session")
+        try await database.sessions.delete("test-session")
+        try await database.events.deleteBySession("test-session")
 
         // Then: Events should also be removed
-        let eventsAfter = try database.events.getBySession("test-session")
+        let eventsAfter = try await database.events.getBySession("test-session")
         XCTAssertEqual(eventsAfter.count, 0)
     }
 

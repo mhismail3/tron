@@ -114,7 +114,7 @@ struct TronMobileApp: App {
 
                 // Flush any pending debounced draft save before backgrounding
                 if isBackground {
-                    container.draftStore.flushPending()
+                    Task { await container.draftStore.flushPending() }
                 }
 
                 TronLogger.shared.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)

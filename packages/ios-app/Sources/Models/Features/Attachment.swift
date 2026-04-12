@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Attachment Type
 
 /// Type of attachment based on MIME type
-enum AttachmentType: String, Codable, Equatable {
+enum AttachmentType: String, Codable, Equatable, Sendable {
     case image
     case pdf
     case document

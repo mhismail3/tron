@@ -39,26 +39,26 @@ final class DraftStore {
         debounceTask = Task { [weak self] in
             try? await Task.sleep(for: DraftStore.debounceInterval)
             guard !Task.isCancelled else { return }
-            self?.performSave(sessionId: sessionId, inputBarState: inputBarState)
+            await self?.performSave(sessionId: sessionId, inputBarState: inputBarState)
         }
     }
 
     /// Save immediately, bypassing debounce. Use on `onDisappear`.
-    func saveImmediately(sessionId: String, inputBarState: InputBarState) {
+    func saveImmediately(sessionId: String, inputBarState: InputBarState) async {
         debounceTask?.cancel()
         debounceTask = nil
         pendingSessionId = nil
         pendingInputBarState = nil
-        performSave(sessionId: sessionId, inputBarState: inputBarState)
+        await performSave(sessionId: sessionId, inputBarState: inputBarState)
     }
 
     /// Load a draft into the given InputBarState. Returns true if a draft was found.
     @discardableResult
-    func loadDraft(sessionId: String, into inputBarState: InputBarState) -> Bool {
+    func loadDraft(sessionId: String, into inputBarState: InputBarState) async -> Bool {
         guard eventDatabase.isInitialized else { return false }
 
         do {
-            guard let draft = try eventDatabase.drafts.load(sessionId: sessionId) else {
+            guard let draft = try await eventDatabase.drafts.load(sessionId: sessionId) else {
                 return false
             }
 
@@ -76,10 +76,10 @@ final class DraftStore {
     }
 
     /// Clear a draft after sending a message.
-    func clearDraft(sessionId: String) {
+    func clearDraft(sessionId: String) async {
         lastSavedFingerprints.removeValue(forKey: sessionId)
         do {
-            try eventDatabase.drafts.delete(sessionId: sessionId)
+            try await eventDatabase.drafts.delete(sessionId: sessionId)
         } catch {
             logger.warning("Failed to delete draft row for session \(sessionId): \(error.localizedDescription)", category: .database)
         }
@@ -87,14 +87,14 @@ final class DraftStore {
     }
 
     /// Clean up a draft when a session is deleted.
-    func deleteSessionDraft(sessionId: String) {
-        clearDraft(sessionId: sessionId)
+    func deleteSessionDraft(sessionId: String) async {
+        await clearDraft(sessionId: sessionId)
     }
 
     /// Flush any pending debounced save. Call on app background.
-    func flushPending() {
+    func flushPending() async {
         guard let sessionId = pendingSessionId, let state = pendingInputBarState else { return }
-        saveImmediately(sessionId: sessionId, inputBarState: state)
+        await saveImmediately(sessionId: sessionId, inputBarState: state)
     }
 
     // MARK: - File Paths
@@ -109,7 +109,7 @@ final class DraftStore {
 
     // MARK: - Private
 
-    private func performSave(sessionId: String, inputBarState: InputBarState) {
+    private func performSave(sessionId: String, inputBarState: InputBarState) async {
         guard eventDatabase.isInitialized else { return }
 
         let fingerprint = inputBarState.draftFingerprint
@@ -119,7 +119,7 @@ final class DraftStore {
 
         guard inputBarState.hasDraftContent else {
             if lastSavedFingerprints[sessionId] != nil {
-                clearDraft(sessionId: sessionId)
+                await clearDraft(sessionId: sessionId)
             }
             return
         }
@@ -137,7 +137,7 @@ final class DraftStore {
                 )
             }
 
-            try eventDatabase.drafts.save(
+            try await eventDatabase.drafts.save(
                 sessionId: sessionId,
                 text: inputBarState.text,
                 skills: inputBarState.selectedSkills,

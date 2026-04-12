@@ -216,18 +216,19 @@ final class MessagingCoordinatorTests: XCTestCase {
         // Given: A draft store with a saved draft
         let db = EventDatabase()!
         try! await db.initialize()
-        try! db.clearAll()
+        try! await db.clearAll()
         let store = DraftStore(eventDatabase: db, documentsURL: FileManager.default.temporaryDirectory)
         mockContext.draftStore = store
 
         // Save a draft
         let draftState = InputBarState()
         draftState.text = "draft text"
-        store.saveImmediately(sessionId: "test-session", inputBarState: draftState)
+        await store.saveImmediately(sessionId: "test-session", inputBarState: draftState)
 
         // Verify draft exists
         let checkState = InputBarState()
-        XCTAssertTrue(store.loadDraft(sessionId: "test-session", into: checkState))
+        let hasDraft = await store.loadDraft(sessionId: "test-session", into: checkState)
+        XCTAssertTrue(hasDraft)
 
         // When: Sending a message
         mockContext.inputText = "Test message"
@@ -235,24 +236,25 @@ final class MessagingCoordinatorTests: XCTestCase {
 
         // Then: Draft should be cleared
         let afterState = InputBarState()
-        XCTAssertFalse(store.loadDraft(sessionId: "test-session", into: afterState))
+        let hasDraftAfter = await store.loadDraft(sessionId: "test-session", into: afterState)
+        XCTAssertFalse(hasDraftAfter)
 
         store.removeAllDraftFiles()
-        try? db.clearAll()
-        db.close()
+        try? await db.clearAll()
+        await db.close()
     }
 
     func testSendMessage_clearsDraft_evenOnServerError() async {
         // Given: Draft store and server will fail
         let db = EventDatabase()!
         try! await db.initialize()
-        try! db.clearAll()
+        try! await db.clearAll()
         let store = DraftStore(eventDatabase: db, documentsURL: FileManager.default.temporaryDirectory)
         mockContext.draftStore = store
 
         let draftState = InputBarState()
         draftState.text = "draft"
-        store.saveImmediately(sessionId: "test-session", inputBarState: draftState)
+        await store.saveImmediately(sessionId: "test-session", inputBarState: draftState)
 
         mockContext.inputText = "Test"
         mockContext.sendPromptShouldFail = true
@@ -262,11 +264,12 @@ final class MessagingCoordinatorTests: XCTestCase {
 
         // Then: Draft should still be cleared (input state was already consumed)
         let afterState = InputBarState()
-        XCTAssertFalse(store.loadDraft(sessionId: "test-session", into: afterState))
+        let hasDraftAfter = await store.loadDraft(sessionId: "test-session", into: afterState)
+        XCTAssertFalse(hasDraftAfter)
 
         store.removeAllDraftFiles()
-        try? db.clearAll()
-        db.close()
+        try? await db.clearAll()
+        await db.close()
     }
 
     // MARK: - Error Handling Tests

@@ -321,7 +321,7 @@ struct SessionSheet: View {
     private func loadEvents() async {
         do {
             try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
-            sessionEvents = try eventStoreManager.getSessionEvents(sessionId)
+            sessionEvents = try await eventStoreManager.getSessionEvents(sessionId)
         } catch {
             // Non-critical: analytics and history gracefully degrade to empty
         }

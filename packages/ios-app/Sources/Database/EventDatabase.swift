@@ -12,7 +12,7 @@ import SQLite3
 @MainActor
 final class EventDatabase: DatabaseTransport {
 
-    private(set) var db: OpaquePointer?
+    private let dbActor: DatabaseActor
     let dbPath: String
 
     private(set) var isInitialized = false
@@ -47,6 +47,7 @@ final class EventDatabase: DatabaseTransport {
         try? fileManager.createDirectory(at: dbDir, withIntermediateDirectories: true)
 
         self.dbPath = dbDir.appendingPathComponent("prod.db").path
+        self.dbActor = DatabaseActor(dbPath: self.dbPath)
     }
 
     /// Fallback initializer for when Documents directory is unavailable (e.g., device restore).
@@ -55,84 +56,42 @@ final class EventDatabase: DatabaseTransport {
         let dir = (fallbackPath as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         self.dbPath = fallbackPath
+        self.dbActor = DatabaseActor(dbPath: fallbackPath)
     }
 
     func initialize() async throws {
         guard !isInitialized else { return }
 
-        // Open database
-        if sqlite3_open(dbPath, &db) != SQLITE_OK {
-            throw EventDatabaseError.openFailed(errorMessage)
-        }
-
-        // Enable WAL mode for better concurrent access
-        try execute("PRAGMA journal_mode = WAL")
-        try execute("PRAGMA busy_timeout = 5000")
-
-        // Create tables
-        try createTables()
+        try await dbActor.open()
 
         isInitialized = true
         logger.info("Event database initialized at \(self.dbPath)", category: .session)
     }
 
-    func close() {
-        if let db = db {
-            sqlite3_close(db)
-            self.db = nil
-            isInitialized = false
-        }
+    func close() async {
+        await dbActor.close()
+        isInitialized = false
     }
 
-    // Note: deinit cleanup is handled by close() method which should be called explicitly
-    // We can't access actor-isolated properties from deinit in Swift 6
+    // MARK: - DatabaseTransport
 
-    // MARK: - Schema
-
-    /// Create all database tables and run migrations.
-    /// - Note: Delegates to DatabaseSchema for schema management.
-    private func createTables() throws {
-        try DatabaseSchema.createTables(db: db)
+    nonisolated func withDB<T: Sendable>(_ body: @Sendable (OpaquePointer?) throws -> T) async throws -> T {
+        try await dbActor.withDB(body)
     }
 
     // MARK: - Utilities
 
-    func clearAll() throws {
-        try execute("DELETE FROM events")
-        try execute("DELETE FROM sessions")
-        try execute("DELETE FROM sync_state")
-        try execute("DELETE FROM session_drafts")
-    }
-
-    // MARK: - DatabaseTransport Helpers
-
-    var errorMessage: String {
-        String(cString: sqlite3_errmsg(db))
-    }
-
-    func execute(_ sql: String) throws {
-        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
-            throw EventDatabaseError.executeFailed(errorMessage)
-        }
-    }
-
-    func bindOptionalText(_ stmt: OpaquePointer?, _ index: Int32, _ value: String?) {
-        if let value = value {
-            sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-        } else {
-            sqlite3_bind_null(stmt, index)
-        }
-    }
-
-    func getOptionalText(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
-        guard let ptr = sqlite3_column_text(stmt, index) else { return nil }
-        return String(cString: ptr)
+    func clearAll() async throws {
+        try await dbActor.exec("DELETE FROM events")
+        try await dbActor.exec("DELETE FROM sessions")
+        try await dbActor.exec("DELETE FROM sync_state")
+        try await dbActor.exec("DELETE FROM session_drafts")
     }
 }
 
 // MARK: - Errors
 
-enum EventDatabaseError: LocalizedError {
+enum EventDatabaseError: LocalizedError, Sendable {
     case openFailed(String)
     case prepareFailed(String)
     case executeFailed(String)

@@ -20,26 +20,26 @@ extension EventStoreManager {
             for serverSession in serverSessions {
                 let sessionId = serverSession.sessionId
 
-                if try sessionSynchronizer.sessionHasDifferentOrigin(sessionId, expectedOrigin: serverOrigin) {
+                if try await sessionSynchronizer.sessionHasDifferentOrigin(sessionId, expectedOrigin: serverOrigin) {
                     continue
                 }
 
                 let cachedSession: CachedSession
-                if try eventDB.sessions.exists(sessionId), let existing = try eventDB.sessions.get(sessionId) {
+                if try await eventDB.sessions.exists(sessionId), let existing = try await eventDB.sessions.get(sessionId) {
                     cachedSession = mergeSessionData(existing: existing, serverInfo: serverSession, serverOrigin: serverOrigin)
                 } else {
                     cachedSession = serverSessionToCached(serverSession, serverOrigin: serverOrigin)
                 }
-                try eventDB.sessions.insert(cachedSession)
+                try await eventDB.sessions.insert(cachedSession)
             }
 
             // Remove local sessions that no longer exist on the server
-            let localSessions = try eventDB.sessions.getByOrigin(serverOrigin)
+            let localSessions = try await eventDB.sessions.getByOrigin(serverOrigin)
             var removedCount = 0
             for local in localSessions {
                 if !serverSessionIds.contains(local.id) {
-                    try eventDB.events.deleteBySession(local.id)
-                    try eventDB.sessions.delete(local.id)
+                    try await eventDB.events.deleteBySession(local.id)
+                    try await eventDB.sessions.delete(local.id)
                     removedCount += 1
                 }
             }
@@ -81,9 +81,9 @@ extension EventStoreManager {
 
     /// Update session metadata from event database.
     func updateSessionMetadata(sessionId: String) async throws {
-        guard var session = try eventDB.sessions.get(sessionId) else { return }
+        guard var session = try await eventDB.sessions.get(sessionId) else { return }
 
-        let events = try eventDB.events.getBySession(sessionId)
+        let events = try await eventDB.events.getBySession(sessionId)
 
         // Update counts
         session.eventCount = events.count
@@ -100,7 +100,7 @@ extension EventStoreManager {
             session.rootEventId = firstEvent.id
         }
 
-        try eventDB.sessions.insert(session)
+        try await eventDB.sessions.insert(session)
         loadSessions()
     }
 

@@ -2,8 +2,7 @@ import Foundation
 
 /// Repository for tree visualization queries.
 /// Extracted from EventDatabase for single responsibility.
-@MainActor
-final class TreeRepository {
+final class TreeRepository: @unchecked Sendable {
 
     private let eventRepository: EventRepository
     private let sessionRepository: SessionRepository
@@ -17,9 +16,9 @@ final class TreeRepository {
 
     /// Build tree visualization for a session.
     /// Delegates to EventTreeBuilder for presentation logic.
-    func build(_ sessionId: String) throws -> [EventTreeNode] {
-        let events = try eventRepository.getBySession(sessionId)
-        let session = try sessionRepository.get(sessionId)
+    func build(_ sessionId: String) async throws -> [EventTreeNode] {
+        let events = try await eventRepository.getBySession(sessionId)
+        let session = try await sessionRepository.get(sessionId)
         return EventTreeBuilder.buildTree(from: events, headEventId: session?.headEventId)
     }
 }

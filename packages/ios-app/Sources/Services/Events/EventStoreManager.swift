@@ -285,10 +285,12 @@ final class EventStoreManager {
 
         // Also persist to local DB so the data survives app restarts
         if let session = sessions.first(where: { $0.id == sessionId }) {
-            do {
-                try eventDB.sessions.insert(session)
-            } catch {
-                logger.error("Failed to persist session update for \(sessionId): \(error)", category: .database)
+            Task {
+                do {
+                    try await self.eventDB.sessions.insert(session)
+                } catch {
+                    logger.error("Failed to persist session update for \(sessionId): \(error)", category: .database)
+                }
             }
         }
     }
@@ -336,10 +338,12 @@ final class EventStoreManager {
         sessions.insert(newSession, at: 0)
 
         // Persist to local DB
-        do {
-            try eventDB.sessions.insert(newSession)
-        } catch {
-            logger.error("Failed to persist new session \(sessionId): \(error)", category: .database)
+        Task {
+            do {
+                try await self.eventDB.sessions.insert(newSession)
+            } catch {
+                logger.error("Failed to persist new session \(sessionId): \(error)", category: .database)
+            }
         }
     }
 
@@ -358,11 +362,13 @@ final class EventStoreManager {
         dashboardStreamManager.clearBuffer(for: sessionId)
 
         // Remove from local DB
-        do {
-            try eventDB.events.deleteBySession(sessionId)
-            try eventDB.sessions.delete(sessionId)
-        } catch {
-            logger.error("Failed to clean up archived session \(sessionId) from DB: \(error)", category: .database)
+        Task {
+            do {
+                try await self.eventDB.events.deleteBySession(sessionId)
+                try await self.eventDB.sessions.delete(sessionId)
+            } catch {
+                logger.error("Failed to clean up archived session \(sessionId) from DB: \(error)", category: .database)
+            }
         }
     }
 
@@ -382,11 +388,13 @@ final class EventStoreManager {
 
         sessions.removeAll { $0.id == sessionId }
         dashboardStreamManager.clearBuffer(for: sessionId)
-        do {
-            try eventDB.events.deleteBySession(sessionId)
-            try eventDB.sessions.delete(sessionId)
-        } catch {
-            logger.error("Failed to clean up deleted session \(sessionId) from DB: \(error)", category: .database)
+        Task {
+            do {
+                try await self.eventDB.events.deleteBySession(sessionId)
+                try await self.eventDB.sessions.delete(sessionId)
+            } catch {
+                logger.error("Failed to clean up deleted session \(sessionId) from DB: \(error)", category: .database)
+            }
         }
     }
 
@@ -447,7 +455,7 @@ final class EventStoreManager {
     func loadSessions() {
         if !hasLoadedSessionsOnce {
             hasLoadedSessionsOnce = true
-            _loadSessionsImmediate()
+            Task { await _loadSessionsImmediate() }
             return
         }
 
@@ -455,12 +463,12 @@ final class EventStoreManager {
         loadSessionsDebounceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(100))
             guard !Task.isCancelled else { return }
-            self?._loadSessionsImmediate()
+            await self?._loadSessionsImmediate()
         }
     }
 
     /// Actual loadSessions implementation (called directly or after debounce).
-    private func _loadSessionsImmediate() {
+    private func _loadSessionsImmediate() async {
         do {
             // Preserve transient state that isn't persisted to DB
             var preservedState: [String: (activityLines: [ActivityLine]?, isProcessing: Bool?)] = [:]
@@ -470,7 +478,7 @@ final class EventStoreManager {
 
             // Filter by current server origin if enabled
             let origin = filterByOrigin ? currentServerOrigin : nil
-            sessions = try eventDB.sessions.getByOrigin(origin)
+            sessions = try await eventDB.sessions.getByOrigin(origin)
             chatSessionId = sessions.first(where: { $0.isChat })?.id
             logger.info("Loaded \(self.sessions.count) sessions from EventDatabase (origin filter: \(origin ?? "none"), chat: \(chatSessionId ?? "none"))", category: .session)
 

@@ -2,7 +2,7 @@ import Foundation
 
 /// Lightweight model for displaying thinking blocks in the UI
 /// Full content is NOT stored here - loaded on demand into ThinkingState.loadedFullContent
-struct ThinkingBlock: Identifiable {
+struct ThinkingBlock: Identifiable, Sendable {
     let id: UUID
     let eventId: String
     let turnNumber: Int

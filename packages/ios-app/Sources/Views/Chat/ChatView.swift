@@ -187,7 +187,7 @@ struct ChatView: View {
         }
         .onDisappear {
             // Persist draft state before view is destroyed
-            dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState)
+            Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
             // Reset for next entry
             initialLoadComplete = false
             // Full reset of animation state when leaving session
@@ -213,7 +213,7 @@ struct ChatView: View {
             viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
 
             // Restore draft state and wire draft store
-            dependencies.draftStore.loadDraft(sessionId: sessionId, into: viewModel.inputBarState)
+            await dependencies.draftStore.loadDraft(sessionId: sessionId, into: viewModel.inputBarState)
             viewModel.draftStore = dependencies.draftStore
 
             // Run model prefetch in parallel with connect/resume

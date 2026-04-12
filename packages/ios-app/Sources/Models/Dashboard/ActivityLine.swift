@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The type of content in a dashboard activity line.
 /// Used by both live streaming buffers and persisted card data.
-enum ActivityLineKind: String, Codable, Equatable, CaseIterable {
+enum ActivityLineKind: String, Codable, Equatable, CaseIterable, Sendable {
     case text
     case userPrompt
     case toolStart
@@ -19,7 +19,7 @@ enum ActivityLineKind: String, Codable, Equatable, CaseIterable {
 // MARK: - Activity Line Status
 
 /// Status of a tool or subagent activity line.
-enum ActivityLineStatus: String, Codable, Equatable, CaseIterable {
+enum ActivityLineStatus: String, Codable, Equatable, CaseIterable, Sendable {
     case running
     case success
     case error
@@ -29,7 +29,7 @@ enum ActivityLineStatus: String, Codable, Equatable, CaseIterable {
 
 /// Type-safe tool color that bridges between ToolDescriptor string names and SwiftUI colors.
 /// Replaces the stringly-typed `iconColorName` → `String.resolvedToolColor` pattern.
-enum ToolColor: String, Codable, Equatable, CaseIterable {
+enum ToolColor: String, Codable, Equatable, CaseIterable, Sendable {
     case tronSlate
     case tronPink
     case orange
@@ -90,7 +90,7 @@ enum DashboardConstants {
 ///
 /// `id` is excluded from Codable — generated fresh on decode for SwiftUI identity.
 /// `toolCallId` is transient (live streaming only) and excluded from Codable.
-struct ActivityLine: Identifiable, Codable {
+struct ActivityLine: Identifiable, Codable, Sendable {
     let id: UUID
     let kind: ActivityLineKind
     var text: String

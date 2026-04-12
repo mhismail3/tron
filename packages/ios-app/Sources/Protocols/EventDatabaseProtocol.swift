@@ -15,10 +15,10 @@ protocol EventDatabaseProtocol: AnyObject {
 
     // MARK: - Initialization
     func initialize() async throws
-    func close()
+    func close() async
 
     // MARK: - Utilities
-    func clearAll() throws
+    func clearAll() async throws
 }
 
 // MARK: - EventDatabase Conformance

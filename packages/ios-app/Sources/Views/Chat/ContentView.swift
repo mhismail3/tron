@@ -319,15 +319,17 @@ struct ContentView: View {
             defaultModel: defaultModel,
             eventStoreManager: eventStoreManager,
             onSessionCreated: { sessionId, workspaceId, model, workingDirectory in
-                do {
-                    try eventStoreManager.cacheNewSession(
-                        sessionId: sessionId,
-                        workspaceId: workspaceId,
-                        model: model,
-                        workingDirectory: workingDirectory
-                    )
-                } catch {
-                    logger.error("Failed to cache new session: \(error)", category: .session)
+                Task {
+                    do {
+                        try await eventStoreManager.cacheNewSession(
+                            sessionId: sessionId,
+                            workspaceId: workspaceId,
+                            model: model,
+                            workingDirectory: workingDirectory
+                        )
+                    } catch {
+                        logger.error("Failed to cache new session: \(error)", category: .session)
+                    }
                 }
                 selectedSessionId = sessionId
                 showNewSessionSheet = false
