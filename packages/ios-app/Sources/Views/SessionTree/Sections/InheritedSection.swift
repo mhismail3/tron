@@ -9,7 +9,7 @@ struct InheritedSection: View {
     let forkPointEvent: SessionEvent?
     @Binding var isExpanded: Bool
     let parentSessionId: String?
-    let onFork: (String) -> Void
+    let onFork: (String) async -> Void
 
     /// Truncated session ID for display (first 8 chars)
     private var displaySessionId: String {
@@ -70,7 +70,7 @@ struct InheritedSection: View {
                             isHead: false,
                             isMuted: true,
                             forkButtonState: event.isForkable ? .active : .hidden,
-                            onFork: { onFork(event.id) }
+                            onFork: { await onFork(event.id) }
                         )
                     }
                 }

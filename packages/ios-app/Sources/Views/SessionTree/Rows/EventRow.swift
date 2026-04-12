@@ -1,22 +1,117 @@
 import SwiftUI
 
 /// Fork button display state for event rows
-enum ForkButtonState {
+enum ForkButtonState: Equatable {
     /// No button shown
     case hidden
     /// Tappable fork button
     case active
 }
 
+/// Derives the fork button state for an event in a turn detail context.
+///
+/// Extracted as a free function for testability. Used by `TurnDetailSheet`
+/// to determine whether each event row should show a fork button.
+func deriveForkButtonState(
+    event: SessionEvent,
+    sessionId: String,
+    isInherited: Bool
+) -> ForkButtonState {
+    if isInherited { return .hidden }
+    if event.sessionId != sessionId { return .hidden }
+    return event.isForkable ? .active : .hidden
+}
+
+// MARK: - Fork Button
+
+/// Reusable fork button with inline confirmation morph.
+///
+/// Tapping the "Fork" pill expands it in-place into a confirmation strip
+/// with "Fork Session" and "Cancel" capsules, then collapses back on
+/// cancel or after the fork completes. Used by both `EventRow` and
+/// `TurnDetailSheet.mergedToolRow`.
+@available(iOS 26.0, *)
+struct ForkButton: View {
+    let isForking: Bool
+    let isDisabled: Bool
+    let onFork: () async -> Void
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        if isExpanded && !isForking {
+            // Expanded confirmation strip
+            HStack(spacing: 6) {
+                Button {
+                    isExpanded = false
+                    Task { await onFork() }
+                } label: {
+                    Text("Fork Session")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(.tronAmber)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.tronAmber.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded = false
+                    }
+                } label: {
+                    Text("Cancel")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.tronTextMuted.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)))
+        } else {
+            // Collapsed fork pill / spinner
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded = true
+                }
+            } label: {
+                if isForking {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.tronAmber)
+                } else {
+                    Text("Fork")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(.tronAmber)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.tronAmber.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isForking || isDisabled)
+            .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)))
+        }
+    }
+}
+
 // MARK: - Event Row
 
 /// Row display for session events in the history list view
+@available(iOS 26.0, *)
 struct EventRow: View {
     let event: SessionEvent
     var isHead: Bool = false
     var isMuted: Bool = false
     var forkButtonState: ForkButtonState = .active
-    let onFork: () -> Void
+    var isForking: Bool = false
+    var isForkDisabled: Bool = false
+    let onFork: () async -> Void
 
     @State private var isExpanded = false
 
@@ -63,16 +158,11 @@ struct EventRow: View {
 
                 // Fork button
                 if case .active = forkButtonState {
-                    Button(action: onFork) {
-                        Text("Fork")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                            .foregroundStyle(.tronAmber)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.tronAmber.opacity(0.15))
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
+                    ForkButton(
+                        isForking: isForking,
+                        isDisabled: isForkDisabled,
+                        onFork: onFork
+                    )
                 }
             }
             .padding(.vertical, 8)

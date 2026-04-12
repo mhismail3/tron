@@ -3,10 +3,11 @@ import SwiftUI
 // MARK: - This Session Section
 
 /// Section showing events from the current session (after fork point)
+@available(iOS 26.0, *)
 struct ThisSessionSection: View {
     let events: [SessionEvent]
     let headEventId: String?
-    let onFork: (String) -> Void
+    let onFork: (String) async -> Void
 
     var body: some View {
         SectionCard(title: "This Session", icon: "sparkles", accentColor: .tronPurple) {
@@ -37,7 +38,7 @@ struct ThisSessionSection: View {
                                 isHead: event.id == headEventId,
                                 forkButtonState: event.id == headEventId ? .hidden
                                     : event.isForkable ? .active : .hidden,
-                                onFork: { onFork(event.id) }
+                                onFork: { await onFork(event.id) }
                             )
                             .id(event.id)
                         }

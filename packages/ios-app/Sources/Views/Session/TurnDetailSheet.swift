@@ -12,7 +12,8 @@ struct TurnDetailSheet: View {
     let onDismissParent: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var forkEventId: String?
+    @State private var forkingEventId: String?
+    @State private var forkError: String?
 
     private var turnTitle: String {
         "Turn \(turnGroup.turnNumber)"
@@ -39,20 +40,13 @@ struct TurnDetailSheet: View {
                 .padding(.vertical, 8)
             }
         }
-        .sheet(item: Binding(
-            get: { forkEventId.map { ForkEventItem(eventId: $0) } },
-            set: { forkEventId = $0?.eventId }
-        )) { wrapper in
-            ForkConfirmationSheet(
-                eventId: wrapper.eventId,
-                event: turnGroup.events.first(where: { $0.id == wrapper.eventId }),
-                sessionId: sessionId,
-                eventStoreManager: eventStoreManager,
-                onDismissParent: {
-                    dismiss()
-                    onDismissParent()
-                }
-            )
+        .alert("Error", isPresented: Binding(
+            get: { forkError != nil },
+            set: { if !$0 { forkError = nil } }
+        )) {
+            Button("OK") { forkError = nil }
+        } message: {
+            Text(forkError ?? "")
         }
     }
 
@@ -223,7 +217,9 @@ struct TurnDetailSheet: View {
                 isHead: false,
                 isMuted: turnGroup.isInherited,
                 forkButtonState: forkButtonState(for: event),
-                onFork: { forkEventId = event.id }
+                isForking: forkingEventId == event.id,
+                isForkDisabled: forkingEventId != nil && forkingEventId != event.id,
+                onFork: { await performFork(eventId: event.id) }
             )
 
         case .mergedTool(let call, let result):
@@ -280,16 +276,11 @@ struct TurnDetailSheet: View {
 
             // Fork button (on the call event)
             if case .active = forkButtonState(for: call) {
-                Button(action: { forkEventId = call.id }) {
-                    Text("Fork")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronAmber)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.tronAmber.opacity(0.15))
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
+                ForkButton(
+                    isForking: forkingEventId == call.id,
+                    isDisabled: forkingEventId != nil && forkingEventId != call.id,
+                    onFork: { await performFork(eventId: call.id) }
+                )
             }
         }
         .padding(.vertical, 8)
@@ -367,12 +358,33 @@ struct TurnDetailSheet: View {
         return (mainItems, postTurnItems)
     }
 
-    // MARK: - Fork Button State
+    // MARK: - Fork
 
     private func forkButtonState(for event: SessionEvent) -> ForkButtonState {
-        if turnGroup.isInherited { return .hidden }
-        if event.sessionId != sessionId { return .hidden }
-        return event.isForkable ? .active : .hidden
+        deriveForkButtonState(
+            event: event,
+            sessionId: sessionId,
+            isInherited: turnGroup.isInherited
+        )
+    }
+
+    private func performFork(eventId: String) async {
+        forkingEventId = eventId
+        logger.debug("Fork initiated: sessionId=\(sessionId), fromEventId=\(eventId)", category: .session)
+
+        do {
+            let newSessionId = try await eventStoreManager.forkSession(sessionId, fromEventId: eventId)
+            logger.debug("Fork succeeded: newSessionId=\(newSessionId)", category: .session)
+            eventStoreManager.setActiveSession(newSessionId)
+            eventStoreManager.loadSessions()
+            NotificationCenter.default.post(name: .switchToSession, object: newSessionId)
+            dismiss()
+            onDismissParent()
+        } catch {
+            logger.error("Fork FAILED: \(error)", category: .session)
+            forkError = "Failed to fork session: \(error.localizedDescription)"
+        }
+        forkingEventId = nil
     }
 
     // MARK: - Helpers
@@ -400,10 +412,4 @@ struct ProcessedEventItem: Identifiable {
         case .mergedTool(let call, _): return "tool-\(call.id)"
         }
     }
-}
-
-/// Wrapper to make eventId identifiable for sheet presentation
-private struct ForkEventItem: Identifiable {
-    let eventId: String
-    var id: String { eventId }
 }
