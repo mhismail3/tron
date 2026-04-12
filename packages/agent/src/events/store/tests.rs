@@ -19,7 +19,7 @@ fn setup() -> EventStore {
 fn create_session_basic() {
     let store = setup();
     let result = store
-        .create_session("claude-opus-4-6", "/tmp/project", Some("Test"), None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", Some("Test"), None, None, None)
         .unwrap();
 
     assert!(result.session.id.starts_with("sess_"));
@@ -47,6 +47,7 @@ fn create_session_with_explicit_provider() {
             None,
             Some("openai"),
             None,
+            None,
         )
         .unwrap();
 
@@ -63,7 +64,7 @@ fn create_session_with_explicit_provider() {
 fn create_session_creates_workspace() {
     let store = setup();
     store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let ws = store.get_workspace_by_path("/tmp/project").unwrap();
@@ -74,10 +75,10 @@ fn create_session_creates_workspace() {
 fn create_session_reuses_workspace() {
     let store = setup();
     let r1 = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
     let r2 = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     assert_eq!(r1.session.workspace_id, r2.session.workspace_id);
@@ -88,7 +89,7 @@ fn create_session_reuses_workspace() {
 fn create_session_root_event_has_correct_fields() {
     let store = setup();
     let result = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     assert!(result.root_event.parent_id.is_none());
@@ -102,7 +103,7 @@ fn create_session_root_event_has_correct_fields() {
 fn create_session_detects_ollama_provider() {
     let store = setup();
     let result = store
-        .create_session("gemma4:e4b", "/tmp/project", None, None, None)
+        .create_session("gemma4:e4b", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let payload_str: String = result.root_event.payload;
@@ -118,7 +119,7 @@ fn create_session_detects_ollama_provider() {
 fn create_session_detects_anthropic_provider() {
     let store = setup();
     let result = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let payload_str: String = result.root_event.payload;
@@ -130,7 +131,7 @@ fn create_session_detects_anthropic_provider() {
 fn create_session_detects_google_provider() {
     let store = setup();
     let result = store
-        .create_session("gemini-2.5-flash", "/tmp/project", None, None, None)
+        .create_session("gemini-2.5-flash", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let payload_str: String = result.root_event.payload;
@@ -144,7 +145,7 @@ fn create_session_detects_google_provider() {
 fn append_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let event = store
@@ -169,7 +170,7 @@ fn append_basic() {
 fn append_chains_from_head() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let evt1 = store
@@ -200,7 +201,7 @@ fn append_chains_from_head() {
 fn append_updates_session_head() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let event = store
@@ -221,7 +222,7 @@ fn append_updates_session_head() {
 fn append_increments_counters() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     store
@@ -280,7 +281,7 @@ fn append_increments_counters() {
 fn last_turn_input_tokens_prefers_context_window_tokens() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // Append assistant message with BOTH tokenUsage.inputTokens AND
@@ -317,7 +318,7 @@ fn last_turn_input_tokens_prefers_context_window_tokens() {
 fn last_turn_input_tokens_falls_back_to_input_tokens() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // No tokenRecord — should fall back to tokenUsage.inputTokens
@@ -345,7 +346,7 @@ fn last_turn_input_tokens_falls_back_to_input_tokens() {
 fn last_turn_input_tokens_not_set_for_user_messages() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // User messages should NOT update last_turn_input_tokens even if
@@ -376,7 +377,7 @@ fn last_turn_input_tokens_not_set_for_user_messages() {
 fn token_counters_only_from_stream_turn_end() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // message.assistant with tokenUsage should NOT increment token counters
@@ -442,7 +443,7 @@ fn token_counters_only_from_stream_turn_end() {
 fn cost_only_from_stream_turn_end() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // message.assistant with cost should NOT increment cost
@@ -486,7 +487,7 @@ fn cost_only_from_stream_turn_end() {
 fn no_double_counting_with_both_events() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // Simulate a real turn: message.assistant then stream.turn_end with identical tokens
@@ -537,7 +538,7 @@ fn no_double_counting_with_both_events() {
 fn stream_turn_end_without_token_usage_no_counter_change() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // stream.turn_end with no tokenUsage (e.g. tool-only turn)
@@ -563,7 +564,7 @@ fn stream_turn_end_without_token_usage_no_counter_change() {
 fn events_without_token_usage_dont_affect_counters() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     store
@@ -595,7 +596,7 @@ fn events_without_token_usage_dont_affect_counters() {
 fn last_turn_input_tokens_still_set_on_message_assistant() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // Even though token counters don't increment from message.assistant,
@@ -627,7 +628,7 @@ fn last_turn_input_tokens_still_set_on_message_assistant() {
 fn multi_turn_no_double_counting() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // Turn 1
@@ -715,7 +716,7 @@ fn multi_turn_no_double_counting() {
 fn append_with_explicit_parent() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // Append with explicit parent = root event (not head)
@@ -763,7 +764,7 @@ fn append_to_nonexistent_session_fails() {
 fn get_event() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let event = store.get_event(&cr.root_event.id).unwrap();
@@ -775,7 +776,7 @@ fn get_event() {
 fn get_events_by_session() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     store
@@ -800,7 +801,7 @@ fn get_events_by_session() {
 fn get_ancestors() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let evt1 = store
@@ -836,7 +837,7 @@ fn get_ancestors() {
 fn fork_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let user_msg = store
@@ -873,7 +874,7 @@ fn fork_basic() {
 fn fork_ancestors_cross_sessions() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let user_msg = store
@@ -900,7 +901,7 @@ fn fork_ancestors_cross_sessions() {
 fn fork_with_model_override() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let fork = store
@@ -930,7 +931,7 @@ fn fork_nonexistent_event_fails() {
 fn delete_message_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let user_msg = store
@@ -956,7 +957,7 @@ fn delete_message_basic() {
 fn delete_non_message_fails() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // Try to delete the root session.start event
@@ -970,7 +971,7 @@ fn delete_non_message_fails() {
 fn get_session() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let session = store.get_session(&cr.session.id).unwrap();
@@ -981,10 +982,10 @@ fn get_session() {
 fn list_sessions() {
     let store = setup();
     store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
     store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let sessions = store
@@ -997,7 +998,7 @@ fn list_sessions() {
 fn end_and_reactivate_session() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     store.end_session(&cr.session.id).unwrap();
@@ -1013,7 +1014,7 @@ fn end_and_reactivate_session() {
 fn update_session_title() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     store
@@ -1027,7 +1028,7 @@ fn update_session_title() {
 fn delete_session_cascade() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     store
@@ -1061,6 +1062,7 @@ fn update_source_sets_source() {
             Some("Cron: test"),
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -1082,7 +1084,7 @@ fn update_source_nonexistent_session() {
 fn update_source_is_idempotent() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     store.update_source(&cr.session.id, "cron").unwrap();
@@ -1103,10 +1105,11 @@ fn update_spawn_info_links_subagent_and_lists_it() {
             Some("Parent"),
             None,
             None,
+            None,
         )
         .unwrap();
     let child = store
-        .create_session("claude-opus-4-6", "/tmp/project", Some("Child"), None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", Some("Child"), None, None, None)
         .unwrap();
 
     let updated = store
@@ -1153,7 +1156,7 @@ fn update_spawn_info_nonexistent_session_returns_false() {
 fn was_session_interrupted_tracks_incomplete_turns() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     assert!(!store.was_session_interrupted(&cr.session.id).unwrap());
@@ -1220,10 +1223,10 @@ fn workspace_get_or_create() {
 fn list_workspaces() {
     let store = setup();
     store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
-        .create_session("claude-opus-4-6", "/tmp/b", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/b", None, None, None, None)
         .unwrap();
 
     let workspaces = store.list_workspaces().unwrap();
@@ -1236,7 +1239,7 @@ fn list_workspaces() {
 fn agentic_loop() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     // Turn 1: user → assistant(tool_use) → turn_end → tool.result → assistant(end_turn) → turn_end
@@ -1336,7 +1339,7 @@ fn agentic_loop() {
 fn fork_then_diverge() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     let user_msg = store
@@ -1397,13 +1400,13 @@ fn fork_then_diverge() {
 fn get_sessions_by_ids_basic() {
     let store = setup();
     let cr1 = store
-        .create_session("claude-opus-4-6", "/tmp/a", Some("A"), None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", Some("A"), None, None, None)
         .unwrap();
     let cr2 = store
-        .create_session("claude-opus-4-6", "/tmp/b", Some("B"), None, None)
+        .create_session("claude-opus-4-6", "/tmp/b", Some("B"), None, None, None)
         .unwrap();
     store
-        .create_session("claude-opus-4-6", "/tmp/c", Some("C"), None, None)
+        .create_session("claude-opus-4-6", "/tmp/c", Some("C"), None, None, None)
         .unwrap();
 
     let ids = [cr1.session.id.as_str(), cr2.session.id.as_str()];
@@ -1424,7 +1427,7 @@ fn get_sessions_by_ids_empty() {
 fn get_sessions_by_ids_missing_omitted() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
 
     let ids = [cr.session.id.as_str(), "sess_nonexistent"];
@@ -1437,7 +1440,7 @@ fn get_sessions_by_ids_missing_omitted() {
 fn get_session_message_previews_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
 
     store
@@ -1475,7 +1478,7 @@ fn get_session_message_previews_basic() {
 fn get_events_by_ids_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     let evt = store
         .append(&AppendOptions {
@@ -1498,10 +1501,10 @@ fn get_events_by_ids_basic() {
 fn get_events_by_sessions_and_types_returns_all_matching_events() {
     let store = setup();
     let first = store
-        .create_session("claude-opus-4-6", "/tmp/project-a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project-a", None, None, None, None)
         .unwrap();
     let second = store
-        .create_session("claude-opus-4-6", "/tmp/project-b", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project-b", None, None, None, None)
         .unwrap();
 
     let first_user = store
@@ -1548,7 +1551,7 @@ fn get_events_by_sessions_and_types_returns_all_matching_events() {
 fn get_events_by_type_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -1580,10 +1583,10 @@ fn get_events_by_type_basic() {
 fn get_events_by_workspace_and_types_cross_session() {
     let store = setup();
     let cr1 = store
-        .create_session("claude-opus-4-6", "/tmp/proj", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/proj", None, None, None, None)
         .unwrap();
     let cr2 = store
-        .create_session("claude-opus-4-6", "/tmp/proj", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/proj", None, None, None, None)
         .unwrap();
 
     store
@@ -1620,7 +1623,7 @@ fn get_events_by_workspace_and_types_cross_session() {
 fn count_events_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -1642,7 +1645,7 @@ fn count_events_basic() {
 fn get_messages_at_head_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -1677,7 +1680,7 @@ fn get_messages_at_head_basic() {
 fn get_messages_at_specific_event() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
     let user_evt = store
         .append(&AppendOptions {
@@ -1718,7 +1721,7 @@ fn get_messages_at_nonexistent_fails() {
 fn get_state_at_head_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -1769,7 +1772,7 @@ fn get_state_at_head_basic() {
 fn get_state_at_head_ended_session() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
     store.end_session(&cr.session.id).unwrap();
 
@@ -1781,7 +1784,7 @@ fn get_state_at_head_ended_session() {
 fn get_state_at_specific_event() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
     let user_evt = store
         .append(&AppendOptions {
@@ -1822,7 +1825,7 @@ fn get_state_at_head_nonexistent_session_fails() {
 fn get_state_at_head_with_agentic_loop() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     store
@@ -1881,7 +1884,7 @@ fn get_state_at_head_with_agentic_loop() {
 fn get_state_at_head_with_compaction() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
     store
@@ -2026,7 +2029,7 @@ fn concurrent_appends_produce_unique_sequences() {
     let store = Arc::new(store);
 
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
     let session_id = cr.session.id.clone();
 
@@ -2083,6 +2086,7 @@ fn concurrent_appends_to_different_sessions() {
                         None,
                         None,
                         None,
+                        None,
                     )
                     .unwrap();
                 for _ in 0..5 {
@@ -2117,7 +2121,7 @@ fn concurrent_reads_during_writes() {
     let store = Arc::new(store);
 
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
     let session_id = cr.session.id.clone();
 
@@ -2182,7 +2186,7 @@ fn concurrent_reads_during_writes() {
 fn get_active_worktree_none() {
     let store = setup();
     let session = store
-        .create_session("model", "/tmp", Some("test"), None, None)
+        .create_session("model", "/tmp", Some("test"), None, None, None)
         .unwrap();
     let result = store.get_active_worktree(&session.session.id).unwrap();
     assert!(result.is_none());
@@ -2192,7 +2196,7 @@ fn get_active_worktree_none() {
 fn get_active_worktree_acquired() {
     let store = setup();
     let session = store
-        .create_session("model", "/tmp", Some("test"), None, None)
+        .create_session("model", "/tmp", Some("test"), None, None, None)
         .unwrap();
     let sid = &session.session.id;
 
@@ -2219,7 +2223,7 @@ fn get_active_worktree_acquired() {
 fn get_active_worktree_released() {
     let store = setup();
     let session = store
-        .create_session("model", "/tmp", Some("test"), None, None)
+        .create_session("model", "/tmp", Some("test"), None, None, None)
         .unwrap();
     let sid = &session.session.id;
 
@@ -2259,7 +2263,7 @@ fn get_active_worktree_released() {
 fn get_active_worktree_reacquired() {
     let store = setup();
     let session = store
-        .create_session("model", "/tmp", Some("test"), None, None)
+        .create_session("model", "/tmp", Some("test"), None, None, None)
         .unwrap();
     let sid = &session.session.id;
 
@@ -2313,7 +2317,7 @@ fn get_active_worktree_reacquired() {
 fn get_activity_summary_empty_session() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     let lines = store
         .get_session_activity_summaries(&cr.session.id)
@@ -2325,7 +2329,7 @@ fn get_activity_summary_empty_session() {
 fn get_activity_summary_user_prompt_only() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -2349,7 +2353,7 @@ fn get_activity_summary_user_prompt_only() {
 fn get_activity_summary_user_prompt_truncation() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     let long_text = "a".repeat(150);
     store
@@ -2372,7 +2376,7 @@ fn get_activity_summary_user_prompt_truncation() {
 fn get_activity_summary_text_block() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -2398,7 +2402,7 @@ fn get_activity_summary_text_block() {
 fn get_activity_summary_text_block_multiline() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -2422,7 +2426,7 @@ fn get_activity_summary_text_block_multiline() {
 fn get_activity_summary_thinking_block() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -2447,7 +2451,7 @@ fn get_activity_summary_thinking_block() {
 fn get_activity_summary_tool_use_with_result() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -2487,7 +2491,7 @@ fn get_activity_summary_tool_use_with_result() {
 fn get_activity_summary_tool_use_no_result() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -2515,7 +2519,7 @@ fn get_activity_summary_tool_use_no_result() {
 fn get_activity_summary_spawn_subagent_skipped() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -2541,7 +2545,7 @@ fn get_activity_summary_spawn_subagent_skipped() {
 fn get_activity_summary_subagent_lifecycle() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
 
     // Spawn a user-visible subagent (has toolCallId in payload)
@@ -2594,7 +2598,7 @@ fn get_activity_summary_subagent_lifecycle() {
 fn get_activity_summary_hook_subagent_filtered() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
 
     // Hook subagent: toolCallId is null in payload → tool_call_id IS NULL on EventRow
@@ -2641,7 +2645,7 @@ fn get_activity_summary_hook_subagent_filtered() {
 fn get_activity_summary_returns_last_5() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
 
     // Create 8 user prompts
@@ -2669,7 +2673,7 @@ fn get_activity_summary_returns_last_5() {
 fn get_activity_summary_interleaved_content() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -2701,7 +2705,7 @@ fn get_activity_summary_interleaved_content() {
 fn get_activity_summary_multiple_turns() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
         .unwrap();
 
     // Turn 1

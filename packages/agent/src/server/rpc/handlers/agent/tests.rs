@@ -243,7 +243,7 @@ async fn prompt_returns_acknowledged() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"))
+        .create_session("mock", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = PromptHandler
@@ -259,11 +259,11 @@ async fn prompt_generates_unique_run_ids() {
     let ctx = make_text_context("Done.");
     let sid1 = ctx
         .session_manager
-        .create_session("mock", "/tmp/1", Some("t1"))
+        .create_session("mock", "/tmp/1", Some("t1"), None)
         .unwrap();
     let sid2 = ctx
         .session_manager
-        .create_session("mock", "/tmp/2", Some("t2"))
+        .create_session("mock", "/tmp/2", Some("t2"), None)
         .unwrap();
 
     let r1 = PromptHandler
@@ -292,7 +292,7 @@ async fn prompt_missing_prompt() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
     let err = PromptHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -306,7 +306,7 @@ async fn prompt_rejects_oversized_prompt() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
     let oversized = "x".repeat(crate::server::rpc::validation::MAX_PROMPT_LENGTH.saturating_add(1));
 
@@ -338,7 +338,7 @@ async fn prompt_rejects_busy_session() {
     let ctx = make_slow_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"))
+        .create_session("mock", "/tmp", Some("t"), None)
         .unwrap();
 
     // First prompt succeeds
@@ -363,7 +363,7 @@ async fn abort_active_returns_true() {
     let ctx = make_slow_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     // Start a run so there's something to abort
@@ -400,7 +400,7 @@ async fn abort_active_cancels_pending_device_requests() {
 
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -452,7 +452,7 @@ async fn prompt_accepts_reasoning_level() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -469,7 +469,7 @@ async fn prompt_accepts_images() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -486,7 +486,7 @@ async fn prompt_accepts_attachments() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -505,7 +505,7 @@ async fn prompt_accepts_skills_and_spells() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -524,7 +524,7 @@ async fn prompt_with_images_creates_multimodal_message() {
     let ctx = make_text_context("Analyzed image.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -549,7 +549,7 @@ async fn prompt_with_reasoning_level_runs_successfully() {
     let ctx = make_text_context("Thought deeply.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -574,7 +574,7 @@ async fn prompt_accepts_xhigh_reasoning_level() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -591,7 +591,7 @@ async fn prompt_accepts_max_reasoning_level() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -608,7 +608,7 @@ async fn prompt_with_xhigh_reasoning_runs_successfully() {
     let ctx = make_text_context("Deep reasoning.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -633,7 +633,7 @@ async fn prompt_with_skills_runs_successfully() {
     let ctx = make_text_context("Using skills.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -658,7 +658,7 @@ async fn prompt_empty_images_no_multimodal() {
     let ctx = make_text_context("Plain text.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -685,7 +685,7 @@ async fn prompt_spawns_background_task() {
     let ctx = make_text_context("Hello!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"))
+        .create_session("mock", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = PromptHandler
@@ -706,7 +706,7 @@ async fn prompt_without_agent_deps_returns_not_available() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
 
     let err = PromptHandler
@@ -723,7 +723,7 @@ async fn prompt_complete_run_on_success() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -767,7 +767,7 @@ async fn prompt_complete_run_on_error() {
 
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -809,7 +809,7 @@ async fn prompt_cleans_run_on_panic() {
 
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -854,7 +854,7 @@ async fn prompt_error_emits_agent_error_event() {
 
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
     let mut rx = ctx.orchestrator.subscribe();
 
@@ -919,7 +919,7 @@ async fn prompt_error_agent_error_has_rate_limit_category() {
 
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
     let mut rx = ctx.orchestrator.subscribe();
 
@@ -956,7 +956,7 @@ async fn prompt_success_no_agent_error() {
     let ctx = make_text_context("Hello!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
     let mut rx = ctx.orchestrator.subscribe();
 
@@ -980,7 +980,7 @@ async fn prompt_forwards_events_to_broadcast() {
     let ctx = make_text_context("Hello events!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let mut rx = ctx.orchestrator.subscribe();
@@ -1014,7 +1014,7 @@ async fn prompt_emits_session_updated_after_completion() {
     let ctx = make_text_context("Hello session update!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let mut rx = ctx.orchestrator.subscribe();
@@ -1051,7 +1051,7 @@ async fn prompt_event_ordering() {
     let ctx = make_text_context("Ordered!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let mut rx = ctx.orchestrator.subscribe();
@@ -1089,7 +1089,7 @@ async fn prompt_sequential_after_complete() {
     let ctx = make_text_context("Hello!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     // First prompt
@@ -1114,7 +1114,7 @@ async fn prompt_concurrent_reject() {
     let ctx = make_text_context("Hello!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     // First prompt
@@ -1143,7 +1143,7 @@ async fn prompt_loads_rules_from_working_dir() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", tmp.path().to_str().unwrap(), None)
+        .create_session("mock", tmp.path().to_str().unwrap(), None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1163,7 +1163,7 @@ async fn prompt_no_rules_still_works() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", tmp.path().to_str().unwrap(), None)
+        .create_session("mock", tmp.path().to_str().unwrap(), None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1181,7 +1181,7 @@ async fn prompt_restores_messages_from_session() {
     let ctx = make_text_context("Response.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     // Store message events in the session
@@ -1219,7 +1219,7 @@ async fn prompt_empty_session_no_messages() {
     let ctx = make_text_context("Hello.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1240,7 +1240,7 @@ async fn prompt_nonexistent_working_dir_ok() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/nonexistent/path/for/test", None)
+        .create_session("mock", "/nonexistent/path/for/test", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1322,7 +1322,7 @@ async fn prompt_with_registered_skill_loads_content() {
     register_test_skill(&ctx, "web-search", "Search the web using Bing API.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1343,7 +1343,7 @@ async fn prompt_with_unknown_skill_still_works() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1365,7 +1365,7 @@ async fn prompt_with_spells_runs_successfully() {
     register_test_skill(&ctx, "auto-commit", "Auto commit changes.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1388,7 +1388,7 @@ async fn prompt_with_skills_and_spells_merges() {
     register_test_skill(&ctx, "auto-commit", "Auto commit.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1415,7 +1415,7 @@ async fn prompt_with_duplicate_skill_and_spell_deduplicates() {
     register_test_skill(&ctx, "web-search", "Search the web.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1443,7 +1443,7 @@ async fn prompt_with_pdf_attachment_runs_successfully() {
     let ctx = make_text_context("Received your PDF.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1472,7 +1472,7 @@ async fn prompt_with_image_attachment_uses_image_block() {
     let ctx = make_text_context("Nice image.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1500,7 +1500,7 @@ async fn prompt_with_text_attachment_uses_document_block() {
     let ctx = make_text_context("Read your text.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1529,7 +1529,7 @@ async fn prompt_with_mixed_images_and_attachments() {
     let ctx = make_text_context("Got both.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1555,7 +1555,7 @@ async fn prompt_attachment_without_data_skipped() {
     let ctx = make_text_context("No attachment data.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1582,7 +1582,7 @@ async fn gather_recent_events_returns_event_types() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
 
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -1610,7 +1610,7 @@ async fn gather_recent_events_since_boundary() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
 
     // Events before boundary
@@ -1649,7 +1649,7 @@ async fn gather_recent_events_no_boundary_returns_all() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
 
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -1683,7 +1683,7 @@ async fn gather_recent_tool_calls_extracts_bash() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
 
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -1704,7 +1704,7 @@ async fn gather_recent_tool_calls_skips_non_bash() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
 
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -1724,7 +1724,7 @@ async fn prompt_persists_token_record_in_assistant_events() {
     let ctx = make_text_context("Hello!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -1752,7 +1752,7 @@ async fn interrupted_run_persists_notification_event() {
     let ctx = make_slow_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -1789,7 +1789,7 @@ async fn interrupted_run_persists_partial_assistant_message() {
     let tempdir = tempfile::tempdir().unwrap();
     let sid = ctx
         .session_manager
-        .create_session("mock", tempdir.path().to_str().unwrap(), None)
+        .create_session("mock", tempdir.path().to_str().unwrap(), None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -1823,7 +1823,7 @@ async fn normal_run_does_not_persist_interrupted_notification() {
     let ctx = make_text_context("hello world");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -1856,7 +1856,7 @@ fn make_event_store() -> Arc<crate::events::EventStore> {
 fn get_pending_no_notifications_returns_empty() {
     let store = make_event_store();
     let sid = store
-        .create_session("mock", "/tmp", None, None, None)
+        .create_session("mock", "/tmp", None, None, None, None)
         .unwrap()
         .session
         .id;
@@ -1869,7 +1869,7 @@ fn get_pending_no_notifications_returns_empty() {
 fn get_pending_with_notification_returns_it() {
     let store = make_event_store();
     let sid = store
-        .create_session("mock", "/tmp", None, None, None)
+        .create_session("mock", "/tmp", None, None, None, None)
         .unwrap()
         .session
         .id;
@@ -1904,7 +1904,7 @@ fn get_pending_with_notification_returns_it() {
 fn get_pending_skips_consumed() {
     let store = make_event_store();
     let sid = store
-        .create_session("mock", "/tmp", None, None, None)
+        .create_session("mock", "/tmp", None, None, None, None)
         .unwrap()
         .session
         .id;
@@ -1952,7 +1952,7 @@ fn get_pending_skips_consumed() {
 fn get_pending_partial_consumed() {
     let store = make_event_store();
     let sid = store
-        .create_session("mock", "/tmp", None, None, None)
+        .create_session("mock", "/tmp", None, None, None, None)
         .unwrap()
         .session
         .id;
@@ -2020,7 +2020,7 @@ fn get_pending_partial_consumed() {
 fn get_pending_multiple_consumption_events() {
     let store = make_event_store();
     let sid = store
-        .create_session("mock", "/tmp", None, None, None)
+        .create_session("mock", "/tmp", None, None, None, None)
         .unwrap()
         .session
         .id;
@@ -2126,7 +2126,7 @@ async fn prompt_text_only_event_has_string_content() {
     let ctx = make_text_context("Reply.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -2147,7 +2147,7 @@ async fn prompt_with_images_event_has_content_blocks() {
     let ctx = make_text_context("I see the image.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None)
+        .create_session("mock", "/tmp", None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -2525,7 +2525,7 @@ async fn gather_recent_events_uses_latest_boundary() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
 
     // Progress signal before first boundary
@@ -2587,7 +2587,7 @@ async fn gather_recent_events_falls_back_to_compact_summary() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
 
     // Progress signal before summary
@@ -2633,7 +2633,7 @@ async fn stale_git_push_excluded_after_boundary() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
 
     // Prior interaction: git push

@@ -309,7 +309,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let result = GetHistoryHandler
@@ -328,7 +328,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         // Append a user message
@@ -359,7 +359,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let _ = ctx
@@ -391,7 +391,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         for i in 0..5 {
@@ -432,7 +432,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         // afterSequence=999 → nothing after that
@@ -449,7 +449,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let _ = ctx
@@ -479,7 +479,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         for _ in 0..5 {
@@ -543,7 +543,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let result = AppendHandler
@@ -568,7 +568,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let result = AppendHandler
@@ -701,7 +701,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         // Append 3 events
@@ -739,7 +739,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let _ = ctx
@@ -769,7 +769,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         // Unknown afterEventId → returns all events
@@ -790,7 +790,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let result = GetHistoryHandler
@@ -806,7 +806,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let _ = ctx

@@ -54,6 +54,7 @@ struct PromptRunPlan {
     sequence_counter: Option<Arc<AtomicI64>>,
     server_origin: String,
     run_id: String,
+    source: Option<String>,
     model: String,
     working_dir: String,
     request: PromptRequest,
@@ -163,6 +164,7 @@ pub fn spawn_prompt_run(
         },
         server_origin: ctx.origin.clone(),
         run_id,
+        source: session.source.clone(),
         model: session.latest_model.clone(),
         working_dir: session.working_directory.clone(),
         request,
@@ -200,10 +202,13 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         sequence_counter,
         server_origin,
         run_id,
+        source,
         model,
         working_dir,
         request,
     } = plan;
+
+    let is_chat = source.as_deref() == Some("chat");
 
     let PromptRequest {
         session_id,
@@ -378,6 +383,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         working_dir.clone(),
         settings.as_ref().clone(),
         is_resumed,
+        source.clone(),
     )
     .await
     {
@@ -475,10 +481,14 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         model: model.clone(),
         working_directory: Some(working_dir.clone()),
         server_origin: Some(server_origin),
-        // Precedence: project .tron/SYSTEM.md > global ~/.tron/workspace/memory/rules/SYSTEM.md > embedded
-        system_prompt: crate::runtime::context::system_prompts::load_system_prompt_from_file(&working_dir)
-            .or_else(crate::runtime::context::system_prompts::load_global_system_prompt)
-            .map(|loaded| loaded.content),
+        system_prompt: if is_chat {
+            Some(crate::runtime::context::system_prompts::TRON_CHAT_PROMPT.to_string())
+        } else {
+            // Precedence: project .tron/SYSTEM.md > global ~/.tron/workspace/memory/rules/SYSTEM.md > embedded
+            crate::runtime::context::system_prompts::load_system_prompt_from_file(&working_dir)
+                .or_else(crate::runtime::context::system_prompts::load_global_system_prompt)
+                .map(|loaded| loaded.content)
+        },
         enable_thinking: true,
         max_turns: settings.agent.max_turns,
         compaction: crate::runtime::context::types::CompactionConfig {
@@ -922,6 +932,11 @@ fn drain_prompt_queue(
         output_buffer_registry,
         hook_abort_tracker,
         sequence_counter,
+        source: session_manager
+            .get_session(session_id)
+            .ok()
+            .flatten()
+            .and_then(|s| s.source),
         server_origin,
         run_id,
         model: model.to_string(),

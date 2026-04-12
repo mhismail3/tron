@@ -436,7 +436,7 @@ mod tests {
         let orch = make_orchestrator();
         let sid = orch
             .session_manager()
-            .create_session("model", "/tmp", Some("test"))
+            .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
 
         assert_eq!(orch.active_session_count(), 1);
@@ -463,7 +463,7 @@ mod tests {
         for i in 0..10 {
             let _ = orch
                 .session_manager()
-                .create_session("model", &format!("/tmp/{i}"), None)
+                .create_session("model", &format!("/tmp/{i}"), None, None)
                 .unwrap();
         }
 
@@ -682,7 +682,7 @@ mod tests {
         let orch = make_orchestrator();
         let sid = orch
             .session_manager()
-            .create_session("model", "/tmp", Some("test"))
+            .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
         assert!(orch.is_session_busy(&sid));
     }

@@ -654,7 +654,7 @@ mod tests {
         let ctx = make_test_context();
         let session_id = ctx
             .session_manager
-            .create_session("claude-sonnet-4-20250514", "/tmp", Some("test"))
+            .create_session("claude-sonnet-4-20250514", "/tmp", Some("test"), None)
             .unwrap();
 
         let _ = ctx.event_store.append(&AppendOptions {

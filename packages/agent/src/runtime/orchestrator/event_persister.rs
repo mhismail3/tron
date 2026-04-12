@@ -239,7 +239,7 @@ mod tests {
     async fn append_and_retrieve() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone());
@@ -261,7 +261,7 @@ mod tests {
     async fn sequential_events_form_chain() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone());
@@ -293,7 +293,7 @@ mod tests {
     async fn append_background_persists_without_waiting_for_result() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone());
@@ -314,7 +314,7 @@ mod tests {
     async fn append_background_applies_backpressure_instead_of_dropping() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .expect("Failed to create session");
         let worker_entered = Arc::new(Notify::new());
         let worker_release = Arc::new(Notify::new());
@@ -383,7 +383,7 @@ mod tests {
     async fn flush_waits_for_pending() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone());
@@ -407,7 +407,7 @@ mod tests {
     async fn shutdown_drains_pending_events() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone());
@@ -466,7 +466,7 @@ mod tests {
     async fn worker_exit_gives_descriptive_error() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone());
@@ -494,7 +494,7 @@ mod tests {
     async fn append_with_preassigned_sequence() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone());
@@ -517,7 +517,7 @@ mod tests {
     async fn append_background_with_preassigned_sequence() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone());

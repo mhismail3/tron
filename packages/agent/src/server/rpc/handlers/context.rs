@@ -139,7 +139,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .create_session("claude-opus-4-6", "/tmp", Some("test"), None)
             .unwrap();
         (ctx, sid)
     }
@@ -384,7 +384,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", tmp.path().to_str().unwrap(), None)
+            .create_session("claude-opus-4-6", tmp.path().to_str().unwrap(), None, None)
             .unwrap();
 
         let result = GetDetailedSnapshotHandler
@@ -416,7 +416,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", tmp.path().to_str().unwrap(), None)
+            .create_session("claude-opus-4-6", tmp.path().to_str().unwrap(), None, None)
             .unwrap();
 
         let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -829,7 +829,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", tmp.path().to_str().unwrap(), None)
+            .create_session("claude-opus-4-6", tmp.path().to_str().unwrap(), None, None)
             .unwrap();
 
         let result = GetDetailedSnapshotHandler
@@ -974,7 +974,7 @@ mod tests {
             hook_abort_tracker: Arc::new(crate::runtime::hooks::abort_tracker::HookAbortTracker::new()),
         };
         let sid = mgr
-            .create_session("claude-opus-4-6", "/tmp", Some("origin-test"))
+            .create_session("claude-opus-4-6", "/tmp", Some("origin-test"), None)
             .unwrap();
         (ctx, sid)
     }

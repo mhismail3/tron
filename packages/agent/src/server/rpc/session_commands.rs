@@ -32,6 +32,7 @@ pub(crate) struct CreateSessionRequest {
     pub(crate) working_directory: String,
     pub(crate) model: String,
     pub(crate) title: Option<String>,
+    pub(crate) source: Option<String>,
 }
 
 pub(crate) struct SessionCommandService;
@@ -45,10 +46,11 @@ impl SessionCommandService {
         let working_directory = request.working_directory.clone();
         let model = request.model.clone();
         let title = request.title.clone();
+        let source = request.source.clone();
         let session_id = ctx
             .run_blocking("session.create", move || {
                 session_manager
-                    .create_session(&model, &working_directory, title.as_deref())
+                    .create_session(&model, &working_directory, title.as_deref(), source.as_deref())
                     .map_err(|error| RpcError::Internal {
                         message: error.to_string(),
                     })
@@ -62,13 +64,16 @@ impl SessionCommandService {
                 base: BaseEvent::now(&session_id),
                 model: request.model.clone(),
                 working_directory: request.working_directory.clone(),
-                source: None,
+                source: request.source.clone(),
                 title: request.title.clone(),
             });
 
         ctx.orchestrator.init_sequence_counter(&session_id, 0);
 
-        spawn_optimistic_context_preload(ctx, &session_id, &request.working_directory);
+        // Skip optimistic context preload for chat sessions — they don't load context artifacts
+        if request.source.as_deref() != Some("chat") {
+            spawn_optimistic_context_preload(ctx, &session_id, &request.working_directory);
+        }
 
         Ok(json!({
             "sessionId": session_id,
@@ -416,7 +421,7 @@ mod tests {
 
         let sid = ctx
             .session_manager
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"))
+            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None)
             .unwrap();
 
         // Acquire worktree
@@ -451,7 +456,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("model", "/tmp", Some("test"))
+            .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
 
         SessionCommandService::archive(&ctx, sid.clone()).await.unwrap();
@@ -472,7 +477,7 @@ mod tests {
 
         let sid = ctx
             .session_manager
-            .create_session("model", &dir.path().to_string_lossy(), Some("test"))
+            .create_session("model", &dir.path().to_string_lossy(), Some("test"), None)
             .unwrap();
 
         let result = coord.maybe_acquire(&sid, dir.path()).await.unwrap();
@@ -496,7 +501,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("model", "/tmp", Some("test"))
+            .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
 
         SessionCommandService::delete(&ctx, sid.clone()).await.unwrap();

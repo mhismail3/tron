@@ -419,7 +419,7 @@ mod tests {
 
     fn create_test_session(ctx: &RpcContext) -> String {
         ctx.session_manager
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap()
     }
 

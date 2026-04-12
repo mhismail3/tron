@@ -42,6 +42,9 @@ struct CachedSession: Identifiable, Codable, Sendable {
     /// Server origin (host:port) this session was synced from
     var serverOrigin: String?
 
+    /// Session source (e.g. "chat" for quick chat sessions, "cron" for automation)
+    var source: String?
+
     /// Whether this session is pending server deletion
     var isDeleting: Bool = false
 

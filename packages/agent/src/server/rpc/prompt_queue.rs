@@ -253,7 +253,7 @@ mod tests {
         let store = Arc::new(EventStore::new(pool));
 
         let result = store
-            .create_session("claude-opus-4-6", "/tmp", None, None, None)
+            .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
             .unwrap();
 
         (store, result.session.id)
@@ -555,8 +555,8 @@ mod tests {
         }
         let store = Arc::new(EventStore::new(pool));
 
-        let r1 = store.create_session("claude-opus-4-6", "/tmp", None, None, None).unwrap();
-        let r2 = store.create_session("claude-opus-4-6", "/tmp", None, None, None).unwrap();
+        let r1 = store.create_session("claude-opus-4-6", "/tmp", None, None, None, None).unwrap();
+        let r2 = store.create_session("claude-opus-4-6", "/tmp", None, None, None, None).unwrap();
         let sid1 = r1.session.id;
         let sid2 = r2.session.id;
 

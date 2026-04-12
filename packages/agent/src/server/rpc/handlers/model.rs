@@ -464,7 +464,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         let result = SwitchModelHandler
@@ -483,7 +483,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", None)
+            .create_session("m", "/tmp", None, None)
             .unwrap();
 
         let err = SwitchModelHandler
@@ -524,7 +524,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         let _ = SwitchModelHandler
@@ -544,7 +544,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         let mut rx = ctx.orchestrator.subscribe();
@@ -566,7 +566,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         let _ = SwitchModelHandler
@@ -592,7 +592,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         // Simulate a running session by starting a run via orchestrator
@@ -613,7 +613,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         // Resume to cache it
@@ -637,7 +637,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         // Add a turn end with cost to accumulate session cost
@@ -677,7 +677,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         let mut rx = ctx.orchestrator.subscribe();
@@ -703,7 +703,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         let err = SwitchModelHandler
@@ -722,7 +722,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         let err = SwitchModelHandler
@@ -769,7 +769,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-opus-4-6", "/tmp", None)
+            .create_session("claude-opus-4-6", "/tmp", None, None)
             .unwrap();
 
         let result = SwitchModelHandler
@@ -791,7 +791,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-sonnet-4-6", "/tmp", None)
+            .create_session("claude-sonnet-4-6", "/tmp", None, None)
             .unwrap();
 
         let result = SetReasoningLevelHandler
@@ -818,7 +818,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-sonnet-4-6", "/tmp", None)
+            .create_session("claude-sonnet-4-6", "/tmp", None, None)
             .unwrap();
 
         let result = SetReasoningLevelHandler
@@ -839,7 +839,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-sonnet-4-6", "/tmp", None)
+            .create_session("claude-sonnet-4-6", "/tmp", None, None)
             .unwrap();
 
         let _ = SetReasoningLevelHandler
@@ -866,7 +866,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-sonnet-4-6", "/tmp", None)
+            .create_session("claude-sonnet-4-6", "/tmp", None, None)
             .unwrap();
 
         let _ = SetReasoningLevelHandler
@@ -886,7 +886,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("claude-sonnet-4-6", "/tmp", None)
+            .create_session("claude-sonnet-4-6", "/tmp", None, None)
             .unwrap();
 
         // First change: medium (default) → high

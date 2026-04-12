@@ -47,17 +47,26 @@ pub(crate) fn build_context_manager_for_session(
     };
 
     let settings = crate::settings::get_settings();
-    let artifacts = context_artifacts
-        .load(event_store, &session.working_directory, &settings)
-        .session;
+    let is_chat = session.source.as_deref() == Some("chat");
+    let artifacts = if is_chat {
+        SessionContextArtifacts::default()
+    } else {
+        context_artifacts
+            .load(event_store, &session.working_directory, &settings)
+            .session
+    };
 
     let context_limit = crate::llm::model_context_window(&state.model);
     let compactor_settings = &settings.context.compactor;
     let mut context_manager = ContextManager::new(ContextManagerConfig {
         model: state.model.clone(),
-        system_prompt: crate::runtime::context::system_prompts::load_system_prompt_from_file(&session.working_directory)
-            .or_else(crate::runtime::context::system_prompts::load_global_system_prompt)
-            .map(|loaded| loaded.content),
+        system_prompt: if is_chat {
+            Some(crate::runtime::context::system_prompts::TRON_CHAT_PROMPT.to_string())
+        } else {
+            crate::runtime::context::system_prompts::load_system_prompt_from_file(&session.working_directory)
+                .or_else(crate::runtime::context::system_prompts::load_global_system_prompt)
+                .map(|loaded| loaded.content)
+        },
         working_directory: state.working_directory.clone(),
         tools: tool_definitions,
         rules_content: artifacts.rules.merged_content.clone(),

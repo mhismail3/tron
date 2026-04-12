@@ -23,6 +23,7 @@ impl MethodHandler for CreateSessionHandler {
         let model = opt_string(params.as_ref(), "model")
             .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
         let title = opt_string(params.as_ref(), "title");
+        let source = opt_string(params.as_ref(), "source");
 
         SessionCommandService::create(
             ctx,
@@ -30,6 +31,7 @@ impl MethodHandler for CreateSessionHandler {
                 working_directory: working_dir,
                 model,
                 title,
+                source,
             },
         )
         .await

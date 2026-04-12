@@ -95,7 +95,7 @@ mod tests {
         let ctx = make_test_context();
         let _ = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
         let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["activeSessions"], 1);
@@ -122,7 +122,7 @@ mod tests {
         let ctx = make_test_context();
         let _ = ctx
             .session_manager
-            .create_session("model", "/tmp", Some("test"))
+            .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
         assert_eq!(ctx.session_manager.active_count(), 1);
 

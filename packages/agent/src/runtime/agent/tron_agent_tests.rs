@@ -607,7 +607,7 @@ fn make_agent_with_store(
     store: &Arc<crate::events::EventStore>,
 ) -> (TronAgent, String) {
     let session = store
-        .create_session("mock-model", "/tmp", Some("test"), None, None)
+        .create_session("mock-model", "/tmp", Some("test"), None, None, None)
         .unwrap();
     let sid = session.session.id.clone();
     let agent = TronAgent::new(

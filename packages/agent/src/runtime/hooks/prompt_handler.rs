@@ -335,30 +335,40 @@ impl HookHandler for PromptHookHandler {
                     // For title generation, persist to DB and emit SessionUpdated
                     if is_title_gen {
                         if let Some(title) = output_text.as_ref().and_then(|t| Self::clean_title(t)) {
-                            if let Some(store) = &event_store {
-                                if let Err(e) = store.update_session_title(&session_id, Some(&title)) {
-                                    warn!(session_id = %session_id, error = %e, "failed to persist hook-generated title");
+                            // Respect pre-set titles (e.g., quick chat sessions titled "Chat")
+                            let has_existing_title = event_store
+                                .as_ref()
+                                .and_then(|store| store.get_session(&session_id).ok().flatten())
+                                .and_then(|s| s.title)
+                                .is_some();
+                            if has_existing_title {
+                                debug!(session_id = %session_id, "skipping title-gen: session already has a title");
+                            } else {
+                                if let Some(store) = &event_store {
+                                    if let Err(e) = store.update_session_title(&session_id, Some(&title)) {
+                                        warn!(session_id = %session_id, error = %e, "failed to persist hook-generated title");
+                                    }
                                 }
+                                debug!(title = %title, "LLM hook generated session title");
+                                let _ = emitter.emit(crate::core::events::TronEvent::SessionUpdated {
+                                    base: BaseEvent::now(&session_id),
+                                    title: Some(title),
+                                    model: None,
+                                    message_count: None,
+                                    input_tokens: None,
+                                    output_tokens: None,
+                                    last_turn_input_tokens: None,
+                                    cache_read_tokens: None,
+                                    cache_creation_tokens: None,
+                                    cost: None,
+                                    last_activity: chrono::Utc::now().to_rfc3339(),
+                                    is_active: true,
+                                    last_user_prompt: None,
+                                    last_assistant_response: None,
+                                    parent_session_id: None,
+                                    activity_lines: None,
+                                });
                             }
-                            debug!(title = %title, "LLM hook generated session title");
-                            let _ = emitter.emit(crate::core::events::TronEvent::SessionUpdated {
-                                base: BaseEvent::now(&session_id),
-                                title: Some(title),
-                                model: None,
-                                message_count: None,
-                                input_tokens: None,
-                                output_tokens: None,
-                                last_turn_input_tokens: None,
-                                cache_read_tokens: None,
-                                cache_creation_tokens: None,
-                                cost: None,
-                                last_activity: chrono::Utc::now().to_rfc3339(),
-                                is_active: true,
-                                last_user_prompt: None,
-                                last_assistant_response: None,
-                                parent_session_id: None,
-                                activity_lines: None,
-                            });
                         }
                     }
 
@@ -860,7 +870,7 @@ mod tests {
 
         fn create_session(store: &EventStore) -> String {
             let cr = store
-                .create_session("claude-opus-4-6", "/tmp/test", None, None, None)
+                .create_session("claude-opus-4-6", "/tmp/test", None, None, None, None)
                 .unwrap();
             cr.session.id
         }

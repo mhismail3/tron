@@ -98,7 +98,7 @@ struct SessionSidebar: View {
             HStack {
                 FloatingVoiceNotesButton(action: onVoiceNote, size: 56)
                 Spacer()
-                FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress)
+                FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress, size: 56)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 24)
@@ -134,12 +134,13 @@ struct SessionSidebar: View {
 struct FloatingNewSessionButton: View {
     let action: () -> Void
     var onLongPress: (() -> Void)? = nil
+    var size: CGFloat = 44
 
     var body: some View {
         Image(systemName: "plus")
             .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
             .foregroundStyle(.tronEmerald)
-            .frame(width: 44, height: 44)
+            .frame(width: size, height: size)
             .contentShape(Circle())
             .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.25)).interactive(), in: .circle)
             .onTapGesture { action() }

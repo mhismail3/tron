@@ -182,7 +182,7 @@ mod tests {
         let ctx = make_test_context();
         let _ = ctx
             .session_manager
-            .create_session("model", "/tmp", Some("test"))
+            .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
         assert_eq!(ctx.orchestrator.active_session_count(), 1);
     }
@@ -199,7 +199,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("model", "/tmp", Some("test"))
+            .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
         let session = ctx.event_store.get_session(&sid).unwrap();
         assert!(session.is_some());
@@ -229,7 +229,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("model", "/tmp", Some("test"))
+            .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
 
         let event = ctx

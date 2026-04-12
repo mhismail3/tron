@@ -34,6 +34,12 @@ use super::constants::MAX_SYSTEM_PROMPT_FILE_SIZE;
 /// creating `.tron/SYSTEM.md` in their project directory.
 pub const TRON_CORE_PROMPT: &str = include_str!("core.md");
 
+/// Chat system prompt for lightweight conversational sessions.
+///
+/// Used when `session.source == "chat"` (quick chat sessions).
+/// Not scoped to a project — no rules or workspace context loaded.
+pub const TRON_CHAT_PROMPT: &str = include_str!("chat.md");
+
 /// Working directory suffix template appended to system prompts.
 pub const WORKING_DIRECTORY_SUFFIX: &str = "\n\nCurrent working directory: {workingDirectory}";
 
@@ -343,6 +349,12 @@ mod tests {
     fn core_prompt_is_non_empty() {
         assert!(!TRON_CORE_PROMPT.is_empty());
         assert!(TRON_CORE_PROMPT.len() > 1000);
+    }
+
+    #[test]
+    fn chat_prompt_is_non_empty() {
+        assert!(!TRON_CHAT_PROMPT.is_empty());
+        assert!(TRON_CHAT_PROMPT.len() > 500);
     }
 
     #[test]

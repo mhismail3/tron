@@ -152,7 +152,7 @@ mod tests {
     }
 
     fn create_test_session(ctx: &RpcContext) -> String {
-        let result = ctx.event_store.create_session("m", "/tmp", None, None, None).unwrap();
+        let result = ctx.event_store.create_session("m", "/tmp", None, None, None, None).unwrap();
         result.session.id
     }
 

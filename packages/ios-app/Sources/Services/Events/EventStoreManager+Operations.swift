@@ -9,19 +9,20 @@ extension EventStoreManager {
         sessionId: String,
         workspaceId: String,
         model: String,
-        workingDirectory: String
+        workingDirectory: String,
+        source: String? = nil
     ) async throws {
         let now = DateParser.now
 
         // CRITICAL: Tag with current server origin for filtering
         let serverOrigin = rpcClient.serverOrigin
 
-        let session = CachedSession(
+        var session = CachedSession(
             id: sessionId,
             workspaceId: workspaceId,
             rootEventId: nil,
             headEventId: nil,
-            title: URL(fileURLWithPath: workingDirectory).lastPathComponent,
+            title: source == "chat" ? "Chat" : URL(fileURLWithPath: workingDirectory).lastPathComponent,
             latestModel: model,
             workingDirectory: workingDirectory,
             createdAt: now,
@@ -37,6 +38,7 @@ extension EventStoreManager {
             cost: 0,
             serverOrigin: serverOrigin
         )
+        session.source = source
 
         try await eventDB.sessions.insert(session)
         loadSessions()
@@ -270,7 +272,7 @@ extension EventStoreManager {
         let workspaceName = URL(fileURLWithPath: workingDir).lastPathComponent
         // CRITICAL: Tag with current server origin for filtering
         let serverOrigin = rpcClient.serverOrigin
-        let forkedSession = CachedSession(
+        var forkedSession = CachedSession(
             id: result.newSessionId,
             workspaceId: sourceSession?.workspaceId ?? workingDir,
             rootEventId: result.rootEventId,
@@ -295,6 +297,7 @@ extension EventStoreManager {
             isFork: true,
             serverOrigin: serverOrigin
         )
+        forkedSession.source = sourceSession?.source
         try await eventDB.sessions.insert(forkedSession)
         logger.info("[FORK] Inserted forked session into local DB", category: .session)
 

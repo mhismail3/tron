@@ -115,10 +115,11 @@ impl SessionManager {
         model: &str,
         workspace_path: &str,
         title: Option<&str>,
+        source: Option<&str>,
     ) -> Result<String, RuntimeError> {
         let result = self
             .event_store
-            .create_session(model, workspace_path, title, None, self.origin.as_deref())
+            .create_session(model, workspace_path, title, None, self.origin.as_deref(), source)
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
         let session_id = result.session.id.clone();
@@ -317,7 +318,7 @@ impl SessionManager {
         spawn_type: &str,
         spawn_task: &str,
     ) -> Result<String, RuntimeError> {
-        let session_id = self.create_session(model, workspace_path, title)?;
+        let session_id = self.create_session(model, workspace_path, title, None)?;
 
         let _ = self
             .event_store
@@ -431,7 +432,7 @@ mod tests {
     async fn create_session() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
         assert!(!sid.is_empty());
         assert!(mgr.is_active(&sid));
@@ -442,7 +443,7 @@ mod tests {
     async fn resume_session() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         // Drop from active cache
@@ -459,7 +460,7 @@ mod tests {
     async fn resume_already_active() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         // Resume when already active should return existing
@@ -472,7 +473,7 @@ mod tests {
     async fn end_session() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         mgr.end_session(&sid).await.unwrap();
@@ -483,7 +484,7 @@ mod tests {
     async fn fork_session() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         let result = mgr.fork_session(&sid, None, None, Some("forked")).unwrap();
@@ -497,7 +498,7 @@ mod tests {
     async fn fork_session_from_specific_event() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         // Append an event so we have something besides the root to fork from
@@ -537,7 +538,7 @@ mod tests {
     async fn fork_session_from_head_when_no_event_id() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         // Get the HEAD event
@@ -555,7 +556,7 @@ mod tests {
     async fn fork_session_from_nonexistent_event_fails() {
         let mgr = make_manager();
         let _sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         let result = mgr.fork_session(&_sid, Some("nonexistent-event-id"), None, None);
@@ -569,7 +570,7 @@ mod tests {
     async fn archive_and_unarchive() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         mgr.archive_session(&sid).unwrap();
@@ -584,7 +585,7 @@ mod tests {
     async fn delete_session() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         mgr.delete_session(&sid).unwrap();
@@ -594,8 +595,8 @@ mod tests {
     #[tokio::test]
     async fn list_sessions() {
         let mgr = make_manager();
-        let _ = mgr.create_session("model-a", "/tmp/a", Some("s1")).unwrap();
-        let _ = mgr.create_session("model-b", "/tmp/b", Some("s2")).unwrap();
+        let _ = mgr.create_session("model-a", "/tmp/a", Some("s1"), None).unwrap();
+        let _ = mgr.create_session("model-b", "/tmp/b", Some("s2"), None).unwrap();
 
         let sessions = mgr.list_sessions(&SessionFilter::default()).unwrap();
         assert_eq!(sessions.len(), 2);
@@ -605,7 +606,7 @@ mod tests {
     async fn get_session() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         let session = mgr.get_session(&sid).unwrap();
@@ -630,7 +631,7 @@ mod tests {
         let mgr = SessionManager::new(store.clone()).with_origin("localhost:9847".to_string());
 
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("origin test"))
+            .create_session("test-model", "/tmp", Some("origin test"), None)
             .unwrap();
         let session = store.get_session(&sid).unwrap().unwrap();
         assert_eq!(session.origin.as_deref(), Some("localhost:9847"));
@@ -640,7 +641,7 @@ mod tests {
     async fn create_session_without_origin() {
         let mgr = make_manager();
         let sid = mgr
-            .create_session("test-model", "/tmp", Some("no origin"))
+            .create_session("test-model", "/tmp", Some("no origin"), None)
             .unwrap();
         let session = mgr.get_session(&sid).unwrap().unwrap();
         assert!(session.origin.is_none());
@@ -657,10 +658,10 @@ mod tests {
         let mgr = SessionManager::new(store.clone());
 
         let _ = mgr
-            .create_session("test-model", "/tmp", Some("user session"))
+            .create_session("test-model", "/tmp", Some("user session"), None)
             .unwrap();
         let cron_sid = mgr
-            .create_session("test-model", "/tmp", Some("Cron: daily"))
+            .create_session("test-model", "/tmp", Some("Cron: daily"), None)
             .unwrap();
         assert!(store.update_source(&cron_sid, "cron").unwrap());
 
@@ -685,10 +686,10 @@ mod tests {
         let mgr = SessionManager::new(store.clone());
 
         let _ = mgr
-            .create_session("test-model", "/tmp", Some("user session"))
+            .create_session("test-model", "/tmp", Some("user session"), None)
             .unwrap();
         let cron_sid = mgr
-            .create_session("test-model", "/tmp", Some("Cron: daily"))
+            .create_session("test-model", "/tmp", Some("Cron: daily"), None)
             .unwrap();
         assert!(store.update_source(&cron_sid, "cron").unwrap());
 
@@ -707,10 +708,10 @@ mod tests {
         let mgr = SessionManager::new(store.clone());
 
         let _ = mgr
-            .create_session("test-model", "/tmp", Some("user session"))
+            .create_session("test-model", "/tmp", Some("user session"), None)
             .unwrap();
         let cron_id = mgr
-            .create_session("test-model", "/tmp", Some("Cron: daily"))
+            .create_session("test-model", "/tmp", Some("Cron: daily"), None)
             .unwrap();
         assert!(store.update_source(&cron_id, "cron").unwrap());
 
@@ -732,7 +733,7 @@ mod tests {
     #[tokio::test]
     async fn evict_idle_session() {
         let mgr = make_manager();
-        let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
+        let sid = mgr.create_session("m", "/tmp", Some("test"), None).unwrap();
 
         // Force last_accessed to the past
         if let Some(cached) = mgr.active_sessions.get(&sid) {
@@ -747,7 +748,7 @@ mod tests {
     #[tokio::test]
     async fn evict_preserves_recent_session() {
         let mgr = make_manager();
-        let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
+        let sid = mgr.create_session("m", "/tmp", Some("test"), None).unwrap();
 
         let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
         assert_eq!(evicted, 0);
@@ -757,7 +758,7 @@ mod tests {
     #[tokio::test]
     async fn evict_preserves_processing_session() {
         let mgr = make_manager();
-        let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
+        let sid = mgr.create_session("m", "/tmp", Some("test"), None).unwrap();
 
         // Mark as processing and make it old
         let _ = mgr.mark_processing(&sid);
@@ -773,7 +774,7 @@ mod tests {
     #[tokio::test]
     async fn evicted_session_reconstructs_on_resume() {
         let mgr = make_manager();
-        let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
+        let sid = mgr.create_session("m", "/tmp", Some("test"), None).unwrap();
 
         // Evict it
         if let Some(cached) = mgr.active_sessions.get(&sid) {
@@ -791,8 +792,8 @@ mod tests {
     #[tokio::test]
     async fn evict_mixed_idle_and_active() {
         let mgr = make_manager();
-        let idle = mgr.create_session("m", "/tmp", Some("idle")).unwrap();
-        let recent = mgr.create_session("m", "/tmp", Some("recent")).unwrap();
+        let idle = mgr.create_session("m", "/tmp", Some("idle"), None).unwrap();
+        let recent = mgr.create_session("m", "/tmp", Some("recent"), None).unwrap();
 
         if let Some(cached) = mgr.active_sessions.get(&idle) {
             *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);
@@ -807,8 +808,8 @@ mod tests {
     #[tokio::test]
     async fn evict_zero_ttl_evicts_all_idle() {
         let mgr = make_manager();
-        let s1 = mgr.create_session("m", "/tmp", Some("s1")).unwrap();
-        let s2 = mgr.create_session("m", "/tmp", Some("s2")).unwrap();
+        let s1 = mgr.create_session("m", "/tmp", Some("s1"), None).unwrap();
+        let s2 = mgr.create_session("m", "/tmp", Some("s2"), None).unwrap();
 
         let evicted = mgr.evict_idle_sessions(Duration::ZERO);
         assert_eq!(evicted, 2);
@@ -826,7 +827,7 @@ mod tests {
     #[tokio::test]
     async fn processing_flag_lifecycle() {
         let mgr = make_manager();
-        let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
+        let sid = mgr.create_session("m", "/tmp", Some("test"), None).unwrap();
 
         assert!(!mgr.is_processing(&sid));
         mgr.mark_processing(&sid);

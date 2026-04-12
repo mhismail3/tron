@@ -9,7 +9,7 @@ async fn get_status_requires_coordinator() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("model", "/tmp", Some("test"))
+        .create_session("model", "/tmp", Some("test"), None)
         .unwrap();
     let err = GetStatusHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -23,7 +23,7 @@ async fn commit_requires_coordinator() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
     let err = CommitHandler
         .handle(
@@ -50,7 +50,7 @@ async fn merge_requires_coordinator() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
     let err = MergeHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -71,7 +71,7 @@ async fn acquire_requires_coordinator() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
     let err = AcquireHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -97,7 +97,7 @@ async fn list_session_branches_requires_coordinator() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
     let err = ListSessionBranchesHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -135,7 +135,7 @@ async fn delete_branch_requires_coordinator() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
     let err = DeleteBranchHandler
         .handle(
@@ -164,7 +164,7 @@ async fn prune_branches_requires_coordinator() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
     let err = PruneBranchesHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -190,7 +190,7 @@ async fn committed_diff_requires_coordinator() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None)
+        .create_session("m", "/tmp", None, None)
         .unwrap();
     let err = GetCommittedDiffHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -564,7 +564,7 @@ async fn get_diff_not_git_repo() {
     let ctx = make_test_context();
     let tmp = tempfile::TempDir::new().unwrap();
     let dir = tmp.path().to_str().unwrap();
-    let sid = ctx.session_manager.create_session("m", dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", dir, None, None).unwrap();
 
     let result = GetDiffHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -578,7 +578,7 @@ async fn get_diff_nonexistent_directory() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/nonexistent/path/xyz", None)
+        .create_session("m", "/nonexistent/path/xyz", None, None)
         .unwrap();
 
     let err = GetDiffHandler
@@ -592,7 +592,7 @@ async fn get_diff_nonexistent_directory() {
 async fn get_diff_clean_repo() {
     let ctx = make_test_context();
     let (_tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     let result = GetDiffHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -609,7 +609,7 @@ async fn get_diff_clean_repo() {
 async fn get_diff_with_modified_file() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     // Modify the committed file
     std::fs::write(tmp.path().join("init.txt"), "modified content").unwrap();
@@ -630,7 +630,7 @@ async fn get_diff_with_modified_file() {
 async fn get_diff_with_new_file() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::write(tmp.path().join("new.txt"), "new content").unwrap();
 
@@ -651,7 +651,7 @@ async fn get_diff_with_new_file() {
 async fn get_diff_with_deleted_file() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::remove_file(tmp.path().join("init.txt")).unwrap();
 
@@ -669,7 +669,7 @@ async fn get_diff_with_deleted_file() {
 async fn get_diff_with_staged_and_unstaged() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     // Stage a change
     std::fs::write(tmp.path().join("init.txt"), "staged").unwrap();
@@ -703,7 +703,7 @@ async fn get_diff_empty_repo_no_commits() {
     run_git(&["init", dir]);
     std::fs::write(tmp.path().join("new.txt"), "content").unwrap();
 
-    let sid = ctx.session_manager.create_session("m", dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", dir, None, None).unwrap();
 
     let result = GetDiffHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -719,7 +719,7 @@ async fn get_diff_empty_repo_no_commits() {
 async fn get_diff_branch_name() {
     let ctx = make_test_context();
     let (_tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     run_git(&["-C", &dir, "checkout", "-b", "feature/test"]);
 
@@ -734,7 +734,7 @@ async fn get_diff_branch_name() {
 async fn get_diff_detached_head() {
     let ctx = make_test_context();
     let (_tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     // Get HEAD hash and checkout detached
     let hash = git_output(&["-C", &dir, "rev-parse", "HEAD"]);
@@ -753,7 +753,7 @@ async fn get_diff_falls_back_to_working_directory() {
     let ctx = make_test_context();
     let (_tmp, dir) = make_git_repo();
     // No worktree — should fall back to session working_directory
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     let result = GetDiffHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -774,7 +774,7 @@ async fn get_diff_multiple_files() {
     run_git(&["-C", &dir, "add", "-A"]);
     run_git(&["-C", &dir, "commit", "-m", "add files"]);
 
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     // Modify 2 files, delete 1, add 1 new, leave 1 unchanged
     std::fs::write(tmp.path().join("a.txt"), "modified-a").unwrap();
@@ -796,7 +796,7 @@ async fn get_diff_multiple_files() {
 async fn get_diff_binary_file() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     // Create a binary file with NUL bytes (git detects binary via NUL), commit it, then modify
     let bin_data: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x00, 0x00, 0x1A, 0x0A];
@@ -829,7 +829,7 @@ async fn get_diff_binary_file() {
 async fn get_diff_staging_area_staged_only() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::write(tmp.path().join("init.txt"), "staged change").unwrap();
     run_git(&["-C", &dir, "add", "init.txt"]);
@@ -849,7 +849,7 @@ async fn get_diff_staging_area_staged_only() {
 async fn get_diff_staging_area_unstaged_only() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::write(tmp.path().join("init.txt"), "unstaged change").unwrap();
 
@@ -866,7 +866,7 @@ async fn get_diff_staging_area_unstaged_only() {
 async fn get_diff_staging_area_untracked() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::write(tmp.path().join("brand_new.txt"), "new").unwrap();
 
@@ -884,7 +884,7 @@ async fn get_diff_staging_area_untracked() {
 async fn get_diff_staging_area_deleted_staged() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::remove_file(tmp.path().join("init.txt")).unwrap();
     run_git(&["-C", &dir, "add", "init.txt"]);
@@ -905,7 +905,7 @@ async fn get_diff_staging_area_deleted_staged() {
 async fn stage_files_success() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::write(tmp.path().join("init.txt"), "modified").unwrap();
 
@@ -928,7 +928,7 @@ async fn stage_files_success() {
 async fn stage_files_untracked() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::write(tmp.path().join("new.txt"), "new content").unwrap();
 
@@ -972,7 +972,7 @@ async fn stage_files_empty_paths() {
 async fn unstage_files_success() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::write(tmp.path().join("init.txt"), "modified").unwrap();
     run_git(&["-C", &dir, "add", "init.txt"]);
@@ -1003,7 +1003,7 @@ async fn unstage_files_no_commits() {
     std::fs::write(tmp.path().join("new.txt"), "content").unwrap();
     run_git(&["-C", &dir, "add", "new.txt"]);
 
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     let result = UnstageFilesHandler
         .handle(
@@ -1037,7 +1037,7 @@ async fn unstage_files_missing_params() {
 async fn discard_files_tracked_modified() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::write(tmp.path().join("init.txt"), "modified").unwrap();
 
@@ -1059,7 +1059,7 @@ async fn discard_files_tracked_modified() {
 async fn discard_files_untracked() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::write(tmp.path().join("new.txt"), "content").unwrap();
     assert!(tmp.path().join("new.txt").exists());
@@ -1079,7 +1079,7 @@ async fn discard_files_untracked() {
 async fn discard_files_path_traversal_blocked() {
     let ctx = make_test_context();
     let (_tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     let err = DiscardFilesHandler
         .handle(
@@ -1096,7 +1096,7 @@ async fn discard_files_path_traversal_blocked() {
 async fn discard_files_absolute_path_blocked() {
     let ctx = make_test_context();
     let (_tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     let err = DiscardFilesHandler
         .handle(
@@ -1122,7 +1122,7 @@ async fn discard_files_missing_params() {
 async fn discard_files_deleted_file() {
     let ctx = make_test_context();
     let (tmp, dir) = make_git_repo();
-    let sid = ctx.session_manager.create_session("m", &dir, None).unwrap();
+    let sid = ctx.session_manager.create_session("m", &dir, None, None).unwrap();
 
     std::fs::remove_file(tmp.path().join("init.txt")).unwrap();
     assert!(!tmp.path().join("init.txt").exists());

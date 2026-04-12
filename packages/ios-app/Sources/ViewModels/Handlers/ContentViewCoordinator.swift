@@ -114,14 +114,17 @@ final class ContentViewCoordinator {
             do {
                 let result = try await rpcClient.session.create(
                     workingDirectory: workspace,
-                    model: dependencies.defaultModel
+                    model: dependencies.defaultModel,
+                    title: "Chat",
+                    source: "chat"
                 )
 
                 try await eventStoreManager.cacheNewSession(
                     sessionId: result.sessionId,
                     workspaceId: workspace,
                     model: result.model,
-                    workingDirectory: workspace
+                    workingDirectory: workspace,
+                    source: "chat"
                 )
 
                 await MainActor.run {

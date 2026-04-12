@@ -197,7 +197,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let result = GetVisualizationHandler
@@ -217,7 +217,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let result = GetVisualizationHandler
@@ -247,7 +247,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let result = GetBranchesHandler
@@ -262,7 +262,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
         let session = ctx.event_store.get_session(&sid).unwrap().unwrap();
         let root_id = session.root_event_id.unwrap();
@@ -280,7 +280,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
         let session = ctx.event_store.get_session(&sid).unwrap().unwrap();
         let root_id = session.root_event_id.unwrap();

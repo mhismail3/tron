@@ -1024,7 +1024,7 @@ mod tests {
         // Create a session first so the handler can find it
         let cr = ctx
             .event_store
-            .create_session("claude-sonnet-4-6", "/tmp", None, None, None)
+            .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
             .unwrap();
 
         let result = retain_memory(&ctx, cr.session.id.clone()).await.unwrap();

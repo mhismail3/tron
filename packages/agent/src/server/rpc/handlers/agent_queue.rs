@@ -145,7 +145,7 @@ mod tests {
         let ctx = make_test_context();
         let result = ctx
             .event_store
-            .create_session("claude-opus-4-6", "/tmp", None, None, None)
+            .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
             .unwrap();
         let sid = result.session.id;
 
@@ -165,7 +165,7 @@ mod tests {
         let ctx = make_test_context();
         let result = ctx
             .event_store
-            .create_session("claude-opus-4-6", "/tmp", None, None, None)
+            .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
             .unwrap();
         let sid = result.session.id;
 
@@ -190,7 +190,7 @@ mod tests {
         let ctx = make_test_context();
         let result = ctx
             .event_store
-            .create_session("claude-opus-4-6", "/tmp", None, None, None)
+            .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
             .unwrap();
         let sid = result.session.id;
 
@@ -211,7 +211,7 @@ mod tests {
         let ctx = make_test_context();
         let result = ctx
             .event_store
-            .create_session("claude-opus-4-6", "/tmp", None, None, None)
+            .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
             .unwrap();
         let sid = result.session.id;
 

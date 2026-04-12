@@ -6,7 +6,7 @@ import SQLite3
 enum DatabaseSchema {
 
     /// Current schema version for tracking migrations.
-    static let version = 8
+    static let version = 9
 
     // MARK: - Public API
 
@@ -137,6 +137,9 @@ enum DatabaseSchema {
 
         // Migration: Add activity_lines_json for server-computed dashboard activity lines
         try addColumnIfNotExists(db: db, table: "sessions", column: "activity_lines_json", definition: "TEXT")
+
+        // Migration: Add source column for session type (e.g. "chat", "cron")
+        try addColumnIfNotExists(db: db, table: "sessions", column: "source", definition: "TEXT")
     }
 
     /// Migrate old sessions table schema by rebuilding the table.

@@ -301,7 +301,7 @@ final class EventStoreManager {
 
         logger.info("Global: session.created for \(sessionId) from another device", category: .session)
 
-        let newSession = CachedSession(
+        var newSession = CachedSession(
             id: sessionId,
             workspaceId: result.workingDirectory ?? "",
             rootEventId: nil,
@@ -323,6 +323,7 @@ final class EventStoreManager {
             isFork: result.parentSessionId != nil,
             serverOrigin: rpcClient.serverOrigin
         )
+        newSession.source = result.source
 
         // Prepend new session (most recent first)
         sessions.insert(newSession, at: 0)

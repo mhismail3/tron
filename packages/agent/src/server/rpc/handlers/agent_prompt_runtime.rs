@@ -207,7 +207,13 @@ fn load_prompt_context_artifacts(
     working_dir: &str,
     settings: &crate::settings::TronSettings,
     is_resumed: bool,
+    source: Option<&str>,
 ) -> PromptContextArtifacts {
+    // Chat sessions skip context artifacts (rules, workspace memory)
+    if source == Some("chat") {
+        return PromptContextArtifacts::default();
+    }
+
     let artifacts = context_artifacts.load(event_store, working_dir, settings);
     let pre_activated_rules = if is_resumed {
         collect_dynamic_rule_paths(event_store, session_id)
@@ -572,6 +578,7 @@ pub async fn load_prompt_bootstrap(
     working_dir: String,
     settings: crate::settings::TronSettings,
     is_resumed: bool,
+    source: Option<String>,
 ) -> Result<PromptBootstrapData, RpcError> {
     run_blocking_task("agent.prompt.bootstrap", move || {
         let artifacts = load_prompt_context_artifacts(
@@ -581,6 +588,7 @@ pub async fn load_prompt_bootstrap(
             &working_dir,
             &settings,
             is_resumed,
+            source.as_deref(),
         );
 
         let pending = get_pending_subagent_results(event_store.as_ref(), &session_id);

@@ -593,7 +593,7 @@ async fn spawn_nonblocking_persists_notification_to_parent_session() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
 
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
 
     let mut config = make_config("research task");
@@ -644,7 +644,7 @@ async fn spawn_nonblocking_failed_persists_notification_with_success_false() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(ErrorProvider));
 
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
 
     let mut config = make_config("failing task");
@@ -672,7 +672,7 @@ async fn spawn_blocking_skips_notification() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
 
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
 
     let mut config = make_config("blocking task");
@@ -695,7 +695,7 @@ async fn spawn_persists_lifecycle_events_to_parent() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
 
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
 
     let mut config = make_config("lifecycle task");
@@ -733,7 +733,7 @@ async fn spawn_failed_persists_lifecycle_events_to_parent() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(ErrorProvider));
 
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
 
     let mut config = make_config("failing lifecycle task");
@@ -760,7 +760,7 @@ async fn subsession_does_not_persist_notification() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
 
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
 
     let config = make_subsession_config("summarize", &parent_sid);
@@ -782,7 +782,7 @@ async fn subsession_does_not_persist_notification() {
 async fn spawn_persists_message_user_to_child_session() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
     let mut config = make_config("research task");
     config.parent_session_id = Some(parent_sid);
@@ -814,7 +814,7 @@ async fn spawn_subsession_persists_message_user_to_child_session() {
 async fn spawn_end_session_flushes_persisted_events() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
     let mut config = make_config("test task");
     config.parent_session_id = Some(parent_sid);
@@ -851,7 +851,7 @@ impl crate::runtime::orchestrator::orchestrator::RunStateProbe for StubProbe {
 async fn notify_true_when_probe_reports_parent_idle() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
 
     // Install a probe that reports parent as idle (has_active_run = false)
@@ -884,7 +884,7 @@ async fn notify_true_when_probe_reports_parent_idle() {
 async fn notify_false_when_probe_reports_parent_active() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
 
     // Install a probe that reports parent as active (has_active_run = true)
@@ -918,7 +918,7 @@ async fn notify_defaults_true_when_probe_not_set() {
     // No probe installed → safe default (notify=true, user sees completion).
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
 
     let mut config = make_config("unprobed task");
@@ -946,7 +946,7 @@ async fn notify_defaults_true_when_probe_not_set() {
 async fn notify_defaults_true_when_probe_weak_expired() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
     let parent_sid = session_mgr
-        .create_session("mock-model", "/tmp", None)
+        .create_session("mock-model", "/tmp", None, None)
         .unwrap();
 
     // Install probe, then drop the strong Arc so the Weak expires.

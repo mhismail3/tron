@@ -6,15 +6,21 @@ struct SessionCreateParams: Encodable {
     let workingDirectory: String
     let model: String?
     let contextFiles: [String]?
+    let title: String?
+    let source: String?
 
     init(
         workingDirectory: String,
         model: String? = nil,
-        contextFiles: [String]? = nil
+        contextFiles: [String]? = nil,
+        title: String? = nil,
+        source: String? = nil
     ) {
         self.workingDirectory = workingDirectory
         self.model = model
         self.contextFiles = contextFiles
+        self.title = title
+        self.source = source
     }
 }
 

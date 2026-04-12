@@ -118,7 +118,7 @@ mod tests {
     fn reconstruct_empty_session() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .unwrap();
 
         let state = reconstruct(&store, &session.session.id).unwrap();
@@ -131,7 +131,7 @@ mod tests {
     fn reconstruct_with_messages() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .unwrap();
         let sid = &session.session.id;
 
@@ -177,7 +177,7 @@ mod tests {
     fn reconstruct_tool_use_survives_serde_roundtrip() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .unwrap();
         let sid = &session.session.id;
 
@@ -270,7 +270,7 @@ mod tests {
     fn reconstruct_reasoning_level_none_by_default() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .unwrap();
         let state = reconstruct(&store, &session.session.id).unwrap();
         assert!(state.reasoning_level.is_none());
@@ -280,7 +280,7 @@ mod tests {
     fn reconstruct_reasoning_level_from_event() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .unwrap();
         let sid = &session.session.id;
 
@@ -305,7 +305,7 @@ mod tests {
     fn reconstruct_reasoning_level_latest_wins() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .unwrap();
         let sid = &session.session.id;
 
@@ -352,7 +352,7 @@ mod tests {
     fn reconstruct_with_model_switch() {
         let store = make_store();
         let session = store
-            .create_session("model-a", "/tmp", Some("test"), None, None)
+            .create_session("model-a", "/tmp", Some("test"), None, None, None)
             .unwrap();
         let sid = &session.session.id;
 
@@ -380,7 +380,7 @@ mod tests {
     fn reconstruct_multimodal_user_message() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
             .unwrap();
         let sid = &session.session.id;
 

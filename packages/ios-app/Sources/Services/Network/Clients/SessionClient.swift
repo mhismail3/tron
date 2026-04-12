@@ -8,14 +8,18 @@ final class SessionClient: RPCDomainClient {
 
     func create(
         workingDirectory: String,
-        model: String? = nil
+        model: String? = nil,
+        title: String? = nil,
+        source: String? = nil
     ) async throws -> SessionCreateResult {
         let ws = try requireTransport().requireConnection()
 
         let params = SessionCreateParams(
             workingDirectory: workingDirectory,
             model: model,
-            contextFiles: nil
+            contextFiles: nil,
+            title: title,
+            source: source
         )
 
         let result: SessionCreateResult = try await ws.send(

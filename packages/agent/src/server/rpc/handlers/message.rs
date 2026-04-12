@@ -87,7 +87,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let err = DeleteMessageHandler
@@ -107,7 +107,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         // Append an event to delete
@@ -143,7 +143,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"))
+            .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
         let event = ctx

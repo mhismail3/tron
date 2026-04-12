@@ -52,6 +52,7 @@ async fn acquire_in_git_repo() {
             Some("test"),
             None,
             None,
+            None,
         )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
@@ -86,6 +87,7 @@ async fn acquire_idempotent() {
             "model",
             &dir.path().to_string_lossy(),
             Some("test"),
+            None,
             None,
             None,
         )
@@ -138,6 +140,7 @@ async fn full_lifecycle() {
             Some("test"),
             None,
             None,
+            None,
         )
         .unwrap();
     let sid = &session.session.id;
@@ -180,6 +183,7 @@ async fn get_status_returns_enriched_info() {
             "model",
             &dir.path().to_string_lossy(),
             Some("test"),
+            None,
             None,
             None,
         )
@@ -238,6 +242,7 @@ async fn commit_populates_files_and_stats() {
             "model",
             &dir.path().to_string_lossy(),
             Some("test"),
+            None,
             None,
             None,
         )
@@ -310,6 +315,7 @@ async fn rebuild_from_events_restores_repo_tracking_for_lazy_mode() {
             Some("first"),
             None,
             None,
+            None,
         )
         .unwrap();
     let second = store
@@ -317,6 +323,7 @@ async fn rebuild_from_events_restores_repo_tracking_for_lazy_mode() {
             "model",
             &dir.path().to_string_lossy(),
             Some("second"),
+            None,
             None,
             None,
         )
@@ -374,6 +381,7 @@ async fn list_branches_with_active_worktree() {
             Some("test"),
             None,
             None,
+            None,
         )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
@@ -399,6 +407,7 @@ async fn list_branches_with_preserved_branch() {
             "model",
             &dir.path().to_string_lossy(),
             Some("test"),
+            None,
             None,
             None,
         )
@@ -452,6 +461,7 @@ async fn committed_diff_no_commits() {
             Some("test"),
             None,
             None,
+            None,
         )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
@@ -477,6 +487,7 @@ async fn committed_diff_single_commit() {
             "model",
             &dir.path().to_string_lossy(),
             Some("test"),
+            None,
             None,
             None,
         )
@@ -520,6 +531,7 @@ async fn release_cleans_empty_repo_sessions() {
             Some("test"),
             None,
             None,
+            None,
         )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
@@ -548,6 +560,7 @@ async fn acquire_idempotent_no_duplicate_tracking() {
             "model",
             &dir.path().to_string_lossy(),
             Some("test"),
+            None,
             None,
             None,
         )
@@ -611,6 +624,7 @@ async fn broadcasts_worktree_events() {
             Some("test"),
             None,
             None,
+            None,
         )
         .unwrap();
     let sid = &session.session.id;
@@ -668,7 +682,7 @@ async fn acquire_empty_repo_then_commit_then_acquire() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -713,7 +727,7 @@ async fn acquire_then_delete_git_dir_returns_passthrough() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -739,7 +753,7 @@ async fn get_status_after_git_dir_deleted_returns_none() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -762,7 +776,7 @@ async fn acquire_then_delete_worktree_dir_detects_staleness() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -793,7 +807,7 @@ async fn get_status_after_worktree_dir_deleted_returns_none() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -839,7 +853,7 @@ async fn full_lifecycle_git_init_midsession() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None)
+        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -888,6 +902,7 @@ async fn rename_branch_updates_state_and_git() {
             "model",
             &dir.path().to_string_lossy(),
             Some("test"),
+            None,
             None,
             None,
         )
@@ -955,6 +970,7 @@ async fn rename_branch_collision_returns_error() {
             Some("test"),
             None,
             None,
+            None,
         )
         .unwrap();
     let sid = &sess.session.id;
@@ -989,6 +1005,7 @@ async fn rename_branch_then_release_preserves_new_name() {
             "model",
             &dir.path().to_string_lossy(),
             Some("test"),
+            None,
             None,
             None,
         )
@@ -1031,6 +1048,7 @@ async fn rename_branch_idempotent_same_name() {
             Some("test"),
             None,
             None,
+            None,
         )
         .unwrap();
     let sid = &sess.session.id;
@@ -1059,6 +1077,7 @@ async fn rebuild_from_events_applies_renames() {
             "model",
             &dir.path().to_string_lossy(),
             Some("test"),
+            None,
             None,
             None,
         )
@@ -1101,6 +1120,7 @@ async fn rebuild_from_events_multiple_renames_uses_latest() {
             Some("test"),
             None,
             None,
+            None,
         )
         .unwrap();
     let sid = &sess.session.id;
@@ -1139,6 +1159,7 @@ async fn list_branches_after_rename_shows_correct_base_branch() {
             Some("test"),
             None,
             None,
+            None,
         )
         .unwrap();
     let sid = &sess.session.id;
@@ -1175,6 +1196,7 @@ async fn list_branches_after_rename_and_release_shows_base_branch() {
             "model",
             &dir.path().to_string_lossy(),
             Some("test"),
+            None,
             None,
             None,
         )

@@ -30,6 +30,7 @@ impl EventStore {
         title: Option<&str>,
         provider: Option<&str>,
         origin: Option<&str>,
+        source: Option<&str>,
     ) -> Result<CreateSessionResult> {
         self.with_global_write_lock(|| {
             let conn = self.conn()?;
@@ -50,7 +51,7 @@ impl EventStore {
                     spawn_type: None,
                     spawn_task: None,
                     origin,
-                    source: None,
+                    source,
                 },
             )?;
 

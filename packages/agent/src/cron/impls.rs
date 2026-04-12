@@ -156,7 +156,7 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
         let title = format!("Cron: {}", prompt.chars().take(80).collect::<String>());
         let session_id = self
             .session_manager
-            .create_session(model, &workspace_path, Some(&title))
+            .create_session(model, &workspace_path, Some(&title), None)
             .map_err(|e| CronError::Execution(format!("create session: {e}")))?;
 
         let _ = self

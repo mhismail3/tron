@@ -44,7 +44,7 @@ async fn resume_session_success() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("model", "/tmp", Some("test"))
+        .create_session("model", "/tmp", Some("test"), None)
         .unwrap();
 
     let result = ResumeSessionHandler
@@ -76,11 +76,11 @@ async fn list_sessions_populated() {
     let ctx = make_test_context();
     let _ = ctx
         .session_manager
-        .create_session("m", "/a", Some("s1"))
+        .create_session("m", "/a", Some("s1"), None)
         .unwrap();
     let _ = ctx
         .session_manager
-        .create_session("m", "/b", Some("s2"))
+        .create_session("m", "/b", Some("s2"), None)
         .unwrap();
 
     let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
@@ -92,7 +92,7 @@ async fn list_sessions_has_cache_tokens() {
     let ctx = make_test_context();
     let _ = ctx
         .session_manager
-        .create_session("m", "/a", Some("s1"))
+        .create_session("m", "/a", Some("s1"), None)
         .unwrap();
 
     let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
@@ -108,7 +108,7 @@ async fn list_sessions_has_last_turn_input_tokens() {
     let ctx = make_test_context();
     let _ = ctx
         .session_manager
-        .create_session("m", "/a", Some("s1"))
+        .create_session("m", "/a", Some("s1"), None)
         .unwrap();
 
     let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
@@ -122,7 +122,7 @@ async fn list_sessions_has_message_previews() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/a", Some("s1"))
+        .create_session("m", "/a", Some("s1"), None)
         .unwrap();
 
     // Add a user message
@@ -148,7 +148,7 @@ async fn list_sessions_empty_previews() {
     let ctx = make_test_context();
     let _ = ctx
         .session_manager
-        .create_session("m", "/a", Some("s1"))
+        .create_session("m", "/a", Some("s1"), None)
         .unwrap();
 
     let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
@@ -165,7 +165,7 @@ async fn list_sessions_cost_field() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/a", Some("s1"))
+        .create_session("m", "/a", Some("s1"), None)
         .unwrap();
 
     // Simulate accumulated cost from turns
@@ -191,7 +191,7 @@ async fn delete_session_success() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = DeleteSessionHandler
@@ -216,7 +216,7 @@ async fn fork_returns_new_session_id() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = ForkSessionHandler
@@ -233,7 +233,7 @@ async fn fork_returns_forked_from_session_id() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = ForkSessionHandler
@@ -248,7 +248,7 @@ async fn fork_returns_event_ids() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = ForkSessionHandler
@@ -275,7 +275,7 @@ async fn fork_from_specific_event() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     // Append two events so we can fork from the first one (not HEAD)
@@ -320,7 +320,7 @@ async fn fork_without_from_event_id_forks_from_head() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     // Get the HEAD event ID
@@ -343,7 +343,7 @@ async fn get_head_success() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = GetHeadHandler
@@ -368,7 +368,7 @@ async fn get_state_success() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("my-model", "/tmp", Some("t"))
+        .create_session("my-model", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = GetStateHandler
@@ -384,7 +384,7 @@ async fn get_state_has_workspace_id() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp/workspace", Some("t"))
+        .create_session("m", "/tmp/workspace", Some("t"), None)
         .unwrap();
 
     let result = GetStateHandler
@@ -399,7 +399,7 @@ async fn get_state_has_cache_read_tokens() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = GetStateHandler
@@ -414,7 +414,7 @@ async fn get_state_has_cache_creation_tokens() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = GetStateHandler
@@ -429,7 +429,7 @@ async fn get_state_token_usage_complete() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = GetStateHandler
@@ -474,7 +474,7 @@ async fn archive_session_emits_event() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let mut rx = ctx.orchestrator.subscribe();
@@ -493,7 +493,7 @@ async fn unarchive_session_emits_event() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
     ctx.session_manager.archive_session(&sid).unwrap();
 
@@ -513,7 +513,7 @@ async fn fork_session_emits_event() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let mut rx = ctx.orchestrator.subscribe();
@@ -535,7 +535,7 @@ async fn delete_session_emits_event() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let mut rx = ctx.orchestrator.subscribe();
@@ -556,7 +556,7 @@ async fn get_history_empty_session() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = GetHistoryHandler
@@ -572,7 +572,7 @@ async fn get_history_with_messages() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let _ = ctx
@@ -609,7 +609,7 @@ async fn get_history_returns_has_more() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     for _ in 0..5 {
@@ -639,7 +639,7 @@ async fn get_history_before_id_pagination() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let e1 = ctx
@@ -688,7 +688,7 @@ async fn get_history_message_shape() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let _ = ctx
@@ -718,7 +718,7 @@ async fn get_history_tool_result_has_tool_call_id_at_top() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let _ = ctx
@@ -748,7 +748,7 @@ async fn get_history_tool_result_content_preserved() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let _ = ctx
@@ -775,7 +775,7 @@ async fn get_history_tool_result_has_is_error() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let _ = ctx
@@ -805,7 +805,7 @@ async fn get_history_assistant_latency_preserved() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let _ = ctx
@@ -838,7 +838,7 @@ async fn get_history_includes_tool_results() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     // User message
@@ -1031,7 +1031,7 @@ async fn reconstruct_empty_session() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = ReconstructHandler
@@ -1053,7 +1053,7 @@ async fn reconstruct_session_with_history() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     // Add some events
@@ -1087,7 +1087,7 @@ async fn reconstruct_with_limit() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     // Add 20 events
@@ -1119,7 +1119,7 @@ async fn reconstruct_with_before_sequence() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     // Add 10 events (session.start is seq 0, so these are seq 1-10)
@@ -1157,7 +1157,7 @@ async fn reconstruct_pagination_combined() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     // Add 20 events
@@ -1197,7 +1197,7 @@ async fn reconstruct_oldest_sequence_correct() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     for i in 0..5 {
@@ -1228,7 +1228,7 @@ async fn reconstruct_idle_no_inflight() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let result = ReconstructHandler
@@ -1258,7 +1258,7 @@ async fn reconstruct_events_wire_format() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let _ = ctx
@@ -1292,7 +1292,7 @@ async fn reconstruct_metadata_correct() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("claude-test-model", "/tmp/test", Some("Test Session"))
+        .create_session("claude-test-model", "/tmp/test", Some("Test Session"), None)
         .unwrap();
 
     let result = ReconstructHandler
@@ -1311,7 +1311,7 @@ async fn reconstruct_last_sequence_matches_events() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     for i in 0..3 {
@@ -1344,7 +1344,7 @@ async fn reconstruct_running_agent_has_inflight() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     // Simulate a running agent: begin_run + populate accumulator
@@ -1377,7 +1377,7 @@ async fn reconstruct_running_agent_tool_status() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let _run = ctx.orchestrator.begin_run(&sid, "run_1").unwrap();
@@ -1410,7 +1410,7 @@ async fn reconstruct_running_agent_streaming_thinking() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let _run = ctx.orchestrator.begin_run(&sid, "run_1").unwrap();
@@ -1438,7 +1438,7 @@ async fn reconstruct_inflight_content_sequence_ordering() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     let _run = ctx.orchestrator.begin_run(&sid, "run_1").unwrap();
@@ -1467,7 +1467,7 @@ async fn reconstruct_last_sequence_from_counter() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     // Init counter higher than DB events (simulates non-persisted events)
@@ -1489,7 +1489,7 @@ async fn reconstruct_limit_zero_returns_no_events() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     // Add some events
@@ -1523,7 +1523,7 @@ async fn reconstruct_before_sequence_zero_returns_empty() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("t"))
+        .create_session("m", "/tmp", Some("t"), None)
         .unwrap();
 
     for i in 0..5 {
@@ -1557,7 +1557,7 @@ async fn list_sessions_has_is_running_field() {
     let ctx = make_test_context();
     let _ = ctx
         .session_manager
-        .create_session("m", "/a", Some("s1"))
+        .create_session("m", "/a", Some("s1"), None)
         .unwrap();
 
     let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
