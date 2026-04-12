@@ -99,7 +99,7 @@ pub fn build_user_event_payload(
     if let Some(Value::Object(extra)) = extra_metadata {
         if let Value::Object(ref mut obj) = payload {
             for (k, v) in extra {
-                obj.insert(k.clone(), v.clone());
+                let _ = obj.insert(k.clone(), v.clone());
             }
         }
     }

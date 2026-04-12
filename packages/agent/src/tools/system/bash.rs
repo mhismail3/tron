@@ -23,6 +23,7 @@ static DANGER_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r">\s*/dev/[sh]d",
     ]
     .iter()
+    // SAFETY: Constant patterns, validated at first use during any test run.
     .map(|p| Regex::new(p).expect("danger pattern must compile"))
     .collect()
 });

@@ -200,6 +200,8 @@ pub struct OpenAIModelInfo {
 }
 
 /// Static model registry.
+// HashMap::insert returns the previous value, intentionally unused during
+// one-time static registry construction.
 #[allow(unused_results)]
 pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = LazyLock::new(|| {
     let mut m = HashMap::new();

@@ -48,11 +48,11 @@ impl MethodHandler for SubmitConfirmationHandler {
         // Structured metadata for iOS chip rendering (persisted in the
         // message.user event payload alongside the text content).
         let mut metadata_obj = serde_json::Map::new();
-        metadata_obj.insert("messageKind".into(), serde_json::json!("confirmation_response"));
-        metadata_obj.insert("confirmationDecision".into(), serde_json::json!(decision));
+        let _ = metadata_obj.insert("messageKind".into(), serde_json::json!("confirmation_response"));
+        let _ = metadata_obj.insert("confirmationDecision".into(), serde_json::json!(decision));
         if let Some(ref n) = note {
             if !n.is_empty() {
-                metadata_obj.insert("confirmationNote".into(), serde_json::json!(n));
+                let _ = metadata_obj.insert("confirmationNote".into(), serde_json::json!(n));
             }
         }
         let message_metadata = Some(Value::Object(metadata_obj));

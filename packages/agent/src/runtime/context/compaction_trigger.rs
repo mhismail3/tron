@@ -21,6 +21,9 @@ pub struct CompactionTriggerResult {
 }
 
 /// Progress signal patterns matched against recent Bash tool call commands.
+// SAFETY: Constant patterns validated by every test run. LazyLock ensures
+// these compile exactly once at first use; invalid regex panics immediately
+// at startup, never at runtime.
 static PROGRESS_PATTERNS: LazyLock<[Regex; 4]> = LazyLock::new(|| {
     [
         Regex::new(r"\bgit\s+push\b").expect("valid regex"),

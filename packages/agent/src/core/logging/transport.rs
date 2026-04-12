@@ -362,7 +362,7 @@ where
         id: &tracing::span::Id,
         ctx: Context<'_, S>,
     ) {
-        let span = ctx.span(id).expect("span not found");
+        let Some(span) = ctx.span(id) else { return };
         let mut span_ctx = SpanContext::default();
         attrs.record(&mut SpanFieldVisitor { ctx: &mut span_ctx });
         span.extensions_mut().insert(span_ctx);

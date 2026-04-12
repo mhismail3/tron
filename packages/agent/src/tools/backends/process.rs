@@ -22,6 +22,7 @@ const MAX_OUTPUT_BYTES: u64 = 10 * 1024 * 1024; // 10MB
 pub struct TokioProcessRunner;
 
 /// ANSI escape code stripping regex pattern.
+// SAFETY: Constant pattern, validated at first use during any test run.
 static ANSI_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b\[[\?0-9;]*[hlm]")
         .expect("ANSI regex must compile")

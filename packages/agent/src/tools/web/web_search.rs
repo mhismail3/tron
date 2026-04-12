@@ -299,11 +299,11 @@ fn extract_structured_results(endpoint: &str, body: &Value) -> Vec<Value> {
                 .unwrap_or("");
             let age = r.get("age").and_then(Value::as_str);
             let mut obj = serde_json::Map::new();
-            obj.insert("title".into(), json!(title));
-            obj.insert("url".into(), json!(url));
-            obj.insert("snippet".into(), json!(snippet));
+            let _ = obj.insert("title".into(), json!(title));
+            let _ = obj.insert("url".into(), json!(url));
+            let _ = obj.insert("snippet".into(), json!(snippet));
             if let Some(a) = age {
-                obj.insert("age".into(), json!(a));
+                let _ = obj.insert("age".into(), json!(a));
             }
             Value::Object(obj)
         })

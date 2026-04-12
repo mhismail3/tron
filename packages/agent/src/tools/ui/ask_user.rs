@@ -158,11 +158,7 @@ The question tool should be the FINAL action in your response.",
                 .map(|opts| {
                     opts.iter()
                         .filter_map(|o| {
-                            if let Some(s) = o.as_str() {
-                                Some(s.to_string())
-                            } else {
-                                o.get("label").and_then(Value::as_str).map(String::from)
-                            }
+                            o.get("label").and_then(Value::as_str).map(String::from)
                         })
                         .collect::<Vec<_>>()
                         .join(", ")
@@ -422,8 +418,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn string_options_backward_compat() {
-        // String options should still work (backward compat)
+    async fn string_options_ignored() {
+        // Bare-string options (old format) should be ignored — only object format accepted
         let tool = AskUserQuestionTool::new();
         let r = tool
             .execute(
@@ -434,7 +430,9 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(r.is_error.is_none());
+        let text = extract_text(&r);
+        // "A" and "B" should NOT appear because bare strings lack a "label" key
+        assert!(!text.contains("(A"), "bare-string options should not be extracted: {text}");
     }
 
     #[tokio::test]

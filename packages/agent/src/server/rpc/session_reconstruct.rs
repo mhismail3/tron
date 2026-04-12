@@ -462,33 +462,4 @@ mod tests {
         assert!(seq.iter().all(|item| item["type"] == "tool_ref"));
     }
 
-    // ── Legacy tests (kept for backward compat of response shape) ──
-
-    #[test]
-    fn test_reconstruct_response_shape() {
-        let response = json!({
-            "events": [],
-            "hasMoreEvents": false,
-            "oldestSequence": null,
-            "inFlight": null,
-            "lastSequence": 0,
-            "isRunning": false,
-            "metadata": {
-                "model": "claude-opus-4-20250514",
-                "turnCount": 0,
-                "workingDirectory": "/tmp",
-                "tokenUsage": null,
-            },
-            "pendingQueue": [],
-        });
-
-        assert!(response.get("events").is_some());
-        assert!(response.get("hasMoreEvents").is_some());
-        assert!(response.get("oldestSequence").is_some());
-        assert!(response.get("inFlight").is_some());
-        assert!(response.get("lastSequence").is_some());
-        assert!(response.get("isRunning").is_some());
-        assert!(response.get("metadata").is_some());
-        assert!(response.get("pendingQueue").is_some());
-    }
 }

@@ -168,15 +168,16 @@ impl Orchestrator {
     /// Atomically increment and return the next sequence number for a session.
     ///
     /// Returns 1-based sequences (first call after init(0) returns 1).
-    /// Panics if the counter was not initialized — callers must ensure
-    /// `init_sequence_counter` was called first.
-    pub fn next_sequence(&self, session_id: &str) -> i64 {
-        let entry = self.sequence_counters.get(session_id).unwrap_or_else(|| {
-            panic!("sequence counter not initialized for session {session_id}");
-        });
+    /// Returns `Err` if the counter was not initialized for the given session.
+    pub fn next_sequence(&self, session_id: &str) -> Result<i64, RuntimeError> {
+        let entry = self.sequence_counters.get(session_id).ok_or_else(|| {
+            RuntimeError::Internal(format!(
+                "sequence counter not initialized for session {session_id}"
+            ))
+        })?;
         let seq = entry.value().fetch_add(1, Ordering::SeqCst) + 1;
         trace!(session_id, seq, "sequence assigned");
-        seq
+        Ok(seq)
     }
 
     /// Read the current sequence value without incrementing.
@@ -692,7 +693,7 @@ mod tests {
     fn next_sequence_monotonic() {
         let orch = make_orchestrator();
         orch.init_sequence_counter("s1", 0);
-        let seqs: Vec<i64> = (0..10).map(|_| orch.next_sequence("s1")).collect();
+        let seqs: Vec<i64> = (0..10).map(|_| orch.next_sequence("s1").unwrap()).collect();
         assert_eq!(seqs, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 
@@ -700,8 +701,8 @@ mod tests {
     fn next_sequence_initializes_from_db() {
         let orch = make_orchestrator();
         orch.init_sequence_counter("s1", 5);
-        assert_eq!(orch.next_sequence("s1"), 6);
-        assert_eq!(orch.next_sequence("s1"), 7);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 6);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 7);
     }
 
     #[test]
@@ -713,7 +714,7 @@ mod tests {
         let mut handles = Vec::new();
         for _ in 0..10 {
             let orch = Arc::clone(&orch);
-            handles.push(std::thread::spawn(move || orch.next_sequence("s1")));
+            handles.push(std::thread::spawn(move || orch.next_sequence("s1").unwrap()));
         }
         let mut results: Vec<i64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
         results.sort_unstable();
@@ -725,10 +726,10 @@ mod tests {
         let orch = make_orchestrator();
         orch.init_sequence_counter("s1", 0);
         orch.init_sequence_counter("s2", 0);
-        assert_eq!(orch.next_sequence("s1"), 1);
-        assert_eq!(orch.next_sequence("s2"), 1);
-        assert_eq!(orch.next_sequence("s1"), 2);
-        assert_eq!(orch.next_sequence("s2"), 2);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 1);
+        assert_eq!(orch.next_sequence("s2").unwrap(), 1);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 2);
+        assert_eq!(orch.next_sequence("s2").unwrap(), 2);
     }
 
     #[test]
@@ -750,8 +751,8 @@ mod tests {
     fn current_sequence_reads_without_increment() {
         let orch = make_orchestrator();
         orch.init_sequence_counter("s1", 0);
-        let _ = orch.next_sequence("s1");
-        let _ = orch.next_sequence("s1");
+        let _ = orch.next_sequence("s1").unwrap();
+        let _ = orch.next_sequence("s1").unwrap();
         assert_eq!(orch.current_sequence("s1"), Some(2));
         assert_eq!(orch.current_sequence("s1"), Some(2));
     }
@@ -762,8 +763,8 @@ mod tests {
         let orch = make_orchestrator();
         orch.init_sequence_counter("s1", 42);
         // Next sequence should be 43, not 1
-        assert_eq!(orch.next_sequence("s1"), 43);
-        assert_eq!(orch.next_sequence("s1"), 44);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 43);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 44);
     }
 
     #[test]
@@ -771,12 +772,30 @@ mod tests {
         // Simulates: counter existed, then session is re-initialized
         let orch = make_orchestrator();
         orch.init_sequence_counter("s1", 0);
-        assert_eq!(orch.next_sequence("s1"), 1);
-        assert_eq!(orch.next_sequence("s1"), 2);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 1);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 2);
 
         // Re-init to a higher value (e.g., after DB sync)
         orch.init_sequence_counter("s1", 100);
-        assert_eq!(orch.next_sequence("s1"), 101);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 101);
+    }
+
+    #[test]
+    fn next_sequence_returns_error_when_not_initialized() {
+        let orch = make_orchestrator();
+        let result = orch.next_sequence("nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn next_sequence_error_contains_session_id() {
+        let orch = make_orchestrator();
+        let err = orch.next_sequence("sess_abc123").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("sess_abc123"),
+            "error should contain session id: {msg}"
+        );
     }
 
     // --- Orphaned run cleanup ---
