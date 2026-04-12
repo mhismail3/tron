@@ -28,7 +28,6 @@ struct SettingsView: View {
     @State private var showLogViewer = false
     #endif
     @State private var showArchiveAllConfirmation = false
-    @State private var showResetChatConfirmation = false
     @State private var isArchivingAll = false
     @State private var activePage: SettingsPage?
 
@@ -130,18 +129,12 @@ struct SettingsView: View {
         } message: {
             Text("This will reset all settings to their default values.")
         }
-        .alert("Reset Chat?", isPresented: $showResetChatConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Reset", role: .destructive) { resetChatSession() }
-        } message: {
-            Text("This will archive the current chat and start a fresh one.")
-        }
         .alert("Archive All Sessions?", isPresented: $showArchiveAllConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Archive All", role: .destructive) { archiveAllSessions() }
         } message: {
             Text({
-                let count = eventStoreManager.sessions.count(where: { !$0.isChat })
+                let count = eventStoreManager.sessions.count
                 return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
             }())
         }
@@ -254,19 +247,6 @@ struct SettingsView: View {
 
             SettingsCard(accent: .tronError) {
                 Button {
-                    showResetChatConfirmation = true
-                } label: {
-                    SettingsRow(icon: "arrow.counterclockwise", label: "Reset Chat Session", accentColor: .tronError, labelColor: .tronError) {
-                        EmptyView()
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(eventStoreManager.chatSession == nil)
-                .opacity(eventStoreManager.chatSession == nil ? 0.4 : 1)
-
-                SettingsRowDivider()
-
-                Button {
                     showArchiveAllConfirmation = true
                 } label: {
                     HStack {
@@ -289,8 +269,8 @@ struct SettingsView: View {
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(!eventStoreManager.sessions.contains(where: { !$0.isChat }) || isArchivingAll)
-                .opacity(!eventStoreManager.sessions.contains(where: { !$0.isChat }) || isArchivingAll ? 0.4 : 1)
+                .disabled(eventStoreManager.sessions.isEmpty || isArchivingAll)
+                .opacity(eventStoreManager.sessions.isEmpty || isArchivingAll ? 0.4 : 1)
 
                 SettingsRowDivider()
 
@@ -335,12 +315,6 @@ struct SettingsView: View {
             } catch {
                 settingsState.loadError = "Failed to reset: \(error.localizedDescription)"
             }
-        }
-    }
-
-    private func resetChatSession() {
-        Task {
-            _ = try? await rpcClient.session.resetChat()
         }
     }
 

@@ -45,9 +45,6 @@ struct CachedSession: Identifiable, Codable, Sendable {
     /// Whether this session is pending server deletion
     var isDeleting: Bool = false
 
-    /// Whether this is the persistent chat session
-    var isChat: Bool = false
-
     /// Total input tokens sent to model (uncached + cache read)
     var totalInputTokens: Int { inputTokens + cacheReadTokens }
 

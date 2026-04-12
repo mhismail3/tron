@@ -266,7 +266,7 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 
 ## RPC API
 
-JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **133 methods** across three groups.
+JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **131 methods** across three groups.
 
 ### Connection
 
@@ -289,7 +289,7 @@ All messages use JSON-RPC 2.0 framing:
 |-------|------:|---------|
 | `system` | 3 | `system.ping`, `system.getInfo`, `system.shutdown` |
 | `blob` | 1 | `blob.get` |
-| `session` | 13 | `session.create`, `session.resume`, `session.list`, `session.delete`, `session.fork`, `session.getHead`, `session.getState`, `session.getHistory`, `session.reconstruct`, `session.archive`, `session.unarchive`, `session.getChat`, `session.resetChat` |
+| `session` | 11 | `session.create`, `session.resume`, `session.list`, `session.delete`, `session.fork`, `session.getHead`, `session.getState`, `session.getHistory`, `session.reconstruct`, `session.archive`, `session.unarchive` |
 | `agent` | 8 | `agent.prompt`, `agent.abort`, `agent.queuePrompt`, `agent.dequeuePrompt`, `agent.clearQueue`, `agent.deliverSubagentResults`, `agent.submitConfirmation`, `agent.submitAnswers` |
 | `model` / `config` | 3 | `model.list`, `model.switch`, `config.setReasoningLevel` |
 | `context` | 8 | `context.getSnapshot`, `context.getDetailedSnapshot`, `context.shouldCompact`, `context.previewCompaction`, `context.confirmCompaction`, `context.canAcceptTurn`, `context.clear`, `context.compact` |

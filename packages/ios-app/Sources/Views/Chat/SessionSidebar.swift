@@ -39,16 +39,6 @@ struct SessionSidebar: View {
             VStack(spacing: 0) {
                 // Always render List so NavigationSplitView can push on compact
                 List(selection: $selectedSessionId) {
-                    // Hidden chat anchor — enables programmatic navigation to chat on compact
-                    if let chat = eventStoreManager.chatSession, eventStoreManager.sortedSessions.isEmpty {
-                        Color.clear
-                            .frame(height: 0)
-                            .tag(chat.id)
-                            .listRowInsets(EdgeInsets())
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    }
-
                     Section {
                         ForEach(eventStoreManager.sortedSessions) { session in
                             CachedSessionSidebarRow(
@@ -89,7 +79,6 @@ struct SessionSidebar: View {
                 .contentMargins(.top, 8)
                 .overlay {
                     if eventStoreManager.sortedSessions.isEmpty {
-                        // Tron placeholder when no non-chat sessions
                         VStack(spacing: 16) {
                             Image("TronLogo")
                                 .resizable()
@@ -107,17 +96,9 @@ struct SessionSidebar: View {
 
             // Bottom floating bar
             HStack {
+                FloatingVoiceNotesButton(action: onVoiceNote, size: 56)
                 Spacer()
-                FloatingVoiceNotesButton(action: onVoiceNote)
                 FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress)
-                if let chat = eventStoreManager.chatSession {
-                    FloatingChatPill(
-                        session: chat,
-                        isSelected: chat.id == selectedSessionId,
-                        streamManager: eventStoreManager.dashboardStreamManager,
-                        onTap: { selectedSessionId = chat.id }
-                    )
-                }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 24)
@@ -145,55 +126,6 @@ struct SessionSidebar: View {
         }
     }
 
-}
-
-// MARK: - Floating Chat Pill
-
-@available(iOS 26.0, *)
-struct FloatingChatPill: View {
-    let session: CachedSession
-    let isSelected: Bool
-    let streamManager: DashboardStreamManager
-    let onTap: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "bubble.left.and.bubble.right.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronMint)
-
-            Text("Chat")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(.tronMint)
-
-            if session.isProcessing == true {
-                Image(systemName: "brain")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronMint)
-                    .symbolEffect(.pulse, options: .repeating)
-
-                if let lastLine = streamManager.activityLines(for: session.id, persisted: session.lastActivityLines, count: 1).last {
-                    Text(lastLine.text)
-                        .font(TronTypography.codeSM)
-                        .foregroundStyle(.tronMint.opacity(0.7))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: 120)
-                }
-            }
-        }
-        .padding(.horizontal, 18)
-        .frame(height: 44)
-        .glassEffect(
-            isSelected
-                ? .regular.tint(Color.tronMint.opacity(0.25)).interactive()
-                : .regular.tint(Color.tronMint.opacity(0.2)).interactive(),
-            in: .capsule
-        )
-        .contentShape([.interaction, .hoverEffect], Capsule())
-        .hoverEffect(.highlight)
-        .onTapGesture { onTap() }
-    }
 }
 
 // MARK: - Floating New Session Button (iOS 26 Liquid Glass)

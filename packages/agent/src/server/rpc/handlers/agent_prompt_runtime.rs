@@ -206,14 +206,9 @@ fn load_prompt_context_artifacts(
     session_id: &str,
     working_dir: &str,
     settings: &crate::settings::TronSettings,
-    is_chat: bool,
     is_resumed: bool,
 ) -> PromptContextArtifacts {
-    if is_chat {
-        return PromptContextArtifacts::default();
-    }
-
-    let artifacts = context_artifacts.load(event_store, working_dir, settings, is_chat);
+    let artifacts = context_artifacts.load(event_store, working_dir, settings);
     let pre_activated_rules = if is_resumed {
         collect_dynamic_rule_paths(event_store, session_id)
     } else {
@@ -576,7 +571,6 @@ pub async fn load_prompt_bootstrap(
     session_id: String,
     working_dir: String,
     settings: crate::settings::TronSettings,
-    is_chat: bool,
     is_resumed: bool,
 ) -> Result<PromptBootstrapData, RpcError> {
     run_blocking_task("agent.prompt.bootstrap", move || {
@@ -586,7 +580,6 @@ pub async fn load_prompt_bootstrap(
             &session_id,
             &working_dir,
             &settings,
-            is_chat,
             is_resumed,
         );
 

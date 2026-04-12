@@ -77,7 +77,6 @@ pub(crate) struct ResolvedContextArtifacts {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct ContextArtifactsKey {
     working_dir: String,
-    is_chat: bool,
     discover_standalone_files: bool,
 }
 
@@ -178,15 +177,9 @@ impl ContextArtifactsService {
         event_store: &EventStore,
         working_dir: &str,
         settings: &crate::settings::TronSettings,
-        is_chat: bool,
     ) -> ResolvedContextArtifacts {
-        if is_chat {
-            return ResolvedContextArtifacts::default();
-        }
-
         let key = ContextArtifactsKey {
             working_dir: working_dir.to_owned(),
-            is_chat,
             discover_standalone_files: settings.context.rules.discover_standalone_files,
         };
 
@@ -293,12 +286,7 @@ pub(crate) fn load_session_context_artifacts_with_home(
     working_dir: &str,
     settings: &crate::settings::TronSettings,
     home_dir: Option<&Path>,
-    is_chat: bool,
 ) -> SessionContextArtifacts {
-    // Chat sessions are clean slates — no auto-injected rules or memory
-    if is_chat {
-        return SessionContextArtifacts::default();
-    }
     let wd_path = Path::new(working_dir);
     let _workspace = event_store
         .get_workspace_by_path(working_dir)
@@ -626,7 +614,6 @@ mod tests {
             working_dir.path().to_str().unwrap(),
             &settings,
             Some(home_dir.path()),
-            false,
         );
 
         assert_eq!(artifacts.rules.files.len(), 2);
@@ -708,14 +695,14 @@ mod tests {
         let working_dir = tempfile::tempdir().unwrap();
         let working_dir_str = working_dir.path().to_str().unwrap();
 
-        let first = service.load(ctx.event_store.as_ref(), working_dir_str, &settings, false);
+        let first = service.load(ctx.event_store.as_ref(), working_dir_str, &settings);
         assert!(first.session.rules.merged_content.is_none());
 
         let rules_dir = working_dir.path().join(".agent");
         std::fs::create_dir_all(&rules_dir).unwrap();
         std::fs::write(rules_dir.join("AGENTS.md"), "project rules").unwrap();
 
-        let second = service.load(ctx.event_store.as_ref(), working_dir_str, &settings, false);
+        let second = service.load(ctx.event_store.as_ref(), working_dir_str, &settings);
         assert!(
             second
                 .session
@@ -735,14 +722,14 @@ mod tests {
         let working_dir = tempfile::tempdir().unwrap();
         let working_dir_str = working_dir.path().to_str().unwrap();
 
-        let first = service.load(ctx.event_store.as_ref(), working_dir_str, &settings, false);
+        let first = service.load(ctx.event_store.as_ref(), working_dir_str, &settings);
         assert!(first.rules_index.is_none());
 
         let scoped_rules_dir = working_dir.path().join("src").join(".claude");
         std::fs::create_dir_all(&scoped_rules_dir).unwrap();
         std::fs::write(scoped_rules_dir.join("AGENTS.md"), "scoped rules").unwrap();
 
-        let second = service.load(ctx.event_store.as_ref(), working_dir_str, &settings, false);
+        let second = service.load(ctx.event_store.as_ref(), working_dir_str, &settings);
         assert_eq!(
             second.rules_index.as_ref().map(RulesIndex::total_count),
             Some(1)

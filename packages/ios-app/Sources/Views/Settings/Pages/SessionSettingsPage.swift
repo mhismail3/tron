@@ -8,7 +8,6 @@ struct SessionSettingsPage: View {
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
     @State private var showQuickSessionWorkspaceSelector = false
-    @State private var showChatWorkspaceSelector = false
     @State private var showModelPicker = false
 
     private var rpcClient: RPCClient { dependencies.rpcClient }
@@ -52,9 +51,6 @@ struct SessionSettingsPage: View {
                 quickSessionCard
             }
 
-            // Chat
-            chatCard
-
             // Git Isolation
             gitIsolationCard
 
@@ -77,27 +73,6 @@ struct SessionSettingsPage: View {
                         dependencies.quickSessionWorkspace = newValue
                         updateServerSetting {
                             ServerSettingsUpdate(server: .init(defaultWorkspace: newValue))
-                        }
-                    }
-                )
-            )
-        }
-        .sheet(isPresented: $showChatWorkspaceSelector) {
-            WorkspaceSelector(
-                rpcClient: rpcClient,
-                selectedPath: Binding(
-                    get: { settingsState.chatWorkspace },
-                    set: { newValue in
-                        let previousValue = settingsState.chatWorkspace
-                        settingsState.chatWorkspace = newValue
-                        updateServerSetting {
-                            ServerSettingsUpdate(session: .init(chat: .init(workingDirectory: newValue)))
-                        }
-                        if newValue != previousValue {
-                            Task {
-                                _ = try? await rpcClient.session.resetChat()
-                                await eventStoreManager.refreshSessionList()
-                            }
                         }
                     }
                 )
@@ -145,27 +120,6 @@ struct SessionSettingsPage: View {
             }
 
             SettingsCaption(text: "Long-press the + button to instantly start a session with these defaults.")
-        }
-    }
-
-    // MARK: - Chat Card
-
-    private var chatCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Chat")
-
-            SettingsCard {
-                settingsRow(
-                    icon: "folder",
-                    label: "Workspace",
-                    value: settingsState.displayChatWorkspace.isEmpty
-                        ? "Default"
-                        : settingsState.displayChatWorkspace,
-                    action: { showChatWorkspaceSelector = true }
-                )
-            }
-
-            SettingsCaption(text: "Changing the workspace will archive the current chat and start a fresh one.")
         }
     }
 

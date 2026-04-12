@@ -83,9 +83,8 @@ extension EventStoreManager {
     }
 
     /// Archive all sessions (server-confirmed, then local cleanup).
-    /// The persistent chat session is excluded — it cannot be archived.
     func archiveAllSessions() async {
-        let sessionsToArchive = sessions.filter { !$0.isChat }
+        let sessionsToArchive = sessions
 
         guard !sessionsToArchive.isEmpty else {
             logger.info("No sessions to archive", category: .session)
@@ -99,9 +98,9 @@ extension EventStoreManager {
             markSessionDeleting(session.id, isDeleting: true)
         }
 
-        // Switch to chat session if the active session is being archived
+        // Clear active session since all are being archived
         if let activeId = activeSessionId, sessionsToArchive.contains(where: { $0.id == activeId }) {
-            setActiveSession(chatSessionId)
+            setActiveSession(nil)
         }
 
         // Archive each on server, then clean up locally

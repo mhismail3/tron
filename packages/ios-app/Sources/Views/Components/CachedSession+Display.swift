@@ -26,9 +26,6 @@ extension CachedSession {
         if let title = title, !title.isEmpty {
             return title
         }
-        if isChat {
-            return "Chat"
-        }
         return (workingDirectory as NSString).lastPathComponent
     }
 

@@ -114,7 +114,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "cost": 0.0,
                 "lastActivity": base.timestamp,
                 "isActive": true,
-                "isChat": source.as_deref() == Some("chat"),
+                "source": source,
             })),
         )),
         TronEvent::SessionForked { new_session_id, .. } => Some(global(

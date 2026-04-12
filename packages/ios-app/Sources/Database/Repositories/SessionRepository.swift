@@ -56,7 +56,7 @@ final class SessionRepository: @unchecked Sendable {
             sqlite3_bind_double(stmt, 18, session.cost)
             sqlite3_bind_int(stmt, 19, Int32(session.isFork == true ? 1 : 0))
             sqliteBindOptionalText(stmt, 20, session.serverOrigin)
-            sqlite3_bind_int(stmt, 21, Int32(session.isChat ? 1 : 0))
+            sqlite3_bind_int(stmt, 21, 0) // is_chat column (legacy, always 0)
 
             // Persist activity lines as JSON
             if let lines = session.lastActivityLines,
@@ -341,7 +341,7 @@ final class SessionRepository: @unchecked Sendable {
         let cost = sqlite3_column_double(stmt, 17)
         let isFork = sqlite3_column_int(stmt, 18) != 0
         let serverOrigin = sqliteGetOptionalText(stmt, 19)
-        let isChat = sqlite3_column_int(stmt, 20) != 0
+        _ = sqlite3_column_int(stmt, 20) // is_chat column (legacy, always 0)
 
         // Decode persisted activity lines from JSON
         var activityLines: [ActivityLine]?
@@ -370,8 +370,7 @@ final class SessionRepository: @unchecked Sendable {
             cacheCreationTokens: cacheCreationTokens,
             cost: cost,
             isFork: isFork,
-            serverOrigin: serverOrigin,
-            isChat: isChat
+            serverOrigin: serverOrigin
         )
         session.lastActivityLines = activityLines
         return session

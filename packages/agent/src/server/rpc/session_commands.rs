@@ -91,7 +91,6 @@ impl SessionCommandService {
         let session_manager = ctx.session_manager.clone();
         let session_id_for_delete = session_id.clone();
         ctx.run_blocking("session.delete", move || {
-            ensure_not_chat_session(session_manager.as_ref(), &session_id_for_delete, "deleted")?;
             session_manager
                 .delete_session(&session_id_for_delete)
                 .map_err(|error| RpcError::Internal {
@@ -165,11 +164,6 @@ impl SessionCommandService {
         let session_manager = ctx.session_manager.clone();
         let session_id_for_archive = session_id.clone();
         ctx.run_blocking("session.archive", move || {
-            ensure_not_chat_session(
-                session_manager.as_ref(),
-                &session_id_for_archive,
-                "archived",
-            )?;
             session_manager
                 .archive_session(&session_id_for_archive)
                 .map_err(|error| RpcError::Internal {
@@ -215,171 +209,6 @@ impl SessionCommandService {
         Ok(json!({ "unarchived": true }))
     }
 
-    pub(crate) async fn get_chat(ctx: &RpcContext) -> Result<Value, RpcError> {
-        let settings = crate::settings::get_settings();
-        if !settings.session.chat.enabled {
-            return Err(RpcError::Custom {
-                code: "CHAT_DISABLED".into(),
-                message: "Default chat mode is disabled".into(),
-                details: None,
-            });
-        }
-
-        let model = settings.server.default_model.clone();
-        let working_directory = settings.session.chat.working_directory.clone();
-        let session_manager = ctx.session_manager.clone();
-        let model_for_lookup = model.clone();
-        let working_directory_for_lookup = working_directory.clone();
-        let (session_id, created, session) = ctx
-            .run_blocking("session.get_chat", move || {
-                let (session_id, created) = session_manager
-                    .get_or_create_chat_session(&model_for_lookup, &working_directory_for_lookup)
-                    .map_err(|error| RpcError::Internal {
-                        message: error.to_string(),
-                    })?;
-                let session = session_manager
-                    .get_session(&session_id)
-                    .map_err(|error| RpcError::Internal {
-                        message: error.to_string(),
-                    })?
-                    .ok_or_else(|| RpcError::Internal {
-                        message: "Chat session disappeared after creation".into(),
-                    })?;
-                Ok((session_id, created, session))
-            })
-            .await?;
-
-        if created {
-            ctx.orchestrator.init_sequence_counter(&session_id, 0);
-
-            let _ = ctx
-                .orchestrator
-                .broadcast()
-                .emit(TronEvent::SessionCreated {
-                    base: BaseEvent::now(&session_id),
-                    model: model.clone(),
-                    working_directory: working_directory.clone(),
-                    source: Some("chat".into()),
-                    title: Some("Chat".into()),
-                });
-        }
-
-        Ok(json!({
-            "sessionId": session_id,
-            "created": created,
-            "model": session.latest_model,
-            "workingDirectory": session.working_directory,
-            "createdAt": session.created_at,
-            "isActive": true,
-            "isArchived": false,
-            "isChat": true,
-            "messageCount": session.message_count,
-            "eventCount": session.event_count,
-        }))
-    }
-
-    pub(crate) async fn reset_chat(ctx: &RpcContext) -> Result<Value, RpcError> {
-        let settings = crate::settings::get_settings();
-        if !settings.session.chat.enabled {
-            return Err(RpcError::Custom {
-                code: "CHAT_DISABLED".into(),
-                message: "Default chat mode is disabled".into(),
-                details: None,
-            });
-        }
-
-        // Find the old chat session so we can release its worktree before the
-        // blocking reset call (which archives the old session synchronously).
-        let old_chat_id = {
-            let sm = ctx.session_manager.clone();
-            ctx.run_blocking("session.reset_chat.find_old", move || {
-                Ok(sm
-                    .event_store()
-                    .find_chat_session()
-                    .map_err(|e| RpcError::Internal {
-                        message: e.to_string(),
-                    })?
-                    .map(|s| s.id))
-            })
-            .await?
-        };
-        if let Some(ref old_id) = old_chat_id {
-            release_worktree_if_active(ctx, old_id).await;
-        }
-
-        let model = settings.server.default_model.clone();
-        let working_directory = settings.session.chat.working_directory.clone();
-        let session_manager = ctx.session_manager.clone();
-        let model_for_reset = model.clone();
-        let working_directory_for_reset = working_directory.clone();
-        let (new_id, old_id, session) = ctx
-            .run_blocking("session.reset_chat", move || {
-                let (new_id, old_id) = session_manager
-                    .reset_chat_session(&model_for_reset, &working_directory_for_reset)
-                    .map_err(|error| RpcError::Internal {
-                        message: error.to_string(),
-                    })?;
-                let session = session_manager
-                    .get_session(&new_id)
-                    .map_err(|error| RpcError::Internal {
-                        message: error.to_string(),
-                    })?
-                    .ok_or_else(|| RpcError::Internal {
-                        message: "New chat session disappeared after creation".into(),
-                    })?;
-                Ok((new_id, old_id, session))
-            })
-            .await?;
-
-        ctx.orchestrator.remove_sequence_counter(&old_id);
-        ctx.orchestrator.remove_compaction_handler(&old_id);
-        ctx.orchestrator.init_sequence_counter(&new_id, 0);
-
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(TronEvent::SessionArchived {
-                base: BaseEvent::now(&old_id),
-            });
-        let _ = ctx
-            .orchestrator
-            .broadcast()
-            .emit(TronEvent::SessionCreated {
-                base: BaseEvent::now(&new_id),
-                model: model.clone(),
-                working_directory: working_directory.clone(),
-                source: Some("chat".into()),
-                title: Some("Chat".into()),
-            });
-
-        Ok(json!({
-            "sessionId": new_id,
-            "previousSessionId": old_id,
-            "model": session.latest_model,
-            "workingDirectory": session.working_directory,
-            "createdAt": session.created_at,
-            "isActive": true,
-            "isArchived": false,
-            "isChat": true,
-            "messageCount": 0,
-            "eventCount": session.event_count,
-        }))
-    }
-}
-
-fn ensure_not_chat_session(
-    session_manager: &crate::runtime::orchestrator::session_manager::SessionManager,
-    session_id: &str,
-    operation: &str,
-) -> Result<(), RpcError> {
-    if session_manager.is_chat_session(session_id) {
-        return Err(RpcError::Custom {
-            code: "CHAT_SESSION_PROTECTED".into(),
-            message: format!("The default chat session cannot be {operation}"),
-            details: None,
-        });
-    }
-    Ok(())
 }
 
 fn spawn_optimistic_context_preload(ctx: &RpcContext, session_id: &str, working_dir: &str) {
@@ -432,7 +261,7 @@ fn emit_optimistic_context_events(
     working_dir: &str,
 ) -> OptimisticContextSummary {
     let settings = crate::settings::get_settings();
-    let artifacts = context_artifacts.load(event_store.as_ref(), working_dir, &settings, false);
+    let artifacts = context_artifacts.load(event_store.as_ref(), working_dir, &settings);
     let mut summary = OptimisticContextSummary::default();
 
     let files_json: Vec<serde_json::Value> = artifacts
@@ -675,41 +504,4 @@ mod tests {
         assert!(ctx.event_store.get_session(&sid).unwrap().is_none());
     }
 
-    // ── Reset Chat ─────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn reset_chat_releases_old_session_worktree() {
-        let dir = tempdir().unwrap();
-        init_repo(dir.path()).await;
-
-        let store = make_store();
-        let (ctx, coord) = make_context_with_worktree(store.clone());
-
-        // Create a chat session
-        let wd = dir.path().to_string_lossy().to_string();
-        let (chat_id, _) = ctx
-            .session_manager
-            .get_or_create_chat_session("model", &wd)
-            .unwrap();
-
-        // Acquire worktree for the chat session
-        let result = coord.maybe_acquire(&chat_id, dir.path()).await.unwrap();
-        let wt_path = match result {
-            AcquireResult::Acquired(ref info) => info.worktree_path.clone(),
-            other => panic!("expected Acquired, got {other:?}"),
-        };
-        assert!(wt_path.exists());
-
-        // Reset chat — should release old session's worktree
-        SessionCommandService::reset_chat(&ctx).await.unwrap();
-
-        assert!(
-            coord.get_info(&chat_id).is_none(),
-            "old chat session worktree should be released"
-        );
-        assert!(
-            !wt_path.exists(),
-            "old chat session worktree directory should be removed"
-        );
-    }
 }

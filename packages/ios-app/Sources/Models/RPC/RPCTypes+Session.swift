@@ -55,10 +55,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let lastUserPrompt: String?
     /// Last assistant response text (for preview display)
     let lastAssistantResponse: String?
-    /// Session source (e.g. "chat" for persistent chat)
+    /// Session source (e.g. "cron" for automation sessions)
     let source: String?
-    /// Whether this is the persistent chat session
-    let isChat: Bool?
     /// Whether the agent is currently running in this session (server-authoritative)
     let isRunning: Bool?
     /// Server-computed activity summary lines for dashboard cards
@@ -153,30 +151,6 @@ struct ToolUseInfo: Decodable {
 struct SessionHistoryResult: Decodable {
     let messages: [HistoryMessage]
     let hasMore: Bool
-}
-
-// MARK: - Chat Session
-
-struct ChatSessionResult: Decodable {
-    let sessionId: String
-    let created: Bool
-    let model: String
-    let workingDirectory: String
-    let createdAt: String
-    let isChat: Bool
-    let messageCount: Int
-    let eventCount: Int
-}
-
-struct ResetChatResult: Decodable {
-    let sessionId: String
-    let previousSessionId: String
-    let model: String
-    let workingDirectory: String
-    let createdAt: String
-    let isChat: Bool
-    let messageCount: Int
-    let eventCount: Int
 }
 
 // MARK: - Session Fork

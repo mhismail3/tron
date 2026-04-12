@@ -46,18 +46,6 @@ final class SettingsState {
     var isLoadingModels = false
     var loadError: String?
 
-    // MARK: - Chat Settings
-
-    var chatWorkspace: String = ""
-
-    var displayChatWorkspace: String {
-        chatWorkspace.replacingOccurrences(
-            of: "^/Users/[^/]+/",
-            with: "~/",
-            options: .regularExpression
-        )
-    }
-
     // MARK: - Display Helpers
 
     var displayQuickSessionWorkspace: String {
@@ -123,7 +111,6 @@ final class SettingsState {
         if let workspace = settings.defaultWorkspace {
             quickSessionWorkspace = workspace
         }
-        chatWorkspace = settings.chatWorkingDirectory ?? ""
         skillsCompactionPolicy = settings.skillsCompactionPolicy
         skillsShowIndex = settings.skillsShowIndex
         autoRetainInterval = settings.autoRetainInterval

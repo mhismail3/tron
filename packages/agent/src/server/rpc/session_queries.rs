@@ -78,7 +78,6 @@ impl SessionQueryService {
                         "isActive": is_active,
                         "isRunning": is_running,
                         "isArchived": session.ended_at.is_some(),
-                        "isChat": session.source.as_deref() == Some("chat"),
                         "source": session.source,
                         "eventCount": session.event_count,
                         "messageCount": session.message_count,

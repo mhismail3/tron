@@ -16,7 +16,6 @@ struct ServerSettings: Decodable {
     let compaction: CompactionSettings
     let rules: RulesSettings
     let isolationMode: String
-    let chatWorkingDirectory: String?
     let cacheTtlSecs: Int
     let hooksLlmModel: String
     let builtinHooks: [BuiltinHookSetting]
@@ -43,11 +42,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum SessionKeys: String, CodingKey {
-        case isolation, chat, cacheTtlSecs, queueDrainMode
-    }
-
-    private enum ChatKeys: String, CodingKey {
-        case workingDirectory
+        case isolation, cacheTtlSecs, queueDrainMode
     }
 
     private enum IsolationKeys: String, CodingKey {
@@ -96,23 +91,17 @@ struct ServerSettings: Decodable {
             rules = .defaults
         }
 
-        // session.isolation.mode + session.chat.workingDirectory + session.cacheTtlSecs
+        // session.isolation.mode + session.cacheTtlSecs
         if let sessionContainer = try? container.nestedContainer(keyedBy: SessionKeys.self, forKey: .session) {
             if let isoContainer = try? sessionContainer.nestedContainer(keyedBy: IsolationKeys.self, forKey: .isolation) {
                 isolationMode = (try? isoContainer.decodeIfPresent(String.self, forKey: .mode)) ?? "always"
             } else {
                 isolationMode = "always"
             }
-            if let chatContainer = try? sessionContainer.nestedContainer(keyedBy: ChatKeys.self, forKey: .chat) {
-                chatWorkingDirectory = try? chatContainer.decodeIfPresent(String.self, forKey: .workingDirectory)
-            } else {
-                chatWorkingDirectory = nil
-            }
             cacheTtlSecs = (try? sessionContainer.decodeIfPresent(Int.self, forKey: .cacheTtlSecs)) ?? 3600
             queueDrainMode = (try? sessionContainer.decodeIfPresent(String.self, forKey: .queueDrainMode)) ?? "sequential"
         } else {
             isolationMode = "always"
-            chatWorkingDirectory = nil
             cacheTtlSecs = 3600
             queueDrainMode = "sequential"
         }
@@ -225,16 +214,11 @@ struct ServerSettingsUpdate: Encodable {
 
     struct SessionUpdate: Encodable {
         var isolation: IsolationUpdate?
-        var chat: ChatUpdate?
         var cacheTtlSecs: Int?
         var queueDrainMode: String?
 
         struct IsolationUpdate: Encodable {
             var mode: String?
-        }
-
-        struct ChatUpdate: Encodable {
-            var workingDirectory: String?
         }
     }
 

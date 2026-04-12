@@ -255,19 +255,6 @@ impl SessionRepo {
         Ok(row)
     }
 
-    /// Find the active chat session (`source = 'chat'`, not ended).
-    pub fn find_chat_session(conn: &Connection) -> Result<Option<SessionRow>> {
-        let row = conn
-            .query_row(
-                "SELECT * FROM sessions WHERE source = 'chat' AND ended_at IS NULL \
-                 ORDER BY last_activity_at DESC LIMIT 1",
-                [],
-                Self::map_row,
-            )
-            .optional()?;
-        Ok(row)
-    }
-
     /// List sessions with filtering.
     pub fn list(conn: &Connection, opts: &ListSessionsOptions<'_>) -> Result<Vec<SessionRow>> {
         use std::fmt::Write;

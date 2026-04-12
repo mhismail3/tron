@@ -56,7 +56,6 @@ struct PromptRunPlan {
     run_id: String,
     model: String,
     working_dir: String,
-    is_chat: bool,
     request: PromptRequest,
 }
 
@@ -166,7 +165,6 @@ pub fn spawn_prompt_run(
         run_id,
         model: session.latest_model.clone(),
         working_dir: session.working_directory.clone(),
-        is_chat: session.source.as_deref() == Some("chat"),
         request,
     };
 
@@ -204,7 +202,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         run_id,
         model,
         working_dir,
-        is_chat,
         request,
     } = plan;
 
@@ -235,10 +232,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
 
     // Create per-session hook engine: builtins + discovered user/project hooks.
     // Fresh each session so new/modified hook files are picked up without restart.
-    // Hooks only apply to user-created sessions — not chat mode or subagents.
-    let hooks = if is_chat {
-        None
-    } else {
+    let hooks = {
         use crate::runtime::hooks::builtin;
         use crate::runtime::hooks::discovery::discover_hooks;
         use crate::runtime::hooks::engine::HookEngine;
@@ -383,7 +377,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         session_id.clone(),
         working_dir.clone(),
         settings.as_ref().clone(),
-        is_chat,
         is_resumed,
     )
     .await
@@ -482,14 +475,10 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         model: model.clone(),
         working_directory: Some(working_dir.clone()),
         server_origin: Some(server_origin),
-        system_prompt: if is_chat {
-            Some(crate::runtime::context::system_prompts::TRON_CHAT_PROMPT.to_string())
-        } else {
-            // Precedence: project .tron/SYSTEM.md > global ~/.tron/workspace/memory/rules/SYSTEM.md > embedded
-            crate::runtime::context::system_prompts::load_system_prompt_from_file(&working_dir)
-                .or_else(crate::runtime::context::system_prompts::load_global_system_prompt)
-                .map(|loaded| loaded.content)
-        },
+        // Precedence: project .tron/SYSTEM.md > global ~/.tron/workspace/memory/rules/SYSTEM.md > embedded
+        system_prompt: crate::runtime::context::system_prompts::load_system_prompt_from_file(&working_dir)
+            .or_else(crate::runtime::context::system_prompts::load_global_system_prompt)
+            .map(|loaded| loaded.content),
         enable_thinking: true,
         max_turns: settings.agent.max_turns,
         compaction: crate::runtime::context::types::CompactionConfig {
@@ -792,7 +781,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         &session_id,
         &model,
         &working_dir,
-        is_chat,
         orchestrator.broadcast().clone(),
         drain_provider_factory,
         drain_tool_factory,
@@ -821,7 +809,6 @@ fn drain_prompt_queue(
     session_id: &str,
     model: &str,
     working_dir: &str,
-    is_chat: bool,
     broadcast: Arc<crate::runtime::EventEmitter>,
     provider_factory: Arc<dyn crate::llm::provider::ProviderFactory>,
     tool_factory: Arc<dyn Fn() -> crate::tools::registry::ToolRegistry + Send + Sync>,
@@ -939,7 +926,6 @@ fn drain_prompt_queue(
         run_id,
         model: model.to_string(),
         working_dir: working_dir.to_string(),
-        is_chat,
         request: PromptRequest {
             session_id: session_id.to_string(),
             prompt: prompt_text,

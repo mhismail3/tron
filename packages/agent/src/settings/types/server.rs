@@ -255,8 +255,6 @@ pub struct SessionSettings {
     pub worktree_timeout_ms: u64,
     /// Git worktree isolation settings.
     pub isolation: IsolationSettings,
-    /// Default chat session settings.
-    pub chat: ChatSettings,
     /// TTL in seconds for idle session cache eviction. 0 = evict all idle immediately.
     pub cache_ttl_secs: u64,
     /// How queued messages are drained when the agent finishes.
@@ -268,7 +266,6 @@ impl Default for SessionSettings {
         Self {
             worktree_timeout_ms: 30_000,
             isolation: IsolationSettings::default(),
-            chat: ChatSettings::default(),
             cache_ttl_secs: 3600,
             queue_drain_mode: QueueDrainMode::default(),
         }
@@ -284,26 +281,6 @@ pub enum QueueDrainMode {
     Sequential,
     /// All pending queued messages are combined into a single prompt for one turn.
     Batched,
-}
-
-/// Default chat session settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct ChatSettings {
-    /// Whether the default chat session is enabled.
-    pub enabled: bool,
-    /// Working directory for the chat session.
-    pub working_directory: String,
-}
-
-impl Default for ChatSettings {
-    fn default() -> Self {
-        let home = crate::core::paths::home_dir();
-        Self {
-            enabled: true,
-            working_directory: format!("{home}/Workspace"),
-        }
-    }
 }
 
 /// When to create isolated git worktrees for sessions.
@@ -564,8 +541,6 @@ mod tests {
         assert!(s.isolation.auto_commit_on_release);
         assert!(s.isolation.preserve_branches);
         assert!(s.isolation.delete_worktree_on_release);
-        assert!(s.chat.enabled);
-        assert!(s.chat.working_directory.contains("Workspace"));
     }
 
     #[test]

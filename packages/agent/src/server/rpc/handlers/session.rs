@@ -150,32 +150,6 @@ impl MethodHandler for GetHistoryHandler {
     }
 }
 
-/// Get or create the default chat session.
-pub struct GetChatSessionHandler;
-
-#[async_trait]
-impl MethodHandler for GetChatSessionHandler {
-    #[instrument(skip(self, ctx), fields(method = "session.getChat"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        SessionCommandService::get_chat(ctx).await
-    }
-}
-
-/// Reset the chat session: archive the current one and create a fresh replacement.
-///
-/// Takes no parameters — operates on the singleton chat session. Returns the
-/// new session info (same shape as `session.getChat`). Rejects calls when no
-/// active chat session exists or when chat mode is disabled.
-pub struct ResetChatSessionHandler;
-
-#[async_trait]
-impl MethodHandler for ResetChatSessionHandler {
-    #[instrument(skip(self, ctx), fields(method = "session.resetChat"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        SessionCommandService::reset_chat(ctx).await
-    }
-}
-
 /// Unarchive a session.
 pub struct UnarchiveSessionHandler;
 

@@ -731,7 +731,6 @@ fn session_created_has_required_fields() {
     assert_eq!(data["workingDirectory"], "/tmp/project");
     assert_eq!(data["messageCount"], 0);
     assert_eq!(data["inputTokens"], 0);
-    assert_eq!(data["isChat"], false);
     assert_eq!(data["outputTokens"], 0);
     assert_eq!(data["cost"], 0.0);
     assert_eq!(data["isActive"], true);
