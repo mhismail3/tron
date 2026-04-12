@@ -31,26 +31,28 @@ struct TurnGroup: Identifiable, Equatable {
 
 enum TurnGrouping {
 
-    /// Groups events into turns using boundary-based grouping.
+    /// Groups events into turns using boundary-based grouping with cycle-aware
+    /// turn number correction.
     ///
-    /// Most event types only carry a `turn` field on assistant messages, tool
-    /// calls, and stream events — user messages, session lifecycle events, and
-    /// worktree events do NOT. Grouping purely by payload `turn` field would
-    /// dump all user messages and session events into turn 0.
+    /// ## Why raw turn numbers collide
     ///
-    /// Instead, we walk events in sequence order and assign turn numbers using
-    /// two passes:
-    ///   1. Build a map from each event to the turn it belongs to, using the
-    ///      `turn` field where present and propagating it to neighboring events.
-    ///   2. Group events by their assigned turn numbers.
+    /// The Rust agent numbers turns **per prompt cycle** — each `message.user`
+    /// starts a new cycle where the `turn` payload field counts from 1. A session
+    /// with three user prompts might have raw turns `[1,2,3, 1,2, 1,2,3,4]`.
+    /// Using these directly would create duplicate groups and SwiftUI ID collisions.
     ///
-    /// The propagation rule: walk events in order. Track "current turn".
-    /// - If an event has an explicit `turn` in payload → use it, update current.
-    /// - If `message.user` → look ahead for the next event with a `turn` field
-    ///   and use that turn number (the user message starts that turn).
-    /// - Otherwise → use the current turn (events between turns inherit from
-    ///   the last known turn).
-    /// - Events before any turn is established go to turn 0 (session setup).
+    /// ## How correction works
+    ///
+    /// A cumulative `turnOffset` increases at each cycle boundary (detected when
+    /// a raw turn number resets). The global turn number is `turnOffset + rawTurn`,
+    /// producing a monotonically increasing sequence: `[1,2,3, 4,5, 6,7,8,9]`.
+    ///
+    /// ## Output invariants
+    ///
+    /// - Turn 0 is reserved for session setup events (before any user message)
+    /// - Global turn numbers are monotonically increasing
+    /// - Each contiguous run of the same global turn number forms one TurnGroup
+    /// - Sessions without turn resets produce identical output to raw turn numbers
     static func group(
         events: [SessionEvent],
         analytics: ConsolidatedAnalytics,
@@ -104,44 +106,72 @@ enum TurnGrouping {
         }
     }
 
-    /// Assigns a turn number to each event in sequence order.
+    /// Assigns a session-global turn number to each event in sequence order.
     ///
-    /// Returns an array parallel to `events` with the assigned turn number.
+    /// The Rust agent numbers turns per prompt cycle (each `message.user` starts
+    /// a new cycle where turns count from 1). This method transforms per-cycle
+    /// turn numbers into globally unique, monotonically increasing turn numbers
+    /// for the entire session.
+    ///
+    /// Returns an array parallel to `events` with the assigned global turn number.
+    ///
+    /// ## Invariants
+    /// - Turn 0 is reserved for session setup events (before any user message)
+    /// - Global turn numbers are monotonically increasing
+    /// - Each contiguous run of the same global turn number forms one TurnGroup
+    /// - Sessions without turn resets produce identical output to raw turn numbers
     private static func assignTurnNumbers(_ events: [SessionEvent]) -> [Int] {
         var assignments = [Int](repeating: 0, count: events.count)
-        var currentTurn = 0
+        var currentGlobalTurn = 0
+        var turnOffset = 0      // cumulative offset from previous prompt cycles
+        var prevRawTurn = 0     // highest raw turn in the current prompt cycle
 
-        // First pass: find explicit turn numbers and build a forward-lookup
-        // for user messages that precede their turn's assistant message.
-        var explicitTurns: [Int: Int] = [:] // index → turn number
+        // Pass 1: index events that carry an explicit turn number in their payload.
+        var explicitTurns: [Int: Int] = [:] // event index → raw turn number
         for (i, event) in events.enumerated() {
             if let turn = extractPayloadTurn(event), turn > 0 {
                 explicitTurns[i] = turn
             }
         }
 
-        // Second pass: assign turn numbers
+        // Pass 2: assign global turn numbers, detecting cycle boundaries.
         for i in 0..<events.count {
             let event = events[i]
 
-            if let turn = explicitTurns[i] {
-                // Event has explicit turn
-                currentTurn = turn
-                assignments[i] = turn
-            } else if event.eventType == .messageUser {
-                // User message: look ahead for the next explicit turn
-                let nextTurn = lookAheadForTurn(from: i + 1, events: events, explicitTurns: explicitTurns)
-                if let next = nextTurn {
-                    currentTurn = next
-                    assignments[i] = next
+            if event.eventType == .messageUser {
+                // User message starts a potential new prompt cycle.
+                // Look ahead to see what raw turn the next assistant message carries.
+                let nextRawTurn = lookAheadForTurn(
+                    from: i + 1, events: events, explicitTurns: explicitTurns
+                )
+                if let next = nextRawTurn {
+                    if next <= prevRawTurn {
+                        // Cycle boundary: raw turn reset detected.
+                        // Shift offset so new cycle continues from current high-water mark.
+                        turnOffset = currentGlobalTurn
+                        prevRawTurn = 0
+                    }
+                    prevRawTurn = next
+                    currentGlobalTurn = turnOffset + next
+                    assignments[i] = currentGlobalTurn
                 } else {
-                    // No future turn found — use current + 1 as estimate
-                    currentTurn += 1
-                    assignments[i] = currentTurn
+                    // No future turn found (user message at end of session)
+                    currentGlobalTurn += 1
+                    assignments[i] = currentGlobalTurn
                 }
+            } else if let rawTurn = explicitTurns[i] {
+                // Explicit turn in payload.
+                // Guard against cycle boundaries missed by user-message detection
+                // (e.g., auto-continuations without a preceding message.user).
+                if rawTurn < prevRawTurn {
+                    turnOffset = currentGlobalTurn
+                }
+                prevRawTurn = rawTurn
+                currentGlobalTurn = turnOffset + rawTurn
+                assignments[i] = currentGlobalTurn
             } else {
-                // No explicit turn — inherit current
-                assignments[i] = currentTurn
+                // No turn signal — inherit the current global turn.
+                assignments[i] = currentGlobalTurn
             }
         }
 
