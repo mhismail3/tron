@@ -50,4 +50,19 @@ extension CachedSession {
         }
         return workingDirectory
     }
+
+    /// Unique workspace paths from a list of sessions, ordered by first appearance.
+    /// Sessions should be pre-sorted (e.g. by most recent activity).
+    /// Filters out sessions with empty workingDirectory.
+    static func recentWorkspaces(from sessions: [CachedSession]) -> [(path: String, name: String)] {
+        var seen = Set<String>()
+        var result: [(path: String, name: String)] = []
+        for session in sessions {
+            let path = session.workingDirectory
+            guard !path.isEmpty, seen.insert(path).inserted else { continue }
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            result.append((path: path, name: name))
+        }
+        return result
+    }
 }

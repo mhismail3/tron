@@ -19,7 +19,6 @@ struct ServerSettingsTests {
             },
             "session": {
                 "isolation": { "mode": "never" },
-                "chat": { "workingDirectory": "/chat" },
                 "cacheTtlSecs": 7200,
                 "queueDrainMode": "parallel"
             },
@@ -39,7 +38,7 @@ struct ServerSettingsTests {
         #expect(settings.compaction.maxPreservedRatio == 0.30)
         #expect(settings.rules.discoverStandaloneFiles == false)
         #expect(settings.isolationMode == "never")
-        #expect(settings.chatWorkingDirectory == "/chat")
+        // chatWorkingDirectory removed with persistent chat feature
         #expect(settings.cacheTtlSecs == 7200)
         #expect(settings.queueDrainMode == "parallel")
         #expect(settings.hooksLlmModel == "claude-opus-4-6")
@@ -65,7 +64,7 @@ struct ServerSettingsTests {
         #expect(settings.compaction.maxPreservedRatio == 0.20)
         #expect(settings.rules.discoverStandaloneFiles == true)
         #expect(settings.isolationMode == "always")
-        #expect(settings.chatWorkingDirectory == nil)
+        // chatWorkingDirectory removed with persistent chat feature
         #expect(settings.cacheTtlSecs == 3600)
         #expect(settings.queueDrainMode == "sequential")
         #expect(settings.hooksLlmModel == "claude-haiku-4-5-20251001")

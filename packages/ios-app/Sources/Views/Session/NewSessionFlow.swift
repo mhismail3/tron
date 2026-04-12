@@ -28,10 +28,44 @@ struct NewSessionFlow: View {
         !isCreating && !workingDirectory.isEmpty && !selectedModel.isEmpty
     }
 
+    /// Unique workspace paths from recent sessions, ordered by most recent activity.
+    private var recentWorkspaces: [(path: String, name: String)] {
+        CachedSession.recentWorkspaces(from: eventStoreManager.sortedSessions)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    // Recent workspaces
+                    if !recentWorkspaces.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(recentWorkspaces, id: \.path) { workspace in
+                                    let isSelected = workingDirectory == workspace.path
+                                    Button {
+                                        workingDirectory = workspace.path
+                                    } label: {
+                                        Text(workspace.name)
+                                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                                            .foregroundStyle(.tronEmerald)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                    }
+                                    .chipStyle(
+                                        .tronEmerald,
+                                        tintOpacity: isSelected ? 0.3 : 0.15,
+                                        strokeOpacity: isSelected ? 0.4 : 0.2
+                                    )
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .scrollClipDisabled()
+                        .contentMargins(.horizontal, 20)
+                        .padding(.horizontal, -20)
+                    }
+
                     // Workspace section
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Workspace")

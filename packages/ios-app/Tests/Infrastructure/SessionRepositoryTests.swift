@@ -42,7 +42,6 @@ final class SessionRepositoryTests: XCTestCase {
         cost: Double = 0.05,
         isFork: Bool? = false,
         serverOrigin: String? = nil,
-        isChat: Bool = false,
         lastActivityLines: [ActivityLine]? = nil
     ) -> CachedSession {
         var session = CachedSession(
@@ -63,11 +62,10 @@ final class SessionRepositoryTests: XCTestCase {
             lastTurnInputTokens: lastTurnInputTokens,
             cacheReadTokens: cacheReadTokens,
             cacheCreationTokens: cacheCreationTokens,
-            cost: cost,
-            isFork: isFork,
-            serverOrigin: serverOrigin,
-            isChat: isChat
+            cost: cost
         )
+        session.isFork = isFork
+        session.serverOrigin = serverOrigin
         session.lastActivityLines = lastActivityLines
         return session
     }
@@ -123,7 +121,6 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertEqual(retrieved!.cost, 0.05, accuracy: 0.0001)
         XCTAssertEqual(retrieved?.isFork, false)
         XCTAssertNil(retrieved?.serverOrigin)
-        XCTAssertEqual(retrieved?.isChat, false)
     }
 
     func testInsertWithAllOptionalFieldsNil() async throws {
@@ -155,14 +152,6 @@ final class SessionRepositoryTests: XCTestCase {
         let retrieved = try await database.sessions.get("sess-1")
         XCTAssertEqual(retrieved?.archivedAt, "2026-04-02T00:00:00Z")
         XCTAssertTrue(retrieved?.isArchived == true)
-    }
-
-    func testInsertWithChatSession() async throws {
-        let session = makeSession(isChat: true)
-        try await database.sessions.insert(session)
-
-        let retrieved = try await database.sessions.get("sess-1")
-        XCTAssertEqual(retrieved?.isChat, true)
     }
 
     func testInsertWithForkSession() async throws {
