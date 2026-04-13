@@ -339,12 +339,12 @@ struct SkillDetailSheet: View {
 // MARK: - Content Compactness
 
 /// Whether skill content is compact enough for liquid glass rendering.
-/// Long content (>= 100 lines) causes glass rendering glitches on iOS 26.
+/// Long content (>= 60 lines) causes glass rendering glitches on iOS 26.
 func isCompactContent(_ content: String) -> Bool {
     var count = 0
     for char in content where char == "\n" {
         count += 1
-        if count >= 100 { return false }
+        if count >= 60 { return false }
     }
     return true
 }
