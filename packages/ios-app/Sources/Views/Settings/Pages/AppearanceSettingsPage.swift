@@ -8,6 +8,7 @@ struct AppearanceSettingsPage: View {
     var body: some View {
         SettingsPageContainer(title: "Appearance") {
             themeCard
+            dashboardCard
             fontCard
             codeFontCard
             thinkingIndicatorCard
@@ -62,6 +63,24 @@ struct AppearanceSettingsPage: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    // MARK: - Dashboard Card
+
+    private var dashboardCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Dashboard")
+
+            SettingsCard {
+                SettingsRow(icon: "line.3.horizontal.decrease", label: "Workspace Pills") {
+                    Toggle("", isOn: $appearanceSettings.showWorkspacePills)
+                        .labelsHidden()
+                        .tint(.tronEmerald)
+                }
+            }
+
+            SettingsCaption(text: "Show workspace filter pills on the session dashboard.")
         }
     }
 

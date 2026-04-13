@@ -1941,7 +1941,6 @@
 				653047B4F42C693D285E5A37 /* Indicators */,
 				9E5B92ACAC0F59E241719A8A /* Rows */,
 				619383A5A971D760D16930EA /* Sections */,
-				E68C3F68D99AB15D125E9B99 /* Sheets */,
 				CB64330B29A5E180DF9AB214 /* States */,
 				F65F494BA5F6D9203D1574E6 /* Utilities */,
 			);
@@ -3046,13 +3045,6 @@
 				C80DB0E6F2AECF50A2F590BE /* WriteToolDetailSheet.swift */,
 			);
 			path = Write;
-			sourceTree = "<group>";
-		};
-		E68C3F68D99AB15D125E9B99 /* Sheets */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Sheets;
 			sourceTree = "<group>";
 		};
 		E76F08E1413C91E422B18ECD /* Models */ = {

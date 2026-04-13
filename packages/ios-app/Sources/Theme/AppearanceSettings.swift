@@ -49,6 +49,12 @@ final class AppearanceSettings {
         }
     }
 
+    var showWorkspacePills: Bool {
+        didSet {
+            UserDefaults.standard.set(showWorkspacePills, forKey: "showWorkspacePills")
+        }
+    }
+
     private init() {
         if let saved = UserDefaults.standard.string(forKey: "appearanceMode"),
            let parsed = AppearanceMode(rawValue: saved) {
@@ -63,5 +69,7 @@ final class AppearanceSettings {
         } else {
             self.thinkingIndicatorStyle = .neuralSpark
         }
+
+        self.showWorkspacePills = UserDefaults.standard.object(forKey: "showWorkspacePills") as? Bool ?? true
     }
 }

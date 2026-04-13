@@ -26,6 +26,7 @@ struct SessionSidebar: View {
     @State private var sessionToArchive: String?
     @State private var showArchiveConfirmation = false
     @State private var selectedWorkspace: String?
+    @State private var appearanceSettings = AppearanceSettings.shared
 
     // Convenience accessor
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -145,7 +146,7 @@ struct SessionSidebar: View {
             HStack(alignment: .center) {
                 FloatingVoiceNotesButton(action: onVoiceNote, size: 56)
 
-                if recentWorkspaces.count > 1 {
+                if recentWorkspaces.count > 1 && appearanceSettings.showWorkspacePills {
                     workspaceFilterPills
                 } else {
                     Spacer()
@@ -156,6 +157,11 @@ struct SessionSidebar: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
             .contentShape(Rectangle())
+        }
+        .onChange(of: appearanceSettings.showWorkspacePills) { _, showPills in
+            if !showPills {
+                selectedWorkspace = nil
+            }
         }
         .background {
             Color.clear
