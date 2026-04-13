@@ -231,9 +231,9 @@ final class ChatViewModel {
     /// All loaded messages from EventDatabase (full set for pagination)
     var allReconstructedMessages: [ChatMessage] = []
     /// Number of messages to show initially
-    static let initialMessageBatchSize = 50
+    static let initialMessageBatchSize = 100
     /// Number of messages to load on scroll-up
-    static let additionalMessageBatchSize = 30
+    static let additionalMessageBatchSize = 100
     /// Prune when messages exceed this count during live sessions
     static let liveSessionPruneThreshold = 200
     /// Keep this many messages after pruning
