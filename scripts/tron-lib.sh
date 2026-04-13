@@ -337,13 +337,6 @@ codesign_bundle() {
     local bundle="$1"
     local identity entitlements
 
-    # Unlock login keychain for non-interactive contexts (launchd agents).
-    # Only attempt when there's no TTY — interactive terminals already have the
-    # keychain unlocked, and `security unlock-keychain` prompts unconditionally.
-    if ! tty -s 2>/dev/null; then
-        security unlock-keychain ~/Library/Keychains/login.keychain-db 2>/dev/null || true
-    fi
-
     # Find valid identity — filter revoked, prefer Developer ID > Apple Development
     identity=$(security find-identity -v -p codesigning 2>/dev/null \
         | grep -v "REVOKED" \
