@@ -270,14 +270,12 @@ create_app_bundle() {
     local binary_src="$2"
     local version="${3:-1.0.0}"
 
-    # Strip code signature so macOS no longer protects the bundle structure.
-    # macOS App Management TCC blocks modification of *signed* bundles by
-    # non-authorized processes (e.g. launchd agents). Removing the signature
-    # first makes it a plain directory. codesign_bundle re-signs afterward.
-    if [ -d "$bundle_path" ]; then
-        codesign --remove-signature "$bundle_path" 2>/dev/null || true
-    fi
-    rm -rf "$bundle_path/Contents"
+    # Delete the entire .app bundle, not just its contents. macOS App
+    # Management TCC protects files *inside* .app bundles from modification
+    # by non-authorized processes (launchd agents). But deleting the .app
+    # itself is a parent-directory operation on ~/.tron/system/, which is
+    # not protected. codesign_bundle re-signs the new bundle afterward.
+    rm -rf "$bundle_path"
 
     mkdir -p "$bundle_path/Contents/MacOS"
     mkdir -p "$bundle_path/Contents/Resources"
