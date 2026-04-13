@@ -151,11 +151,39 @@ wait_for_port_free() {
 }
 
 #=============================================================================
+# LAUNCHD HELPERS — modern API (bootout/bootstrap/kickstart) with fallback
+#=============================================================================
+
+_launchd_target() { echo "gui/$(id -u)/$1"; }
+
+launchd_stop() {
+    launchctl bootout "$(_launchd_target "$1")" 2>/dev/null \
+        || launchctl unload "$HOME/Library/LaunchAgents/$1.plist" 2>/dev/null \
+        || true
+}
+
+launchd_start() {
+    local plist="$HOME/Library/LaunchAgents/$1.plist"
+    launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null \
+        || launchctl load "$plist" 2>/dev/null \
+        || true
+}
+
+launchd_restart() {
+    launchctl kickstart -k "$(_launchd_target "$1")" 2>/dev/null \
+        || { launchd_stop "$1"; sleep 1; launchd_start "$1"; }
+}
+
+launchd_is_loaded() {
+    launchctl print "$(_launchd_target "$1")" &>/dev/null
+}
+
+#=============================================================================
 # SERVICE FUNCTIONS
 #=============================================================================
 
 service_is_running() {
-    launchctl list 2>/dev/null | grep -q "$PLIST_NAME"
+    launchd_is_loaded "$PLIST_NAME"
 }
 
 get_service_pid() {
@@ -197,8 +225,7 @@ service_start() {
     fi
 
     print_status "Starting service..."
-    launchctl unload "$PLIST_PATH" 2>/dev/null || true
-    launchctl load "$PLIST_PATH"
+    launchd_restart "$PLIST_NAME"
     sleep 2
 
     if service_is_running; then
@@ -219,7 +246,7 @@ service_stop() {
     fi
 
     print_status "Stopping service..."
-    launchctl unload "$PLIST_PATH"
+    launchd_stop "$PLIST_NAME"
 
     if wait_for_port_free "$PROD_PORT" 10; then
         print_success "Service stopped"
@@ -242,6 +269,15 @@ create_app_bundle() {
     local bundle_path="$1"
     local binary_src="$2"
     local version="${3:-1.0.0}"
+
+    # Strip code signature so macOS no longer protects the bundle structure.
+    # macOS App Management TCC blocks modification of *signed* bundles by
+    # non-authorized processes (e.g. launchd agents). Removing the signature
+    # first makes it a plain directory. codesign_bundle re-signs afterward.
+    if [ -d "$bundle_path" ]; then
+        codesign --remove-signature "$bundle_path" 2>/dev/null || true
+    fi
+    rm -rf "$bundle_path/Contents"
 
     mkdir -p "$bundle_path/Contents/MacOS"
     mkdir -p "$bundle_path/Contents/Resources"
@@ -300,6 +336,12 @@ PLIST
 codesign_bundle() {
     local bundle="$1"
     local identity entitlements
+
+    # Unlock login keychain for non-interactive contexts (launchd agents).
+    # No-op if already unlocked. Requires one-time setup:
+    #   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k <pw> login.keychain-db
+    #   security set-keychain-settings ~/Library/Keychains/login.keychain-db
+    security unlock-keychain ~/Library/Keychains/login.keychain-db 2>/dev/null || true
 
     # Find valid identity — filter revoked, prefer Developer ID > Apple Development
     identity=$(security find-identity -v -p codesigning 2>/dev/null \
@@ -809,7 +851,7 @@ cmd_rollback() {
 
     # Stop service
     print_status "Stopping service..."
-    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    launchd_stop "$PLIST_NAME"
     sleep 1
 
     # Restore backup
@@ -818,7 +860,7 @@ cmd_rollback() {
     codesign_bundle "$INSTALLED_BUNDLE"
 
     # Start service
-    launchctl load "$PLIST_PATH"
+    launchd_start "$PLIST_NAME"
     sleep 3
 
     if service_is_running; then

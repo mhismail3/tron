@@ -36,7 +36,7 @@ usage() {
 stop_server() {
   if service_is_running; then
     echo "Stopping tron server..."
-    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    launchd_stop "$PLIST_NAME"
     sleep 1
   fi
 }
@@ -44,7 +44,7 @@ stop_server() {
 start_server() {
   if [ -f "$PLIST_PATH" ]; then
     echo "Starting tron server..."
-    launchctl load "$PLIST_PATH"
+    launchd_start "$PLIST_NAME"
   else
     echo "Warning: $PLIST_PATH not found — server not started"
   fi

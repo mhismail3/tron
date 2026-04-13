@@ -50,7 +50,7 @@ fi
 
 # Don't deploy if dev server has taken over
 if lsof -t -i :9847 -sTCP:LISTEN >/dev/null 2>&1; then
-    if ! launchctl list 2>/dev/null | grep -q "com.tron.server"; then
+    if ! launchd_is_loaded "com.tron.server"; then
         log "SKIP: Dev server active on port 9847"
         exit 0
     fi

@@ -428,7 +428,7 @@ dev_start_foreground() {
     # Stop prod service for takeover
     if service_is_running; then
         print_status "Stopping production service for dev takeover..."
-        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        launchd_stop "$PLIST_NAME"
     fi
 
     # Wait for port to be freed (up to 5 seconds)
@@ -442,14 +442,14 @@ dev_start_foreground() {
         if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
             print_status "Restarting production service..."
-            launchctl load "$PLIST_PATH" 2>/dev/null || true
+            launchd_start "$PLIST_NAME"
             return 1
         fi
     fi
 
     # Restart prod on ANY exit (Ctrl+C, error, normal exit)
     # IMPORTANT: no `exec` — must run as child so EXIT trap fires
-    trap 'echo ""; print_status "Restarting production service..."; if ensure_prod_binary; then launchctl load "$PLIST_PATH" 2>/dev/null || true; print_success "Production service restarted"; else print_error "Cannot restart: no valid binary. Run: tron deploy"; fi' EXIT INT TERM
+    trap 'echo ""; print_status "Restarting production service..."; if ensure_prod_binary; then launchd_start "$PLIST_NAME"; print_success "Production service restarted"; else print_error "Cannot restart: no valid binary. Run: tron deploy"; fi' EXIT INT TERM
 
     echo ""
     echo -e "${CYAN}Starting Tron Dev Server (takeover)${NC}"
@@ -474,7 +474,7 @@ dev_start_background() {
     # Stop prod service for takeover
     if service_is_running; then
         print_status "Stopping production service for dev takeover..."
-        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        launchd_stop "$PLIST_NAME"
     fi
 
     # Wait for port to be freed (up to 5 seconds)
@@ -488,7 +488,7 @@ dev_start_background() {
         if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
             print_status "Restarting production service..."
-            launchctl load "$PLIST_PATH" 2>/dev/null || true
+            launchd_start "$PLIST_NAME"
             return 1
         fi
     fi
@@ -520,7 +520,7 @@ dev_start_background() {
         print_error "Dev server failed to start. Check: tron logs -l error"
         print_status "Restarting production service..."
         if ensure_prod_binary; then
-            launchctl load "$PLIST_PATH" 2>/dev/null || true
+            launchd_start "$PLIST_NAME"
             print_success "Production service restarted"
         fi
         return 1
@@ -552,7 +552,7 @@ dev_stop() {
         if ! service_is_running; then
             print_status "Restarting production service..."
             if ensure_prod_binary; then
-                launchctl load "$PLIST_PATH" 2>/dev/null || true
+                launchd_start "$PLIST_NAME"
                 print_success "Production service restarted"
             else
                 print_error "Cannot restart: no valid binary. Run: tron deploy"
@@ -746,7 +746,7 @@ cmd_deploy() {
 
     # Stop service
     print_status "Stopping service..."
-    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    launchd_stop "$PLIST_NAME"
     sleep 1
 
     # Create app bundle with new binary, sign with Developer ID (if available),
@@ -802,7 +802,7 @@ SENTINEL
 
     # Start service
     print_status "Starting service..."
-    launchctl load "$PLIST_PATH"
+    launchd_start "$PLIST_NAME"
     sleep 3
 
     if service_is_running; then
@@ -832,7 +832,7 @@ SENTINEL
             create_app_bundle "$INSTALLED_BUNDLE" "$DEPLOY_DIR/tron.bak"
             codesign_bundle "$INSTALLED_BUNDLE"
             rm -f "$DEPLOY_DIR/tron.bak"
-            launchctl load "$PLIST_PATH"
+            launchd_start "$PLIST_NAME"
             sleep 2
             if service_is_running; then
                 print_success "Rolled back to previous version"
@@ -919,7 +919,7 @@ cmd_install() {
 
     # Start service
     print_status "Starting service..."
-    launchctl load "$PLIST_PATH"
+    launchd_start "$PLIST_NAME"
     sleep 2
 
     if service_is_running; then
@@ -957,7 +957,7 @@ cmd_uninstall() {
 
     if service_is_running; then
         print_status "Stopping service..."
-        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        launchd_stop "$PLIST_NAME"
         sleep 1
     fi
 
@@ -1335,6 +1335,8 @@ create_auto_deploy_plist() {
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.cargo/bin</string>
         <key>TRON_DATA_DIR</key>
         <string>$TRON_HOME</string>
+        <key>DEVELOPER_DIR</key>
+        <string>/Applications/Xcode.app/Contents/Developer</string>
     </dict>
 
     <key>StandardOutPath</key>
@@ -1354,13 +1356,13 @@ auto_deploy_install() {
 
     # Unload existing job before overwriting plist
     if [ -f "$AUTO_DEPLOY_PLIST_PATH" ]; then
-        launchctl unload "$AUTO_DEPLOY_PLIST_PATH" 2>/dev/null || true
+        launchd_stop "$AUTO_DEPLOY_PLIST_NAME"
     fi
 
     create_auto_deploy_plist
     print_success "Created: $AUTO_DEPLOY_PLIST_PATH"
 
-    launchctl load "$AUTO_DEPLOY_PLIST_PATH"
+    launchd_start "$AUTO_DEPLOY_PLIST_NAME"
     print_success "Loaded launchd job (polling every 60s)"
 
     rm -f "$AUTO_DEPLOY_PAUSE_FILE"
@@ -1375,7 +1377,7 @@ auto_deploy_uninstall() {
     print_header "Uninstalling Auto-Deploy Watcher"
 
     if [ -f "$AUTO_DEPLOY_PLIST_PATH" ]; then
-        launchctl unload "$AUTO_DEPLOY_PLIST_PATH" 2>/dev/null || true
+        launchd_stop "$AUTO_DEPLOY_PLIST_NAME"
         rm -f "$AUTO_DEPLOY_PLIST_PATH"
         print_success "Removed launchd job"
     else
@@ -1393,7 +1395,7 @@ auto_deploy_status() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
     if [ -f "$AUTO_DEPLOY_PLIST_PATH" ]; then
-        if launchctl list 2>/dev/null | grep -q "$AUTO_DEPLOY_PLIST_NAME"; then
+        if launchd_is_loaded "$AUTO_DEPLOY_PLIST_NAME"; then
             print_success "Launchd job: ${GREEN}LOADED${NC}"
         else
             print_warning "Launchd job: ${YELLOW}NOT LOADED${NC} (plist exists)"
