@@ -41,7 +41,7 @@ struct HooksSettingsPage: View {
     private func builtinHookRow(meta: (id: String, label: String, description: String, event: String)) -> some View {
         let isEnabled = settingsState.builtinHooks.first(where: { $0.id == meta.id })?.enabled ?? true
 
-        return SettingsRow(icon: "bolt.fill", label: meta.label) {
+        return SettingsRow(icon: "arrow.uturn.up.circle.fill", label: meta.label) {
             Toggle("", isOn: Binding(
                 get: { isEnabled },
                 set: { newValue in

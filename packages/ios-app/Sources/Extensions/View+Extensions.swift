@@ -124,7 +124,15 @@ extension View {
 
 private struct AdaptivePresentationModifier: ViewModifier {
     let detents: Set<PresentationDetent>
-    @State private var selectedDetent: PresentationDetent = .medium
+    @State private var selectedDetent: PresentationDetent
+
+    init(detents: Set<PresentationDetent>) {
+        self.detents = detents
+        // Initialize to the smallest detent so the selection binding stays in sync.
+        // When only [.large] is provided, this ensures the initial state matches
+        // what SwiftUI will present, avoiding a stale .medium default.
+        _selectedDetent = State(initialValue: detents.contains(.medium) ? .medium : .large)
+    }
     @Environment(\.colorScheme) private var colorScheme
 
     private var needsOpaqueBackground: Bool {

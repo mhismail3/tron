@@ -72,6 +72,8 @@ struct SettingsView: View {
         #if DEBUG || BETA
         .sheet(isPresented: $showLogViewer) {
             LogViewer()
+                .adaptivePresentationDetents([.large])
+                .presentationDragIndicator(.hidden)
         }
         #endif
         .sheet(item: $activePage) { page in
@@ -138,7 +140,7 @@ struct SettingsView: View {
                 return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
             }())
         }
-        .adaptivePresentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
     }
@@ -177,7 +179,7 @@ struct SettingsView: View {
 
             SettingsRowDivider()
 
-            categoryRow(icon: "bolt.horizontal", label: "Hooks", subtitle: "LLM lifecycle hooks") {
+            categoryRow(icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill", label: "Hooks", subtitle: "LLM lifecycle hooks") {
                 activePage = .hooks
             }
 
