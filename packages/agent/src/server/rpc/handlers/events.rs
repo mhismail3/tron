@@ -1,5 +1,4 @@
 //! Events handlers: getHistory, getSince, subscribe, append.
-// Test
 
 use async_trait::async_trait;
 use serde_json::Value;
