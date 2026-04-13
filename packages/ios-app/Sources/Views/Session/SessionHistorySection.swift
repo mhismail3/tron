@@ -152,7 +152,7 @@ struct SessionHistorySection: View {
                     // Role icon
                     if !muted {
                         if turn.turnNumber == 0 {
-                            Image(systemName: "gearshape.fill")
+                            Image(systemName: "rays")
                                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronTextMuted)
                         } else {
@@ -163,7 +163,7 @@ struct SessionHistorySection: View {
                     }
 
                     // Message preview or fallback
-                    Text(turn.displayPreview ?? "Agent activity")
+                    Text(turn.displayPreview ?? "Pre-session activity")
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(muted ? .tronTextMuted : .tronTextPrimary)
                         .lineLimit(1)
@@ -189,7 +189,7 @@ struct SessionHistorySection: View {
                         }
 
                         HStack(spacing: 3) {
-                            Image(systemName: "number")
+                            Image(systemName: "text.word.spacing")
                                 .font(TronTypography.sans(size: TronTypography.sizeXS))
                             Text(TokenFormatter.format(data.totalTokens))
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
