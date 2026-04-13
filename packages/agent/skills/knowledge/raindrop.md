@@ -41,24 +41,55 @@ If not found, tell the user:
 # Resolve collection ID (0 = Unsorted, or look up by name)
 curl -s -H "Authorization: Bearer $TOKEN" \
   "https://api.raindrop.io/rest/v1/raindrops/$COLLECTION_ID?perpage=25&sort=-created" \
-  | jq '.items[] | select(.tags | map(startswith("wiki-")) | any | not) | {id: ._id, title: .title, url: .link, tags: .tags, created: .created}'
+  | jq '.items[] | select(.tags | map(startswith("wiki-")) | any | not) | {id: ._id, title: .title, url: .link, tags: .tags, note: .note, created: .created}'
 ```
 
-Fetches the 25 most recent bookmarks from the selected collection not yet processed. Any bookmark with a `wiki-` prefixed tag is skipped — this covers `wiki-ingested`, `wiki-error`, and any future status tags.
+Fetches the 25 most recent bookmarks from the selected collection not yet processed. Any bookmark with a `wiki-` prefixed tag is skipped — this covers `wiki-ingested`, `wiki-error`, and any future status tags. The `note` field is included — it may contain user guidance on what to focus on or why the link was saved.
 
 ### Step 2: Process each bookmark (max 10 per run)
 
 For each unprocessed bookmark:
 
-1. **Fetch content:** WebFetch the bookmark URL
+1. **Check the `note` field first.** The user may have written a note on the bookmark in Raindrop to indicate what they found interesting or what to focus on. If a note exists, it guides the entire extraction — treat it as the user's intent for this link.
 
-2. **Deep extraction:** Follow `ingest.md` Extract mode:
+2. **Fetch content.** Use the appropriate method per `ingest.md` Extract mode (WebFetch for articles, `tron-twitter fetch-url` for X/Twitter links, etc.)
+
+3. **Decide the ingestion path** based on what you got back:
+
+   **Path A — Extractable content exists:** Follow `ingest.md` Extract mode fully. If the bookmark has a note, use it to guide what to emphasize in the source note and which topics to create/update. Without a note, extract normally.
+
+   **Path B — No extractable content** (landing page, SaaS homepage, login wall, empty/script-only response): Save as a **reference source note**. This is the default for links with no readable content — don't treat it as an error.
+
+   Reference source note format:
+   ```markdown
+   ---
+   type: source
+   url: "https://..."
+   source_type: reference
+   tags: [from-raindrop-tags]
+   raindrop_id: 12345678
+   raindrop_collection: "Collection Name"
+   created: "YYYY-MM-DD"
+   updated: "YYYY-MM-DD"
+   ---
+
+   # {Title from Raindrop}
+
+   ## What This Is
+
+   {Brief description from the page title, domain, and any available metadata.
+   If the bookmark has a note, incorporate the user's context here.}
+   ```
+
+   Reference notes are still tagged `wiki-ingested` in Raindrop (not `wiki-error`) — the link was successfully processed, it just didn't have article content to extract.
+
+4. **Common to both paths:**
    - Create source note in WIKI_SOURCES with `raindrop_id` and `raindrop_collection` in frontmatter
    - Transfer Raindrop tags to note's `tags` field
-   - Create/update topic notes in WIKI_TOPICS for key concepts
+   - Create/update topic notes in WIKI_TOPICS for key concepts (Path A) or relevant existing topics (Path B, if the note provides enough context)
    - Cross-link selectively with existing topic notes
 
-3. **Tag in Raindrop:** Mark the bookmark based on outcome. Preserve existing tags.
+5. **Tag in Raindrop:** Mark the bookmark based on outcome. Preserve existing tags.
 
 **On success** — add `wiki-ingested`:
 
@@ -75,23 +106,26 @@ curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
   "https://api.raindrop.io/rest/v1/raindrop/<id>"
 ```
 
-**On error** (WebFetch failure, JS-rendered page, login wall, etc.) — add `wiki-error` and write a note in the bookmark:
+**On error** (network failure, HTTP 5xx, PDF extraction crash, etc.) — add `wiki-error` and append the reason to the bookmark's note (preserve the user's existing note):
 
 ```bash
-# Merge tags: existing + wiki-error
+# Merge tags: existing + wiki-error. Append error to note, preserving user's original.
 curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"tags": <merged_tags_with_wiki_error>, "note": "<error reason>"}' \
+  -d '{"tags": <merged_tags_with_wiki_error>, "note": "<existing note>\n\nwiki-error: <reason>"}' \
   "https://api.raindrop.io/rest/v1/raindrop/<id>"
 ```
 
-The `note` field should contain a concise error description, e.g.:
-- `"wiki-error: JS-rendered page — WebFetch returned empty/script-only content"`
-- `"wiki-error: Login required — page returned 403 or login redirect"`
+Error examples:
+- `"wiki-error: Network failure — connection refused"`
 - `"wiki-error: PDF extraction failed — <details>"`
 - `"wiki-error: Timeout — page did not respond within fetch window"`
 
-This persists the failure reason in Raindrop itself so it's visible when browsing bookmarks and queryable for later retry or tooling improvements. A stub source note should still be created in WIKI_SOURCES with `ingest_status: "blocked"` and the `blocker` field describing the error — see `ingest.md`.
+**Not errors** — these are handled as reference notes (Path B in Step 2):
+- Landing pages, SaaS homepages, login walls, JS-rendered pages with no content
+- These get `wiki-ingested`, not `wiki-error`
+
+A stub source note should still be created in WIKI_SOURCES for true errors with `ingest_status: "blocked"` and the `blocker` field describing the error — see `ingest.md`.
 
 ### Step 3: Update state
 
@@ -113,7 +147,8 @@ Update WIKI_INDEX, append to WIKI_LOG:
 
 ```
 2026-04-07T16:00:00Z | raindrop | source | 2026-04-07-author-title | Raindrop ID: 12345678 — full extraction
-2026-04-07T16:00:00Z | raindrop | source | 2026-04-07-author-title | Raindrop ID: 12345679 — BLOCKED: JS-rendered page
+2026-04-07T16:00:00Z | raindrop | source | 2026-04-07-paperspace | Raindrop ID: 12345679 — reference (no extractable content)
+2026-04-07T16:00:00Z | raindrop | source | 2026-04-07-author-title | Raindrop ID: 12345680 — BLOCKED: network failure
 2026-04-07T16:00:00Z | raindrop | topic | concept-slug | From raindrop ingest
 ```
 
@@ -124,10 +159,11 @@ cd WIKI_ROOT && git add -A && git commit -m "knowledge: raindrop — processed N
 
 ### Step 5: Report
 
-1. Bookmarks successfully ingested (count + list with source note paths)
-2. Topic notes created/updated (list with what was added)
-3. Bookmarks that errored (count + list with bookmark title, URL, and error reason)
-4. Bookmarks skipped (already tagged with any `wiki-` prefix)
+1. Bookmarks fully ingested (count + list with source note paths)
+2. Bookmarks saved as references (count + list — no extractable content)
+3. Topic notes created/updated (list with what was added)
+4. Bookmarks that errored (count + list with bookmark title, URL, and error reason)
+5. Bookmarks skipped (already tagged with any `wiki-` prefix)
 
 ---
 
@@ -164,7 +200,8 @@ Collection `0` = Unsorted. Use `/rest/v1/collections` to resolve collection name
 |---|---|
 | 401 Unauthorized | Token expired/invalid. Ask user to regenerate and re-store in vault. |
 | 429 Rate Limited | Raindrop limits ~120 req/min. The 10-bookmark cap keeps well under this. |
-| WebFetch failure (JS-rendered, login wall, timeout, etc.) | Tag bookmark `wiki-error` with reason in `note` field. Create stub source note with `ingest_status: "blocked"`. Log to WIKI_LOG. Continue to next bookmark. |
+| No extractable content (landing page, SaaS homepage, login wall, JS-only) | Save as reference source note (Path B). Tag `wiki-ingested`. Not an error. |
+| True fetch failure (network error, HTTP 5xx, timeout, PDF crash) | Tag bookmark `wiki-error` with reason appended to note. Create stub source note with `ingest_status: "blocked"`. Log to WIKI_LOG. Continue to next bookmark. |
 | Network failure | Stop the run, preserve state. Next run picks up. |
 | Vault token missing | Write error to output file and exit. Don't ask for input (cron runs unattended). |
 
