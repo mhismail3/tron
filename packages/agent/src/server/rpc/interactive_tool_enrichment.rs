@@ -50,6 +50,7 @@ use serde_json::{Map, Value, json};
 
 const CONFIRMATION_MARKER: &str = "[Confirmation response]";
 const ANSWERS_MARKER: &str = "[Answers to your questions]";
+const SUBAGENT_RESULTS_MARKER: &str = "# Completed Sub-Agent Results";
 
 /// Enrich GetConfirmation and AskUserQuestion `tool.call` events in place.
 ///
@@ -115,6 +116,52 @@ pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
         }
 
         inject_into_payload(&mut events[call_idx], fields);
+    }
+
+    // Second pass: back-fill `message.user` events that contain delivered
+    // subagent results. The live path tags these with `messageKind` via
+    // `PromptRequest.message_metadata`, but historical events from before
+    // that change need back-filling so iOS renders a chip.
+    enrich_subagent_result_messages(events);
+}
+
+/// Back-fill `messageKind` into `message.user` events whose content starts
+/// with the subagent results marker. Skips events that already have a
+/// `messageKind` (tagged on the live path) and events where `content` is an
+/// array (images/attachments) rather than a string.
+fn enrich_subagent_result_messages(events: &mut [Value]) {
+    for event in events.iter_mut() {
+        if event.get("type").and_then(Value::as_str) != Some("message.user") {
+            continue;
+        }
+
+        let payload = match event.get("payload") {
+            Some(p) => p,
+            None => continue,
+        };
+
+        // Already tagged on the live path — skip.
+        if payload.get("messageKind").is_some() {
+            continue;
+        }
+
+        // Only match string content (not array content blocks from images).
+        let content = match payload.get("content").and_then(Value::as_str) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        if !content.starts_with(SUBAGENT_RESULTS_MARKER) {
+            continue;
+        }
+
+        // Count subagent sections: each starts with "## [" (e.g. "## [+] Sub-Agent:").
+        let count = content.matches("## [").count().max(1);
+
+        let mut fields = Map::new();
+        let _ = fields.insert("messageKind".into(), json!("subagent_results_delivered"));
+        let _ = fields.insert("subagentCount".into(), json!(count));
+        inject_into_payload(event, fields);
     }
 }
 
@@ -756,5 +803,123 @@ mod tests {
         let user_payload = &events[1]["payload"];
         assert_eq!(user_payload["messageKind"], "answered_questions");
         assert_eq!(user_payload["answerCount"], 0);
+    }
+
+    // ── Subagent results back-fill ──────────────────────────────────────
+
+    fn make_subagent_results_content(agents: &[(&str, bool)]) -> String {
+        let mut s = String::from("# Completed Sub-Agent Results\n\n\
+            The following sub-agent(s) have completed since your last turn. \
+            Review their results and incorporate them into your response.\n\n");
+        for (id, success) in agents {
+            let icon = if *success { "+" } else { "x" };
+            s.push_str(&format!(
+                "## [{icon}] Sub-Agent: `{id}`\n\n\
+                 **Task**: test task\n\
+                 **Status**: {}\n\
+                 **Turns**: 2\n\
+                 **Duration**: 5.0s\n\n\
+                 **Output**:\n```\ndone\n```\n\n---\n\n",
+                if *success { "Completed" } else { "Failed" }
+            ));
+        }
+        s
+    }
+
+    #[test]
+    fn subagent_results_message_gets_backfilled() {
+        let content = make_subagent_results_content(&[("sub-1", true)]);
+        let mut events = vec![make_user_msg(&content)];
+        enrich_interactive_tool_statuses(&mut events);
+        let p = &events[0]["payload"];
+        assert_eq!(p["messageKind"], "subagent_results_delivered");
+        assert_eq!(p["subagentCount"], 1);
+    }
+
+    #[test]
+    fn subagent_results_multiple_agents_correct_count() {
+        let content = make_subagent_results_content(&[
+            ("sub-1", true),
+            ("sub-2", true),
+            ("sub-3", true),
+        ]);
+        let mut events = vec![make_user_msg(&content)];
+        enrich_interactive_tool_statuses(&mut events);
+        assert_eq!(events[0]["payload"]["subagentCount"], 3);
+    }
+
+    #[test]
+    fn subagent_results_mixed_success_failure_counted() {
+        let content = make_subagent_results_content(&[
+            ("sub-1", true),
+            ("sub-2", false),
+        ]);
+        let mut events = vec![make_user_msg(&content)];
+        enrich_interactive_tool_statuses(&mut events);
+        assert_eq!(events[0]["payload"]["subagentCount"], 2);
+    }
+
+    #[test]
+    fn subagent_results_already_tagged_not_overwritten() {
+        let content = make_subagent_results_content(&[("sub-1", true)]);
+        let mut events = vec![json!({
+            "type": "message.user",
+            "payload": {
+                "content": content,
+                "messageKind": "subagent_results_delivered",
+                "subagentCount": 42,
+            }
+        })];
+        enrich_interactive_tool_statuses(&mut events);
+        // Should not overwrite the existing count
+        assert_eq!(events[0]["payload"]["subagentCount"], 42);
+    }
+
+    #[test]
+    fn subagent_results_array_content_skipped() {
+        let content = make_subagent_results_content(&[("sub-1", true)]);
+        let mut events = vec![json!({
+            "type": "message.user",
+            "payload": {
+                "content": [{"type": "text", "text": content}]
+            }
+        })];
+        enrich_interactive_tool_statuses(&mut events);
+        assert!(events[0]["payload"].get("messageKind").is_none());
+    }
+
+    #[test]
+    fn subagent_results_regular_message_untouched() {
+        let mut events = vec![make_user_msg("Hello, how are you?")];
+        enrich_interactive_tool_statuses(&mut events);
+        assert!(events[0]["payload"].get("messageKind").is_none());
+    }
+
+    #[test]
+    fn subagent_results_partial_marker_no_match() {
+        let mut events = vec![make_user_msg(
+            "The user mentioned # Completed Sub-Agent Results in their message",
+        )];
+        enrich_interactive_tool_statuses(&mut events);
+        assert!(events[0]["payload"].get("messageKind").is_none());
+    }
+
+    #[test]
+    fn subagent_results_empty_content_no_match() {
+        let mut events = vec![make_user_msg("")];
+        enrich_interactive_tool_statuses(&mut events);
+        assert!(events[0]["payload"].get("messageKind").is_none());
+    }
+
+    #[test]
+    fn subagent_results_no_sections_defaults_to_one() {
+        // Marker present but no "## [" section headers (malformed content)
+        let mut events = vec![make_user_msg(
+            "# Completed Sub-Agent Results\n\nSome malformed content without section headers.",
+        )];
+        enrich_interactive_tool_statuses(&mut events);
+        let p = &events[0]["payload"];
+        assert_eq!(p["messageKind"], "subagent_results_delivered");
+        assert_eq!(p["subagentCount"], 1);
     }
 }

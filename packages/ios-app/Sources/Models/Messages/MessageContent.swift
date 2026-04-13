@@ -21,6 +21,7 @@ enum MessageContent: Equatable {
     case getConfirmation(GetConfirmationToolData)
     case answeredQuestions(questionCount: Int)
     case confirmedAction(approved: Bool)
+    case subagentResultsDelivered(subagentCount: Int)
     case subagent(SubagentToolData)
 
     // MARK: - Convenience Factories (forward to systemEvent)
@@ -126,6 +127,10 @@ enum MessageContent: Equatable {
             return "Answered \(count) \(count == 1 ? "question" : "questions")"
         case .confirmedAction(let approved):
             return approved ? "Approved" : "Denied"
+        case .subagentResultsDelivered(let count):
+            return count == 1
+                ? "Sent sub-agent result"
+                : "Sent \(count) sub-agent results"
         case .subagent(let data):
             switch data.status {
             case .running:

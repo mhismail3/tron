@@ -81,6 +81,12 @@ impl MethodHandler for DeliverSubagentResultsHandler {
             })
             .await?;
 
+        // Tag the message.user event so iOS renders a chip instead of raw markdown.
+        let metadata = serde_json::json!({
+            "messageKind": "subagent_results_delivered",
+            "subagentCount": count,
+        });
+
         // Try to start a prompt run; if session is busy or agent deps unavailable, queue
         let run_id = uuid::Uuid::now_v7().to_string();
         if let Some(deps) = ctx.agent_deps.as_ref() {
@@ -98,7 +104,7 @@ impl MethodHandler for DeliverSubagentResultsHandler {
                             reasoning_level: None,
                             images: None,
                             attachments: None,
-                            message_metadata: None,
+                            message_metadata: Some(metadata),
                         },
                     );
                     return Ok(serde_json::json!({
@@ -116,10 +122,11 @@ impl MethodHandler for DeliverSubagentResultsHandler {
         let event_store = ctx.event_store.clone();
         let sid_for_queue = session_id.clone();
         let _ = ctx.run_blocking("agent.deliverSubagentResults.queue", move || {
-            crate::server::rpc::prompt_queue::PromptQueueService::enqueue(
+            crate::server::rpc::prompt_queue::PromptQueueService::enqueue_with_metadata(
                 &event_store,
                 &sid_for_queue,
                 &prompt,
+                Some(metadata),
             )
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),

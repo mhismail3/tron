@@ -45,6 +45,12 @@ enum MessageHandlers {
                 content: .confirmedAction(approved: approved),
                 timestamp: timestamp
             )
+        case "subagent_results_delivered":
+            return ChatMessage(
+                role: .user,
+                content: .subagentResultsDelivered(subagentCount: max(1, parsed.subagentCount ?? 1)),
+                timestamp: timestamp
+            )
         default:
             break
         }

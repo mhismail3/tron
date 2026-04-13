@@ -161,6 +161,21 @@ extension ChatViewModel {
         }
         subagentState.showDetailSheet = false
 
+        // Remove the "results ready" notification — the chip replaces it.
+        removeFromMessages { msg in
+            if case .systemEvent(.subagentResultsReady) = msg.content { return true }
+            return false
+        }
+
+        // Add chip to chat immediately (matches AskUserQuestionCoordinator pattern).
+        // On reconstruction the server-tagged message.user event produces the same chip.
+        let chip = ChatMessage(
+            role: .user,
+            content: .subagentResultsDelivered(subagentCount: pending.count)
+        )
+        appendToMessages(chip)
+        currentTurn += 1
+
         Task {
             do {
                 let response = try await rpcClient.agent.deliverSubagentResults()

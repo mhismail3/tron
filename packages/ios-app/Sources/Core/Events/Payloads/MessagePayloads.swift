@@ -32,6 +32,8 @@ struct UserMessagePayload {
     let confirmationNote: String?
     /// Number of questions answered for `messageKind == "answered_questions"`.
     let answerCount: Int?
+    /// Number of subagent results delivered for `messageKind == "subagent_results_delivered"`.
+    let subagentCount: Int?
 
     init?(from payload: [String: AnyCodable]) {
         var extractedAttachments: [Attachment] = []
@@ -150,6 +152,7 @@ struct UserMessagePayload {
         self.confirmationDecision = payload.string("confirmationDecision")
         self.confirmationNote = payload.string("confirmationNote")
         self.answerCount = payload.int("answerCount")
+        self.subagentCount = payload.int("subagentCount")
     }
 }
 
