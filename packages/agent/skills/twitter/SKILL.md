@@ -1,7 +1,7 @@
 ---
 name: "Twitter"
 description: "Agentic X/Twitter research — multi-round search, thread analysis, synthesis — plus engagement tools"
-version: "3.0.0"
+version: "3.1.0"
 tags: [twitter, social-media, research, x]
 subagent: ask
 ---
@@ -10,14 +10,27 @@ subagent: ask
 
 You are an autonomous research analyst specializing in X/Twitter discourse. For any research question: decompose into targeted queries, execute multi-round search, follow high-signal threads, deep-dive linked content, and synthesize findings thematically with sourced tweet citations.
 
+## Reliability Tiers
+
+Not all commands are equally reliable. Other skills referencing this skill should use the robust tier whenever possible.
+
+| Tier | Commands | Auth | Reliability |
+|------|----------|------|-------------|
+| **Robust** | `fetch-url` | None — uses public APIs (fxtwitter, syndication) | Very high. No auth to expire, no cookies to rotate. Works for any public tweet. |
+| **Shaky** | `search`, `trending`, `timeline`, `user`, `tweet`, `notifications`, `dms`, `dm-history`, `check-mentions`, `check-dms`, all write commands | `TRON_TWITTER_COOKIES` — manually harvested browser cookies | Low. twikit library has known auth bugs, cookies expire (hours to months), X actively breaks scraping libraries every 2-4 weeks. Expect periodic failures. |
+
+**Rule of thumb**: If you have a tweet URL and just need to read it, always use `fetch-url`. Only use cookie-dependent commands when you need search, timelines, engagement, or DMs — and be prepared for auth failures.
+
 ## Setup
 
 ### Preflight
 
-Run at the start of any twitter session:
+**For `fetch-url` only** (reading a specific tweet link): no setup needed. Skip straight to the command.
+
+**For cookie-dependent commands** (search, timeline, engagement, DMs): run at the start of the session:
 
 ```bash
-# 1. Is tron-twitter installed (v0.6.0+ required — stateless env-driven CLI)?
+# 1. Is tron-twitter installed (v0.7.0+ required)?
 which tron-twitter || brew install mhismail3/tools/tron-twitter
 
 # 2. Is it up to date?
@@ -128,20 +141,33 @@ TRON_TWITTER_STATE=$(~/.tron/skills/vault/scripts/vault.sh get twitter-state --f
 
 Match user intent to the correct reference file. **Read the file** before executing the workflow.
 
-| User wants... | Read file |
+| User wants... | Action |
 |---|---|
-| Deep research on a topic, sentiment analysis, emerging trends | `research.md` |
-| Build precise search queries, search operators | `search-operators.md` |
-| Synthesize findings into a report, citation format | `report.md` |
-| Post, reply, like, retweet, follow, DM, check mentions | `engagement.md` |
+| **Read a specific X.com / Twitter link** | `tron-twitter fetch-url URL` — no auth, no preflight, no sub-file needed. See CLI Quick Reference below. |
+| Deep research on a topic, sentiment analysis, emerging trends | Read `research.md` |
+| Build precise search queries, search operators | Read `search-operators.md` |
+| Synthesize findings into a report, citation format | Read `report.md` |
+| Post, reply, like, retweet, follow, DM, check mentions | Read `engagement.md` |
 
 For **quick lookups** (single search, scan results, answer directly), the CLI reference below is sufficient — no sub-file needed.
 
 ## CLI Quick Reference
 
-All commands require `TRON_TWITTER_COOKIES` inline. Only `check-mentions` / `check-dms` additionally require `TRON_TWITTER_STATE`.
+### Zero-Auth (Robust Tier)
 
-### Read Operations
+These commands need **no cookies and no preflight**. Use them whenever possible.
+
+| Command | Usage |
+|---------|-------|
+| Fetch tweet by URL | `tron-twitter fetch-url "https://x.com/USER/status/ID"` |
+
+`fetch-url` accepts `x.com` and `twitter.com` URLs (including `mobile.`, `www.`, query params). Returns full tweet text (including article content), author info, and engagement metrics. For tweets with articles, the full article body is included in the `text` field.
+
+### Cookie-Dependent (Shaky Tier)
+
+All commands below require `TRON_TWITTER_COOKIES` inline. Only `check-mentions` / `check-dms` additionally require `TRON_TWITTER_STATE`. These commands may fail if cookies have expired or twikit has issues — see Reliability Tiers.
+
+#### Read Operations
 
 | Command | Usage |
 |---------|-------|
@@ -149,7 +175,7 @@ All commands require `TRON_TWITTER_COOKIES` inline. Only `check-mentions` / `che
 | Trending | `tron-twitter trending --category trending --count 20` |
 | Timeline | `tron-twitter timeline USERNAME --count 20` |
 | Profile | `tron-twitter user USERNAME` |
-| Single tweet | `tron-twitter tweet TWEET_ID` |
+| Single tweet (by ID) | `tron-twitter tweet TWEET_ID` |
 | Notifications | `tron-twitter notifications [--type All\|Verified\|Mentions] [--count 20]` |
 | DM inbox | `tron-twitter dms` |
 | DM history | `tron-twitter dm-history USERNAME --count 20` |
@@ -232,6 +258,8 @@ For tracking a specific user's output, use `tron-twitter timeline USERNAME --cou
 
 ## Gotchas
 
+- **Prefer `fetch-url` for reading links.** It uses public APIs, needs no cookies, and is the most reliable path. Only use cookie-dependent commands when you genuinely need search, engagement, or DMs.
+- **Cookie-dependent commands are inherently fragile.** The twikit library has known auth bugs, X actively breaks scraping libraries every 2-4 weeks, and cookies expire unpredictably. If a cookie-dependent command fails, inform the user — don't retry in a loop.
 - **Inline env overrides only.** Use `TRON_TWITTER_COOKIES=... tron-twitter ...` — never `export TRON_TWITTER_COOKIES=...`. Exporting leaks the cookies into any sibling tool you run in the same shell, defeating the whole point of sourcing from the vault per-call.
 - **State envelope write-back.** Non-peek `check-mentions` / `check-dms` mutate the bookmark in the returned `state` field. If you don't push that updated `state` back to `twitter-state` in the vault, the next run re-materializes the old bookmark and re-reports the same items as "new".
 - **Peek vs non-peek.** `--peek` reads state but does not advance it. Don't interleave a peek and a non-peek call and expect deterministic bookmark behavior — pick one mode per workflow.
@@ -239,3 +267,4 @@ For tracking a specific user's output, use `tron-twitter timeline USERNAME --cou
 - **No programmatic login.** Cold-start cookies must come from a real browser session the user is already signed into. Automated login via `agent-browser` almost always trips bot detection. Ask the user to do the browser step and paste the values.
 - **The x.com / twitter.com domain switch** can put cookies under either hostname in DevTools. Check both `https://x.com` and `https://twitter.com` in the Cookies panel if the first is empty.
 - **Never put cookie values on the command line.** Always stage them to a `mktemp` file with `chmod 600` and use `vault.sh set --field-file`. `--field key=value` would leak the secret into process args and shell history.
+- **`fetch-url` only works for public tweets.** Tweets from private/protected accounts require cookie auth via the `tweet` command.

@@ -41,10 +41,10 @@ If not found, tell the user:
 # Resolve collection ID (0 = Unsorted, or look up by name)
 curl -s -H "Authorization: Bearer $TOKEN" \
   "https://api.raindrop.io/rest/v1/raindrops/$COLLECTION_ID?perpage=25&sort=-created" \
-  | jq '.items[] | select((.tags | index("wiki-ingested") | not) and (.tags | index("wiki-error") | not)) | {id: ._id, title: .title, url: .link, tags: .tags, created: .created}'
+  | jq '.items[] | select(.tags | map(startswith("wiki-")) | any | not) | {id: ._id, title: .title, url: .link, tags: .tags, created: .created}'
 ```
 
-Fetches the 25 most recent bookmarks from the selected collection not yet processed (no `wiki-ingested` or `wiki-error` tag).
+Fetches the 25 most recent bookmarks from the selected collection not yet processed. Any bookmark with a `wiki-` prefixed tag is skipped — this covers `wiki-ingested`, `wiki-error`, and any future status tags.
 
 ### Step 2: Process each bookmark (max 10 per run)
 
@@ -105,7 +105,7 @@ Write to `AUTOMATIONS/raindrop-ingest/state/{collection-slug}-last_seen.json`:
 }
 ```
 
-This is an **optimization** — it lets subsequent runs skip pages already seen. The `wiki-ingested` tag in Raindrop is the true idempotency guard. If this file is lost, nothing gets re-ingested.
+This is an **optimization** — it lets subsequent runs skip pages already seen. The `wiki-` prefixed tags in Raindrop are the true idempotency guard. If this file is lost, nothing gets re-ingested.
 
 ### Step 4: Epilogue
 
@@ -127,7 +127,7 @@ cd WIKI_ROOT && git add -A && git commit -m "knowledge: raindrop — processed N
 1. Bookmarks successfully ingested (count + list with source note paths)
 2. Topic notes created/updated (list with what was added)
 3. Bookmarks that errored (count + list with bookmark title, URL, and error reason)
-4. Bookmarks skipped (already tagged `wiki-ingested` or `wiki-error`)
+4. Bookmarks skipped (already tagged with any `wiki-` prefix)
 
 ---
 
@@ -170,7 +170,7 @@ Collection `0` = Unsorted. Use `/rest/v1/collections` to resolve collection name
 
 ### Retrying errors
 
-Bookmarks tagged `wiki-error` are skipped in normal runs. To retry them:
+Any bookmark with a `wiki-` prefixed tag is skipped in normal runs. To retry an errored bookmark:
 1. Remove the `wiki-error` tag from the bookmark in Raindrop (manually or via API)
 2. The next run will pick it up as unprocessed
 3. If the underlying issue persists (e.g., site still requires JS), it will be re-tagged `wiki-error`
