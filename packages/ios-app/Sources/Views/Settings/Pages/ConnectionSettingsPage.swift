@@ -15,7 +15,7 @@ struct ConnectionSettingsPage: View {
     }
 
     var body: some View {
-        SettingsPageContainer(title: "Connection") {
+        SettingsPageContainer(title: "Server") {
             // Presets
             if !settingsState.connectionPresets.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {

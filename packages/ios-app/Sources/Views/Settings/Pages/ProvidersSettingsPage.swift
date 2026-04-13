@@ -48,7 +48,7 @@ struct ProvidersSettingsPage: View {
     private var rpcClient: RPCClient { dependencies.rpcClient }
 
     var body: some View {
-        SettingsPageContainer(title: "Providers") {
+        SettingsPageContainer(title: "LLM Providers") {
             providersContent
         }
         .sheet(item: $oauthProvider) { provider in
@@ -66,9 +66,6 @@ struct ProvidersSettingsPage: View {
 
     @ViewBuilder
     private var providersContent: some View {
-                // LLM Providers section
-                SettingsSectionHeader(title: "LLM Providers")
-
                 ForEach(ProviderInfo.llmProviders) { provider in
                     ProviderCard(
                         provider: provider,
@@ -220,7 +217,8 @@ private struct ProviderCard: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .foregroundStyle(provider.color)
-                    .frame(width: 18, height: 18)
+                    .frame(maxWidth: 22, maxHeight: 22)
+                    .frame(width: 26, height: 26)
                 Text(provider.displayName)
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(provider.color)

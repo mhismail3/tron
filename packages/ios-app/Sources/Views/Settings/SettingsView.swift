@@ -33,7 +33,7 @@ struct SettingsView: View {
 
     /// Settings sub-pages, driven by a single `.sheet(item:)`.
     enum SettingsPage: String, Identifiable {
-        case connection, session, context, providers, appearance, mcpServers, hooks
+        case server, session, agent, providers, app, mcpServers, hooks
         var id: String { rawValue }
     }
 
@@ -65,7 +65,6 @@ struct SettingsView: View {
             #endif
         } content: {
             categoriesCard
-            notificationsCard
             dangerZoneCard
             footerView
         }
@@ -79,7 +78,7 @@ struct SettingsView: View {
         .sheet(item: $activePage) { page in
             Group {
                 switch page {
-                case .connection:
+                case .server:
                     ConnectionSettingsPage(
                         serverHost: $serverHost,
                         serverPort: $serverPort,
@@ -95,17 +94,19 @@ struct SettingsView: View {
                 case .session:
                     SessionSettingsPage(
                         settingsState: settingsState,
-                        confirmArchive: $confirmArchive,
                         selectedModelDisplayName: selectedModelDisplayName,
                         updateServerSetting: updateServerSetting
                     )
-                case .context:
+                case .agent:
                     ContextSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
                 case .providers:
                     ProvidersSettingsPage()
-                case .appearance:
+                case .app:
                     if #available(iOS 26.0, *) {
-                        AppearanceSettingsPage()
+                        AppearanceSettingsPage(
+                            confirmArchive: $confirmArchive,
+                            autoMarkRead: $autoMarkRead
+                        )
                     }
                 case .mcpServers:
                     MCPServersPage()
@@ -149,45 +150,45 @@ struct SettingsView: View {
 
     private var categoriesCard: some View {
         SettingsCard {
-            categoryRow(icon: "network", label: "Connection", subtitle: "Server, accounts") {
-                activePage = .connection
+            categoryRow(icon: "network", label: "Server", subtitle: "Host, port, connection presets") {
+                activePage = .server
             }
 
             SettingsRowDivider()
 
-            categoryRow(icon: "key.horizontal", label: "Providers", subtitle: "API keys, OAuth tokens") {
+            categoryRow(icon: "key.horizontal", label: "LLM Providers", subtitle: "Login with OAuth and configure API keys") {
                 activePage = .providers
             }
 
             SettingsRowDivider()
 
-            categoryRow(icon: "bolt", label: "Session", subtitle: "Workspace, model, limits") {
+            categoryRow(icon: "bolt", label: "Sessions", subtitle: "Configure how agent sessions are managed") {
                 activePage = .session
             }
 
             SettingsRowDivider()
 
-            categoryRow(icon: "brain", label: "Context", subtitle: "Compaction, memory, rules") {
-                activePage = .context
+            categoryRow(icon: "brain", label: "Agent", subtitle: "Configure how agents learn and remember") {
+                activePage = .agent
             }
 
             SettingsRowDivider()
 
-            categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "External tool servers") {
+            categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "Configure external tool servers") {
                 activePage = .mcpServers
             }
 
             SettingsRowDivider()
 
-            categoryRow(icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill", label: "Hooks", subtitle: "LLM lifecycle hooks") {
+            categoryRow(icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill", label: "Hooks", subtitle: "Manage agent lifecycle events") {
                 activePage = .hooks
             }
 
             if #available(iOS 26.0, *) {
                 SettingsRowDivider()
 
-                categoryRow(icon: "paintbrush", label: "Appearance", subtitle: "Theme, font, indicators") {
-                    activePage = .appearance
+                categoryRow(icon: "paintbrush", label: "App", subtitle: "Change how the iOS app looks and behaves") {
+                    activePage = .app
                 }
             }
         }
@@ -221,24 +222,6 @@ struct SettingsView: View {
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - Notifications Card
-
-    private var notificationsCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Notifications")
-
-            SettingsCard {
-                SettingsRow(icon: "bell.badge", label: "Auto-mark as read") {
-                    Toggle("", isOn: $autoMarkRead)
-                        .labelsHidden()
-                        .tint(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(text: "Automatically mark notifications as read when opened.")
-        }
     }
 
     // MARK: - Danger Zone Card

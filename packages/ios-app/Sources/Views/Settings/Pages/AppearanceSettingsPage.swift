@@ -2,16 +2,66 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 struct AppearanceSettingsPage: View {
+    @Binding var confirmArchive: Bool
+    @Binding var autoMarkRead: Bool
     @State private var appearanceSettings = AppearanceSettings.shared
     @State private var fontSettings = FontSettings.shared
 
     var body: some View {
-        SettingsPageContainer(title: "Appearance") {
+        SettingsPageContainer(title: "App") {
+            workspacePillsCard
+            confirmArchivingCard
+            autoMarkReadCard
             themeCard
-            dashboardCard
             fontCard
             codeFontCard
             thinkingIndicatorCard
+        }
+    }
+
+    // MARK: - Behavior Cards
+
+    private var workspacePillsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Behavior")
+
+            SettingsCard {
+                SettingsRow(icon: "line.3.horizontal.decrease", label: "Workspace Pills") {
+                    Toggle("", isOn: $appearanceSettings.showWorkspacePills)
+                        .labelsHidden()
+                        .tint(.tronEmerald)
+                }
+            }
+
+            SettingsCaption(text: "Show workspace filter pills on the session dashboard.")
+        }
+    }
+
+    private var confirmArchivingCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard {
+                SettingsRow(icon: "questionmark.circle", label: "Confirm Archiving") {
+                    Toggle("", isOn: $confirmArchive)
+                        .labelsHidden()
+                        .tint(.tronEmerald)
+                }
+            }
+
+            SettingsCaption(text: "Ask before archiving a session.")
+        }
+    }
+
+    private var autoMarkReadCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard {
+                SettingsRow(icon: "bell.badge", label: "Auto-mark as Read") {
+                    Toggle("", isOn: $autoMarkRead)
+                        .labelsHidden()
+                        .tint(.tronEmerald)
+                }
+            }
+
+            SettingsCaption(text: "Automatically mark notifications as read when opened.")
         }
     }
 
@@ -63,24 +113,6 @@ struct AppearanceSettingsPage: View {
                 }
                 .buttonStyle(.plain)
             }
-        }
-    }
-
-    // MARK: - Dashboard Card
-
-    private var dashboardCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Dashboard")
-
-            SettingsCard {
-                SettingsRow(icon: "line.3.horizontal.decrease", label: "Workspace Pills") {
-                    Toggle("", isOn: $appearanceSettings.showWorkspacePills)
-                        .labelsHidden()
-                        .tint(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(text: "Show workspace filter pills on the session dashboard.")
         }
     }
 

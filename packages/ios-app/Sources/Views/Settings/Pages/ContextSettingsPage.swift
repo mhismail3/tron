@@ -5,9 +5,10 @@ struct ContextSettingsPage: View {
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
     var body: some View {
-        SettingsPageContainer(title: "Context") {
+        SettingsPageContainer(title: "Agent") {
             thresholdCard
             keepRecentCard
+            memoryCard
             rulesCard
         }
     }
@@ -81,6 +82,44 @@ struct ContextSettingsPage: View {
             }
 
             SettingsCaption(text: "Turns kept verbatim after compaction. The rest is summarized.")
+        }
+    }
+
+    // MARK: - Memory Card
+
+    private var autoRetainDisplayText: String {
+        if settingsState.autoRetainInterval == 0 {
+            return "Off"
+        } else {
+            return "\(settingsState.autoRetainInterval)"
+        }
+    }
+
+    private var memoryCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Memory")
+
+            SettingsCard {
+                SettingsRow(icon: "brain", label: "Auto-Retain") {
+                    Text(autoRetainDisplayText)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                        .frame(minWidth: 30, alignment: .trailing)
+                    TronStepper(
+                        value: Bindable(settingsState).autoRetainInterval,
+                        range: 0...50,
+                        step: 5
+                    )
+                }
+                .onChange(of: settingsState.autoRetainInterval) { _, newValue in
+                    updateServerSetting {
+                        ServerSettingsUpdate(memory: .init(autoRetainInterval: newValue))
+                    }
+                }
+            }
+
+            SettingsCaption(text: "Turns between automatic memory retention. 0 to disable.")
         }
     }
 

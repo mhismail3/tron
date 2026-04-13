@@ -3,7 +3,6 @@ import SwiftUI
 struct SessionSettingsPage: View {
     @Environment(\.dependencies) var dependencies
     let settingsState: SettingsState
-    @Binding var confirmArchive: Bool
     let selectedModelDisplayName: String
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
@@ -45,7 +44,7 @@ struct SessionSettingsPage: View {
     }
 
     var body: some View {
-        SettingsPageContainer(title: "Session") {
+        SettingsPageContainer(title: "Sessions") {
             // Quick Session
             if #available(iOS 26.0, *) {
                 quickSessionCard
@@ -56,9 +55,6 @@ struct SessionSettingsPage: View {
 
             // Message Queue
             messageQueueCard
-
-            // Memory
-            memoryCard
 
             // Session Management
             sessionManagementCard
@@ -242,44 +238,6 @@ struct SessionSettingsPage: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Memory Card
-
-    private var autoRetainDisplayText: String {
-        if settingsState.autoRetainInterval == 0 {
-            return "Off"
-        } else {
-            return "\(settingsState.autoRetainInterval)"
-        }
-    }
-
-    private var memoryCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Memory")
-
-            SettingsCard {
-                SettingsRow(icon: "brain", label: "Auto-Retain") {
-                    Text(autoRetainDisplayText)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .monospacedDigit()
-                        .frame(minWidth: 30, alignment: .trailing)
-                    TronStepper(
-                        value: Bindable(settingsState).autoRetainInterval,
-                        range: 0...50,
-                        step: 5
-                    )
-                }
-                .onChange(of: settingsState.autoRetainInterval) { _, newValue in
-                    updateServerSetting {
-                        ServerSettingsUpdate(memory: .init(autoRetainInterval: newValue))
-                    }
-                }
-            }
-
-            SettingsCaption(text: "Turns between automatic memory retention. 0 to disable.")
-        }
-    }
-
     // MARK: - Session Management Card
 
     private var sessionManagementCard: some View {
@@ -326,14 +284,6 @@ struct SessionSettingsPage: View {
                     }
                 }
 
-                SettingsRowDivider()
-
-                // Confirm archive toggle
-                SettingsRow(icon: "questionmark.circle", label: "Confirm archiving") {
-                    Toggle("", isOn: $confirmArchive)
-                        .labelsHidden()
-                        .tint(.tronEmerald)
-                }
             }
         }
     }
