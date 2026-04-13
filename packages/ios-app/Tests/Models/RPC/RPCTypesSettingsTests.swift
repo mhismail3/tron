@@ -141,6 +141,18 @@ struct ServerSettingsTests {
         #expect(preset.port == 9090)
     }
 
+    @Test("ConnectionPreset encode round-trip")
+    func connectionPresetRoundTrip() throws {
+        let json = #"{"id":"rt","label":"Round Trip","host":"10.0.0.1","port":9847}"#
+        let decoded = try JSONDecoder().decode(ConnectionPreset.self, from: json.data(using: .utf8)!)
+        let encoded = try JSONEncoder().encode(decoded)
+        let redecoded = try JSONDecoder().decode(ConnectionPreset.self, from: encoded)
+        #expect(redecoded.id == "rt")
+        #expect(redecoded.label == "Round Trip")
+        #expect(redecoded.host == "10.0.0.1")
+        #expect(redecoded.port == 9847)
+    }
+
     // MARK: - Memory Settings
 
     @Test("decode memory settings from JSON")

@@ -38,12 +38,33 @@ final class SettingsState {
 
     var connectionPresets: [ConnectionPreset] = []
 
+    // MARK: - Preset Cache
+
+    private static let presetsKey = "cachedConnectionPresets"
+
+    private func loadCachedPresets() {
+        guard let data = UserDefaults.standard.data(forKey: Self.presetsKey),
+              let cached = try? JSONDecoder().decode([ConnectionPreset].self, from: data) else { return }
+        connectionPresets = cached
+    }
+
+    private func cachePresets(_ presets: [ConnectionPreset]) {
+        guard let data = try? JSONEncoder().encode(presets) else { return }
+        UserDefaults.standard.set(data, forKey: Self.presetsKey)
+    }
+
     // MARK: - Load State
 
     var isLoaded = false
     var availableModels: [ModelInfo] = []
     var isLoadingModels = false
     var loadError: String?
+
+    // MARK: - Init
+
+    init() {
+        loadCachedPresets()
+    }
 
     // MARK: - Display Helpers
 
@@ -104,6 +125,7 @@ final class SettingsState {
         cacheTtlSecs = settings.cacheTtlSecs
         queueDrainMode = settings.queueDrainMode
         connectionPresets = settings.connectionPresets
+        cachePresets(settings.connectionPresets)
         hooksLlmModel = settings.hooksLlmModel
         builtinHooks = settings.builtinHooks
         if let workspace = settings.defaultWorkspace {

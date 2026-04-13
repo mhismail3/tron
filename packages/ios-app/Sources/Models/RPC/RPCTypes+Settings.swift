@@ -242,7 +242,7 @@ struct BuiltinHookSetting: Codable, Identifiable, Equatable {
 }
 
 /// A connection preset for quick-connect from the Connections settings page.
-struct ConnectionPreset: Decodable, Identifiable {
+struct ConnectionPreset: Codable, Identifiable {
     let id: String
     let label: String
     let host: String
