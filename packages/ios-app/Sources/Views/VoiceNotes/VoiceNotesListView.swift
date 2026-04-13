@@ -105,7 +105,7 @@ struct VoiceNotesListView: View {
                 .font(TronTypography.sans(size: 48, weight: .light))
                 .foregroundStyle(.tronTeal)
 
-            Text("Tap the mic button to record")
+            Text("Tap the mic to start recording")
                 .font(TronTypography.subheadline)
                 .foregroundStyle(.tronTextMuted)
         }

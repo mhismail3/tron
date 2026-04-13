@@ -195,7 +195,7 @@ struct ContainerDetailSheet: View {
 
     private var rawJSONSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Container Record")
+            Text("Sandbox Record")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 

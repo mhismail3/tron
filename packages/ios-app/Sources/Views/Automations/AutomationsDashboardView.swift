@@ -242,19 +242,11 @@ struct AutomationsDashboardView: View {
                 .font(TronTypography.sans(size: 48, weight: .light))
                 .foregroundStyle(.tronCoral)
 
-            VStack(spacing: 6) {
-                Text("No Automations")
-                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-
-                Text("Scheduled jobs created by agents or from here will appear")
-                    .font(TronTypography.subheadline)
-                    .foregroundStyle(.tronTextMuted)
-                    .multilineTextAlignment(.center)
-            }
-
+            Text("Create and manage scheduled jobs")
+                .font(TronTypography.subheadline)
+                .foregroundStyle(.tronTextMuted)
+                .multilineTextAlignment(.center)
         }
-        .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 

@@ -76,7 +76,7 @@ struct SandboxesDashboardView: View {
                 SafariView(url: url)
             }
         }
-        .alert("Kill Container?", isPresented: $showKillConfirmation) {
+        .alert("Kill Sandbox?", isPresented: $showKillConfirmation) {
             Button("Cancel", role: .cancel) {
                 containerAction = nil
             }
@@ -90,7 +90,7 @@ struct SandboxesDashboardView: View {
                 Text("This will immediately terminate all processes in \"\(action.container.name)\".")
             }
         }
-        .alert("Remove Container?", isPresented: $showRemoveConfirmation) {
+        .alert("Remove Sandbox?", isPresented: $showRemoveConfirmation) {
             Button("Cancel", role: .cancel) {
                 containerAction = nil
             }
@@ -250,18 +250,11 @@ struct SandboxesDashboardView: View {
                 .font(TronTypography.sans(size: 48, weight: .light))
                 .foregroundStyle(.tronIndigo)
 
-            VStack(spacing: 6) {
-                Text("No Containers")
-                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-
-                Text("Containers created by agents will appear here")
-                    .font(TronTypography.subheadline)
-                    .foregroundStyle(.tronTextMuted)
-                    .multilineTextAlignment(.center)
-            }
+            Text("Sandboxes created by agents will appear here")
+                .font(TronTypography.subheadline)
+                .foregroundStyle(.tronTextMuted)
+                .multilineTextAlignment(.center)
         }
-        .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
