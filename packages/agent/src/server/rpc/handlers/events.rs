@@ -198,7 +198,7 @@ impl MethodHandler for GetSinceHandler {
                 message: e.to_string(),
             })?;
 
-        let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) > l);
+        let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) >= l);
 
         if let Some(l) = limit {
             events.truncate(usize::try_from(l).unwrap_or(usize::MAX));
