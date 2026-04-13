@@ -75,8 +75,6 @@ pub struct CompactionConfig {
     pub threshold: f64,
     /// Number of recent user turns to preserve verbatim during compaction.
     pub preserve_recent_turns: usize,
-    /// Maximum ratio (0.0–1.0) of context limit that preserved turns can consume.
-    pub max_preserved_ratio: f64,
     /// Model context limit in tokens.
     pub context_limit: u64,
 }
@@ -86,7 +84,6 @@ impl Default for CompactionConfig {
         Self {
             threshold: 0.70,
             preserve_recent_turns: 5,
-            max_preserved_ratio: 0.20,
             context_limit: 200_000,
         }
     }
@@ -533,7 +530,6 @@ mod tests {
         let cfg = CompactionConfig::default();
         assert!((cfg.threshold - 0.70).abs() < f64::EPSILON);
         assert_eq!(cfg.preserve_recent_turns, 5);
-        assert!((cfg.max_preserved_ratio - 0.20).abs() < f64::EPSILON);
     }
 
     #[test]

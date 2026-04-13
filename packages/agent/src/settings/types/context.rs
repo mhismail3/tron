@@ -24,8 +24,6 @@ pub struct CompactorSettings {
     pub compaction_threshold: f64,
     /// Target token count after compaction.
     pub target_tokens: usize,
-    /// Maximum ratio (0.0–1.0) of context limit that preserved turns can consume.
-    pub max_preserved_ratio: f64,
     /// Approximate characters per token for estimation.
     pub chars_per_token: usize,
     /// Token buffer reserved for responses.
@@ -43,7 +41,6 @@ impl Default for CompactorSettings {
             max_tokens: 25_000,
             compaction_threshold: 0.85,
             target_tokens: 10_000,
-            max_preserved_ratio: 0.20,
             chars_per_token: 4,
             buffer_tokens: 4000,
             trigger_token_threshold: Some(0.70),
@@ -81,7 +78,6 @@ mod tests {
         let c = CompactorSettings::default();
         assert_eq!(c.max_tokens, 25_000);
         assert!((c.compaction_threshold - 0.85).abs() < f64::EPSILON);
-        assert!((c.max_preserved_ratio - 0.20).abs() < f64::EPSILON);
         assert_eq!(c.trigger_token_threshold, Some(0.70));
         assert_eq!(c.preserve_recent_count, 5);
     }
@@ -129,7 +125,6 @@ mod tests {
         });
         let ctx: ContextSettings = serde_json::from_value(json).unwrap();
         assert_eq!(ctx.compactor.max_tokens, 50_000);
-        assert!((ctx.compactor.max_preserved_ratio - 0.20).abs() < f64::EPSILON);
         assert!(ctx.rules.discover_standalone_files);
     }
 }

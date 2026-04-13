@@ -65,12 +65,11 @@ pub trait CompactionDeps: Send + Sync {
 /// being a user prompt plus all responses/tool-results until the next
 /// user message), capped by a maximum token budget.
 pub struct CompactionEngine<D: CompactionDeps> {
-    /// Compaction threshold ratio (0–1).
+    /// Compaction threshold ratio (0–1). Also used as the token budget
+    /// ratio for preserved turns during compaction.
     threshold: f64,
     /// Number of recent user turns to preserve.
     preserve_recent_turns: usize,
-    /// Maximum ratio (0.0–1.0) of context limit for preserved messages.
-    max_preserved_ratio: f64,
     /// Injected dependencies.
     pub(crate) deps: D,
     /// Callback for when compaction is needed.
@@ -82,13 +81,11 @@ impl<D: CompactionDeps> CompactionEngine<D> {
     pub fn new(
         threshold: f64,
         preserve_recent_turns: usize,
-        max_preserved_ratio: f64,
         deps: D,
     ) -> Self {
         Self {
             threshold,
             preserve_recent_turns,
-            max_preserved_ratio,
             deps,
             on_needed_callback: None,
         }
@@ -113,7 +110,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
 
         #[allow(clippy::cast_precision_loss)]
         let token_budget =
-            (self.max_preserved_ratio * self.deps.get_context_limit() as f64) as u64;
+            (self.threshold * self.deps.get_context_limit() as f64) as u64;
 
         let mut turns_seen: usize = 0;
         let mut candidate_split = messages.len(); // default: nothing preserved

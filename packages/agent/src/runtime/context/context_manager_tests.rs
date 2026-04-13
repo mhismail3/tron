@@ -11,7 +11,6 @@ fn test_config() -> ContextManagerConfig {
         compaction: CompactionConfig {
             threshold: 0.70,
             preserve_recent_turns: 5,
-            max_preserved_ratio: 0.20,
             context_limit: 100_000,
         },
     }
@@ -585,7 +584,6 @@ fn get_current_tokens_includes_volatile() {
 fn compaction_config_default_turns() {
     let config = CompactionConfig::default();
     assert_eq!(config.preserve_recent_turns, 5);
-    assert!((config.max_preserved_ratio - 0.20).abs() < f64::EPSILON);
 }
 
 // -- model switching --

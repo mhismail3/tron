@@ -274,10 +274,9 @@ Settings live at `~/.tron/system/settings.json`. All keys are camelCase. Missing
 | `maxTokens` | 25000 | Max token budget for summarized context |
 | `compactionThreshold` | 0.85 | Context window usage ratio that triggers compaction |
 | `targetTokens` | 10000 | Target token count after compaction |
-| `maxPreservedRatio` | 0.20 | Max ratio of context preserved turns can consume |
 | `charsPerToken` | 4 | Approximate characters per token for estimation |
 | `bufferTokens` | 4000 | Token buffer reserved for responses |
-| `triggerTokenThreshold` | 0.70 | Context usage ratio trigger (optional) |
+| `triggerTokenThreshold` | 0.70 | Context usage ratio trigger; also used as preserved-turn budget |
 | `preserveRecentCount` | 5 | Recent messages to preserve during compaction |
 
 ### logging

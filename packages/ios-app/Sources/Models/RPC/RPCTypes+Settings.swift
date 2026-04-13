@@ -137,31 +137,26 @@ struct ServerSettings: Decodable {
     struct CompactionSettings: Decodable {
         let preserveRecentCount: Int
         let triggerTokenThreshold: Double
-        let maxPreservedRatio: Double
 
         static let defaults = CompactionSettings(
             preserveRecentCount: 5,
-            triggerTokenThreshold: 0.70,
-            maxPreservedRatio: 0.20
+            triggerTokenThreshold: 0.70
         )
 
         private enum CodingKeys: String, CodingKey {
-            case preserveRecentCount, triggerTokenThreshold, maxPreservedRatio
+            case preserveRecentCount, triggerTokenThreshold
         }
 
         init(preserveRecentCount: Int,
-             triggerTokenThreshold: Double,
-             maxPreservedRatio: Double = 0.20) {
+             triggerTokenThreshold: Double) {
             self.preserveRecentCount = preserveRecentCount
             self.triggerTokenThreshold = triggerTokenThreshold
-            self.maxPreservedRatio = maxPreservedRatio
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             preserveRecentCount = (try? container.decodeIfPresent(Int.self, forKey: .preserveRecentCount)) ?? 5
             triggerTokenThreshold = (try? container.decodeIfPresent(Double.self, forKey: .triggerTokenThreshold)) ?? 0.70
-            maxPreservedRatio = (try? container.decodeIfPresent(Double.self, forKey: .maxPreservedRatio)) ?? 0.20
         }
     }
 
@@ -204,7 +199,6 @@ struct ServerSettingsUpdate: Encodable {
         struct CompactorUpdate: Encodable {
             var preserveRecentCount: Int?
             var triggerTokenThreshold: Double?
-            var maxPreservedRatio: Double?
         }
 
         struct RulesUpdate: Encodable {

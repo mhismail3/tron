@@ -494,7 +494,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         compaction: crate::runtime::context::types::CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
             preserve_recent_turns: compactor_settings.preserve_recent_count,
-            max_preserved_ratio: compactor_settings.max_preserved_ratio,
             context_limit: crate::llm::model_context_window(&model),
         },
         retry: Some(crate::core::retry::RetryConfig {

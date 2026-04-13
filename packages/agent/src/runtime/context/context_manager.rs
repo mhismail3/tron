@@ -505,7 +505,6 @@ impl ContextManager {
         let engine = CompactionEngine::new(
             self.config.compaction.threshold,
             self.config.compaction.preserve_recent_turns,
-            self.config.compaction.max_preserved_ratio,
             deps,
         );
         engine.preview(summarizer).await
@@ -521,7 +520,6 @@ impl ContextManager {
         let engine = CompactionEngine::new(
             self.config.compaction.threshold,
             self.config.compaction.preserve_recent_turns,
-            self.config.compaction.max_preserved_ratio,
             deps,
         );
         let result = engine.execute(summarizer, edited_summary).await?;

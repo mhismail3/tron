@@ -14,7 +14,7 @@ struct ServerSettingsTests {
             "models": { "default": "claude-opus-4-6" },
             "server": { "maxConcurrentSessions": 20, "defaultWorkspace": "/projects", "connectionPresets": [{"id":"p1","label":"Local","host":"127.0.0.1","port":8080}] },
             "context": {
-                "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80, "maxPreservedRatio": 0.30 },
+                "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 },
                 "rules": { "discoverStandaloneFiles": false }
             },
             "session": {
@@ -35,7 +35,6 @@ struct ServerSettingsTests {
         #expect(settings.connectionPresets[0].label == "Local")
         #expect(settings.compaction.preserveRecentCount == 3)
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
-        #expect(settings.compaction.maxPreservedRatio == 0.30)
         #expect(settings.rules.discoverStandaloneFiles == false)
         #expect(settings.isolationMode == "never")
         // chatWorkingDirectory removed with persistent chat feature
@@ -61,7 +60,6 @@ struct ServerSettingsTests {
         #expect(settings.connectionPresets.isEmpty)
         #expect(settings.compaction.preserveRecentCount == 5)
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
-        #expect(settings.compaction.maxPreservedRatio == 0.20)
         #expect(settings.rules.discoverStandaloneFiles == true)
         #expect(settings.isolationMode == "always")
         // chatWorkingDirectory removed with persistent chat feature
@@ -100,7 +98,6 @@ struct ServerSettingsTests {
         let defaults = ServerSettings.CompactionSettings.defaults
         #expect(defaults.preserveRecentCount == 5)
         #expect(defaults.triggerTokenThreshold == 0.70)
-        #expect(defaults.maxPreservedRatio == 0.20)
     }
 
     @Test("CompactionSettings decoder with empty JSON uses same defaults")
@@ -110,7 +107,6 @@ struct ServerSettingsTests {
         let manual = ServerSettings.CompactionSettings.defaults
         #expect(decoded.preserveRecentCount == manual.preserveRecentCount)
         #expect(decoded.triggerTokenThreshold == manual.triggerTokenThreshold)
-        #expect(decoded.maxPreservedRatio == manual.maxPreservedRatio)
     }
 
     // MARK: - RulesSettings Dual Init Consistency

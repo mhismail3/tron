@@ -13,7 +13,6 @@ final class SettingsState {
 
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
     var preserveRecentCount: Int = 5
-    var maxPreservedRatio: Double = 0.20
     var triggerTokenThreshold: Double = 0.70
     var maxConcurrentSessions: Int = 10
     var rulesDiscoverStandaloneFiles: Bool = true
@@ -98,7 +97,6 @@ final class SettingsState {
     /// Apply a ServerSettings response to local state (shared by load and reset).
     private func applyServerSettings(_ settings: ServerSettings) {
         preserveRecentCount = settings.compaction.preserveRecentCount
-        maxPreservedRatio = settings.compaction.maxPreservedRatio
         triggerTokenThreshold = settings.compaction.triggerTokenThreshold
         maxConcurrentSessions = settings.maxConcurrentSessions
         rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles

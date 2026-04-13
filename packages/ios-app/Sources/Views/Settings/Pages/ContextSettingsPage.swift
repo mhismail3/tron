@@ -8,7 +8,6 @@ struct ContextSettingsPage: View {
         SettingsPageContainer(title: "Context") {
             thresholdCard
             keepRecentCard
-            maxPreservedCard
             rulesCard
         }
     }
@@ -35,7 +34,7 @@ struct ContextSettingsPage: View {
                 }
                 Slider(
                     value: Bindable(settingsState).triggerTokenThreshold,
-                    in: 0.50...0.95,
+                    in: 0.10...0.85,
                     step: 0.05
                 )
                 .tint(.tronEmerald)
@@ -82,49 +81,6 @@ struct ContextSettingsPage: View {
             }
 
             SettingsCaption(text: "Turns kept verbatim after compaction. The rest is summarized.")
-        }
-    }
-
-    // MARK: - Max Preserved Card
-
-    private var maxPreservedCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Max Preserved Context")
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Image(systemName: "chart.pie")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 18)
-                    Text("Max Preserved")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    Spacer()
-                    Text("\(Int(settingsState.maxPreservedRatio * 100))%")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .monospacedDigit()
-                }
-                Slider(
-                    value: Bindable(settingsState).maxPreservedRatio,
-                    in: 0.10...0.50,
-                    step: 0.05
-                )
-                .tint(.tronEmerald)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .sectionFill(.tronEmerald)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .onChange(of: settingsState.maxPreservedRatio) { _, newValue in
-                updateServerSetting {
-                    ServerSettingsUpdate(context: .init(compactor: .init(
-                        maxPreservedRatio: newValue
-                    )))
-                }
-            }
-
-            SettingsCaption(text: "Maximum % of context window that preserved turns can consume.")
         }
     }
 

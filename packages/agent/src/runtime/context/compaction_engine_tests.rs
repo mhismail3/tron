@@ -159,28 +159,28 @@ fn compaction_summary(text: &str) -> Message {
 #[test]
 fn should_compact_above_threshold() {
     let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     assert!(engine.should_compact());
 }
 
 #[test]
 fn should_compact_below_threshold() {
     let deps = MockDeps::new(default_messages()).with_tokens(60_000, 100_000);
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     assert!(!engine.should_compact());
 }
 
 #[test]
 fn should_compact_at_exact_threshold() {
     let deps = MockDeps::new(default_messages()).with_tokens(70_000, 100_000);
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     assert!(engine.should_compact());
 }
 
 #[test]
 fn should_compact_zero_limit() {
     let deps = MockDeps::new(default_messages()).with_tokens(80_000, 0);
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     assert!(!engine.should_compact());
 }
 
@@ -193,7 +193,7 @@ fn basic_3_turns_preserve_2() {
     // [U,A,U,A,U,A] — 3 turns, preserve 2
     let msgs = default_messages();
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 2); // preserve [U,A,U,A] = last 2 turns
 }
@@ -210,7 +210,7 @@ fn basic_5_turns_preserve_3() {
         })
         .collect();
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 3, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 3, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 4); // preserve last 6 messages (3 turns)
 }
@@ -225,7 +225,7 @@ fn basic_preserve_all() {
         Message::assistant("d"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 5, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0); // preserve everything
 }
@@ -234,7 +234,7 @@ fn basic_preserve_all() {
 fn basic_single_turn() {
     let msgs = vec![Message::user("hi"), Message::assistant("hello")];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0); // 1 turn, preserve it all
 }
@@ -243,7 +243,7 @@ fn basic_single_turn() {
 fn basic_preserve_zero() {
     let msgs = default_messages();
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 0, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 0, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 6); // summarize all
 }
@@ -264,7 +264,7 @@ fn tool_heavy_single_turn() {
         Message::assistant("done"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0); // 1 turn, preserve all
 }
@@ -282,7 +282,7 @@ fn tool_heavy_preserve_1_of_2() {
         Message::assistant("done"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 2); // Last turn starts at U[2]
 }
@@ -298,7 +298,7 @@ fn parallel_tools_one_turn() {
         Message::assistant("done"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0); // 1 turn, preserve all
 }
@@ -317,7 +317,7 @@ fn mixed_tool_and_simple() {
         Message::assistant("r3"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 2); // Last 2 turns: [q2,A(tc),TR,A, q3,r3]
 }
@@ -331,12 +331,12 @@ fn token_cap_limits_turns() {
     // 3 turns, 500 tok per message, budget fits 2 turns
     let msgs = default_messages(); // 6 msgs, 3 turns
     let deps = MockDeps::new(msgs.clone())
-        .with_tokens(80_000, 10_000)
+        .with_tokens(80_000, 3000)
         .with_token_fn(|_| 500);
-    // budget = 0.20 * 10_000 = 2000. Each turn = 1000 tokens.
-    // Turn 3 (last): 1000 ≤ 2000 → fits. Turn 2: 1000+1000=2000 ≤ 2000 → fits.
-    // Turn 1: 1000+2000=3000 > 2000 and turns_seen=2 > 0 → stop.
-    let engine = CompactionEngine::new(0.70, 3, 0.20, deps);
+    // budget = threshold * context_limit = 0.70 * 3000 = 2100. Each turn = 1000 tokens.
+    // Turn 3 (last): 1000 ≤ 2100 → fits. Turn 2: 1000+1000=2000 ≤ 2100 → fits.
+    // Turn 1: 1000+2000=3000 > 2100 and turns_seen=2 > 0 → stop.
+    let engine = CompactionEngine::new(0.70, 3, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 2); // Budget only fits 2 of 3 requested turns
 }
@@ -346,10 +346,10 @@ fn token_cap_single_large_turn() {
     // 1 turn that exceeds budget — must still preserve it (guarantee at least 1)
     let msgs = vec![Message::user("big q"), Message::assistant("huge response")];
     let deps = MockDeps::new(msgs.clone())
-        .with_tokens(80_000, 1000)
+        .with_tokens(80_000, 100)
         .with_token_fn(|_| 5000);
-    // budget = 0.20 * 1000 = 200. Turn = 10000 tokens. But turns_seen==0 → include anyway.
-    let engine = CompactionEngine::new(0.70, 1, 0.20, deps);
+    // budget = 0.70 * 100 = 70. Turn = 10000 tokens. But turns_seen==0 → include anyway.
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0); // Guarantee: at least 1 turn preserved
 }
@@ -365,31 +365,26 @@ fn token_cap_exact_fit() {
     let deps = MockDeps::new(msgs.clone())
         .with_tokens(80_000, 2000)
         .with_token_fn(|_| 100);
-    // budget = 0.20 * 2000 = 400. Each turn = 200. 2 turns = 400 ≤ 400 → fits exactly.
-    let engine = CompactionEngine::new(0.70, 2, 0.20, deps);
+    // budget = 0.70 * 2000 = 1400. Each turn = 200. 2 turns = 400 ≤ 1400 → fits.
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let split = engine.compute_split_point(&msgs);
-    assert_eq!(split, 0); // Both turns fit exactly
+    assert_eq!(split, 0); // Both turns fit
 }
 
 #[test]
-fn token_cap_zero_ratio() {
+fn token_cap_tiny_budget() {
+    // Very small context_limit makes budget ≈ 0, but we still guarantee at least 1 turn.
     let msgs = vec![
         Message::user("a"),
         Message::assistant("b"),
         Message::user("c"),
         Message::assistant("d"),
     ];
-    let deps = MockDeps::new(msgs.clone());
-    // max_preserved_ratio=0.0 → budget=0. First turn exceeds budget but turns_seen=0 → include.
-    // Wait, budget=0. Turn cost > 0. turns_seen==0 → we include it.
-    // Actually re-reading the algorithm: if budget is 0 and turn cost > 0 and turns_seen==0,
-    // we still include it (guarantee at least 1 turn).
-    // But preserve_recent_turns=2, so after turn 1, turns_seen=1 >= 0, next turn would
-    // check budget: cost > 0 > budget=0 and turns_seen=1 > 0 → stop.
-    let engine = CompactionEngine::new(0.70, 2, 0.0, deps);
+    let deps = MockDeps::new(msgs.clone()).with_tokens(80_000, 1);
+    // budget = 0.70 * 1 = 0 (truncated). Turn cost > 0, turns_seen==0 → include anyway.
+    // After first turn, turns_seen=1 > 0, next turn exceeds budget → stop.
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let split = engine.compute_split_point(&msgs);
-    // First turn (last in list): U"c",A"d" — cost=200, budget=0, turns_seen=0 → include
-    // Second turn: U"a",A"b" — cost=200, total=400 > 0, turns_seen=1 > 0 → stop
     assert_eq!(split, 2); // Only 1 turn preserved despite requesting 2
 }
 
@@ -405,7 +400,7 @@ fn token_cap_partial_turn_excluded() {
         Message::assistant("r3"),
     ];
     let deps = MockDeps::new(msgs.clone())
-        .with_tokens(80_000, 10_000)
+        .with_tokens(80_000, 3000)
         .with_token_fn(|msg| {
             // Make the "huge response" assistant message very expensive
             if let Message::Assistant { content, .. } = msg
@@ -416,10 +411,10 @@ fn token_cap_partial_turn_excluded() {
             }
             100
         });
-    // budget = 0.20 * 10_000 = 2000
-    // Turn 3 (last): [q3, r3] = 200 ≤ 2000 → fits. turns_seen=1.
-    // Turn 2: [q2, huge] = 5100. 200+5100=5300 > 2000, turns_seen=1>0 → stop.
-    let engine = CompactionEngine::new(0.70, 3, 0.20, deps);
+    // budget = 0.70 * 3000 = 2100
+    // Turn 3 (last): [q3, r3] = 200 ≤ 2100 → fits. turns_seen=1.
+    // Turn 2: [q2, huge] = 5100. 200+5100=5300 > 2100, turns_seen=1>0 → stop.
+    let engine = CompactionEngine::new(0.70, 3, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 4); // Only last turn preserved
 }
@@ -442,7 +437,7 @@ fn recompact_skips_summary() {
         Message::assistant("r3"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 4); // Summary not counted, preserve last 2 real turns
 }
@@ -459,7 +454,7 @@ fn recompact_all_turns_fit() {
         Message::assistant("r2"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 5, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0); // Preserves everything including summary
 }
@@ -472,7 +467,7 @@ fn recompact_summary_only() {
         Message::assistant("Ack"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     // No real user turns, preserve everything (nothing meaningful to summarize)
     assert_eq!(split, 0);
@@ -492,7 +487,7 @@ fn recompact_multiple_summaries() {
         Message::assistant("r2"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 6); // Preserve last real turn only
 }
@@ -512,7 +507,7 @@ fn orphan_split_on_user_is_clean() {
         Message::assistant("done"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 3); // Lands on U[3], clean
     assert!(msgs[split].is_user());
@@ -527,7 +522,7 @@ fn degenerate_leading_tool_result() {
         Message::assistant("a"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 1); // Preserve from User onward
 }
@@ -541,7 +536,7 @@ fn degenerate_all_tool_results() {
         tool_result("tc2"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0); // No user turns found, preserve everything
 }
@@ -554,7 +549,7 @@ fn degenerate_all_tool_results() {
 fn empty_messages() {
     let msgs: Vec<Message> = vec![];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0);
 }
@@ -563,7 +558,7 @@ fn empty_messages() {
 fn single_user_no_response() {
     let msgs = vec![Message::user("hello")];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0); // Incomplete turn still preserved
 }
@@ -577,7 +572,7 @@ fn assistant_first() {
         Message::assistant("a"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 1); // Leading assistant summarized
 }
@@ -590,7 +585,7 @@ fn only_assistant_messages() {
         Message::assistant("a3"),
     ];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0); // No user turns found, preserve everything
 }
@@ -599,7 +594,7 @@ fn only_assistant_messages() {
 fn preserve_turns_exceeds_total() {
     let msgs = vec![Message::user("hi"), Message::assistant("hello")];
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 100, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 100, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 0); // Preserve all
 }
@@ -617,7 +612,7 @@ fn huge_message_count() {
         })
         .collect();
     let deps = MockDeps::new(msgs.clone());
-    let engine = CompactionEngine::new(0.70, 5, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     let split = engine.compute_split_point(&msgs);
     assert_eq!(split, 990); // Last 10 messages = 5 turns
 }
@@ -629,7 +624,7 @@ fn huge_message_count() {
 #[tokio::test]
 async fn preview_generates_summary() {
     let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Test summary");
 
     let preview = engine.preview(&summarizer).await.unwrap();
@@ -641,7 +636,7 @@ async fn preview_generates_summary() {
 #[tokio::test]
 async fn preview_turn_based() {
     let deps = MockDeps::new(default_messages()); // 6 messages, 3 turns
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Summary");
 
     let preview = engine.preview(&summarizer).await.unwrap();
@@ -655,7 +650,7 @@ async fn preview_turn_based() {
 #[tokio::test]
 async fn preview_with_extracted_data() {
     let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Summary");
 
     let preview = engine.preview(&summarizer).await.unwrap();
@@ -665,7 +660,7 @@ async fn preview_with_extracted_data() {
 #[tokio::test]
 async fn preview_empty_messages() {
     let deps = MockDeps::new(vec![]);
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("");
 
     let preview = engine.preview(&summarizer).await.unwrap();
@@ -680,7 +675,7 @@ async fn preview_empty_messages() {
 #[tokio::test]
 async fn execute_compaction_updates_messages() {
     let deps = MockDeps::new(default_messages()); // 6 messages, 3 turns
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Compacted summary");
 
     let result = engine.execute(&summarizer, None).await.unwrap();
@@ -696,7 +691,7 @@ async fn execute_compaction_updates_messages() {
 #[tokio::test]
 async fn execute_uses_edited_summary() {
     let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Original");
 
     let result = engine
@@ -711,7 +706,7 @@ async fn execute_uses_edited_summary() {
 #[tokio::test]
 async fn execute_returns_turn_counts() {
     let deps = MockDeps::new(default_messages()); // 3 turns
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Summary");
 
     let result = engine.execute(&summarizer, None).await.unwrap();
@@ -732,12 +727,12 @@ async fn execute_token_cap_reflected() {
         })
         .collect();
     let deps = MockDeps::new(msgs)
-        .with_tokens(80_000, 3000)
+        .with_tokens(80_000, 860)
         .with_token_fn(|_| 100);
-    // budget = 0.20 * 3000 = 600. Each turn = 200 tokens.
-    // Turn 5 (last): 200 ≤ 600 → fits. Turn 4: 400 ≤ 600 → fits. Turn 3: 600 ≤ 600 → fits.
-    // Turn 2: 800 > 600, turns_seen=3>0 → stop.
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    // budget = 0.70 * 860 = 602. Each turn = 200 tokens.
+    // Turn 5 (last): 200 ≤ 602 → fits. Turn 4: 400 ≤ 602 → fits. Turn 3: 600 ≤ 602 → fits.
+    // Turn 2: 800 > 602, turns_seen=3>0 → stop.
+    let engine = CompactionEngine::new(0.70, 5, deps);
     let summarizer = MockSummarizer::new("Summary");
 
     let result = engine.execute(&summarizer, None).await.unwrap();
@@ -758,7 +753,7 @@ async fn execute_recompact_correct() {
         Message::assistant("r3"),
     ];
     let deps = MockDeps::new(msgs);
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Re-compacted summary");
 
     let result = engine.execute(&summarizer, None).await.unwrap();
@@ -770,7 +765,7 @@ async fn execute_recompact_correct() {
 #[tokio::test]
 async fn execute_summary_format() {
     let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let summarizer = MockSummarizer::new("The user worked on authentication.");
 
     let _ = engine.execute(&summarizer, None).await.unwrap();
@@ -801,7 +796,7 @@ async fn execute_summary_format() {
 #[tokio::test]
 async fn execute_preserve_zero() {
     let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 0, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 0, deps);
     let summarizer = MockSummarizer::new("Everything summarized");
 
     let result = engine.execute(&summarizer, None).await.unwrap();
@@ -817,7 +812,7 @@ async fn execute_preserve_zero() {
 async fn execute_skips_when_all_within_preserve_window() {
     let msgs = vec![Message::user("Hi"), Message::assistant("Hello")];
     let deps = MockDeps::new(msgs);
-    let engine = CompactionEngine::new(0.70, 5, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     let summarizer = MockSummarizer::new("Should not be called");
 
     let result = engine.execute(&summarizer, None).await.unwrap();
@@ -830,7 +825,7 @@ async fn execute_skips_when_all_within_preserve_window() {
 #[tokio::test]
 async fn execute_returns_compression_ratio() {
     let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let summarizer = MockSummarizer::new("Short");
 
     let result = engine.execute(&summarizer, None).await.unwrap();
@@ -846,7 +841,7 @@ async fn execute_returns_compression_ratio() {
 #[test]
 fn trigger_if_needed_fires_callback() {
     let deps = MockDeps::new(default_messages());
-    let mut engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let mut engine = CompactionEngine::new(0.70, 5, deps);
 
     let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let called_clone = called.clone();
@@ -861,7 +856,7 @@ fn trigger_if_needed_fires_callback() {
 #[test]
 fn trigger_if_needed_does_not_fire_below_threshold() {
     let deps = MockDeps::new(default_messages()).with_tokens(50_000, 100_000);
-    let mut engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let mut engine = CompactionEngine::new(0.70, 5, deps);
 
     let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let called_clone = called.clone();
@@ -876,7 +871,7 @@ fn trigger_if_needed_does_not_fire_below_threshold() {
 #[test]
 fn trigger_if_needed_no_callback_no_panic() {
     let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     engine.trigger_if_needed();
 }
 
@@ -887,14 +882,14 @@ fn trigger_if_needed_no_callback_no_panic() {
 #[test]
 fn message_only_tokens_subtracts_overhead() {
     let deps = MockDeps::new(vec![]);
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     assert_eq!(engine.message_only_tokens(), 78_500);
 }
 
 #[test]
 fn message_only_tokens_saturates_at_zero() {
     let deps = MockDeps::new(vec![]).with_tokens(500, 100_000);
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     assert_eq!(engine.message_only_tokens(), 0);
 }
 
@@ -905,7 +900,7 @@ fn message_only_tokens_saturates_at_zero() {
 #[test]
 fn estimate_after_compaction_components() {
     let deps = MockDeps::new(vec![]);
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     let preserved = [Message::user("msg1"), Message::user("msg2")];
 
     let result = engine.estimate_tokens_after_compaction("Short summary", &preserved);
@@ -925,7 +920,7 @@ fn token_estimation_uses_deps() {
         message_token_value: 250,
         token_fn: None,
     };
-    let engine = CompactionEngine::new(0.70, 5, 0.20, deps);
+    let engine = CompactionEngine::new(0.70, 5, deps);
     let preserved = [Message::user("test")];
     let result = engine.estimate_tokens_after_compaction("s", &preserved);
     // summary: 1, context: 50, ack: 50, preserved: 250
@@ -978,7 +973,7 @@ async fn execute_compaction_no_orphaned_tool_results() {
     ];
     // 3 turns, preserve 1
     let deps = MockDeps::new(msgs);
-    let engine = CompactionEngine::new(0.70, 1, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 1, deps);
     let summarizer = MockSummarizer::new("Summary of tool usage");
 
     let result = engine.execute(&summarizer, None).await.unwrap();
@@ -1004,7 +999,7 @@ async fn execute_turn_based_no_orphans() {
         Message::assistant("r3"),
     ];
     let deps = MockDeps::new(msgs);
-    let engine = CompactionEngine::new(0.70, 2, 1.0, deps);
+    let engine = CompactionEngine::new(0.70, 2, deps);
     let summarizer = MockSummarizer::new("Summary");
 
     let result = engine.execute(&summarizer, None).await.unwrap();

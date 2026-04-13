@@ -418,10 +418,9 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
       "maxTokens": 25000,           // Context budget
       "compactionThreshold": 0.85,  // Hard ceiling that triggers compaction
       "targetTokens": 10000,        // Target token count after compaction
-      "maxPreservedRatio": 0.20,    // Cap on context preserved across compaction
       "charsPerToken": 4,           // Token estimation factor
       "bufferTokens": 4000,         // Response buffer
-      "triggerTokenThreshold": 0.70,// Soft threshold for proactive compaction
+      "triggerTokenThreshold": 0.70,// Soft threshold for proactive compaction (also used as preserved-turn budget)
       "preserveRecentCount": 5      // Always preserve N most recent messages
     },
     "rules": {

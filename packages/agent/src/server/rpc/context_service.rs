@@ -73,7 +73,6 @@ pub(crate) fn build_context_manager_for_session(
         compaction: CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
             preserve_recent_turns: compactor_settings.preserve_recent_count,
-            max_preserved_ratio: compactor_settings.max_preserved_ratio,
             context_limit,
         },
     });
