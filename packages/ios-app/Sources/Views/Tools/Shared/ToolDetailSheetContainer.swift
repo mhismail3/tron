@@ -10,8 +10,7 @@ import SwiftUI
 /// ToolDetailSheetContainer(
 ///     toolName: "Bash",
 ///     iconName: "terminal",
-///     accent: .tronEmerald,
-///     copyContent: command
+///     accent: .tronEmerald
 /// ) {
 ///     // tool-specific content sections
 /// }
@@ -22,7 +21,6 @@ struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
     let iconName: String
     let accent: Color
     let iconColor: Color?
-    let copyContent: String?
     @ViewBuilder let content: () -> Content
     @ViewBuilder let leadingToolbar: () -> LeadingToolbar
     @Environment(\.dismiss) private var dismiss
@@ -32,7 +30,6 @@ struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
         iconName: String,
         accent: Color,
         iconColor: Color? = nil,
-        copyContent: String? = nil,
         @ViewBuilder content: @escaping () -> Content,
         @ViewBuilder leadingToolbar: @escaping () -> LeadingToolbar
     ) {
@@ -40,7 +37,6 @@ struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
         self.iconName = iconName
         self.accent = accent
         self.iconColor = iconColor
-        self.copyContent = copyContent
         self.content = content
         self.leadingToolbar = leadingToolbar
     }
@@ -55,16 +51,6 @@ struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     leadingToolbar()
-                    if let copyContent {
-                        Button {
-                            UIPasteboard.general.string = copyContent
-                        } label: {
-                            Image(systemName: "doc.on.doc")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                .foregroundStyle(accent.opacity(0.6))
-                        }
-                        .accessibilityLabel("Copy output")
-                    }
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
@@ -101,14 +87,12 @@ extension ToolDetailSheetContainer where LeadingToolbar == EmptyView {
         iconName: String,
         accent: Color,
         iconColor: Color? = nil,
-        copyContent: String? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.toolName = toolName
         self.iconName = iconName
         self.accent = accent
         self.iconColor = iconColor
-        self.copyContent = copyContent
         self.content = content
         self.leadingToolbar = { EmptyView() }
     }

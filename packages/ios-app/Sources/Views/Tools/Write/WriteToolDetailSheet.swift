@@ -41,7 +41,6 @@ struct WriteToolDetailSheet: View {
             toolName: "Write",
             iconName: "square.and.pencil",
             accent: .tronPink,
-            copyContent: fileInfo.filePath
         ) {
             contentBody
         }

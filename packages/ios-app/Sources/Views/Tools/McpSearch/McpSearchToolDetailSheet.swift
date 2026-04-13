@@ -36,7 +36,6 @@ struct McpSearchToolDetailSheet: View {
             toolName: "MCP Search",
             iconName: "magnifyingglass.circle",
             accent: .tronInfo,
-            copyContent: data.result ?? ""
         ) {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {

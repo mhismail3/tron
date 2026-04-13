@@ -66,7 +66,6 @@ struct DisplayToolDetailSheet: View {
             toolName: title ?? "Display",
             iconName: iconForType,
             accent: .tronIndigo,
-            copyContent: nil
         ) {
             VStack(alignment: .leading, spacing: displayType == "webview" ? 8 : 16) {
                 ToolStatusRow(status: data.status, durationMs: data.durationMs) {

@@ -95,7 +95,6 @@ struct ComputerUseToolDetailSheet: View {
             toolName: "Computer Use",
             iconName: "desktopcomputer",
             accent: .purple,
-            copyContent: data.result ?? ""
         ) {
             contentBody
         }

@@ -115,7 +115,6 @@ struct BashToolDetailSheet: View {
             toolName: "Bash",
             iconName: "terminal",
             accent: .tronEmerald,
-            copyContent: isJobActive ? nil : command
         ) {
             contentBody
         } leadingToolbar: {

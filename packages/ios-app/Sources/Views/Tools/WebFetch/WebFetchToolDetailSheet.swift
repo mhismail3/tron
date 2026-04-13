@@ -43,7 +43,6 @@ struct WebFetchToolDetailSheet: View {
             toolName: "Web Fetch",
             iconName: "arrow.down.doc",
             accent: .tronInfo,
-            copyContent: url
         ) {
             contentBody
         }

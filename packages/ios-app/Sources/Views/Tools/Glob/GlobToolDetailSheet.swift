@@ -45,7 +45,6 @@ struct GlobToolDetailSheet: View {
             toolName: "Find",
             iconName: "doc.text.magnifyingglass",
             accent: .cyan,
-            copyContent: parsedFiles.map(\.path).joined(separator: "\n")
         ) {
             contentBody
         }

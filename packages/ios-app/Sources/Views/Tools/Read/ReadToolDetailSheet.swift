@@ -23,7 +23,6 @@ struct ReadToolDetailSheet: View {
             toolName: "Read",
             iconName: "doc.text",
             accent: .tronSlate,
-            copyContent: fileInfo.filePath
         ) {
             contentBody
         }

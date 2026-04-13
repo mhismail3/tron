@@ -51,7 +51,6 @@ struct McpCallToolDetailSheet: View {
             toolName: "MCP Call",
             iconName: "server.rack",
             accent: .tronEmerald,
-            copyContent: data.result ?? ""
         ) {
             contentBody
         }

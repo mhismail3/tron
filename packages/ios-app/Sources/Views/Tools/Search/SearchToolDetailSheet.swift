@@ -56,7 +56,6 @@ struct SearchToolDetailSheet: View {
             toolName: "File Search",
             iconName: "magnifyingglass",
             accent: .purple,
-            copyContent: data.result ?? ""
         ) {
             contentBody
         }

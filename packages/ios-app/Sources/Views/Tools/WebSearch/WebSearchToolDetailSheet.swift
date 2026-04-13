@@ -45,7 +45,6 @@ struct WebSearchToolDetailSheet: View {
             toolName: "Web Search",
             iconName: "magnifyingglass.circle",
             accent: .tronInfo,
-            copyContent: data.result ?? ""
         ) {
             contentBody
         }

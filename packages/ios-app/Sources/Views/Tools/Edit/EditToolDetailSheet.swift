@@ -48,7 +48,6 @@ struct EditToolDetailSheet: View {
             toolName: "Edit",
             iconName: "pencil.line",
             accent: .orange,
-            copyContent: fileInfo.filePath
         ) {
             contentBody
         }
