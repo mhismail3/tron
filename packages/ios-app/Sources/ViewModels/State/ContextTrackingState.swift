@@ -17,7 +17,7 @@ final class ContextTrackingState {
     /// Per-turn NEW tokens (for stats line display) - from server's tokenRecord.computed.newInputTokens
     var newInputTokens: Int = 0
 
-    /// Total context size in tokens (for progress pill) - from server's tokenRecord.computed.contextWindowTokens
+    /// Total context size in tokens (for progress pill) - synced from server snapshot or tokenRecord
     var contextWindowTokens: Int = 0
 
     /// Output tokens for this turn - from server's tokenRecord.source.rawOutputTokens
@@ -66,6 +66,17 @@ final class ContextTrackingState {
     }
 
     // MARK: - Server Value Updates
+
+    /// Sync state from server's context snapshot (authoritative source).
+    /// Called by refreshContextFromServer() to keep the pill in sync with the sheet.
+    /// Only updates contextWindowTokens when the server returns a non-zero value
+    /// (zero means the session hasn't been built on the server yet).
+    func syncFromServerSnapshot(currentTokens: Int, contextLimit: Int) {
+        currentContextWindow = contextLimit
+        if currentTokens > 0 {
+            contextWindowTokens = currentTokens
+        }
+    }
 
     /// Update from server's tokenRecord (called on turn_end)
     /// This is the preferred method - uses server-calculated values

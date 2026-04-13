@@ -56,7 +56,7 @@ struct ContextUsageGaugeView: View {
 
                     Spacer()
 
-                    Text("\(Int(usagePercent * 100))%")
+                    Text("\(Int((usagePercent * 100).rounded()))%")
                         .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
                         .foregroundStyle(usageColor)
                 }

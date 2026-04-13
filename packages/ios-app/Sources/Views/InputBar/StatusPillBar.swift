@@ -70,19 +70,11 @@ struct StatusPillsColumn: View {
     }
 
     private var tokensRemaining: Int {
-        // Use last turn's input tokens as actual context size
-        // (input tokens already includes system prompt + history, so it's the full context)
-        return max(0, contextWindow - lastTurnInputTokens)
+        max(0, contextWindow - lastTurnInputTokens)
     }
 
     private var formattedTokensRemaining: String {
-        let remaining = tokensRemaining
-        if remaining >= 1_000_000 {
-            return String(format: "%.1fM", Double(remaining) / 1_000_000)
-        } else if remaining >= 1000 {
-            return String(format: "%.0fk", Double(remaining) / 1000)
-        }
-        return "\(remaining)"
+        TokenFormatter.format(tokensRemaining)
     }
 
     /// Whether reasoning pill should be visible
@@ -258,13 +250,7 @@ struct TokenStatsPill: View {
     }
 
     private var formattedTokensRemaining: String {
-        let remaining = tokensRemaining
-        if remaining >= 1_000_000 {
-            return String(format: "%.1fM", Double(remaining) / 1_000_000)
-        } else if remaining >= 1000 {
-            return String(format: "%.0fk", Double(remaining) / 1000)
-        }
-        return "\(remaining)"
+        TokenFormatter.format(tokensRemaining)
     }
 
     var body: some View {

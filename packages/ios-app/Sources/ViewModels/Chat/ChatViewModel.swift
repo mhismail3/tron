@@ -667,35 +667,29 @@ final class ChatViewModel {
         }
     }
 
-    /// Refresh context state from server (authoritative source for ACTIVE sessions)
-    /// Call after: session resume, model switch, skill add/remove, context clear/compaction
-    /// This ensures iOS state stays in sync with server's live context calculations
-    /// Includes retry logic for transient network failures
-    ///
-    /// IMPORTANT: When the session is NOT active on the server (e.g., during resume before
-    /// the user sends a message), the server returns currentTokens=0. In this case, we
-    /// preserve the reconstructed state value (from parsing server events).
-    /// The reconstructed state is the source of truth for inactive sessions.
+    /// Refresh context state from server (authoritative source).
+    /// Call after: session resume, model switch, skill add/remove, context clear/compaction.
+    /// Syncs both context limit and current token count to keep the pill in sync with the sheet.
+    /// When the server returns currentTokens=0 (session not yet built), preserves existing tokens.
     func refreshContextFromServer() async {
         guard let sessionId = rpcClient.currentSessionId else {
             logger.debug("No session ID available for context refresh", category: .session)
             return
         }
 
-        // Capture the RPC client call outside the retry closure to avoid Sendable issues
         let contextClient = rpcClient.context
         let sid = sessionId
         do {
             let snapshot = try await withRetry {
                 try await contextClient.getSnapshot(sessionId: sid)
             }
-            // Update context limit (model's max tokens).
-            // Do NOT update lastTurnInputTokens — reconstructed state from turn_end events
-            // is the single source of truth for context window tokens.
-            self.contextState.currentContextWindow = snapshot.contextLimit
-            logger.debug("refreshContextFromServer: contextLimit=\(snapshot.contextLimit), currentTokens=\(snapshot.currentTokens) (preserving reconstructed lastTurnInputTokens: \(self.contextState.lastTurnInputTokens))", category: .session)
+            self.contextState.syncFromServerSnapshot(
+                currentTokens: snapshot.currentTokens,
+                contextLimit: snapshot.contextLimit
+            )
+            logger.debug("refreshContextFromServer: contextLimit=\(snapshot.contextLimit), currentTokens=\(snapshot.currentTokens), contextWindowTokens=\(self.contextState.contextWindowTokens)", category: .session)
         } catch {
-            logger.warning("Failed to refresh context from server: \(error.localizedDescription). Preserving reconstructed state value: \(contextState.lastTurnInputTokens)", category: .session)
+            logger.warning("Failed to refresh context from server: \(error.localizedDescription). Preserving state: \(contextState.contextWindowTokens)", category: .session)
         }
     }
 
