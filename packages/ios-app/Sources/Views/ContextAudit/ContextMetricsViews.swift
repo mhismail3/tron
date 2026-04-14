@@ -31,68 +31,58 @@ struct ContextUsageGaugeView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Section header with explanatory subtitle
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(spacing: 2) {
+            // Row 1: icon + title + progress bar + percentage
+            HStack(spacing: 8) {
+                Image(systemName: "gauge.with.dots.needle.67percent")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(usageColor)
+
                 Text("Context Window")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-                Text("What's being sent to the model this turn")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextDisabled)
-            }
+                    .foregroundStyle(usageColor)
+                    .layoutPriority(1)
 
-            // Main content card
-            VStack(spacing: 12) {
-                // Header
-                HStack {
-                    Image(systemName: "gauge.with.dots.needle.67percent")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(usageColor)
-
-                    Text("Current Size")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.tronSlate)
-
-                    Spacer()
-
-                    Text("\(Int((usagePercent * 100).rounded()))%")
-                        .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                        .foregroundStyle(usageColor)
-                }
-
-                // Progress bar - use overlay + clipShape to prevent thin-line artifact at low fill
+                // Progress bar inline
                 GeometryReader { geometry in
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
                         .fill(Color.tronOverlay(0.1))
                         .overlay(alignment: .leading) {
                             Rectangle()
                                 .fill(usageColor.opacity(0.8))
                                 .frame(width: geometry.size.width * min(usagePercent, 1.0))
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
-                .frame(height: 10)
+                .frame(height: 6)
+                .padding(.horizontal, 4)
 
-                // Token counts
-                HStack {
-                    Text("\(formattedTokens) / \(formattedLimit)")
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextSecondary)
-
-                    Spacer()
-
-                    Text("\(TokenFormatter.format(contextLimit - currentTokens)) remaining")
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextMuted)
-                }
+                Text("\(Int((usagePercent * 100).rounded()))%")
+                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .foregroundStyle(usageColor)
+                    .layoutPriority(1)
             }
-            .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronSlateDark.opacity(0.5)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            // Row 2: token counts — left text aligns with "Context Window" title
+            HStack {
+                Text("\(TokenFormatter.format(contextLimit - currentTokens)) remaining")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextMuted)
+
+                Spacer()
+
+                Text("\(formattedTokens) / \(formattedLimit)")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextMuted)
             }
+            .padding(.leading, 24)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.tronSlateDark.opacity(0.5)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 }
