@@ -97,7 +97,7 @@ struct ProjectSkillsSection: View {
 
     var body: some View {
         CollapsibleSkillsSection(
-            icon: "folder.fill",
+            icon: "sparkles",
             accent: .tronEmerald,
             title: "Available Skills",
             count: skills.count,

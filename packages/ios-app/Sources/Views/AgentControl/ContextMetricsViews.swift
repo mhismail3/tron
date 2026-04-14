@@ -74,11 +74,7 @@ struct ContextUsageGaugeView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronSlateDark.opacity(0.5)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
+        .glassEffect(.regular.tint(Color.tronSlateDark.opacity(0.5)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {
             onTap?()
@@ -131,11 +127,7 @@ struct ModelControlView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronPurple.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
+        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {
             onTap?()
@@ -215,11 +207,7 @@ struct SourceControlCardView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronTeal.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
+        .glassEffect(.regular.tint(Color.tronTeal.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {
             onTap?()
@@ -274,11 +262,7 @@ struct AnalyticsCardView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronRose.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
+        .glassEffect(.regular.tint(Color.tronRose.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {
             onTap?()
@@ -323,11 +307,7 @@ struct HistoryCardView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronCoral.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
+        .glassEffect(.regular.tint(Color.tronCoral.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {
             onTap?()

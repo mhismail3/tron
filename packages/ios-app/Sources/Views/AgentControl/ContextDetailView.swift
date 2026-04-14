@@ -33,10 +33,11 @@ struct ContextDetailView: View {
         guard let rules = snapshot.rules else { return nil }
         let globalFiles = rules.files.filter { $0.level == .global }
         guard !globalFiles.isEmpty else { return nil }
+        let share = rules.files.isEmpty ? 0 : rules.tokens * globalFiles.count / rules.files.count
         return LoadedRules(
             files: globalFiles,
             totalFiles: globalFiles.count,
-            tokens: rules.tokens // token count is aggregate; we show it on global only as approximation
+            tokens: share
         )
     }
 
@@ -45,10 +46,11 @@ struct ContextDetailView: View {
         guard let rules = snapshot.rules else { return nil }
         let projectFiles = rules.files.filter { $0.level == .project || $0.level == .directory }
         guard !projectFiles.isEmpty else { return nil }
+        let share = rules.files.isEmpty ? 0 : rules.tokens * projectFiles.count / rules.files.count
         return LoadedRules(
             files: projectFiles,
             totalFiles: projectFiles.count,
-            tokens: 0 // no separate token count available for project subset
+            tokens: share
         )
     }
 
