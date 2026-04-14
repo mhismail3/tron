@@ -382,6 +382,7 @@ struct InputBar: View {
                 contextPercentage: config.contextPercentage,
                 contextWindow: config.contextWindow,
                 lastTurnInputTokens: config.lastTurnInputTokens,
+                modelName: config.currentModelInfo?.name,
                 hasAppeared: hasAppeared,
                 onContextTap: actions.onContextTap,
                 readOnly: config.readOnly

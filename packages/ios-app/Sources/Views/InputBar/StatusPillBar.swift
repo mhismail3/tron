@@ -2,14 +2,16 @@ import SwiftUI
 
 // MARK: - Status Pills Column (iOS 26 Liquid Glass)
 
-/// Status pill column: token stats pill for context window access
-/// Model and reasoning controls are available via the Agent Control sheet
+/// Status pill column: agent control pill showing model name and context percentage.
 @available(iOS 26.0, *)
 struct StatusPillsColumn: View {
     // Context info
     let contextPercentage: Int
     let contextWindow: Int
     let lastTurnInputTokens: Int
+
+    // Model info
+    var modelName: String?
 
     // Animation state
     let hasAppeared: Bool
@@ -31,55 +33,33 @@ struct StatusPillsColumn: View {
         return .tronEmerald
     }
 
-    private var tokensRemaining: Int {
-        max(0, contextWindow - lastTurnInputTokens)
-    }
-
-    private var formattedTokensRemaining: String {
-        TokenFormatter.format(tokensRemaining)
+    private var displayModelName: String {
+        modelName ?? "—"
     }
 
     // MARK: - Body
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            tokenStatsPillWithChevrons
+            agentControlPill
                 .scaleEffect(hasAppeared ? 1 : 0.3, anchor: .bottom)
                 .opacity(hasAppeared ? 1 : 0)
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: hasAppeared)
     }
 
-    // MARK: - Token Stats Pill
+    // MARK: - Agent Control Pill
 
-    private var tokenStatsPillWithChevrons: some View {
+    private var agentControlPill: some View {
         Button {
             onContextTap?()
         } label: {
-            HStack(spacing: 8) {
-                // Context usage bar - use overlay + clipShape to prevent overflow
-                Capsule()
-                    .fill(Color.tronOverlay(0.2))
-                    .frame(width: 40, height: 6)
-                    .overlay(alignment: .leading) {
-                        // Fill rectangle that gets clipped by parent Capsule shape
-                        Rectangle()
-                            .fill(readOnly ? Color.tronEmerald.opacity(0.3) : contextPercentageColor)
-                            .frame(width: readOnly ? 0 : 40 * min(CGFloat(contextPercentage) / 100.0, 1.0))
-                    }
-                    .clipShape(Capsule())
+            HStack(spacing: 0) {
+                Text(readOnly ? "—" : displayModelName)
+                    .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
 
-                // Tokens remaining + Chevrons (spacing: 4 to match model pill)
-                HStack(spacing: 4) {
-                    Text(readOnly ? "—" : "\(formattedTokensRemaining) left")
-                        .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : contextPercentageColor)
-
-                    if !readOnly {
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(TronTypography.labelSM)
-                            .foregroundStyle(contextPercentageColor)
-                    }
-                }
+                Text(readOnly ? "" : " • \(contextPercentage)%")
+                    .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : contextPercentageColor)
             }
             .font(TronTypography.pillValue)
             .padding(.horizontal, 10)

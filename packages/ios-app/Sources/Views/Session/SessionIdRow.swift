@@ -9,8 +9,12 @@ struct SessionIdRow: View {
     @State private var showCopied = false
 
     var body: some View {
-        HStack {
-            Text("ID")
+        HStack(spacing: 8) {
+            Image(systemName: "number")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronAmber)
+
+            Text("Session ID")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronAmber)
 
@@ -27,7 +31,8 @@ struct SessionIdRow: View {
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .sectionFill(.tronAmber)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {

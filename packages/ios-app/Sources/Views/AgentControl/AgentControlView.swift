@@ -37,6 +37,7 @@ struct AgentControlView: View {
     @State private var showAnalytics = false
     @State private var showHistory = false
     @State private var pendingSkillDeletions: Set<String> = []
+    @State private var cardsVisible = false
 
     // MARK: - Session State
 
@@ -85,16 +86,6 @@ struct AgentControlView: View {
         NavigationStack {
             ZStack {
                 contentView
-
-                if isLoading && detailedSnapshot == nil && diffResult == nil && sessionEvents.isEmpty {
-                    Color.clear
-                        .background(.ultraThinMaterial)
-                        .overlay {
-                            ProgressView()
-                                .tint(.tronEmerald)
-                        }
-                        .ignoresSafeArea()
-                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -189,29 +180,30 @@ struct AgentControlView: View {
     private var contentView: some View {
         GeometryReader { geometry in
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
+                VStack(spacing: 12) {
                     // Context gauge
-                    if let snapshot = detailedSnapshot {
-                        ContextUsageGaugeView(
-                            currentTokens: snapshot.currentTokens,
-                            contextLimit: snapshot.contextLimit,
-                            usagePercent: snapshot.usagePercent,
-                            thresholdLevel: snapshot.thresholdLevel,
-                            onTap: {
-                                showContextDetail = true
-                            }
-                        )
-                        .padding(.horizontal)
+                    ContextUsageGaugeView(
+                        currentTokens: detailedSnapshot?.currentTokens ?? 0,
+                        contextLimit: detailedSnapshot?.contextLimit ?? 1,
+                        usagePercent: detailedSnapshot?.usagePercent ?? 0,
+                        thresholdLevel: detailedSnapshot?.thresholdLevel ?? "normal",
+                        onTap: {
+                            showContextDetail = true
+                        }
+                    )
+                    .padding(.horizontal)
+                    .cardEntrance(visible: cardsVisible, index: 0)
 
-                        ModelControlView(
-                            modelInfo: currentModelInfo,
-                            reasoningLevel: reasoningLevel,
-                            onTap: {
-                                showModelPicker = true
-                            }
-                        )
-                        .padding(.horizontal)
-                    }
+                    // Model control
+                    ModelControlView(
+                        modelInfo: currentModelInfo,
+                        reasoningLevel: reasoningLevel,
+                        onTap: {
+                            showModelPicker = true
+                        }
+                    )
+                    .padding(.horizontal)
+                    .cardEntrance(visible: cardsVisible, index: 1)
 
                     // Source control card
                     SourceControlCardView(
@@ -226,17 +218,17 @@ struct AgentControlView: View {
                         }
                     )
                     .padding(.horizontal)
+                    .cardEntrance(visible: cardsVisible, index: 2)
 
                     // Analytics card
-                    if hasEvents {
-                        AnalyticsCardView(
-                            totalTokens: analyticsTotalTokens,
-                            totalCost: cachedAnalytics.totalCost,
-                            totalTurns: cachedAnalytics.turns.count,
-                            onTap: { showAnalytics = true }
-                        )
-                        .padding(.horizontal)
-                    }
+                    AnalyticsCardView(
+                        totalTokens: analyticsTotalTokens,
+                        totalCost: cachedAnalytics.totalCost,
+                        totalTurns: cachedAnalytics.turns.count,
+                        onTap: { showAnalytics = true }
+                    )
+                    .padding(.horizontal)
+                    .cardEntrance(visible: cardsVisible, index: 3)
 
                     // History card
                     HistoryCardView(
@@ -245,12 +237,14 @@ struct AgentControlView: View {
                         onTap: { showHistory = true }
                     )
                     .padding(.horizontal)
+                    .cardEntrance(visible: cardsVisible, index: 4)
 
                     // Session ID
                     SessionIdRow(sessionId: sessionId)
                         .padding(.horizontal)
+                        .cardEntrance(visible: cardsVisible, index: 5)
                 }
-                .padding(.vertical)
+                .padding(.vertical, 12)
                 .frame(width: geometry.size.width)
             }
             .frame(width: geometry.size.width)
@@ -262,6 +256,10 @@ struct AgentControlView: View {
     private func loadAll() async {
         isLoading = true
         errorMessage = nil
+
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+            cardsVisible = true
+        }
 
         async let contextTask: Void = loadContext()
         async let changesTask: Void = loadChanges()
@@ -355,5 +353,29 @@ struct AgentControlView: View {
             }
             errorMessage = "Failed to remove skill: \(error.localizedDescription)"
         }
+    }
+}
+
+// MARK: - Card Entrance Modifier
+
+private struct CardEntranceModifier: ViewModifier {
+    let visible: Bool
+    let index: Int
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(visible ? 1 : 0)
+            .offset(y: visible ? 0 : 20)
+            .animation(
+                .spring(response: 0.45, dampingFraction: 0.78)
+                    .delay(Double(index) * 0.06),
+                value: visible
+            )
+    }
+}
+
+extension View {
+    fileprivate func cardEntrance(visible: Bool, index: Int) -> some View {
+        modifier(CardEntranceModifier(visible: visible, index: index))
     }
 }
