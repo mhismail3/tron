@@ -94,6 +94,63 @@ struct ContextUsageGaugeView: View {
     }
 }
 
+// MARK: - Model Control View
+
+@available(iOS 26.0, *)
+struct ModelControlView: View {
+    var modelInfo: ModelInfo?
+    var reasoningLevel: String?
+    var onTap: (() -> Void)?
+
+    private var displayName: String {
+        modelInfo?.name ?? "Unknown"
+    }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            // Row 1: icon + title + model name
+            HStack(spacing: 8) {
+                Image(systemName: "cpu")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronAmber)
+
+                Text("Model")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronAmber)
+
+                Spacer()
+
+                Text(displayName)
+                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .foregroundStyle(.tronAmber)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+            }
+
+            // Row 2: reasoning level (bottom right)
+            if let level = reasoningLevel, !level.isEmpty {
+                HStack {
+                    Spacer()
+                    Text("Reasoning: \(level.capitalized)")
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextMuted)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture {
+            onTap?()
+        }
+    }
+}
+
 // MARK: - Markdown Content View (caption-sized block-level markdown for context audit)
 
 @available(iOS 26.0, *)

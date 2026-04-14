@@ -38,7 +38,11 @@ struct ChatSheetContent: View {
                 sessionId: sessionId,
                 skillStore: skillStore,
                 readOnly: sheetReadOnly,
-                contextState: viewModel.contextState
+                contextState: viewModel.contextState,
+                currentModelInfo: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel),
+                reasoningLevel: viewModel.inputBarState.reasoningLevel,
+                availableModels: viewModel.modelPickerState.cachedModels,
+                currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel)
             )
 
         case .session:

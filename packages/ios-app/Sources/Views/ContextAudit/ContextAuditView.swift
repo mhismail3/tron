@@ -10,6 +10,14 @@ struct ContextAuditView: View {
     var readOnly: Bool = false
     /// Observable context state — drives background refresh when tokens change (e.g. after compaction)
     var contextState: ContextTrackingState?
+    /// Current model info (for display name, tier, etc.)
+    var currentModelInfo: ModelInfo?
+    /// Current reasoning level (e.g. "low", "medium", "high")
+    var reasoningLevel: String?
+    /// Available models for the model picker
+    var availableModels: [ModelInfo] = []
+    /// Current model ID string for the model picker
+    var currentModelId: String = ""
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
@@ -17,6 +25,7 @@ struct ContextAuditView: View {
     @State private var errorMessage: String?
     @State private var detailedSnapshot: DetailedContextSnapshotResult?
     @State private var showContextDetail = false
+    @State private var showModelPicker = false
 
     // Optimistic deletion state - skills being deleted animate out immediately
     @State private var pendingSkillDeletions: Set<String> = []
@@ -44,6 +53,16 @@ struct ContextAuditView: View {
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                 }
+            }
+            .sheet(isPresented: $showModelPicker) {
+                ModelPickerSheet(
+                    models: availableModels,
+                    currentModelId: currentModelId,
+                    readOnly: readOnly,
+                    onSelect: { model in
+                        NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                    }
+                )
             }
             .sheet(isPresented: $showContextDetail) {
                 if let snapshot = detailedSnapshot {
@@ -90,7 +109,7 @@ struct ContextAuditView: View {
             Group {
                 if let snapshot = detailedSnapshot {
                     ScrollView(.vertical, showsIndicators: true) {
-                        VStack(spacing: 16) {
+                        VStack(spacing: 12) {
                             ContextUsageGaugeView(
                                 currentTokens: snapshot.currentTokens,
                                 contextLimit: snapshot.contextLimit,
@@ -98,6 +117,15 @@ struct ContextAuditView: View {
                                 thresholdLevel: snapshot.thresholdLevel,
                                 onTap: {
                                     showContextDetail = true
+                                }
+                            )
+                            .padding(.horizontal)
+
+                            ModelControlView(
+                                modelInfo: currentModelInfo,
+                                reasoningLevel: reasoningLevel,
+                                onTap: {
+                                    showModelPicker = true
                                 }
                             )
                             .padding(.horizontal)
