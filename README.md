@@ -432,6 +432,11 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
     "bash": { "defaultTimeoutMs": 120000 }
   },
 
+  "skills": {
+    "compactionPolicy": "clearAll",   // "clearAll" | "autoRestore" | "askUser"
+    "showIndex": "always"             // "always" | "never" | "whenNoActiveSkills"
+  },
+
   "retry":  { "maxRetries": 1 },
   "hooks":  { "defaultTimeoutMs": 5000, "discoveryTimeoutMs": 10000, "extensions": [".ts", ".js", ".mjs", ".sh"] }
 }

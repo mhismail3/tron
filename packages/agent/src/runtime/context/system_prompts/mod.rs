@@ -93,7 +93,8 @@ Return a single JSON object:
 - Preserve specific values: file paths, variable names, error messages, URLs, command outputs
 - Do NOT summarize tool results as "the tool succeeded" — include what the result was
 - Omit empty arrays from extractedData rather than including []
-- Be concise but complete — every sentence should carry information"#;
+- Be concise but complete — every sentence should carry information
+- If skills were used (referenced with @skill-name), note which skills were active for context, but do NOT instruct the reader to continue using them. Skills are managed separately and may not be available after compaction"#;
 
 /// System prompt for the memory retain summarizer subagent.
 ///

@@ -369,6 +369,13 @@ impl CompactionHandler {
         let result =
             Self::run_summarizer(context_manager, session_id, self.subagent_manager.as_ref()).await;
 
+        // Append a policy-aware skill notice to the compaction ack message.
+        // This ensures the model sees explicit guidance about skill availability
+        // right after the compaction summary in the conversation history.
+        if result.is_ok() {
+            Self::inject_skill_notice_into_ack(context_manager);
+        }
+
         let tokens_after = context_manager.get_current_tokens();
 
         if tokens_after >= tokens_before && result.is_ok() {
@@ -483,6 +490,42 @@ impl CompactionHandler {
         } else {
             let summarizer = KeywordSummarizer;
             context_manager.execute_compaction(&summarizer, None).await
+        }
+    }
+
+    /// Append a skill-status notice to the compaction ack message based on the
+    /// configured `CompactionPolicy`. The ack is always at index 1 in the message
+    /// list (after the summary user message at index 0).
+    fn inject_skill_notice_into_ack(context_manager: &mut ContextManager) {
+        use crate::settings::types::CompactionPolicy;
+
+        let policy = {
+            let settings = crate::settings::get_settings();
+            settings.skills.compaction_policy.clone()
+        };
+
+        let notice = match policy {
+            CompactionPolicy::ClearAll | CompactionPolicy::AskUser => {
+                "\n\n[Skills Status: All previously active skills were cleared during context \
+                 compaction. Skills mentioned in the context summary above are no longer loaded. \
+                 Do not use or reference them unless re-activated with @skill-name.]"
+            }
+            CompactionPolicy::AutoRestore => {
+                "\n\n[Skills Status: Active skills were preserved through context compaction \
+                 and remain available.]"
+            }
+        };
+
+        let mut messages = context_manager.get_messages();
+        if messages.len() >= 2 {
+            if let crate::core::messages::Message::Assistant { ref mut content, .. } = messages[1] {
+                if let Some(crate::core::content::AssistantContent::Text { text, .. }) =
+                    content.first_mut()
+                {
+                    text.push_str(notice);
+                }
+            }
+            context_manager.set_messages(messages);
         }
     }
 

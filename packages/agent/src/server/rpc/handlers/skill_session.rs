@@ -364,6 +364,7 @@ impl MethodHandler for ActiveHandler {
 pub fn reconstruct_tracker(
     event_store: &crate::events::EventStore,
     session_id: &str,
+    policy: &crate::settings::types::CompactionPolicy,
 ) -> SkillTracker {
     let events = event_store
         .get_events_by_type(
@@ -375,6 +376,7 @@ pub fn reconstruct_tracker(
                 "spell.consumed",
                 "context.cleared",
                 "compact.boundary",
+                "skills.cleared",
             ],
             None,
         )
@@ -391,7 +393,7 @@ pub fn reconstruct_tracker(
             })
         })
         .collect();
-    SkillTracker::from_events(&json_events)
+    SkillTracker::from_events_with_policy(&json_events, policy)
 }
 
 #[cfg(test)]
@@ -711,7 +713,7 @@ mod tests {
             .await
             .unwrap();
 
-        let tracker = reconstruct_tracker(&ctx.event_store, &session_id);
+        let tracker = reconstruct_tracker(&ctx.event_store, &session_id, &crate::settings::types::CompactionPolicy::ClearAll);
         assert!(tracker.has_skill("browser"));
         assert_eq!(tracker.count(), 1);
     }
@@ -734,7 +736,7 @@ mod tests {
             .unwrap();
 
         // Verify active
-        let tracker = reconstruct_tracker(&ctx.event_store, &session_id);
+        let tracker = reconstruct_tracker(&ctx.event_store, &session_id, &crate::settings::types::CompactionPolicy::ClearAll);
         assert!(tracker.has_skill("browser"));
 
         // Deactivate
@@ -747,7 +749,7 @@ mod tests {
             .unwrap();
 
         // Verify not active, pending removal
-        let tracker = reconstruct_tracker(&ctx.event_store, &session_id);
+        let tracker = reconstruct_tracker(&ctx.event_store, &session_id, &crate::settings::types::CompactionPolicy::ClearAll);
         assert!(!tracker.has_skill("browser"));
         assert!(tracker.pending_removal_notices().contains("browser"));
     }

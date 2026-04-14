@@ -10,6 +10,7 @@ struct ContextSettingsPage: View {
             keepRecentCard
             memoryCard
             rulesCard
+            skillsCard
         }
     }
 
@@ -121,6 +122,72 @@ struct ContextSettingsPage: View {
 
             SettingsCaption(text: "Turns between automatic memory retention. 0 to disable.")
         }
+    }
+
+    // MARK: - Skills Card
+
+    private var skillsCompactionCaption: String {
+        switch settingsState.skillsCompactionPolicy {
+        case "autoRestore":
+            return "Active skills are automatically re-injected after compaction."
+        case "askUser":
+            return "Skills are cleared on compaction and you'll be prompted to re-activate."
+        default:
+            return "All active skills are cleared when context is compacted."
+        }
+    }
+
+    private var skillsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Skills")
+
+            SettingsCard {
+                HStack {
+                    Image(systemName: "wand.and.stars")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    Text("On Compaction")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    Spacer()
+                    skillsCompactionToggle
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 14)
+            }
+
+            SettingsCaption(text: skillsCompactionCaption)
+        }
+    }
+
+    private var skillsCompactionToggle: some View {
+        let modes = ["clearAll", "autoRestore", "askUser"]
+        let labels = ["Clear All", "Auto-Restore", "Ask User"]
+        let currentIndex = modes.firstIndex(of: settingsState.skillsCompactionPolicy) ?? 0
+
+        return Button {
+            let nextIndex = (currentIndex + 1) % modes.count
+            let newValue = modes[nextIndex]
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                settingsState.skillsCompactionPolicy = newValue
+            }
+            updateServerSetting {
+                ServerSettingsUpdate(skills: .init(compactionPolicy: newValue))
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(labels[currentIndex])
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+            }
+            .foregroundStyle(.tronEmerald)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.tronEmerald.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Rules Card

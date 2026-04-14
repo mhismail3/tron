@@ -4,6 +4,8 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use serde_json::{Value, json};
 use crate::skills::registry::SkillRegistry;
+use crate::skills::tracker::SkillTracker;
+use crate::skills::types::{SkillAddMethod, SkillSource};
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::context_service::{
@@ -350,59 +352,64 @@ fn build_added_skills(
     event_store: &crate::events::EventStore,
     session_id: &str,
 ) -> Result<Vec<Value>, RpcError> {
-    let added_events = event_store
-        .get_events_by_type(session_id, &["skill.activated"], None)
-        .map_err(|error| RpcError::Internal {
-            message: error.to_string(),
-        })?;
-    let removed_events = event_store
-        .get_events_by_type(session_id, &["skill.deactivated"], None)
+    let policy = {
+        let settings = crate::settings::get_settings();
+        settings.skills.compaction_policy.clone()
+    };
+
+    let events = event_store
+        .get_events_by_type(
+            session_id,
+            &[
+                "skill.activated",
+                "skill.deactivated",
+                "context.cleared",
+                "compact.boundary",
+                "skills.cleared",
+            ],
+            None,
+        )
         .map_err(|error| RpcError::Internal {
             message: error.to_string(),
         })?;
 
-    let removed_names: std::collections::HashSet<String> = removed_events
+    let json_events: Vec<Value> = events
         .iter()
-        .filter_map(|event| {
-            serde_json::from_str::<Value>(&event.payload)
-                .ok()
-                .and_then(|payload| {
-                    payload
-                        .get("skillName")
-                        .and_then(Value::as_str)
-                        .map(String::from)
+        .filter_map(|e| {
+            serde_json::from_str::<Value>(&e.payload).ok().map(|payload| {
+                json!({
+                    "type": e.event_type,
+                    "id": e.id,
+                    "payload": payload,
                 })
+            })
         })
         .collect();
 
-    Ok(added_events
-        .iter()
-        .filter_map(|event| {
-            let payload: Value = serde_json::from_str(&event.payload).ok()?;
-            let name = payload.get("skillName")?.as_str()?;
-            if removed_names.contains(name) {
-                return None;
-            }
-            let source = payload
-                .get("source")
-                .and_then(Value::as_str)
-                .unwrap_or("global");
-            let added_via = payload
-                .get("addedVia")
-                .and_then(Value::as_str)
-                .unwrap_or("mention");
-            let tokens = payload.get("tokens").and_then(Value::as_u64);
+    let tracker = SkillTracker::from_events_with_policy(&json_events, &policy);
 
-            let mut skill = json!({
-                "name": name,
-                "source": source,
-                "addedVia": added_via,
-                "eventId": event.id,
+    Ok(tracker
+        .added_skills()
+        .into_iter()
+        .map(|skill| {
+            let source_str = match skill.source {
+                SkillSource::Global => "global",
+                SkillSource::Project => "project",
+            };
+            let added_via_str = match skill.added_via {
+                SkillAddMethod::Mention => "mention",
+                SkillAddMethod::Explicit => "explicit",
+            };
+            let mut value = json!({
+                "name": skill.name,
+                "source": source_str,
+                "addedVia": added_via_str,
+                "eventId": skill.event_id,
             });
-            if let Some(tokens) = tokens {
-                skill["tokens"] = json!(tokens);
+            if let Some(tokens) = skill.tokens {
+                value["tokens"] = json!(tokens);
             }
-            Some(skill)
+            value
         })
         .collect())
 }

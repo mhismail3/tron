@@ -694,10 +694,33 @@ pub async fn build_skill_context_from_session(
     session_id: String,
 ) -> Result<SkillContextResult, RpcError> {
     run_blocking_task("agent.prompt.skills", move || {
+        let policy = {
+            let settings = crate::settings::get_settings();
+            settings.skills.compaction_policy.clone()
+        };
+
         let tracker = crate::server::rpc::handlers::skill_session::reconstruct_tracker(
             &event_store,
             &session_id,
+            &policy,
         );
+
+        // For AskUser policy, emit skills.cleared event once after compaction
+        if matches!(policy, crate::settings::types::CompactionPolicy::AskUser) {
+            let cleared = tracker.cleared_at_boundary();
+            if !cleared.is_empty() {
+                let _ = event_store.append(&crate::events::AppendOptions {
+                    session_id: &session_id,
+                    event_type: crate::events::EventType::SkillsCleared,
+                    payload: serde_json::json!({
+                        "clearedSkills": cleared,
+                        "reason": "compaction",
+                    }),
+                    parent_id: None,
+                    sequence: None,
+                });
+            }
+        }
 
         // Collect active skill names + unconsumed spell names
         let active_names = tracker.active_skill_names();
@@ -770,19 +793,39 @@ pub async fn build_skill_context_from_session(
         let skill_activation_context =
             crate::skills::injector::build_activation_directive(&skill_only_names, &spell_names);
 
-        // Build removal notice for deactivated skills
-        let pending_removals = tracker.pending_removal_notices();
-        let removal_notice = if pending_removals.is_empty() {
-            None
-        } else {
-            let names: Vec<String> = pending_removals
-                .iter()
-                .map(|n| format!("@{n}"))
-                .collect();
-            Some(format!(
-                "The following skills have been deactivated. Stop following their instructions: {}.",
-                names.join(", ")
-            ))
+        // Build removal notice for deactivated skills + post-compaction guidance
+        let removal_notice = {
+            let mut notices = Vec::new();
+
+            // Post-compaction skill notice: when skills were cleared by compaction
+            // and none re-activated, tell the model not to use skills from the summary
+            if tracker.skills_cleared_by_compaction() {
+                notices.push(
+                    "Context was compacted and all previously active skills were cleared. \
+                     Skills mentioned in the earlier context summary are not currently active \
+                     and should not be used. To use a skill, activate it with @skill-name."
+                        .to_string(),
+                );
+            }
+
+            // Standard removal notice for explicitly deactivated skills
+            let pending_removals = tracker.pending_removal_notices();
+            if !pending_removals.is_empty() {
+                let names: Vec<String> = pending_removals
+                    .iter()
+                    .map(|n| format!("@{n}"))
+                    .collect();
+                notices.push(format!(
+                    "The following skills have been deactivated. Stop following their instructions: {}.",
+                    names.join(", ")
+                ));
+            }
+
+            if notices.is_empty() {
+                None
+            } else {
+                Some(notices.join("\n\n"))
+            }
         };
 
         Ok(SkillContextResult {

@@ -2,7 +2,9 @@
 //!
 //! Tracks which skills are active in a session, which have been deactivated
 //! (for removal notice generation), and which spells are pending consumption.
-//! State is reconstructed from events via [`SkillTracker::from_events`].
+//! State is reconstructed from events via [`SkillTracker::from_events`] (always
+//! uses `ClearAll` semantics) or [`SkillTracker::from_events_with_policy`]
+//! (respects the configured [`CompactionPolicy`](crate::settings::types::CompactionPolicy)).
 //!
 //! ## Event types handled
 //!
@@ -10,7 +12,15 @@
 //! - `skill.deactivated` — removes skill, adds to pending removal notices
 //! - `spell.cast` — queues spell for next prompt
 //! - `spell.consumed` — marks a queued spell as consumed
-//! - `compact.boundary` / `context.cleared` — clears all state (respects compaction policy externally)
+//! - `compact.boundary` — behavior depends on `CompactionPolicy`:
+//!   - `ClearAll` (default): clears all state, sets `skills_cleared_by_compaction`
+//!     if skills were active at boundary time
+//!   - `AutoRestore`: clears ephemeral state but keeps active skills
+//!   - `AskUser`: records cleared skill names, then clears all state, sets
+//!     `skills_cleared_by_compaction` if skills were active
+//! - `context.cleared` — always clears all state regardless of policy
+//! - `skills.cleared` — resets `cleared_at_boundary` to prevent duplicate emission
+//! - `skill.activated` (post-boundary) — resets `skills_cleared_by_compaction`
 
 use std::collections::{HashMap, HashSet};
 
@@ -51,6 +61,14 @@ pub struct SkillTracker {
     removed_skill_names: HashSet<String>,
     /// Spells cast but not yet consumed by a prompt.
     pending_spells: Vec<PendingSpell>,
+    /// Names of skills that were active when cleared by a `compact.boundary`
+    /// under `AskUser` policy. Empty for other policies. Reset on each boundary.
+    cleared_at_boundary: Vec<String>,
+    /// `true` when a `compact.boundary` cleared active skills (ClearAll/AskUser)
+    /// and no new skill has been activated since. Used to generate a post-compaction
+    /// notice in the system prompt telling the model not to use skills from the
+    /// compaction summary.
+    skills_cleared_by_compaction: bool,
 }
 
 impl SkillTracker {
@@ -61,6 +79,8 @@ impl SkillTracker {
             pending_removal_notices: HashSet::new(),
             removed_skill_names: HashSet::new(),
             pending_spells: Vec::new(),
+            cleared_at_boundary: Vec::new(),
+            skills_cleared_by_compaction: false,
         }
     }
 
@@ -200,16 +220,41 @@ impl SkillTracker {
         self.removed_skill_names.clear();
         self.pending_removal_notices.clear();
         self.pending_spells.clear();
+        self.cleared_at_boundary.clear();
+        self.skills_cleared_by_compaction = false;
+    }
+
+    /// Clear ephemeral state but keep active skills (for `AutoRestore` compaction).
+    ///
+    /// Clears removed names, pending removal notices, spells, and boundary records
+    /// but leaves `added_skills` intact so they survive compaction.
+    pub fn clear_ephemeral(&mut self) {
+        self.removed_skill_names.clear();
+        self.pending_removal_notices.clear();
+        self.pending_spells.clear();
+        self.cleared_at_boundary.clear();
+        self.skills_cleared_by_compaction = false;
+    }
+
+    /// Names of skills that were active when cleared by a `compact.boundary`
+    /// under `AskUser` policy. Empty for other policies.
+    pub fn cleared_at_boundary(&self) -> &[String] {
+        &self.cleared_at_boundary
+    }
+
+    /// Whether skills were cleared by a compaction boundary and no new skill
+    /// has been activated since. Used to inject a post-compaction notice into
+    /// the system prompt.
+    pub fn skills_cleared_by_compaction(&self) -> bool {
+        self.skills_cleared_by_compaction
     }
 
     /// Reconstruct tracker state from a sequence of session events.
     ///
-    /// Processes events in order, handling:
-    /// `skill.activated`, `skill.deactivated`, `spell.cast`, `spell.consumed`,
-    /// `compact.boundary`, `context.cleared`.
-    ///
-    /// Events before the last `compact.boundary` or `context.cleared` are discarded
-    /// (the caller controls whether compaction clears skills via the compaction policy setting).
+    /// Always uses `ClearAll` compaction semantics: all state is discarded at
+    /// every `compact.boundary` or `context.cleared` event. Use
+    /// [`from_events_with_policy`](Self::from_events_with_policy) for
+    /// policy-aware reconstruction.
     pub fn from_events(events: &[serde_json::Value]) -> Self {
         let mut tracker = Self::new();
 
@@ -302,6 +347,140 @@ impl SkillTracker {
                 // Compaction / context clear: reset all state
                 "context.cleared" | "compact.boundary" => {
                     tracker.clear();
+                }
+                _ => {}
+            }
+        }
+
+        tracker
+    }
+
+    /// Reconstruct tracker state with compaction policy awareness.
+    ///
+    /// Like [`from_events`], but respects the `CompactionPolicy` when
+    /// processing `compact.boundary` events:
+    ///
+    /// - `ClearAll` — clears all state (same as `from_events`).
+    /// - `AutoRestore` — clears ephemeral state but keeps active skills.
+    /// - `AskUser` — records cleared skill names in [`cleared_at_boundary`],
+    ///   then clears all state. A subsequent `skills.cleared` event resets
+    ///   the recorded names to prevent duplicate emission.
+    ///
+    /// `context.cleared` always performs a full clear regardless of policy.
+    pub fn from_events_with_policy(
+        events: &[serde_json::Value],
+        policy: &crate::settings::types::CompactionPolicy,
+    ) -> Self {
+        use crate::settings::types::CompactionPolicy;
+
+        let mut tracker = Self::new();
+
+        for event in events {
+            let event_type = event
+                .get("type")
+                .and_then(|t| t.as_str())
+                .unwrap_or_default();
+            let event_id = event
+                .get("id")
+                .and_then(|id| id.as_str())
+                .map(ToString::to_string);
+
+            match event_type {
+                "skill.activated" => {
+                    if let Some(payload) = event.get("payload") {
+                        let name = payload
+                            .get("skillName")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let source = match payload
+                            .get("source")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("global")
+                        {
+                            "project" => SkillSource::Project,
+                            _ => SkillSource::Global,
+                        };
+                        let added_via = match payload
+                            .get("addedVia")
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("explicit")
+                        {
+                            "mention" => SkillAddMethod::Mention,
+                            _ => SkillAddMethod::Explicit,
+                        };
+
+                        if !name.is_empty() {
+                            tracker.add_skill(name, source, added_via, event_id);
+                            tracker.skills_cleared_by_compaction = false;
+                        }
+                    }
+                }
+                "skill.deactivated" => {
+                    if let Some(payload) = event.get("payload") {
+                        let name = payload
+                            .get("skillName")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or_default();
+                        if !name.is_empty() {
+                            let _ = tracker.remove_skill(name);
+                        }
+                    }
+                }
+                "spell.cast" => {
+                    if let Some(payload) = event.get("payload") {
+                        let name = payload
+                            .get("spellName")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let source = match payload
+                            .get("source")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("global")
+                        {
+                            "project" => SkillSource::Project,
+                            _ => SkillSource::Global,
+                        };
+                        if !name.is_empty() {
+                            if let Some(eid) = &event_id {
+                                tracker.add_spell(eid.clone(), name, source);
+                            }
+                        }
+                    }
+                }
+                "spell.consumed" => {
+                    if let Some(payload) = event.get("payload") {
+                        let cast_id = payload
+                            .get("castEventId")
+                            .and_then(|id| id.as_str())
+                            .unwrap_or_default();
+                        if !cast_id.is_empty() {
+                            tracker.consume_spell(cast_id);
+                        }
+                    }
+                }
+                "context.cleared" => {
+                    tracker.clear();
+                }
+                "compact.boundary" => {
+                    let had_skills = tracker.count() > 0;
+                    match policy {
+                        CompactionPolicy::ClearAll => {
+                            tracker.clear();
+                            tracker.skills_cleared_by_compaction = had_skills;
+                        }
+                        CompactionPolicy::AutoRestore => tracker.clear_ephemeral(),
+                        CompactionPolicy::AskUser => {
+                            let names = tracker.active_skill_names();
+                            tracker.clear();
+                            tracker.cleared_at_boundary = names;
+                            tracker.skills_cleared_by_compaction = had_skills;
+                        }
+                    }
+                }
+                "skills.cleared" => {
+                    tracker.cleared_at_boundary.clear();
                 }
                 _ => {}
             }
@@ -898,6 +1077,742 @@ mod tests {
         let skills = tracker.added_skills();
         assert_eq!(skills[0].source, SkillSource::Project);
         assert_eq!(skills[0].added_via, SkillAddMethod::Explicit);
+    }
+
+    // ── from_events_with_policy: ClearAll ──────────────────────────
+
+    #[test]
+    fn test_policy_clear_all_clears_skills_on_boundary() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert_eq!(tracker.count(), 0);
+        assert!(!tracker.has_skill("browser"));
+    }
+
+    #[test]
+    fn test_policy_clear_all_clears_spells_on_boundary() {
+        let events = vec![
+            serde_json::json!({
+                "type": "spell.cast",
+                "id": "evt-1",
+                "payload": { "spellName": "commit", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert!(tracker.unconsumed_spells().is_empty());
+    }
+
+    #[test]
+    fn test_policy_clear_all_clears_removals_on_boundary() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "skill.deactivated",
+                "id": "evt-2",
+                "payload": { "skillName": "browser" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert!(tracker.removed_skill_names().is_empty());
+        assert!(tracker.pending_removal_notices().is_empty());
+    }
+
+    #[test]
+    fn test_policy_clear_all_post_boundary_skills_survive() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "old", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-3",
+                "payload": { "skillName": "new", "source": "project" }
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert!(!tracker.has_skill("old"));
+        assert!(tracker.has_skill("new"));
+        assert_eq!(tracker.count(), 1);
+    }
+
+    #[test]
+    fn test_policy_clear_all_cleared_at_boundary_is_empty() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert!(tracker.cleared_at_boundary().is_empty());
+    }
+
+    // ── from_events_with_policy: AutoRestore ───────────────────────
+
+    #[test]
+    fn test_policy_auto_restore_keeps_skills_through_boundary() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-2",
+                "payload": { "skillName": "code", "source": "project" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AutoRestore,
+        );
+        assert!(tracker.has_skill("browser"));
+        assert!(tracker.has_skill("code"));
+        assert_eq!(tracker.count(), 2);
+    }
+
+    #[test]
+    fn test_policy_auto_restore_clears_spells_on_boundary() {
+        let events = vec![
+            serde_json::json!({
+                "type": "spell.cast",
+                "id": "evt-1",
+                "payload": { "spellName": "commit", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AutoRestore,
+        );
+        assert!(tracker.unconsumed_spells().is_empty());
+    }
+
+    #[test]
+    fn test_policy_auto_restore_clears_pending_removals_on_boundary() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "skill.deactivated",
+                "id": "evt-2",
+                "payload": { "skillName": "a" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AutoRestore,
+        );
+        assert!(tracker.pending_removal_notices().is_empty());
+    }
+
+    #[test]
+    fn test_policy_auto_restore_clears_removed_names_on_boundary() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "skill.deactivated",
+                "id": "evt-2",
+                "payload": { "skillName": "a" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AutoRestore,
+        );
+        assert!(tracker.removed_skill_names().is_empty());
+    }
+
+    #[test]
+    fn test_policy_auto_restore_deactivated_before_boundary_stays_gone() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "skill.deactivated",
+                "id": "evt-2",
+                "payload": { "skillName": "a" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AutoRestore,
+        );
+        assert!(!tracker.has_skill("a"));
+    }
+
+    #[test]
+    fn test_policy_auto_restore_multiple_boundaries() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-3",
+                "payload": { "skillName": "b", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-4",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AutoRestore,
+        );
+        assert!(tracker.has_skill("a"));
+        assert!(tracker.has_skill("b"));
+        assert_eq!(tracker.count(), 2);
+    }
+
+    #[test]
+    fn test_policy_auto_restore_post_boundary_deactivation() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+            serde_json::json!({
+                "type": "skill.deactivated",
+                "id": "evt-3",
+                "payload": { "skillName": "a" }
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AutoRestore,
+        );
+        assert!(!tracker.has_skill("a"));
+        assert!(tracker.removed_skill_names().contains("a"));
+    }
+
+    #[test]
+    fn test_policy_auto_restore_cleared_at_boundary_is_empty() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AutoRestore,
+        );
+        assert!(tracker.cleared_at_boundary().is_empty());
+    }
+
+    // ── from_events_with_policy: AskUser ───────────────────────────
+
+    #[test]
+    fn test_policy_ask_user_clears_skills_on_boundary() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AskUser,
+        );
+        assert_eq!(tracker.count(), 0);
+    }
+
+    #[test]
+    fn test_policy_ask_user_records_cleared_names() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-2",
+                "payload": { "skillName": "code", "source": "project" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AskUser,
+        );
+        let mut cleared = tracker.cleared_at_boundary().to_vec();
+        cleared.sort();
+        assert_eq!(cleared, vec!["browser", "code"]);
+    }
+
+    #[test]
+    fn test_policy_ask_user_empty_skills_no_cleared_names() {
+        let events = vec![serde_json::json!({
+            "type": "compact.boundary",
+            "id": "evt-1",
+            "payload": {}
+        })];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AskUser,
+        );
+        assert!(tracker.cleared_at_boundary().is_empty());
+    }
+
+    #[test]
+    fn test_policy_ask_user_deactivated_before_boundary_not_in_cleared() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "skill.deactivated",
+                "id": "evt-2",
+                "payload": { "skillName": "a" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AskUser,
+        );
+        assert!(tracker.cleared_at_boundary().is_empty());
+    }
+
+    #[test]
+    fn test_policy_ask_user_multiple_boundaries_resets_cleared() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-3",
+                "payload": { "skillName": "b", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-4",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AskUser,
+        );
+        assert_eq!(tracker.cleared_at_boundary(), &["b"]);
+    }
+
+    // ── from_events_with_policy: context.cleared is unconditional ──
+
+    #[test]
+    fn test_policy_auto_restore_context_cleared_always_clears() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "context.cleared",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AutoRestore,
+        );
+        assert_eq!(tracker.count(), 0);
+    }
+
+    #[test]
+    fn test_policy_ask_user_context_cleared_no_cleared_names() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "context.cleared",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AskUser,
+        );
+        assert_eq!(tracker.count(), 0);
+        assert!(tracker.cleared_at_boundary().is_empty());
+    }
+
+    // ── from_events_with_policy: skills_cleared_by_compaction ──────
+
+    #[test]
+    fn test_cleared_by_compaction_clear_all_with_active_skills() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert!(tracker.skills_cleared_by_compaction());
+    }
+
+    #[test]
+    fn test_cleared_by_compaction_clear_all_no_active_skills() {
+        let events = vec![serde_json::json!({
+            "type": "compact.boundary",
+            "id": "evt-1",
+            "payload": {}
+        })];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert!(!tracker.skills_cleared_by_compaction());
+    }
+
+    #[test]
+    fn test_cleared_by_compaction_auto_restore_does_not_set() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AutoRestore,
+        );
+        assert!(!tracker.skills_cleared_by_compaction());
+    }
+
+    #[test]
+    fn test_cleared_by_compaction_ask_user_with_active_skills() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AskUser,
+        );
+        assert!(tracker.skills_cleared_by_compaction());
+    }
+
+    #[test]
+    fn test_cleared_by_compaction_reset_on_activation() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-3",
+                "payload": { "skillName": "code", "source": "global" }
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert!(!tracker.skills_cleared_by_compaction());
+    }
+
+    #[test]
+    fn test_cleared_by_compaction_context_cleared_does_not_set() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "context.cleared",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        // context.cleared calls clear() which sets flag to false
+        assert!(!tracker.skills_cleared_by_compaction());
+    }
+
+    #[test]
+    fn test_cleared_by_compaction_multiple_boundaries_last_counts() {
+        // First boundary clears skills (flag=true), second boundary has no skills (flag=false)
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        // Second boundary had no skills to clear
+        assert!(!tracker.skills_cleared_by_compaction());
+    }
+
+    #[test]
+    fn test_cleared_by_compaction_persists_across_turns() {
+        // Flag stays true when no new skill.activated events arrive
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+            serde_json::json!({
+                "type": "skills.cleared",
+                "id": "evt-3",
+                "payload": { "clearedSkills": ["browser"], "reason": "compaction" }
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AskUser,
+        );
+        // skills.cleared resets cleared_at_boundary but NOT skills_cleared_by_compaction
+        assert!(tracker.skills_cleared_by_compaction());
+    }
+
+    #[test]
+    fn test_cleared_by_compaction_deactivated_before_boundary() {
+        // Skill deactivated before boundary: boundary has no active skills
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "skill.deactivated",
+                "id": "evt-2",
+                "payload": { "skillName": "browser" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert!(!tracker.skills_cleared_by_compaction());
+    }
+
+    // ── from_events_with_policy: skills.cleared suppression ────────
+
+    #[test]
+    fn test_policy_ask_user_skills_cleared_event_suppresses_repeat() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+            serde_json::json!({
+                "type": "skills.cleared",
+                "id": "evt-3",
+                "payload": { "clearedSkills": ["a"], "reason": "compaction" }
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::AskUser,
+        );
+        assert!(tracker.cleared_at_boundary().is_empty());
     }
 
 }
