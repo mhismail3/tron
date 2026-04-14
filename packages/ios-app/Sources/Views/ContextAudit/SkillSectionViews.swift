@@ -17,7 +17,7 @@ struct SkillReferencesSection: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronCyan)
                     .frame(width: 18)
-                Text("Skill References")
+                Text("Available Skills")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronCyan)
 
@@ -80,7 +80,7 @@ struct ProjectSkillsSection: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronEmerald)
                     .frame(width: 18)
-                Text("Project Skills")
+                Text("Available Skills")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronEmerald)
 

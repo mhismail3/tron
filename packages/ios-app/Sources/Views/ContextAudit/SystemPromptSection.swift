@@ -15,11 +15,11 @@ struct SystemPromptSection: View {
             HStack(spacing: 8) {
                 Image(systemName: "doc.text.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronPurple)
+                    .foregroundStyle(.tronSlate)
                     .frame(width: 18)
                 Text("System Prompt")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronPurple)
+                    .foregroundStyle(.tronSlate)
                 Spacer()
                 Text(TokenFormatter.format(tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
@@ -59,14 +59,14 @@ struct SystemPromptSection: View {
                             .textSelection(.enabled)
                     }
                     .frame(maxHeight: 300)
-                    .sectionFill(.tronPurple, cornerRadius: 6, subtle: true)
+                    .sectionFill(.tronSlate, cornerRadius: 6, subtle: true)
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
             }
         }
-        .sectionFill(.tronPurple)
+        .sectionFill(.tronSlate)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -78,7 +78,7 @@ struct EnvironmentItemRow: View {
     let icon: String
     let label: String
     let value: String
-    var accent: Color = .tronPurple
+    var accent: Color = .tronSlate
 
     var body: some View {
         HStack(spacing: 8) {

@@ -8,6 +8,7 @@ struct ContextUsageGaugeView: View {
     let contextLimit: Int
     let usagePercent: Double
     let thresholdLevel: String
+    var onTap: (() -> Void)?
 
     private var usageColor: Color {
         switch thresholdLevel {
@@ -63,17 +64,19 @@ struct ContextUsageGaugeView: View {
                     .layoutPriority(1)
             }
 
-            // Row 2: token counts — left text aligns with "Context Window" title
+            // Row 2: token summary + tap hint
             HStack {
-                Text("\(TokenFormatter.format(contextLimit - currentTokens)) remaining")
+                Text("\(TokenFormatter.format(contextLimit - currentTokens)) left (\(formattedTokens) / \(formattedLimit))")
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
 
                 Spacer()
 
-                Text("\(formattedTokens) / \(formattedLimit)")
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronTextMuted)
+                if onTap != nil {
+                    Text("Tap to view details")
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextDisabled)
+                }
             }
             .padding(.leading, 24)
         }
@@ -83,6 +86,10 @@ struct ContextUsageGaugeView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
                 .glassEffect(.regular.tint(Color.tronSlateDark.opacity(0.5)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture {
+            onTap?()
         }
     }
 }

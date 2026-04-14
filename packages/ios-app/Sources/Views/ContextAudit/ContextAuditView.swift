@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Context Audit View
+// MARK: - Context Audit View (Agent Control sheet)
 
 @available(iOS 26.0, *)
 struct ContextAuditView: View {
@@ -14,35 +14,12 @@ struct ContextAuditView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
     @State private var isLoading = true
-
     @State private var errorMessage: String?
     @State private var detailedSnapshot: DetailedContextSnapshotResult?
-    @State private var isClearing = false
-    @State private var isCompacting = false
-    @State private var isRetaining = false
-    @State private var showClearPopover = false
-    @State private var showCompactPopover = false
-    @State private var showRetainPopover = false
+    @State private var showContextDetail = false
 
     // Optimistic deletion state - skills being deleted animate out immediately
     @State private var pendingSkillDeletions: Set<String> = []
-
-    /// Whether there are messages in context that can be cleared/compacted
-    private var hasMessages: Bool {
-        guard let snapshot = detailedSnapshot else { return false }
-        return !snapshot.messages.isEmpty
-    }
-
-    /// Skills filtered to exclude those being deleted (for optimistic UI)
-    private var displayedSkills: [AddedSkillInfo] {
-        guard let snapshot = detailedSnapshot else { return [] }
-        return snapshot.addedSkills.filter { !pendingSkillDeletions.contains($0.name) }
-    }
-
-    /// Whether session memories exist
-    private var hasSessionMemories: Bool {
-        detailedSnapshot?.sessionMemories?.count ?? 0 > 0
-    }
 
     var body: some View {
         NavigationStack {
@@ -62,13 +39,30 @@ struct ContextAuditView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    clearButton(iconOnly: true)
-                    compactButton(iconOnly: true)
+                ToolbarItem(placement: .principal) {
+                    Text("Agent Control")
+                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
                 }
-                ToolbarItem(placement: .principal) { principalToolbarContent }
-                ToolbarItem(placement: .topBarTrailing) {
-                    retainButton(iconOnly: false)
+            }
+            .sheet(isPresented: $showContextDetail) {
+                if let snapshot = detailedSnapshot {
+                    ContextDetailView(
+                        rpcClient: rpcClient,
+                        sessionId: sessionId,
+                        snapshot: snapshot,
+                        skillStore: skillStore,
+                        readOnly: readOnly,
+                        pendingSkillDeletions: pendingSkillDeletions,
+                        onRemoveSkill: { skillName in
+                            Task { await removeSkillFromContext(skillName: skillName) }
+                        },
+                        onFetchSkillContent: { skillName in
+                            guard let store = skillStore else { return nil }
+                            let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
+                            return metadata?.content
+                        }
+                    )
                 }
             }
             .alert("Error", isPresented: Binding(
@@ -92,245 +86,20 @@ struct ContextAuditView: View {
     }
 
     private var contentView: some View {
-        contextView
-    }
-
-    // MARK: - Toolbar Content
-
-    private var principalToolbarContent: some View {
-        Text("Context")
-            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-            .foregroundStyle(.tronEmerald)
-    }
-
-    // MARK: - Toolbar Button Builders
-
-    private func clearButton(iconOnly: Bool) -> some View {
-        Button {
-            showClearPopover = true
-        } label: {
-            HStack(spacing: 4) {
-                if isClearing {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .tint(.tronError)
-                } else {
-                    Image(systemName: "trash")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                }
-                if !iconOnly {
-                    Text("Clear")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                }
-            }
-            .foregroundStyle(hasMessages && !readOnly ? .tronError : .tronTextMuted)
-        }
-        .disabled(isClearing || !hasMessages || readOnly)
-        .popover(isPresented: $showClearPopover, arrowEdge: .top) {
-            GlassActionSheet(
-                actions: [
-                    GlassAction(
-                        title: "Clear Context",
-                        icon: "trash",
-                        color: .tronError,
-                        role: .destructive
-                    ) {
-                        showClearPopover = false
-                        Task { await clearContext() }
-                    },
-                    GlassAction(
-                        title: "Cancel",
-                        icon: nil,
-                        color: .tronTextMuted,
-                        role: .cancel
-                    ) {
-                        showClearPopover = false
-                    }
-                ]
-            )
-            .presentationCompactAdaptation(.popover)
-        }
-    }
-
-    private func compactButton(iconOnly: Bool) -> some View {
-        Button {
-            showCompactPopover = true
-        } label: {
-            HStack(spacing: 4) {
-                if isCompacting {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .tint(.tronSlate)
-                } else {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                }
-                if !iconOnly {
-                    Text("Compact")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                }
-            }
-            .foregroundStyle(hasMessages && !readOnly ? .tronSlate : .tronTextMuted)
-        }
-        .disabled(isCompacting || !hasMessages || readOnly)
-        .popover(isPresented: $showCompactPopover, arrowEdge: .top) {
-            GlassActionSheet(
-                actions: [
-                    GlassAction(
-                        title: "Compact Context",
-                        icon: "arrow.down.right.and.arrow.up.left",
-                        color: Color(red: 0.55, green: 0.7, blue: 0.8),
-                        role: .default
-                    ) {
-                        showCompactPopover = false
-                        Task { await compactContext() }
-                    },
-                    GlassAction(
-                        title: "Cancel",
-                        icon: nil,
-                        color: .tronTextMuted,
-                        role: .cancel
-                    ) {
-                        showCompactPopover = false
-                    }
-                ]
-            )
-            .presentationCompactAdaptation(.popover)
-        }
-    }
-
-    private func retainButton(iconOnly: Bool) -> some View {
-        Button {
-            showRetainPopover = true
-        } label: {
-            HStack(spacing: 4) {
-                if isRetaining {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .tint(.tronPink)
-                } else {
-                    Image(systemName: "brain")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                }
-                if !iconOnly {
-                    Text("Retain")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                }
-            }
-            .foregroundStyle(!readOnly && !isRetaining ? .tronPink : .tronTextMuted)
-        }
-        .disabled(isRetaining || readOnly)
-        .popover(isPresented: $showRetainPopover, arrowEdge: .top) {
-            GlassActionSheet(
-                actions: [
-                    GlassAction(
-                        title: "Retain Memory",
-                        icon: "brain",
-                        color: .tronPink,
-                        role: .default
-                    ) {
-                        showRetainPopover = false
-                        Task { await retainMemory() }
-                    },
-                    GlassAction(
-                        title: "Cancel",
-                        icon: nil,
-                        color: .tronTextMuted,
-                        role: .cancel
-                    ) {
-                        showRetainPopover = false
-                    }
-                ]
-            )
-            .presentationCompactAdaptation(.popover)
-        }
-    }
-
-    // MARK: - Context View
-
-    private var contextView: some View {
         GeometryReader { geometry in
             Group {
                 if let snapshot = detailedSnapshot {
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 16) {
-                            // Usage gauge
                             ContextUsageGaugeView(
                                 currentTokens: snapshot.currentTokens,
                                 contextLimit: snapshot.contextLimit,
                                 usagePercent: snapshot.usagePercent,
-                                thresholdLevel: snapshot.thresholdLevel
+                                thresholdLevel: snapshot.thresholdLevel,
+                                onTap: {
+                                    showContextDetail = true
+                                }
                             )
-                            .padding(.horizontal)
-
-                            // Token Breakdown header and expandable sections
-                            TokenBreakdownHeader()
-                                .padding(.horizontal)
-
-                            // Context Items section containers
-                            VStack(spacing: 10) {
-                                SystemPromptSection(
-                                    tokens: snapshot.breakdown.systemPrompt,
-                                    content: snapshot.systemPromptContent,
-                                    environment: snapshot.environment
-                                )
-
-                                ToolsSection(
-                                    toolsContent: snapshot.toolsContent,
-                                    tokens: snapshot.breakdown.tools
-                                )
-
-                                if let globalSkills = skillStore?.globalSkills, !globalSkills.isEmpty {
-                                    SkillReferencesSection(
-                                        skills: globalSkills,
-                                        tokens: snapshot.breakdown.skillIndex
-                                    )
-                                }
-
-                                if let projectSkills = skillStore?.projectSkills, !projectSkills.isEmpty {
-                                    ProjectSkillsSection(
-                                        skills: projectSkills,
-                                        tokens: snapshot.breakdown.skillIndex
-                                    )
-                                }
-
-                                if let rules = snapshot.rules, rules.totalFiles > 0 {
-                                    RulesSection(
-                                        rules: rules,
-                                        onFetchContent: { path in
-                                            try await rpcClient.filesystem.readFile(path: path)
-                                        }
-                                    )
-                                }
-
-                                if let memory = snapshot.memory, memory.count > 0 {
-                                    MemorySection(memory: memory)
-                                }
-
-                                if let taskCtx = snapshot.taskContext {
-                                    TaskContextSection(taskContext: taskCtx)
-                                }
-
-                                // Session-added items (skills added during session, session memories)
-                                if !displayedSkills.isEmpty {
-                                    AddedSkillsContainer(
-                                        skills: displayedSkills,
-                                        tokens: snapshot.breakdown.skillContext,
-                                        onDelete: readOnly ? nil : { skillName in
-                                            Task { await removeSkillFromContext(skillName: skillName) }
-                                        },
-                                        onFetchContent: { skillName in
-                                            guard let store = skillStore else { return nil }
-                                            let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
-                                            return metadata?.content
-                                        }
-                                    )
-                                }
-
-                                if let sessionMem = detailedSnapshot?.sessionMemories, sessionMem.count > 0 {
-                                    SessionMemoriesSection(memory: sessionMem)
-                                }
-                            }
                             .padding(.horizontal)
                         }
                         .padding(.vertical)
@@ -366,7 +135,6 @@ struct ContextAuditView: View {
         isLoading = false
     }
 
-    /// Background reload that doesn't show loading state (used after optimistic updates)
     private func reloadContextInBackground() async {
         do {
             detailedSnapshot = try await rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
@@ -376,54 +144,7 @@ struct ContextAuditView: View {
         }
     }
 
-    private func clearContext() async {
-        isClearing = true
-
-        do {
-            _ = try await rpcClient.context.clear(sessionId: sessionId)
-            // Reload context to show updated state
-            await loadContext()
-        } catch {
-            errorMessage = "Failed to clear context: \(error.localizedDescription)"
-        }
-
-        isClearing = false
-    }
-
-    private func compactContext() async {
-        logger.info("🔧 compactContext() called for session: \(sessionId)", category: .general)
-        isCompacting = true
-
-        do {
-            logger.info("🔧 Calling rpcClient.compactContext...", category: .general)
-            let result = try await rpcClient.context.compact(sessionId: sessionId)
-            logger.info("🔧 Compaction succeeded: tokensBefore=\(result.tokensBefore), tokensAfter=\(result.tokensAfter)", category: .general)
-            // Dismiss the sheet - the ChatView will show the compaction notification pill
-            // when it receives the agent.compaction event from the server
-            dismiss()
-        } catch {
-            logger.error("🔧 Compaction failed: \(error)", category: .general)
-            errorMessage = "Failed to compact context: \(error.localizedDescription)"
-            isCompacting = false
-        }
-    }
-
-    private func retainMemory() async {
-        isRetaining = true
-
-        do {
-            _ = try await rpcClient.misc.retainMemory(sessionId: sessionId)
-            // Don't dismiss — the MemoryUpdated event adds a pill to chat.
-            // Just re-enable the button.
-            isRetaining = false
-        } catch {
-            errorMessage = "Failed to retain memory: \(error.localizedDescription)"
-            isRetaining = false
-        }
-    }
-
     private func removeSkillFromContext(skillName: String) async {
-        // Optimistic update: immediately hide the skill with animation
         _ = withAnimation(.tronStandard) {
             pendingSkillDeletions.insert(skillName)
         }
@@ -431,17 +152,14 @@ struct ContextAuditView: View {
         do {
             let result = try await rpcClient.skill.remove(sessionId: sessionId, skillName: skillName)
             if result.success {
-                // Background reload to sync state (doesn't show loading)
                 await reloadContextInBackground()
             } else {
-                // Rollback: show the skill again if removal failed
                 _ = withAnimation(.tronStandard) {
                     pendingSkillDeletions.remove(skillName)
                 }
                 errorMessage = result.error ?? "Failed to remove skill"
             }
         } catch {
-            // Rollback: show the skill again if removal failed
             _ = withAnimation(.tronStandard) {
                 pendingSkillDeletions.remove(skillName)
             }
@@ -449,4 +167,3 @@ struct ContextAuditView: View {
         }
     }
 }
-
