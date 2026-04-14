@@ -76,7 +76,8 @@ struct SourceControlSheet: View {
                                 branches: branches,
                                 onFileSelected: { selectedFileDetail = $0 },
                                 onShowAllBranches: { showAllBranches = true },
-                                hideBranchesRow: true
+                                hideBranchesRow: true,
+                                availableHeight: geometry.size.height
                             )
                             .padding(.horizontal)
                         }

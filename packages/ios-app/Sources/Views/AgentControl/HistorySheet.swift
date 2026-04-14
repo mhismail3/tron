@@ -356,7 +356,7 @@ struct HistorySheet: View {
 
             Spacer()
 
-            if let result {
+            if result != nil {
                 HStack(spacing: 4) {
                     if let duration {
                         Text("\(duration)ms")

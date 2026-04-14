@@ -13,6 +13,8 @@ struct SessionChangesSection: View {
     let onShowAllBranches: () -> Void
     /// When true, the "View All Branches" row is omitted (rendered externally by the parent).
     var hideBranchesRow: Bool = false
+    /// Available height from the parent container, used to vertically center empty states.
+    var availableHeight: CGFloat?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -204,33 +206,33 @@ struct SessionChangesSection: View {
 
     // MARK: - Empty States
 
-    private var noChangesView: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle")
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronSuccess)
-            Text("No changes")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronTextMuted)
-            Spacer()
-        }
-        .padding(12)
-        .sectionFill(.tronSuccess)
+    private var emptyStateMinHeight: CGFloat {
+        // Subtract estimated header + padding so the empty state centers
+        // within the visible scroll area, not the full sheet.
+        max((availableHeight ?? 300) - 80, 150)
     }
 
-    private var notGitRepoView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(TronTypography.sans(size: TronTypography.sizeDisplay))
+    private var noChangesView: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 56, weight: .medium))
                 .foregroundStyle(.tronTeal)
-            Text("Not a git repository")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-            Text("This workspace is not tracked by git")
+            Text("Working tree is clean")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextMuted)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+        .frame(maxWidth: .infinity, minHeight: emptyStateMinHeight)
+    }
+
+    private var notGitRepoView: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 56, weight: .medium))
+                .foregroundStyle(.tronTeal)
+            Text("Not a git repository")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .frame(maxWidth: .infinity, minHeight: emptyStateMinHeight)
     }
 }
