@@ -9,15 +9,43 @@ struct ModelPickerSheet: View {
     let models: [ModelInfo]
     let currentModelId: String
     var readOnly: Bool = false
+    var reasoningLevel: String = "medium"
     let onSelect: (ModelInfo) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var expandedProviders: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
     @State private var expandedDetails: Set<String> = []
+    @State private var showReasoningPopover = false
+    @State private var pendingModelId: String = ""
+    @State private var hasCommitted = false
 
     private var providerGroups: [ProviderGroup] {
         ModelFilteringService.organizeByProviderFamily(models)
+    }
+
+    /// Uses pending selection so toolbar updates live as user browses
+    private var selectedModelInfo: ModelInfo? {
+        let id = pendingModelId.isEmpty ? currentModelId : pendingModelId
+        return models.first { $0.id == id }
+    }
+
+    private var supportsReasoning: Bool {
+        selectedModelInfo?.supportsReasoning == true
+    }
+
+    private var availableReasoningLevels: [String] {
+        selectedModelInfo?.reasoningLevels ?? ["low", "medium", "high", "xhigh"]
+    }
+
+    /// Provider color for the currently selected model
+    private var selectedProviderColor: Color {
+        guard let model = selectedModelInfo else { return .tronEmerald }
+        for group in providerGroups {
+            let contains = group.families.contains { $0.models.contains { $0.id == model.id } }
+            if contains { return group.color }
+        }
+        return .tronEmerald
     }
 
     var body: some View {
@@ -27,7 +55,7 @@ struct ModelPickerSheet: View {
                     ForEach(providerGroups) { provider in
                         ProviderSection(
                             provider: provider,
-                            currentModelId: currentModelId,
+                            currentModelId: pendingModelId.isEmpty ? currentModelId : pendingModelId,
                             readOnly: readOnly,
                             isExpanded: expandedProviders.contains(provider.id),
                             expandedFamilies: $expandedFamilies,
@@ -42,8 +70,9 @@ struct ModelPickerSheet: View {
                                 }
                             },
                             onSelect: { model in
-                                onSelect(model)
-                                dismiss()
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    pendingModelId = model.id
+                                }
                             }
                         )
                     }
@@ -54,13 +83,18 @@ struct ModelPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if supportsReasoning {
+                        reasoningButton
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     Text("Models")
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
+                    Button { commitSelection(); dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronEmerald)
@@ -70,7 +104,11 @@ struct ModelPickerSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+        .onDisappear {
+            commitSelection()
+        }
         .onAppear {
+            pendingModelId = currentModelId
             // Expand only the provider containing the current default model
             for provider in providerGroups {
                 let containsCurrentModel = provider.families.contains { family in
@@ -84,6 +122,53 @@ struct ModelPickerSheet: View {
                 }
             }
         }
+    }
+
+    // MARK: - Reasoning Button
+
+    private var reasoningButton: some View {
+        Button {
+            showReasoningPopover = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: Color.reasoningLevelIcon(reasoningLevel))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                Text(reasoningLevelLabel(reasoningLevel))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+            }
+            .foregroundStyle(selectedProviderColor)
+        }
+        .popover(isPresented: $showReasoningPopover, arrowEdge: .top) {
+            ReasoningLevelPopover(
+                levels: availableReasoningLevels,
+                currentLevel: reasoningLevel,
+                accentColor: selectedProviderColor,
+                onSelect: { level in
+                    showReasoningPopover = false
+                    NotificationCenter.default.post(name: .reasoningLevelAction, object: level)
+                }
+            )
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private func reasoningLevelLabel(_ level: String) -> String {
+        switch level.lowercased() {
+        case "low": return "Low"
+        case "medium": return "Medium"
+        case "high": return "High"
+        case "xhigh": return "Extra High"
+        case "max": return "Max"
+        default: return level.capitalized
+        }
+    }
+
+    private func commitSelection() {
+        guard !hasCommitted else { return }
+        guard pendingModelId != currentModelId,
+              let model = models.first(where: { $0.id == pendingModelId }) else { return }
+        hasCommitted = true
+        onSelect(model)
     }
 }
 
@@ -418,5 +503,64 @@ private struct ModelCard: View {
         .padding(.vertical, 2)
         .background(color.opacity(0.12))
         .clipShape(Capsule())
+    }
+}
+
+// MARK: - Reasoning Level Popover
+
+@available(iOS 26.0, *)
+private struct ReasoningLevelPopover: View {
+    let levels: [String]
+    let currentLevel: String
+    let accentColor: Color
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ForEach(levels, id: \.self) { level in
+                let isSelected = level == currentLevel
+                Button {
+                    onSelect(level)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: Color.reasoningLevelIcon(level))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            .frame(width: 22)
+                        Text(reasoningLabel(level))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .medium))
+                        Spacer()
+                    }
+                    .foregroundStyle(isSelected ? accentColor : .tronTextSecondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 20)
+                    .contentShape(Capsule())
+                    .background {
+                        Capsule()
+                            .fill(.clear)
+                            .glassEffect(
+                                .regular.tint(isSelected ? accentColor.opacity(0.25) : Color.tronTextMuted.opacity(0.1)),
+                                in: Capsule()
+                            )
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .frame(minWidth: 200)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .presentationBackground(.clear)
+    }
+
+    private func reasoningLabel(_ level: String) -> String {
+        switch level.lowercased() {
+        case "low": return "Low"
+        case "medium": return "Medium"
+        case "high": return "High"
+        case "xhigh": return "Extra High"
+        case "max": return "Max"
+        default: return level.capitalized
+        }
     }
 }

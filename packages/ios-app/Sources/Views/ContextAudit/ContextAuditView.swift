@@ -59,6 +59,7 @@ struct ContextAuditView: View {
                     models: availableModels,
                     currentModelId: currentModelId,
                     readOnly: readOnly,
+                    reasoningLevel: reasoningLevel ?? "medium",
                     onSelect: { model in
                         NotificationCenter.default.post(name: .modelPickerAction, object: model)
                     }

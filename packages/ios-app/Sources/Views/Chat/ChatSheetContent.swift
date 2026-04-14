@@ -40,7 +40,7 @@ struct ChatSheetContent: View {
                 readOnly: sheetReadOnly,
                 contextState: viewModel.contextState,
                 currentModelInfo: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel),
-                reasoningLevel: viewModel.inputBarState.reasoningLevel,
+                reasoningLevel: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel)?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
                 availableModels: viewModel.modelPickerState.cachedModels,
                 currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel)
             )
@@ -108,6 +108,7 @@ struct ChatSheetContent: View {
                 models: viewModel.modelPickerState.cachedModels,
                 currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel),
                 readOnly: sheetReadOnly,
+                reasoningLevel: viewModel.inputBarState.reasoningLevel,
                 onSelect: { model in
                     NotificationCenter.default.post(name: .modelPickerAction, object: model)
                 }
