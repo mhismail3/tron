@@ -20,7 +20,12 @@ struct ConsolidatedAnalytics {
         let errors: [String]
         let model: String?
 
-        var totalTokens: Int { inputTokens + outputTokens }
+        var totalTokens: Int {
+            let cacheWrite = hasPerTTLBreakdown
+                ? (cacheCreation5mTokens + cacheCreation1hTokens)
+                : cacheCreationTokens
+            return inputTokens + outputTokens + cacheReadTokens + cacheWrite
+        }
         var hasPerTTLBreakdown: Bool { cacheCreation5mTokens > 0 || cacheCreation1hTokens > 0 }
     }
 

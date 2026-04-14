@@ -12,7 +12,9 @@ struct SessionAnalyticsSection: View {
     }
 
     private var totalTokens: Int {
-        analytics.totalInputTokens + analytics.totalOutputTokens
+        let bd = breakdown
+        return bd.baseInputTokens + bd.outputTokens + bd.cacheReadTokens
+            + bd.cacheWrite5mTokens + bd.cacheWrite1hTokens + bd.cacheWriteLegacyTokens
     }
 
     var body: some View {
@@ -36,7 +38,7 @@ struct SessionAnalyticsSection: View {
     // MARK: - Totals Header
 
     private var totalsHeader: some View {
-        HStack {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(TokenFormatter.format(totalTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
@@ -46,9 +48,7 @@ struct SessionAnalyticsSection: View {
                     .foregroundStyle(.tronTextMuted)
             }
 
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(formatCost(analytics.totalCost))
                     .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronAmberLight)
@@ -56,107 +56,44 @@ struct SessionAnalyticsSection: View {
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             }
+
+            Spacer()
         }
     }
 
     // MARK: - Category Pills
 
     private var categoryPills: some View {
-        VStack(spacing: 6) {
-            // First row: Input + Output (always present)
-            HStack(spacing: 6) {
-                categoryPill(
-                    label: "Input",
-                    tokens: breakdown.baseInputTokens,
-                    cost: breakdown.baseInputCost,
-                    icon: "arrow.up.circle.fill"
-                )
-                categoryPill(
-                    label: "Output",
-                    tokens: breakdown.outputTokens,
-                    cost: breakdown.outputCost,
-                    icon: "arrow.down.circle.fill"
-                )
+        HStack(spacing: 4) {
+            categoryPill(label: "Input", tokens: breakdown.baseInputTokens)
+            categoryPill(label: "Output", tokens: breakdown.outputTokens)
+
+            if breakdown.cacheReadTokens > 0 {
+                categoryPill(label: "Read", tokens: breakdown.cacheReadTokens)
             }
 
-            // Second row: Cache categories (conditional)
-            if hasCacheContent {
-                HStack(spacing: 6) {
-                    if breakdown.cacheReadTokens > 0 {
-                        categoryPill(
-                            label: "Cache Read",
-                            tokens: breakdown.cacheReadTokens,
-                            cost: breakdown.cacheReadCost,
-                            icon: nil
-                        )
-                    }
-
-                    if breakdown.hasPerTTLBreakdown {
-                        if breakdown.cacheWrite5mTokens > 0 {
-                            categoryPill(
-                                label: "Cache 5m",
-                                tokens: breakdown.cacheWrite5mTokens,
-                                cost: breakdown.cacheWrite5mCost,
-                                icon: nil
-                            )
-                        }
-                        if breakdown.cacheWrite1hTokens > 0 {
-                            categoryPill(
-                                label: "Cache 1h",
-                                tokens: breakdown.cacheWrite1hTokens,
-                                cost: breakdown.cacheWrite1hCost,
-                                icon: nil
-                            )
-                        }
-                    } else if breakdown.cacheWriteLegacyTokens > 0 {
-                        categoryPill(
-                            label: "Cache Write",
-                            tokens: breakdown.cacheWriteLegacyTokens,
-                            cost: breakdown.cacheWriteLegacyCost,
-                            icon: nil
-                        )
-                    }
+            if breakdown.hasPerTTLBreakdown {
+                if breakdown.cacheWrite5mTokens > 0 {
+                    categoryPill(label: "5m", tokens: breakdown.cacheWrite5mTokens)
                 }
+                if breakdown.cacheWrite1hTokens > 0 {
+                    categoryPill(label: "1h", tokens: breakdown.cacheWrite1hTokens)
+                }
+            } else if breakdown.cacheWriteLegacyTokens > 0 {
+                categoryPill(label: "Write", tokens: breakdown.cacheWriteLegacyTokens)
             }
         }
     }
 
-    private var hasCacheContent: Bool {
-        breakdown.cacheReadTokens > 0
-            || breakdown.cacheWrite5mTokens > 0
-            || breakdown.cacheWrite1hTokens > 0
-            || breakdown.cacheWriteLegacyTokens > 0
-    }
+    private func categoryPill(label: String, tokens: Int) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                .foregroundStyle(.tronTextMuted)
 
-    private func categoryPill(
-        label: String,
-        tokens: Int,
-        cost: Double,
-        icon: String?
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 3) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeXS))
-                        .foregroundStyle(.tronAmberLight)
-                }
-                Text(label)
-                    .font(TronTypography.mono(size: TronTypography.sizeXS))
-                    .foregroundStyle(.tronTextMuted)
-            }
-
-            HStack {
-                Text(TokenFormatter.format(tokens))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronAmberLight)
-
-                Spacer()
-
-                Text(formatCost(cost))
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.tronAmber)
-            }
+            Text(TokenFormatter.format(tokens))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronAmberLight)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
