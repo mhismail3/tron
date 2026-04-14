@@ -151,6 +151,88 @@ struct ModelControlView: View {
     }
 }
 
+// MARK: - Source Control Card View
+
+@available(iOS 26.0, *)
+struct SourceControlCardView: View {
+    var branchName: String?
+    var totalFiles: Int
+    var totalAdditions: Int
+    var totalDeletions: Int
+    var isGitRepo: Bool?
+    var isLoading: Bool
+    var onTap: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 2) {
+            // Row 1: icon + title + branch name
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronEmerald)
+
+                Text("Source Control")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronEmerald)
+
+                Spacer()
+
+                if let name = branchName {
+                    Text(name)
+                        .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                        .foregroundStyle(.tronEmerald)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                }
+            }
+
+            // Row 2: file stats (bottom right)
+            HStack {
+                Spacer()
+
+                if isLoading && isGitRepo == nil {
+                    Text("Loading...")
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextMuted)
+                } else if isGitRepo == false {
+                    Text("Not a git repository")
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextMuted)
+                } else if totalFiles > 0 {
+                    HStack(spacing: 6) {
+                        Text("\(totalFiles) \(totalFiles == 1 ? "file" : "files")")
+                            .foregroundStyle(.tronTextMuted)
+                        if totalAdditions > 0 {
+                            Text("+\(totalAdditions)")
+                                .foregroundStyle(.tronSuccess)
+                        }
+                        if totalDeletions > 0 {
+                            Text("−\(totalDeletions)")
+                                .foregroundStyle(.tronError)
+                        }
+                    }
+                    .font(TronTypography.codeCaption)
+                } else {
+                    Text("No changes")
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextMuted)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture {
+            onTap?()
+        }
+    }
+}
+
 // MARK: - Markdown Content View (caption-sized block-level markdown for context audit)
 
 @available(iOS 26.0, *)

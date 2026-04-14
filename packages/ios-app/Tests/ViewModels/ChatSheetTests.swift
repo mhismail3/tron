@@ -23,13 +23,6 @@ struct ChatSheetTests {
         #expect(sheet.id == "agentControl")
     }
 
-    @Test("Session sheet has consistent id")
-    func testSessionSheetId() {
-        let sheet = ChatSheet.session
-
-        #expect(sheet.id == "session")
-    }
-
     @Test("Skill detail sheets with different skills have different ids")
     func testSkillDetailDifferentSkillsHaveDifferentIds() {
         let skill1 = Skill(
@@ -174,7 +167,6 @@ struct ChatSheetTests {
         let sheets: [ChatSheet] = [
             .settings,
             .agentControl,
-            .session,
             .skillDetail(skill, .skill),
             .compactionDetail(compactionData),
             .askUserQuestion,
@@ -365,15 +357,6 @@ struct SheetCoordinatorTests {
         coordinator.showAgentControl()
 
         #expect(coordinator.activeSheet == .agentControl)
-    }
-
-    @Test("showSession creates session sheet")
-    func testShowSessionCreatesSessionSheet() {
-        let coordinator = SheetCoordinator()
-
-        coordinator.showSession()
-
-        #expect(coordinator.activeSheet == .session)
     }
 
     @Test("showSkillDetail creates skill detail sheet with correct data")

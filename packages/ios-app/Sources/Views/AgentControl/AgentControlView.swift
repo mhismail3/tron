@@ -18,24 +18,92 @@ struct AgentControlView: View {
     var availableModels: [ModelInfo] = []
     /// Current model ID string for the model picker
     var currentModelId: String = ""
+    /// Callback for "Ask Agent" actions from branch management
+    var onAskAgent: ((String) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
+
+    private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
+
+    // MARK: - Context State
+
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var detailedSnapshot: DetailedContextSnapshotResult?
     @State private var showContextDetail = false
     @State private var showModelPicker = false
-
-    // Optimistic deletion state - skills being deleted animate out immediately
+    @State private var showSourceControl = false
     @State private var pendingSkillDeletions: Set<String> = []
+
+    // MARK: - Session State
+
+    @State private var diffResult: WorktreeGetDiffResult?
+    @State private var worktreeStatus: WorktreeGetStatusResult?
+    @State private var branches: [SessionBranchInfo] = []
+    @State private var sessionEvents: [SessionEvent] = []
+
+    // Sub-sheets
+    @State private var selectedTurnGroup: TurnGroup?
+
+    // MARK: - Session Computed Properties
+
+    private var stagedFiles: [DiffFileEntry] {
+        diffResult?.files?.filter { $0.fileStagingArea == .staged } ?? []
+    }
+
+    private var unstagedFiles: [DiffFileEntry] {
+        diffResult?.files?.filter { $0.fileStagingArea == .unstaged } ?? []
+    }
+
+    private var totalFiles: Int {
+        stagedFiles.count + unstagedFiles.count
+    }
+
+    private var totalAdditions: Int {
+        (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.additions }
+    }
+
+    private var totalDeletions: Int {
+        (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.deletions }
+    }
+
+    private var analytics: ConsolidatedAnalytics {
+        ConsolidatedAnalytics(from: sessionEvents)
+    }
+
+    private var hasEvents: Bool {
+        !sessionEvents.isEmpty
+    }
+
+    private var filteredEvents: [SessionEvent] {
+        sessionEvents.filter { event in
+            switch event.eventType {
+            case .streamTurnStart, .streamTurnEnd, .streamTextDelta,
+                 .streamThinkingDelta, .streamThinkingComplete, .compactBoundary:
+                return false
+            default:
+                return true
+            }
+        }
+    }
+
+    private var turnGroups: [TurnGroup] {
+        TurnGrouping.group(
+            events: filteredEvents,
+            analytics: analytics,
+            currentSessionId: sessionId
+        )
+    }
+
+    // MARK: - Body
 
     var body: some View {
         NavigationStack {
             ZStack {
                 contentView
 
-                if isLoading && detailedSnapshot == nil {
+                if isLoading && detailedSnapshot == nil && diffResult == nil && sessionEvents.isEmpty {
                     Color.clear
                         .background(.ultraThinMaterial)
                         .overlay {
@@ -85,6 +153,24 @@ struct AgentControlView: View {
                     )
                 }
             }
+            .sheet(isPresented: $showSourceControl) {
+                SourceControlSheet(
+                    rpcClient: rpcClient,
+                    sessionId: sessionId,
+                    diffResult: diffResult,
+                    worktreeStatus: worktreeStatus,
+                    branches: branches,
+                    onAskAgent: { message in
+                        showSourceControl = false
+                        dismiss()
+                        onAskAgent?(message)
+                    },
+                    onReload: {
+                        await loadChanges()
+                        await loadBranches()
+                    }
+                )
+            }
             .alert("Error", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
@@ -94,7 +180,7 @@ struct AgentControlView: View {
                 Text(errorMessage ?? "")
             }
             .task {
-                await loadContext()
+                await loadAll()
             }
             .onChange(of: contextState?.contextWindowTokens) {
                 Task { await reloadContextInBackground() }
@@ -103,65 +189,107 @@ struct AgentControlView: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
+        .sheet(item: $selectedTurnGroup) { turn in
+            TurnDetailSheet(
+                turnGroup: turn,
+                sessionId: sessionId,
+                eventStoreManager: eventStoreManager,
+                onDismissParent: { dismiss() }
+            )
+            .presentationDragIndicator(.hidden)
+            .adaptivePresentationDetents([.medium, .large])
+        }
     }
+
+    // MARK: - Content
 
     private var contentView: some View {
         GeometryReader { geometry in
-            Group {
-                if let snapshot = detailedSnapshot {
-                    ScrollView(.vertical, showsIndicators: true) {
-                        VStack(spacing: 12) {
-                            ContextUsageGaugeView(
-                                currentTokens: snapshot.currentTokens,
-                                contextLimit: snapshot.contextLimit,
-                                usagePercent: snapshot.usagePercent,
-                                thresholdLevel: snapshot.thresholdLevel,
-                                onTap: {
-                                    showContextDetail = true
-                                }
-                            )
-                            .padding(.horizontal)
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 16) {
+                    // Context gauge
+                    if let snapshot = detailedSnapshot {
+                        ContextUsageGaugeView(
+                            currentTokens: snapshot.currentTokens,
+                            contextLimit: snapshot.contextLimit,
+                            usagePercent: snapshot.usagePercent,
+                            thresholdLevel: snapshot.thresholdLevel,
+                            onTap: {
+                                showContextDetail = true
+                            }
+                        )
+                        .padding(.horizontal)
 
-                            ModelControlView(
-                                modelInfo: currentModelInfo,
-                                reasoningLevel: reasoningLevel,
-                                onTap: {
-                                    showModelPicker = true
-                                }
-                            )
-                            .padding(.horizontal)
+                        ModelControlView(
+                            modelInfo: currentModelInfo,
+                            reasoningLevel: reasoningLevel,
+                            onTap: {
+                                showModelPicker = true
+                            }
+                        )
+                        .padding(.horizontal)
+                    }
+
+                    // Source control card
+                    SourceControlCardView(
+                        branchName: worktreeStatus?.worktree?.shortBranch ?? diffResult?.branch,
+                        totalFiles: totalFiles,
+                        totalAdditions: totalAdditions,
+                        totalDeletions: totalDeletions,
+                        isGitRepo: diffResult?.isGitRepo,
+                        isLoading: isLoading,
+                        onTap: {
+                            showSourceControl = true
                         }
-                        .padding(.vertical)
-                        .frame(width: geometry.size.width)
-                    }
-                    .frame(width: geometry.size.width)
-                } else {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .tint(.cyan)
+                    )
+                    .padding(.horizontal)
 
-                        Text("Loading context...")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(.tronTextMuted)
+                    // Session ID
+                    SessionIdRow(sessionId: sessionId)
+                        .padding(.horizontal)
+
+                    // Analytics
+                    if hasEvents {
+                        SessionAnalyticsSection(analytics: analytics)
+                            .padding(.horizontal)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    // Turn history
+                    SessionHistorySection(
+                        turnGroups: turnGroups,
+                        onTurnSelected: { selectedTurnGroup = $0 }
+                    )
+                    .padding(.horizontal)
                 }
+                .padding(.vertical)
+                .frame(width: geometry.size.width)
             }
+            .refreshable { await loadAll() }
+            .frame(width: geometry.size.width)
         }
     }
 
     // MARK: - Data Loading
 
-    private func loadContext() async {
+    private func loadAll() async {
         isLoading = true
+        errorMessage = nil
 
+        async let contextTask: Void = loadContext()
+        async let changesTask: Void = loadChanges()
+        async let eventsTask: Void = loadEvents()
+        async let branchTask: Void = loadBranches()
+
+        _ = await (contextTask, changesTask, eventsTask, branchTask)
+        isLoading = false
+    }
+
+    private func loadContext() async {
         do {
             detailedSnapshot = try await rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
         } catch {
             errorMessage = error.localizedDescription
         }
-
-        isLoading = false
     }
 
     private func reloadContextInBackground() async {
@@ -172,6 +300,32 @@ struct AgentControlView: View {
             errorMessage = error.localizedDescription
         }
     }
+
+    private func loadChanges() async {
+        do {
+            async let diff = rpcClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
+            async let status: WorktreeGetStatusResult? = { try? await rpcClient.worktree.getStatus(sessionId: sessionId) }()
+            diffResult = try await diff
+            worktreeStatus = await status
+        } catch {
+            errorMessage = "Failed to load changes: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadEvents() async {
+        do {
+            try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
+            sessionEvents = try await eventStoreManager.getSessionEvents(sessionId)
+        } catch {
+            // Non-critical: analytics and history gracefully degrade to empty
+        }
+    }
+
+    private func loadBranches() async {
+        branches = (try? await rpcClient.worktree.listSessionBranches(sessionId: sessionId)) ?? []
+    }
+
+    // MARK: - Skill Management
 
     private func removeSkillFromContext(skillName: String) async {
         _ = withAnimation(.tronStandard) {

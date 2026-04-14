@@ -11,6 +11,8 @@ struct SessionChangesSection: View {
     let branches: [SessionBranchInfo]
     let onFileSelected: (FileDetailData) -> Void
     let onShowAllBranches: () -> Void
+    /// When true, the "View All Branches" row is omitted (rendered externally by the parent).
+    var hideBranchesRow: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -37,8 +39,8 @@ struct SessionChangesSection: View {
                 .padding(.vertical, 16)
             }
 
-            // View All Branches row
-            if diffResult?.isGitRepo == true || diffResult == nil {
+            // View All Branches row (inline when not externally managed)
+            if !hideBranchesRow && (diffResult?.isGitRepo == true || diffResult == nil) {
                 viewAllBranchesRow
             }
         }
@@ -64,23 +66,15 @@ struct SessionChangesSection: View {
 
     private var sectionHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Source Control")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-
-                Spacer()
-
-                if let name = branchName {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.triangle.branch")
-                            .foregroundStyle(.tronAmber)
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        Text(name)
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                            .foregroundStyle(.tronAmber)
-                            .lineLimit(1)
-                    }
+            if let name = branchName {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .foregroundStyle(.tronEmerald)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    Text(name)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                        .lineLimit(1)
                 }
             }
 
@@ -211,14 +205,17 @@ struct SessionChangesSection: View {
     // MARK: - Empty States
 
     private var noChangesView: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "checkmark.circle")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronSuccess)
             Text("No changes")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronTextMuted)
+            Spacer()
         }
+        .padding(12)
+        .sectionFill(.tronSuccess)
     }
 
     private var notGitRepoView: some View {

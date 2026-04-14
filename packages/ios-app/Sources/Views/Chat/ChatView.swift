@@ -126,7 +126,7 @@ struct ChatView: View {
             guard let raw = notification.object as? String,
                   let action = ChatMenuAction(rawValue: raw) else { return }
             switch action {
-            case .session: sheetCoordinator.showSession()
+            case .session: sheetCoordinator.showAgentControl()
             case .context: sheetCoordinator.showAgentControl()
             case .settings: sheetCoordinator.showSettings()
             case .processes: viewModel.showProcessSheet = true

@@ -59,11 +59,6 @@ final class SheetCoordinator {
         present(.agentControl)
     }
 
-    /// Show unified session sheet (changes + analytics + history)
-    func showSession() {
-        present(.session)
-    }
-
     /// Show skill/spell detail sheet
     func showSkillDetail(_ skill: Skill, mode: ChipMode) {
         present(.skillDetail(skill, mode))

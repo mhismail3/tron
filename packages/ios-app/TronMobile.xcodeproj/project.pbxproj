@@ -643,6 +643,7 @@
 		EACF734D9C7C0B0D0000FB47 /* MemoryRetainDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 668367B81547A4A7C1322E00 /* MemoryRetainDetailSheet.swift */; };
 		EAE9FFCC465D011583D191E0 /* TronColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BA5810A34C92084B89C6EA4 /* TronColors.swift */; };
 		EB67206447A441B245917538 /* ChatViewModel+Connection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE04482C85DF6EF6EAA8C0BF /* ChatViewModel+Connection.swift */; };
+		EB8855E1B2E63A3DD0A634F4 /* SourceControlSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6118D4FF8A1B425BCD11CFB /* SourceControlSheet.swift */; };
 		EC2522C84E6F3A711A14FA63 /* ChatViewModelProcessingIndicatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF5C0D5D49C644E37207CA96 /* ChatViewModelProcessingIndicatorTests.swift */; };
 		ECBB40661FD1D4894EC7AA30 /* AuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABC4D8415F891AA6E1D9BFF6 /* AuthClient.swift */; };
 		ED208B0DC1AC47E2ED6C56E1 /* SubagentEventFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D46621337C6C107BF33474BD /* SubagentEventFormatter.swift */; };
@@ -1303,6 +1304,7 @@
 		D4F9A6992BA712B1D7BC0A63 /* ToolRunningSpinner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRunningSpinner.swift; sourceTree = "<group>"; };
 		D5CD5F330539097040C10CAC /* TronSpacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronSpacing.swift; sourceTree = "<group>"; };
 		D5E80B3A2D78CAEEFADA5EDE /* WebSearchToolDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchToolDetailSheet.swift; sourceTree = "<group>"; };
+		D6118D4FF8A1B425BCD11CFB /* SourceControlSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceControlSheet.swift; sourceTree = "<group>"; };
 		D6A4E9B31D300C40B795D335 /* MiscClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiscClientTests.swift; sourceTree = "<group>"; };
 		D6E22132487C41F0ACC72285 /* ToolEmptyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolEmptyState.swift; sourceTree = "<group>"; };
 		D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformer.swift; sourceTree = "<group>"; };
@@ -2252,6 +2254,7 @@
 				A9F33B80C60EF29B3EC1B78C /* GlassActionSheet.swift */,
 				F036C59AA7B1C7FFA8CDBD4D /* RulesSectionViews.swift */,
 				C131F7215B28C02C337EB930 /* SkillSectionViews.swift */,
+				D6118D4FF8A1B425BCD11CFB /* SourceControlSheet.swift */,
 				97B933892FDC37296600BDA3 /* SystemPromptSection.swift */,
 				BCCDCC32EE19E420297339CA /* ToolSectionViews.swift */,
 				5ACF7E361C172F4DE573B1E5 /* TurnBreakdownViews.swift */,
@@ -3725,6 +3728,7 @@
 				9A34F612C00200BBB53F6EC9 /* SkillSectionViews.swift in Sources */,
 				99172A00AE032281FED38F44 /* SkillStore.swift in Sources */,
 				6A269E36D6E34A3017690929 /* SourceControlMetadata.swift in Sources */,
+				EB8855E1B2E63A3DD0A634F4 /* SourceControlSheet.swift in Sources */,
 				99FFAD7357E66923CAB8DB1D /* SpellCastPlugin.swift in Sources */,
 				05D507CB3C67284103C9894D /* StatusPillBar.swift in Sources */,
 				A9C56AF4AEF5B9B6E32720FC /* StreamSheetView.swift in Sources */,

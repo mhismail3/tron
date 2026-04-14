@@ -42,13 +42,7 @@ struct ChatSheetContent: View {
                 currentModelInfo: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel),
                 reasoningLevel: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel)?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
                 availableModels: viewModel.modelPickerState.cachedModels,
-                currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel)
-            )
-
-        case .session:
-            SessionSheet(
-                rpcClient: rpcClient,
-                sessionId: sessionId,
+                currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel),
                 onAskAgent: { message in
                     viewModel.pendingSourceChangesPrompt = message
                     sheetCoordinator?.dismiss()

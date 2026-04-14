@@ -78,12 +78,6 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertEqual(coordinator.activeSheet, .agentControl)
     }
 
-    func testShowSessionHistory() {
-        let coordinator = SheetCoordinator()
-        coordinator.showSession()
-        XCTAssertEqual(coordinator.activeSheet, .session)
-    }
-
     func testShowAskUserQuestion() {
         let coordinator = SheetCoordinator()
         coordinator.showAskUserQuestion()
