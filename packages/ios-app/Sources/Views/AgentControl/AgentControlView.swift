@@ -34,6 +34,8 @@ struct AgentControlView: View {
     @State private var showContextDetail = false
     @State private var showModelPicker = false
     @State private var showSourceControl = false
+    @State private var showAnalytics = false
+    @State private var showHistory = false
     @State private var pendingSkillDeletions: Set<String> = []
 
     // MARK: - Session State
@@ -43,8 +45,7 @@ struct AgentControlView: View {
     @State private var branches: [SessionBranchInfo] = []
     @State private var sessionEvents: [SessionEvent] = []
 
-    // Sub-sheets
-    @State private var selectedTurnGroup: TurnGroup?
+    // (sub-sheets managed via showSourceControl / showAnalytics / showHistory)
 
     // MARK: - Session Computed Properties
 
@@ -86,6 +87,12 @@ struct AgentControlView: View {
                 return true
             }
         }
+    }
+
+    private var analyticsTotalTokens: Int {
+        let bd = analytics.costBreakdown
+        return bd.baseInputTokens + bd.outputTokens + bd.cacheReadTokens
+            + bd.cacheWrite5mTokens + bd.cacheWrite1hTokens + bd.cacheWriteLegacyTokens
     }
 
     private var turnGroups: [TurnGroup] {
@@ -189,15 +196,19 @@ struct AgentControlView: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .sheet(item: $selectedTurnGroup) { turn in
-            TurnDetailSheet(
-                turnGroup: turn,
+        .sheet(isPresented: $showAnalytics) {
+            AnalyticsSheet(
+                analytics: analytics,
+                turnGroups: turnGroups
+            )
+        }
+        .sheet(isPresented: $showHistory) {
+            HistorySheet(
+                turnGroups: turnGroups,
                 sessionId: sessionId,
                 eventStoreManager: eventStoreManager,
                 onDismissParent: { dismiss() }
             )
-            .presentationDragIndicator(.hidden)
-            .adaptivePresentationDetents([.medium, .large])
         }
     }
 
@@ -244,22 +255,27 @@ struct AgentControlView: View {
                     )
                     .padding(.horizontal)
 
+                    // Analytics card
+                    if hasEvents {
+                        AnalyticsCardView(
+                            totalTokens: analyticsTotalTokens,
+                            totalCost: analytics.costBreakdown.totalCost,
+                            totalTurns: analytics.turns.count,
+                            onTap: { showAnalytics = true }
+                        )
+                        .padding(.horizontal)
+                    }
+
+                    // History card
+                    HistoryCardView(
+                        totalTurns: turnGroups.count,
+                        onTap: { showHistory = true }
+                    )
+                    .padding(.horizontal)
+
                     // Session ID
                     SessionIdRow(sessionId: sessionId)
                         .padding(.horizontal)
-
-                    // Analytics
-                    if hasEvents {
-                        SessionAnalyticsSection(analytics: analytics)
-                            .padding(.horizontal)
-                    }
-
-                    // Turn history
-                    SessionHistorySection(
-                        turnGroups: turnGroups,
-                        onTurnSelected: { selectedTurnGroup = $0 }
-                    )
-                    .padding(.horizontal)
                 }
                 .padding(.vertical)
                 .frame(width: geometry.size.width)

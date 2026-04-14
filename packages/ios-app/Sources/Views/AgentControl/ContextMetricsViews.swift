@@ -233,6 +233,107 @@ struct SourceControlCardView: View {
     }
 }
 
+// MARK: - Analytics Card View
+
+@available(iOS 26.0, *)
+struct AnalyticsCardView: View {
+    var totalTokens: Int
+    var totalCost: Double
+    var totalTurns: Int
+    var onTap: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 2) {
+            // Row 1: icon + title
+            HStack(spacing: 8) {
+                Image(systemName: "chart.bar.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronAmber)
+
+                Text("Analytics")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronAmber)
+
+                Spacer()
+
+                // Tokens + cost side by side
+                HStack(spacing: 12) {
+                    VStack(spacing: 1) {
+                        Text(TokenFormatter.format(totalTokens))
+                            .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                            .foregroundStyle(.tronAmber)
+                        Text("tokens")
+                            .font(TronTypography.codeCaption)
+                            .foregroundStyle(.tronTextMuted)
+                    }
+                    VStack(spacing: 1) {
+                        Text(formatCost(totalCost))
+                            .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                            .foregroundStyle(.tronAmberLight)
+                        Text("total cost")
+                            .font(TronTypography.codeCaption)
+                            .foregroundStyle(.tronTextMuted)
+                    }
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+            }
+
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture {
+            onTap?()
+        }
+    }
+}
+
+// MARK: - History Card View
+
+@available(iOS 26.0, *)
+struct HistoryCardView: View {
+    var totalTurns: Int
+    var onTap: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 2) {
+            // Row 1: icon + title + turn count
+            HStack(spacing: 8) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronAmberLight)
+
+                Text("History")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronAmberLight)
+
+                Spacer()
+
+                Text("\(totalTurns) \(totalTurns == 1 ? "turn" : "turns")")
+                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .foregroundStyle(.tronAmberLight)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.tronAmberLight.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture {
+            onTap?()
+        }
+    }
+}
+
 // MARK: - Markdown Content View (caption-sized block-level markdown for context audit)
 
 @available(iOS 26.0, *)
