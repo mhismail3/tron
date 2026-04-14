@@ -44,20 +44,20 @@ struct AllBranchesSheet: View {
                     ToolbarItem(placement: .principal) {
                         Text("All Branches")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronAmber)
+                            .foregroundStyle(.tronTeal)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(.tronAmber)
+                                .foregroundStyle(.tronTeal)
                         }
                     }
                 }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronAmber)
+        .tint(.tronTeal)
         .sheet(item: $selectedBranch, onDismiss: {
             Task { await loadBranches() }
         }) { branch in
@@ -97,6 +97,13 @@ struct AllBranchesSheet: View {
 
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    if !currentBranches.isEmpty {
+                        sectionHeader("Current Session")
+                        ForEach(currentBranches) { branch in
+                            currentBranchRow(branch)
+                        }
+                    }
+
                     if !activeBranches.isEmpty {
                         sectionHeader("Active Sessions")
                         ForEach(activeBranches) { branch in
@@ -107,13 +114,6 @@ struct AllBranchesSheet: View {
                     if !preservedBranches.isEmpty {
                         sectionHeader("Preserved Branches")
                         ForEach(preservedBranches) { branch in
-                            branchRow(branch)
-                        }
-                    }
-
-                    if !currentBranches.isEmpty {
-                        sectionHeader("Current Session")
-                        ForEach(currentBranches) { branch in
                             branchRow(branch)
                         }
                     }
@@ -136,6 +136,35 @@ struct AllBranchesSheet: View {
             .padding(.bottom, 4)
     }
 
+    private func currentBranchRow(_ branch: SessionBranchInfo) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(branch.shortBranch)
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronTeal)
+
+                Text(branch.lastCommitMessage)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            if branch.commitCount > 0 {
+                Text("\(branch.commitCount)")
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(.tronTeal)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+    }
+
     private func branchRow(_ branch: SessionBranchInfo) -> some View {
         Button { selectedBranch = branch } label: {
             HStack(spacing: 10) {
@@ -155,7 +184,7 @@ struct AllBranchesSheet: View {
                 if branch.commitCount > 0 {
                     Text("\(branch.commitCount)")
                         .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronTeal)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(.ultraThinMaterial)
