@@ -39,14 +39,14 @@ final class SessionEventSummaryTests: XCTestCase {
 
     func testLlmHookResult_withoutHookName_showsFallback() {
         let event = makeEvent(type: "hook.llm_result")
-        XCTAssertEqual(event.summary, "LLM hook result")
+        XCTAssertEqual(event.summary, "Hook completed")
     }
 
     func testLlmHookResult_withEmptyHookName_showsFallback() {
         let event = makeEvent(type: "hook.llm_result", payload: [
             "hookName": AnyCodable(""),
         ])
-        XCTAssertEqual(event.summary, "LLM hook result")
+        XCTAssertEqual(event.summary, "Hook completed")
     }
 
     // MARK: - Subagent Events
@@ -195,12 +195,12 @@ final class SessionEventSummaryTests: XCTestCase {
         let event = makeEvent(type: "worktree.acquired", payload: [
             "branch": AnyCodable("session/test-branch"),
         ])
-        XCTAssertEqual(event.summary, "Worktree: session/test-branch")
+        XCTAssertEqual(event.summary, "Branch: session/test-branch")
     }
 
     func testWorktreeAcquired_withoutBranch() {
         let event = makeEvent(type: "worktree.acquired")
-        XCTAssertEqual(event.summary, "Worktree acquired")
+        XCTAssertEqual(event.summary, "Branch created")
     }
 
     func testSessionBranch_summary() {

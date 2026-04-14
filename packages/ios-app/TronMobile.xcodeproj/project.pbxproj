@@ -76,7 +76,6 @@
 		177D0BD5E23B8D6B810468E9 /* ToolCodeBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8A2109BF93AE020C9CC0BE5 /* ToolCodeBlock.swift */; };
 		17B5974A12F8C119953C3D4C /* NotifyAppDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B0D0EBE752ACE1C4B9B567 /* NotifyAppDetailSheet.swift */; };
 		17CF66BAF2CD3108C62EB429 /* AppearanceSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78526BB911BE412A17BFDBD3 /* AppearanceSettingsTests.swift */; };
-		17E75BBA0BEA0220F656EF65 /* TurnBreakdownViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ACF7E361C172F4DE573B1E5 /* TurnBreakdownViews.swift */; };
 		186D919AAC62C6F4C4B5C493 /* RPCRetryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4831D2ADEDA260364F63294 /* RPCRetryPolicy.swift */; };
 		1941E9257E3CE110699A37A0 /* WaitToolDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0144D9FF13273A90B8DA1760 /* WaitToolDetailSheet.swift */; };
 		19E0C5A85FE1390F8A7905E4 /* InputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86A01BCFC99D98B0D971D0B /* InputBar.swift */; };
@@ -967,7 +966,6 @@
 		5916B2C51BF52310DD2E9907 /* AttachmentBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentBubble.swift; sourceTree = "<group>"; };
 		5A086125114604546F6343DA /* AgentClientProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentClientProtocol.swift; sourceTree = "<group>"; };
 		5A987D3FDC1F067017F40BEC /* SessionEvent+ExpandedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionEvent+ExpandedContent.swift"; sourceTree = "<group>"; };
-		5ACF7E361C172F4DE573B1E5 /* TurnBreakdownViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnBreakdownViews.swift; sourceTree = "<group>"; };
 		5B5AACA7D30F43F0D5582D21 /* ComputerUseDetailsHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputerUseDetailsHelper.swift; sourceTree = "<group>"; };
 		5BCA35ED70CF3D2DEB460346 /* ProcessStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessStateTests.swift; sourceTree = "<group>"; };
 		5CE7FB0A11EF8ABA88945BF3 /* BashOutputHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashOutputHelpers.swift; sourceTree = "<group>"; };
@@ -2264,7 +2262,6 @@
 				D6118D4FF8A1B425BCD11CFB /* SourceControlSheet.swift */,
 				97B933892FDC37296600BDA3 /* SystemPromptSection.swift */,
 				BCCDCC32EE19E420297339CA /* ToolSectionViews.swift */,
-				5ACF7E361C172F4DE573B1E5 /* TurnBreakdownViews.swift */,
 			);
 			path = AgentControl;
 			sourceTree = "<group>";
@@ -3827,7 +3824,6 @@
 				AF995741399CFE0412212FE4 /* TronSpacing.swift in Sources */,
 				ADE823483A87985C5E503A9C /* TronStepper.swift in Sources */,
 				5370368B0B9ACE3C1C21123B /* TronTypography.swift in Sources */,
-				17E75BBA0BEA0220F656EF65 /* TurnBreakdownViews.swift in Sources */,
 				7A607C5FA33FDB48E86A79D6 /* TurnEndPlugin.swift in Sources */,
 				F6C7B37661AABE24E3676AF7 /* TurnFailedPlugin.swift in Sources */,
 				22A5E435E0FB5D894F409926 /* TurnGrouping.swift in Sources */,

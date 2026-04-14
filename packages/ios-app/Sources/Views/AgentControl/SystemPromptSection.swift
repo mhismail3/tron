@@ -58,36 +58,3 @@ struct SystemPromptSection: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
-
-// MARK: - Environment Item Row
-
-@available(iOS 26.0, *)
-struct EnvironmentItemRow: View {
-    let icon: String
-    let label: String
-    let value: String
-    var accent: Color = .tronSlate
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(accent)
-
-            Text(label)
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(accent)
-
-            Spacer()
-
-            Text(value)
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronTextSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-        .padding(8)
-        .sectionFill(accent, cornerRadius: 6, subtle: true)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-    }
-}

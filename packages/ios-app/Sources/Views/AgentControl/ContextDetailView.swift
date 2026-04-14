@@ -313,7 +313,7 @@ struct ContextDetailView: View {
                     GlassAction(
                         title: "Compact Context",
                         icon: "arrow.down.right.and.arrow.up.left",
-                        color: Color(red: 0.55, green: 0.7, blue: 0.8),
+                        color: .tronSlate,
                         role: .default
                     ) {
                         showCompactPopover = false

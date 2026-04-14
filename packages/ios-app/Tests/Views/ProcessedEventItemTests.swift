@@ -103,10 +103,10 @@ struct ProcessedEventItemTests {
         }
     }
 
-    @Test("Tool call without result but with preceding tool result stays in main")
+    @Test("In-progress tool call after completed tool goes to post-turn boundary")
     func toolCallInProgressAfterCompletedTool() {
         // When a completed tool call+result exists, a subsequent in-progress call
-        // is included in main because lastMainIndex = last toolResult index
+        // falls past the lastMainIndex (= last toolResult index) into post-turn
         let events = [
             makeEvent(type: "message.assistant", sequence: 1),
             makeEvent(id: "call-done", type: "tool.call", sequence: 2, payload: ["toolCallId": AnyCodable("done")]),

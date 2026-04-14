@@ -117,7 +117,7 @@ struct SessionChangesSection: View {
             fileContainer(
                 title: "Unstaged",
                 files: unstagedFiles,
-                accentColor: .orange,
+                accentColor: .tronAmber,
                 stagingArea: .unstaged
             )
         }

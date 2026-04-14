@@ -11,7 +11,7 @@ enum ForkButtonState: Equatable {
 /// Derives the fork button state for an event in a turn detail context.
 ///
 /// Extracted as a free function for testability. Used by `HistorySheet`
-/// to determine whether each event row should show a fork button.
+/// and `EventRow` to determine whether each event row should show a fork button.
 func deriveForkButtonState(
     event: SessionEvent,
     sessionId: String,

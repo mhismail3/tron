@@ -18,14 +18,22 @@ struct BranchDetailView: View {
     @State private var showMergeConfirmation = false
     @State private var isMerging = false
     @State private var mergeSuccess: String?
-    @State private var mergeError: String?
+    @State private var operationError: String?
     @State private var mergeConflicts: [String] = []
     @State private var showConflictAlert = false
     @State private var showDeleteBranchConfirmation = false
     @State private var isDeleting = false
 
+    private var effectiveSessionId: String {
+        branch.sessionId ?? currentSessionId
+    }
+
     private var targetBranch: String {
         branch.baseBranch ?? "main"
+    }
+
+    private var mergePrompt: String {
+        "Please merge branch \(branch.branch) into \(targetBranch) and resolve any conflicts"
     }
 
     private var canMerge: Bool {
@@ -93,8 +101,7 @@ struct BranchDetailView: View {
             }
             .alert("Merge Conflicts", isPresented: $showConflictAlert) {
                 Button("Ask Agent to Merge") {
-                    let message = "Please merge branch \(branch.branch) into \(targetBranch) and resolve any conflicts"
-                    onAskAgent(message)
+                    onAskAgent(mergePrompt)
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -123,8 +130,7 @@ struct BranchDetailView: View {
 
     private var askAgentButton: some View {
         Button {
-            let message = "Please merge branch \(branch.branch) into \(targetBranch) and resolve any conflicts"
-            onAskAgent(message)
+            onAskAgent(mergePrompt)
         } label: {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
@@ -235,7 +241,7 @@ struct BranchDetailView: View {
             .sectionFill(.tronSuccess)
         }
 
-        if let error = mergeError {
+        if let error = operationError {
             HStack(spacing: 6) {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.tronError)
@@ -411,7 +417,7 @@ struct BranchDetailView: View {
         errorMessage = nil
 
         do {
-            let sid = branch.sessionId ?? currentSessionId
+            let sid = effectiveSessionId
             committedDiff = try await rpcClient.worktree.getCommittedDiff(sessionId: sid)
         } catch {
             errorMessage = "Failed to load changes: \(error.localizedDescription)"
@@ -428,13 +434,13 @@ struct BranchDetailView: View {
             defer { isDeleting = false }
 
             do {
-                let _ = try await rpcClient.worktree.deleteBranch(
-                    sessionId: branch.sessionId ?? currentSessionId,
+                try await rpcClient.worktree.deleteBranch(
+                    sessionId: effectiveSessionId,
                     branch: branch.branch
                 )
                 dismiss()
             } catch {
-                mergeError = "Delete failed: \(error.localizedDescription)"
+                operationError = "Delete failed: \(error.localizedDescription)"
             }
         }
     }
@@ -444,13 +450,13 @@ struct BranchDetailView: View {
     private func performMerge(strategy: String?) {
         Task {
             isMerging = true
-            mergeError = nil
+            operationError = nil
             mergeSuccess = nil
             defer { isMerging = false }
 
             do {
                 let result = try await rpcClient.worktree.merge(
-                    sessionId: branch.sessionId ?? currentSessionId,
+                    sessionId: effectiveSessionId,
                     targetBranch: targetBranch,
                     strategy: strategy
                 )
@@ -462,10 +468,10 @@ struct BranchDetailView: View {
                     mergeConflicts = conflicts
                     showConflictAlert = true
                 } else {
-                    mergeError = result.error ?? "Merge failed"
+                    operationError = result.error ?? "Merge failed"
                 }
             } catch {
-                mergeError = "Merge failed: \(error.localizedDescription)"
+                operationError = "Merge failed: \(error.localizedDescription)"
             }
         }
     }

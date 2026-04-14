@@ -253,11 +253,11 @@ struct AddedSkillRow: View {
             HStack(spacing: 8) {
                 Image(systemName: sourceIcon)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronCyan)
+                    .foregroundStyle(sourceColor)
 
                 Text("@\(skill.name)")
                     .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronCyan)
+                    .foregroundStyle(sourceColor)
 
                 Spacer()
 

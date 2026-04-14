@@ -11,6 +11,11 @@ struct AnalyticsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var expandedTurns: Set<String> = []
 
+    /// Pre-indexed turn groups by turn number for O(1) lookup per row.
+    private var turnGroupIndex: [Int: TurnGroup] {
+        Dictionary(turnGroups.map { ($0.turnNumber, $0) }, uniquingKeysWith: { _, last in last })
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
@@ -63,7 +68,7 @@ struct AnalyticsSheet: View {
     @ViewBuilder
     private func turnCard(_ turnData: ConsolidatedAnalytics.TurnData) -> some View {
         let isExpanded = expandedTurns.contains(turnData.id.uuidString)
-        let turnGroup = turnGroups.first(where: { $0.turnNumber == turnData.turn })
+        let turnGroup = turnGroupIndex[turnData.turn]
 
         VStack(spacing: 0) {
             // Header row — always visible

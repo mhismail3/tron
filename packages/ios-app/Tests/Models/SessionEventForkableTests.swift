@@ -42,7 +42,7 @@ final class SessionEventForkableTests: XCTestCase {
         XCTAssertTrue(event.isForkable)
     }
 
-    // MARK: - messageAssistant (forkable only without tool_use)
+    // MARK: - messageAssistant (always forkable — fork point selection is handled at the UI layer)
 
     func testAssistant_textOnlyContentArray_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
@@ -97,7 +97,7 @@ final class SessionEventForkableTests: XCTestCase {
         XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_withToolUseBlock_isNotForkable() {
+    func testAssistant_withToolUseBlock_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
                 ["type": "text", "text": "Let me run that"],
@@ -105,21 +105,20 @@ final class SessionEventForkableTests: XCTestCase {
             ]),
             "stopReason": AnyCodable("tool_use"),
         ])
-        XCTAssertFalse(event.isForkable)
+        XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_stopReasonToolUse_isNotForkable() {
+    func testAssistant_stopReasonToolUse_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
                 ["type": "tool_use", "id": "toolu_456", "name": "Read", "input": ["path": "/tmp"]],
             ]),
             "stopReason": AnyCodable("tool_use"),
         ])
-        XCTAssertFalse(event.isForkable)
+        XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_interruptedWithToolUseInContent_isNotForkable() {
-        // stopReason is "interrupted" but content still has tool_use blocks
+    func testAssistant_interruptedWithToolUseInContent_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
                 ["type": "text", "text": "Running..."],
@@ -127,10 +126,10 @@ final class SessionEventForkableTests: XCTestCase {
             ]),
             "stopReason": AnyCodable("interrupted"),
         ])
-        XCTAssertFalse(event.isForkable)
+        XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_mixedContentWithToolUse_isNotForkable() {
+    func testAssistant_mixedContentWithToolUse_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "content": AnyCodable([
                 ["type": "thinking", "thinking": "Let me think..."],
@@ -139,15 +138,14 @@ final class SessionEventForkableTests: XCTestCase {
             ]),
             "stopReason": AnyCodable("tool_use"),
         ])
-        XCTAssertFalse(event.isForkable)
+        XCTAssertTrue(event.isForkable)
     }
 
-    func testAssistant_stopReasonToolUse_noContent_isNotForkable() {
-        // Fast path: stopReason alone is sufficient
+    func testAssistant_stopReasonToolUse_noContent_isForkable() {
         let event = makeEvent(type: "message.assistant", payload: [
             "stopReason": AnyCodable("tool_use"),
         ])
-        XCTAssertFalse(event.isForkable)
+        XCTAssertTrue(event.isForkable)
     }
 
     // MARK: - Non-forkable event types

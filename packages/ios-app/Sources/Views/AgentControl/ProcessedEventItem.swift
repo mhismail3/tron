@@ -21,6 +21,14 @@ struct ProcessedEventItem: Identifiable {
 
 // MARK: - Event Processing
 
+/// Event types considered post-turn lifecycle events (config changes, worktree ops, etc.)
+private let postTurnEventTypes: Set<SessionEventType> = [
+    .configModelSwitch, .configPromptUpdate, .configReasoningLevel,
+    .llmHookResult, .worktreeAcquired, .worktreeCommit, .worktreeReleased,
+    .worktreeMerged, .worktreeRenamed, .skillActivated, .skillDeactivated,
+    .memoryRetained, .rulesLoaded, .rulesActivated
+]
+
 /// Splits a turn's events into main content and post-turn lifecycle events,
 /// merging tool call/result pairs into single items.
 func processEventsForTurn(_ turn: TurnGroup) -> (main: [ProcessedEventItem], postTurn: [ProcessedEventItem]) {
@@ -42,14 +50,7 @@ func processEventsForTurn(_ turn: TurnGroup) -> (main: [ProcessedEventItem], pos
     let mainEvents = lastMainIndex < events.count ? Array(events[...lastMainIndex]) : events
     let postTurnEvents = lastMainIndex + 1 < events.count ? Array(events[(lastMainIndex + 1)...]) : []
 
-    let postTurnTypes: Set<SessionEventType> = [
-        .configModelSwitch, .configPromptUpdate, .configReasoningLevel,
-        .llmHookResult, .worktreeAcquired, .worktreeCommit, .worktreeReleased,
-        .worktreeMerged, .worktreeRenamed, .skillActivated, .skillDeactivated,
-        .memoryRetained, .rulesLoaded, .rulesActivated
-    ]
-
-    let filteredPostTurn = postTurnEvents.filter { postTurnTypes.contains($0.eventType) }
+    let filteredPostTurn = postTurnEvents.filter { postTurnEventTypes.contains($0.eventType) }
 
     var mainItems: [ProcessedEventItem] = []
     var resultByCallId: [String: SessionEvent] = [:]
