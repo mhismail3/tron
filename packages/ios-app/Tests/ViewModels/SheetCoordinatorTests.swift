@@ -27,9 +27,9 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
     func testLastActiveSheetTrackedOnPresent() {
         let coordinator = SheetCoordinator()
         coordinator.present(.settings)
-        coordinator.present(.contextAudit)
+        coordinator.present(.agentControl)
         XCTAssertEqual(coordinator.lastActiveSheet, .settings)
-        XCTAssertEqual(coordinator.activeSheet, .contextAudit)
+        XCTAssertEqual(coordinator.activeSheet, .agentControl)
     }
 
     func testLastActiveSheetTrackedOnDismiss() {
@@ -72,22 +72,16 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertEqual(coordinator.activeSheet, .settings)
     }
 
-    func testShowContextAudit() {
+    func testShowAgentControl() {
         let coordinator = SheetCoordinator()
-        coordinator.showContextAudit()
-        XCTAssertEqual(coordinator.activeSheet, .contextAudit)
+        coordinator.showAgentControl()
+        XCTAssertEqual(coordinator.activeSheet, .agentControl)
     }
 
     func testShowSessionHistory() {
         let coordinator = SheetCoordinator()
         coordinator.showSession()
         XCTAssertEqual(coordinator.activeSheet, .session)
-    }
-
-    func testShowModelPicker() {
-        let coordinator = SheetCoordinator()
-        coordinator.showModelPicker()
-        XCTAssertEqual(coordinator.activeSheet, .modelPicker)
     }
 
     func testShowAskUserQuestion() {

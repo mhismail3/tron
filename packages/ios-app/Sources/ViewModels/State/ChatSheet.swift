@@ -43,7 +43,7 @@ struct ProviderErrorDetailData: Equatable, Hashable {
 enum ChatSheet: Identifiable, Equatable {
     // Settings & Info
     case settings
-    case contextAudit
+    case agentControl
     case session
 
     // Skill/Spell details
@@ -65,15 +65,13 @@ enum ChatSheet: Identifiable, Equatable {
     // Command tool detail
     case commandToolDetail(CommandToolChipData)
 
-    // Model picker
-    case modelPicker
 
     var id: String {
         switch self {
         case .settings:
             return "settings"
-        case .contextAudit:
-            return "contextAudit"
+        case .agentControl:
+            return "agentControl"
         case .session:
             return "session"
         case .skillDetail(let skill, _):
@@ -98,8 +96,6 @@ enum ChatSheet: Identifiable, Equatable {
             return "commandTool-\(data.id)"
         case .providerErrorDetail:
             return "providerError"
-        case .modelPicker:
-            return "modelPicker"
         }
     }
 
@@ -109,7 +105,7 @@ enum ChatSheet: Identifiable, Equatable {
         switch (lhs, rhs) {
         case (.settings, .settings):
             return true
-        case (.contextAudit, .contextAudit):
+        case (.agentControl, .agentControl):
             return true
         case (.session, .session):
             return true
@@ -135,8 +131,6 @@ enum ChatSheet: Identifiable, Equatable {
             return data1.id == data2.id
         case (.providerErrorDetail(let data1), .providerErrorDetail(let data2)):
             return data1 == data2
-        case (.modelPicker, .modelPicker):
-            return true
         default:
             return false
         }

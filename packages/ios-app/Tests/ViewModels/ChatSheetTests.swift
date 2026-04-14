@@ -16,11 +16,11 @@ struct ChatSheetTests {
         #expect(sheet.id == "settings")
     }
 
-    @Test("Context audit sheet has consistent id")
-    func testContextAuditSheetId() {
-        let sheet = ChatSheet.contextAudit
+    @Test("Agent control sheet has consistent id")
+    func testAgentControlSheetId() {
+        let sheet = ChatSheet.agentControl
 
-        #expect(sheet.id == "contextAudit")
+        #expect(sheet.id == "agentControl")
     }
 
     @Test("Session sheet has consistent id")
@@ -173,7 +173,7 @@ struct ChatSheetTests {
 
         let sheets: [ChatSheet] = [
             .settings,
-            .contextAudit,
+            .agentControl,
             .session,
             .skillDetail(skill, .skill),
             .compactionDetail(compactionData),
@@ -182,8 +182,7 @@ struct ChatSheetTests {
             .notifyApp(notifyData),
             .thinkingDetail("content"),
             .commandToolDetail(commandToolData),
-            .providerErrorDetail(providerErrorData),
-            .modelPicker
+            .providerErrorDetail(providerErrorData)
         ]
 
         // Extract base ids (before any dynamic suffix)
@@ -294,9 +293,9 @@ struct SheetCoordinatorTests {
         let coordinator = SheetCoordinator()
 
         coordinator.present(.settings)
-        coordinator.present(.contextAudit)
+        coordinator.present(.agentControl)
 
-        #expect(coordinator.activeSheet == .contextAudit)
+        #expect(coordinator.activeSheet == .agentControl)
     }
 
     @Test("Present replaces onDismiss callback")
@@ -306,7 +305,7 @@ struct SheetCoordinatorTests {
         var secondCalled = false
 
         coordinator.present(.settings) { firstCalled = true }
-        coordinator.present(.contextAudit) { secondCalled = true }
+        coordinator.present(.agentControl) { secondCalled = true }
 
         coordinator.onDismiss?()
 
@@ -359,13 +358,13 @@ struct SheetCoordinatorTests {
         #expect(coordinator.activeSheet == .settings)
     }
 
-    @Test("showContextAudit creates context audit sheet")
-    func testShowContextAuditCreatesContextAuditSheet() {
+    @Test("showAgentControl creates agent control sheet")
+    func testShowAgentControlCreatesAgentControlSheet() {
         let coordinator = SheetCoordinator()
 
-        coordinator.showContextAudit()
+        coordinator.showAgentControl()
 
-        #expect(coordinator.activeSheet == .contextAudit)
+        #expect(coordinator.activeSheet == .agentControl)
     }
 
     @Test("showSession creates session sheet")

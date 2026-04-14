@@ -32,8 +32,8 @@ struct ChatSheetContent: View {
             SettingsView()
                 .environment(\.dependencies, dependencies)
 
-        case .contextAudit:
-            ContextAuditView(
+        case .agentControl:
+            AgentControlView(
                 rpcClient: rpcClient,
                 sessionId: sessionId,
                 skillStore: skillStore,
@@ -102,17 +102,6 @@ struct ChatSheetContent: View {
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
                 .adaptivePresentationDetents([.medium])
-
-        case .modelPicker:
-            ModelPickerSheet(
-                models: viewModel.modelPickerState.cachedModels,
-                currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel),
-                readOnly: sheetReadOnly,
-                reasoningLevel: viewModel.inputBarState.reasoningLevel,
-                onSelect: { model in
-                    NotificationCenter.default.post(name: .modelPickerAction, object: model)
-                }
-            )
 
         }
     }

@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Model Picker Sheet
 
 /// Rich bottom sheet for model selection with Provider > Family > Model hierarchy.
-/// Follows ContextAuditView patterns: NavigationStack, ScrollView, collapsible sections.
+/// Follows AgentControlView patterns: NavigationStack, ScrollView, collapsible sections.
 @available(iOS 26.0, *)
 struct ModelPickerSheet: View {
     let models: [ModelInfo]

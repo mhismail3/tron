@@ -25,9 +25,6 @@ struct ChatView: View {
     // See: https://www.hackingwithswift.com/quick-start/swiftui/how-to-present-multiple-sheets
     @State var sheetCoordinator = SheetCoordinator()
 
-    // Note: Model state (cachedModels, isLoadingModels, optimisticModelName)
-    // has been moved to viewModel.modelPickerState - see ChatView+Helpers.swift for accessors
-
     // MARK: - Connection Interaction State (private - body only)
     @State private var isInteractionEnabled: Bool
     @State private var interactionDebounceTask: Task<Void, Never>?
@@ -130,7 +127,7 @@ struct ChatView: View {
                   let action = ChatMenuAction(rawValue: raw) else { return }
             switch action {
             case .session: sheetCoordinator.showSession()
-            case .context: sheetCoordinator.showContextAudit()
+            case .context: sheetCoordinator.showAgentControl()
             case .settings: sheetCoordinator.showSettings()
             case .processes: viewModel.showProcessSheet = true
             }
@@ -356,13 +353,10 @@ struct ChatView: View {
                         isCompacting: viewModel.isCompacting,
                         isRecording: viewModel.isRecording,
                         isTranscribing: viewModel.isTranscribing,
-                        modelName: displayModelName,
                         tokenUsage: viewModel.contextState.totalTokenUsage,
                         contextPercentage: viewModel.contextState.contextPercentage,
                         contextWindow: viewModel.contextState.currentContextWindow,
                         lastTurnInputTokens: viewModel.contextState.lastTurnInputTokens,
-                        cachedModels: cachedModels,
-                        isLoadingModels: isLoadingModels,
                         currentModelInfo: currentModelInfo,
                         skillStore: skillStore,
                         inputHistory: inputHistory,
@@ -410,7 +404,7 @@ struct ChatView: View {
                         onAddAttachment: viewModel.addAttachment,
                         onRemoveAttachment: viewModel.removeAttachment,
                         onHistoryNavigate: { newText in viewModel.inputText = newText },
-                        onContextTap: { [sheetCoordinator] in sheetCoordinator.showContextAudit() },
+                        onContextTap: { [sheetCoordinator] in sheetCoordinator.showAgentControl() },
                         onSkillSelect: nil,
                         onSkillRemove: { [viewModel] skill in
                             Task { try? await viewModel.deactivateSkillOnServer(skill.name) }

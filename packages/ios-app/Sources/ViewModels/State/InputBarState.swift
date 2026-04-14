@@ -102,15 +102,12 @@ struct InputBarConfig {
     let isTranscribing: Bool
 
     // MARK: - Status Display
-    let modelName: String
     let tokenUsage: TokenUsage?
     let contextPercentage: Int
     let contextWindow: Int
     let lastTurnInputTokens: Int
 
-    // MARK: - Model Picker
-    let cachedModels: [ModelInfo]
-    let isLoadingModels: Bool
+    // MARK: - Model / Attachments
     let currentModelInfo: ModelInfo?
 
     // MARK: - Skills
@@ -146,13 +143,10 @@ struct InputBarConfig {
         isCompacting: Bool = false,
         isRecording: Bool = false,
         isTranscribing: Bool = false,
-        modelName: String = "",
         tokenUsage: TokenUsage? = nil,
         contextPercentage: Int = 0,
         contextWindow: Int = 0,
         lastTurnInputTokens: Int = 0,
-        cachedModels: [ModelInfo] = [],
-        isLoadingModels: Bool = false,
         currentModelInfo: ModelInfo? = nil,
         skillStore: SkillStore? = nil,
         inputHistory: InputHistoryStore? = nil,
@@ -165,13 +159,10 @@ struct InputBarConfig {
         self.isCompacting = isCompacting
         self.isRecording = isRecording
         self.isTranscribing = isTranscribing
-        self.modelName = modelName
         self.tokenUsage = tokenUsage
         self.contextPercentage = contextPercentage
         self.contextWindow = contextWindow
         self.lastTurnInputTokens = lastTurnInputTokens
-        self.cachedModels = cachedModels
-        self.isLoadingModels = isLoadingModels
         self.currentModelInfo = currentModelInfo
         self.skillStore = skillStore
         self.inputHistory = inputHistory

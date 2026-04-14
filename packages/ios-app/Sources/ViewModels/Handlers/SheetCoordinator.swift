@@ -54,9 +54,9 @@ final class SheetCoordinator {
         present(.settings)
     }
 
-    /// Show context audit sheet
-    func showContextAudit() {
-        present(.contextAudit)
+    /// Show agent control sheet
+    func showAgentControl() {
+        present(.agentControl)
     }
 
     /// Show unified session sheet (changes + analytics + history)
@@ -133,8 +133,4 @@ final class SheetCoordinator {
         present(.commandToolDetail(data))
     }
 
-    /// Show model picker sheet
-    func showModelPicker() {
-        present(.modelPicker)
-    }
 }

@@ -19,63 +19,8 @@ final class AnimationCoordinatorTests: XCTestCase {
 
     // MARK: - Initial State Tests
 
-    func test_initialState_isDormant() {
-        XCTAssertEqual(coordinator.currentPhase, .dormant)
-        XCTAssertFalse(coordinator.supportsReasoning)
-    }
-
-    func test_initialState_noPillsVisible() {
-        XCTAssertFalse(coordinator.showContextPill)
-        XCTAssertFalse(coordinator.showModelPill)
-        XCTAssertFalse(coordinator.showReasoningPill)
-    }
-
     func test_initialState_noToolsVisible() {
         XCTAssertTrue(coordinator.visibleToolCallIds.isEmpty)
-    }
-
-    // MARK: - Pill State Tests
-
-    func test_resetPillState_setsToDormant() {
-        // Given - some pills visible
-        coordinator.setPillsVisibleImmediately(supportsReasoning: true)
-
-        // When
-        coordinator.resetPillState()
-
-        // Then
-        XCTAssertEqual(coordinator.currentPhase, .dormant)
-        XCTAssertFalse(coordinator.supportsReasoning)
-    }
-
-    func test_setPillsVisibleImmediately_withoutReasoning() {
-        // When
-        coordinator.setPillsVisibleImmediately(supportsReasoning: false)
-
-        // Then
-        XCTAssertEqual(coordinator.currentPhase, .modelPillVisible)
-        XCTAssertTrue(coordinator.showContextPill)
-        XCTAssertTrue(coordinator.showModelPill)
-        XCTAssertFalse(coordinator.showReasoningPill)
-    }
-
-    func test_setPillsVisibleImmediately_withReasoning() {
-        // When
-        coordinator.setPillsVisibleImmediately(supportsReasoning: true)
-
-        // Then
-        XCTAssertEqual(coordinator.currentPhase, .reasoningPillVisible)
-        XCTAssertTrue(coordinator.showContextPill)
-        XCTAssertTrue(coordinator.showModelPill)
-        XCTAssertTrue(coordinator.showReasoningPill)
-    }
-
-    // MARK: - Pill Phase Comparisons
-
-    func test_pillMorphPhase_ordering() {
-        XCTAssertTrue(AnimationCoordinator.PillMorphPhase.dormant < .contextPillVisible)
-        XCTAssertTrue(AnimationCoordinator.PillMorphPhase.contextPillVisible < .modelPillVisible)
-        XCTAssertTrue(AnimationCoordinator.PillMorphPhase.modelPillVisible < .reasoningPillVisible)
     }
 
     // MARK: - Tool Call Staggering Tests
@@ -220,11 +165,6 @@ final class AnimationCoordinatorTests: XCTestCase {
     // MARK: - Timing Constants
 
     func test_timingConstants_areReasonable() {
-        // Pill delays
-        XCTAssertEqual(AnimationCoordinator.Timing.contextPillDelay, 0)
-        XCTAssertGreaterThan(AnimationCoordinator.Timing.modelPillDelay, 0)
-        XCTAssertGreaterThan(AnimationCoordinator.Timing.reasoningPillDelay, 0)
-
         // Cascade
         XCTAssertGreaterThan(AnimationCoordinator.Timing.cascadeMaxMessages, 0)
         XCTAssertGreaterThan(AnimationCoordinator.Timing.cascadeSpringResponse, 0)
@@ -232,20 +172,5 @@ final class AnimationCoordinatorTests: XCTestCase {
         // Tool stagger
         XCTAssertGreaterThan(AnimationCoordinator.Timing.toolStaggerInterval, 0)
         XCTAssertGreaterThan(AnimationCoordinator.Timing.toolStaggerCap, 0)
-    }
-
-    // MARK: - Reasoning Support Updates
-
-    func test_updateReasoningSupport_toFalse_hidesReasoningPill() {
-        // Given
-        coordinator.setPillsVisibleImmediately(supportsReasoning: true)
-        XCTAssertTrue(coordinator.showReasoningPill)
-
-        // When
-        coordinator.updateReasoningSupport(false)
-
-        // Then
-        XCTAssertFalse(coordinator.supportsReasoning)
-        XCTAssertFalse(coordinator.showReasoningPill)
     }
 }

@@ -519,14 +519,6 @@ extension Animation {
 // MARK: - Animation Timing Constants
 
 enum TronAnimationTiming {
-    // MARK: - Pill Morph Sequence
-    /// Delay before context pill appears (immediate)
-    static let contextPillDelayNanos: UInt64 = 0
-    /// Delay between context and model pill (200ms)
-    static let modelPillDelayNanos: UInt64 = 200_000_000
-    /// Delay between model and reasoning pill (170ms)
-    static let reasoningPillDelayNanos: UInt64 = 170_000_000
-
     // MARK: - Message Cascade
     /// Stagger interval between messages (20ms)
     static let cascadeStaggerNanos: UInt64 = 20_000_000

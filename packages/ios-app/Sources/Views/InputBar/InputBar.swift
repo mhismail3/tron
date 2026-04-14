@@ -563,13 +563,10 @@ extension Notification.Name {
             config: InputBarConfig(
                 isRecording: false,
                 isTranscribing: false,
-                modelName: "claude-sonnet-4-5-20260105",
                 tokenUsage: TokenUsage(inputTokens: 50000, outputTokens: 10000, cacheReadTokens: nil, cacheCreationTokens: nil),
                 contextPercentage: 30,
                 contextWindow: 200_000,
                 lastTurnInputTokens: 60000,
-                cachedModels: [],
-                isLoadingModels: false,
                 currentModelInfo: nil,
                 skillStore: nil,
                 inputHistory: nil,

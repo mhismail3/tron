@@ -1,9 +1,9 @@
 import SwiftUI
 
-// MARK: - Context Audit View (Agent Control sheet)
+// MARK: - Agent Control View
 
 @available(iOS 26.0, *)
-struct ContextAuditView: View {
+struct AgentControlView: View {
     let rpcClient: RPCClient
     let sessionId: String
     var skillStore: SkillStore?

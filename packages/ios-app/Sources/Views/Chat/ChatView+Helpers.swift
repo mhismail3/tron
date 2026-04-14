@@ -4,24 +4,9 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 extension ChatView {
-    /// Current model name (optimistic if pending, else actual)
-    var displayModelName: String {
-        viewModel.modelPickerState.displayModelName(current: viewModel.currentModel)
-    }
-
-    /// Current model info (for reasoning level support detection)
+    /// Current model info (for attachment limits and reasoning support detection)
     var currentModelInfo: ModelInfo? {
         viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel)
-    }
-
-    /// Cached models from model picker state
-    var cachedModels: [ModelInfo] {
-        viewModel.modelPickerState.cachedModels
-    }
-
-    /// Whether models are being loaded
-    var isLoadingModels: Bool {
-        viewModel.modelPickerState.isLoadingModels
     }
 
     // MARK: - Model Operations
