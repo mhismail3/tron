@@ -69,15 +69,15 @@ struct SessionAnalyticsSection: View {
             categoryPill(label: "Output", tokens: breakdown.outputTokens)
 
             if breakdown.cacheReadTokens > 0 {
-                categoryPill(label: "Read", tokens: breakdown.cacheReadTokens)
+                categoryPill(label: "Cache Read", tokens: breakdown.cacheReadTokens)
             }
 
             if breakdown.hasPerTTLBreakdown {
                 if breakdown.cacheWrite5mTokens > 0 {
-                    categoryPill(label: "5m", tokens: breakdown.cacheWrite5mTokens)
+                    categoryPill(label: "Cache 5m", tokens: breakdown.cacheWrite5mTokens)
                 }
                 if breakdown.cacheWrite1hTokens > 0 {
-                    categoryPill(label: "1h", tokens: breakdown.cacheWrite1hTokens)
+                    categoryPill(label: "Cache 1h", tokens: breakdown.cacheWrite1hTokens)
                 }
             } else if breakdown.cacheWriteLegacyTokens > 0 {
                 categoryPill(label: "Write", tokens: breakdown.cacheWriteLegacyTokens)
