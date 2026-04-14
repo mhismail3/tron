@@ -10,7 +10,8 @@ private struct CollapsibleSkillsSection<RowContent: View>: View {
     let count: Int
     let tokens: Int
     var rowSpacing: CGFloat = 6
-    var compact: Bool = false
+    var compact: Bool = true
+    var interactive: Bool = false
     @ViewBuilder let rowContent: () -> RowContent
 
     @State private var isExpanded = false
@@ -58,7 +59,7 @@ private struct CollapsibleSkillsSection<RowContent: View>: View {
                 .padding(.bottom, 10)
             }
         }
-        .sectionFill(accent, compact: compact)
+        .sectionFill(accent, compact: compact, interactive: interactive)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -157,7 +158,7 @@ struct ProjectSkillRow: View {
                     .padding(.bottom, 8)
             }
         }
-        .sectionFill(.tronEmerald, cornerRadius: 6, subtle: true)
+        .sectionFill(.tronEmerald, cornerRadius: 6, subtle: true, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
@@ -221,7 +222,7 @@ struct SkillReferenceRow: View {
                     .padding(.bottom, 8)
             }
         }
-        .sectionFill(sourceColor, cornerRadius: 6, subtle: true)
+        .sectionFill(sourceColor, cornerRadius: 6, subtle: true, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         // No context menu - skill references are not removable
     }
@@ -304,7 +305,7 @@ struct AddedSkillRow: View {
                                 .textSelection(.enabled)
                         }
                         .frame(maxHeight: 300)
-                        .sectionFill(.tronCyan, cornerRadius: 6, subtle: true)
+                        .sectionFill(.tronCyan, cornerRadius: 6, subtle: true, interactive: false)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         .padding(.horizontal, 8)
                     } else {
@@ -317,7 +318,7 @@ struct AddedSkillRow: View {
                 .padding(.bottom, 8)
             }
         }
-        .sectionFill(.tronCyan, cornerRadius: 6, subtle: true)
+        .sectionFill(.tronCyan, cornerRadius: 6, subtle: true, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .contextMenu {
             if onDelete != nil {

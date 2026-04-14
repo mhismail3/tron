@@ -251,6 +251,7 @@ private struct SectionFillModifier: ViewModifier {
     let cornerRadius: CGFloat
     let subtle: Bool
     let compact: Bool
+    let interactive: Bool
     @Environment(\.colorScheme) var colorScheme
 
     private var opacity: Double {
@@ -268,12 +269,21 @@ private struct SectionFillModifier: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if #available(iOS 26.0, *), compact {
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .glassEffect(
-                    .regular.tint(color.opacity(glassOpacity)).interactive(),
-                    in: shape
-                )
+            if interactive {
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassEffect(
+                        .regular.tint(color.opacity(glassOpacity)).interactive(),
+                        in: shape
+                    )
+            } else {
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassEffect(
+                        .regular.tint(color.opacity(glassOpacity)),
+                        in: shape
+                    )
+            }
         } else {
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -288,8 +298,8 @@ extension View {
     /// Adaptive section background fill — uses higher opacity in dark mode, lower in light mode.
     /// `subtle: true` for nested/inner rows (half the standard intensity).
     /// `compact: false` forces plain fill instead of glass (for large content that causes rendering glitches).
-    func sectionFill(_ color: Color, cornerRadius: CGFloat = 12, subtle: Bool = false, compact: Bool = true) -> some View {
-        self.modifier(SectionFillModifier(color: color, cornerRadius: cornerRadius, subtle: subtle, compact: compact))
+    func sectionFill(_ color: Color, cornerRadius: CGFloat = 12, subtle: Bool = false, compact: Bool = true, interactive: Bool = true) -> some View {
+        self.modifier(SectionFillModifier(color: color, cornerRadius: cornerRadius, subtle: subtle, compact: compact, interactive: interactive))
     }
 
     /// Adaptive chip fill + stroke for capsule-shaped tool chips.

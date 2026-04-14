@@ -335,7 +335,7 @@ struct AgentControlView: View {
     // MARK: - Skill Management
 
     private func removeSkillFromContext(skillName: String) async {
-        withAnimation(.tronStandard) {
+        _ = withAnimation(.tronStandard) {
             pendingSkillDeletions.insert(skillName)
         }
 
@@ -344,13 +344,13 @@ struct AgentControlView: View {
             if result.success {
                 await reloadContextInBackground()
             } else {
-                withAnimation(.tronStandard) {
+                _ = withAnimation(.tronStandard) {
                     pendingSkillDeletions.remove(skillName)
                 }
                 errorMessage = result.error ?? "Failed to remove skill"
             }
         } catch {
-            withAnimation(.tronStandard) {
+            _ = withAnimation(.tronStandard) {
                 pendingSkillDeletions.remove(skillName)
             }
             errorMessage = "Failed to remove skill: \(error.localizedDescription)"

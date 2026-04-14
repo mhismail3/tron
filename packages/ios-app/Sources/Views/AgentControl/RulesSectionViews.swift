@@ -58,7 +58,7 @@ struct RulesSection: View {
                 .padding(10)
             }
         }
-        .sectionFill(.tronIndigo)
+        .sectionFill(.tronIndigo, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -162,7 +162,7 @@ struct RulesFileRow: View {
                                 .textSelection(.enabled)
                         }
                         .frame(maxHeight: 300)
-                        .sectionFill(.tronIndigo, cornerRadius: 6, subtle: true)
+                        .sectionFill(.tronIndigo, cornerRadius: 6, subtle: true, interactive: false)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     } else {
                         Text("Content not available")
@@ -175,7 +175,7 @@ struct RulesFileRow: View {
                 .padding(.bottom, 10)
             }
         }
-        .sectionFill(.tronIndigo, cornerRadius: 8, subtle: true)
+        .sectionFill(.tronIndigo, cornerRadius: 8, subtle: true, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         // NO context menu - rules cannot be deleted
     }

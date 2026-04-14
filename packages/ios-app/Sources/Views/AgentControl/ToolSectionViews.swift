@@ -48,7 +48,7 @@ struct ToolsSection: View {
                     .padding(.bottom, 10)
             }
         }
-        .sectionFill(.tronSlate)
+        .sectionFill(.tronSlate, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -92,7 +92,7 @@ struct ToolGridItem: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .sectionFill(.tronSlate, cornerRadius: 6, subtle: true)
+        .sectionFill(.tronSlate, cornerRadius: 6, subtle: true, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }

@@ -238,7 +238,7 @@ private struct ProviderSection: View {
             }
         }
         .clipped()
-        .sectionFill(provider.color)
+        .sectionFill(provider.color, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -318,7 +318,7 @@ private struct FamilySection: View {
             }
         }
         .clipped()
-        .sectionFill(providerColor, cornerRadius: 8, subtle: true)
+        .sectionFill(providerColor, cornerRadius: 8, subtle: true, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

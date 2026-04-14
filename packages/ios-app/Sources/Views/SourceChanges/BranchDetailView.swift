@@ -434,7 +434,7 @@ struct BranchDetailView: View {
             defer { isDeleting = false }
 
             do {
-                try await rpcClient.worktree.deleteBranch(
+                _ = try await rpcClient.worktree.deleteBranch(
                     sessionId: effectiveSessionId,
                     branch: branch.branch
                 )

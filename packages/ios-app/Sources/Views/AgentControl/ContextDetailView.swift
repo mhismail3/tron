@@ -70,7 +70,11 @@ struct ContextDetailView: View {
                         VStack(spacing: 6) {
                             if let wd = env.workingDirectory {
                                 let displayPath = wd.abbreviatingHomeDirectory
-                                HStack {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "folder.fill")
+                                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                        .foregroundStyle(.tronSlate)
+                                        .frame(width: 18)
                                     Text("Working Directory")
                                         .font(TronTypography.codeCaption)
                                         .foregroundStyle(.tronTextMuted)
@@ -86,7 +90,11 @@ struct ContextDetailView: View {
                                 .sectionFill(.tronSlate, cornerRadius: 10, subtle: true, compact: false)
                             }
                             if let origin = env.serverOrigin {
-                                HStack {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "network")
+                                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                        .foregroundStyle(.tronSlate)
+                                        .frame(width: 18)
                                     Text("Server Origin")
                                         .font(TronTypography.codeCaption)
                                         .foregroundStyle(.tronTextMuted)

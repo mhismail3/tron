@@ -47,14 +47,14 @@ struct SystemPromptSection: View {
                             .textSelection(.enabled)
                     }
                     .frame(maxHeight: 300)
-                    .sectionFill(.tronSlate, cornerRadius: 6, subtle: true)
+                    .sectionFill(.tronSlate, cornerRadius: 6, subtle: true, interactive: false)
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
             }
         }
-        .sectionFill(.tronSlate)
+        .sectionFill(.tronSlate, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
