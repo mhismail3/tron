@@ -421,11 +421,15 @@ struct DiffContentExtractionTests {
         #expect(lines?[2] == "line three")
     }
 
-    @Test("Returns nil for mixed diff (additions and deletions)")
-    func testMixedDiffReturnsNil() {
+    @Test("Extracts post-image from mixed diff (additions and deletions)")
+    func testMixedDiffExtractsPostImage() {
+        // extractFileContent reconstructs the "after" state: deletions are skipped,
+        // additions and context lines are included.
         let diff = "@@ -1,3 +1,3 @@\n-old line\n+new line\n context"
         let lines = SourceControlMetadata.extractFileContent(from: diff)
-        #expect(lines == nil)
+        #expect(lines?.count == 2)
+        #expect(lines?[0] == "new line")
+        #expect(lines?[1] == "context")
     }
 
     @Test("Returns nil for nil diff")

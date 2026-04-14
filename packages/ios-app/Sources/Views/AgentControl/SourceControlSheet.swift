@@ -8,13 +8,17 @@ import SwiftUI
 struct SourceControlSheet: View {
     let rpcClient: RPCClient
     let sessionId: String
-    var diffResult: WorktreeGetDiffResult?
-    var worktreeStatus: WorktreeGetStatusResult?
-    var branches: [SessionBranchInfo]
+    var initialDiffResult: WorktreeGetDiffResult?
+    var initialWorktreeStatus: WorktreeGetStatusResult?
+    var initialBranches: [SessionBranchInfo] = []
     var onAskAgent: ((String) -> Void)?
-    var onReload: (() async -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+
+    // Self-managed data state
+    @State private var diffResult: WorktreeGetDiffResult?
+    @State private var worktreeStatus: WorktreeGetStatusResult?
+    @State private var branches: [SessionBranchInfo] = []
 
     // Git actions
     @State private var isCommitting = false
@@ -103,7 +107,7 @@ struct SourceControlSheet: View {
                         .foregroundStyle(.tronTeal)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { Task { await onReload?() } } label: {
+                    Button { Task { await loadData() } } label: {
                         Image(systemName: "arrow.clockwise")
                             .font(TronTypography.buttonSM)
                             .foregroundStyle(.tronTeal)
@@ -123,6 +127,13 @@ struct SourceControlSheet: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            .task {
+                // Pre-populate from parent's data, then refresh in background
+                diffResult = initialDiffResult
+                worktreeStatus = initialWorktreeStatus
+                branches = initialBranches
+                await loadData()
+            }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -134,14 +145,14 @@ struct SourceControlSheet: View {
                 rpcClient: rpcClient,
                 sessionId: sessionId,
                 onAction: {
-                    Task { await onReload?() }
+                    Task { await loadData() }
                 }
             )
             .presentationDragIndicator(.hidden)
             .adaptivePresentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showAllBranches, onDismiss: {
-            Task { await onReload?() }
+            Task { await loadData() }
         }) {
             AllBranchesSheet(
                 rpcClient: rpcClient,
@@ -253,6 +264,21 @@ struct SourceControlSheet: View {
         }
     }
 
+    // MARK: - Data Loading
+
+    private func loadData() async {
+        do {
+            async let diff = rpcClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
+            async let status: WorktreeGetStatusResult? = { try? await rpcClient.worktree.getStatus(sessionId: sessionId) }()
+            async let branchList = { (try? await rpcClient.worktree.listSessionBranches(sessionId: sessionId)) ?? [] }()
+            diffResult = try await diff
+            worktreeStatus = await status
+            branches = await branchList
+        } catch {
+            errorMessage = "Failed to load changes: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Git Actions
 
     private func commitChanges() {
@@ -266,7 +292,7 @@ struct SourceControlSheet: View {
                     message: "Manual commit from iOS"
                 )
                 if result.success {
-                    await onReload?()
+                    await loadData()
                 } else if let error = result.error {
                     errorMessage = "Commit failed: \(error)"
                 }
@@ -294,7 +320,7 @@ struct SourceControlSheet: View {
                         errorMessage = error
                     }
                 }
-                await onReload?()
+                await loadData()
             } catch {
                 errorMessage = "Merge failed: \(error.localizedDescription)"
             }

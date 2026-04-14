@@ -1,34 +1,37 @@
 import SwiftUI
 
-// MARK: - Skill References Section (standalone container, frontmatter only, not removable)
+// MARK: - Collapsible Skills Section (shared base for skill section headers)
 
 @available(iOS 26.0, *)
-struct SkillReferencesSection: View {
-    let skills: [Skill]
-    /// Server-reported token count for the skill index (from breakdown.skillIndex).
+private struct CollapsibleSkillsSection<RowContent: View>: View {
+    let icon: String
+    let accent: Color
+    let title: String
+    let count: Int
     let tokens: Int
+    var rowSpacing: CGFloat = 6
+    var compact: Bool = false
+    @ViewBuilder let rowContent: () -> RowContent
+
     @State private var isExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
             HStack(spacing: 8) {
-                Image(systemName: "sparkles")
+                Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronCyan)
+                    .foregroundStyle(accent)
                     .frame(width: 18)
-                Text("Available Skills")
+                Text(title)
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronCyan)
+                    .foregroundStyle(accent)
 
-                // Count badge
-                Text("\(skills.count)")
+                Text("\(count)")
                     .font(TronTypography.pillValue)
-                    .countBadge(.tronCyan)
+                    .countBadge(accent)
 
                 Spacer()
 
-                // Token count
                 Text(TokenFormatter.format(tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
@@ -47,19 +50,39 @@ struct SkillReferencesSection: View {
                 }
             }
 
-            // Content - list of skill references (frontmatter only, lazy for performance)
             if isExpanded {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(skills) { skill in
-                        SkillReferenceRow(skill: skill)
-                    }
+                LazyVStack(alignment: .leading, spacing: rowSpacing) {
+                    rowContent()
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
             }
         }
-        .sectionFill(.tronCyan)
+        .sectionFill(accent, compact: compact)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Skill References Section (standalone container, frontmatter only, not removable)
+
+@available(iOS 26.0, *)
+struct SkillReferencesSection: View {
+    let skills: [Skill]
+    /// Server-reported token count for the skill index (from breakdown.skillIndex).
+    let tokens: Int
+
+    var body: some View {
+        CollapsibleSkillsSection(
+            icon: "sparkles",
+            accent: .tronCyan,
+            title: "Available Skills",
+            count: skills.count,
+            tokens: tokens
+        ) {
+            ForEach(skills) { skill in
+                SkillReferenceRow(skill: skill)
+            }
+        }
     }
 }
 
@@ -70,56 +93,19 @@ struct ProjectSkillsSection: View {
     let skills: [Skill]
     /// Server-reported token count for project skills.
     let tokens: Int
-    @State private var isExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(spacing: 8) {
-                Image(systemName: "folder.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
-                    .frame(width: 18)
-                Text("Available Skills")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronEmerald)
-
-                Text("\(skills.count)")
-                    .font(TronTypography.pillValue)
-                    .countBadge(.tronEmerald)
-
-                Spacer()
-
-                Text(TokenFormatter.format(tokens))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-
-                Image(systemName: "chevron.down")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.tronTextMuted)
-                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
-            }
-            .padding(12)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .onTapGesture {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    isExpanded.toggle()
-                }
-            }
-
-            if isExpanded {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(skills) { skill in
-                        ProjectSkillRow(skill: skill)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
+        CollapsibleSkillsSection(
+            icon: "folder.fill",
+            accent: .tronEmerald,
+            title: "Available Skills",
+            count: skills.count,
+            tokens: tokens
+        ) {
+            ForEach(skills) { skill in
+                ProjectSkillRow(skill: skill)
             }
         }
-        .sectionFill(.tronEmerald)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -363,58 +349,23 @@ struct AddedSkillsContainer: View {
     var onDelete: ((String) -> Void)?
     var onFetchContent: ((String) async -> String?)?
 
-    @State private var isExpanded = false
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronCyan)
-                    .frame(width: 18)
-                Text("Added Skills")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronCyan)
-
-                Text("\(skills.count)")
-                    .font(TronTypography.pillValue)
-                    .countBadge(.tronCyan)
-
-                Spacer()
-
-                Text(TokenFormatter.format(tokens))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-
-                Image(systemName: "chevron.down")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.tronTextMuted)
-                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
-            }
-            .padding(12)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .onTapGesture {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    isExpanded.toggle()
-                }
-            }
-
-            if isExpanded {
-                LazyVStack(spacing: 4) {
-                    ForEach(skills) { skill in
-                        AddedSkillRow(
-                            skill: skill,
-                            onDelete: { onDelete?(skill.name) },
-                            onFetchContent: onFetchContent
-                        )
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
+        CollapsibleSkillsSection(
+            icon: "sparkles",
+            accent: .tronCyan,
+            title: "Added Skills",
+            count: skills.count,
+            tokens: tokens,
+            rowSpacing: 4,
+            compact: skills.count < 20
+        ) {
+            ForEach(skills) { skill in
+                AddedSkillRow(
+                    skill: skill,
+                    onDelete: { onDelete?(skill.name) },
+                    onFetchContent: onFetchContent
+                )
             }
         }
-        .sectionFill(.tronCyan, compact: skills.count < 20)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

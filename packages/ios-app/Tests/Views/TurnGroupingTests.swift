@@ -559,7 +559,7 @@ struct TurnGroupingTests {
         ]
         let analytics = ConsolidatedAnalytics(from: allEvents)
 
-        // Filter out stream events (as SessionSheet does)
+        // Filter out stream events (as AgentControlView does)
         let filteredEvents = allEvents.filter { event in
             let type = SessionEventType(rawValue: event.type)
             return type != .streamTurnEnd && type != .streamTurnStart

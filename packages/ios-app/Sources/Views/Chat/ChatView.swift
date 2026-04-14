@@ -126,8 +126,6 @@ struct ChatView: View {
             guard let raw = notification.object as? String,
                   let action = ChatMenuAction(rawValue: raw) else { return }
             switch action {
-            case .session: sheetCoordinator.showAgentControl()
-            case .context: sheetCoordinator.showAgentControl()
             case .settings: sheetCoordinator.showSettings()
             case .processes: viewModel.showProcessSheet = true
             }
@@ -824,8 +822,8 @@ struct ChatView: View {
 // Menu button actions that mutate @State break gesture handling in iOS 26
 // Workaround: Post notification, handle via onReceive
 
-enum ChatMenuAction: String, CaseIterable {
-    case session, context, settings, processes
+enum ChatMenuAction: String {
+    case settings, processes
 }
 
 extension Notification.Name {

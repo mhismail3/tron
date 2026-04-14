@@ -104,8 +104,7 @@ struct ContextDetailView: View {
 
                     SystemPromptSection(
                         tokens: snapshot.breakdown.systemPrompt,
-                        content: snapshot.systemPromptContent,
-                        environment: nil // environment shown separately above
+                        content: snapshot.systemPromptContent
                     )
 
                     ToolsSection(
@@ -395,6 +394,7 @@ struct ContextDetailView: View {
         isCompacting = true
         do {
             _ = try await rpcClient.context.compact(sessionId: sessionId)
+            isCompacting = false
             dismiss()
         } catch {
             errorMessage = "Failed to compact context: \(error.localizedDescription)"

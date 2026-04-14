@@ -228,7 +228,7 @@ struct HistorySheet: View {
                                 HStack(spacing: 3) {
                                     Image(systemName: "clock")
                                         .font(TronTypography.sans(size: TronTypography.sizeXS))
-                                    Text(formatLatency(data.latency))
+                                    Text(DurationFormatter.format(data.latency, style: .compact))
                                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 }
                                 .foregroundStyle(muted ? .tronTextMuted : .tronSlate)
@@ -267,7 +267,7 @@ struct HistorySheet: View {
 
     @ViewBuilder
     private func eventsContent(for turn: TurnGroup) -> some View {
-        let (mainItems, postTurnItems) = processEvents(for: turn)
+        let (mainItems, postTurnItems) = processEventsForTurn(turn)
 
         VStack(alignment: .leading, spacing: 2) {
             Divider()
@@ -385,59 +385,6 @@ struct HistorySheet: View {
         .padding(.horizontal, 10)
     }
 
-    // MARK: - Event Processing
-
-    private func processEvents(for turn: TurnGroup) -> (main: [ProcessedEventItem], postTurn: [ProcessedEventItem]) {
-        let events = turn.events
-        let lastAssistantIndex = events.lastIndex(where: { $0.eventType == .messageAssistant })
-
-        let lastMainIndex: Int
-        if let lai = lastAssistantIndex {
-            let afterAssistant = events[lai...]
-            if let lastToolResult = afterAssistant.lastIndex(where: { $0.eventType == .toolResult }) {
-                lastMainIndex = lastToolResult
-            } else {
-                lastMainIndex = lai
-            }
-        } else {
-            lastMainIndex = events.count - 1
-        }
-
-        let mainEvents = lastMainIndex < events.count ? Array(events[...lastMainIndex]) : events
-        let postTurnEvents = lastMainIndex + 1 < events.count ? Array(events[(lastMainIndex + 1)...]) : []
-
-        let postTurnTypes: Set<SessionEventType> = [
-            .configModelSwitch, .configPromptUpdate, .configReasoningLevel,
-            .llmHookResult, .worktreeAcquired, .worktreeCommit, .worktreeReleased,
-            .worktreeMerged, .worktreeRenamed, .skillActivated, .skillDeactivated,
-            .memoryRetained, .rulesLoaded, .rulesActivated
-        ]
-
-        let filteredPostTurn = postTurnEvents.filter { postTurnTypes.contains($0.eventType) }
-
-        var mainItems: [ProcessedEventItem] = []
-        var resultByCallId: [String: SessionEvent] = [:]
-        for event in mainEvents where event.eventType == .toolResult {
-            if let callId = event.payload.string("toolCallId") {
-                resultByCallId[callId] = event
-            }
-        }
-
-        for event in mainEvents {
-            if event.eventType == .toolResult { continue }
-            if event.eventType == .toolCall {
-                let callId = event.payload.string("toolCallId") ?? event.id
-                let result = resultByCallId[callId]
-                mainItems.append(ProcessedEventItem(kind: .mergedTool(call: event, result: result)))
-            } else {
-                mainItems.append(ProcessedEventItem(kind: .single(event)))
-            }
-        }
-
-        let postTurnItems = filteredPostTurn.map { ProcessedEventItem(kind: .single($0)) }
-        return (mainItems, postTurnItems)
-    }
-
     // MARK: - Fork
 
     private func forkButtonState(for event: SessionEvent, turn: TurnGroup) -> ForkButtonState {
@@ -482,10 +429,4 @@ struct HistorySheet: View {
         .padding(.vertical, 20)
     }
 
-    // MARK: - Helpers
-
-    private func formatLatency(_ ms: Int) -> String {
-        if ms < 1000 { return "\(ms)ms" }
-        return String(format: "%.1fs", Double(ms) / 1000.0)
-    }
 }

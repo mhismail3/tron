@@ -101,7 +101,7 @@ struct SessionAnalyticsSection: View {
     private var statsRow: some View {
         HStack(spacing: 0) {
             statItem(value: "\(analytics.totalTurns)", label: "turns")
-            statItem(value: formatLatency(analytics.avgLatency), label: "latency")
+            statItem(value: analytics.avgLatency == 0 ? "-" : DurationFormatter.format(analytics.avgLatency, style: .compact), label: "latency")
             statItem(value: "\(analytics.totalToolCalls)", label: "tools")
             statItem(
                 value: "\(analytics.totalErrors)",
@@ -135,9 +135,4 @@ struct SessionAnalyticsSection: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func formatLatency(_ ms: Int) -> String {
-        if ms == 0 { return "-" }
-        if ms < 1000 { return "\(ms)ms" }
-        return String(format: "%.1fs", Double(ms) / 1000.0)
-    }
 }

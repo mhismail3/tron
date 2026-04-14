@@ -44,8 +44,8 @@ struct AgentControlView: View {
     @State private var worktreeStatus: WorktreeGetStatusResult?
     @State private var branches: [SessionBranchInfo] = []
     @State private var sessionEvents: [SessionEvent] = []
-
-    // (sub-sheets managed via showSourceControl / showAnalytics / showHistory)
+    @State private var cachedAnalytics = ConsolidatedAnalytics(from: [])
+    @State private var cachedTurnGroups: [TurnGroup] = []
 
     // MARK: - Session Computed Properties
 
@@ -69,38 +69,14 @@ struct AgentControlView: View {
         (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.deletions }
     }
 
-    private var analytics: ConsolidatedAnalytics {
-        ConsolidatedAnalytics(from: sessionEvents)
-    }
-
     private var hasEvents: Bool {
         !sessionEvents.isEmpty
     }
 
-    private var filteredEvents: [SessionEvent] {
-        sessionEvents.filter { event in
-            switch event.eventType {
-            case .streamTurnStart, .streamTurnEnd, .streamTextDelta,
-                 .streamThinkingDelta, .streamThinkingComplete, .compactBoundary:
-                return false
-            default:
-                return true
-            }
-        }
-    }
-
     private var analyticsTotalTokens: Int {
-        let bd = analytics.costBreakdown
+        let bd = cachedAnalytics.costBreakdown
         return bd.baseInputTokens + bd.outputTokens + bd.cacheReadTokens
             + bd.cacheWrite5mTokens + bd.cacheWrite1hTokens + bd.cacheWriteLegacyTokens
-    }
-
-    private var turnGroups: [TurnGroup] {
-        TurnGrouping.group(
-            events: filteredEvents,
-            analytics: analytics,
-            currentSessionId: sessionId
-        )
     }
 
     // MARK: - Body
@@ -164,17 +140,13 @@ struct AgentControlView: View {
                 SourceControlSheet(
                     rpcClient: rpcClient,
                     sessionId: sessionId,
-                    diffResult: diffResult,
-                    worktreeStatus: worktreeStatus,
-                    branches: branches,
+                    initialDiffResult: diffResult,
+                    initialWorktreeStatus: worktreeStatus,
+                    initialBranches: branches,
                     onAskAgent: { message in
                         showSourceControl = false
                         dismiss()
                         onAskAgent?(message)
-                    },
-                    onReload: {
-                        await loadChanges()
-                        await loadBranches()
                     }
                 )
             }
@@ -198,13 +170,13 @@ struct AgentControlView: View {
         .tint(.tronEmerald)
         .sheet(isPresented: $showAnalytics) {
             AnalyticsSheet(
-                analytics: analytics,
-                turnGroups: turnGroups
+                analytics: cachedAnalytics,
+                turnGroups: cachedTurnGroups
             )
         }
         .sheet(isPresented: $showHistory) {
             HistorySheet(
-                turnGroups: turnGroups,
+                turnGroups: cachedTurnGroups,
                 sessionId: sessionId,
                 eventStoreManager: eventStoreManager,
                 onDismissParent: { dismiss() }
@@ -259,8 +231,8 @@ struct AgentControlView: View {
                     if hasEvents {
                         AnalyticsCardView(
                             totalTokens: analyticsTotalTokens,
-                            totalCost: analytics.costBreakdown.totalCost,
-                            totalTurns: analytics.turns.count,
+                            totalCost: cachedAnalytics.totalCost,
+                            totalTurns: cachedAnalytics.turns.count,
                             onTap: { showAnalytics = true }
                         )
                         .padding(.horizontal)
@@ -268,8 +240,8 @@ struct AgentControlView: View {
 
                     // History card
                     HistoryCardView(
-                        totalTurns: turnGroups.count,
-                        totalToolCalls: analytics.totalToolCalls,
+                        totalTurns: cachedTurnGroups.count,
+                        totalToolCalls: cachedAnalytics.totalToolCalls,
                         onTap: { showHistory = true }
                     )
                     .padding(.horizontal)
@@ -331,7 +303,26 @@ struct AgentControlView: View {
     private func loadEvents() async {
         do {
             try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
-            sessionEvents = try await eventStoreManager.getSessionEvents(sessionId)
+            let events = try await eventStoreManager.getSessionEvents(sessionId)
+            sessionEvents = events
+
+            let analytics = ConsolidatedAnalytics(from: events)
+            cachedAnalytics = analytics
+
+            let filtered = events.filter { event in
+                switch event.eventType {
+                case .streamTurnStart, .streamTurnEnd, .streamTextDelta,
+                     .streamThinkingDelta, .streamThinkingComplete, .compactBoundary:
+                    return false
+                default:
+                    return true
+                }
+            }
+            cachedTurnGroups = TurnGrouping.group(
+                events: filtered,
+                analytics: analytics,
+                currentSessionId: sessionId
+            )
         } catch {
             // Non-critical: analytics and history gracefully degrade to empty
         }

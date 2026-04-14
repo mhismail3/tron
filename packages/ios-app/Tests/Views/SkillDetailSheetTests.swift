@@ -17,17 +17,17 @@ struct SkillDetailSheetCompactTests {
         #expect(isCompactContent(content) == true)
     }
 
-    @Test func exactly99Newlines() {
-        // 100 lines of text separated by 99 newlines — last compact value
-        let content = Array(repeating: "x", count: 100).joined(separator: "\n")
-        #expect(content.filter { $0 == "\n" }.count == 99)
+    @Test func exactly59Newlines() {
+        // 60 lines of text separated by 59 newlines — last compact value
+        let content = Array(repeating: "x", count: 60).joined(separator: "\n")
+        #expect(content.filter { $0 == "\n" }.count == 59)
         #expect(isCompactContent(content) == true)
     }
 
-    @Test func exactly100Newlines() {
-        // 101 lines of text separated by 100 newlines — first non-compact value
-        let content = Array(repeating: "x", count: 101).joined(separator: "\n")
-        #expect(content.filter { $0 == "\n" }.count == 100)
+    @Test func exactly60Newlines() {
+        // 61 lines of text separated by 60 newlines — first non-compact value
+        let content = Array(repeating: "x", count: 61).joined(separator: "\n")
+        #expect(content.filter { $0 == "\n" }.count == 60)
         #expect(isCompactContent(content) == false)
     }
 

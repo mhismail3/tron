@@ -6,7 +6,6 @@ import SwiftUI
 struct SystemPromptSection: View {
     let tokens: Int
     let content: String
-    var environment: EnvironmentInfo?
     @State private var isExpanded = false
 
     var body: some View {
@@ -41,17 +40,6 @@ struct SystemPromptSection: View {
             // Content
             if isExpanded {
                 VStack(alignment: .leading, spacing: 6) {
-                    // Environment sub-containers
-                    if let env = environment {
-                        if let wd = env.workingDirectory {
-                            EnvironmentItemRow(icon: "folder", label: "Working Directory", value: wd)
-                        }
-                        if let origin = env.serverOrigin {
-                            EnvironmentItemRow(icon: "server.rack", label: "Server Origin", value: origin)
-                        }
-                    }
-
-                    // Full prompt content
                     ScrollView {
                         ContextMarkdownContent(content: content)
                             .frame(maxWidth: .infinity, alignment: .leading)

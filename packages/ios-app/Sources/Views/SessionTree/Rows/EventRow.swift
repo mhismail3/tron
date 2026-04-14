@@ -10,7 +10,7 @@ enum ForkButtonState: Equatable {
 
 /// Derives the fork button state for an event in a turn detail context.
 ///
-/// Extracted as a free function for testability. Used by `TurnDetailSheet`
+/// Extracted as a free function for testability. Used by `HistorySheet`
 /// to determine whether each event row should show a fork button.
 func deriveForkButtonState(
     event: SessionEvent,
@@ -29,7 +29,7 @@ func deriveForkButtonState(
 /// Tapping the "Fork" pill expands it in-place into a confirmation strip
 /// with "Fork Session" and "Cancel" capsules, then collapses back on
 /// cancel or after the fork completes. Used by both `EventRow` and
-/// `TurnDetailSheet.mergedToolRow`.
+/// `HistorySheet.mergedToolRow`.
 @available(iOS 26.0, *)
 struct ForkButton: View {
     let isForking: Bool

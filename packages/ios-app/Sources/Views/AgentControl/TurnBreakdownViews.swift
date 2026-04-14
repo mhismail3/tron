@@ -1,92 +1,11 @@
 import SwiftUI
 
-// MARK: - Turn Breakdown Container
-
-@available(iOS 26.0, *)
-struct TurnBreakdownContainer: View {
-    let turns: [ConsolidatedAnalytics.TurnData]
-    @State private var isExpanded = false
-
-    private var totalTokens: Int {
-        turns.reduce(0) { $0 + $1.totalTokens }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack {
-                Image(systemName: "list.number")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronAmberLight)
-
-                Text("Turn Breakdown")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronAmberLight)
-
-                // Count badge
-                Text("\(turns.count)")
-                    .font(TronTypography.pillValue)
-                    .countBadge(.tronAmberLight)
-
-                Spacer()
-
-                Text(TokenFormatter.format(totalTokens))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-
-                Image(systemName: "chevron.down")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.tronTextMuted)
-                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
-            }
-            .padding(12)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .onTapGesture {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    isExpanded.toggle()
-                }
-            }
-
-            // Content
-            if isExpanded {
-                if turns.isEmpty {
-                    Text("No turns recorded")
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextMuted)
-                        .frame(maxWidth: .infinity)
-                        .padding(12)
-                } else {
-                    LazyVStack(spacing: 4) {
-                        ForEach(turns) { turn in
-                            TurnRow(turn: turn)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
-                }
-            }
-        }
-        .sectionFill(.tronAmberLight, compact: turns.count < 20)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
 // MARK: - Turn Row (Expandable)
 
 @available(iOS 26.0, *)
 struct TurnRow: View {
     let turn: ConsolidatedAnalytics.TurnData
     @State private var isExpanded = false
-
-    private func formatLatency(_ ms: Int) -> String {
-        if ms == 0 { return "-" }
-        if ms < 1000 {
-            return "\(ms)ms"
-        } else {
-            return String(format: "%.1fs", Double(ms) / 1000.0)
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -115,7 +34,7 @@ struct TurnRow: View {
 
                         // Latency
                         if turn.latency > 0 {
-                            Text(formatLatency(turn.latency))
+                            Text(DurationFormatter.format(turn.latency, style: .compact))
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronTextMuted)
                         }
@@ -311,47 +230,3 @@ private struct TurnCostBreakdownRow: View {
     }
 }
 
-// MARK: - Flow Layout (for tool tags)
-
-@available(iOS 26.0, *)
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 4
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
-        return result.size
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
-        for (index, position) in result.positions.enumerated() {
-            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
-        }
-    }
-
-    private func arrangeSubviews(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
-        let maxWidth = proposal.width ?? .infinity
-        var positions: [CGPoint] = []
-        var currentX: CGFloat = 0
-        var currentY: CGFloat = 0
-        var lineHeight: CGFloat = 0
-        var totalHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-
-            if currentX + size.width > maxWidth && currentX > 0 {
-                currentX = 0
-                currentY += lineHeight + spacing
-                lineHeight = 0
-            }
-
-            positions.append(CGPoint(x: currentX, y: currentY))
-            currentX += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-            totalHeight = currentY + lineHeight
-        }
-
-        return (CGSize(width: maxWidth, height: totalHeight), positions)
-    }
-}

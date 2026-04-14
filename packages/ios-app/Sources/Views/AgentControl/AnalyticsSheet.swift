@@ -150,7 +150,7 @@ struct AnalyticsSheet: View {
             // Stats row
             HStack(spacing: 0) {
                 if turnData.latency > 0 {
-                    statItem(value: formatLatency(turnData.latency), label: "latency")
+                    statItem(value: DurationFormatter.format(turnData.latency, style: .compact), label: "latency")
                 }
                 if let model = turnData.model {
                     statItem(value: model, label: "model")
@@ -213,8 +213,4 @@ struct AnalyticsSheet: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func formatLatency(_ ms: Int) -> String {
-        if ms < 1000 { return "\(ms)ms" }
-        return String(format: "%.1fs", Double(ms) / 1000.0)
-    }
 }
