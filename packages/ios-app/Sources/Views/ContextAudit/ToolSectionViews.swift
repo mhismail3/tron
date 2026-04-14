@@ -43,13 +43,9 @@ struct ToolsSection: View {
             }
 
             if isExpanded {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(toolsContent) { tool in
-                        ToolItemRow(tool: tool)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
+                ToolGrid(tools: toolsContent)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
             }
         }
         .sectionFill(.tronSlate)
@@ -57,55 +53,45 @@ struct ToolsSection: View {
     }
 }
 
-// MARK: - Tool Item Row
+// MARK: - Tool Grid (3-column compact layout)
 
 @available(iOS 26.0, *)
-struct ToolItemRow: View {
-    let tool: ToolSummaryInfo
-    @State private var isExpanded = false
+struct ToolGrid: View {
+    let tools: [ToolSummaryInfo]
 
-    private var hasDescription: Bool {
-        !tool.description.isEmpty
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 6) {
+            ForEach(tools) { tool in
+                ToolGridItem(tool: tool)
+            }
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+struct ToolGridItem: View {
+    let tool: ToolSummaryInfo
+
+    private var descriptor: ToolDescriptor {
+        ToolRegistry.descriptor(for: tool.name)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "wrench.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronSlate)
-
-                Text(tool.name)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronSlate)
-
-                Spacer()
-
-                if hasDescription {
-                    Image(systemName: "chevron.down")
-                        .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                        .foregroundStyle(.tronTextDisabled)
-                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
-                }
-            }
-            .padding(8)
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .onTapGesture {
-                guard hasDescription else { return }
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    isExpanded.toggle()
-                }
-            }
-
-            if isExpanded {
-                Text(tool.description)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 8)
-            }
+        HStack(spacing: 5) {
+            Image(systemName: descriptor.icon)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(descriptor.iconColor)
+                .frame(width: 14)
+            Text(tool.name)
+                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+                .lineLimit(1)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .sectionFill(.tronSlate, cornerRadius: 6, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }

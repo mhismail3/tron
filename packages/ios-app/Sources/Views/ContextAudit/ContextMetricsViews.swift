@@ -94,24 +94,6 @@ struct ContextUsageGaugeView: View {
     }
 }
 
-// MARK: - Token Breakdown Header
-
-@available(iOS 26.0, *)
-struct TokenBreakdownHeader: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Context Items")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-            Text("Items loaded into the context window")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextDisabled)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 8)
-    }
-}
-
 // MARK: - Markdown Content View (caption-sized block-level markdown for context audit)
 
 @available(iOS 26.0, *)
