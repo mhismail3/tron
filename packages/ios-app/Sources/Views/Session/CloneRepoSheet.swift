@@ -43,11 +43,7 @@ struct CloneRepoSheet: View {
 
     /// Display-friendly destination path (truncates home dir)
     private var displayDestinationPath: String {
-        fullDestinationPath.replacingOccurrences(
-            of: "^/Users/[^/]+/",
-            with: "~/",
-            options: .regularExpression
-        )
+        fullDestinationPath.abbreviatingHomeDirectory
     }
 
     var body: some View {

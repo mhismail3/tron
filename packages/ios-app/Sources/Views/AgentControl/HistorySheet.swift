@@ -49,13 +49,13 @@ struct HistorySheet: View {
                 ToolbarItem(placement: .principal) {
                     Text("History")
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronAmberLight)
+                        .foregroundStyle(.tronCoral)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronAmberLight)
+                            .foregroundStyle(.tronCoral)
                     }
                 }
             }
@@ -70,7 +70,7 @@ struct HistorySheet: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronAmberLight)
+        .tint(.tronCoral)
     }
 
     // MARK: - Linear Content
@@ -180,9 +180,9 @@ struct HistorySheet: View {
                         // Turn number badge
                         Text("\(turn.turnNumber)")
                             .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .bold))
-                            .foregroundStyle(muted ? .tronTextMuted : .tronAmberLight)
+                            .foregroundStyle(muted ? .tronTextMuted : .tronCoral)
                             .frame(width: 24, height: 24)
-                            .background((muted ? Color.tronTextMuted : Color.tronAmberLight).opacity(0.2))
+                            .background((muted ? Color.tronTextMuted : Color.tronCoral).opacity(0.2))
                             .clipShape(Circle())
 
                         // Role icon
@@ -224,20 +224,6 @@ struct HistorySheet: View {
                                 .foregroundStyle(muted ? .tronTextMuted : .tronCyan)
                             }
 
-                            HStack(spacing: 3) {
-                                Image(systemName: "text.word.spacing")
-                                    .font(TronTypography.sans(size: TronTypography.sizeXS))
-                                Text(TokenFormatter.format(data.totalTokens))
-                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            }
-                            .foregroundStyle(muted ? .tronTextMuted : .tronAmberLight)
-
-                            if data.cost > 0 {
-                                Text(formatCost(data.cost))
-                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(muted ? .tronTextMuted : .tronAmberLight)
-                            }
-
                             if data.latency > 0 {
                                 HStack(spacing: 3) {
                                     Image(systemName: "clock")
@@ -261,6 +247,7 @@ struct HistorySheet: View {
                         .padding(.leading, 32)
                     }
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .padding(10)
@@ -273,7 +260,7 @@ struct HistorySheet: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
         }
-        .sectionFill(muted ? .tronSlate : .tronAmberLight, cornerRadius: 10, subtle: true, compact: false)
+        .sectionFill(muted ? .tronSlate : .tronCoral, cornerRadius: 10, subtle: true, compact: false)
     }
 
     // MARK: - Events Content

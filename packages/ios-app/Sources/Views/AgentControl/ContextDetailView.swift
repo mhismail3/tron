@@ -60,7 +60,7 @@ struct ContextDetailView: View {
     var body: some View {
         NavigationStack {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 16) {
+            VStack(spacing: 8) {
                 // System Instructions
                 sectionHeader("System Instructions", icon: "doc.text")
 
@@ -69,17 +69,21 @@ struct ContextDetailView: View {
                     if let env = snapshot.environment {
                         VStack(spacing: 6) {
                             if let wd = env.workingDirectory {
+                                let displayPath = wd.abbreviatingHomeDirectory
                                 HStack {
                                     Text("Working Directory")
                                         .font(TronTypography.codeCaption)
                                         .foregroundStyle(.tronTextMuted)
                                     Spacer()
-                                    Text(wd)
+                                    Text(displayPath)
                                         .font(TronTypography.codeCaption)
                                         .foregroundStyle(.tronTextSecondary)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                 }
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+                                .sectionFill(.tronSlate, cornerRadius: 10, subtle: true, compact: false)
                             }
                             if let origin = env.serverOrigin {
                                 HStack {
@@ -91,9 +95,11 @@ struct ContextDetailView: View {
                                         .font(TronTypography.codeCaption)
                                         .foregroundStyle(.tronTextSecondary)
                                 }
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+                                .sectionFill(.tronSlate, cornerRadius: 10, subtle: true, compact: false)
                             }
                         }
-                        .padding(.horizontal, 4)
                     }
 
                     SystemPromptSection(
@@ -112,6 +118,7 @@ struct ContextDetailView: View {
                 // Global Context
                 if hasGlobalContent {
                     sectionHeader("Global Context", icon: "globe")
+                        .padding(.top, 12)
 
                     VStack(spacing: 10) {
                         if let globalRules {
@@ -136,6 +143,7 @@ struct ContextDetailView: View {
                 // Project Context
                 if hasProjectContent {
                     sectionHeader("Project Context", icon: "folder.fill")
+                        .padding(.top, 12)
 
                     VStack(spacing: 10) {
                         if let projectRules {
@@ -160,6 +168,7 @@ struct ContextDetailView: View {
                 // Session Context
                 if hasSessionContent {
                     sectionHeader("Session Context", icon: "clock")
+                        .padding(.top, 12)
 
                     VStack(spacing: 10) {
                         if !displayedAddedSkills.isEmpty {
@@ -188,7 +197,7 @@ struct ContextDetailView: View {
             ToolbarItem(placement: .principal) {
                 Text("Context")
                     .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronCyan)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 retainButton
@@ -205,7 +214,7 @@ struct ContextDetailView: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronEmerald)
+        .tint(.tronCyan)
     }
 
     // MARK: - Section Headers
@@ -214,14 +223,13 @@ struct ContextDetailView: View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+                .foregroundStyle(.tronCyan)
             Text(title)
                 .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+                .foregroundStyle(.tronCyan)
             Spacer()
         }
         .padding(.horizontal)
-        .padding(.top, 4)
     }
 
     // MARK: - Content Checks

@@ -19,11 +19,6 @@ struct SessionAnalyticsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Section header
-            Text("Analytics")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-
             // Unified card
             VStack(spacing: 12) {
                 totalsHeader
@@ -31,7 +26,7 @@ struct SessionAnalyticsSection: View {
                 statsRow
             }
             .padding(14)
-            .sectionFill(.tronAmber)
+            .sectionFill(.tronRose)
         }
     }
 
@@ -42,7 +37,7 @@ struct SessionAnalyticsSection: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(TokenFormatter.format(totalTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronRose)
                 Text("tokens")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
@@ -51,7 +46,7 @@ struct SessionAnalyticsSection: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(formatCost(analytics.totalCost))
                     .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                    .foregroundStyle(.tronAmberLight)
+                    .foregroundStyle(.tronRose)
                 Text("total cost")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
@@ -93,12 +88,12 @@ struct SessionAnalyticsSection: View {
 
             Text(TokenFormatter.format(tokens))
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronAmberLight)
+                .foregroundStyle(.tronRose)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .sectionFill(.tronAmberLight, cornerRadius: 8, subtle: true)
+        .sectionFill(.tronRose, cornerRadius: 8, subtle: true, compact: false)
     }
 
     // MARK: - Stats Row
@@ -132,7 +127,7 @@ struct SessionAnalyticsSection: View {
         VStack(spacing: 2) {
             Text(value)
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(color ?? .tronAmberLight.opacity(0.8))
+                .foregroundStyle(color ?? .tronRose.opacity(0.8))
             Text(label)
                 .font(TronTypography.pill)
                 .foregroundStyle(.tronTextMuted)

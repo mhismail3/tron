@@ -39,7 +39,7 @@ struct ContextUsageGaugeView: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(usageColor)
 
-                Text("Context Window")
+                Text("Context")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(usageColor)
                     .layoutPriority(1)
@@ -64,21 +64,13 @@ struct ContextUsageGaugeView: View {
                     .layoutPriority(1)
             }
 
-            // Row 2: token summary + tap hint
+            // Row 2: token summary
             HStack {
+                Spacer()
                 Text("\(TokenFormatter.format(contextLimit - currentTokens)) left (\(formattedTokens) / \(formattedLimit))")
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
-
-                Spacer()
-
-                if onTap != nil {
-                    Text("Tap to view details")
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextDisabled)
-                }
             }
-            .padding(.leading, 24)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -112,17 +104,17 @@ struct ModelControlView: View {
             HStack(spacing: 8) {
                 Image(systemName: "cpu")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronPurple)
 
                 Text("Model")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronPurple)
 
                 Spacer()
 
                 Text(displayName)
                     .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronPurple)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             }
@@ -142,7 +134,7 @@ struct ModelControlView: View {
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .glassEffect(.regular.tint(Color.tronPurple.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {
@@ -169,18 +161,22 @@ struct SourceControlCardView: View {
             HStack(spacing: 8) {
                 Image(systemName: "arrow.triangle.branch")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronTeal)
 
                 Text("Source Control")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronTeal)
 
                 Spacer()
 
-                if let name = branchName {
+                if isGitRepo == false {
+                    Text("Not a git repo")
+                        .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                        .foregroundStyle(.tronTeal)
+                } else if let name = branchName {
                     Text(name)
                         .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronTeal)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
                 }
@@ -195,9 +191,7 @@ struct SourceControlCardView: View {
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                 } else if isGitRepo == false {
-                    Text("Not a git repository")
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextMuted)
+                    EmptyView()
                 } else if totalFiles > 0 {
                     HStack(spacing: 6) {
                         Text("\(totalFiles) \(totalFiles == 1 ? "file" : "files")")
@@ -224,7 +218,7 @@ struct SourceControlCardView: View {
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .glassEffect(.regular.tint(Color.tronTeal.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {
@@ -244,48 +238,46 @@ struct AnalyticsCardView: View {
 
     var body: some View {
         VStack(spacing: 2) {
-            // Row 1: icon + title
+            // Row 1: icon + title + values
             HStack(spacing: 8) {
                 Image(systemName: "chart.bar.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronRose)
 
                 Text("Analytics")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronRose)
 
                 Spacer()
 
-                // Tokens + cost side by side
-                HStack(spacing: 12) {
-                    VStack(spacing: 1) {
-                        Text(TokenFormatter.format(totalTokens))
-                            .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                            .foregroundStyle(.tronAmber)
-                        Text("tokens")
-                            .font(TronTypography.codeCaption)
-                            .foregroundStyle(.tronTextMuted)
-                    }
-                    VStack(spacing: 1) {
-                        Text(formatCost(totalCost))
-                            .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                            .foregroundStyle(.tronAmberLight)
-                        Text("total cost")
-                            .font(TronTypography.codeCaption)
-                            .foregroundStyle(.tronTextMuted)
-                    }
-                }
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-            }
+                Text(TokenFormatter.format(totalTokens))
+                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .foregroundStyle(.tronRose)
 
+                Text(formatCost(totalCost))
+                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .foregroundStyle(.tronRose)
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+
+            // Row 2: labels
+            HStack(spacing: 8) {
+                Spacer()
+                Text("tokens")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextMuted)
+                Text("total cost")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextMuted)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .glassEffect(.regular.tint(Color.tronRose.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {
@@ -299,6 +291,7 @@ struct AnalyticsCardView: View {
 @available(iOS 26.0, *)
 struct HistoryCardView: View {
     var totalTurns: Int
+    var totalToolCalls: Int
     var onTap: (() -> Void)?
 
     var body: some View {
@@ -307,17 +300,25 @@ struct HistoryCardView: View {
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronAmberLight)
+                    .foregroundStyle(.tronCoral)
 
                 Text("History")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronAmberLight)
+                    .foregroundStyle(.tronCoral)
 
                 Spacer()
 
                 Text("\(totalTurns) \(totalTurns == 1 ? "turn" : "turns")")
                     .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                    .foregroundStyle(.tronAmberLight)
+                    .foregroundStyle(.tronCoral)
+            }
+
+            // Row 2: tool calls
+            HStack {
+                Spacer()
+                Text("\(totalToolCalls) tool \(totalToolCalls == 1 ? "call" : "calls")")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextMuted)
             }
         }
         .padding(.horizontal, 12)
@@ -325,7 +326,7 @@ struct HistoryCardView: View {
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronAmberLight.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .glassEffect(.regular.tint(Color.tronCoral.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {

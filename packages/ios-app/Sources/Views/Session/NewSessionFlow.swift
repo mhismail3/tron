@@ -279,11 +279,7 @@ struct NewSessionFlow: View {
 
     /// Workspace path formatted for display (truncates /Users/<user>/ to ~/)
     private var displayWorkspacePath: String {
-        workingDirectory.replacingOccurrences(
-            of: "^/Users/[^/]+/",
-            with: "~/",
-            options: .regularExpression
-        )
+        workingDirectory.abbreviatingHomeDirectory
     }
 
     private var modelDescription: String {

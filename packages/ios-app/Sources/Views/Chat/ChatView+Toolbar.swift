@@ -92,22 +92,8 @@ extension ChatView {
                         .foregroundStyle(.tronEmerald)
                 }
             }
-            Menu {
-                Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.context.rawValue) } label: {
-                    Label("Context", systemImage: "gauge.with.dots.needle.67percent")
-                }
-                Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.session.rawValue) } label: {
-                    Label("Session", systemImage: "arrow.triangle.branch")
-                }
-                if viewModel.processState.hasActiveProcesses {
-                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.processes.rawValue) } label: {
-                        Label("Processes (\(viewModel.processState.activeCount))", systemImage: "gearshape.arrow.triangle.2.circlepath")
-                    }
-                }
-                Divider()
-                Button { NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.settings.rawValue) } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
+            Button {
+                NotificationCenter.default.post(name: .chatMenuAction, object: ChatMenuAction.settings.rawValue)
             } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))

@@ -69,11 +69,11 @@ struct SessionChangesSection: View {
             if let name = branchName {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.branch")
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronTeal)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     Text(name)
                         .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronTeal)
                         .lineLimit(1)
                 }
             }
@@ -219,13 +219,18 @@ struct SessionChangesSection: View {
     }
 
     private var notGitRepoView: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "info.circle")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextMuted)
+        VStack(spacing: 12) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(TronTypography.sans(size: TronTypography.sizeDisplay))
+                .foregroundStyle(.tronTeal)
             Text("Not a git repository")
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+            Text("This workspace is not tracked by git")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextMuted)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
     }
 }

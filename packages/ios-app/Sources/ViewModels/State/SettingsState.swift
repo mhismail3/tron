@@ -69,11 +69,7 @@ final class SettingsState {
     // MARK: - Display Helpers
 
     var displayQuickSessionWorkspace: String {
-        quickSessionWorkspace.replacingOccurrences(
-            of: "^/Users/[^/]+/",
-            with: "~/",
-            options: .regularExpression
-        )
+        quickSessionWorkspace.abbreviatingHomeDirectory
     }
 
     // MARK: - Load from Server

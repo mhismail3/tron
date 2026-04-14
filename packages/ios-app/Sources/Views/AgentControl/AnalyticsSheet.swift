@@ -42,20 +42,20 @@ struct AnalyticsSheet: View {
                 ToolbarItem(placement: .principal) {
                     Text("Analytics")
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronRose)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronAmber)
+                            .foregroundStyle(.tronRose)
                     }
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronAmber)
+        .tint(.tronRose)
     }
 
     // MARK: - Turn Card
@@ -80,9 +80,9 @@ struct AnalyticsSheet: View {
                     // Turn number badge
                     Text("\(turnData.turn)")
                         .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .bold))
-                        .foregroundStyle(.tronAmberLight)
+                        .foregroundStyle(.tronRose)
                         .frame(width: 24, height: 24)
-                        .background(Color.tronAmberLight.opacity(0.2))
+                        .background(Color.tronRose.opacity(0.2))
                         .clipShape(Circle())
 
                     // Preview text
@@ -102,11 +102,11 @@ struct AnalyticsSheet: View {
                     // Compact stats
                     Text(TokenFormatter.format(turnData.totalTokens))
                         .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronAmberLight)
+                        .foregroundStyle(.tronRose)
 
                     Text(formatCost(turnData.cost))
                         .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronRose)
 
                     Image(systemName: "chevron.down")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
@@ -125,7 +125,7 @@ struct AnalyticsSheet: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
         }
-        .sectionFill(.tronAmberLight, cornerRadius: 10, subtle: true, compact: false)
+        .sectionFill(.tronRose, cornerRadius: 10, subtle: true, compact: false)
     }
 
     // MARK: - Expanded Turn Detail
@@ -188,24 +188,24 @@ struct AnalyticsSheet: View {
             HStack {
                 Text(TokenFormatter.format(tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronAmberLight)
+                    .foregroundStyle(.tronRose)
                 Spacer()
                 Text(formatCost(cost))
                     .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronRose)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .sectionFill(.tronAmberLight, cornerRadius: 8, subtle: true, compact: false)
+        .sectionFill(.tronRose, cornerRadius: 8, subtle: true, compact: false)
     }
 
     private func statItem(value: String, label: String, color: Color? = nil) -> some View {
         VStack(spacing: 2) {
             Text(value)
                 .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(color ?? .tronAmberLight.opacity(0.8))
+                .foregroundStyle(color ?? .tronRose.opacity(0.8))
             Text(label)
                 .font(TronTypography.pill)
                 .foregroundStyle(.tronTextMuted)

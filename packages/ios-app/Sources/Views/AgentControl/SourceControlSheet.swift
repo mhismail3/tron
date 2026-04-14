@@ -79,7 +79,6 @@ struct SourceControlSheet: View {
                         .padding(.vertical)
                         .frame(width: geometry.size.width)
                     }
-                    .refreshable { await onReload?() }
                     .frame(width: geometry.size.width)
                 }
 
@@ -101,13 +100,18 @@ struct SourceControlSheet: View {
                 ToolbarItem(placement: .principal) {
                     Text("Source Control")
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronTeal)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { Task { await onReload?() } } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronTeal)
+                    }
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
+                            .foregroundStyle(.tronTeal)
                     }
                 }
             }
@@ -122,7 +126,7 @@ struct SourceControlSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronEmerald)
+        .tint(.tronTeal)
         .sheet(item: $selectedFileDetail) { fileData in
             FileDetailSheet(
                 file: fileData,
@@ -159,7 +163,7 @@ struct SourceControlSheet: View {
             HStack(spacing: 10) {
                 Image(systemName: "arrow.triangle.branch")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronTeal)
 
                 Text("View All Branches")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
@@ -168,7 +172,7 @@ struct SourceControlSheet: View {
                 if !branches.isEmpty {
                     Text("\(branches.count)")
                         .font(TronTypography.pillValue)
-                        .countBadge(.tronEmerald)
+                        .countBadge(.tronTeal)
                 }
 
                 Spacer()
@@ -178,7 +182,7 @@ struct SourceControlSheet: View {
                     .foregroundStyle(.tronTextMuted)
             }
             .padding(12)
-            .sectionFill(.tronEmerald)
+            .sectionFill(.tronTeal)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -194,7 +198,7 @@ struct SourceControlSheet: View {
             } else {
                 Image(systemName: "checkmark.circle")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(canCommit ? .tronEmerald : .tronTextMuted.opacity(0.5))
+                    .foregroundStyle(canCommit ? .tronTeal : .tronTextMuted.opacity(0.5))
             }
         }
         .disabled(!canCommit || isCommitting)
@@ -202,7 +206,7 @@ struct SourceControlSheet: View {
         .popover(isPresented: $showCommitConfirmation, arrowEdge: .top) {
             GlassActionSheet(
                 actions: [
-                    GlassAction(title: "Commit Changes", icon: "checkmark.circle", color: .tronEmerald, role: .default) {
+                    GlassAction(title: "Commit Changes", icon: "checkmark.circle", color: .tronTeal, role: .default) {
                         showCommitConfirmation = false
                         commitChanges()
                     },
@@ -223,7 +227,7 @@ struct SourceControlSheet: View {
             } else {
                 Image(systemName: "arrow.triangle.merge")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(canMerge ? .tronEmerald : .tronTextMuted.opacity(0.5))
+                    .foregroundStyle(canMerge ? .tronTeal : .tronTextMuted.opacity(0.5))
             }
         }
         .disabled(!canMerge || isMerging)
@@ -234,7 +238,7 @@ struct SourceControlSheet: View {
                     GlassAction(
                         title: "Merge to \(worktreeStatus?.worktree?.baseBranch ?? "main")",
                         icon: "arrow.triangle.merge",
-                        color: .tronEmerald,
+                        color: .tronTeal,
                         role: .default
                     ) {
                         showMergeConfirmation = false

@@ -74,5 +74,10 @@ extension String {
     var withoutExtension: String {
         (self as NSString).deletingPathExtension
     }
+
+    /// Abbreviates a macOS server path by replacing /Users/<username> with ~
+    var abbreviatingHomeDirectory: String {
+        replacingOccurrences(of: #"^/Users/[^/]+"#, with: "~", options: .regularExpression)
+    }
 }
 

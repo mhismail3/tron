@@ -269,6 +269,7 @@ struct AgentControlView: View {
                     // History card
                     HistoryCardView(
                         totalTurns: turnGroups.count,
+                        totalToolCalls: analytics.totalToolCalls,
                         onTap: { showHistory = true }
                     )
                     .padding(.horizontal)
@@ -280,7 +281,6 @@ struct AgentControlView: View {
                 .padding(.vertical)
                 .frame(width: geometry.size.width)
             }
-            .refreshable { await loadAll() }
             .frame(width: geometry.size.width)
         }
     }
