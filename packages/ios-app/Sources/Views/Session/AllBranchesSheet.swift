@@ -46,7 +46,12 @@ struct AllBranchesSheet: View {
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(.tronTeal)
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button { Task { await loadBranches() } } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(.tronTeal)
+                        }
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
@@ -120,7 +125,6 @@ struct AllBranchesSheet: View {
                 }
                 .padding(.vertical)
             }
-            .refreshable { await loadBranches() }
         }
     }
 
