@@ -410,10 +410,7 @@ struct ChatView: View {
                         onAddAttachment: viewModel.addAttachment,
                         onRemoveAttachment: viewModel.removeAttachment,
                         onHistoryNavigate: { newText in viewModel.inputText = newText },
-                        onModelSelect: { model in switchModel(to: model) },
-                        onReasoningLevelChange: { newLevel in viewModel.inputBarState.reasoningLevel = newLevel },
                         onContextTap: { [sheetCoordinator] in sheetCoordinator.showContextAudit() },
-                        onModelPickerTap: { [sheetCoordinator] in sheetCoordinator.showModelPicker() },
                         onSkillSelect: nil,
                         onSkillRemove: { [viewModel] skill in
                             Task { try? await viewModel.deactivateSkillOnServer(skill.name) }

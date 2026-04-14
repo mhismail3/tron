@@ -196,15 +196,8 @@ struct InputBarActions {
     // MARK: - History
     let onHistoryNavigate: ((String) -> Void)?
 
-    // MARK: - Model/Reasoning
-    let onModelSelect: ((ModelInfo) -> Void)?
-    let onReasoningLevelChange: ((String) -> Void)?
-
     // MARK: - Context
     let onContextTap: (() -> Void)?
-
-    // MARK: - Model Picker Sheet
-    let onModelPickerTap: (() -> Void)?
 
     // MARK: - Skills
     let onSkillSelect: ((Skill) -> Void)?
@@ -225,10 +218,7 @@ struct InputBarActions {
         onAddAttachment: @escaping (Attachment) -> Void = { _ in },
         onRemoveAttachment: @escaping (Attachment) -> Void = { _ in },
         onHistoryNavigate: ((String) -> Void)? = nil,
-        onModelSelect: ((ModelInfo) -> Void)? = nil,
-        onReasoningLevelChange: ((String) -> Void)? = nil,
         onContextTap: (() -> Void)? = nil,
-        onModelPickerTap: (() -> Void)? = nil,
         onSkillSelect: ((Skill) -> Void)? = nil,
         onSkillRemove: ((Skill) -> Void)? = nil,
         onSkillDetailTap: ((Skill) -> Void)? = nil,
@@ -242,10 +232,7 @@ struct InputBarActions {
         self.onAddAttachment = onAddAttachment
         self.onRemoveAttachment = onRemoveAttachment
         self.onHistoryNavigate = onHistoryNavigate
-        self.onModelSelect = onModelSelect
-        self.onReasoningLevelChange = onReasoningLevelChange
         self.onContextTap = onContextTap
-        self.onModelPickerTap = onModelPickerTap
         self.onSkillSelect = onSkillSelect
         self.onSkillRemove = onSkillRemove
         self.onSkillDetailTap = onSkillDetailTap

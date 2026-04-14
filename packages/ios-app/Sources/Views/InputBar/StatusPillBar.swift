@@ -2,61 +2,23 @@ import SwiftUI
 
 // MARK: - Status Pills Column (iOS 26 Liquid Glass)
 
-/// Vertical column of status pills: reasoning level, model picker, and token stats
-/// Used as the right-side indicator area in InputBar
+/// Status pill column: token stats pill for context window access
+/// Model and reasoning controls are available via the Agent Control sheet
 @available(iOS 26.0, *)
 struct StatusPillsColumn: View {
-    // Model info
-    let modelName: String
-    let cachedModels: [ModelInfo]
-    let currentModelInfo: ModelInfo?
-
     // Context info
     let contextPercentage: Int
     let contextWindow: Int
     let lastTurnInputTokens: Int
 
-    // Reasoning level
-    @Binding var reasoningLevel: String
-
     // Animation state
     let hasAppeared: Bool
 
-    // Namespaces for morph animations
-    let reasoningPillNamespace: Namespace.ID
-
     // Actions
     var onContextTap: (() -> Void)?
-    var onModelPickerTap: (() -> Void)?
 
-    // Read-only mode (disables model and reasoning pickers)
+    // Read-only mode
     var readOnly: Bool = false
-
-    // MARK: - Reasoning Level Helpers
-
-    private func reasoningLevelLabel(_ level: String) -> String {
-        switch level.lowercased() {
-        case "low": return "Low"
-        case "medium": return "Medium"
-        case "high": return "High"
-        case "xhigh": return "Extra High"
-        case "max": return "Max"
-        default: return level.capitalized
-        }
-    }
-
-    private func reasoningLevelIcon(_ level: String) -> String {
-        Color.reasoningLevelIcon(level)
-    }
-
-    /// Available reasoning levels from the current model, or default set
-    private var availableReasoningLevels: [String] {
-        currentModelInfo?.reasoningLevels ?? ["low", "medium", "high", "xhigh"]
-    }
-
-    private func reasoningLevelColor(_ level: String) -> Color {
-        Color.reasoningLevel(level, levels: availableReasoningLevels)
-    }
 
     // MARK: - Context Helpers
 
@@ -77,110 +39,15 @@ struct StatusPillsColumn: View {
         TokenFormatter.format(tokensRemaining)
     }
 
-    /// Whether reasoning pill should be visible
-    private var showReasoningPill: Bool {
-        currentModelInfo?.supportsReasoning == true
-    }
-
-    /// Whether model pill should be visible
-    private var showModelPill: Bool {
-        !modelName.isEmpty || readOnly
-    }
-
     // MARK: - Body
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            // Reasoning level picker - morphs up from model pill area
-            reasoningLevelMenu
-                .scaleEffect(hasAppeared && showReasoningPill ? 1 : 0.3, anchor: .bottom)
-                .opacity(hasAppeared && showReasoningPill ? 1 : 0)
-                .allowsHitTesting(hasAppeared && showReasoningPill)
-
-            // Model picker - morphs up from token pill area
-            modelPickerMenu
-                .scaleEffect(hasAppeared && showModelPill ? 1 : 0.3, anchor: .bottom)
-                .opacity(hasAppeared && showModelPill ? 1 : 0)
-                .allowsHitTesting(hasAppeared && showModelPill)
-
-            // Token stats pill - morphs up from bottom (first to appear)
             tokenStatsPillWithChevrons
                 .scaleEffect(hasAppeared ? 1 : 0.3, anchor: .bottom)
                 .opacity(hasAppeared ? 1 : 0)
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: hasAppeared)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showModelPill)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showReasoningPill)
-    }
-
-    // MARK: - Model Picker Pill
-
-    private var modelPickerMenu: some View {
-        Button {
-            onModelPickerTap?()
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "cpu")
-                    .font(TronTypography.pill)
-                Text(modelName.isEmpty ? "—" : modelName.shortModelName)
-                    .font(TronTypography.pillValue)
-                if !readOnly {
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(TronTypography.labelSM)
-                }
-            }
-            .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .capsule)
-        .opacity(readOnly ? 0.5 : 1.0)
-        .disabled(readOnly)
-    }
-
-    // MARK: - Reasoning Level Menu
-
-    private var reasoningLevelMenu: some View {
-        // Separate visual (glass pill) from interaction (invisible Menu overlay)
-        // This avoids the iOS 26 Menu + glassEffect transition bug
-        HStack(spacing: 4) {
-            Image(systemName: reasoningLevelIcon(reasoningLevel))
-                .font(TronTypography.pill)
-            Text(reasoningLevelLabel(reasoningLevel))
-                .font(TronTypography.pillValue)
-            if !readOnly {
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(TronTypography.labelSM)
-            }
-        }
-        .foregroundStyle(readOnly ? reasoningLevelColor(reasoningLevel).opacity(0.5) : reasoningLevelColor(reasoningLevel))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .capsule)
-        .opacity(readOnly ? 0.5 : 1.0)
-        .overlay {
-            // Invisible Menu overlay handles interaction only
-            Menu {
-                ForEach(availableReasoningLevels, id: \.self) { level in
-                    Button {
-                        NotificationCenter.default.post(name: .reasoningLevelAction, object: level)
-                    } label: {
-                        Label(reasoningLevelLabel(level), systemImage: reasoningLevelIcon(level))
-                    }
-                }
-            } label: {
-                Color.clear
-                    .contentShape(Capsule())
-            }
-            .disabled(readOnly)
-        }
-        .matchedGeometryEffect(id: "reasoningPillMorph", in: reasoningPillNamespace)
-        .transition(.asymmetric(
-            insertion: .scale(scale: 0.6, anchor: .leading).combined(with: .opacity),
-            removal: .scale(scale: 0.8).combined(with: .opacity)
-        ))
     }
 
     // MARK: - Token Stats Pill
@@ -223,62 +90,5 @@ struct StatusPillsColumn: View {
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .capsule)
         .opacity(readOnly ? 0.5 : 1.0)
         .disabled(readOnly)
-    }
-}
-
-// MARK: - Token Stats Pill (Standalone)
-
-/// Standalone token stats pill without chevrons (for legacy/fallback use)
-@available(iOS 26.0, *)
-struct TokenStatsPill: View {
-    let contextPercentage: Int
-    let contextWindow: Int
-    let lastTurnInputTokens: Int
-    var onContextTap: (() -> Void)?
-
-    private var contextPercentageColor: Color {
-        if contextPercentage >= 95 {
-            return .tronError
-        } else if contextPercentage >= 80 {
-            return .tronAmber
-        }
-        return .tronEmerald
-    }
-
-    private var tokensRemaining: Int {
-        return max(0, contextWindow - lastTurnInputTokens)
-    }
-
-    private var formattedTokensRemaining: String {
-        TokenFormatter.format(tokensRemaining)
-    }
-
-    var body: some View {
-        Button {
-            onContextTap?()
-        } label: {
-            HStack(spacing: 8) {
-                // Context usage bar
-                Capsule()
-                    .fill(Color.tronOverlay(0.2))
-                    .frame(width: 40, height: 6)
-                    .overlay(alignment: .leading) {
-                        Rectangle()
-                            .fill(contextPercentageColor)
-                            .frame(width: 40 * min(CGFloat(contextPercentage) / 100.0, 1.0))
-                    }
-                    .clipShape(Capsule())
-
-                // Tokens remaining
-                Text("\(formattedTokensRemaining) left")
-                    .foregroundStyle(contextPercentageColor)
-            }
-            .font(TronTypography.pillValue)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .capsule)
     }
 }

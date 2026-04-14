@@ -37,10 +37,7 @@ struct InputBar: View {
 
     // Namespaces for morph animations
     @Namespace private var actionButtonNamespace
-    @Namespace private var modelPillNamespace
-    @Namespace private var tokenPillNamespace
     @Namespace private var micButtonNamespace
-    @Namespace private var reasoningPillNamespace
     @Namespace private var attachmentButtonNamespace
 
     private let actionButtonSize: CGFloat = 40
@@ -67,9 +64,7 @@ struct InputBar: View {
         return canSend
     }
 
-    private var shouldShowStatusPills: Bool {
-        !config.modelName.isEmpty || true // Token pill always visible
-    }
+    private var shouldShowStatusPills: Bool { true }
 
     private var hasSkillsAvailable: Bool {
         config.skillStore != nil && (config.skillStore?.totalCount ?? 0) > 0
@@ -250,10 +245,6 @@ struct InputBar: View {
                 )
             }
         }
-        // Animation coordinator updates
-        .onChange(of: config.currentModelInfo?.supportsReasoning) { _, supportsReasoning in
-            config.animationCoordinator?.updateReasoningSupport(supportsReasoning == true)
-        }
         // Skill and spell mention detection
         .onChange(of: state.text) { _, newText in
             detectSkillMention(in: newText)
@@ -388,17 +379,11 @@ struct InputBar: View {
             Spacer(minLength: 0)
 
             StatusPillsColumn(
-                modelName: config.modelName,
-                cachedModels: config.cachedModels,
-                currentModelInfo: config.currentModelInfo,
                 contextPercentage: config.contextPercentage,
                 contextWindow: config.contextWindow,
                 lastTurnInputTokens: config.lastTurnInputTokens,
-                reasoningLevel: $state.reasoningLevel,
                 hasAppeared: hasAppeared,
-                reasoningPillNamespace: reasoningPillNamespace,
                 onContextTap: actions.onContextTap,
-                onModelPickerTap: actions.onModelPickerTap,
                 readOnly: config.readOnly
             )
             .opacity(shouldShowStatusPills ? 1 : 0)
@@ -551,15 +536,6 @@ struct InputBar: View {
         }
     }
 
-    /// Trigger reasoning pill animation
-    func triggerReasoningPillAnimation() {
-        config.animationCoordinator?.updateReasoningSupport(true)
-    }
-
-    /// Hide reasoning pill
-    func hideReasoningPill() {
-        config.animationCoordinator?.updateReasoningSupport(false)
-    }
 }
 
 // MARK: - iOS 26 Menu Workaround Notifications

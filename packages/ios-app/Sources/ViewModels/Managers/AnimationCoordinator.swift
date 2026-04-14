@@ -10,11 +10,6 @@ final class AnimationCoordinator {
     // MARK: - Animation Timing Constants
 
     struct Timing {
-        // Pill morph sequence delays
-        static let contextPillDelay: UInt64 = 0                // Immediate
-        static let modelPillDelay: UInt64 = 200_000_000        // 200ms after context
-        static let reasoningPillDelay: UInt64 = 170_000_000    // 170ms after model
-
         // Message cascade
         static let cascadeStaggerInterval: UInt64 = 20_000_000 // 20ms per message
         static let cascadeMaxMessages = 50                      // Cap at 1 second total
@@ -26,23 +21,7 @@ final class AnimationCoordinator {
         static let toolStaggerCap: UInt64 = 200_000_000        // Max 200ms delay
     }
 
-    // MARK: - Pill Morph Phase State Machine
-
-    enum PillMorphPhase: Int, Comparable {
-        case dormant = 0
-        case contextPillVisible = 1
-        case modelPillVisible = 2
-        case reasoningPillVisible = 3
-
-        static func < (lhs: PillMorphPhase, rhs: PillMorphPhase) -> Bool {
-            lhs.rawValue < rhs.rawValue
-        }
-    }
-
     // MARK: - Published State
-
-    private(set) var currentPhase: PillMorphPhase = .dormant
-    private(set) var supportsReasoning: Bool = false
 
     // Tool stagger state
     private(set) var visibleToolCallIds: Set<String> = []
@@ -53,87 +32,6 @@ final class AnimationCoordinator {
     private(set) var cascadeProgress: Int = 0
     private(set) var totalCascadeMessages: Int = 0
     private var cascadeTask: Task<Void, Never>?
-
-    // MARK: - Computed Visibility Properties
-
-    var showContextPill: Bool {
-        currentPhase.rawValue >= PillMorphPhase.contextPillVisible.rawValue
-    }
-
-    var showModelPill: Bool {
-        currentPhase.rawValue >= PillMorphPhase.modelPillVisible.rawValue
-    }
-
-    var showReasoningPill: Bool {
-        currentPhase.rawValue >= PillMorphPhase.reasoningPillVisible.rawValue && supportsReasoning
-    }
-
-    // MARK: - Pill Morph Sequence
-
-    /// Start the chained pill morph animation sequence
-    /// Pills appear sequentially: context → model → reasoning (if supported)
-    func startPillMorphSequence(supportsReasoning: Bool) {
-        self.supportsReasoning = supportsReasoning
-        currentPhase = .dormant
-
-        Task { @MainActor in
-            // Context pill appears immediately
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                currentPhase = .contextPillVisible
-            }
-
-            // Model pill morphs from context pill after delay
-            try? await Task.sleep(nanoseconds: Timing.modelPillDelay)
-            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-                currentPhase = .modelPillVisible
-            }
-
-            // Reasoning pill morphs from model pill (if supported)
-            if supportsReasoning {
-                try? await Task.sleep(nanoseconds: Timing.reasoningPillDelay)
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                    currentPhase = .reasoningPillVisible
-                }
-            }
-        }
-    }
-
-    /// Reset pill state to dormant (e.g., when leaving chat)
-    func resetPillState() {
-        currentPhase = .dormant
-        supportsReasoning = false
-    }
-
-    /// Set pills visible immediately without animation (for resumed sessions with existing data)
-    /// Call this instead of startPillMorphSequence when loading a session that already has content
-    func setPillsVisibleImmediately(supportsReasoning: Bool) {
-        self.supportsReasoning = supportsReasoning
-        // Set to final state immediately - no animation needed for resumed sessions
-        currentPhase = supportsReasoning ? .reasoningPillVisible : .modelPillVisible
-    }
-
-    /// Update reasoning support (e.g., when model changes)
-    func updateReasoningSupport(_ supports: Bool) {
-        let wasSupported = supportsReasoning
-        supportsReasoning = supports
-
-        // If switching to a model that supports reasoning while pills are visible
-        if supports && !wasSupported && currentPhase >= .modelPillVisible {
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: Timing.reasoningPillDelay)
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                    currentPhase = .reasoningPillVisible
-                }
-            }
-        } else if !supports && wasSupported {
-            // Hide reasoning pill when switching to non-reasoning model
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                if currentPhase == .reasoningPillVisible {
-                    currentPhase = .modelPillVisible
-                }
-            }
-        }
-    }
 
     // MARK: - Tool Call Staggering
 
