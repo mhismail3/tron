@@ -151,7 +151,7 @@ struct SettingsView: View {
     private var categoriesCard: some View {
         VStack(spacing: 8) {
             SettingsCard {
-                categoryRow(icon: "network", label: "Server", subtitle: "Host, port, connection presets") {
+                categoryRow(icon: "network", label: "Server", subtitle: "Configure the Tron server host/port") {
                     activePage = .server
                 }
             }
