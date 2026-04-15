@@ -73,10 +73,17 @@ struct SessionChangesSection: View {
                     Image(systemName: "arrow.triangle.branch")
                         .foregroundStyle(.tronTeal)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    Text(name)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronTeal)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name)
+                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(.tronTeal)
+                            .lineLimit(1)
+                        if let path = worktreeStatus?.worktree?.path {
+                            Text(path.replacingOccurrences(of: "^/Users/[^/]+", with: "~", options: .regularExpression))
+                                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextMuted)
+                        }
+                    }
                 }
             }
 
