@@ -331,7 +331,7 @@ struct CompactOptionRowView: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 // Selection indicator
                 selectionIndicator
 
@@ -349,16 +349,10 @@ struct CompactOptionRowView: View {
                     }
                 }
 
-                Spacer()
-
-                // Checkmark for selected state
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(accentColor)
-                }
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
+            .padding(.leading, 10)
+            .padding(.trailing, 10)
             .padding(.vertical, 12)
             .contentShape(Rectangle())
         }
