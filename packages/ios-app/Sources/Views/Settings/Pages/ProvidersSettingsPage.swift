@@ -343,7 +343,7 @@ private struct ProviderCard: View {
             }
         }
         .clipped()
-        .sectionFill(provider.color)
+        .sectionFill(provider.color, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -421,7 +421,7 @@ private struct CredentialRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityAddTraits(.isButton)
         .onTapGesture { Task { await onSelect() } }
-        .sectionFill(providerColor, cornerRadius: 8, subtle: true)
+        .sectionFill(providerColor, cornerRadius: 8, subtle: true, interactive: false)
         .overlay {
             if isActive {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -476,7 +476,7 @@ private struct AddApiKeyRow: View {
             }
         }
         .padding(10)
-        .sectionFill(providerColor, cornerRadius: 8, subtle: true)
+        .sectionFill(providerColor, cornerRadius: 8, subtle: true, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
@@ -623,7 +623,7 @@ private struct GoogleProviderFields: View {
             }
         }
         .padding(10)
-        .sectionFill(.tronCyan, cornerRadius: 8, subtle: true)
+        .sectionFill(.tronCyan, cornerRadius: 8, subtle: true, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
@@ -734,7 +734,7 @@ private struct ServiceCard: View {
             }
         }
         .clipped()
-        .sectionFill(service.color)
+        .sectionFill(service.color, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
