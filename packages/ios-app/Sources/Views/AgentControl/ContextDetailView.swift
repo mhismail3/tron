@@ -18,10 +18,8 @@ struct ContextDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isClearing = false
     @State private var isCompacting = false
-    @State private var isRetaining = false
     @State private var showClearPopover = false
     @State private var showCompactPopover = false
-    @State private var showRetainPopover = false
     @State private var errorMessage: String?
 
     private var hasMessages: Bool {
@@ -199,9 +197,8 @@ struct ContextDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarLeading) {
+            ToolbarItem(placement: .topBarLeading) {
                 clearButton
-                compactButton
             }
             ToolbarItem(placement: .principal) {
                 Text("Context")
@@ -209,7 +206,7 @@ struct ContextDetailView: View {
                     .foregroundStyle(.tronCyan)
             }
             ToolbarItem(placement: .topBarTrailing) {
-                retainButton
+                compactButton
             }
         }
         .alert("Error", isPresented: Binding(
@@ -270,6 +267,8 @@ struct ContextDetailView: View {
                     Image(systemName: "trash")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 }
+                Text("Clear")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
             }
             .foregroundStyle(hasMessages && !readOnly ? .tronError : .tronTextMuted)
         }
@@ -313,6 +312,8 @@ struct ContextDetailView: View {
                     Image(systemName: "arrow.down.right.and.arrow.up.left")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 }
+                Text("Compact")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
             }
             .foregroundStyle(hasMessages && !readOnly ? .tronSlate : .tronTextMuted)
         }
@@ -336,51 +337,6 @@ struct ContextDetailView: View {
                         role: .cancel
                     ) {
                         showCompactPopover = false
-                    }
-                ]
-            )
-            .presentationCompactAdaptation(.popover)
-        }
-    }
-
-    private var retainButton: some View {
-        Button {
-            showRetainPopover = true
-        } label: {
-            HStack(spacing: 4) {
-                if isRetaining {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .tint(.tronPink)
-                } else {
-                    Image(systemName: "brain")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                }
-                Text("Retain")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-            }
-            .foregroundStyle(!readOnly && !isRetaining ? .tronPink : .tronTextMuted)
-        }
-        .disabled(isRetaining || readOnly)
-        .popover(isPresented: $showRetainPopover, arrowEdge: .top) {
-            GlassActionSheet(
-                actions: [
-                    GlassAction(
-                        title: "Retain Memory",
-                        icon: "brain",
-                        color: .tronPink,
-                        role: .default
-                    ) {
-                        showRetainPopover = false
-                        Task { await retainMemory() }
-                    },
-                    GlassAction(
-                        title: "Cancel",
-                        icon: nil,
-                        color: .tronTextMuted,
-                        role: .cancel
-                    ) {
-                        showRetainPopover = false
                     }
                 ]
             )
@@ -412,14 +368,4 @@ struct ContextDetailView: View {
         }
     }
 
-    private func retainMemory() async {
-        isRetaining = true
-        do {
-            _ = try await rpcClient.misc.retainMemory(sessionId: sessionId)
-            isRetaining = false
-        } catch {
-            errorMessage = "Failed to retain memory: \(error.localizedDescription)"
-            isRetaining = false
-        }
-    }
 }

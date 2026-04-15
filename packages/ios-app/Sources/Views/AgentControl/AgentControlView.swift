@@ -38,6 +38,8 @@ struct AgentControlView: View {
     @State private var showHistory = false
     @State private var pendingSkillDeletions: Set<String> = []
     @State private var cardsVisible = false
+    @State private var isRetaining = false
+    @State private var showRetainPopover = false
 
     // MARK: - Session State
 
@@ -94,6 +96,9 @@ struct AgentControlView: View {
                     Text("Agent Control")
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    retainButton
                 }
             }
             .sheet(isPresented: $showModelPicker) {
@@ -328,6 +333,63 @@ struct AgentControlView: View {
 
     private func loadBranches() async {
         branches = (try? await rpcClient.worktree.listSessionBranches(sessionId: sessionId)) ?? []
+    }
+
+    // MARK: - Retain Button
+
+    private var retainButton: some View {
+        Button {
+            showRetainPopover = true
+        } label: {
+            HStack(spacing: 4) {
+                if isRetaining {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(.tronPink)
+                } else {
+                    Image(systemName: "brain")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                }
+                Text("Retain")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+            }
+            .foregroundStyle(!readOnly && !isRetaining ? .tronPink : .tronTextMuted)
+        }
+        .disabled(isRetaining || readOnly)
+        .popover(isPresented: $showRetainPopover, arrowEdge: .top) {
+            GlassActionSheet(
+                actions: [
+                    GlassAction(
+                        title: "Retain Memory",
+                        icon: "brain",
+                        color: .tronPink,
+                        role: .default
+                    ) {
+                        showRetainPopover = false
+                        Task { await retainMemory() }
+                    },
+                    GlassAction(
+                        title: "Cancel",
+                        icon: nil,
+                        color: .tronTextMuted,
+                        role: .cancel
+                    ) {
+                        showRetainPopover = false
+                    }
+                ]
+            )
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private func retainMemory() async {
+        isRetaining = true
+        do {
+            _ = try await rpcClient.misc.retainMemory(sessionId: sessionId)
+        } catch {
+            errorMessage = "Failed to retain memory: \(error.localizedDescription)"
+        }
+        isRetaining = false
     }
 
     // MARK: - Skill Management
