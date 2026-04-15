@@ -162,7 +162,7 @@ struct SourceControlCardView: View {
                 Spacer()
 
                 if isGitRepo == false {
-                    Text("Not a git repo")
+                    Text("Untracked")
                         .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
                         .foregroundStyle(.tronTeal)
                 } else {
@@ -183,7 +183,9 @@ struct SourceControlCardView: View {
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                 } else if isGitRepo == false {
-                    EmptyView()
+                    Text("Not a git repository")
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextMuted)
                 } else if totalFiles > 0 {
                     HStack(spacing: 6) {
                         Text("\(totalFiles) \(totalFiles == 1 ? "file" : "files")")

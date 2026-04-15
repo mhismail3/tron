@@ -91,13 +91,13 @@ struct ModelPickerSheet: View {
                 ToolbarItem(placement: .principal) {
                     Text("Models")
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronPurple)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { commitSelection(); dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
+                            .foregroundStyle(.tronPurple)
                     }
                 }
             }
