@@ -17,7 +17,11 @@ struct TurnGroup: Identifiable, Equatable {
 
     /// Best available preview text for this turn.
     var displayPreview: String? {
-        userMessagePreview ?? assistantMessagePreview
+        if let preview = userMessagePreview ?? assistantMessagePreview {
+            return preview
+        }
+        // Fall back to first tool name if the turn is tool-use-only
+        return TurnGrouping.extractToolUsePreview(from: events)
     }
 
     static func == (lhs: TurnGroup, rhs: TurnGroup) -> Bool {
@@ -233,6 +237,29 @@ enum TurnGrouping {
                     if block["type"] as? String == "tool_use" { continue }
                     if let text = block["text"] as? String, !text.isEmpty {
                         return truncatePreview(text)
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Extracts a preview from tool.call events when no message text is available.
+    static func extractToolUsePreview(from events: [SessionEvent]) -> String? {
+        for event in events {
+            guard event.eventType == .toolCall else { continue }
+            if let name = event.payload["name"]?.value as? String, !name.isEmpty {
+                return "Tool use: \(name)"
+            }
+        }
+        // Also check assistant message content blocks for inline tool_use
+        for event in events {
+            guard event.eventType == .messageAssistant else { continue }
+            if let contentArray = event.payload["content"]?.value as? [[String: Any]] {
+                for block in contentArray {
+                    if block["type"] as? String == "tool_use",
+                       let name = block["name"] as? String, !name.isEmpty {
+                        return "Tool use: \(name)"
                     }
                 }
             }

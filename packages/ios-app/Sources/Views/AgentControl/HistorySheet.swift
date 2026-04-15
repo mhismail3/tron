@@ -198,7 +198,7 @@ struct HistorySheet: View {
                             }
                         }
 
-                        Text(turn.displayPreview ?? "Pre-session activity")
+                        Text(turn.displayPreview ?? (turn.turnNumber == 0 ? "Pre-session activity" : "Tool use"))
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(muted ? .tronTextMuted : .tronTextPrimary)
                             .lineLimit(1)
