@@ -27,9 +27,7 @@ struct ProviderErrorDetailSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text(ErrorCategoryDisplay.label(for: data.category, provider: data.provider))
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.red)
+                    SheetTitle(title: ErrorCategoryDisplay.label(for: data.category, provider: data.provider), color: .red)
                 }
             }
         }

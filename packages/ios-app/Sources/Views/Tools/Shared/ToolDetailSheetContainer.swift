@@ -57,18 +57,11 @@ struct ToolDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
                         Image(systemName: iconName)
                             .font(TronTypography.sans(size: TronTypography.sizeBody))
                             .foregroundStyle(iconColor ?? accent)
-                        Text(toolName)
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(accent)
+                        SheetTitle(title: toolName, color: accent)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
-                    }
-                    .accessibilityLabel("Close")
+                    SheetDismissButton(color: accent)
                 }
             }
         }

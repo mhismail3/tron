@@ -47,16 +47,10 @@ struct HistorySheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("History")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronCoral)
+                    SheetTitle(title: "History", color: .tronCoral)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronCoral)
-                    }
+                    SheetDismissButton(color: .tronCoral)
                 }
             }
             .tronErrorAlert(message: $forkError)

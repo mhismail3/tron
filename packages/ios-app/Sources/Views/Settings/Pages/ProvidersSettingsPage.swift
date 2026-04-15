@@ -55,11 +55,7 @@ struct ProvidersSettingsPage: View {
             OAuthLoginSheet(provider: provider)
         }
         .task(id: dependencies.authVersion) { await loadAuthState() }
-        .alert("Error", isPresented: .constant(error != nil)) {
-            Button("OK") { error = nil }
-        } message: {
-            Text(error ?? "")
-        }
+        .tronErrorAlert(message: $error)
     }
 
     // MARK: - Content

@@ -21,9 +21,7 @@ struct MemoryRetainDetailSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Memory Retained")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronPink)
+                    SheetTitle(title: "Memory Retained", color: .tronPink)
                 }
             }
         }

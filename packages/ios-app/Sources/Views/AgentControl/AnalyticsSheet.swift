@@ -45,16 +45,10 @@ struct AnalyticsSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Analytics")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronRose)
+                    SheetTitle(title: "Analytics", color: .tronRose)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronRose)
-                    }
+                    SheetDismissButton(color: .tronRose)
                 }
             }
         }

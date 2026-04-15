@@ -64,9 +64,7 @@ struct AutomationFormSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("New Automation")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronCoral)
+                    SheetTitle(title: "New Automation", color: .tronCoral)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { onCancel() } label: {
@@ -89,16 +87,7 @@ struct AutomationFormSheet: View {
                     }
                 }
             }
-            .alert("Error", isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                if let error = errorMessage {
-                    Text(error)
-                }
-            }
+            .tronErrorAlert(message: $errorMessage)
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)

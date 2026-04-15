@@ -104,9 +104,7 @@ struct SourceControlSheet: View {
                     mergeButton
                 }
                 ToolbarItem(placement: .principal) {
-                    Text("Source Control")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronTeal)
+                    SheetTitle(title: "Source Control", color: .tronTeal)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
@@ -129,11 +127,7 @@ struct SourceControlSheet: View {
                         }
                     }
                     .disabled(isReloading)
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronTeal)
-                    }
+                    SheetDismissButton(color: .tronTeal)
                 }
             }
             .tronErrorAlert(message: $errorMessage)

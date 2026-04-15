@@ -43,9 +43,7 @@ struct AllBranchesSheet: View {
                         }
                     }
                     ToolbarItem(placement: .principal) {
-                        Text("All Branches")
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronTeal)
+                        SheetTitle(title: "All Branches", color: .tronTeal)
                     }
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button {
@@ -68,11 +66,7 @@ struct AllBranchesSheet: View {
                             }
                         }
                         .disabled(isReloading)
-                        Button { dismiss() } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(.tronTeal)
-                        }
+                        SheetDismissButton(color: .tronTeal)
                     }
                 }
         }

@@ -60,9 +60,7 @@ struct BranchDetailView: View {
                     askAgentButton
                 }
                 ToolbarItem(placement: .principal) {
-                    Text(branch.shortBranch)
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronTeal)
+                    SheetTitle(title: branch.shortBranch, color: .tronTeal)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
                 }
@@ -87,11 +85,7 @@ struct BranchDetailView: View {
                         }
                     }
                     .disabled(isReloading)
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronTeal)
-                    }
+                    SheetDismissButton(color: .tronTeal)
                 }
             }
             .task { await loadCommittedDiff() }

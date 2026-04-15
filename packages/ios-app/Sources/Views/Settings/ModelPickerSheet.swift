@@ -89,9 +89,7 @@ struct ModelPickerSheet: View {
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    Text("Models")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronPurple)
+                    SheetTitle(title: "Models", color: .tronPurple)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { commitSelection(); dismiss() } label: {

@@ -91,9 +91,7 @@ struct AgentControlView: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Agent Control")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
+                    SheetTitle(title: "Agent Control", color: .tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     retainButton

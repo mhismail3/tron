@@ -63,9 +63,7 @@ struct SubagentDetailSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text(titleText)
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(titleColor)
+                    SheetTitle(title: titleText, color: titleColor)
                 }
 
                 // Send to Agent button (top right) - when results are pending (completed or failed)

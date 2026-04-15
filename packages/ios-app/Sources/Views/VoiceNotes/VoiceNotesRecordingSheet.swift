@@ -88,11 +88,7 @@ struct VoiceNotesRecordingSheet: View {
         .onDisappear {
             recorder.cancelRecording()
         }
-        .alert("Error", isPresented: .constant(errorMessage != nil)) {
-            Button("OK") { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
-        }
+        .tronErrorAlert(message: $errorMessage)
     }
 
     private var formattedDuration: String {

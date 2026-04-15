@@ -50,17 +50,11 @@ struct AutomationDetailSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text(currentJob.name)
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronCoral)
+                    SheetTitle(title: currentJob.name, color: .tronCoral)
                         .lineLimit(1)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronCoral)
-                    }
+                    SheetDismissButton(color: .tronCoral)
                 }
             }
         }

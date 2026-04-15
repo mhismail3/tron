@@ -34,9 +34,7 @@ struct SubagentResultsListSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Agent Results")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
+                    SheetTitle(title: "Agent Results", color: .tronTextPrimary)
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {

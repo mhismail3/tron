@@ -59,9 +59,7 @@ struct ContainerDetailSheet: View {
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    Text(container.name)
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronIndigo)
+                    SheetTitle(title: container.name, color: .tronIndigo)
                         .lineLimit(1)
                 }
                 ToolbarItem(placement: .topBarTrailing) {

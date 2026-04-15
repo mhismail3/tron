@@ -41,16 +41,10 @@ struct SkillDetailSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text(skill.displayName)
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(accentColor)
+                    SheetTitle(title: skill.displayName, color: accentColor)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(accentColor)
-                    }
+                    SheetDismissButton(color: accentColor)
                 }
             }
         }

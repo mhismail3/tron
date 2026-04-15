@@ -74,14 +74,7 @@ struct FileDetailSheet: View {
                     }
                 }
             }
-            .alert("Error", isPresented: Binding(
-                get: { actionError != nil },
-                set: { if !$0 { actionError = nil } }
-            )) {
-                Button("OK") { actionError = nil }
-            } message: {
-                Text(actionError ?? "")
-            }
+            .tronErrorAlert(message: $actionError)
         } leadingToolbar: {
             stagingToolbarButtons
         }

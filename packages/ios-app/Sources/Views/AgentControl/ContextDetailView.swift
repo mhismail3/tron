@@ -201,9 +201,7 @@ struct ContextDetailView: View {
                 clearButton
             }
             ToolbarItem(placement: .principal) {
-                Text("Context")
-                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(.tronCyan)
+                SheetTitle(title: "Context", color: .tronCyan)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 compactButton

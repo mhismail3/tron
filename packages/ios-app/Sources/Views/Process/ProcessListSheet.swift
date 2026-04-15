@@ -22,9 +22,7 @@ struct ProcessListSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Background Processes")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
+                    SheetTitle(title: "Background Processes", color: .tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

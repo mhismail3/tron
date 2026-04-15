@@ -37,9 +37,7 @@ struct CompactionDetailSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Context Compacted")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.cyan)
+                    SheetTitle(title: "Context Compacted", color: .cyan)
                 }
             }
         }
