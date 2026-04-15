@@ -28,11 +28,11 @@ Use WebFetch to read the URL. Extract:
 | URL type | Method |
 |---|---|
 | Articles, blogs | WebFetch directly |
-| Twitter/X posts (`x.com/*/status/*`, `twitter.com/*/status/*`) | `tron-twitter fetch-url URL` — zero auth, returns full tweet with text, author, metrics, article content. Falls back to WebFetch if CLI unavailable. |
+| Twitter/X posts (`x.com/*/status/*`, `twitter.com/*/status/*`) | See the Twitter skill — `curl` the fxtwitter API (zero auth, structured JSON). Falls back to WebFetch if API unavailable. |
 | PDFs, papers | WebFetch with PDF handling |
 | YouTube, video | WebFetch — title, description, transcript if available |
 
-> **Why tron-twitter for tweets?** X's pages are heavily JavaScript-dependent — WebFetch often gets incomplete or empty content. `tron-twitter fetch-url` uses public embed APIs (fxtwitter, syndication) that return structured data reliably, including full article content for long-form posts. No cookies or auth needed. See the Twitter skill's Reliability Tiers for details.
+> **Why not WebFetch for tweets?** X's pages are heavily JavaScript-dependent — WebFetch often gets incomplete or empty content. The fxtwitter public API (`api.fxtwitter.com`) returns structured JSON reliably, including full article content for long-form posts. No auth needed. See the Twitter skill for details.
 
 ### Step 2: Survey existing topics
 

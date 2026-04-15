@@ -671,7 +671,7 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 
 Notes:
 - `~/.tron/user/` is reserved (`paths::user_dir()`) but not currently populated.
-- Credentials for external CLIs (Google Workspace, Twitter, etc.) live in `workspace/vault/`. See the relevant skills for the materialization pattern.
+- Credentials for external CLIs (Google Workspace, etc.) live in `workspace/vault/`. See the relevant skills for the materialization pattern.
 
 ### Service (launchd)
 
