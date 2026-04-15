@@ -11,7 +11,7 @@
 //! Each provider has its own module with `load_server_auth()` for priority-based
 //! auth loading:
 //! - [`anthropic`]: PKCE OAuth + API key (provider key: `"anthropic"`)
-//! - [`google`]: Dual-endpoint OAuth (Cloud Code Assist / Antigravity) + API key
+//! - [`google`]: Cloud Code Assist OAuth + API key
 //! - [`openai`]: OAuth + API key (provider key: `"openai-codex"`)
 
 pub mod anthropic;
@@ -48,9 +48,9 @@ pub use errors::AuthError;
 pub use pkce::{PkcePair, generate_pkce};
 pub use storage::{auth_file_path, load_auth_storage, save_auth_storage};
 pub use types::{
-    ActiveCredential, ApiKeyEntry, AuthStorage, GoogleAuth, GoogleOAuthEndpoint,
-    GoogleProviderAuth, OAuthConfig, OAuthTokenRefreshResponse, OAuthTokens, ProviderAuth,
-    ServerAuth, ServiceAuth, calculate_expires_at, now_ms, should_refresh,
+    ActiveCredential, ApiKeyEntry, AuthStorage, GoogleAuth, GoogleProviderAuth, OAuthConfig,
+    OAuthTokenRefreshResponse, OAuthTokens, ProviderAuth, ServerAuth, ServiceAuth,
+    calculate_expires_at, now_ms, should_refresh,
 };
 
 // ─── Credential resolution ──────────────────────────────────────────────────

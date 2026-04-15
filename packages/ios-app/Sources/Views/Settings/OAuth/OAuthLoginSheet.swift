@@ -10,11 +10,13 @@ struct OAuthProvider: Identifiable {
 
     static let anthropic = OAuthProvider(id: "anthropic", displayName: "Anthropic", assetIcon: "IconAnthropic", accentColor: .tronCoral)
     static let openai = OAuthProvider(id: "openai-codex", displayName: "OpenAI", assetIcon: "IconOpenAI", accentColor: .tronSlate)
+    static let google = OAuthProvider(id: "google", displayName: "Google", assetIcon: "IconGoogle", accentColor: .tronCyan)
 
     static func from(_ providerId: String) -> OAuthProvider? {
         switch providerId {
         case "anthropic": return .anthropic
         case "openai-codex": return .openai
+        case "google": return .google
         default: return nil
         }
     }

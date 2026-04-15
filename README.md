@@ -106,7 +106,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   +-- llm              Provider trait, model registry, SSE streaming, auth
   |     +-- anthropic/   Claude (OAuth + API key, cache pruning)
   |     +-- openai/      GPT/o-series (OAuth + API key)
-  |     +-- google/      Gemini (Cloud Code Assist + Antigravity OAuth)
+  |     +-- google/      Gemini (Cloud Code Assist OAuth + API key)
   |     +-- minimax/     MiniMax (API key only)
   |     +-- kimi/        Kimi/Moonshot (API key only)
   |     +-- ollama/      Gemma 4 local inference (no auth, native /api/chat)
@@ -456,7 +456,7 @@ The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection
 |----------|--------|--------------|-------|
 | Anthropic | `llm/anthropic/` | OAuth (primary), API key | PKCE OAuth flow; cache pruning supported |
 | OpenAI    | `llm/openai/`    | OAuth, API key            | Codex CLI compatibility |
-| Google    | `llm/google/`    | OAuth, API key            | Dual endpoint: Cloud Code Assist + Antigravity |
+| Google    | `llm/google/`    | OAuth, API key            | Cloud Code Assist OAuth, Gemini API key |
 | MiniMax   | `llm/minimax/`   | API key only              | — |
 | Kimi      | `llm/kimi/`      | API key only              | — |
 | Ollama    | `llm/ollama/`    | None (local)              | Requires Ollama running locally. See `docs/local-llm-setup.md` |

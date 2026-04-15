@@ -85,22 +85,9 @@ pub struct GoogleProviderAuth {
     /// OAuth client secret (stored for refresh).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_secret: Option<String>,
-    /// Which Google endpoint was used for auth.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub endpoint: Option<GoogleOAuthEndpoint>,
     /// Google Cloud project ID (required for Cloud Code Assist).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
-}
-
-/// Google OAuth endpoint variant.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum GoogleOAuthEndpoint {
-    /// Production Cloud Code Assist.
-    CloudCodeAssist,
-    /// Free tier / sandbox.
-    Antigravity,
 }
 
 /// API key auth for external services.
@@ -258,12 +245,6 @@ impl ServerAuth {
 pub struct GoogleAuth {
     /// Base server auth.
     pub auth: ServerAuth,
-    /// Which Google endpoint.
-    pub endpoint: Option<GoogleOAuthEndpoint>,
-    /// API base URL.
-    pub api_endpoint: Option<String>,
-    /// API version string.
-    pub api_version: Option<String>,
     /// Google Cloud project ID.
     pub project_id: Option<String>,
 }
@@ -380,25 +361,25 @@ mod tests {
             "accounts": [{"label":"test","oauth":{"accessToken":"ya29.abc","refreshToken":"r","expiresAt":0}}],
             "clientId": "cid",
             "clientSecret": "csec",
-            "endpoint": "cloud-code-assist",
             "projectId": "my-project"
         }"#;
         let gpa: GoogleProviderAuth = serde_json::from_str(json).unwrap();
         assert_eq!(gpa.client_id.as_deref(), Some("cid"));
-        assert_eq!(gpa.endpoint, Some(GoogleOAuthEndpoint::CloudCodeAssist));
         assert_eq!(gpa.project_id.as_deref(), Some("my-project"));
         assert_eq!(gpa.base.accounts.as_ref().unwrap()[0].label, "test");
     }
 
     #[test]
-    fn google_endpoint_serde() {
-        let cca = serde_json::to_string(&GoogleOAuthEndpoint::CloudCodeAssist).unwrap();
-        assert_eq!(cca, "\"cloud-code-assist\"");
-        let ag = serde_json::to_string(&GoogleOAuthEndpoint::Antigravity).unwrap();
-        assert_eq!(ag, "\"antigravity\"");
-
-        let back: GoogleOAuthEndpoint = serde_json::from_str("\"antigravity\"").unwrap();
-        assert_eq!(back, GoogleOAuthEndpoint::Antigravity);
+    fn google_provider_auth_ignores_legacy_endpoint() {
+        // Legacy auth.json files may have "endpoint": "antigravity" — serde ignores it
+        let json = r#"{
+            "clientId": "cid",
+            "endpoint": "antigravity",
+            "projectId": "proj"
+        }"#;
+        let gpa: GoogleProviderAuth = serde_json::from_str(json).unwrap();
+        assert_eq!(gpa.client_id.as_deref(), Some("cid"));
+        assert_eq!(gpa.project_id.as_deref(), Some("proj"));
     }
 
     #[test]
@@ -464,14 +445,12 @@ mod tests {
     fn auth_storage_get_google_auth() {
         let mut storage = AuthStorage::new();
         let gpa = GoogleProviderAuth {
-            endpoint: Some(GoogleOAuthEndpoint::Antigravity),
             project_id: Some("proj".to_string()),
             ..Default::default()
         };
         storage.set_google_auth(&gpa);
 
         let restored = storage.get_google_auth().unwrap();
-        assert_eq!(restored.endpoint, Some(GoogleOAuthEndpoint::Antigravity));
         assert_eq!(restored.project_id.as_deref(), Some("proj"));
     }
 

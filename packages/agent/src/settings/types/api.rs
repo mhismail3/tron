@@ -15,9 +15,9 @@ pub struct ApiSettings {
     /// `OpenAI` Codex API settings (optional — absent if not configured).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub openai_codex: Option<OpenAiCodexApiSettings>,
-    /// Google Gemini API settings (optional — absent if not configured).
+    /// Google Gemini API settings (legacy — kept for serde compatibility, never read).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub google: Option<GoogleApiSettings>,
+    pub google: Option<serde_json::Value>,
     /// `MiniMax` API settings (optional — absent if not configured).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minimax: Option<MiniMaxApiSettings>,
@@ -125,59 +125,6 @@ impl Default for OpenAiCodexApiSettings {
     }
 }
 
-/// Google API endpoint variant.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GoogleEndpoint {
-    /// Cloud Code Assist (production).
-    #[default]
-    #[serde(rename = "cloud-code-assist")]
-    CloudCodeAssist,
-    /// Antigravity (sandbox/free tier).
-    #[serde(rename = "antigravity")]
-    Antigravity,
-}
-
-/// Google Gemini API and OAuth settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct GoogleApiSettings {
-    /// OAuth authorization URL.
-    pub auth_url: String,
-    /// OAuth token exchange URL.
-    pub token_url: String,
-    /// OAuth scopes requested.
-    pub scopes: Vec<String>,
-    /// OAuth redirect URI.
-    pub redirect_uri: String,
-    /// Seconds before token expiry to trigger refresh.
-    pub token_expiry_buffer_seconds: u64,
-    /// API endpoint base URL.
-    pub api_endpoint: String,
-    /// API version string.
-    pub api_version: String,
-    /// Which Google endpoint to use.
-    pub default_endpoint: GoogleEndpoint,
-}
-
-impl Default for GoogleApiSettings {
-    fn default() -> Self {
-        Self {
-            auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
-            token_url: "https://oauth2.googleapis.com/token".to_string(),
-            scopes: vec![
-                "https://www.googleapis.com/auth/cloud-platform".to_string(),
-                "https://www.googleapis.com/auth/userinfo.email".to_string(),
-                "openid".to_string(),
-            ],
-            redirect_uri: "http://localhost:45289".to_string(),
-            token_expiry_buffer_seconds: 300,
-            api_endpoint: "https://cloudcode-pa.googleapis.com".to_string(),
-            api_version: "v1internal".to_string(),
-            default_endpoint: GoogleEndpoint::CloudCodeAssist,
-        }
-    }
-}
-
 /// `MiniMax` API settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -279,21 +226,11 @@ mod tests {
     }
 
     #[test]
-    fn google_endpoint_serde() {
-        let json = serde_json::to_string(&GoogleEndpoint::CloudCodeAssist).unwrap();
-        assert_eq!(json, "\"cloud-code-assist\"");
-        let back: GoogleEndpoint = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, GoogleEndpoint::CloudCodeAssist);
-
-        let json2 = serde_json::to_string(&GoogleEndpoint::Antigravity).unwrap();
-        assert_eq!(json2, "\"antigravity\"");
-    }
-
-    #[test]
-    fn google_defaults() {
-        let g = GoogleApiSettings::default();
-        assert_eq!(g.default_endpoint, GoogleEndpoint::CloudCodeAssist);
-        assert_eq!(g.redirect_uri, "http://localhost:45289");
+    fn google_settings_not_in_api_settings() {
+        // GoogleApiSettings was removed — the `google` field on ApiSettings
+        // is kept as Option<serde_json::Value> for backward compat only
+        let api = ApiSettings::default();
+        assert!(api.google.is_none());
     }
 
     #[test]

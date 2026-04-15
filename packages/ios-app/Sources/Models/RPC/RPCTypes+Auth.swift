@@ -20,7 +20,6 @@ struct ProviderAuthInfo: Decodable {
     let activeCredential: ActiveCredentialInfo?
 
     // Google-specific fields
-    let endpoint: String?
     let projectId: String?
     let hasClientId: Bool?
     let hasClientSecret: Bool?
@@ -35,7 +34,6 @@ struct ProviderAuthInfo: Decodable {
         accounts = try? container.decodeIfPresent([AccountInfo].self, forKey: .accounts)
         apiKeys = try? container.decodeIfPresent([ApiKeyInfo].self, forKey: .apiKeys)
         activeCredential = try? container.decodeIfPresent(ActiveCredentialInfo.self, forKey: .activeCredential)
-        endpoint = try? container.decodeIfPresent(String.self, forKey: .endpoint)
         projectId = try? container.decodeIfPresent(String.self, forKey: .projectId)
         hasClientId = try? container.decodeIfPresent(Bool.self, forKey: .hasClientId)
         hasClientSecret = try? container.decodeIfPresent(Bool.self, forKey: .hasClientSecret)
@@ -44,7 +42,7 @@ struct ProviderAuthInfo: Decodable {
     private enum CodingKeys: String, CodingKey {
         case hasApiKey, apiKeyHint, hasOAuth, oauthExpiresAt, isOAuthExpired
         case accounts, apiKeys, activeCredential
-        case endpoint, projectId, hasClientId, hasClientSecret
+        case projectId, hasClientId, hasClientSecret
     }
 }
 
@@ -95,7 +93,6 @@ struct AuthUpdateParams: Encodable {
     // Google-specific fields
     var clientId: String?
     var clientSecret: String?
-    var endpoint: String?
     var projectId: String?
 }
 

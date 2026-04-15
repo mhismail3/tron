@@ -390,7 +390,6 @@ pub fn acquire_auth_file_lock(auth_path: &Path) -> std::io::Result<AuthFileLock>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::auth::types::GoogleOAuthEndpoint;
     use tempfile::TempDir;
 
     fn test_path(dir: &TempDir) -> PathBuf {
@@ -589,17 +588,12 @@ mod tests {
         let path = test_path(&dir);
 
         let gpa = GoogleProviderAuth {
-            endpoint: Some(crate::llm::auth::types::GoogleOAuthEndpoint::Antigravity),
             project_id: Some("proj-123".to_string()),
             ..Default::default()
         };
         save_google_provider_auth(&path, &gpa).unwrap();
 
         let loaded = get_google_provider_auth(&path).unwrap();
-        assert_eq!(
-            loaded.endpoint,
-            Some(crate::llm::auth::types::GoogleOAuthEndpoint::Antigravity)
-        );
         assert_eq!(loaded.project_id.as_deref(), Some("proj-123"));
     }
 
@@ -1222,7 +1216,7 @@ mod tests {
         write_raw_auth(&path, AUTH_WITH_RELAY);
 
         let gpa = GoogleProviderAuth {
-            endpoint: Some(GoogleOAuthEndpoint::Antigravity),
+            project_id: Some("test-proj".to_string()),
             ..Default::default()
         };
         save_google_provider_auth(&path, &gpa).unwrap();

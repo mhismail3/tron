@@ -154,30 +154,16 @@ pub fn default_safety_settings() -> Vec<SafetySetting> {
 // Authentication types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// OAuth endpoint variants for Google authentication.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum GoogleOAuthEndpoint {
-    /// Cloud Code Assist (production).
-    #[default]
-    CloudCodeAssist,
-    /// Antigravity (sandbox/experimental).
-    Antigravity,
-}
-
 /// Google provider authentication.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GoogleAuth {
-    /// OAuth authentication (preferred).
+    /// OAuth authentication via Cloud Code Assist.
     Oauth {
         /// OAuth tokens.
         #[serde(flatten)]
         tokens: crate::llm::auth::OAuthTokens,
-        /// Which OAuth endpoint was used.
-        #[serde(default)]
-        endpoint: GoogleOAuthEndpoint,
-        /// Project ID for `x-goog-user-project` header (Cloud Code Assist).
+        /// Project ID for `x-goog-user-project` header.
         #[serde(skip_serializing_if = "Option::is_none")]
         project_id: Option<String>,
     },
@@ -369,6 +355,9 @@ pub struct GenerationConfig {
     /// Stop sequences.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_sequences: Option<Vec<String>>,
+    /// Thinking configuration (Gemini 2.5 and 3 thinking-capable models).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_config: Option<ThinkingConfig>,
 }
 
 /// Streaming response chunk from the Gemini API.
@@ -750,12 +739,6 @@ pub const CLOUD_CODE_ASSIST_ENDPOINT: &str = "https://cloudcode-pa.googleapis.co
 /// Cloud Code Assist API version.
 pub const CLOUD_CODE_ASSIST_VERSION: &str = "v1internal";
 
-/// Antigravity API endpoint.
-pub const ANTIGRAVITY_ENDPOINT: &str = "https://daily-cloudcode-pa.sandbox.googleapis.com";
-
-/// Antigravity API version.
-pub const ANTIGRAVITY_VERSION: &str = "v1internal";
-
 /// Maximum tool result content length before truncation.
 pub const TOOL_RESULT_MAX_LENGTH: usize = 16_384;
 
@@ -778,17 +761,6 @@ pub struct GoogleApiSettings {
     /// OAuth client secret (required for token refresh).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_secret: Option<String>,
-}
-
-/// Map standard Gemini model names to Antigravity endpoint model names.
-#[must_use]
-pub fn map_to_antigravity_model(model: &str) -> &str {
-    match model {
-        "gemini-3.1-pro-preview" => "gemini-3.1-pro-high",
-        "gemini-3-pro-preview" => "gemini-3-pro-high",
-        "gemini-3-flash-preview" => "gemini-3-pro-low",
-        _ => model,
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -868,13 +840,11 @@ mod tests {
                 refresh_token: "rt".into(),
                 expires_at: 99999,
             },
-            endpoint: GoogleOAuthEndpoint::CloudCodeAssist,
             project_id: Some("proj-123".into()),
         };
         let json = serde_json::to_value(&auth).unwrap();
         assert_eq!(json["type"], "oauth");
         assert_eq!(json["accessToken"], "at");
-        assert_eq!(json["endpoint"], "cloud-code-assist");
         assert_eq!(json["project_id"], "proj-123");
     }
 
@@ -889,11 +859,17 @@ mod tests {
     }
 
     #[test]
-    fn oauth_endpoint_default() {
-        assert_eq!(
-            GoogleOAuthEndpoint::default(),
-            GoogleOAuthEndpoint::CloudCodeAssist
-        );
+    fn auth_oauth_has_no_endpoint_field() {
+        let auth = GoogleAuth::Oauth {
+            tokens: crate::llm::auth::OAuthTokens {
+                access_token: "at".into(),
+                refresh_token: "rt".into(),
+                expires_at: 99999,
+            },
+            project_id: None,
+        };
+        let json = serde_json::to_value(&auth).unwrap();
+        assert!(json.get("endpoint").is_none());
     }
 
     // ── Config ───────────────────────────────────────────────────────
@@ -908,7 +884,6 @@ mod tests {
                     refresh_token: "rt".into(),
                     expires_at: 99999,
                 },
-                endpoint: GoogleOAuthEndpoint::CloudCodeAssist,
                 project_id: None,
             },
             max_tokens: Some(4096),
@@ -1160,29 +1135,6 @@ mod tests {
         assert_eq!(json["clientId"], "cid");
     }
 
-    // ── map_to_antigravity_model ────────────────────────────────────
-
-    #[test]
-    fn antigravity_model_mapping() {
-        assert_eq!(
-            map_to_antigravity_model("gemini-3.1-pro-preview"),
-            "gemini-3.1-pro-high"
-        );
-        assert_eq!(
-            map_to_antigravity_model("gemini-3-pro-preview"),
-            "gemini-3-pro-high"
-        );
-        assert_eq!(
-            map_to_antigravity_model("gemini-3-flash-preview"),
-            "gemini-3-pro-low"
-        );
-        assert_eq!(map_to_antigravity_model("gemini-2.5-pro"), "gemini-2.5-pro");
-        assert_eq!(
-            map_to_antigravity_model("gemini-2.5-flash"),
-            "gemini-2.5-flash"
-        );
-        assert_eq!(map_to_antigravity_model("unknown-model"), "unknown-model");
-    }
 
     // ── Generation config ────────────────────────────────────────────
 
@@ -1241,10 +1193,66 @@ mod tests {
             top_p: None,
             top_k: None,
             stop_sequences: None,
+            thinking_config: None,
         };
         let json = serde_json::to_value(&config).unwrap();
         assert_eq!(json["maxOutputTokens"], 4096);
         assert!(json.get("temperature").is_none());
         assert!(json.get("topP").is_none());
+        assert!(json.get("thinkingConfig").is_none());
+    }
+
+    #[test]
+    fn generation_config_with_thinking_nested() {
+        let config = GenerationConfig {
+            max_output_tokens: Some(65536),
+            temperature: Some(1.0),
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            thinking_config: Some(ThinkingConfig {
+                thinking_level: Some("HIGH".into()),
+                thinking_budget: None,
+                include_thoughts: Some(true),
+            }),
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        assert_eq!(json["thinkingConfig"]["thinkingLevel"], "HIGH");
+        assert_eq!(json["thinkingConfig"]["includeThoughts"], true);
+        assert!(json["thinkingConfig"].get("thinkingBudget").is_none());
+    }
+
+    #[test]
+    fn generation_config_with_budget_nested() {
+        let config = GenerationConfig {
+            max_output_tokens: Some(8192),
+            temperature: Some(0.7),
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            thinking_config: Some(ThinkingConfig {
+                thinking_level: None,
+                thinking_budget: Some(10_000),
+                include_thoughts: Some(true),
+            }),
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        assert_eq!(json["thinkingConfig"]["thinkingBudget"], 10_000);
+        assert_eq!(json["thinkingConfig"]["includeThoughts"], true);
+        assert!(json["thinkingConfig"].get("thinkingLevel").is_none());
+    }
+
+    #[test]
+    fn generation_config_no_thinking_omits_field() {
+        let config = GenerationConfig {
+            max_output_tokens: Some(4096),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            thinking_config: None,
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        assert!(json.get("thinkingConfig").is_none());
     }
 }

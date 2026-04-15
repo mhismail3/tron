@@ -151,10 +151,9 @@ async fn auth_get_shows_accounts_list() {
 }
 
 #[tokio::test]
-async fn auth_get_google_returns_endpoint_and_project() {
+async fn auth_get_google_returns_project() {
     let (ctx, _dir) = make_ctx_with_temp_auth();
     let gpa = GoogleProviderAuth {
-        endpoint: Some(GoogleOAuthEndpoint::Antigravity),
         project_id: Some("my-project".into()),
         client_id: Some("cid".into()),
         client_secret: Some("csec".into()),
@@ -164,7 +163,7 @@ async fn auth_get_google_returns_endpoint_and_project() {
 
     let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
     let google = &result["providers"]["google"];
-    assert_eq!(google["endpoint"], "antigravity");
+    assert!(google.get("endpoint").is_none() || google["endpoint"].is_null());
     assert_eq!(google["projectId"], "my-project");
     assert_eq!(google["hasClientId"], true);
     assert_eq!(google["hasClientSecret"], true);
@@ -257,7 +256,6 @@ async fn auth_update_sets_google_with_all_fields() {
                 "apiKey": "ya29.abcdefghijklmnop",
                 "clientId": "client-id-123",
                 "clientSecret": "client-secret-456",
-                "endpoint": "antigravity",
                 "projectId": "my-gcp-project"
             })),
             &ctx,
@@ -269,7 +267,6 @@ async fn auth_update_sets_google_with_all_fields() {
     assert_eq!(google["hasApiKey"], true);
     assert_eq!(google["hasClientId"], true);
     assert_eq!(google["hasClientSecret"], true);
-    assert_eq!(google["endpoint"], "antigravity");
     assert_eq!(google["projectId"], "my-gcp-project");
 }
 
@@ -885,6 +882,234 @@ async fn oauth_begin_anthropic_still_returns_pkce() {
     assert!(url.contains("claude.ai"), "Anthropic URL should use claude.ai");
     assert!(url.contains("code_challenge="), "Anthropic should use PKCE");
     assert!(url.contains("code_challenge_method=S256"), "Anthropic should use S256");
+}
+
+// ── auth.oauthBegin (Google) ──
+
+#[tokio::test]
+async fn oauth_begin_google_requires_client_id() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    // No Google credentials saved
+    let err = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code(), "INVALID_PARAMS");
+    assert!(err.to_string().contains("client_id"), "error should mention client_id: {}", err);
+}
+
+#[tokio::test]
+async fn oauth_begin_google_error_message_mentions_settings() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let err = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("Settings"), "error should guide user to Settings: {}", err);
+}
+
+#[tokio::test]
+async fn oauth_begin_google_returns_flow_id_and_auth_url() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let gpa = GoogleProviderAuth {
+        client_id: Some("test-client-id".into()),
+        ..Default::default()
+    };
+    save_google_provider_auth(&ctx.auth_path, &gpa).unwrap();
+
+    let result = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap();
+
+    assert!(result["flowId"].as_str().is_some());
+    assert!(!result["flowId"].as_str().unwrap().is_empty());
+    assert!(result["authUrl"].as_str().is_some());
+    assert!(!result["authUrl"].as_str().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn oauth_begin_google_auth_url_contains_google_endpoint() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let gpa = GoogleProviderAuth {
+        client_id: Some("test-client-id".into()),
+        ..Default::default()
+    };
+    save_google_provider_auth(&ctx.auth_path, &gpa).unwrap();
+
+    let result = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap();
+
+    let url = result["authUrl"].as_str().unwrap();
+    assert!(url.contains("accounts.google.com"), "URL should use Google auth endpoint");
+}
+
+#[tokio::test]
+async fn oauth_begin_google_auth_url_has_pkce() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let gpa = GoogleProviderAuth {
+        client_id: Some("test-client-id".into()),
+        ..Default::default()
+    };
+    save_google_provider_auth(&ctx.auth_path, &gpa).unwrap();
+
+    let result = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap();
+
+    let url = result["authUrl"].as_str().unwrap();
+    assert!(url.contains("code_challenge="), "Google should use PKCE code_challenge");
+    assert!(url.contains("code_challenge_method=S256"), "Google should use S256");
+}
+
+#[tokio::test]
+async fn oauth_begin_google_auth_url_contains_client_id() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let gpa = GoogleProviderAuth {
+        client_id: Some("test-client-id".into()),
+        ..Default::default()
+    };
+    save_google_provider_auth(&ctx.auth_path, &gpa).unwrap();
+
+    let result = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap();
+
+    let url = result["authUrl"].as_str().unwrap();
+    assert!(url.contains("client_id=test-client-id"), "URL should contain user's client_id");
+}
+
+#[tokio::test]
+async fn oauth_begin_google_auth_url_contains_required_params() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let gpa = GoogleProviderAuth {
+        client_id: Some("test-client-id".into()),
+        ..Default::default()
+    };
+    save_google_provider_auth(&ctx.auth_path, &gpa).unwrap();
+
+    let result = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap();
+
+    let url = result["authUrl"].as_str().unwrap();
+    assert!(url.contains("response_type=code"));
+    assert!(url.contains("redirect_uri="));
+    assert!(url.contains("scope="));
+    assert!(url.contains("access_type=offline"), "Google should request offline access");
+    assert!(url.contains("prompt=consent"), "Google should force consent for refresh token");
+}
+
+#[tokio::test]
+async fn oauth_begin_google_auth_url_has_no_state_param() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let gpa = GoogleProviderAuth {
+        client_id: Some("test-client-id".into()),
+        ..Default::default()
+    };
+    save_google_provider_auth(&ctx.auth_path, &gpa).unwrap();
+
+    let result = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap();
+
+    let url = result["authUrl"].as_str().unwrap();
+    assert!(!url.contains("state="), "Google OAuth should not include state parameter (PKCE-only)");
+}
+
+#[tokio::test]
+async fn oauth_begin_google_stores_correct_provider_in_flow() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let gpa = GoogleProviderAuth {
+        client_id: Some("test-client-id".into()),
+        ..Default::default()
+    };
+    save_google_provider_auth(&ctx.auth_path, &gpa).unwrap();
+
+    let result = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap();
+
+    let flow_id = result["flowId"].as_str().unwrap();
+    let flows = ctx.oauth_flows.lock().await;
+    assert!(flows.contains_key(flow_id));
+    assert_eq!(flows[flow_id].provider, "google");
+}
+
+#[tokio::test]
+async fn oauth_begin_google_with_client_secret_succeeds() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let gpa = GoogleProviderAuth {
+        client_id: Some("cid".into()),
+        client_secret: Some("csec".into()),
+        ..Default::default()
+    };
+    save_google_provider_auth(&ctx.auth_path, &gpa).unwrap();
+
+    let result = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap();
+
+    let url = result["authUrl"].as_str().unwrap();
+    assert!(!url.is_empty());
+    // Client secret should NOT appear in the auth URL (used at token exchange time only)
+    assert!(!url.contains("csec"), "client_secret must not leak into auth URL");
+}
+
+#[tokio::test]
+async fn oauth_begin_google_with_only_client_id_succeeds() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let gpa = GoogleProviderAuth {
+        client_id: Some("cid-only".into()),
+        client_secret: None,
+        ..Default::default()
+    };
+    save_google_provider_auth(&ctx.auth_path, &gpa).unwrap();
+
+    let result = OAuthBeginHandler
+        .handle(Some(json!({"provider": "google"})), &ctx)
+        .await
+        .unwrap();
+
+    assert!(result["authUrl"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn oauth_complete_google_requires_client_id() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    // No Google credentials on disk, but inject a pending flow
+    let flow_id = "test-flow-google";
+    {
+        let mut flows = ctx.oauth_flows.lock().await;
+        let _ = flows.insert(
+            flow_id.to_string(),
+            PendingOAuthFlow {
+                verifier: "test-verifier".to_string(),
+                provider: "google".to_string(),
+                created_at: std::time::Instant::now(),
+            },
+        );
+    }
+
+    let err = OAuthCompleteHandler
+        .handle(
+            Some(json!({"flowId": flow_id, "code": "test-code", "label": "test"})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("client_id"), "error should mention client_id: {}", err);
 }
 
 // ── auth.setActive ──

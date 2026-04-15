@@ -261,10 +261,10 @@ async fn create_google_with_oauth_from_file() {
     };
     tron::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
 
-    // Set Google-specific metadata
+    // Set client_id (required for OAuth)
     let mut gpa = tron::llm::auth::storage::get_google_provider_auth(&path)
         .unwrap_or_default();
-    gpa.endpoint = Some(tron::llm::auth::GoogleOAuthEndpoint::Antigravity);
+    gpa.client_id = Some("test-client-id".to_string());
     tron::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
 
     let result = tron::llm::auth::google::load_server_auth(&path)
@@ -272,10 +272,7 @@ async fn create_google_with_oauth_from_file() {
         .unwrap();
     let auth = result.unwrap();
     assert_eq!(auth.auth.token(), "ya29.google-tok");
-    assert_eq!(
-        auth.endpoint,
-        Some(tron::llm::auth::GoogleOAuthEndpoint::Antigravity)
-    );
+    assert!(auth.project_id.is_none());
 }
 
 #[tokio::test]

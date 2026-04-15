@@ -16,7 +16,7 @@ private struct ProviderInfo: Identifiable {
     static let llmProviders: [ProviderInfo] = [
         ProviderInfo(id: "anthropic", displayName: "Anthropic", assetIcon: "IconAnthropic", color: .tronCoral, supportsOAuth: true),
         ProviderInfo(id: "openai-codex", displayName: "OpenAI", assetIcon: "IconOpenAI", color: .tronSlate, supportsOAuth: true),
-        ProviderInfo(id: "google", displayName: "Google", assetIcon: "IconGoogle", color: .tronCyan, supportsOAuth: false),
+        ProviderInfo(id: "google", displayName: "Google", assetIcon: "IconGoogle", color: .tronCyan, supportsOAuth: true),
         ProviderInfo(id: "minimax", displayName: "MiniMax", assetIcon: "IconMiniMax", color: .tronRose, supportsOAuth: false),
         ProviderInfo(id: "kimi", displayName: "Kimi", assetIcon: "IconKimi", color: .tronIndigo, supportsOAuth: false),
     ]
@@ -84,6 +84,7 @@ struct ProvidersSettingsPage: View {
                             await renameAccount(provider: provider.id, oldLabel: oldLabel, newLabel: newLabel)
                         },
                         onOAuthLogin: { oauthProvider = OAuthProvider.from(provider.id) },
+                        onSaveProvider: { params in await saveProvider(params) },
                         onClear: { await clearProvider(provider.id) }
                     )
                 }
@@ -198,6 +199,7 @@ private struct ProviderCard: View {
     let onAddApiKey: (String, String) async -> Void
     let onRenameAccount: (String, String) async -> Void
     let onOAuthLogin: () -> Void
+    let onSaveProvider: (AuthUpdateParams) async -> Void
     let onClear: () async -> Void
 
     @State private var showAddApiKey = false
@@ -331,10 +333,7 @@ private struct ProviderCard: View {
                     if provider.id == "google" {
                         GoogleProviderFields(
                             providerInfo: providerAuth,
-                            onSave: { params in
-                                // Forward to the parent's save
-                                await onAddApiKey("", "") // Placeholder — Google uses its own save
-                            },
+                            onSave: { params in await onSaveProvider(params) },
                             onClear: { await onClear() }
                         )
                     }
@@ -491,11 +490,8 @@ private struct GoogleProviderFields: View {
 
     @State private var clientId = ""
     @State private var clientSecret = ""
-    @State private var selectedEndpoint = "antigravity"
     @State private var projectId = ""
     @State private var isSaving = false
-
-    private let endpoints = ["cloud-code-assist", "antigravity"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -529,33 +525,6 @@ private struct GoogleProviderFields: View {
             }
 
             HStack {
-                Text("Endpoint")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                Spacer()
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        selectedEndpoint = selectedEndpoint == "antigravity"
-                            ? "cloud-code-assist" : "antigravity"
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(selectedEndpoint == "cloud-code-assist"
-                             ? "Cloud Code Assist" : "Antigravity")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                    }
-                    .foregroundStyle(.tronCyan)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.tronCyan.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-
-            HStack {
                 Text("Project ID")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
@@ -574,7 +543,6 @@ private struct GoogleProviderFields: View {
                         var params = AuthUpdateParams(provider: "google")
                         if !clientId.isEmpty { params.clientId = clientId }
                         if !clientSecret.isEmpty { params.clientSecret = clientSecret }
-                        params.endpoint = selectedEndpoint
                         if !projectId.isEmpty { params.projectId = projectId }
                         await onSave(params)
                         clientId = ""
@@ -604,11 +572,6 @@ private struct GoogleProviderFields: View {
         .padding(10)
         .sectionFill(.tronCyan, cornerRadius: 8, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .onAppear {
-            if let ep = providerInfo?.endpoint {
-                selectedEndpoint = ep
-            }
-        }
     }
 }
 

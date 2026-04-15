@@ -166,23 +166,6 @@ fn update_google_provider(
         }
     }
 
-    // Endpoint
-    if let Some(val) = params.get("endpoint") {
-        if val.is_null() {
-            google.endpoint = None;
-        } else if let Some(s) = val.as_str() {
-            google.endpoint = match s {
-                "cloud-code-assist" => Some(GoogleOAuthEndpoint::CloudCodeAssist),
-                "antigravity" => Some(GoogleOAuthEndpoint::Antigravity),
-                _ => {
-                    return Err(RpcError::InvalidParams {
-                        message: format!("Unknown endpoint: {s}"),
-                    })
-                }
-            };
-        }
-    }
-
     // Project ID
     if let Some(val) = params.get("projectId") {
         if val.is_null() {

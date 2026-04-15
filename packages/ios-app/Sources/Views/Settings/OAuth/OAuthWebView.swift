@@ -47,7 +47,11 @@ struct OAuthWebView: UIViewRepresentable {
                 && url.port == 1455
                 && url.path == "/auth/callback"
 
-            guard isAnthropicCallback || isOpenAICallback else {
+            // Google: localhost:45289
+            let isGoogleCallback = url.host == "localhost"
+                && url.port == 45289
+
+            guard isAnthropicCallback || isOpenAICallback || isGoogleCallback else {
                 decisionHandler(.allow)
                 return
             }

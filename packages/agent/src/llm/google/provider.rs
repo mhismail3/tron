@@ -1,8 +1,7 @@
 //! Google Gemini provider implementing the [`Provider`] trait.
 //!
-//! Supports three authentication modes:
+//! Supports two authentication modes:
 //! - **Cloud Code Assist** (OAuth) — uses `cloudcode-pa.googleapis.com` with project ID
-//! - **Antigravity** (OAuth) — uses `daily-cloudcode-pa.sandbox.googleapis.com` with wrapper format
 //! - **API Key** — uses `generativelanguage.googleapis.com` directly
 //!
 //! # Thinking Configuration
@@ -17,7 +16,7 @@
 //! with a warning.
 
 use async_trait::async_trait;
-use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::llm::auth::{OAuthTokens, calculate_expires_at, should_refresh};
@@ -30,11 +29,10 @@ use crate::core::messages::Context;
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{create_stream_state, process_stream_chunk};
 use super::types::{
-    ANTIGRAVITY_ENDPOINT, ANTIGRAVITY_VERSION, CLOUD_CODE_ASSIST_ENDPOINT,
-    CLOUD_CODE_ASSIST_VERSION, DEFAULT_API_KEY_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS,
-    GeminiStreamChunk, GenerationConfig, GoogleApiSettings, GoogleAuth, GoogleConfig,
-    GoogleOAuthEndpoint, SystemInstruction, SystemPart, ThinkingConfig, default_safety_settings,
-    get_gemini_model, is_gemini_3_model, map_to_antigravity_model,
+    CLOUD_CODE_ASSIST_ENDPOINT, CLOUD_CODE_ASSIST_VERSION, DEFAULT_API_KEY_BASE_URL,
+    DEFAULT_MAX_OUTPUT_TOKENS, GeminiStreamChunk, GenerationConfig, GoogleApiSettings, GoogleAuth,
+    GoogleConfig, SystemInstruction, SystemPart, ThinkingConfig, default_safety_settings,
+    get_gemini_model, is_gemini_3_model,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,8 +130,6 @@ pub struct GoogleProvider {
     client: reqwest::Client,
     /// Mutable OAuth token state (refreshed before each request).
     tokens: Option<tokio::sync::Mutex<OAuthTokens>>,
-    /// OAuth endpoint variant.
-    endpoint: Option<GoogleOAuthEndpoint>,
     /// Google Cloud project ID (Cloud Code Assist only).
     project_id: Option<String>,
 }
@@ -142,52 +138,20 @@ impl GoogleProvider {
     /// Create a new Google provider.
     #[must_use]
     pub fn new(config: GoogleConfig) -> Self {
-        let (tokens, endpoint, project_id) = match &config.auth {
-            GoogleAuth::Oauth {
-                tokens,
-                endpoint,
-                project_id,
-            } => (
-                Some(tokio::sync::Mutex::new(tokens.clone())),
-                Some(*endpoint),
-                project_id.clone(),
-            ),
-            GoogleAuth::ApiKey { .. } => (None, None, None),
-        };
-
-        info!(
-            model = %config.model,
-            auth_type = match &config.auth {
-                GoogleAuth::Oauth { .. } => "oauth",
-                GoogleAuth::ApiKey { .. } => "api_key",
-            },
-            endpoint = ?endpoint,
-            "Google provider initialized"
-        );
-
-        Self {
-            config,
-            client: reqwest::Client::new(),
-            tokens,
-            endpoint,
-            project_id,
-        }
+        Self::with_client(config, reqwest::Client::new())
     }
 
     /// Create a new Google provider with a shared HTTP client.
     #[must_use]
     pub fn with_client(config: GoogleConfig, client: reqwest::Client) -> Self {
-        let (tokens, endpoint, project_id) = match &config.auth {
+        let (tokens, project_id) = match &config.auth {
             GoogleAuth::Oauth {
-                tokens,
-                endpoint,
-                project_id,
+                tokens, project_id, ..
             } => (
                 Some(tokio::sync::Mutex::new(tokens.clone())),
-                Some(*endpoint),
                 project_id.clone(),
             ),
-            GoogleAuth::ApiKey { .. } => (None, None, None),
+            GoogleAuth::ApiKey { .. } => (None, None),
         };
 
         info!(
@@ -196,7 +160,6 @@ impl GoogleProvider {
                 GoogleAuth::Oauth { .. } => "oauth",
                 GoogleAuth::ApiKey { .. } => "api_key",
             },
-            endpoint = ?endpoint,
             "Google provider initialized"
         );
 
@@ -204,7 +167,6 @@ impl GoogleProvider {
             config,
             client,
             tokens,
-            endpoint,
             project_id,
         }
     }
@@ -229,13 +191,7 @@ impl GoogleProvider {
     fn get_api_url(&self, action: &str) -> String {
         match &self.config.auth {
             GoogleAuth::Oauth { .. } => {
-                let (base, version) = match self.endpoint {
-                    Some(GoogleOAuthEndpoint::Antigravity) => {
-                        (ANTIGRAVITY_ENDPOINT, ANTIGRAVITY_VERSION)
-                    }
-                    _ => (CLOUD_CODE_ASSIST_ENDPOINT, CLOUD_CODE_ASSIST_VERSION),
-                };
-                format!("{base}/{version}:{action}?alt=sse")
+                format!("{CLOUD_CODE_ASSIST_ENDPOINT}/{CLOUD_CODE_ASSIST_VERSION}:{action}?alt=sse")
             }
             GoogleAuth::ApiKey { api_key } => {
                 let base = self
@@ -271,19 +227,11 @@ impl GoogleProvider {
                     })?,
                 );
 
-                match self.endpoint {
-                    Some(GoogleOAuthEndpoint::Antigravity) => {
-                        let _ =
-                            headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
-                    }
-                    _ => {
-                        // Cloud Code Assist requires project ID header
-                        if let Some(ref pid) = self.project_id
-                            && let Ok(val) = HeaderValue::from_str(pid)
-                        {
-                            let _ = headers.insert("x-goog-user-project", val);
-                        }
-                    }
+                // Cloud Code Assist requires project ID header
+                if let Some(ref pid) = self.project_id
+                    && let Ok(val) = HeaderValue::from_str(pid)
+                {
+                    let _ = headers.insert("x-goog-user-project", val);
                 }
 
                 let _ = headers.insert(
@@ -331,12 +279,15 @@ impl GoogleProvider {
             options.temperature.or(self.config.temperature)
         };
 
+        let thinking_config = self.build_thinking_config(is_gemini3, options);
+
         GenerationConfig {
             max_output_tokens: Some(max_tokens),
             temperature,
             top_p: None,
             top_k: None,
             stop_sequences: None,
+            thinking_config,
         }
     }
 
@@ -393,7 +344,6 @@ impl GoogleProvider {
         &self,
         context: &Context,
         gen_config: &GenerationConfig,
-        thinking_config: Option<&ThinkingConfig>,
     ) -> serde_json::Value {
         let contents = convert_messages(context);
         let tools = context.tools.as_ref().map(|t| convert_tools(t));
@@ -411,10 +361,6 @@ impl GoogleProvider {
             "safetySettings": safety_settings,
         });
 
-        if let Some(tc) = thinking_config {
-            inner["thinkingConfig"] = serde_json::to_value(tc).unwrap_or_default();
-        }
-
         if let Some(tools) = tools {
             inner["tools"] = serde_json::to_value(tools).unwrap_or_default();
         }
@@ -423,23 +369,9 @@ impl GoogleProvider {
             inner["systemInstruction"] = serde_json::to_value(si).unwrap_or_default();
         }
 
-        if let Some(GoogleOAuthEndpoint::Antigravity) = self.endpoint {
-            let project = self.project_id.as_deref().unwrap_or("");
-            let model = map_to_antigravity_model(&self.config.model);
-
-            serde_json::json!({
-                "project": project,
-                "model": model,
-                "request": inner,
-                "requestType": "agent",
-                "userAgent": "antigravity",
-                "requestId": format!("agent-{}", uuid::Uuid::now_v7()),
-            })
-        } else {
-            // Cloud Code Assist: model goes in request body
-            inner["model"] = serde_json::json!(format!("models/{}", self.config.model));
-            inner
-        }
+        // Cloud Code Assist: model goes in request body
+        inner["model"] = serde_json::json!(format!("models/{}", self.config.model));
+        inner
     }
 
     /// Build the request body for API key endpoints.
@@ -447,7 +379,6 @@ impl GoogleProvider {
         &self,
         context: &Context,
         gen_config: &GenerationConfig,
-        thinking_config: Option<&ThinkingConfig>,
     ) -> serde_json::Value {
         let contents = convert_messages(context);
         let tools = context.tools.as_ref().map(|t| convert_tools(t));
@@ -464,10 +395,6 @@ impl GoogleProvider {
             "generationConfig": gen_config,
             "safetySettings": safety_settings,
         });
-
-        if let Some(tc) = thinking_config {
-            body["thinkingConfig"] = serde_json::to_value(tc).unwrap_or_default();
-        }
 
         if let Some(tools) = tools {
             body["tools"] = serde_json::to_value(tools).unwrap_or_default();
@@ -512,8 +439,6 @@ impl GoogleProvider {
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
         let gen_config = self.build_generation_config(options);
-        let is_gemini3 = is_gemini_3_model(&self.config.model);
-        let thinking_config = self.build_thinking_config(is_gemini3, options);
 
         debug!(
             model = %self.config.model,
@@ -527,10 +452,10 @@ impl GoogleProvider {
 
         let body = match &self.config.auth {
             GoogleAuth::Oauth { .. } => {
-                self.build_oauth_request_body(context, &gen_config, thinking_config.as_ref())
+                self.build_oauth_request_body(context, &gen_config)
             }
             GoogleAuth::ApiKey { .. } => {
-                self.build_api_key_request_body(context, &gen_config, thinking_config.as_ref())
+                self.build_api_key_request_body(context, &gen_config)
             }
         };
 
@@ -633,7 +558,6 @@ mod tests {
             model: "gemini-3-pro-preview".into(),
             auth: GoogleAuth::Oauth {
                 tokens: oauth_tokens(),
-                endpoint: GoogleOAuthEndpoint::CloudCodeAssist,
                 project_id: Some("my-project".into()),
             },
             max_tokens: None,
@@ -691,16 +615,15 @@ mod tests {
     }
 
     #[test]
-    fn api_url_antigravity() {
+    fn oauth_always_uses_cca_endpoint() {
         let mut config = oauth_config();
         config.auth = GoogleAuth::Oauth {
             tokens: oauth_tokens(),
-            endpoint: GoogleOAuthEndpoint::Antigravity,
             project_id: None,
         };
         let provider = GoogleProvider::new(config);
         let url = provider.get_api_url("streamGenerateContent");
-        assert!(url.starts_with(ANTIGRAVITY_ENDPOINT));
+        assert!(url.starts_with(CLOUD_CODE_ASSIST_ENDPOINT));
         assert!(url.contains("v1internal:streamGenerateContent"));
     }
 
@@ -931,25 +854,20 @@ mod tests {
         };
         let opts = ProviderStreamOptions::default();
         let gc = provider.build_generation_config(&opts);
-        let tc = provider.build_thinking_config(true, &opts);
-        let body = provider.build_oauth_request_body(&context, &gc, tc.as_ref());
+        let body = provider.build_oauth_request_body(&context, &gc);
 
         // Cloud Code Assist format: model in body
         assert!(body["model"].as_str().unwrap().starts_with("models/"));
         assert!(body.get("generationConfig").is_some());
         assert!(body.get("safetySettings").is_some());
-        assert!(body.get("thinkingConfig").is_some());
+        // thinkingConfig nested inside generationConfig, not at top level
+        assert!(body["generationConfig"]["thinkingConfig"].is_object());
+        assert!(body.get("thinkingConfig").is_none());
     }
 
     #[test]
-    fn oauth_request_body_antigravity() {
-        let mut config = oauth_config();
-        config.auth = GoogleAuth::Oauth {
-            tokens: oauth_tokens(),
-            endpoint: GoogleOAuthEndpoint::Antigravity,
-            project_id: Some("my-project".into()),
-        };
-        let provider = GoogleProvider::new(config);
+    fn oauth_body_always_uses_cca_format() {
+        let provider = GoogleProvider::new(oauth_config());
         let context = Context {
             system_prompt: None,
             messages: vec![].into(),
@@ -967,49 +885,15 @@ mod tests {
         };
         let opts = ProviderStreamOptions::default();
         let gc = provider.build_generation_config(&opts);
-        let tc = provider.build_thinking_config(true, &opts);
-        let body = provider.build_oauth_request_body(&context, &gc, tc.as_ref());
+        let body = provider.build_oauth_request_body(&context, &gc);
 
-        // Antigravity wrapper format
-        assert_eq!(body["project"], "my-project");
-        assert_eq!(body["model"], "gemini-3-pro-high"); // mapped model name
-        assert_eq!(body["requestType"], "agent");
-        assert_eq!(body["userAgent"], "antigravity");
-        assert!(body["requestId"].as_str().unwrap().starts_with("agent-"));
-        assert!(body.get("request").is_some());
-    }
-
-    #[test]
-    fn oauth_request_body_antigravity_empty_project() {
-        let mut config = oauth_config();
-        config.auth = GoogleAuth::Oauth {
-            tokens: oauth_tokens(),
-            endpoint: GoogleOAuthEndpoint::Antigravity,
-            project_id: None,
-        };
-        let provider = GoogleProvider::new(config);
-        let context = Context {
-            system_prompt: None,
-            messages: vec![].into(),
-            tools: None,
-            working_directory: None,
-            rules_content: None,
-            memory_content: None,
-            skill_index_context: None,
-            skill_activation_context: None,
-            skill_context: None,
-            skill_removal_context: None,
-            job_results_context: None,
-            dynamic_rules_context: None,
-            server_origin: None,
-        };
-        let opts = ProviderStreamOptions::default();
-        let gc = provider.build_generation_config(&opts);
-        let tc = provider.build_thinking_config(true, &opts);
-        let body = provider.build_oauth_request_body(&context, &gc, tc.as_ref());
-
-        // No project ID → empty string (matches TS: `oauthAuth.projectId || ''`)
-        assert_eq!(body["project"], "");
+        // CCA format: model directly in body, no envelope
+        assert!(body["model"].as_str().unwrap().starts_with("models/"));
+        assert!(body.get("generationConfig").is_some());
+        // Should NOT have Antigravity envelope fields
+        assert!(body.get("requestType").is_none());
+        assert!(body.get("userAgent").is_none());
+        assert!(body.get("request").is_none());
     }
 
     #[test]
@@ -1032,14 +916,153 @@ mod tests {
         };
         let opts = ProviderStreamOptions::default();
         let gc = provider.build_generation_config(&opts);
-        let tc = provider.build_thinking_config(false, &opts);
-        let body = provider.build_api_key_request_body(&context, &gc, tc.as_ref());
+        let body = provider.build_api_key_request_body(&context, &gc);
 
         assert!(body.get("contents").is_some());
         assert!(body.get("generationConfig").is_some());
         assert!(body.get("safetySettings").is_some());
         // No model in body for API key (it's in the URL)
         assert!(body.get("model").is_none());
+    }
+
+    // ── Thinking config nesting (regression tests) ─────────────────────
+
+    #[test]
+    fn build_gen_config_includes_thinking_for_gemini3() {
+        let mut config = oauth_config();
+        config.model = "gemini-3.1-pro-preview".into();
+        let provider = GoogleProvider::new(config);
+        let gc = provider.build_generation_config(&ProviderStreamOptions::default());
+        let tc = gc
+            .thinking_config
+            .expect("thinking config should be present for gemini-3.1-pro");
+        assert_eq!(tc.thinking_level.as_deref(), Some("HIGH"));
+        assert!(tc.thinking_budget.is_none());
+        assert_eq!(tc.include_thoughts, Some(true));
+    }
+
+    #[test]
+    fn build_gen_config_includes_thinking_for_gemini25() {
+        let mut config = api_key_config();
+        config.model = "gemini-2.5-pro".into();
+        let provider = GoogleProvider::new(config);
+        let gc = provider.build_generation_config(&ProviderStreamOptions::default());
+        let tc = gc
+            .thinking_config
+            .expect("thinking config should be present for gemini-2.5-pro");
+        assert!(tc.thinking_level.is_none());
+        assert_eq!(tc.thinking_budget, Some(10_000));
+        assert_eq!(tc.include_thoughts, Some(true));
+    }
+
+    #[test]
+    fn build_gen_config_no_thinking_for_non_thinking_model() {
+        let mut config = api_key_config();
+        config.model = "gemini-3-flash-preview".into();
+        let provider = GoogleProvider::new(config);
+        let gc = provider.build_generation_config(&ProviderStreamOptions::default());
+        assert!(gc.thinking_config.is_none());
+    }
+
+    #[test]
+    fn api_key_body_thinking_nested_not_top_level() {
+        let mut config = api_key_config();
+        config.model = "gemini-3.1-pro-preview".into();
+        let provider = GoogleProvider::new(config);
+        let context = Context {
+            system_prompt: None,
+            messages: vec![].into(),
+            tools: None,
+            working_directory: None,
+            rules_content: None,
+            memory_content: None,
+            skill_index_context: None,
+            skill_activation_context: None,
+            skill_context: None,
+            skill_removal_context: None,
+            job_results_context: None,
+            dynamic_rules_context: None,
+            server_origin: None,
+        };
+        let gc = provider.build_generation_config(&ProviderStreamOptions::default());
+        let body = provider.build_api_key_request_body(&context, &gc);
+
+        // thinkingConfig MUST be nested inside generationConfig
+        assert!(
+            body["generationConfig"]["thinkingConfig"].is_object(),
+            "thinkingConfig must be nested inside generationConfig"
+        );
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "HIGH"
+        );
+        // thinkingConfig MUST NOT be at top level (this was the bug)
+        assert!(
+            body.get("thinkingConfig").is_none(),
+            "thinkingConfig must NOT be a top-level field"
+        );
+    }
+
+    #[test]
+    fn oauth_body_thinking_nested_not_top_level() {
+        let mut config = oauth_config();
+        config.model = "gemini-3.1-pro-preview".into();
+        let provider = GoogleProvider::new(config);
+        let context = Context {
+            system_prompt: None,
+            messages: vec![].into(),
+            tools: None,
+            working_directory: None,
+            rules_content: None,
+            memory_content: None,
+            skill_index_context: None,
+            skill_activation_context: None,
+            skill_context: None,
+            skill_removal_context: None,
+            job_results_context: None,
+            dynamic_rules_context: None,
+            server_origin: None,
+        };
+        let gc = provider.build_generation_config(&ProviderStreamOptions::default());
+        let body = provider.build_oauth_request_body(&context, &gc);
+
+        // thinkingConfig MUST be nested inside generationConfig
+        assert!(
+            body["generationConfig"]["thinkingConfig"].is_object(),
+            "thinkingConfig must be nested inside generationConfig"
+        );
+        // thinkingConfig MUST NOT be at top level
+        assert!(
+            body.get("thinkingConfig").is_none(),
+            "thinkingConfig must NOT be a top-level field"
+        );
+    }
+
+    #[test]
+    fn api_key_body_no_thinking_for_flash() {
+        let mut config = api_key_config();
+        config.model = "gemini-3-flash-preview".into();
+        let provider = GoogleProvider::new(config);
+        let context = Context {
+            system_prompt: None,
+            messages: vec![].into(),
+            tools: None,
+            working_directory: None,
+            rules_content: None,
+            memory_content: None,
+            skill_index_context: None,
+            skill_activation_context: None,
+            skill_context: None,
+            skill_removal_context: None,
+            job_results_context: None,
+            dynamic_rules_context: None,
+            server_origin: None,
+        };
+        let gc = provider.build_generation_config(&ProviderStreamOptions::default());
+        let body = provider.build_api_key_request_body(&context, &gc);
+
+        assert!(body.get("thinkingConfig").is_none());
+        assert!(body["generationConfig"].get("thinkingConfig").is_none());
     }
 
     // ── parse_api_error (via shared crate::llm::error_parsing) ─────────────

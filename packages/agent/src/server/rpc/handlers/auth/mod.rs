@@ -25,8 +25,7 @@ use crate::llm::auth::storage::{
     save_named_api_key,
 };
 use crate::llm::auth::types::{
-    AccountEntry, ActiveCredential, ApiKeyEntry, GoogleOAuthEndpoint, OAuthTokens, ProviderAuth,
-    ServiceAuth,
+    AccountEntry, ActiveCredential, ApiKeyEntry, OAuthTokens, ProviderAuth, ServiceAuth,
 };
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
@@ -150,13 +149,6 @@ fn build_masked_state(auth_path: &Path) -> Value {
                 let mut info = build_provider_info(&g.base);
 
                 // Google-specific OAuth configuration fields
-                if let Some(ref ep) = g.endpoint {
-                    let ep_str = match ep {
-                        GoogleOAuthEndpoint::CloudCodeAssist => "cloud-code-assist",
-                        GoogleOAuthEndpoint::Antigravity => "antigravity",
-                    };
-                    let _ = info.insert("endpoint".into(), json!(ep_str));
-                }
                 if let Some(ref pid) = g.project_id {
                     let _ = info.insert("projectId".into(), json!(pid));
                 }

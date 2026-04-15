@@ -11,7 +11,7 @@ pub struct PendingOAuthFlow {
 }
 
 /// Providers that support OAuth login.
-const OAUTH_PROVIDERS: &[&str] = &["anthropic", "openai-codex"];
+const OAUTH_PROVIDERS: &[&str] = &["anthropic", "openai-codex", "google"];
 
 /// Begin an OAuth flow: generate PKCE (Anthropic) or state (OpenAI), return auth URL + flow ID.
 pub struct OAuthBeginHandler;
@@ -38,6 +38,30 @@ impl MethodHandler for OAuthBeginHandler {
                 let url = crate::llm::auth::openai::get_authorization_url_with_state(
                     &config, &pair.challenge, Some(&pair.verifier),
                 );
+                (url, pair.verifier)
+            }
+            "google" => {
+                let gpa = crate::llm::auth::storage::get_google_provider_auth(&ctx.auth_path);
+                let client_id = gpa
+                    .as_ref()
+                    .and_then(|g| g.client_id.clone())
+                    .ok_or_else(|| RpcError::InvalidParams {
+                        message: "Google OAuth requires a client_id — configure it in Settings > Providers > Google".into(),
+                    })?;
+                let client_secret = gpa.and_then(|g| g.client_secret);
+
+                let base_cfg = crate::llm::auth::google::cloud_code_assist_config();
+                let config = crate::llm::auth::google::GoogleOAuthConfig {
+                    oauth: crate::llm::auth::types::OAuthConfig {
+                        client_id,
+                        client_secret,
+                        ..base_cfg.oauth
+                    },
+                    ..base_cfg
+                };
+
+                let pair = crate::llm::auth::pkce::generate_pkce();
+                let url = crate::llm::auth::google::get_authorization_url(&config, &pair.challenge);
                 (url, pair.verifier)
             }
             _ => {
@@ -116,6 +140,29 @@ impl MethodHandler for OAuthCompleteHandler {
                     &config, &code, &flow.verifier,
                 )
                 .await
+            }
+            "google" => {
+                let gpa = crate::llm::auth::storage::get_google_provider_auth(&ctx.auth_path);
+                let client_id = gpa
+                    .as_ref()
+                    .and_then(|g| g.client_id.clone())
+                    .ok_or_else(|| RpcError::Internal {
+                        message: "Google client_id is no longer configured — cannot complete OAuth".into(),
+                    })?;
+                let client_secret = gpa.and_then(|g| g.client_secret);
+
+                let base_cfg = crate::llm::auth::google::cloud_code_assist_config();
+                let config = crate::llm::auth::google::GoogleOAuthConfig {
+                    oauth: crate::llm::auth::types::OAuthConfig {
+                        client_id,
+                        client_secret,
+                        ..base_cfg.oauth
+                    },
+                    ..base_cfg
+                };
+
+                crate::llm::auth::google::exchange_code_for_tokens(&config, &code, &flow.verifier)
+                    .await
             }
             _ => {
                 return Err(RpcError::InvalidParams {

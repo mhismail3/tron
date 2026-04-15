@@ -270,37 +270,39 @@ impl DefaultProviderFactory {
             }
         };
 
+        let google_auth_is_oauth = google_auth.auth.is_oauth();
         let auth = match google_auth.auth {
             crate::llm::auth::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
                 ..
-            } => {
-                let endpoint = google_auth
-                    .endpoint
-                    .map(|e| match e {
-                        crate::llm::auth::GoogleOAuthEndpoint::CloudCodeAssist => {
-                            crate::llm::google::types::GoogleOAuthEndpoint::CloudCodeAssist
-                        }
-                        crate::llm::auth::GoogleOAuthEndpoint::Antigravity => {
-                            crate::llm::google::types::GoogleOAuthEndpoint::Antigravity
-                        }
-                    })
-                    .unwrap_or_default();
-                crate::llm::google::types::GoogleAuth::Oauth {
-                    tokens: crate::llm::auth::OAuthTokens {
-                        access_token,
-                        refresh_token,
-                        expires_at,
-                    },
-                    endpoint,
-                    project_id: google_auth.project_id,
-                }
-            }
+            } => crate::llm::google::types::GoogleAuth::Oauth {
+                tokens: crate::llm::auth::OAuthTokens {
+                    access_token,
+                    refresh_token,
+                    expires_at,
+                },
+                project_id: google_auth.project_id,
+            },
             crate::llm::auth::ServerAuth::ApiKey { api_key } => {
                 crate::llm::google::types::GoogleAuth::ApiKey { api_key }
             }
+        };
+
+        // Populate provider_settings with client credentials for mid-session
+        // token refresh. Without this, ensure_valid_tokens() would fail after
+        // the access token expires (~1 hour).
+        let provider_settings = if google_auth_is_oauth {
+            let gpa =
+                crate::llm::auth::storage::get_google_provider_auth(&self.auth_path);
+            crate::llm::google::types::GoogleApiSettings {
+                token_url: None,
+                client_id: gpa.as_ref().and_then(|g| g.client_id.clone()),
+                client_secret: gpa.as_ref().and_then(|g| g.client_secret.clone()),
+            }
+        } else {
+            crate::llm::google::types::GoogleApiSettings::default()
         };
 
         let config = crate::llm::google::types::GoogleConfig {
@@ -312,7 +314,7 @@ impl DefaultProviderFactory {
             thinking_level: None,
             thinking_budget: None,
             safety_settings: None,
-            provider_settings: crate::llm::google::types::GoogleApiSettings::default(),
+            provider_settings,
         };
         Ok(Arc::new(
             crate::llm::google::provider::GoogleProvider::with_client(

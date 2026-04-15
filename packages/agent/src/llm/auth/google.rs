@@ -1,18 +1,11 @@
 //! Google/Gemini OAuth implementation.
 //!
-//! Supports two endpoints:
-//! - **Cloud Code Assist**: Production endpoint requiring project discovery.
-//! - **Antigravity**: Free tier/sandbox with default project fallback.
+//! Supports Cloud Code Assist OAuth and direct API key authentication.
 
 use super::errors::AuthError;
-use super::types::{
-    GoogleAuth, GoogleOAuthEndpoint, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at,
-};
+use super::types::{GoogleAuth, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at};
 #[cfg(test)]
 use super::types::now_ms;
-
-/// Default project for Antigravity free tier.
-pub const ANTIGRAVITY_DEFAULT_PROJECT: &str = "rising-fact-p41fc";
 
 /// Cloud Code Assist OAuth configuration.
 pub fn cloud_code_assist_config() -> GoogleOAuthConfig {
@@ -32,38 +25,6 @@ pub fn cloud_code_assist_config() -> GoogleOAuthConfig {
         },
         api_endpoint: "https://cloudcode-pa.googleapis.com".to_string(),
         api_version: "v1internal".to_string(),
-    }
-}
-
-/// Antigravity OAuth configuration.
-pub fn antigravity_config() -> GoogleOAuthConfig {
-    GoogleOAuthConfig {
-        oauth: OAuthConfig {
-            auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
-            token_url: "https://oauth2.googleapis.com/token".to_string(),
-            redirect_uri: "http://localhost:51121/oauth-callback".to_string(),
-            client_id: String::new(),
-            client_secret: None,
-            scopes: vec![
-                "https://www.googleapis.com/auth/cloud-platform".to_string(),
-                "https://www.googleapis.com/auth/userinfo.email".to_string(),
-                "https://www.googleapis.com/auth/userinfo.profile".to_string(),
-                "https://www.googleapis.com/auth/cclog".to_string(),
-                "https://www.googleapis.com/auth/experimentsandconfigs".to_string(),
-                "openid".to_string(),
-            ],
-            token_expiry_buffer_seconds: 300,
-        },
-        api_endpoint: "https://daily-cloudcode-pa.sandbox.googleapis.com".to_string(),
-        api_version: "v1internal".to_string(),
-    }
-}
-
-/// Get the appropriate config for a Google OAuth endpoint.
-pub fn get_config(endpoint: GoogleOAuthEndpoint) -> GoogleOAuthConfig {
-    match endpoint {
-        GoogleOAuthEndpoint::CloudCodeAssist => cloud_code_assist_config(),
-        GoogleOAuthEndpoint::Antigravity => antigravity_config(),
     }
 }
 
@@ -209,46 +170,6 @@ pub fn is_oauth_token(token: &str) -> bool {
     token.starts_with("ya29.") || token.split('.').count() == 3
 }
 
-/// Build the Gemini API URL for a model action.
-///
-/// OAuth uses `/{api_version}:{action}` (model in request body).
-/// API key uses `/v1beta/models/{model}:{action}` (standard Gemini format).
-pub fn get_api_url(auth: &GoogleAuth, model: &str, action: &str) -> String {
-    if auth.auth.is_oauth() {
-        let endpoint = auth
-            .api_endpoint
-            .as_deref()
-            .unwrap_or("https://cloudcode-pa.googleapis.com");
-        let version = auth.api_version.as_deref().unwrap_or("v1internal");
-        format!("{endpoint}/{version}:{action}")
-    } else {
-        format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:{action}")
-    }
-}
-
-/// Build request headers for Gemini API calls.
-pub fn get_api_headers(auth: &GoogleAuth) -> Vec<(String, String)> {
-    let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
-
-    match &auth.auth {
-        ServerAuth::OAuth { access_token, .. } => {
-            headers.push((
-                "Authorization".to_string(),
-                format!("Bearer {access_token}"),
-            ));
-        }
-        ServerAuth::ApiKey { api_key } => {
-            headers.push(("x-goog-api-key".to_string(), api_key.clone()));
-        }
-    }
-
-    if let Some(project) = &auth.project_id {
-        headers.push(("x-goog-user-project".to_string(), project.clone()));
-    }
-
-    headers
-}
-
 /// Load server auth from auth storage.
 ///
 /// Priority:
@@ -289,12 +210,14 @@ pub async fn load_server_auth_with_client(
 
     match resolved {
         super::ResolvedCredential::OAuthAccount(acct) => {
-            let endpoint = gpa.endpoint.unwrap_or(GoogleOAuthEndpoint::Antigravity);
-            let cfg = get_config(endpoint);
+            let cfg = cloud_code_assist_config();
+            let client_id = gpa.client_id.clone().ok_or_else(|| AuthError::NotConfigured(
+                "Google OAuth requires a client_id — configure one in Settings > Providers > Google".into(),
+            ))?;
 
             let cfg_with_creds = GoogleOAuthConfig {
                 oauth: OAuthConfig {
-                    client_id: gpa.client_id.clone().unwrap_or(cfg.oauth.client_id),
+                    client_id,
                     client_secret: gpa.client_secret.clone().or(cfg.oauth.client_secret),
                     ..cfg.oauth
                 },
@@ -311,9 +234,6 @@ pub async fn load_server_auth_with_client(
                     }
                     Ok(Some(GoogleAuth {
                         auth: ServerAuth::from_oauth(&tokens),
-                        endpoint: Some(endpoint),
-                        api_endpoint: Some(cfg_with_creds.api_endpoint),
-                        api_version: Some(cfg_with_creds.api_version),
                         project_id: gpa.project_id.clone(),
                     }))
                 }
@@ -326,9 +246,6 @@ pub async fn load_server_auth_with_client(
         super::ResolvedCredential::ApiKey(key) => {
             Ok(Some(GoogleAuth {
                 auth: ServerAuth::from_api_key(&key.key),
-                endpoint: None,
-                api_endpoint: None,
-                api_version: None,
                 project_id: None,
             }))
         }
@@ -370,12 +287,10 @@ pub fn save_oauth_credentials(
     auth_path: &std::path::Path,
     client_id: &str,
     client_secret: &str,
-    endpoint: GoogleOAuthEndpoint,
 ) -> Result<(), AuthError> {
     let mut gpa = super::storage::get_google_provider_auth(auth_path).unwrap_or_default();
     gpa.client_id = Some(client_id.to_string());
     gpa.client_secret = Some(client_secret.to_string());
-    gpa.endpoint = Some(endpoint);
     super::storage::save_google_provider_auth(auth_path, &gpa)
 }
 
@@ -404,13 +319,6 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_config_values() {
-        let cfg = antigravity_config();
-        assert!(cfg.api_endpoint.contains("sandbox"));
-        assert!(cfg.oauth.scopes.len() > 3);
-    }
-
-    #[test]
     fn is_oauth_token_patterns() {
         assert!(is_oauth_token("ya29.abc123"));
         assert!(is_oauth_token("header.payload.signature")); // JWT-like
@@ -425,86 +333,6 @@ mod tests {
         let url = get_authorization_url(&cfg, "challenge");
         assert!(url.contains("access_type=offline"));
         assert!(url.contains("prompt=consent"));
-    }
-
-    #[test]
-    fn api_url_oauth_format() {
-        let auth = GoogleAuth {
-            auth: ServerAuth::OAuth {
-                access_token: "tok".to_string(),
-                refresh_token: "ref".to_string(),
-                expires_at: 0,
-            },
-            endpoint: Some(GoogleOAuthEndpoint::CloudCodeAssist),
-            api_endpoint: Some("https://cloudcode-pa.googleapis.com".to_string()),
-            api_version: Some("v1internal".to_string()),
-            project_id: Some("proj-123".to_string()),
-        };
-        let url = get_api_url(&auth, "gemini-2.0-flash", "generateContent");
-        assert_eq!(
-            url,
-            "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
-        );
-    }
-
-    #[test]
-    fn api_url_api_key_format() {
-        let auth = GoogleAuth {
-            auth: ServerAuth::from_api_key("key-123"),
-            endpoint: None,
-            api_endpoint: None,
-            api_version: None,
-            project_id: None,
-        };
-        let url = get_api_url(&auth, "gemini-2.0-flash", "generateContent");
-        assert_eq!(
-            url,
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-        );
-    }
-
-    #[test]
-    fn api_headers_oauth() {
-        let auth = GoogleAuth {
-            auth: ServerAuth::OAuth {
-                access_token: "ya29.abc".to_string(),
-                refresh_token: "ref".to_string(),
-                expires_at: 0,
-            },
-            endpoint: None,
-            api_endpoint: None,
-            api_version: None,
-            project_id: Some("my-proj".to_string()),
-        };
-        let headers = get_api_headers(&auth);
-        assert!(
-            headers
-                .iter()
-                .any(|(k, v)| k == "Authorization" && v.contains("ya29.abc"))
-        );
-        assert!(
-            headers
-                .iter()
-                .any(|(k, v)| k == "x-goog-user-project" && v == "my-proj")
-        );
-    }
-
-    #[test]
-    fn api_headers_api_key() {
-        let auth = GoogleAuth {
-            auth: ServerAuth::from_api_key("key-123"),
-            endpoint: None,
-            api_endpoint: None,
-            api_version: None,
-            project_id: None,
-        };
-        let headers = get_api_headers(&auth);
-        assert!(
-            headers
-                .iter()
-                .any(|(k, v)| k == "x-goog-api-key" && v == "key-123")
-        );
-        assert!(!headers.iter().any(|(k, _)| k == "x-goog-user-project"));
     }
 
     #[tokio::test]
@@ -533,10 +361,10 @@ mod tests {
         };
         crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
 
-        // Also set Google-specific metadata
+        // Set client_id (required for OAuth)
         let mut gpa = crate::llm::auth::storage::get_google_provider_auth(&path)
             .unwrap_or_default();
-        gpa.endpoint = Some(GoogleOAuthEndpoint::Antigravity);
+        gpa.client_id = Some("test-client-id".to_string());
         crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
 
         let result = load_server_auth(&path).await.unwrap();
@@ -567,16 +395,59 @@ mod tests {
         };
         crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
 
-        // Set Google-specific metadata
+        // Set client_id (required for OAuth)
         let mut gpa = crate::llm::auth::storage::get_google_provider_auth(&path)
             .unwrap_or_default();
-        gpa.endpoint = Some(GoogleOAuthEndpoint::Antigravity);
+        gpa.client_id = Some("test-client-id".to_string());
         crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
 
         let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.auth.token(), "ya29.fresh");
-        assert_eq!(auth.endpoint, Some(GoogleOAuthEndpoint::Antigravity));
+    }
+
+    #[tokio::test]
+    async fn load_server_auth_missing_client_id_returns_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        // Save OAuth tokens but NO client_id
+        let tokens = OAuthTokens {
+            access_token: "ya29.test".to_string(),
+            refresh_token: "ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
+
+        let result = load_server_auth(&path).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("client_id"), "error should mention client_id: {err}");
+    }
+
+    #[tokio::test]
+    async fn load_server_auth_legacy_antigravity_auth_json() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        // Save OAuth tokens
+        let tokens = OAuthTokens {
+            access_token: "ya29.legacy".to_string(),
+            refresh_token: "ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
+
+        // Simulate legacy auth.json with endpoint field by writing raw JSON
+        let mut gpa = crate::llm::auth::storage::get_google_provider_auth(&path)
+            .unwrap_or_default();
+        gpa.client_id = Some("legacy-client".to_string());
+        crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
+
+        // Should load successfully — CCA is used regardless of any legacy endpoint value
+        let result = load_server_auth(&path).await.unwrap();
+        let auth = result.unwrap();
+        assert_eq!(auth.auth.token(), "ya29.legacy");
     }
 
     #[test]
@@ -584,13 +455,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        save_oauth_credentials(
-            &path,
-            "my-client-id",
-            "my-secret",
-            GoogleOAuthEndpoint::CloudCodeAssist,
-        )
-        .unwrap();
+        save_oauth_credentials(&path, "my-client-id", "my-secret").unwrap();
 
         let (id, secret) = get_oauth_credentials(&path).unwrap();
         assert_eq!(id, "my-client-id");
