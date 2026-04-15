@@ -69,7 +69,7 @@ struct SessionChangesSection: View {
     private var sectionHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let name = branchName {
-                HStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "arrow.triangle.branch")
                         .foregroundStyle(.tronTeal)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))

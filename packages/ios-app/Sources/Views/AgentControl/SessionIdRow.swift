@@ -13,6 +13,7 @@ struct SessionIdRow: View {
             Image(systemName: "number")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronAmber)
+                .frame(width: 16)
 
             Text("Session ID")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))

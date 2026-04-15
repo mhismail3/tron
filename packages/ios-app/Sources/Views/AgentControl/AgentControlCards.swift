@@ -1,5 +1,61 @@
 import SwiftUI
 
+// MARK: - Shared Card Components
+
+/// Standard icon for agent control cards — fixed width for vertical alignment across cards.
+@available(iOS 26.0, *)
+private struct CardIcon: View {
+    let systemName: String
+    let color: Color
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+            .foregroundStyle(color)
+            .frame(width: 16)
+    }
+}
+
+/// Standard title for agent control cards.
+@available(iOS 26.0, *)
+private struct CardTitle: View {
+    let title: String
+    let color: Color
+
+    var body: some View {
+        Text(title)
+            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
+            .foregroundStyle(color)
+    }
+}
+
+/// Shared card chrome: padding, glass tint, tap target.
+@available(iOS 26.0, *)
+private struct CardChrome: ViewModifier {
+    let tintColor: Color
+    var tintOpacity: Double = 0.15
+    var onTap: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .glassEffect(
+                .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture { onTap?() }
+    }
+}
+
+@available(iOS 26.0, *)
+private extension View {
+    func cardChrome(_ color: Color, opacity: Double = 0.15, onTap: (() -> Void)? = nil) -> some View {
+        modifier(CardChrome(tintColor: color, tintOpacity: opacity, onTap: onTap))
+    }
+}
+
 // MARK: - Context Usage Gauge View
 
 @available(iOS 26.0, *)
@@ -35,13 +91,8 @@ struct ContextUsageGaugeView: View {
         VStack(spacing: 2) {
             // Row 1: icon + title + progress bar + percentage
             HStack(spacing: 8) {
-                Image(systemName: "gauge.with.dots.needle.67percent")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(usageColor)
-
-                Text("Context")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
-                    .foregroundStyle(usageColor)
+                CardIcon(systemName: "gauge.with.dots.needle.67percent", color: usageColor)
+                CardTitle(title: "Context", color: usageColor)
                     .layoutPriority(1)
 
                 // Progress bar inline
@@ -72,13 +123,7 @@ struct ContextUsageGaugeView: View {
                     .foregroundStyle(.tronTextMuted)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.tint(Color.tronSlateDark.opacity(0.5)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onTapGesture {
-            onTap?()
-        }
+        .cardChrome(.tronSlateDark, opacity: 0.5, onTap: onTap)
     }
 }
 
@@ -98,13 +143,8 @@ struct ModelControlView: View {
         VStack(spacing: 2) {
             // Row 1: icon + title + model name
             HStack(spacing: 8) {
-                Image(systemName: "cpu")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronPurple)
-
-                Text("Model")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
-                    .foregroundStyle(.tronPurple)
+                CardIcon(systemName: "cpu", color: .tronPurple)
+                CardTitle(title: "Model", color: .tronPurple)
 
                 Spacer()
 
@@ -125,13 +165,7 @@ struct ModelControlView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.tint(Color.tronPurple.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onTapGesture {
-            onTap?()
-        }
+        .cardChrome(.tronPurple, onTap: onTap)
     }
 }
 
@@ -152,13 +186,8 @@ struct SourceControlCardView: View {
         VStack(spacing: 2) {
             // Row 1: icon + title + branch name
             HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronTeal)
-
-                Text("Source Control")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
-                    .foregroundStyle(.tronTeal)
+                CardIcon(systemName: "arrow.triangle.branch", color: .tronTeal)
+                CardTitle(title: "Source Control", color: .tronTeal)
 
                 Spacer()
 
@@ -210,13 +239,7 @@ struct SourceControlCardView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.tint(Color.tronTeal.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onTapGesture {
-            onTap?()
-        }
+        .cardChrome(.tronTeal, onTap: onTap)
     }
 }
 
@@ -233,13 +256,8 @@ struct AnalyticsCardView: View {
         VStack(spacing: 2) {
             // Row 1: icon + title + values
             HStack(spacing: 8) {
-                Image(systemName: "chart.bar.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronRose)
-
-                Text("Analytics")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
-                    .foregroundStyle(.tronRose)
+                CardIcon(systemName: "chart.bar.fill", color: .tronRose)
+                CardTitle(title: "Analytics", color: .tronRose)
 
                 Spacer()
 
@@ -265,13 +283,7 @@ struct AnalyticsCardView: View {
                     .foregroundStyle(.tronTextMuted)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.tint(Color.tronRose.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onTapGesture {
-            onTap?()
-        }
+        .cardChrome(.tronRose, onTap: onTap)
     }
 }
 
@@ -287,13 +299,8 @@ struct HistoryCardView: View {
         VStack(spacing: 2) {
             // Row 1: icon + title + turn count
             HStack(spacing: 8) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronCoral)
-
-                Text("History")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
-                    .foregroundStyle(.tronCoral)
+                CardIcon(systemName: "clock.arrow.circlepath", color: .tronCoral)
+                CardTitle(title: "History", color: .tronCoral)
 
                 Spacer()
 
@@ -310,13 +317,7 @@ struct HistoryCardView: View {
                     .foregroundStyle(.tronTextMuted)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.tint(Color.tronCoral.opacity(0.15)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onTapGesture {
-            onTap?()
-        }
+        .cardChrome(.tronCoral, onTap: onTap)
     }
 }
 
