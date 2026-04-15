@@ -28,7 +28,7 @@ Use WebFetch to read the URL. Extract:
 | URL type | Method |
 |---|---|
 | Articles, blogs | WebFetch directly |
-| Twitter/X posts (`x.com/*/status/*`, `twitter.com/*/status/*`) | See the Twitter skill — `curl` the fxtwitter API (zero auth, structured JSON). Falls back to WebFetch if API unavailable. |
+| Twitter/X posts (`x.com/*/status/*`, `twitter.com/*/status/*`) | See the Twitter skill — `curl` the fxtwitter API (zero auth, structured JSON). Always walk the reply chain to get the full thread or conversation. Falls back to WebFetch if API unavailable. |
 | PDFs, papers | WebFetch with PDF handling |
 | YouTube, video | WebFetch — title, description, transcript if available |
 
