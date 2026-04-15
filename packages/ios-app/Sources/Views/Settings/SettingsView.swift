@@ -149,46 +149,48 @@ struct SettingsView: View {
     // MARK: - Categories Card
 
     private var categoriesCard: some View {
-        SettingsCard {
-            categoryRow(icon: "network", label: "Server", subtitle: "Host, port, connection presets") {
-                activePage = .server
+        VStack(spacing: 8) {
+            SettingsCard {
+                categoryRow(icon: "network", label: "Server", subtitle: "Host, port, connection presets") {
+                    activePage = .server
+                }
             }
 
-            SettingsRowDivider()
-
-            categoryRow(icon: "key.horizontal", label: "LLM Providers", subtitle: "Login with OAuth and configure API keys") {
-                activePage = .providers
+            SettingsCard {
+                categoryRow(icon: "key.horizontal", label: "LLM Providers", subtitle: "Login with OAuth and configure API keys") {
+                    activePage = .providers
+                }
             }
 
-            SettingsRowDivider()
-
-            categoryRow(icon: "bolt", label: "Sessions", subtitle: "Configure how agent sessions are managed") {
-                activePage = .session
+            SettingsCard {
+                categoryRow(icon: "bolt", label: "Sessions", subtitle: "Configure how agent sessions are managed") {
+                    activePage = .session
+                }
             }
 
-            SettingsRowDivider()
-
-            categoryRow(icon: "brain", label: "Agent", subtitle: "Configure how agents learn and remember") {
-                activePage = .agent
+            SettingsCard {
+                categoryRow(icon: "brain", label: "Agent", subtitle: "Configure how agents learn and remember") {
+                    activePage = .agent
+                }
             }
 
-            SettingsRowDivider()
-
-            categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "Configure external tool servers") {
-                activePage = .mcpServers
+            SettingsCard {
+                categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "Configure external tool servers") {
+                    activePage = .mcpServers
+                }
             }
 
-            SettingsRowDivider()
-
-            categoryRow(icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill", label: "Hooks", subtitle: "Manage agent lifecycle events") {
-                activePage = .hooks
+            SettingsCard {
+                categoryRow(icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill", label: "Hooks", subtitle: "Manage agent lifecycle events") {
+                    activePage = .hooks
+                }
             }
 
             if #available(iOS 26.0, *) {
-                SettingsRowDivider()
-
-                categoryRow(icon: "paintbrush", label: "App", subtitle: "Change how the iOS app looks and behaves") {
-                    activePage = .app
+                SettingsCard {
+                    categoryRow(icon: "paintbrush", label: "App", subtitle: "Change how the iOS app looks and behaves") {
+                        activePage = .app
+                    }
                 }
             }
         }
@@ -230,43 +232,45 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "Danger Zone", color: .tronError)
 
-            SettingsCard(accent: .tronError) {
-                Button {
-                    showArchiveAllConfirmation = true
-                } label: {
-                    HStack {
-                        Image(systemName: "archivebox")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .foregroundStyle(.tronError)
-                            .frame(width: 18)
-                        Text("Archive All Sessions")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronError)
-                        Spacer()
-                        if isArchivingAll {
-                            ProgressView()
-                                .tint(.tronError)
-                                .scaleEffect(0.7)
+            VStack(spacing: 8) {
+                SettingsCard(accent: .tronError) {
+                    Button {
+                        showArchiveAllConfirmation = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "archivebox")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                .foregroundStyle(.tronError)
+                                .frame(width: 18)
+                            Text("Archive All Sessions")
+                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                                .foregroundStyle(.tronError)
+                            Spacer()
+                            if isArchivingAll {
+                                ProgressView()
+                                    .tint(.tronError)
+                                    .scaleEffect(0.7)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(eventStoreManager.sessions.isEmpty || isArchivingAll)
+                    .opacity(eventStoreManager.sessions.isEmpty || isArchivingAll ? 0.4 : 1)
+                }
+
+                SettingsCard(accent: .tronError) {
+                    Button {
+                        showingResetAlert = true
+                    } label: {
+                        SettingsRow(icon: "arrow.trianglehead.counterclockwise", label: "Reset All Settings", accentColor: .tronError, labelColor: .tronError) {
+                            EmptyView()
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 12)
-                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                .disabled(eventStoreManager.sessions.isEmpty || isArchivingAll)
-                .opacity(eventStoreManager.sessions.isEmpty || isArchivingAll ? 0.4 : 1)
-
-                SettingsRowDivider()
-
-                Button {
-                    showingResetAlert = true
-                } label: {
-                    SettingsRow(icon: "arrow.trianglehead.counterclockwise", label: "Reset All Settings", accentColor: .tronError, labelColor: .tronError) {
-                        EmptyView()
-                    }
-                }
-                .buttonStyle(.plain)
             }
         }
     }
