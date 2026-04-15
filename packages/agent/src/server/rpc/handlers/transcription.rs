@@ -11,8 +11,8 @@ use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::opt_string;
 use crate::server::rpc::registry::MethodHandler;
 
-/// Maximum audio size in bytes (50 MB).
-const MAX_AUDIO_SIZE: usize = 50 * 1024 * 1024;
+/// Maximum audio size in bytes (150 MB).
+const MAX_AUDIO_SIZE: usize = 150 * 1024 * 1024;
 
 /// Typed response for the transcribe.audio RPC method.
 ///
@@ -321,6 +321,24 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn transcribe_audio_rejects_oversized_payload() {
+        let ctx = make_test_context();
+        // Create audio data just over MAX_AUDIO_SIZE (150 MB)
+        let oversized = vec![0u8; MAX_AUDIO_SIZE + 1];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&oversized);
+        let err = TranscribeAudioHandler
+            .handle(Some(json!({"audioBase64": encoded})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(
+            err.to_string().contains("too large"),
+            "error should mention 'too large': {}",
+            err
+        );
     }
 
     // ── ListModelsHandler tests ──

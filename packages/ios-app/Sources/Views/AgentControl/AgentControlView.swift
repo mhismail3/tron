@@ -216,6 +216,7 @@ struct AgentControlView: View {
                         totalDeletions: totalDeletions,
                         isGitRepo: diffResult?.isGitRepo,
                         isLoading: isLoading,
+                        workspacePath: detailedSnapshot?.environment?.workingDirectory,
                         onTap: {
                             showSourceControl = true
                         }

@@ -27,7 +27,7 @@ final class MediaClient: RPCDomainClient {
         return try await ws.send(
             method: "transcribe.audio",
             params: params,
-            timeout: 180.0
+            timeout: 360.0
         )
     }
 
@@ -55,7 +55,7 @@ final class MediaClient: RPCDomainClient {
         return try await ws.send(
             method: "voiceNotes.save",
             params: params,
-            timeout: 180.0  // 3 minutes for transcription
+            timeout: 360.0  // 6 minutes for transcription
         )
     }
 

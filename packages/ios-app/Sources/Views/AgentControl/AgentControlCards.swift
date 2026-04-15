@@ -145,6 +145,7 @@ struct SourceControlCardView: View {
     var totalDeletions: Int
     var isGitRepo: Bool?
     var isLoading: Bool
+    var workspacePath: String?
     var onTap: (() -> Void)?
 
     var body: some View {
@@ -183,9 +184,11 @@ struct SourceControlCardView: View {
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                 } else if isGitRepo == false {
-                    Text("Not a git repository")
+                    Text(workspacePath?.abbreviatingHomeDirectory ?? "–")
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 } else if totalFiles > 0 {
                     HStack(spacing: 6) {
                         Text("\(totalFiles) \(totalFiles == 1 ? "file" : "files")")

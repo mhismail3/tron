@@ -102,8 +102,8 @@ final class VoiceNotesRecorderTests: XCTestCase {
 
     // MARK: - Max Duration Tests
 
-    func test_maxDuration_isFiveMinutes() {
-        XCTAssertEqual(VoiceNotesRecorder.maxDuration, 300)
+    func test_maxDuration_isFifteenMinutes() {
+        XCTAssertEqual(VoiceNotesRecorder.maxDuration, 900)
     }
 
     // MARK: - isRecording Computed Property Tests

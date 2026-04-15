@@ -295,7 +295,7 @@ final class MockTranscriptionContext: TranscriptionContext {
         }
     }
     var inputText: String = ""
-    var maxRecordingDuration: TimeInterval = 120
+    var maxRecordingDuration: TimeInterval = 300
 
     // MARK: - Tracking for Assertions
     var startRecordingCalled = false

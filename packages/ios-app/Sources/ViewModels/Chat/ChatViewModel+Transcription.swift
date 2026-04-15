@@ -3,7 +3,7 @@ import Foundation
 // MARK: - TranscriptionContext Conformance
 
 extension ChatViewModel: TranscriptionContext {
-    var maxRecordingDuration: TimeInterval { 120 }
+    var maxRecordingDuration: TimeInterval { 300 }
 
     func startRecording() async throws {
         try await audioRecorder.startRecording(maxDuration: maxRecordingDuration)

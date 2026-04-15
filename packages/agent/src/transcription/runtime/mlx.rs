@@ -235,10 +235,10 @@ impl MlxEngine {
             return Err(TranscriptionError::Sidecar(format!("broken pipe: {e}")));
         }
 
-        // Read response (timeout: 120s)
+        // Read response (timeout: 300s — 15-min audio at ~10-20x realtime ≈ 45-90s processing)
         let mut line = String::new();
         let read_result = tokio::time::timeout(
-            std::time::Duration::from_secs(120),
+            std::time::Duration::from_secs(300),
             worker.stdout.read_line(&mut line),
         )
         .await;
@@ -292,7 +292,7 @@ impl MlxEngine {
                     let _ = w.child.kill().await;
                 }
                 Err(TranscriptionError::Sidecar(
-                    "transcription timed out (120s)".into(),
+                    "transcription timed out (300s)".into(),
                 ))
             }
         }

@@ -50,7 +50,7 @@ struct VoiceNotesRecordingSheet: View {
 
                 // Max duration indicator
                 if recorder.isRecording {
-                    Text("Max: 5 minutes")
+                    Text("Max: 15 minutes")
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextDisabled)
                 }
@@ -203,24 +203,20 @@ struct VoiceNotesRecordingSheet: View {
 
         Task {
             do {
-                let data = try Data(contentsOf: url)
+                defer { try? FileManager.default.removeItem(at: url) }
 
-                // Fire-and-forget: dismiss immediately, save in background
+                let data = try await Task.detached(priority: .utility) {
+                    try Data(contentsOf: url)
+                }.value
+
                 let result = try await rpcClient.media.saveVoiceNote(
                     audioData: data
                 )
 
-                // Clean up temp file
-                try? FileManager.default.removeItem(at: url)
-
-                await MainActor.run {
-                    onComplete(result.filename)
-                }
+                onComplete(result.filename)
             } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = error.localizedDescription
-                }
+                isSaving = false
+                errorMessage = error.localizedDescription
             }
         }
     }

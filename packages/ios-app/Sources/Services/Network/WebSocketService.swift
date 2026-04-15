@@ -155,7 +155,7 @@ final class WebSocketService {
 
         logger.verbose("Creating WebSocket task...", category: .websocket)
         webSocketTask = session.webSocketTask(with: request)
-        webSocketTask?.maximumMessageSize = 4 * 1024 * 1024  // 4MB — must exceed server's 2MB limit to handle event sync payloads with image data
+        webSocketTask?.maximumMessageSize = 150 * 1024 * 1024  // 150MB — matches server limit; covers 15-min voice notes at 48kHz (~115MB base64)
         webSocketTask?.resume()
         logger.verbose("WebSocket task resumed", category: .websocket)
 

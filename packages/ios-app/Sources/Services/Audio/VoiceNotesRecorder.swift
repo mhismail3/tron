@@ -2,7 +2,7 @@ import Foundation
 import AVFoundation
 
 /// Recorder for voice notes with audio level metering for visualization.
-/// Supports 5-minute max duration with auto-stop.
+/// Supports 15-minute max duration with auto-stop.
 @Observable
 @MainActor
 final class VoiceNotesRecorder {
@@ -29,7 +29,7 @@ final class VoiceNotesRecorder {
     private(set) var audioLevel: Float = 0
     private(set) var recordingDuration: TimeInterval = 0
 
-    static let maxDuration: TimeInterval = 300
+    static let maxDuration: TimeInterval = 900
 
     private let engine = AudioCaptureEngine()
     private var levelTimer: Timer?

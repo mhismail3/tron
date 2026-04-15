@@ -15,7 +15,7 @@ pub struct ServerConfig {
     pub heartbeat_interval_secs: u64,
     /// Heartbeat timeout in seconds (close after this many missed pongs).
     pub heartbeat_timeout_secs: u64,
-    /// Max WebSocket message size in bytes (default 2 MB).
+    /// Max WebSocket message size in bytes (default 150 MB).
     pub max_message_size: usize,
     /// Rate limit: max requests per second per connection. 0 = disabled (default).
     pub rate_limit_rps: u64,
@@ -31,7 +31,7 @@ impl Default for ServerConfig {
             max_connections: 50,
             heartbeat_interval_secs: 30,
             heartbeat_timeout_secs: 90,
-            max_message_size: 2 * 1024 * 1024, // 2 MB (Phase 8)
+            max_message_size: 150 * 1024 * 1024, // 150 MB — accommodates 15-min voice notes at 48kHz (~115 MB base64)
             rate_limit_rps: 0,   // disabled by default
             cors_enabled: false,  // disabled by default
         }
@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn default_max_message_size() {
         let cfg = ServerConfig::default();
-        assert_eq!(cfg.max_message_size, 2 * 1024 * 1024);
+        assert_eq!(cfg.max_message_size, 150 * 1024 * 1024);
     }
 
     #[test]

@@ -11,8 +11,8 @@ struct ImageProcessingResult {
 /// Processes images for sending to LLM providers, preserving format when possible.
 struct ImageProcessor {
 
-    /// WebSocket transport limit is 2MB. After base64 (+33%) and JSON overhead,
-    /// raw image data must stay under this to avoid disconnection.
+    /// Image size limit for LLM token cost and bandwidth efficiency.
+    /// After base64 (+33%) and JSON overhead, raw image data must stay under this.
     static let transportMaxBytes = 1_400_000 // ~1.4MB raw → ~1.87MB base64
 
     /// Detect MIME type from data magic bytes.
