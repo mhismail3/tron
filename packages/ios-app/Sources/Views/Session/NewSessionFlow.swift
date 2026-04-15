@@ -21,6 +21,7 @@ struct NewSessionFlow: View {
     @State private var showModelPicker = false
 
     // Clone repository sheet
+    @State private var selectedReasoningLevel = "medium"
     @State private var showCloneSheet = false
     @State private var showMaxSessionsAlert = false
 
@@ -228,10 +229,15 @@ struct NewSessionFlow: View {
                 ModelPickerSheet(
                     models: availableModels,
                     currentModelId: selectedModel,
+                    reasoningLevel: selectedReasoningLevel,
                     onSelect: { model in
                         selectedModel = model.id
                     }
                 )
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .reasoningLevelAction)) { notification in
+                guard let level = notification.object as? String else { return }
+                selectedReasoningLevel = level
             }
             .sheet(isPresented: $showCloneSheet) {
                 CloneRepoSheet(
@@ -338,6 +344,11 @@ struct NewSessionFlow: View {
                     workingDirectory: workingDirectory,
                     model: selectedModel
                 )
+
+                // Persist non-default reasoning level to the new session
+                if selectedReasoningLevel != "medium" {
+                    _ = try? await rpcClient.model.setReasoningLevel(result.sessionId, level: selectedReasoningLevel)
+                }
 
                 await MainActor.run {
                     // Pass session details to callback - EventStoreManager will cache it
