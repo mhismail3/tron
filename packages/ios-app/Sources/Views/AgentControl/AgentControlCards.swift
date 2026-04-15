@@ -40,7 +40,7 @@ struct ContextUsageGaugeView: View {
                     .foregroundStyle(usageColor)
 
                 Text("Context")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
                     .foregroundStyle(usageColor)
                     .layoutPriority(1)
 
@@ -103,7 +103,7 @@ struct ModelControlView: View {
                     .foregroundStyle(.tronPurple)
 
                 Text("Model")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
                     .foregroundStyle(.tronPurple)
 
                 Spacer()
@@ -156,7 +156,7 @@ struct SourceControlCardView: View {
                     .foregroundStyle(.tronTeal)
 
                 Text("Source Control")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
                     .foregroundStyle(.tronTeal)
 
                 Spacer()
@@ -233,7 +233,7 @@ struct AnalyticsCardView: View {
                     .foregroundStyle(.tronRose)
 
                 Text("Analytics")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
                     .foregroundStyle(.tronRose)
 
                 Spacer()
@@ -287,7 +287,7 @@ struct HistoryCardView: View {
                     .foregroundStyle(.tronCoral)
 
                 Text("History")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
                     .foregroundStyle(.tronCoral)
 
                 Spacer()
