@@ -378,13 +378,11 @@ struct InputBar: View {
 
             Spacer(minLength: 0)
 
-            StatusPillsColumn(
+            AgentControlPill(
                 contextPercentage: config.contextPercentage,
-                contextWindow: config.contextWindow,
-                lastTurnInputTokens: config.lastTurnInputTokens,
                 modelName: config.currentModelInfo?.name,
                 hasAppeared: hasAppeared,
-                onContextTap: actions.onContextTap,
+                onTap: actions.onContextTap,
                 readOnly: config.readOnly
             )
             .opacity(shouldShowStatusPills ? 1 : 0)

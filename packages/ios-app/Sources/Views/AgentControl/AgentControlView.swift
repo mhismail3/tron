@@ -86,9 +86,7 @@ struct AgentControlView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                contentView
-            }
+            contentView
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

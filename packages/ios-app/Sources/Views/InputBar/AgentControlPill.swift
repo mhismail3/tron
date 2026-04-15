@@ -1,14 +1,12 @@
 import SwiftUI
 
-// MARK: - Status Pills Column (iOS 26 Liquid Glass)
+// MARK: - Agent Control Pill (iOS 26 Liquid Glass)
 
-/// Status pill column: agent control pill showing model name and context percentage.
+/// Pill button showing model name and context percentage. Opens the Agent Control sheet.
 @available(iOS 26.0, *)
-struct StatusPillsColumn: View {
+struct AgentControlPill: View {
     // Context info
     let contextPercentage: Int
-    let contextWindow: Int
-    let lastTurnInputTokens: Int
 
     // Model info
     var modelName: String?
@@ -17,12 +15,12 @@ struct StatusPillsColumn: View {
     let hasAppeared: Bool
 
     // Actions
-    var onContextTap: (() -> Void)?
+    var onTap: (() -> Void)?
 
     // Read-only mode
     var readOnly: Bool = false
 
-    // MARK: - Context Helpers
+    // MARK: - Helpers
 
     private var contextPercentageColor: Color {
         if contextPercentage >= 95 {
@@ -40,19 +38,8 @@ struct StatusPillsColumn: View {
     // MARK: - Body
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            agentControlPill
-                .scaleEffect(hasAppeared ? 1 : 0.3, anchor: .bottom)
-                .opacity(hasAppeared ? 1 : 0)
-        }
-        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: hasAppeared)
-    }
-
-    // MARK: - Agent Control Pill
-
-    private var agentControlPill: some View {
         Button {
-            onContextTap?()
+            onTap?()
         } label: {
             HStack(spacing: 0) {
                 Text(readOnly ? "—" : displayModelName)
@@ -68,7 +55,9 @@ struct StatusPillsColumn: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .capsule)
-        .opacity(readOnly ? 0.5 : 1.0)
+        .scaleEffect(hasAppeared ? 1 : 0.3, anchor: .bottom)
+        .opacity(hasAppeared ? (readOnly ? 0.5 : 1.0) : 0)
+        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: hasAppeared)
         .disabled(readOnly)
     }
 }
