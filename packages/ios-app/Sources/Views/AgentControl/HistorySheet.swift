@@ -214,16 +214,6 @@ struct HistorySheet: View {
                     // Stats pills
                     if let data = turn.analyticsData {
                         HStack(spacing: 8) {
-                            if data.toolCount > 0 {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "hammer.fill")
-                                        .font(TronTypography.sans(size: TronTypography.sizeXS))
-                                    Text("\(data.toolCount)")
-                                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                }
-                                .foregroundStyle(muted ? .tronTextMuted : .tronCyan)
-                            }
-
                             if data.latency > 0 {
                                 HStack(spacing: 3) {
                                     Image(systemName: "clock")
@@ -232,6 +222,16 @@ struct HistorySheet: View {
                                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 }
                                 .foregroundStyle(muted ? .tronTextMuted : .tronSlate)
+                            }
+
+                            if data.toolCount > 0 {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "hammer.fill")
+                                        .font(TronTypography.sans(size: TronTypography.sizeXS))
+                                    Text("\(data.toolCount)")
+                                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                }
+                                .foregroundStyle(muted ? .tronTextMuted : .tronCyan)
                             }
 
                             if data.errorCount > 0 {

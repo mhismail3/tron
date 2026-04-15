@@ -152,19 +152,20 @@ struct AnalyticsSheet: View {
                 }
             }
 
-            // Stats row
-            HStack(spacing: 0) {
+            // Stats row — 4-column grid to align with pills above
+            let statColumns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 4)
+            LazyVGrid(columns: statColumns, alignment: .leading, spacing: 0) {
+                if turnData.toolCount > 0 {
+                    statItem(value: "\(turnData.toolCount)", label: "Tools")
+                }
                 if turnData.latency > 0 {
-                    statItem(value: DurationFormatter.format(turnData.latency, style: .compact), label: "latency")
+                    statItem(value: DurationFormatter.format(turnData.latency, style: .compact), label: "Latency")
                 }
                 if let model = turnData.model {
-                    statItem(value: model, label: "model")
-                }
-                if turnData.toolCount > 0 {
-                    statItem(value: "\(turnData.toolCount)", label: "tools")
+                    statItem(value: model, label: "Model")
                 }
                 if turnData.errorCount > 0 {
-                    statItem(value: "\(turnData.errorCount)", label: "errors", color: .tronError)
+                    statItem(value: "\(turnData.errorCount)", label: "Errors", color: .tronError)
                 }
             }
 
@@ -207,15 +208,16 @@ struct AnalyticsSheet: View {
     }
 
     private func statItem(value: String, label: String, color: Color? = nil) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(color ?? .tronRose.opacity(0.8))
+        VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(TronTypography.pill)
+                .font(TronTypography.mono(size: TronTypography.sizeXS))
                 .foregroundStyle(.tronTextMuted)
+            Text(value)
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(color ?? .tronRose)
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
 }

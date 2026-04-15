@@ -99,20 +99,20 @@ struct SessionAnalyticsSection: View {
     // MARK: - Stats Row
 
     private var statsRow: some View {
-        HStack(spacing: 0) {
-            statItem(value: "\(analytics.totalTurns)", label: "turns")
-            statItem(value: analytics.avgLatency == 0 ? "-" : DurationFormatter.format(analytics.avgLatency, style: .compact), label: "latency")
-            statItem(value: "\(analytics.totalToolCalls)", label: "tools")
+        HStack(spacing: 4) {
+            statItem(value: "\(analytics.totalTurns)", label: "Turns")
+            statItem(value: analytics.avgLatency == 0 ? "-" : DurationFormatter.format(analytics.avgLatency, style: .compact), label: "Latency")
+            statItem(value: "\(analytics.totalToolCalls)", label: "Tools")
             statItem(
                 value: "\(analytics.totalErrors)",
-                label: "errors",
+                label: "Errors",
                 color: analytics.totalErrors > 0 ? .tronError : nil
             )
 
             if breakdown.cacheSavings > 0.000001 {
                 statItem(
                     value: "~\(formatCost(breakdown.cacheSavings))",
-                    label: "saved",
+                    label: "Saved",
                     color: .tronEmerald
                 )
             }
@@ -124,15 +124,16 @@ struct SessionAnalyticsSection: View {
         label: String,
         color: Color? = nil
     ) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(color ?? .tronRose.opacity(0.8))
+        VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(TronTypography.pill)
+                .font(TronTypography.mono(size: TronTypography.sizeXS))
                 .foregroundStyle(.tronTextMuted)
+            Text(value)
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(color ?? .tronRose)
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
 }
