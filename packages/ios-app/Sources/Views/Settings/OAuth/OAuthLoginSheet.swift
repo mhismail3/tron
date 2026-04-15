@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 
 // MARK: - OAuth Provider
@@ -7,6 +8,10 @@ struct OAuthProvider: Identifiable {
     let displayName: String
     let assetIcon: String
     let accentColor: Color
+
+    /// Google blocks embedded WKWebViews (Error 403: disallowed_useragent).
+    /// Use ASWebAuthenticationSession (system browser) instead.
+    var usesSystemBrowser: Bool { id == "google" }
 
     static let anthropic = OAuthProvider(id: "anthropic", displayName: "Anthropic", assetIcon: "IconAnthropic", accentColor: .tronCoral)
     static let openai = OAuthProvider(id: "openai-codex", displayName: "OpenAI", assetIcon: "IconOpenAI", accentColor: .tronSlate)
@@ -33,6 +38,8 @@ struct OAuthLoginSheet: View {
     @State private var flowState: OAuthFlowState = .label
     @State private var accountLabel: String = defaultAccountLabel
     @State private var manualCode = ""
+    @State private var webAuthSession: ASWebAuthenticationSession?
+    @State private var loopbackServer: OAuthLoopbackServer?
 
     private var rpcClient: RPCClient { dependencies.rpcClient }
 
@@ -52,6 +59,9 @@ struct OAuthLoginSheet: View {
                         onCodeReceived: { code in handleCodeReceived(code) },
                         onError: { message in flowState = .error(message) }
                     )
+
+                case .systemBrowser:
+                    loadingView("Complete sign in in the browser...")
 
                 case .manualEntry:
                     manualEntryView
@@ -198,7 +208,12 @@ struct OAuthLoginSheet: View {
             HStack(spacing: 12) {
                 Button {
                     if case .manualEntry(let flowId, let url) = flowState {
-                        flowState = .webView(flowId: flowId, url: url)
+                        if provider.usesSystemBrowser {
+                            flowState = .systemBrowser(flowId: flowId, url: url)
+                            startSystemBrowserAuth(flowId: flowId, url: url)
+                        } else {
+                            flowState = .webView(flowId: flowId, url: url)
+                        }
                     }
                 } label: {
                     Text("Back to Browser")
@@ -269,7 +284,12 @@ struct OAuthLoginSheet: View {
                 flowState = .error("Invalid authorization URL")
                 return
             }
-            flowState = .webView(flowId: response.flowId, url: url)
+            if provider.usesSystemBrowser {
+                flowState = .systemBrowser(flowId: response.flowId, url: url)
+                startSystemBrowserAuth(flowId: response.flowId, url: url)
+            } else {
+                flowState = .webView(flowId: response.flowId, url: url)
+            }
         } catch {
             flowState = .error(error.localizedDescription)
         }
@@ -307,6 +327,62 @@ struct OAuthLoginSheet: View {
         }
     }
 
+    private static let loopbackScheme = "tron-oauth"
+
+    private func startSystemBrowserAuth(flowId: String, url: URL) {
+        // Start a loopback HTTP server so Google's redirect to localhost:45289
+        // is caught and bounced to a custom URL scheme that
+        // ASWebAuthenticationSession can intercept.
+        let server = OAuthLoopbackServer(port: 45289, redirectScheme: Self.loopbackScheme)
+        do {
+            try server.start()
+        } catch {
+            flowState = .error("Failed to start local auth server: \(error.localizedDescription)")
+            return
+        }
+        loopbackServer = server
+
+        let session = ASWebAuthenticationSession(
+            url: url,
+            callbackURLScheme: Self.loopbackScheme
+        ) { [self] callbackURL, error in
+            loopbackServer?.stop()
+            loopbackServer = nil
+            webAuthSession = nil
+
+            if let error = error {
+                if (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+                    flowState = .manualEntry(flowId: flowId, url: url)
+                    return
+                }
+                flowState = .error(error.localizedDescription)
+                return
+            }
+
+            guard let callbackURL = callbackURL else {
+                flowState = .error("No callback received")
+                return
+            }
+
+            let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)
+            if let errorParam = components?.queryItems?.first(where: { $0.name == "error" })?.value {
+                let desc = components?.queryItems?.first(where: { $0.name == "error_description" })?.value
+                flowState = .error(desc ?? errorParam)
+                return
+            }
+
+            if let code = components?.queryItems?.first(where: { $0.name == "code" })?.value {
+                exchangeCode(flowId: flowId, code: code)
+            } else {
+                flowState = .error("No authorization code in callback URL")
+            }
+        }
+
+        session.presentationContextProvider = SystemBrowserContextProvider.shared
+        webAuthSession = session
+        session.start()
+    }
+
     private static var defaultAccountLabel: String {
         let user = NSUserName().isEmpty ? "user" : NSUserName()
         let device = UIDevice.current.name
@@ -323,8 +399,24 @@ private enum OAuthFlowState {
     case label
     case loading
     case webView(flowId: String, url: URL)
+    case systemBrowser(flowId: String, url: URL)
     case manualEntry(flowId: String, url: URL)
     case exchanging
     case success
     case error(String)
+}
+
+// MARK: - System Browser Context
+
+private final class SystemBrowserContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
+    static let shared = SystemBrowserContextProvider()
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        guard let scene = UIApplication.shared.connectedScenes
+            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+              let window = scene.windows.first(where: { $0.isKeyWindow }) else {
+            return ASPresentationAnchor()
+        }
+        return window
+    }
 }

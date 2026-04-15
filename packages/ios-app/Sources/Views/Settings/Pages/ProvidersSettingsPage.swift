@@ -488,90 +488,161 @@ private struct GoogleProviderFields: View {
     let onSave: (AuthUpdateParams) async -> Void
     let onClear: () async -> Void
 
+    @State private var isEditing = false
     @State private var clientId = ""
     @State private var clientSecret = ""
     @State private var projectId = ""
     @State private var isSaving = false
 
+    private var hasClientId: Bool { providerInfo?.hasClientId == true }
+    private var hasClientSecret: Bool { providerInfo?.hasClientSecret == true }
+    private var savedProjectId: String? { providerInfo?.projectId }
+    private var isConfigured: Bool { hasClientId }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Google Cloud Settings")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronCyan)
-                .padding(.top, 4)
-
             HStack {
-                Text("Client ID")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
+                Text("Google Cloud Settings")
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronCyan)
                 Spacer()
-                TextField("OAuth client ID", text: $clientId)
-                    .font(TronTypography.codeCaption)
-                    .multilineTextAlignment(.trailing)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-            }
-
-            HStack {
-                Text("Client Secret")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                Spacer()
-                SecureField("OAuth secret", text: $clientSecret)
-                    .font(TronTypography.codeCaption)
-                    .multilineTextAlignment(.trailing)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-            }
-
-            HStack {
-                Text("Project ID")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                Spacer()
-                TextField("GCP project", text: $projectId)
-                    .font(TronTypography.codeCaption)
-                    .multilineTextAlignment(.trailing)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-            }
-
-            HStack(spacing: 8) {
-                Button {
-                    Task {
-                        isSaving = true
-                        var params = AuthUpdateParams(provider: "google")
-                        if !clientId.isEmpty { params.clientId = clientId }
-                        if !clientSecret.isEmpty { params.clientSecret = clientSecret }
-                        if !projectId.isEmpty { params.projectId = projectId }
-                        await onSave(params)
-                        clientId = ""
-                        clientSecret = ""
-                        projectId = ""
-                        isSaving = false
+                if isConfigured && !isEditing {
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isEditing = true }
+                    } label: {
+                        Text("Edit")
+                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .foregroundStyle(.tronCyan)
                     }
-                } label: {
-                    Text("Save")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .buttonStyle(.plain)
                 }
-                .disabled(isSaving)
-                .buttonStyle(.borderedProminent)
-                .tint(.tronCyan)
+            }
+            .padding(.top, 4)
 
-                Button(role: .destructive) {
-                    Task { await onClear() }
-                } label: {
-                    Text("Clear All")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+            if isEditing || !isConfigured {
+                // Input fields
+                HStack {
+                    Text("Client ID")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                    Spacer()
+                    TextField("OAuth client ID", text: $clientId)
+                        .font(TronTypography.codeCaption)
+                        .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
                 }
-                .buttonStyle(.bordered)
 
-                Spacer()
+                HStack {
+                    Text("Client Secret")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                    Spacer()
+                    SecureField("OAuth secret", text: $clientSecret)
+                        .font(TronTypography.codeCaption)
+                        .multilineTextAlignment(.trailing)
+                        .textContentType(.password)
+                        .autocorrectionDisabled()
+                }
+
+                HStack {
+                    Text("Project ID")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                    Spacer()
+                    TextField("GCP project", text: $projectId)
+                        .font(TronTypography.codeCaption)
+                        .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        Task {
+                            isSaving = true
+                            var params = AuthUpdateParams(provider: "google")
+                            if !clientId.isEmpty { params.clientId = clientId }
+                            if !clientSecret.isEmpty { params.clientSecret = clientSecret }
+                            if !projectId.isEmpty { params.projectId = projectId }
+                            await onSave(params)
+                            clientId = ""
+                            clientSecret = ""
+                            projectId = ""
+                            isSaving = false
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isEditing = false }
+                        }
+                    } label: {
+                        Text("Save")
+                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    }
+                    .disabled(isSaving || (clientId.isEmpty && clientSecret.isEmpty && projectId.isEmpty))
+                    .buttonStyle(.borderedProminent)
+                    .tint(.tronCyan)
+
+                    if isEditing {
+                        Button {
+                            clientId = ""
+                            clientSecret = ""
+                            projectId = ""
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isEditing = false }
+                        } label: {
+                            Text("Cancel")
+                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    Spacer()
+                }
+            } else {
+                // Saved state display
+                GoogleConfigRow(label: "Client ID", status: "Configured", statusColor: .tronSuccess)
+                GoogleConfigRow(
+                    label: "Client Secret",
+                    status: hasClientSecret ? "Configured" : "Not set",
+                    statusColor: hasClientSecret ? .tronSuccess : .tronTextMuted
+                )
+                GoogleConfigRow(
+                    label: "Project ID",
+                    status: savedProjectId ?? "Not set",
+                    statusColor: savedProjectId != nil ? .tronSuccess : .tronTextMuted
+                )
+
+                HStack(spacing: 8) {
+                    Button(role: .destructive) {
+                        Task { await onClear() }
+                    } label: {
+                        Text("Clear All")
+                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+
+                    Spacer()
+                }
             }
         }
         .padding(10)
         .sectionFill(.tronCyan, cornerRadius: 8, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct GoogleConfigRow: View {
+    let label: String
+    let status: String
+    let statusColor: Color
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+            Spacer()
+            Text(status)
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(statusColor)
+        }
     }
 }
 

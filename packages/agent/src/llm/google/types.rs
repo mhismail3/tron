@@ -158,7 +158,7 @@ pub fn default_safety_settings() -> Vec<SafetySetting> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GoogleAuth {
-    /// OAuth authentication via Cloud Code Assist.
+    /// OAuth authentication (Bearer token against standard Gemini API).
     Oauth {
         /// OAuth tokens.
         #[serde(flatten)]
@@ -730,14 +730,8 @@ pub fn is_gemini_3_model(model: &str) -> bool {
     model.contains("gemini-3")
 }
 
-/// Default API base URL for API key authentication.
+/// Default API base URL (used for both API key and OAuth authentication).
 pub const DEFAULT_API_KEY_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
-
-/// Cloud Code Assist API endpoint.
-pub const CLOUD_CODE_ASSIST_ENDPOINT: &str = "https://cloudcode-pa.googleapis.com";
-
-/// Cloud Code Assist API version.
-pub const CLOUD_CODE_ASSIST_VERSION: &str = "v1internal";
 
 /// Maximum tool result content length before truncation.
 pub const TOOL_RESULT_MAX_LENGTH: usize = 16_384;

@@ -146,10 +146,31 @@ impl AuthStorage {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
-    /// Set provider auth.
+    /// Set provider auth (replaces the entire provider entry).
+    ///
+    /// **Warning**: For Google, this drops `client_id`/`client_secret`/`project_id`
+    /// because `ProviderAuth` doesn't include those fields. Use
+    /// `save_provider_base` instead when mutating base fields on any provider.
     pub fn set_provider_auth(&mut self, provider: &str, auth: &ProviderAuth) {
         if let Ok(v) = serde_json::to_value(auth) {
             let _ = self.providers.insert(provider.to_string(), v);
+        }
+    }
+
+    /// Save base `ProviderAuth` fields while preserving any provider-specific
+    /// fields in the storage JSON (e.g. Google's `client_id`, `client_secret`,
+    /// `project_id`).
+    ///
+    /// For non-Google providers this is equivalent to `set_provider_auth`.
+    /// For Google, it re-reads the full `GoogleProviderAuth`, replaces only
+    /// the `base` portion, and writes back the complete struct.
+    pub fn save_provider_base(&mut self, provider: &str, pa: &ProviderAuth) {
+        if provider == "google" {
+            let mut gpa = self.get_google_auth().unwrap_or_default();
+            gpa.base = pa.clone();
+            self.set_google_auth(&gpa);
+        } else {
+            self.set_provider_auth(provider, pa);
         }
     }
 

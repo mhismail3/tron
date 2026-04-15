@@ -1,13 +1,16 @@
 //! Google/Gemini OAuth implementation.
 //!
-//! Supports Cloud Code Assist OAuth and direct API key authentication.
+//! Supports OAuth (standard Gemini API) and direct API key authentication.
 
 use super::errors::AuthError;
 use super::types::{GoogleAuth, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at};
 #[cfg(test)]
 use super::types::now_ms;
 
-/// Cloud Code Assist OAuth configuration.
+/// Default Google OAuth configuration for the standard Gemini API.
+///
+/// Users provide their own GCP OAuth `client_id` (and optionally `client_secret`).
+/// Tokens are used against `generativelanguage.googleapis.com` with Bearer auth.
 pub fn cloud_code_assist_config() -> GoogleOAuthConfig {
     GoogleOAuthConfig {
         oauth: OAuthConfig {
@@ -17,14 +20,12 @@ pub fn cloud_code_assist_config() -> GoogleOAuthConfig {
             client_id: String::new(),
             client_secret: None,
             scopes: vec![
-                "https://www.googleapis.com/auth/cloud-platform".to_string(),
-                "https://www.googleapis.com/auth/userinfo.email".to_string(),
-                "openid".to_string(),
+                "https://www.googleapis.com/auth/generative-language".to_string(),
             ],
             token_expiry_buffer_seconds: 300,
         },
-        api_endpoint: "https://cloudcode-pa.googleapis.com".to_string(),
-        api_version: "v1internal".to_string(),
+        api_endpoint: "https://generativelanguage.googleapis.com".to_string(),
+        api_version: "v1beta".to_string(),
     }
 }
 
@@ -314,8 +315,8 @@ mod tests {
     fn cloud_code_assist_config_values() {
         let cfg = cloud_code_assist_config();
         assert!(cfg.oauth.auth_url.contains("accounts.google.com"));
-        assert!(cfg.api_endpoint.contains("cloudcode-pa"));
-        assert_eq!(cfg.api_version, "v1internal");
+        assert!(cfg.api_endpoint.contains("generativelanguage.googleapis.com"));
+        assert_eq!(cfg.api_version, "v1beta");
     }
 
     #[test]

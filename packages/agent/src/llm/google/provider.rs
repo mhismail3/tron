@@ -1,8 +1,8 @@
 //! Google Gemini provider implementing the [`Provider`] trait.
 //!
 //! Supports two authentication modes:
-//! - **Cloud Code Assist** (OAuth) — uses `cloudcode-pa.googleapis.com` with project ID
-//! - **API Key** — uses `generativelanguage.googleapis.com` directly
+//! - **OAuth** — uses `generativelanguage.googleapis.com` with Bearer token + project ID
+//! - **API Key** — uses `generativelanguage.googleapis.com` with `?key=` query param
 //!
 //! # Thinking Configuration
 //!
@@ -29,7 +29,7 @@ use crate::core::messages::Context;
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{create_stream_state, process_stream_chunk};
 use super::types::{
-    CLOUD_CODE_ASSIST_ENDPOINT, CLOUD_CODE_ASSIST_VERSION, DEFAULT_API_KEY_BASE_URL,
+    DEFAULT_API_KEY_BASE_URL,
     DEFAULT_MAX_OUTPUT_TOKENS, GeminiStreamChunk, GenerationConfig, GoogleApiSettings, GoogleAuth,
     GoogleConfig, SystemInstruction, SystemPart, ThinkingConfig, default_safety_settings,
     get_gemini_model, is_gemini_3_model,
@@ -130,7 +130,7 @@ pub struct GoogleProvider {
     client: reqwest::Client,
     /// Mutable OAuth token state (refreshed before each request).
     tokens: Option<tokio::sync::Mutex<OAuthTokens>>,
-    /// Google Cloud project ID (Cloud Code Assist only).
+    /// Google Cloud project ID (OAuth only, for quota attribution).
     project_id: Option<String>,
 }
 
@@ -189,16 +189,19 @@ impl GoogleProvider {
 
     /// Get the API URL for a given action.
     fn get_api_url(&self, action: &str) -> String {
+        let base = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or(DEFAULT_API_KEY_BASE_URL);
         match &self.config.auth {
             GoogleAuth::Oauth { .. } => {
-                format!("{CLOUD_CODE_ASSIST_ENDPOINT}/{CLOUD_CODE_ASSIST_VERSION}:{action}?alt=sse")
+                format!(
+                    "{base}/models/{}:{action}?alt=sse",
+                    self.config.model
+                )
             }
             GoogleAuth::ApiKey { api_key } => {
-                let base = self
-                    .config
-                    .base_url
-                    .as_deref()
-                    .unwrap_or(DEFAULT_API_KEY_BASE_URL);
                 format!(
                     "{base}/models/{}:{action}?key={api_key}&alt=sse",
                     self.config.model
@@ -227,21 +230,12 @@ impl GoogleProvider {
                     })?,
                 );
 
-                // Cloud Code Assist requires project ID header
+                // Project ID header for quota attribution
                 if let Some(ref pid) = self.project_id
                     && let Ok(val) = HeaderValue::from_str(pid)
                 {
                     let _ = headers.insert("x-goog-user-project", val);
                 }
-
-                let _ = headers.insert(
-                    "user-agent",
-                    HeaderValue::from_static("tron-ai-agent/1.0.0"),
-                );
-                let _ = headers.insert(
-                    "x-goog-api-client",
-                    HeaderValue::from_static("gl-rust/1.0.0"),
-                );
             }
             GoogleAuth::ApiKey { .. } => {
                 // API key is in the URL, no auth header needed
@@ -339,43 +333,10 @@ impl GoogleProvider {
         }
     }
 
-    /// Build the request body for OAuth endpoints.
-    fn build_oauth_request_body(
-        &self,
-        context: &Context,
-        gen_config: &GenerationConfig,
-    ) -> serde_json::Value {
-        let contents = convert_messages(context);
-        let tools = context.tools.as_ref().map(|t| convert_tools(t));
-        let safety_settings = self
-            .config
-            .safety_settings
-            .clone()
-            .unwrap_or_else(default_safety_settings);
-
-        let system_instruction = Self::build_system_instruction(context);
-
-        let mut inner = serde_json::json!({
-            "contents": contents,
-            "generationConfig": gen_config,
-            "safetySettings": safety_settings,
-        });
-
-        if let Some(tools) = tools {
-            inner["tools"] = serde_json::to_value(tools).unwrap_or_default();
-        }
-
-        if let Some(si) = system_instruction {
-            inner["systemInstruction"] = serde_json::to_value(si).unwrap_or_default();
-        }
-
-        // Cloud Code Assist: model goes in request body
-        inner["model"] = serde_json::json!(format!("models/{}", self.config.model));
-        inner
-    }
-
-    /// Build the request body for API key endpoints.
-    fn build_api_key_request_body(
+    /// Build the request body (same format for both OAuth and API key).
+    ///
+    /// Model is always in the URL, not the body.
+    fn build_request_body(
         &self,
         context: &Context,
         gen_config: &GenerationConfig,
@@ -450,14 +411,7 @@ impl GoogleProvider {
 
         let headers = self.build_headers().await?;
 
-        let body = match &self.config.auth {
-            GoogleAuth::Oauth { .. } => {
-                self.build_oauth_request_body(context, &gen_config)
-            }
-            GoogleAuth::ApiKey { .. } => {
-                self.build_api_key_request_body(context, &gen_config)
-            }
-        };
+        let body = self.build_request_body(context, &gen_config);
 
         let url = self.get_api_url("streamGenerateContent");
 
@@ -606,16 +560,18 @@ mod tests {
     // ── API URL construction ──────────────────────────────────────────
 
     #[test]
-    fn api_url_cloud_code_assist() {
+    fn api_url_oauth_uses_standard_gemini_api() {
         let provider = GoogleProvider::new(oauth_config());
         let url = provider.get_api_url("streamGenerateContent");
-        assert!(url.starts_with(CLOUD_CODE_ASSIST_ENDPOINT));
-        assert!(url.contains("v1internal:streamGenerateContent"));
+        assert!(url.contains("generativelanguage.googleapis.com"));
+        assert!(url.contains("models/gemini-3-pro-preview:streamGenerateContent"));
         assert!(url.contains("alt=sse"));
+        // No API key in URL for OAuth
+        assert!(!url.contains("key="));
     }
 
     #[test]
-    fn oauth_always_uses_cca_endpoint() {
+    fn oauth_uses_standard_endpoint_without_project_id() {
         let mut config = oauth_config();
         config.auth = GoogleAuth::Oauth {
             tokens: oauth_tokens(),
@@ -623,8 +579,8 @@ mod tests {
         };
         let provider = GoogleProvider::new(config);
         let url = provider.get_api_url("streamGenerateContent");
-        assert!(url.starts_with(CLOUD_CODE_ASSIST_ENDPOINT));
-        assert!(url.contains("v1internal:streamGenerateContent"));
+        assert!(url.contains("generativelanguage.googleapis.com"));
+        assert!(url.contains("models/gemini-3-pro-preview:streamGenerateContent"));
     }
 
     #[test]
@@ -835,7 +791,7 @@ mod tests {
     // ── Request body construction ─────────────────────────────────────
 
     #[test]
-    fn oauth_request_body_cloud_code_assist() {
+    fn oauth_request_body_standard_gemini() {
         let provider = GoogleProvider::new(oauth_config());
         let context = Context {
             system_prompt: Some("Be helpful".into()),
@@ -854,10 +810,10 @@ mod tests {
         };
         let opts = ProviderStreamOptions::default();
         let gc = provider.build_generation_config(&opts);
-        let body = provider.build_oauth_request_body(&context, &gc);
+        let body = provider.build_request_body(&context, &gc);
 
-        // Cloud Code Assist format: model in body
-        assert!(body["model"].as_str().unwrap().starts_with("models/"));
+        // Model is in URL, not body
+        assert!(body.get("model").is_none());
         assert!(body.get("generationConfig").is_some());
         assert!(body.get("safetySettings").is_some());
         // thinkingConfig nested inside generationConfig, not at top level
@@ -866,8 +822,9 @@ mod tests {
     }
 
     #[test]
-    fn oauth_body_always_uses_cca_format() {
-        let provider = GoogleProvider::new(oauth_config());
+    fn request_body_same_format_for_oauth_and_api_key() {
+        let oauth_provider = GoogleProvider::new(oauth_config());
+        let api_key_provider = GoogleProvider::new(api_key_config());
         let context = Context {
             system_prompt: None,
             messages: vec![].into(),
@@ -883,17 +840,20 @@ mod tests {
             dynamic_rules_context: None,
             server_origin: None,
         };
-        let opts = ProviderStreamOptions::default();
-        let gc = provider.build_generation_config(&opts);
-        let body = provider.build_oauth_request_body(&context, &gc);
 
-        // CCA format: model directly in body, no envelope
-        assert!(body["model"].as_str().unwrap().starts_with("models/"));
-        assert!(body.get("generationConfig").is_some());
-        // Should NOT have Antigravity envelope fields
-        assert!(body.get("requestType").is_none());
-        assert!(body.get("userAgent").is_none());
-        assert!(body.get("request").is_none());
+        let oauth_gc = oauth_provider.build_generation_config(&ProviderStreamOptions::default());
+        let oauth_body = oauth_provider.build_request_body(&context, &oauth_gc);
+
+        let api_gc = api_key_provider.build_generation_config(&ProviderStreamOptions::default());
+        let api_body = api_key_provider.build_request_body(&context, &api_gc);
+
+        // Both should have the same top-level fields (no model in body)
+        assert!(oauth_body.get("model").is_none());
+        assert!(api_body.get("model").is_none());
+        assert!(oauth_body.get("contents").is_some());
+        assert!(api_body.get("contents").is_some());
+        assert!(oauth_body.get("generationConfig").is_some());
+        assert!(api_body.get("generationConfig").is_some());
     }
 
     #[test]
@@ -916,12 +876,12 @@ mod tests {
         };
         let opts = ProviderStreamOptions::default();
         let gc = provider.build_generation_config(&opts);
-        let body = provider.build_api_key_request_body(&context, &gc);
+        let body = provider.build_request_body(&context, &gc);
 
         assert!(body.get("contents").is_some());
         assert!(body.get("generationConfig").is_some());
         assert!(body.get("safetySettings").is_some());
-        // No model in body for API key (it's in the URL)
+        // No model in body (it's in the URL)
         assert!(body.get("model").is_none());
     }
 
@@ -985,7 +945,7 @@ mod tests {
             server_origin: None,
         };
         let gc = provider.build_generation_config(&ProviderStreamOptions::default());
-        let body = provider.build_api_key_request_body(&context, &gc);
+        let body = provider.build_request_body(&context, &gc);
 
         // thinkingConfig MUST be nested inside generationConfig
         assert!(
@@ -1024,7 +984,7 @@ mod tests {
             server_origin: None,
         };
         let gc = provider.build_generation_config(&ProviderStreamOptions::default());
-        let body = provider.build_oauth_request_body(&context, &gc);
+        let body = provider.build_request_body(&context, &gc);
 
         // thinkingConfig MUST be nested inside generationConfig
         assert!(
@@ -1059,7 +1019,7 @@ mod tests {
             server_origin: None,
         };
         let gc = provider.build_generation_config(&ProviderStreamOptions::default());
-        let body = provider.build_api_key_request_body(&context, &gc);
+        let body = provider.build_request_body(&context, &gc);
 
         assert!(body.get("thinkingConfig").is_none());
         assert!(body["generationConfig"].get("thinkingConfig").is_none());
