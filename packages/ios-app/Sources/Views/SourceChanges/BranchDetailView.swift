@@ -23,6 +23,7 @@ struct BranchDetailView: View {
     @State private var showConflictAlert = false
     @State private var showDeleteBranchConfirmation = false
     @State private var isDeleting = false
+    @State private var isReloading = false
 
     private var effectiveSessionId: String {
         branch.sessionId ?? currentSessionId
@@ -66,11 +67,26 @@ struct BranchDetailView: View {
                         .minimumScaleFactor(0.5)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { Task { await loadCommittedDiff() } } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronTeal)
+                    Button {
+                        Task {
+                            isReloading = true
+                            await loadCommittedDiff()
+                            isReloading = false
+                        }
+                    } label: {
+                        Group {
+                            if isReloading {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                    .tint(.tronTeal)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(TronTypography.buttonSM)
+                                    .foregroundStyle(.tronTeal)
+                            }
+                        }
                     }
+                    .disabled(isReloading)
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)

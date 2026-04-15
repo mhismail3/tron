@@ -11,6 +11,7 @@ struct AllBranchesSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var branches: [SessionBranchInfo]
     @State private var selectedBranch: SessionBranchInfo?
+    @State private var isReloading = false
     @State private var isPruning = false
     @State private var showPruneConfirmation = false
 
@@ -47,11 +48,26 @@ struct AllBranchesSheet: View {
                             .foregroundStyle(.tronTeal)
                     }
                     ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button { Task { await loadBranches() } } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(.tronTeal)
+                        Button {
+                            Task {
+                                isReloading = true
+                                await loadBranches()
+                                isReloading = false
+                            }
+                        } label: {
+                            Group {
+                                if isReloading {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                        .tint(.tronTeal)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(TronTypography.buttonSM)
+                                        .foregroundStyle(.tronTeal)
+                                }
+                            }
                         }
+                        .disabled(isReloading)
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)

@@ -30,6 +30,7 @@ struct SourceControlSheet: View {
     // Sub-sheets
     @State private var selectedFileDetail: FileDetailData?
     @State private var showAllBranches = false
+    @State private var isReloading = false
 
     // MARK: - Computed Properties
 
@@ -108,11 +109,26 @@ struct SourceControlSheet: View {
                         .foregroundStyle(.tronTeal)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { Task { await loadData() } } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronTeal)
+                    Button {
+                        Task {
+                            isReloading = true
+                            await loadData()
+                            isReloading = false
+                        }
+                    } label: {
+                        Group {
+                            if isReloading {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                    .tint(.tronTeal)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(TronTypography.buttonSM)
+                                    .foregroundStyle(.tronTeal)
+                            }
+                        }
                     }
+                    .disabled(isReloading)
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
