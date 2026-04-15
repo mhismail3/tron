@@ -1227,3 +1227,241 @@ async fn list_branches_after_rename_and_release_shows_base_branch() {
         "load_base_branches_from_events should rekey renamed branches"
     );
 }
+
+// ── delete_session_branch / prune_session_branches tests ───────
+
+#[tokio::test]
+async fn delete_branch_with_linked_worktree() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let git = GitExecutor::new(30_000);
+    let wt_path = dir
+        .path()
+        .join(".worktrees")
+        .join("session")
+        .join("orphan1");
+    git.worktree_add(dir.path(), &wt_path, "session/orphan1", "HEAD")
+        .await
+        .unwrap();
+    assert!(wt_path.exists());
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let result = coord
+        .delete_session_branch(dir.path(), "session/orphan1")
+        .await;
+    assert!(result.is_ok(), "delete should succeed: {result:?}");
+    assert!(!wt_path.exists(), "worktree directory should be removed");
+
+    let branches = git
+        .list_branches_matching(dir.path(), "session/*")
+        .await
+        .unwrap();
+    assert!(
+        !branches.contains(&"session/orphan1".to_string()),
+        "branch should be deleted"
+    );
+}
+
+#[tokio::test]
+async fn delete_branch_with_dirty_worktree_auto_commits() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let git = GitExecutor::new(30_000);
+    let wt_path = dir
+        .path()
+        .join(".worktrees")
+        .join("session")
+        .join("dirty1");
+    git.worktree_add(dir.path(), &wt_path, "session/dirty1", "HEAD")
+        .await
+        .unwrap();
+
+    // Write dirty changes
+    std::fs::write(wt_path.join("unsaved.txt"), "uncommitted work").unwrap();
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let result = coord
+        .delete_session_branch(dir.path(), "session/dirty1")
+        .await;
+    assert!(
+        result.is_ok(),
+        "delete should succeed even with dirty worktree: {result:?}"
+    );
+    assert!(!wt_path.exists(), "worktree directory should be removed");
+}
+
+#[tokio::test]
+async fn delete_branch_rejects_active_branch() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let _ = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("test"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let result = coord.maybe_acquire("sess-del", dir.path()).await.unwrap();
+    let AcquireResult::Acquired(info) = result else {
+        panic!("expected Acquired");
+    };
+
+    let err = coord
+        .delete_session_branch(dir.path(), &info.branch)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::worktree::WorktreeError::BranchActive(_)),
+        "should reject active branch: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn delete_branch_rejects_wrong_prefix() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+    run_cmd(dir.path(), &["git", "branch", "feature/xyz"]).await;
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let err = coord
+        .delete_session_branch(dir.path(), "feature/xyz")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::worktree::WorktreeError::Git(_)),
+        "should reject non-session prefix: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn prune_removes_worktree_linked_branches() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let git = GitExecutor::new(30_000);
+
+    // Create two orphan worktrees
+    let wt1 = dir.path().join(".worktrees/session/orphan-a");
+    let wt2 = dir.path().join(".worktrees/session/orphan-b");
+    git.worktree_add(dir.path(), &wt1, "session/orphan-a", "HEAD")
+        .await
+        .unwrap();
+    git.worktree_add(dir.path(), &wt2, "session/orphan-b", "HEAD")
+        .await
+        .unwrap();
+
+    // Also acquire one via coordinator (active — should be skipped)
+    let store = make_store();
+    let _ = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("test"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+    let result = coord.maybe_acquire("sess-active", dir.path()).await.unwrap();
+    let AcquireResult::Acquired(active_info) = result else {
+        panic!("expected Acquired");
+    };
+
+    let prune_result = coord.prune_session_branches(dir.path()).await.unwrap();
+    assert!(
+        prune_result.deleted.contains(&"session/orphan-a".to_string()),
+        "orphan-a should be deleted: {:?}",
+        prune_result.deleted
+    );
+    assert!(
+        prune_result.deleted.contains(&"session/orphan-b".to_string()),
+        "orphan-b should be deleted: {:?}",
+        prune_result.deleted
+    );
+    assert!(
+        prune_result.failed.is_empty(),
+        "no failures expected: {:?}",
+        prune_result.failed
+    );
+
+    // Active branch should still exist
+    let remaining = git
+        .list_branches_matching(dir.path(), "session/*")
+        .await
+        .unwrap();
+    assert!(
+        remaining.contains(&active_info.branch),
+        "active branch should be preserved: {remaining:?}"
+    );
+    assert!(!wt1.exists(), "orphan-a worktree should be removed");
+    assert!(!wt2.exists(), "orphan-b worktree should be removed");
+}
+
+#[tokio::test]
+async fn prune_empty_repo() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let result = coord.prune_session_branches(dir.path()).await.unwrap();
+    assert!(result.deleted.is_empty());
+    assert!(result.failed.is_empty());
+}
+
+#[tokio::test]
+async fn delete_branch_with_stale_worktree_ref() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let git = GitExecutor::new(30_000);
+    let wt_path = dir
+        .path()
+        .join(".worktrees")
+        .join("session")
+        .join("stale1");
+    git.worktree_add(dir.path(), &wt_path, "session/stale1", "HEAD")
+        .await
+        .unwrap();
+
+    // Manually delete the worktree directory to simulate a stale ref
+    tokio::fs::remove_dir_all(&wt_path).await.unwrap();
+    assert!(!wt_path.exists());
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let result = coord
+        .delete_session_branch(dir.path(), "session/stale1")
+        .await;
+    assert!(
+        result.is_ok(),
+        "delete should succeed with stale worktree ref: {result:?}"
+    );
+
+    let branches = git
+        .list_branches_matching(dir.path(), "session/*")
+        .await
+        .unwrap();
+    assert!(
+        !branches.contains(&"session/stale1".to_string()),
+        "branch should be deleted"
+    );
+}

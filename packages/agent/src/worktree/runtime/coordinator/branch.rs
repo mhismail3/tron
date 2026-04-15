@@ -1,8 +1,59 @@
+use std::path::PathBuf;
+
+use tracing::{info, warn};
+
 use crate::worktree::errors::{Result, WorktreeError};
 
 use super::WorktreeCoordinator;
 
 impl WorktreeCoordinator {
+    /// Remove a linked worktree for a branch, if one exists.
+    ///
+    /// Handles orphaned worktrees that were never properly released (e.g. after
+    /// a database wipe). Auto-commits any dirty changes before removal to
+    /// prevent data loss. Errors are logged but do not propagate — the caller
+    /// should proceed with `branch_delete` regardless, which will fail with a
+    /// clear git error if the worktree could not be removed.
+    async fn remove_worktree_if_present(&self, repo_root: &std::path::Path, branch: &str) {
+        let entries = match self.git.worktree_list(repo_root).await {
+            Ok(e) => e,
+            Err(e) => {
+                warn!(branch, error = %e, "failed to list worktrees");
+                return;
+            }
+        };
+
+        let entry = match entries.iter().find(|e| e.branch.as_deref() == Some(branch)) {
+            Some(e) => e,
+            None => return,
+        };
+
+        let wt_path = PathBuf::from(&entry.path);
+
+        if wt_path.exists() {
+            // Auto-commit dirty changes to prevent data loss
+            if let Ok(true) = self.git.has_changes(&wt_path).await {
+                match self
+                    .git
+                    .commit_all(&wt_path, "[auto-recovered] orphaned session changes")
+                    .await
+                {
+                    Ok(sha) => info!(branch, commit = %sha, "auto-committed orphan changes"),
+                    Err(e) => warn!(branch, error = %e, "failed to auto-commit orphan"),
+                }
+            }
+
+            // Remove the worktree
+            if let Err(e) = self.git.worktree_remove(repo_root, &wt_path, true).await {
+                warn!(branch, error = %e, "failed to remove orphan worktree, trying manual cleanup");
+                let _ = tokio::fs::remove_dir_all(&wt_path).await;
+            }
+        }
+
+        // Clean stale refs regardless
+        let _ = self.git.worktree_prune(repo_root).await;
+    }
+
     /// Delete a single session branch by name.
     ///
     /// Refuses to delete branches with active worktrees. Returns info about
@@ -38,6 +89,7 @@ impl WorktreeCoordinator {
             0
         };
 
+        self.remove_worktree_if_present(repo_root, branch).await;
         self.git.branch_delete(repo_root, branch, true).await?;
 
         Ok(DeleteBranchResult {
@@ -62,6 +114,8 @@ impl WorktreeCoordinator {
             if info.is_active {
                 continue;
             }
+
+            self.remove_worktree_if_present(repo_root, &info.branch).await;
 
             match self.git.branch_delete(repo_root, &info.branch, true).await {
                 Ok(()) => deleted.push(info.branch.clone()),
