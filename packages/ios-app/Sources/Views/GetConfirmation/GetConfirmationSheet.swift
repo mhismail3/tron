@@ -129,8 +129,7 @@ struct GetConfirmationSheet: View {
                 .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronTextMuted)
 
-            Text(content)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
+            Text(inlineMarkdown(from: content, size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(4)

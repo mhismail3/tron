@@ -43,9 +43,20 @@ struct AskUserQuestionSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                if questions.count > 1 {
-                    ToolbarItem(placement: .topBarLeading) {
-                        pageIndicators
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 12) {
+                        Button {
+                            dismiss()
+                            onDismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                                .foregroundStyle(.tronTextMuted)
+                        }
+
+                        if questions.count > 1 {
+                            pageIndicators
+                        }
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -240,8 +251,7 @@ struct QuestionCardView: View {
             }
 
             // Question text
-            Text(question.question)
-                .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .medium))
+            Text(inlineMarkdown(from: question.question, size: TronTypography.sizeBodyLG, weight: .medium))
                 .foregroundStyle(.tronTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(4)
@@ -337,13 +347,11 @@ struct CompactOptionRowView: View {
 
                 // Label and description
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(option.label)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: isSelected ? .medium : .regular))
+                    Text(inlineMarkdown(from: option.label, size: TronTypography.sizeBody, weight: isSelected ? .medium : .regular))
                         .foregroundStyle(.tronTextPrimary)
 
                     if let description = option.description {
-                        Text(description)
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                        Text(inlineMarkdown(from: description, size: TronTypography.sizeBodySM))
                             .foregroundStyle(.tronTextSecondary)
                             .lineSpacing(2)
                     }
