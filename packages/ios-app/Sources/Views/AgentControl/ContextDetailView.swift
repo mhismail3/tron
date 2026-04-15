@@ -209,14 +209,7 @@ struct ContextDetailView: View {
                 compactButton
             }
         }
-        .alert("Error", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
-            Button("OK") { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
-        }
+        .tronErrorAlert(message: $errorMessage)
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -255,24 +248,15 @@ struct ContextDetailView: View {
     // MARK: - Toolbar Buttons
 
     private var clearButton: some View {
-        Button {
+        LoadingToolbarButton(
+            label: "Clear",
+            icon: "trash",
+            color: .tronError,
+            isLoading: isClearing,
+            isEnabled: hasMessages && !readOnly
+        ) {
             showClearPopover = true
-        } label: {
-            HStack(spacing: 4) {
-                if isClearing {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .tint(.tronError)
-                } else {
-                    Image(systemName: "trash")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                }
-                Text("Clear")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-            }
-            .foregroundStyle(hasMessages && !readOnly ? .tronError : .tronTextMuted)
         }
-        .disabled(isClearing || !hasMessages || readOnly)
         .popover(isPresented: $showClearPopover, arrowEdge: .top) {
             GlassActionSheet(
                 actions: [
@@ -300,24 +284,15 @@ struct ContextDetailView: View {
     }
 
     private var compactButton: some View {
-        Button {
+        LoadingToolbarButton(
+            label: "Compact",
+            icon: "arrow.down.right.and.arrow.up.left",
+            color: .tronSlate,
+            isLoading: isCompacting,
+            isEnabled: hasMessages && !readOnly
+        ) {
             showCompactPopover = true
-        } label: {
-            HStack(spacing: 4) {
-                if isCompacting {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .tint(.tronSlate)
-                } else {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                }
-                Text("Compact")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-            }
-            .foregroundStyle(hasMessages && !readOnly ? .tronSlate : .tronTextMuted)
         }
-        .disabled(isCompacting || !hasMessages || readOnly)
         .popover(isPresented: $showCompactPopover, arrowEdge: .top) {
             GlassActionSheet(
                 actions: [

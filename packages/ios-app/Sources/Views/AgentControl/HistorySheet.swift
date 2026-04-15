@@ -59,14 +59,7 @@ struct HistorySheet: View {
                     }
                 }
             }
-            .alert("Error", isPresented: Binding(
-                get: { forkError != nil },
-                set: { if !$0 { forkError = nil } }
-            )) {
-                Button("OK") { forkError = nil }
-            } message: {
-                Text(forkError ?? "")
-            }
+            .tronErrorAlert(message: $forkError)
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)

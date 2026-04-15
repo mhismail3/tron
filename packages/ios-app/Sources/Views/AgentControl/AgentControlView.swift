@@ -144,14 +144,7 @@ struct AgentControlView: View {
                     }
                 )
             }
-            .alert("Error", isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .tronErrorAlert(message: $errorMessage)
             .task {
                 await loadAll()
             }
@@ -337,24 +330,15 @@ struct AgentControlView: View {
     // MARK: - Retain Button
 
     private var retainButton: some View {
-        Button {
+        LoadingToolbarButton(
+            label: "Retain",
+            icon: "brain",
+            color: .tronPink,
+            isLoading: isRetaining,
+            isEnabled: !readOnly
+        ) {
             showRetainPopover = true
-        } label: {
-            HStack(spacing: 4) {
-                if isRetaining {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .tint(.tronPink)
-                } else {
-                    Image(systemName: "brain")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                }
-                Text("Retain")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-            }
-            .foregroundStyle(!readOnly && !isRetaining ? .tronPink : .tronTextMuted)
         }
-        .disabled(isRetaining || readOnly)
         .popover(isPresented: $showRetainPopover, arrowEdge: .top) {
             GlassActionSheet(
                 actions: [

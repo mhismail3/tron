@@ -136,14 +136,7 @@ struct SourceControlSheet: View {
                     }
                 }
             }
-            .alert("Error", isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .tronErrorAlert(message: $errorMessage)
             .task {
                 // Pre-populate from parent's data, then refresh in background
                 diffResult = initialDiffResult
