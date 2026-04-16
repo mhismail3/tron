@@ -423,10 +423,45 @@ fn full_conversation_event_sequence() {
             EventType::MessageUser,        // "Show me an example"
             EventType::MessageAssistant,   // text + tool_use
             EventType::ToolCall,           // Write tool
-            EventType::StreamTurnEnd,      // turn 2 mid-end
             EventType::ToolResult,         // "File written"
             EventType::MessageAssistant,   // "I created the file."
-            EventType::StreamTurnEnd,      // turn 2 final end
+            EventType::StreamTurnEnd,      // turn 2 end (one per turn)
         ]
     );
+}
+
+#[test]
+fn assistant_tool_use_normalized_input_to_arguments() {
+    // Claude Code stores "input" + "caller" on tool_use blocks; Tron expects "arguments"
+    let items = vec![make_assistant_item(
+        vec![json!({
+            "type": "tool_use",
+            "id": "toolu_01",
+            "name": "Bash",
+            "input": {"command": "ls"},
+            "caller": "tool_caller_xyz"
+        })],
+        1,
+        "claude-opus-4-6",
+        "tool_use",
+        10,
+        5,
+    )];
+    let result = transform(items);
+
+    let msg = result
+        .events
+        .iter()
+        .find(|e| e.event_type == EventType::MessageAssistant)
+        .unwrap();
+    let block = &msg.payload["content"][0];
+    // "input" renamed to "arguments"
+    assert_eq!(block["arguments"]["command"], "ls");
+    assert!(block.get("input").is_none());
+    // "caller" stripped
+    assert!(block.get("caller").is_none());
+    // Other fields preserved
+    assert_eq!(block["type"], "tool_use");
+    assert_eq!(block["id"], "toolu_01");
+    assert_eq!(block["name"], "Bash");
 }

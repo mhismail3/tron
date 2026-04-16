@@ -43,6 +43,10 @@ pub struct TransformResult {
 }
 
 /// Transform assembled items into Tron event specs.
+///
+/// Emits exactly one `stream.turn_end` per turn, placed after the last
+/// assistant message of that turn. Token usage and cost are accumulated
+/// across all assistant messages within the same turn.
 pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
     let mut events = Vec::new();
     let mut title: Option<String> = None;
@@ -53,6 +57,40 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
     let mut max_turn: i64 = 0;
     let mut message_count: i64 = 0;
     let mut last_turn_started: i64 = 0;
+
+    // Per-turn accumulation for deferred stream.turn_end
+    let mut pending_turn: i64 = 0;
+    let mut pending_turn_input: i64 = 0;
+    let mut pending_turn_output: i64 = 0;
+    let mut pending_turn_cache_read: i64 = 0;
+    let mut pending_turn_cache_creation: i64 = 0;
+    let mut pending_turn_cost: f64 = 0.0;
+    let mut has_pending_turn_end = false;
+
+    /// Flush accumulated turn stats as a single `stream.turn_end`.
+    fn flush_turn_end(
+        events: &mut Vec<TronEventSpec>,
+        turn: i64,
+        input: i64,
+        output: i64,
+        cache_read: i64,
+        cache_creation: i64,
+        cost: f64,
+    ) {
+        events.push(TronEventSpec {
+            event_type: EventType::StreamTurnEnd,
+            payload: json!({
+                "turn": turn,
+                "tokenUsage": {
+                    "inputTokens": input,
+                    "outputTokens": output,
+                    "cacheReadTokens": cache_read,
+                    "cacheCreationTokens": cache_creation,
+                },
+                "cost": cost,
+            }),
+        });
+    }
 
     for item in items {
         match item {
@@ -66,6 +104,11 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 }
 
                 if is_compact {
+                    // Flush pending turn_end before compact boundary
+                    if has_pending_turn_end {
+                        flush_turn_end(&mut events, pending_turn, pending_turn_input, pending_turn_output, pending_turn_cache_read, pending_turn_cache_creation, pending_turn_cost);
+                        has_pending_turn_end = false;
+                    }
                     emit_compact_from_user(&record, &mut events);
                     continue;
                 }
@@ -75,7 +118,12 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                     continue;
                 }
 
-                // Normal user message
+                // Normal user message — flush pending turn_end from previous turn
+                if has_pending_turn_end && turn > pending_turn {
+                    flush_turn_end(&mut events, pending_turn, pending_turn_input, pending_turn_output, pending_turn_cache_read, pending_turn_cache_creation, pending_turn_cost);
+                    has_pending_turn_end = false;
+                }
+
                 if turn > last_turn_started {
                     events.push(TronEventSpec {
                         event_type: EventType::StreamTurnStart,
@@ -118,6 +166,12 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                     .iter()
                     .any(|b| b.get("type").and_then(Value::as_str) == Some("thinking"));
 
+                // If this assistant is in a new turn, flush the previous turn_end
+                if has_pending_turn_end && am.turn > pending_turn {
+                    flush_turn_end(&mut events, pending_turn, pending_turn_input, pending_turn_output, pending_turn_cache_read, pending_turn_cache_creation, pending_turn_cost);
+                    has_pending_turn_end = false;
+                }
+
                 // Emit turn_start if not already emitted for this turn
                 if am.turn > last_turn_started {
                     events.push(TronEventSpec {
@@ -128,8 +182,14 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 }
 
                 // message.assistant
+                // Normalize content blocks: Claude Code uses "input" for tool_use
+                // but Tron's AssistantContent::ToolUse expects "arguments".
+                let normalized_blocks: Vec<Value> = am.content_blocks.iter().map(|b| {
+                    normalize_assistant_block(b)
+                }).collect();
+
                 let mut assistant_payload = json!({
-                    "content": am.content_blocks,
+                    "content": normalized_blocks,
                     "turn": am.turn,
                     "tokenUsage": {
                         "inputTokens": am.usage.input_tokens,
@@ -153,20 +213,22 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 // tool.call events — one per tool_use block
                 emit_tool_calls(&am, &mut events);
 
-                // stream.turn_end
-                events.push(TronEventSpec {
-                    event_type: EventType::StreamTurnEnd,
-                    payload: json!({
-                        "turn": am.turn,
-                        "tokenUsage": {
-                            "inputTokens": am.usage.input_tokens,
-                            "outputTokens": am.usage.output_tokens,
-                            "cacheReadTokens": am.usage.cache_read_input_tokens,
-                            "cacheCreationTokens": am.usage.cache_creation_input_tokens,
-                        },
-                        "cost": cost,
-                    }),
-                });
+                // Accumulate into pending turn_end (same turn adds up)
+                if has_pending_turn_end && am.turn == pending_turn {
+                    pending_turn_input += am.usage.input_tokens;
+                    pending_turn_output += am.usage.output_tokens;
+                    pending_turn_cache_read += am.usage.cache_read_input_tokens;
+                    pending_turn_cache_creation += am.usage.cache_creation_input_tokens;
+                    pending_turn_cost += cost;
+                } else {
+                    pending_turn = am.turn;
+                    pending_turn_input = am.usage.input_tokens;
+                    pending_turn_output = am.usage.output_tokens;
+                    pending_turn_cache_read = am.usage.cache_read_input_tokens;
+                    pending_turn_cache_creation = am.usage.cache_creation_input_tokens;
+                    pending_turn_cost = cost;
+                }
+                has_pending_turn_end = true;
 
                 total_input_tokens += am.usage.input_tokens;
                 total_output_tokens += am.usage.output_tokens;
@@ -176,6 +238,12 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 }
             }
             AssembledItem::SystemRecord { record, .. } => {
+                // Flush pending turn_end before system records
+                if has_pending_turn_end {
+                    flush_turn_end(&mut events, pending_turn, pending_turn_input, pending_turn_output, pending_turn_cache_read, pending_turn_cache_creation, pending_turn_cost);
+                    has_pending_turn_end = false;
+                }
+
                 let subtype = record.subtype.as_deref().unwrap_or("");
                 match subtype {
                     "compact_boundary" => {
@@ -213,6 +281,11 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 title = Some(t);
             }
         }
+    }
+
+    // Flush final pending turn_end
+    if has_pending_turn_end {
+        flush_turn_end(&mut events, pending_turn, pending_turn_input, pending_turn_output, pending_turn_cache_read, pending_turn_cache_creation, pending_turn_cost);
     }
 
     TransformResult {
@@ -299,6 +372,28 @@ fn emit_tool_results(
         });
 
     }
+}
+
+/// Normalize an assistant content block for Tron compatibility.
+///
+/// Claude Code stores tool_use blocks with `"input"` for arguments and an extra
+/// `"caller"` field. Tron's `AssistantContent::ToolUse` expects `"arguments"`
+/// and doesn't recognize `"caller"`, so deserialization silently fails without
+/// this normalization.
+fn normalize_assistant_block(block: &Value) -> Value {
+    if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+        return block.clone();
+    }
+    let mut b = block.clone();
+    if let Some(obj) = b.as_object_mut() {
+        // Rename "input" → "arguments"
+        if let Some(input) = obj.remove("input") {
+            let _ = obj.insert("arguments".to_string(), input);
+        }
+        // Strip "caller" (Claude Code internal field, not in Tron schema)
+        let _ = obj.remove("caller");
+    }
+    b
 }
 
 /// Emit compact.boundary + compact.summary from a compact summary user record.
