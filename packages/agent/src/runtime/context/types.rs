@@ -153,6 +153,8 @@ pub struct ContextSnapshot {
     /// Loaded rules files (if any).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rules: Option<RulesSnapshot>,
+    /// Whether this is a local (Ollama) model session.
+    pub is_local_model: bool,
 }
 
 /// Information about a loaded rules file.
@@ -590,6 +592,7 @@ mod tests {
                 messages: 1500,
             },
             rules: None,
+            is_local_model: false,
         };
         let json = serde_json::to_value(&snapshot).unwrap();
         assert_eq!(json["currentTokens"], 5000);

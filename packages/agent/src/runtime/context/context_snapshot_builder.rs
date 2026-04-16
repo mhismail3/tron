@@ -54,6 +54,8 @@ pub trait SnapshotDeps: Send + Sync {
     fn get_tool_clarification(&self) -> Option<String>;
     /// Tool summaries for the detailed snapshot.
     fn get_tool_summaries(&self) -> Vec<ToolSummary>;
+    /// Whether this is a local (Ollama) model session.
+    fn is_local_model(&self) -> bool;
 }
 
 // =============================================================================
@@ -104,6 +106,7 @@ impl<D: SnapshotDeps> ContextSnapshotBuilder<D> {
                 messages: self.deps.get_messages_tokens(),
             },
             rules: None,
+            is_local_model: self.deps.is_local_model(),
         }
     }
 
@@ -331,6 +334,9 @@ mod tests {
                     description: "Read file contents.".into(),
                 },
             ]
+        }
+        fn is_local_model(&self) -> bool {
+            false
         }
     }
 

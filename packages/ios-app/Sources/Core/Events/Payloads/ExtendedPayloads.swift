@@ -198,6 +198,8 @@ struct ContextSnapshotResult: Codable {
     let contextLimit: Int
     let usagePercent: Double
     let thresholdLevel: String
+    /// Whether this is a local (Ollama) model session.
+    let isLocalModel: Bool?
     let breakdown: ContextBreakdown
 
     struct ContextBreakdown: Codable {
@@ -280,6 +282,8 @@ struct DetailedContextSnapshotResult: Codable {
     let contextLimit: Int
     let usagePercent: Double
     let thresholdLevel: String
+    /// Whether this is a local (Ollama) model session.
+    let isLocalModel: Bool?
     let breakdown: ContextSnapshotResult.ContextBreakdown
     let messages: [DetailedMessageInfo]
     /// Effective system-level context sent to the model

@@ -502,9 +502,14 @@ fn build_turn_context(
     let is_local = provider_type == crate::core::messages::Provider::Ollama;
 
     // Set volatile token estimates for accurate snapshots.
-    // Local models: zero out since skills/jobs are stripped from context.
+    // Local models: skill tokens flow through (user can manually add skills),
+    // but job_results are stripped (no background job tools for local).
     if is_local {
-        context_manager.set_volatile_tokens(0, 0, 0);
+        context_manager.set_volatile_tokens(
+            run_context.volatile_tokens.skill_context,
+            run_context.volatile_tokens.skill_removal,
+            0,
+        );
     } else {
         context_manager.set_volatile_tokens(
             run_context.volatile_tokens.skill_context,
@@ -526,13 +531,18 @@ fn build_turn_context(
     };
 
     if is_local {
-        // Local models: skip memory, skills, and job results to save tokens.
+        // Local models: skip memory, skill index, and job results.
+        // Keep skill context/activation/removal — users can manually @mention skills.
         // Truncate rules to the most important prefix.
         context.memory_content = None;
         context.skill_index_context = None;
-        context.skill_activation_context = None;
-        context.skill_context = None;
-        context.skill_removal_context = None;
+        context
+            .skill_activation_context
+            .clone_from(&run_context.skill_activation_context);
+        context.skill_context.clone_from(&run_context.skill_context);
+        context
+            .skill_removal_context
+            .clone_from(&run_context.skill_removal_context);
         context.job_results_context = None;
         if let Some(ref rules) = context.rules_content {
             if rules.len() > LOCAL_RULES_TRUNCATION {

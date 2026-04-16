@@ -231,12 +231,18 @@ struct ContextDetailView: View {
 
     // MARK: - Content Checks
 
+    /// Whether the session uses a local (Ollama) model.
+    /// Local models don't use the skill index (catalog), but support manually activated skills.
+    private var isLocalModel: Bool {
+        snapshot.isLocalModel == true
+    }
+
     private var hasGlobalContent: Bool {
-        globalRules != nil || !(skillStore?.globalSkills ?? []).isEmpty
+        globalRules != nil || (!isLocalModel && !(skillStore?.globalSkills ?? []).isEmpty)
     }
 
     private var hasProjectContent: Bool {
-        projectRules != nil || !(skillStore?.projectSkills ?? []).isEmpty
+        projectRules != nil || (!isLocalModel && !(skillStore?.projectSkills ?? []).isEmpty)
     }
 
     private var hasSessionContent: Bool {

@@ -587,8 +587,12 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         }
     };
 
-    // Build skill index based on settings
-    let skill_index_context = {
+    // Build skill index based on settings (skip for local models — index is stripped at turn time)
+    let is_local_model = crate::llm::models::registry::detect_provider_from_model(&model)
+        == Some(crate::core::messages::Provider::Ollama);
+    let skill_index_context = if is_local_model {
+        None
+    } else {
         let settings = crate::settings::get_settings();
         let show_index = &settings.skills.show_index;
         let should_show = match show_index {
@@ -619,9 +623,13 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             .skill_removal_context
             .as_ref()
             .map_or(0, |s| s.len() as u64 / chars_per_token);
-        let jobs = job_results_context
-            .as_ref()
-            .map_or(0, |s| s.len() as u64 / chars_per_token);
+        let jobs = if is_local_model {
+            0 // Job results stripped at turn time for local models
+        } else {
+            job_results_context
+                .as_ref()
+                .map_or(0, |s| s.len() as u64 / chars_per_token)
+        };
         VolatileTokens {
             skill_context: skill_ctx,
             skill_removal: removal,

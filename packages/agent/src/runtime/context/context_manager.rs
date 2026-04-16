@@ -63,8 +63,9 @@ pub struct ContextManager {
     volatile_skill_removal_tokens: u64,
     /// Volatile token estimate: background job results.
     volatile_job_results_tokens: u64,
-    /// Local model mode (Ollama). Disables memory/skill token estimation since
-    /// those fields are stripped from the context at turn-build time.
+    /// Local model mode (Ollama). Disables memory and skill index token estimation
+    /// since those fields are stripped at turn time. Skill context/activation/removal
+    /// tokens still flow through (users can manually activate skills).
     is_local_model: bool,
 }
 
@@ -356,6 +357,15 @@ impl ContextManager {
     }
 
     #[must_use]
+    /// Whether this is a local (Ollama) model session.
+    ///
+    /// Local models strip the skill index and job results at turn time,
+    /// but keep manually-activated skill content.
+    pub fn is_local_model(&self) -> bool {
+        self.is_local_model
+    }
+
+    #[must_use]
     /// Get the working directory (for file operations and tool context).
     pub fn get_working_directory(&self) -> &str {
         self.config.working_directory.as_deref().unwrap_or("/tmp")
@@ -392,7 +402,7 @@ impl ContextManager {
     #[must_use]
     /// Estimate skill index token count.
     ///
-    /// Returns 0 for local models since skill context is stripped at turn time.
+    /// Returns 0 for local models since the skill index is stripped at turn time.
     pub fn estimate_skill_index_tokens(&self) -> u64 {
         if self.is_local_model {
             return 0;
@@ -761,7 +771,11 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
         self.manager.volatile_skill_removal_tokens
     }
     fn get_volatile_job_results_tokens(&self) -> u64 {
-        self.manager.volatile_job_results_tokens
+        if self.manager.is_local_model {
+            0
+        } else {
+            self.manager.volatile_job_results_tokens
+        }
     }
     fn get_messages_tokens(&self) -> u64 {
         self.manager.get_messages_tokens()
@@ -785,6 +799,9 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
                 description: crate::core::text::first_sentence(&t.description).to_owned(),
             })
             .collect()
+    }
+    fn is_local_model(&self) -> bool {
+        self.manager.is_local_model
     }
 }
 

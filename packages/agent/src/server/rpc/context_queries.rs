@@ -37,16 +37,20 @@ impl ContextQueryService {
                     context_artifacts.as_ref(),
                     tool_definitions.clone(),
                 )?;
-                let skill_index_content = {
-                    let mut registry = skill_registry.write();
-                    let _ = registry.refresh_if_stale(&prepared.session.working_directory);
-                    let skills = registry.list(None);
-                    let index = crate::skills::injector::build_skill_index(&skills);
-                    if index.is_empty() { None } else { Some(index) }
-                };
-                prepared.context_manager.set_skill_index_content(skill_index_content);
+                // Skill index: skip for local models (index is stripped at turn time)
+                if !prepared.context_manager.is_local_model() {
+                    let skill_index_content = {
+                        let mut registry = skill_registry.write();
+                        let _ = registry.refresh_if_stale(&prepared.session.working_directory);
+                        let skills = registry.list(None);
+                        let index = crate::skills::injector::build_skill_index(&skills);
+                        if index.is_empty() { None } else { Some(index) }
+                    };
+                    prepared.context_manager.set_skill_index_content(skill_index_content);
+                }
 
                 // Reconstruct volatile token estimates from session state
+                // (runs for all models — users can manually activate skills)
                 let added_skills = build_added_skills(
                     event_store.as_ref(),
                     &session_id_for_query,
@@ -223,6 +227,7 @@ fn snapshot_response(snapshot: &crate::runtime::context::types::ContextSnapshot)
         "contextLimit": snapshot.context_limit,
         "usagePercent": snapshot.usage_percent,
         "thresholdLevel": snapshot.threshold_level,
+        "isLocalModel": snapshot.is_local_model,
         "breakdown": {
             "systemPrompt": snapshot.breakdown.system_prompt,
             "tools": snapshot.breakdown.tools,
@@ -250,18 +255,21 @@ fn build_detailed_snapshot_response(
         mut context_manager,
     } = prepared;
 
-    // Refresh registry if skills changed on disk, then build index for token estimation
-    let skill_index_content = {
-        let mut registry = skill_registry.write();
-        let _ = registry.refresh_if_stale(&session.working_directory);
-        let skills = registry.list(None);
-        let index = crate::skills::injector::build_skill_index(&skills);
-        if index.is_empty() { None } else { Some(index) }
-    };
-    context_manager.set_skill_index_content(skill_index_content);
+    // Skill index: skip for local models (index is stripped at turn time)
+    if !context_manager.is_local_model() {
+        let skill_index_content = {
+            let mut registry = skill_registry.write();
+            let _ = registry.refresh_if_stale(&session.working_directory);
+            let skills = registry.list(None);
+            let index = crate::skills::injector::build_skill_index(&skills);
+            if index.is_empty() { None } else { Some(index) }
+        };
+        context_manager.set_skill_index_content(skill_index_content);
+    }
 
     // Reconstruct volatile token estimates from session state so the snapshot
-    // reflects active skills even when queried between turns.
+    // reflects active skills even when queried between turns
+    // (runs for all models — users can manually activate skills).
     let added_skills = build_added_skills(event_store, session_id)?;
     set_volatile_tokens_from_session(
         &mut context_manager,
@@ -279,6 +287,7 @@ fn build_detailed_snapshot_response(
         "contextLimit": detailed.snapshot.context_limit,
         "usagePercent": detailed.snapshot.usage_percent,
         "thresholdLevel": detailed.snapshot.threshold_level,
+        "isLocalModel": context_manager.is_local_model(),
         "breakdown": {
             "systemPrompt": detailed.snapshot.breakdown.system_prompt,
             "tools": detailed.snapshot.breakdown.tools,

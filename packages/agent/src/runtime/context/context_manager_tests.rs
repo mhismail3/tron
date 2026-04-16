@@ -86,6 +86,50 @@ fn non_ollama_model_gets_core_prompt() {
     assert!(cm.get_system_prompt().contains("YOUR IDENTITY"));
 }
 
+// -- is_local_model --
+
+#[test]
+fn is_local_model_true_for_ollama() {
+    let config = ContextManagerConfig {
+        model: "gemma4:e4b".into(),
+        ..test_config()
+    };
+    assert!(ContextManager::new(config).is_local_model());
+}
+
+#[test]
+fn is_local_model_false_for_cloud() {
+    assert!(!ContextManager::new(test_config()).is_local_model());
+}
+
+// -- volatile tokens for local models --
+
+#[test]
+fn ollama_job_results_tokens_always_zero_in_snapshot() {
+    let config = ContextManagerConfig {
+        model: "gemma4:e4b".into(),
+        ..test_config()
+    };
+    let mut cm = ContextManager::new(config);
+    cm.set_volatile_tokens(100, 50, 75);
+    let snap = cm.get_snapshot();
+    // Skill tokens flow through (user can manually activate skills)
+    assert_eq!(snap.breakdown.skill_context, 100);
+    assert_eq!(snap.breakdown.skill_removal, 50);
+    // Job results stripped for local models
+    assert_eq!(snap.breakdown.job_results, 0);
+}
+
+#[test]
+fn cloud_volatile_tokens_all_reflected() {
+    let mut cm = ContextManager::new(test_config());
+    cm.set_volatile_tokens(100, 50, 75);
+    let snap = cm.get_snapshot();
+    assert_eq!(snap.breakdown.skill_context, 100);
+    assert_eq!(snap.breakdown.skill_removal, 50);
+    assert_eq!(snap.breakdown.job_results, 75);
+}
+
 // -- message management --
 
 #[test]
