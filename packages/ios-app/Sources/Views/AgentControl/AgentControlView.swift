@@ -399,26 +399,3 @@ struct AgentControlView: View {
     }
 }
 
-// MARK: - Card Entrance Modifier
-
-private struct CardEntranceModifier: ViewModifier {
-    let visible: Bool
-    let index: Int
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(visible ? 1 : 0)
-            .offset(y: visible ? 0 : 20)
-            .animation(
-                .spring(response: 0.45, dampingFraction: 0.78)
-                    .delay(Double(index) * 0.06),
-                value: visible
-            )
-    }
-}
-
-extension View {
-    fileprivate func cardEntrance(visible: Bool, index: Int) -> some View {
-        modifier(CardEntranceModifier(visible: visible, index: index))
-    }
-}

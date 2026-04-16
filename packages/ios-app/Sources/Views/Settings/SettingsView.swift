@@ -30,6 +30,7 @@ struct SettingsView: View {
     @State private var showArchiveAllConfirmation = false
     @State private var isArchivingAll = false
     @State private var activePage: SettingsPage?
+    @State private var cardsVisible = false
 
     /// Settings sub-pages, driven by a single `.sheet(item:)`.
     enum SettingsPage: String, Identifiable {
@@ -66,7 +67,9 @@ struct SettingsView: View {
         } content: {
             categoriesCard
             dangerZoneCard
+                .cardEntrance(visible: cardsVisible, index: 7)
             footerView
+                .cardEntrance(visible: cardsVisible, index: 8)
         }
         #if DEBUG || BETA
         .sheet(isPresented: $showLogViewer) {
@@ -118,6 +121,7 @@ struct SettingsView: View {
             .presentationDragIndicator(.hidden)
         }
         .task {
+            cardsVisible = true
             await settingsState.load(using: rpcClient)
             await settingsState.loadModels(using: rpcClient)
         }
@@ -155,36 +159,42 @@ struct SettingsView: View {
                     activePage = .server
                 }
             }
+            .cardEntrance(visible: cardsVisible, index: 0)
 
             SettingsCard {
                 categoryRow(icon: "key.horizontal", label: "LLM Providers", subtitle: "Login with OAuth and configure API keys") {
                     activePage = .providers
                 }
             }
+            .cardEntrance(visible: cardsVisible, index: 1)
 
             SettingsCard {
                 categoryRow(icon: "bolt", label: "Sessions", subtitle: "Configure how agent sessions are managed") {
                     activePage = .session
                 }
             }
+            .cardEntrance(visible: cardsVisible, index: 2)
 
             SettingsCard {
                 categoryRow(icon: "brain", label: "Agent", subtitle: "Configure how agents learn and remember") {
                     activePage = .agent
                 }
             }
+            .cardEntrance(visible: cardsVisible, index: 3)
 
             SettingsCard {
                 categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "Configure external tool servers") {
                     activePage = .mcpServers
                 }
             }
+            .cardEntrance(visible: cardsVisible, index: 4)
 
             SettingsCard {
                 categoryRow(icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill", label: "Hooks", subtitle: "Manage agent lifecycle events") {
                     activePage = .hooks
                 }
             }
+            .cardEntrance(visible: cardsVisible, index: 5)
 
             if #available(iOS 26.0, *) {
                 SettingsCard {
@@ -192,6 +202,7 @@ struct SettingsView: View {
                         activePage = .app
                     }
                 }
+                .cardEntrance(visible: cardsVisible, index: 6)
             }
         }
     }
