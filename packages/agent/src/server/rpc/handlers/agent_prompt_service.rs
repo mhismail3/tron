@@ -14,8 +14,9 @@ use crate::server::rpc::context::{AgentDeps, RpcContext};
 
 use super::prompt_runtime::{
     PromptBootstrapData, PromptContextArtifacts, build_skill_context_from_session,
-    build_user_content_override, build_user_event_payload, load_prompt_bootstrap,
-    load_session_update_data, persist_user_message_event, resume_prompt_session,
+    build_user_content_override, build_user_event_payload, collect_pending_skill_payloads,
+    load_prompt_bootstrap, load_session_update_data, persist_user_message_event,
+    resume_prompt_session,
 };
 
 #[derive(Clone)]
@@ -538,11 +539,19 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     agent.set_persister(Some(persister.clone()));
     orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
 
+    // Collect skills/spells activated since the last message.user for this prompt's payload
+    let (skills_payload, spells_payload) = {
+        let registry = skill_registry.read();
+        collect_pending_skill_payloads(&event_store, &session_id, Some(&*registry))
+    };
+
     let user_event_payload = build_user_event_payload(
         &prompt,
         images.as_deref(),
         attachments.as_deref(),
         message_metadata.as_ref(),
+        skills_payload.as_ref(),
+        spells_payload.as_ref(),
     );
     if let Err(error) =
         persist_user_message_event(event_store.clone(), session_id.clone(), user_event_payload)

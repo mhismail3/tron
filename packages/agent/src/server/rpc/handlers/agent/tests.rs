@@ -2279,7 +2279,7 @@ fn format_subagent_results_multiple() {
 
 #[test]
 fn payload_text_only() {
-    let payload = build_user_event_payload("hello", None, None, None);
+    let payload = build_user_event_payload("hello", None, None, None, None, None);
     assert_eq!(payload["content"], "hello");
     assert!(payload.get("imageCount").is_none());
 }
@@ -2287,7 +2287,7 @@ fn payload_text_only() {
 #[test]
 fn payload_with_single_image() {
     let images = vec![json!({"data": "base64img", "mediaType": "image/png"})];
-    let payload = build_user_event_payload("look", Some(&images), None, None);
+    let payload = build_user_event_payload("look", Some(&images), None, None, None, None);
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content.len(), 2);
     assert_eq!(content[0]["type"], "text");
@@ -2305,7 +2305,7 @@ fn payload_with_multiple_images() {
         json!({"data": "img2", "mediaType": "image/jpeg"}),
         json!({"data": "img3", "mediaType": "image/webp"}),
     ];
-    let payload = build_user_event_payload("see", Some(&images), None, None);
+    let payload = build_user_event_payload("see", Some(&images), None, None, None, None);
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content.len(), 4); // text + 3 images
     assert_eq!(payload["imageCount"], 3);
@@ -2318,7 +2318,7 @@ fn payload_with_document_attachment() {
         "mimeType": "application/pdf",
         "fileName": "report.pdf"
     })];
-    let payload = build_user_event_payload("read this", None, Some(&atts), None);
+    let payload = build_user_event_payload("read this", None, Some(&atts), None, None, None);
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content.len(), 2);
     assert_eq!(content[1]["type"], "document");
@@ -2335,7 +2335,7 @@ fn payload_with_image_attachment() {
         "mimeType": "image/jpeg",
         "fileName": "photo.jpg"
     })];
-    let payload = build_user_event_payload("see", None, Some(&atts), None);
+    let payload = build_user_event_payload("see", None, Some(&atts), None, None, None);
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content.len(), 2);
     assert_eq!(content[1]["type"], "image");
@@ -2351,7 +2351,7 @@ fn payload_mixed_images_and_documents() {
         json!({"data": "img2", "mimeType": "image/jpeg"}),
         json!({"data": "doc1", "mimeType": "application/pdf", "fileName": "f.pdf"}),
     ];
-    let payload = build_user_event_payload("mixed", Some(&images), Some(&atts), None);
+    let payload = build_user_event_payload("mixed", Some(&images), Some(&atts), None, None, None);
     let content = payload["content"].as_array().unwrap();
     // text + 1 image param + 1 image att + 1 doc att = 4
     assert_eq!(content.len(), 4);
@@ -2361,7 +2361,7 @@ fn payload_mixed_images_and_documents() {
 #[test]
 fn payload_empty_images_array() {
     let images: Vec<Value> = vec![];
-    let payload = build_user_event_payload("text", Some(&images), None, None);
+    let payload = build_user_event_payload("text", Some(&images), None, None, None, None);
     assert_eq!(payload["content"], "text"); // text-only path
     assert!(payload.get("imageCount").is_none());
 }
@@ -2369,14 +2369,14 @@ fn payload_empty_images_array() {
 #[test]
 fn payload_empty_attachments_array() {
     let atts: Vec<Value> = vec![];
-    let payload = build_user_event_payload("text", None, Some(&atts), None);
+    let payload = build_user_event_payload("text", None, Some(&atts), None, None, None);
     assert_eq!(payload["content"], "text");
 }
 
 #[test]
 fn payload_malformed_image_no_data() {
     let images = vec![json!({"mediaType": "image/png"})]; // missing data
-    let payload = build_user_event_payload("oops", Some(&images), None, None);
+    let payload = build_user_event_payload("oops", Some(&images), None, None, None, None);
     // Malformed image skipped, falls back to text-only (only text block)
     assert_eq!(payload["content"], "oops");
 }
@@ -2384,7 +2384,7 @@ fn payload_malformed_image_no_data() {
 #[test]
 fn payload_malformed_image_no_mime() {
     let images = vec![json!({"data": "base64"})]; // missing mediaType/mimeType
-    let payload = build_user_event_payload("oops", Some(&images), None, None);
+    let payload = build_user_event_payload("oops", Some(&images), None, None, None, None);
     assert_eq!(payload["content"], "oops");
 }
 
@@ -2392,7 +2392,7 @@ fn payload_malformed_image_no_mime() {
 fn payload_media_type_key_variant() {
     // Clients may send `mediaType`, verify it works
     let images = vec![json!({"data": "d", "mediaType": "image/webp"})];
-    let payload = build_user_event_payload("pic", Some(&images), None, None);
+    let payload = build_user_event_payload("pic", Some(&images), None, None, None, None);
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content[1]["mimeType"], "image/webp");
 }
@@ -2400,7 +2400,7 @@ fn payload_media_type_key_variant() {
 #[test]
 fn payload_document_no_filename() {
     let atts = vec![json!({"data": "docdata", "mimeType": "application/pdf"})];
-    let payload = build_user_event_payload("doc", None, Some(&atts), None);
+    let payload = build_user_event_payload("doc", None, Some(&atts), None, None, None);
     let content = payload["content"].as_array().unwrap();
     assert_eq!(content[1]["type"], "document");
     assert!(content[1].get("fileName").is_none());
@@ -2418,6 +2418,8 @@ fn payload_extra_metadata_merged_for_confirmation_response() {
         None,
         None,
         Some(&meta),
+        None,
+        None,
     );
     assert_eq!(payload["messageKind"], "confirmation_response");
     assert_eq!(payload["confirmationDecision"], "Approved");
@@ -2431,14 +2433,14 @@ fn payload_extra_metadata_merged_for_answered_questions() {
         "messageKind": "answered_questions",
         "answerCount": 3,
     });
-    let payload = build_user_event_payload("[Answers to your questions]\n...", None, None, Some(&meta));
+    let payload = build_user_event_payload("[Answers to your questions]\n...", None, None, Some(&meta), None, None);
     assert_eq!(payload["messageKind"], "answered_questions");
     assert_eq!(payload["answerCount"], 3);
 }
 
 #[test]
 fn payload_no_metadata_adds_nothing() {
-    let payload = build_user_event_payload("plain", None, None, None);
+    let payload = build_user_event_payload("plain", None, None, None, None, None);
     assert!(payload.get("messageKind").is_none());
     assert!(payload.get("confirmationDecision").is_none());
     assert!(payload.get("answerCount").is_none());
@@ -2448,10 +2450,55 @@ fn payload_no_metadata_adds_nothing() {
 fn payload_metadata_combines_with_images() {
     let images = vec![json!({"data": "i", "mediaType": "image/png"})];
     let meta = json!({"messageKind": "confirmation_response", "confirmationDecision": "Denied"});
-    let payload = build_user_event_payload("p", Some(&images), None, Some(&meta));
+    let payload = build_user_event_payload("p", Some(&images), None, Some(&meta), None, None);
     assert_eq!(payload["imageCount"], 1);
     assert_eq!(payload["messageKind"], "confirmation_response");
     assert_eq!(payload["confirmationDecision"], "Denied");
+}
+
+// ── build_user_event_payload skills/spells tests ──
+
+#[test]
+fn payload_with_skills_array() {
+    let skills = json!([{"name": "review", "source": "global", "displayName": "review"}]);
+    let payload = build_user_event_payload("check this", None, None, None, Some(&skills), None);
+    assert_eq!(payload["skills"], skills);
+    assert!(payload.get("spells").is_none());
+}
+
+#[test]
+fn payload_with_spells_array() {
+    let spells = json!([{"name": "quick-fix", "source": "project", "displayName": "quick-fix"}]);
+    let payload = build_user_event_payload("fix it", None, None, None, None, Some(&spells));
+    assert!(payload.get("skills").is_none());
+    assert_eq!(payload["spells"], spells);
+}
+
+#[test]
+fn payload_with_both_skills_and_spells() {
+    let skills = json!([{"name": "a", "source": "global", "displayName": "a"}]);
+    let spells = json!([{"name": "b", "source": "project", "displayName": "b"}]);
+    let payload = build_user_event_payload("go", None, None, None, Some(&skills), Some(&spells));
+    assert_eq!(payload["skills"], skills);
+    assert_eq!(payload["spells"], spells);
+}
+
+#[test]
+fn payload_no_skills_adds_nothing() {
+    let payload = build_user_event_payload("plain", None, None, None, None, None);
+    assert!(payload.get("skills").is_none());
+    assert!(payload.get("spells").is_none());
+}
+
+#[test]
+fn payload_skills_combine_with_images_and_metadata() {
+    let images = vec![json!({"data": "i", "mediaType": "image/png"})];
+    let meta = json!({"messageKind": "normal"});
+    let skills = json!([{"name": "s", "source": "global", "displayName": "s"}]);
+    let payload = build_user_event_payload("p", Some(&images), None, Some(&meta), Some(&skills), None);
+    assert_eq!(payload["imageCount"], 1);
+    assert_eq!(payload["messageKind"], "normal");
+    assert_eq!(payload["skills"], skills);
 }
 
 #[test]

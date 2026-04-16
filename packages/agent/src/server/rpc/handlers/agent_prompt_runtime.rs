@@ -29,6 +29,8 @@ pub fn build_user_event_payload(
     images: Option<&[Value]>,
     attachments: Option<&[Value]>,
     extra_metadata: Option<&Value>,
+    skills: Option<&Value>,
+    spells: Option<&Value>,
 ) -> Value {
     let has_images = images.is_some_and(|v| !v.is_empty());
     let has_attachments = attachments.is_some_and(|v| !v.is_empty());
@@ -103,7 +105,96 @@ pub fn build_user_event_payload(
             }
         }
     }
+    if let Some(s) = skills {
+        payload["skills"] = s.clone();
+    }
+    if let Some(s) = spells {
+        payload["spells"] = s.clone();
+    }
     payload
+}
+
+/// Collect skills/spells activated since the last `message.user` event.
+///
+/// Returns `(skills_json, spells_json)` in the format expected by iOS:
+/// `[{"name": "...", "source": "global"|"project", "displayName": "..."}]`
+///
+/// Uses the event store sequence ordering to find only the skill/spell events
+/// that belong to the current prompt (between last message.user and now).
+pub fn collect_pending_skill_payloads(
+    event_store: &crate::events::EventStore,
+    session_id: &str,
+    skill_registry: Option<&crate::skills::registry::SkillRegistry>,
+) -> (Option<Value>, Option<Value>) {
+    let last_user_seq = event_store
+        .get_latest_event_by_type(session_id, "message.user")
+        .ok()
+        .flatten()
+        .map(|e| e.sequence)
+        .unwrap_or(0);
+
+    let recent_events = event_store
+        .get_events_since(session_id, last_user_seq)
+        .unwrap_or_default();
+
+    let mut skills: Vec<Value> = Vec::new();
+    let mut spells: Vec<Value> = Vec::new();
+
+    for event in &recent_events {
+        let payload: Value = match serde_json::from_str(&event.payload) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        match event.event_type.as_str() {
+            "skill.activated" => {
+                if let Some(name) = payload.get("skillName").and_then(|v| v.as_str()) {
+                    let source = payload
+                        .get("source")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("project");
+                    let display_name = skill_registry
+                        .and_then(|r| r.get(name))
+                        .map(|m| m.display_name.as_str())
+                        .unwrap_or(name);
+                    skills.push(serde_json::json!({
+                        "name": name,
+                        "source": source,
+                        "displayName": display_name,
+                    }));
+                }
+            }
+            "spell.cast" => {
+                if let Some(name) = payload.get("spellName").and_then(|v| v.as_str()) {
+                    let source = payload
+                        .get("source")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("project");
+                    let display_name = skill_registry
+                        .and_then(|r| r.get(name))
+                        .map(|m| m.display_name.as_str())
+                        .unwrap_or(name);
+                    spells.push(serde_json::json!({
+                        "name": name,
+                        "source": source,
+                        "displayName": display_name,
+                    }));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let skills_val = if skills.is_empty() {
+        None
+    } else {
+        Some(Value::Array(skills))
+    };
+    let spells_val = if spells.is_empty() {
+        None
+    } else {
+        Some(Value::Array(spells))
+    };
+    (skills_val, spells_val)
 }
 
 pub fn build_user_content_override(
