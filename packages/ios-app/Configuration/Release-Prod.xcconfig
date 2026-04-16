@@ -1,3 +1,0 @@
-// Release-Prod.xcconfig
-#include "Release.xcconfig"
-#include "Prod.xcconfig"

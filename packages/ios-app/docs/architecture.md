@@ -196,7 +196,7 @@ dependencies.eventStoreManager
 
 Uses XcodeGen with `project.yml`:
 
-- **Configs**: Debug-Beta, Release-Beta, Debug-Prod, Release-Prod
+- **Configs**: Beta (debug), Prod (release)
 - **Minimum iOS**: 18.0
 - **Swift**: 6.0
 

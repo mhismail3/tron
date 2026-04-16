@@ -16,7 +16,7 @@ cd packages/agent && cargo check && cargo test -- --quiet
 
 # iOS
 cd packages/ios-app && xcodegen generate
-xcodebuild test -scheme TronMobile -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
 ## Settings Parity

@@ -1,9 +1,14 @@
-// Prod.xcconfig - Production variant settings
+// Prod.xcconfig - Release build with production bundle ID
+#include "Base.xcconfig"
 
-// Standard bundle ID
+// Release settings
+DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
+SWIFT_OPTIMIZATION_LEVEL = -O
+SWIFT_COMPILATION_MODE = wholemodule
+COPY_PHASE_STRIP = NO
+ENABLE_NS_ASSERTIONS = NO
+MTL_ENABLE_DEBUG_INFO = NO
+
+// Production variant
 PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile
-
-// Standard app icon
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
-
-// No additional compile-time flags — prod is the baseline (not DEBUG, not BETA)

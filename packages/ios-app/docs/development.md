@@ -26,10 +26,8 @@ The app connects to the Tron server:
 
 | Config | Server | Use Case |
 |--------|--------|----------|
-| Debug-Beta | localhost:8082 | Development |
-| Release-Beta | localhost:8082 | TestFlight beta |
-| Debug-Prod | localhost:8080 | Production testing |
-| Release-Prod | localhost:8080 | App Store |
+| Beta | localhost:8082 | Development (debug, beta bundle ID) |
+| Prod | localhost:8080 | App Store (release, production bundle ID) |
 
 ## Running Tests
 
@@ -37,14 +35,14 @@ The app connects to the Tron server:
 
 ```bash
 xcodebuild test \
-  -scheme TronMobile \
+  -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
 ```
 
 ### Xcode
 
 1. Open `TronMobile.xcodeproj`
-2. Select TronMobile scheme
+2. Select Tron scheme
 3. Cmd+U to run tests
 
 ### Test Structure
@@ -72,7 +70,7 @@ Categories: `.network`, `.session`, `.events`, `.notification`, `.audio`
 ### Network Inspector
 
 View WebSocket traffic:
-1. Run in Debug-Beta
+1. Run in Beta
 2. Check Xcode console for `[Network]` logs
 3. Or use Proxyman/Charles for detailed inspection
 

@@ -177,7 +177,7 @@ xcodegen generate
 open TronMobile.xcodeproj
 ```
 
-Build with the `TronMobile` scheme. The app connects to `ws://localhost:9847/ws` by default.
+Build with the `Tron` scheme (or `Tron Beta` for the beta variant). The app connects to `ws://localhost:9847/ws` by default.
 
 ---
 
@@ -595,8 +595,8 @@ Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewMo
 
 | Config | Use |
 |--------|-----|
-| Debug-Beta / Release-Beta | Beta server endpoint |
-| Debug-Prod / Release-Prod | Production server endpoint |
+| Beta | Debug build, beta server endpoint, side-by-side bundle ID |
+| Prod | Release build, production server endpoint |
 
 ### Documentation
 
@@ -697,7 +697,7 @@ The agent is a single `tron` crate, so `cargo test` runs everything (lib unit te
 ```bash
 cd packages/ios-app
 xcodegen generate
-xcodebuild test -scheme TronMobile -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
 ### CI

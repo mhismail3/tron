@@ -25,10 +25,8 @@ DERIVED_DATA="packages/ios-app/.build/DerivedData"
 
 | Variant | Scheme | Configuration | Bundle ID |
 |---------|--------|---------------|-----------|
-| Prod (default) | `TronMobile` | `Debug-Prod` | `com.tron.mobile` |
-| Prod Release | `TronMobile` | `Release-Prod` | `com.tron.mobile` |
-| Beta | `TronMobile-Beta` | `Debug-Beta` | `com.tron.mobile.beta` |
-| Beta Release | `TronMobile-Beta` | `Release-Beta` | `com.tron.mobile.beta` |
+| Prod (default) | `Tron` | `Prod` | `com.tron.mobile` |
+| Beta | `Tron Beta` | `Beta` | `com.tron.mobile.beta` |
 
 ## 1. Detect Connected Device
 
@@ -47,16 +45,14 @@ Single command that builds, installs, and launches on device:
 ```bash
 xcodebuildmcp device build-and-run \
   --project-path packages/ios-app/TronMobile.xcodeproj \
-  --scheme TronMobile \
+  --scheme Tron \
   --device-id <UDID> \
-  --configuration Debug-Prod \
+  --configuration Prod \
   --derived-data-path packages/ios-app/.build/DerivedData
 ```
 
 **Variants:**
-- Beta: `--scheme TronMobile-Beta --configuration Debug-Beta`
-- Release: `--configuration Release-Prod`
-- Beta Release: `--scheme TronMobile-Beta --configuration Release-Beta`
+- Beta: `--scheme 'Tron Beta' --configuration Beta`
 
 **Important:** The output contains the process ID needed to stop the app later. Look for the line:
 ```
@@ -88,7 +84,7 @@ Then stop with the discovered PID. Both `xcodebuildmcp device stop` and `xcrun d
 ```bash
 xcodebuildmcp device clean \
   --project-path packages/ios-app/TronMobile.xcodeproj \
-  --scheme TronMobile \
+  --scheme Tron \
   --derived-data-path packages/ios-app/.build/DerivedData
 ```
 
@@ -126,11 +122,11 @@ xcodebuildmcp device stop-device-log-capture \
 # Show build settings for debugging config issues
 xcodebuildmcp device show-build-settings \
   --project-path packages/ios-app/TronMobile.xcodeproj \
-  --scheme TronMobile
+  --scheme Tron
 
 # Get the path to the built .app
 xcodebuildmcp device get-app-path \
-  --scheme TronMobile
+  --scheme Tron
 
 # List available schemes
 xcodebuildmcp device list-schemes \
@@ -140,11 +136,11 @@ xcodebuildmcp device list-schemes \
 ## Quick Reference
 
 ```bash
-# Run on device (prod debug)
-xcodebuildmcp device build-and-run --project-path packages/ios-app/TronMobile.xcodeproj --scheme TronMobile --device-id <UDID> --configuration Debug-Prod --derived-data-path packages/ios-app/.build/DerivedData
+# Run on device (prod)
+xcodebuildmcp device build-and-run --project-path packages/ios-app/TronMobile.xcodeproj --scheme Tron --device-id <UDID> --configuration Prod --derived-data-path packages/ios-app/.build/DerivedData
 
-# Run on device (beta debug)
-xcodebuildmcp device build-and-run --project-path packages/ios-app/TronMobile.xcodeproj --scheme TronMobile-Beta --device-id <UDID> --configuration Debug-Beta --derived-data-path packages/ios-app/.build/DerivedData
+# Run on device (beta)
+xcodebuildmcp device build-and-run --project-path packages/ios-app/TronMobile.xcodeproj --scheme 'Tron Beta' --device-id <UDID> --configuration Beta --derived-data-path packages/ios-app/.build/DerivedData
 
 # Stop app
 xcodebuildmcp device stop --device-id <UDID> --process-id <PID>

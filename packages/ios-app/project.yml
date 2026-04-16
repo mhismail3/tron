@@ -9,16 +9,12 @@ options:
   createIntermediateGroups: true
 
 configFiles:
-  Debug-Beta: Configuration/Debug-Beta.xcconfig
-  Release-Beta: Configuration/Release-Beta.xcconfig
-  Debug-Prod: Configuration/Debug-Prod.xcconfig
-  Release-Prod: Configuration/Release-Prod.xcconfig
+  Beta: Configuration/Beta.xcconfig
+  Prod: Configuration/Prod.xcconfig
 
 configs:
-  Debug-Beta: debug
-  Release-Beta: release
-  Debug-Prod: debug
-  Release-Prod: release
+  Beta: debug
+  Prod: release
 
 settings:
   base:
@@ -58,14 +54,10 @@ targets:
         CURRENT_PROJECT_VERSION: "2"
         SWIFT_EMIT_LOC_STRINGS: YES
       configs:
-        Debug-Beta:
-          CODE_SIGN_ENTITLEMENTS: TronMobileDebug-Beta.entitlements
-        Release-Beta:
-          CODE_SIGN_ENTITLEMENTS: TronMobileRelease-Beta.entitlements
-        Debug-Prod:
-          CODE_SIGN_ENTITLEMENTS: TronMobileDebug-Prod.entitlements
-        Release-Prod:
-          CODE_SIGN_ENTITLEMENTS: TronMobileRelease-Prod.entitlements
+        Beta:
+          CODE_SIGN_ENTITLEMENTS: TronMobileBeta.entitlements
+        Prod:
+          CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
 
   TronShareExtension:
     type: app-extension
@@ -85,13 +77,9 @@ targets:
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "2"
       configs:
-        Debug-Beta:
+        Beta:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.beta.ShareExtension
-        Release-Beta:
-          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.beta.ShareExtension
-        Debug-Prod:
-          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
-        Release-Prod:
+        Prod:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
 
   TronMobileTests:
@@ -111,40 +99,41 @@ targets:
         TEST_RUNNER_WAIT_FOR_DEBUGGER: NO
 
 schemes:
-  TronMobile:
+  Tron:
     build:
       targets:
         TronMobile: all
         TronShareExtension: all
         TronMobileTests: [test]
     run:
-      config: Debug-Prod
+      config: Prod
+      debugEnabled: false
     test:
-      config: Debug-Prod
+      config: Prod
       targets:
         - TronMobileTests
     profile:
-      config: Release-Prod
+      config: Prod
     analyze:
-      config: Debug-Prod
+      config: Prod
     archive:
-      config: Release-Prod
+      config: Prod
 
-  TronMobile-Beta:
+  Tron Beta:
     build:
       targets:
         TronMobile: all
         TronShareExtension: all
         TronMobileTests: [test]
     run:
-      config: Debug-Beta
+      config: Beta
     test:
-      config: Debug-Beta
+      config: Beta
       targets:
         - TronMobileTests
     profile:
-      config: Release-Beta
+      config: Beta
     analyze:
-      config: Debug-Beta
+      config: Beta
     archive:
-      config: Release-Beta
+      config: Beta

@@ -134,16 +134,16 @@ packages/ios-app/
 ## Building from Command Line
 
 ```bash
-# Build for simulator
+# Build for simulator (production)
 xcodebuild -project TronMobile.xcodeproj \
-  -scheme TronMobile \
+  -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
   build
 
-# Build for device (requires signing)
+# Build for simulator (beta)
 xcodebuild -project TronMobile.xcodeproj \
-  -scheme TronMobile \
-  -destination 'platform=iOS,name=My iPhone' \
+  -scheme 'Tron Beta' \
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
   build
 ```
 

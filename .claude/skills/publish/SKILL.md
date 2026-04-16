@@ -20,8 +20,8 @@ Manage the full TestFlight lifecycle for TronMobile: build, upload, version mana
 - **Share Extension Bundle ID**: `com.tron.mobile.ShareExtension` (capital S)
 - **Team ID**: `MYGKXH6TY4`
 - **Distribution Identity**: `Apple Distribution: MOHSIN H ISMAIL (MYGKXH6TY4)`
-- **Scheme**: `TronMobile` (prod), `TronMobile-Beta` (beta)
-- **Archive Configuration**: `Release-Prod`
+- **Scheme**: `Tron` (prod), `Tron Beta` (beta)
+- **Archive Configuration**: `Prod`
 - **Project root**: `packages/ios-app/`
 - **Build output**: `packages/ios-app/.build/` (gitignored)
 - **Version source of truth**: `packages/ios-app/project.yml` (lines with `CURRENT_PROJECT_VERSION` and `MARKETING_VERSION`)
@@ -42,8 +42,8 @@ rm -rf .build/ipa_work .build/TronMobile.ipa .build/TronMobile.xcarchive
 
 # 2. Archive
 xcodebuild archive \
-  -scheme TronMobile \
-  -configuration Release-Prod \
+  -scheme Tron \
+  -configuration Prod \
   -archivePath .build/TronMobile.xcarchive \
   -destination "generic/platform=iOS" \
   -allowProvisioningUpdates \
@@ -84,7 +84,7 @@ DIST_IDENTITY="Apple Distribution: MOHSIN H ISMAIL (MYGKXH6TY4)"
   "$WORK_DIR/Payload/TronMobile.app/PlugIns/TronShareExtension.appex"
 
 /usr/bin/codesign --force --sign "$DIST_IDENTITY" \
-  --entitlements TronMobileRelease-Prod.entitlements \
+  --entitlements TronMobileProd.entitlements \
   --timestamp=none \
   "$WORK_DIR/Payload/TronMobile.app"
 
@@ -162,10 +162,8 @@ The project has checked-in entitlements files per configuration:
 
 | Config | Main App | Share Extension |
 |---|---|---|
-| Release-Prod | `TronMobileRelease-Prod.entitlements` | `ShareExtension/ShareExtension.entitlements` |
-| Release-Beta | `TronMobileRelease-Beta.entitlements` | `ShareExtension/ShareExtension.entitlements` |
-| Debug-Prod | `TronMobileDebug-Prod.entitlements` | `ShareExtension/ShareExtension.entitlements` |
-| Debug-Beta | `TronMobileDebug-Beta.entitlements` | `ShareExtension/ShareExtension.entitlements` |
+| Prod | `TronMobileProd.entitlements` | `ShareExtension/ShareExtension.entitlements` |
+| Beta | `TronMobileBeta.entitlements` | `ShareExtension/ShareExtension.entitlements` |
 
 **CRITICAL**: Always re-sign using these files. Never extract entitlements from provisioning profiles — profiles contain every capability Apple has granted (NFC, HealthKit, push-to-talk, etc.) which causes ITMS rejections for capabilities the app doesn't use.
 
