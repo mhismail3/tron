@@ -19,7 +19,6 @@ struct RPCTypesAuthTests {
             "isOAuthExpired": false,
             "accounts": [{"label":"work","expiresAt":1800000000,"isExpired":false,"hasRefreshToken":true}],
             "activeCredential": {"type":"oauth","label":"work"},
-            "endpoint": "https://api.example.com",
             "projectId": "proj-123"
         }
         """
@@ -33,7 +32,6 @@ struct RPCTypesAuthTests {
         #expect(info.activeCredential?.isOAuth == true)
         #expect(info.accounts?.count == 1)
         #expect(info.apiKeys?.count == 1)
-        #expect(info.endpoint == "https://api.example.com")
         #expect(info.projectId == "proj-123")
     }
 
@@ -47,7 +45,6 @@ struct RPCTypesAuthTests {
         #expect(info.accounts == nil)
         #expect(info.apiKeys == nil)
         #expect(info.activeCredential == nil)
-        #expect(info.endpoint == nil)
         #expect(info.projectId == nil)
     }
 

@@ -64,7 +64,9 @@ final class ModelFilteringServiceTests: XCTestCase {
         outputCostPerMillion: Double? = nil,
         recommended: Bool? = nil,
         isLegacy: Bool? = nil,
-        sortOrder: Int? = nil
+        sortOrder: Int? = nil,
+        isDeprecated: Bool? = nil,
+        deprecationDate: String? = nil
     ) -> ModelInfo {
         var json: [String: Any] = [
             "id": id,
@@ -84,6 +86,8 @@ final class ModelFilteringServiceTests: XCTestCase {
         if let recommended { json["recommended"] = recommended }
         if let isLegacy { json["isLegacy"] = isLegacy }
         if let sortOrder { json["sortOrder"] = sortOrder }
+        if let isDeprecated { json["isDeprecated"] = isDeprecated }
+        if let deprecationDate { json["deprecationDate"] = deprecationDate }
         let data = try! JSONSerialization.data(withJSONObject: json)
         return try! JSONDecoder().decode(ModelInfo.self, from: data)
     }
@@ -368,6 +372,49 @@ final class ModelFilteringServiceTests: XCTestCase {
     func test_organizeByProviderFamily_handlesEmptyArray() {
         let groups = ModelFilteringService.organizeByProviderFamily([])
         XCTAssertTrue(groups.isEmpty)
+    }
+
+    // MARK: - FamilyGroup.isDeprecated Tests
+
+    func test_familyGroup_isDeprecated_whenAllModelsDeprecated() {
+        let models = [
+            makeModel(id: "gpt-5.1-codex-max", provider: "openai-codex",
+                      family: "GPT-5.1", sortOrder: 0,
+                      isDeprecated: true, deprecationDate: "2026-04-14"),
+            makeModel(id: "gpt-5.1-codex-mini", provider: "openai-codex",
+                      family: "GPT-5.1", sortOrder: 1,
+                      isDeprecated: true, deprecationDate: "2026-04-14"),
+        ]
+        let groups = ModelFilteringService.organizeByProviderFamily(models)
+        let family = groups[0].families[0]
+        XCTAssertEqual(family.id, "GPT-5.1")
+        XCTAssertTrue(family.isDeprecated)
+    }
+
+    func test_familyGroup_isNotDeprecated_whenAnyModelStillSupported() {
+        let models = [
+            makeModel(id: "gpt-5.3-codex", provider: "openai-codex",
+                      family: "GPT-5.3", sortOrder: 0,
+                      isDeprecated: false),
+            makeModel(id: "gpt-5.3-codex-spark", provider: "openai-codex",
+                      family: "GPT-5.3", sortOrder: 1,
+                      isDeprecated: true, deprecationDate: "2026-04-14"),
+        ]
+        let groups = ModelFilteringService.organizeByProviderFamily(models)
+        let family = groups[0].families[0]
+        XCTAssertEqual(family.id, "GPT-5.3")
+        XCTAssertFalse(family.isDeprecated,
+                       "Family must remain active while any member is still supported")
+    }
+
+    func test_familyGroup_isNotDeprecated_whenNoDeprecationFlags() {
+        let models = [
+            makeModel(id: "claude-opus-4-7", provider: "anthropic",
+                      family: "Claude 4.7", sortOrder: 0),
+        ]
+        let groups = ModelFilteringService.organizeByProviderFamily(models)
+        let family = groups[0].families[0]
+        XCTAssertFalse(family.isDeprecated)
     }
 
     func test_organizeByProviderFamily_modelsSortedBySortOrder() {

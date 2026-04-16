@@ -15,6 +15,12 @@ struct FamilyGroup: Identifiable {
     let id: String           // "Claude 4.6", "GPT-5.3", "Gemini 3"
     let models: [ModelInfo]
     let isLatest: Bool       // expanded by default
+
+    /// A family is deprecated when every model it contains is deprecated.
+    /// Derived from per-model `isDeprecatedModel` — no separate server field.
+    var isDeprecated: Bool {
+        !models.isEmpty && models.allSatisfy { $0.isDeprecatedModel }
+    }
 }
 
 // MARK: - Model Group (flat tier-based grouping)

@@ -260,14 +260,23 @@ private struct FamilySection: View {
             HStack(spacing: 8) {
                 Text(family.id)
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
+                    .foregroundStyle(family.isDeprecated ? .tronTextMuted : .tronTextSecondary)
+                    .strikethrough(family.isDeprecated, color: .tronTextMuted)
 
                 // Model count badge
                 Text("\(family.models.count)")
                     .font(TronTypography.pillValue)
                     .countBadge(providerColor)
 
-                if family.isLatest {
+                if family.isDeprecated {
+                    Text("Retired")
+                        .font(TronTypography.pillValue)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.red.opacity(0.15))
+                        .clipShape(Capsule())
+                } else if family.isLatest {
                     Text("Latest")
                         .font(TronTypography.pillValue)
                         .foregroundStyle(providerColor)
