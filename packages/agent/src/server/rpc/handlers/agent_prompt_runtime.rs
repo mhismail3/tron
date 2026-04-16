@@ -662,6 +662,43 @@ pub async fn resume_prompt_session(
     .await
 }
 
+/// Local-model variant of `load_prompt_bootstrap`: loads only the cheap artifacts
+/// (rules files + dynamic rule paths) and skips the three DB queries for pending
+/// subagent/process/user-job results. Local models never receive those
+/// result blocks in context (see `build_turn_context` in `turn_runner.rs`), so
+/// producing them is pure waste that adds to TTFT.
+///
+/// Pending results stay queued in the event store — if the user switches back to
+/// a cloud model in a later prompt, they will be consumed and injected then.
+pub async fn load_prompt_bootstrap_minimal(
+    context_artifacts: Arc<ContextArtifactsService>,
+    event_store: Arc<EventStore>,
+    session_id: String,
+    working_dir: String,
+    settings: crate::settings::TronSettings,
+    is_resumed: bool,
+    source: Option<String>,
+) -> Result<PromptBootstrapData, RpcError> {
+    run_blocking_task("agent.prompt.bootstrap.minimal", move || {
+        let artifacts = load_prompt_context_artifacts(
+            context_artifacts.as_ref(),
+            event_store.as_ref(),
+            &session_id,
+            &working_dir,
+            &settings,
+            is_resumed,
+            source.as_deref(),
+        );
+        Ok(PromptBootstrapData {
+            artifacts,
+            subagent_results_context: None,
+            process_results_context: None,
+            user_job_actions_context: None,
+        })
+    })
+    .await
+}
+
 pub async fn load_prompt_bootstrap(
     context_artifacts: Arc<ContextArtifactsService>,
     event_store: Arc<EventStore>,

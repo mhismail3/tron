@@ -15,8 +15,8 @@ use crate::server::rpc::context::{AgentDeps, RpcContext};
 use super::prompt_runtime::{
     PromptBootstrapData, PromptContextArtifacts, build_skill_context_from_session,
     build_user_content_override, build_user_event_payload, collect_pending_skill_payloads,
-    load_prompt_bootstrap, load_session_update_data, persist_user_message_event,
-    resume_prompt_session,
+    load_prompt_bootstrap, load_prompt_bootstrap_minimal, load_session_update_data,
+    persist_user_message_event, resume_prompt_session,
 };
 
 #[derive(Clone)]
@@ -377,17 +377,35 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         .unwrap_or(working_dir);
 
     let is_resumed = !state.messages.is_empty();
-    let prompt_bootstrap = match load_prompt_bootstrap(
-        context_artifacts.clone(),
-        event_store.clone(),
-        session_id.clone(),
-        working_dir.clone(),
-        settings.as_ref().clone(),
-        is_resumed,
-        source.clone(),
-    )
-    .await
-    {
+    // Local models (Ollama) use a stripped context: skip subagent/process/user-job
+    // result injection at bootstrap time. Pending results remain queued in the
+    // event store for future cloud-model turns. See `runtime/context/local_policy.rs`.
+    let is_local_model = crate::llm::models::registry::detect_provider_from_model(&model)
+        .is_some_and(crate::runtime::context::local_policy::is_local_provider);
+    let bootstrap_result = if is_local_model {
+        load_prompt_bootstrap_minimal(
+            context_artifacts.clone(),
+            event_store.clone(),
+            session_id.clone(),
+            working_dir.clone(),
+            settings.as_ref().clone(),
+            is_resumed,
+            source.clone(),
+        )
+        .await
+    } else {
+        load_prompt_bootstrap(
+            context_artifacts.clone(),
+            event_store.clone(),
+            session_id.clone(),
+            working_dir.clone(),
+            settings.as_ref().clone(),
+            is_resumed,
+            source.clone(),
+        )
+        .await
+    };
+    let prompt_bootstrap = match bootstrap_result {
         Ok(artifacts) => artifacts,
         Err(error) => {
             warn!(
@@ -597,8 +615,6 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     };
 
     // Build skill index based on settings (skip for local models — index is stripped at turn time)
-    let is_local_model = crate::llm::models::registry::detect_provider_from_model(&model)
-        == Some(crate::core::messages::Provider::Ollama);
     let skill_index_context = if is_local_model {
         None
     } else {

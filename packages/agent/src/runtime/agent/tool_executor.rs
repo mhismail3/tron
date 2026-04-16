@@ -4,6 +4,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::time::{Duration, Instant};
 
+use crate::core::messages::Provider;
+use crate::runtime::context::local_policy;
 use crate::runtime::guardrails::{EvaluationContext, GuardrailEngine};
 use crate::runtime::hooks::engine::HookEngine;
 use crate::runtime::hooks::types::{HookAction, HookContext};
@@ -60,6 +62,9 @@ pub struct ToolExecutionContext<'a> {
     pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     /// Optional per-session sequence counter for monotonic event ordering.
     pub sequence_counter: Option<&'a AtomicI64>,
+    /// Provider type of the active model. Used to enforce the local-model
+    /// tool allow-list at the execution boundary (see `local_policy`).
+    pub provider_type: Provider,
 }
 
 /// Execute a single tool call through the full pipeline.
@@ -93,6 +98,28 @@ pub async fn execute_tool(
 
     let stops_turn = tool.stops_turn();
     let is_interactive = tool.is_interactive();
+
+    // 1a. Provider-scoped allow-list. Local models only see a subset of tool
+    // schemas; if the model hallucinates a call to a hidden tool, refuse
+    // execution here so the gate is enforced at the execution boundary (not
+    // only at schema-rendering time).
+    if local_policy::is_local_provider(ctx.provider_type)
+        && !local_policy::is_local_tool(&tool_name)
+    {
+        warn!(tool_name, "tool not available for local model");
+        return ToolExecutionResult {
+            tool_call_id,
+            result: crate::core::tools::error_result(format!(
+                "Tool '{tool_name}' is not available for local models. Use one of: {}.",
+                local_policy::LOCAL_MODEL_TOOLS.join(", ")
+            )),
+            duration_ms: duration_ceil_ms(start.elapsed()),
+            blocked_by_hook: false,
+            blocked_by_guardrail: false,
+            stops_turn: false,
+            is_interactive: false,
+        };
+    }
 
     // 2. Evaluate guardrails (synchronous)
     if let Some(guardrail_engine) = ctx.guardrails {
@@ -419,6 +446,24 @@ mod tests {
                 job_manager: None,
                 output_buffer_registry: None,
                 sequence_counter: None,
+                provider_type: Provider::Anthropic,
+            }
+        };
+        ($registry:expr, $guardrails:expr, $hooks:expr, $emitter:expr, $cancel:expr, $provider:expr) => {
+            ToolExecutionContext {
+                registry: $registry,
+                guardrails: $guardrails,
+                hooks: $hooks,
+                emitter: $emitter,
+                cancel: $cancel,
+                subagent_depth: 0,
+                subagent_max_depth: 0,
+                workspace_id: None,
+                process_manager: None,
+                job_manager: None,
+                output_buffer_registry: None,
+                sequence_counter: None,
+                provider_type: $provider,
             }
         };
     }
@@ -1005,6 +1050,153 @@ mod tests {
             text.to_lowercase().contains("cancelled"),
             "error should mention cancellation, got: {text}"
         );
+    }
+
+    // ── Local-model tool allow-list ──
+
+    /// Stand-in for a cloud-only tool (e.g. SpawnSubagent) not on the local
+    /// allow-list. Uses a name that is definitely not in LOCAL_MODEL_TOOLS.
+    struct CloudOnlyTool;
+
+    #[async_trait]
+    impl TronTool for CloudOnlyTool {
+        fn name(&self) -> &'static str {
+            "SpawnSubagent"
+        }
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Custom
+        }
+        fn definition(&self) -> Tool {
+            Tool {
+                name: "SpawnSubagent".into(),
+                description: "Cloud-only".into(),
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
+            }
+        }
+        async fn execute(
+            &self,
+            _params: Value,
+            _ctx: &ToolContext,
+        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
+            Ok(text_result("executed", false))
+        }
+    }
+
+    /// A tool whose name matches an allow-listed local name. Used to verify
+    /// local sessions can still execute permitted tools.
+    struct ReadTool;
+
+    #[async_trait]
+    impl TronTool for ReadTool {
+        fn name(&self) -> &'static str {
+            "Read"
+        }
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Custom
+        }
+        fn definition(&self) -> Tool {
+            Tool {
+                name: "Read".into(),
+                description: "Read a file".into(),
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
+            }
+        }
+        async fn execute(
+            &self,
+            _params: Value,
+            _ctx: &ToolContext,
+        ) -> Result<TronToolResult, crate::tools::errors::ToolError> {
+            Ok(text_result("read ok", false))
+        }
+    }
+
+    #[tokio::test]
+    async fn local_model_blocks_off_list_tool() {
+        let registry = make_registry(vec![Arc::new(CloudOnlyTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
+
+        let tc = make_tool_call("SpawnSubagent", Map::new());
+        let ctx = tool_exec_ctx!(
+            &registry,
+            &no_guardrails,
+            &no_hooks,
+            &emitter,
+            &cancel,
+            Provider::Ollama
+        );
+        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
+
+        assert!(result.result.is_error.unwrap_or(false));
+        let ToolResultBody::Blocks(blocks) = &result.result.content else {
+            panic!("expected blocks result");
+        };
+        let ToolResultContent::Text { text } = &blocks[0] else {
+            panic!("expected text block");
+        };
+        assert!(
+            text.contains("not available for local models"),
+            "got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_model_allows_listed_tool() {
+        let registry = make_registry(vec![Arc::new(ReadTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
+
+        let tc = make_tool_call("Read", Map::new());
+        let ctx = tool_exec_ctx!(
+            &registry,
+            &no_guardrails,
+            &no_hooks,
+            &emitter,
+            &cancel,
+            Provider::Ollama
+        );
+        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
+
+        assert!(!result.result.is_error.unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn cloud_model_executes_any_registered_tool() {
+        // Regression guard: cloud path must not be affected by the local allow-list.
+        let registry = make_registry(vec![Arc::new(CloudOnlyTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
+
+        let tc = make_tool_call("SpawnSubagent", Map::new());
+        let ctx = tool_exec_ctx!(
+            &registry,
+            &no_guardrails,
+            &no_hooks,
+            &emitter,
+            &cancel,
+            Provider::Anthropic
+        );
+        let result = execute_tool(&tc, "s1", "/tmp", &ctx).await;
+
+        assert!(!result.result.is_error.unwrap_or(false));
     }
 
     #[tokio::test]

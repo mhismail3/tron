@@ -10,6 +10,7 @@ use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 
 use crate::runtime::context::context_manager::ContextManager;
+use crate::runtime::context::local_policy;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
 use crate::core::events::{BaseEvent, TronEvent};
@@ -393,6 +394,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         job_manager,
         output_buffer_registry,
         sequence_counter,
+        provider_type: provider.provider_type(),
     })
     .await;
 
@@ -484,14 +486,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     }
 }
 
-/// Tools included in local model context (Ollama). All other tools are excluded
-/// to reduce token overhead. Execution still works for any registered tool if
-/// the model happens to emit a call — filtering is schema-only.
-const LOCAL_MODEL_TOOLS: &[&str] = &["Read", "Write", "Edit", "Bash", "Search", "Find", "WebFetch"];
-
-/// Maximum chars of rules_content to include for local models.
-const LOCAL_RULES_TRUNCATION: usize = 500;
-
 fn build_turn_context(
     context_manager: &mut ContextManager,
     registry: &ToolRegistry,
@@ -499,7 +493,7 @@ fn build_turn_context(
     server_origin: Option<&str>,
     provider_type: crate::core::messages::Provider,
 ) -> Context {
-    let is_local = provider_type == crate::core::messages::Provider::Ollama;
+    let is_local = local_policy::is_local_provider(provider_type);
 
     // Set volatile token estimates for accurate snapshots.
     // Local models: skill tokens flow through (user can manually add skills),
@@ -525,7 +519,7 @@ fn build_turn_context(
 
     // Tool schemas: reduced set with condensed definitions for local models
     context.tools = if is_local {
-        Some(registry.local_definitions(LOCAL_MODEL_TOOLS))
+        Some(registry.local_definitions(local_policy::LOCAL_MODEL_TOOLS))
     } else {
         Some(registry.definitions())
     };
@@ -545,15 +539,7 @@ fn build_turn_context(
             .clone_from(&run_context.skill_removal_context);
         context.job_results_context = None;
         if let Some(ref rules) = context.rules_content {
-            if rules.len() > LOCAL_RULES_TRUNCATION {
-                let truncated = &rules[..rules
-                    .char_indices()
-                    .take_while(|&(i, _)| i <= LOCAL_RULES_TRUNCATION)
-                    .last()
-                    .map_or(0, |(i, _)| i)];
-                context.rules_content =
-                    Some(format!("{truncated}\n\n[Truncated — full rules available via Read tool]"));
-            }
+            context.rules_content = Some(local_policy::truncate_rules_for_local(rules));
         }
         // Dynamic rules are short and path-relevant — keep them.
         context.dynamic_rules_context = run_context
@@ -582,6 +568,23 @@ fn build_turn_context(
     }
 
     context.server_origin = server_origin.map(String::from);
+
+    if is_local {
+        let rules_truncated = context
+            .rules_content
+            .as_ref()
+            .is_some_and(|r| r.ends_with(local_policy::LOCAL_RULES_TRUNCATION_SUFFIX));
+        debug!(
+            provider = "ollama",
+            tool_count = local_policy::LOCAL_MODEL_TOOLS.len(),
+            memory_stripped = true,
+            skill_index_stripped = true,
+            job_results_stripped = true,
+            rules_truncated,
+            "local-model turn context"
+        );
+    }
+
     context
 }
 

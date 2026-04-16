@@ -41,6 +41,7 @@ pub(super) struct ToolPhaseParams<'a> {
     pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
     pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     pub sequence_counter: Option<&'a AtomicI64>,
+    pub provider_type: crate::core::messages::Provider,
 }
 
 #[derive(Default)]
@@ -118,6 +119,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     job_manager: params.job_manager,
                     output_buffer_registry: params.output_buffer_registry,
                     sequence_counter: params.sequence_counter,
+                    provider_type: params.provider_type,
                 };
                 async move {
                     let result = tool_executor::execute_tool(

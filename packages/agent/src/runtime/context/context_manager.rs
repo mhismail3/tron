@@ -15,6 +15,7 @@ use super::constants::{
     CHARS_PER_TOKEN, TOOL_RESULT_MAX_CHARS, TOOL_RESULT_MIN_TOKENS, Thresholds,
 };
 use super::context_snapshot_builder::{ContextSnapshotBuilder, SnapshotDeps};
+use super::local_policy;
 use super::message_store::MessageStore;
 use super::rules_index::RulesIndex;
 use super::rules_tracker::RulesTracker;
@@ -79,7 +80,7 @@ impl ContextManager {
         }
 
         let is_local = crate::llm::models::registry::detect_provider_from_model(&config.model)
-            == Some(crate::core::messages::Provider::Ollama);
+            .is_some_and(local_policy::is_local_provider);
 
         let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
             if is_local {
@@ -90,12 +91,13 @@ impl ContextManager {
         });
 
         // Filter tool definitions for token estimation accuracy. Local models
-        // only receive a subset of tools at turn time (see LOCAL_MODEL_TOOLS in
-        // turn_runner.rs), so the estimator should count only those.
+        // only receive a subset of tools at turn time (see
+        // `local_policy::LOCAL_MODEL_TOOLS`), so the estimator should count
+        // only those.
         if is_local {
-            const LOCAL_TOOLS: &[&str] =
-                &["Read", "Write", "Edit", "Bash", "Search", "Find", "WebFetch"];
-            config.tools.retain(|t| LOCAL_TOOLS.contains(&t.name.as_str()));
+            config
+                .tools
+                .retain(|t| local_policy::is_local_tool(&t.name));
         }
 
         let rules_content = config.rules_content.clone();
@@ -316,11 +318,21 @@ impl ContextManager {
     /// Get current total token count.
     ///
     /// Uses API-reported tokens if available; otherwise sums component estimates.
+    ///
+    /// INVARIANT: for local models, `volatile_job_results_tokens` is excluded
+    /// because job-result context is stripped at turn time. This mirrors the
+    /// guard in `ManagerSnapshotDeps::get_volatile_job_results_tokens`, so
+    /// `get_current_tokens` and the `DetailedContextSnapshot` total agree.
     #[must_use]
     pub fn get_current_tokens(&self) -> u64 {
         if let Some(api_tokens) = self.api_context_tokens {
             return api_tokens;
         }
+        let job_results = if self.is_local_model {
+            0
+        } else {
+            self.volatile_job_results_tokens
+        };
         self.estimate_system_prompt_tokens()
             + self.estimate_tools_tokens()
             + self.estimate_rules_tokens()
@@ -328,7 +340,7 @@ impl ContextManager {
             + self.estimate_skill_index_tokens()
             + self.volatile_skill_context_tokens
             + self.volatile_skill_removal_tokens
-            + self.volatile_job_results_tokens
+            + job_results
             + self.estimate_environment_tokens()
             + self.get_messages_tokens()
     }
@@ -419,9 +431,11 @@ impl ContextManager {
     /// since `build_turn_context` truncates them before sending.
     pub fn estimate_rules_tokens(&self) -> u64 {
         let static_rules = if self.is_local_model {
-            // Truncated to ~500 chars + suffix at turn time
+            // Truncated to LOCAL_RULES_TRUNCATION_CHARS + suffix at turn time
+            // (see local_policy::truncate_rules_for_local). Cap the estimate
+            // to match what the model actually receives.
             let capped = self.rules_content.as_ref().map(|r| {
-                let len = r.len().min(500 + 60); // truncation + suffix
+                let len = r.len().min(local_policy::LOCAL_RULES_ESTIMATION_CHARS);
                 len as u64 / u64::from(CHARS_PER_TOKEN)
             });
             capped.unwrap_or(0)
@@ -484,6 +498,11 @@ impl ContextManager {
     }
 
     /// Set volatile token estimates (called per-turn by the prompt handler).
+    ///
+    /// For local models, `job_results` is forced to 0 because the job-result
+    /// context is stripped at turn time. Callers in the turn runner already
+    /// pass 0; this guard ensures the invariant holds even if a future caller
+    /// forgets to check.
     pub fn set_volatile_tokens(
         &mut self,
         skill_context: u64,
@@ -492,7 +511,14 @@ impl ContextManager {
     ) {
         self.volatile_skill_context_tokens = skill_context;
         self.volatile_skill_removal_tokens = skill_removal;
-        self.volatile_job_results_tokens = job_results;
+        // Defensive coercion: local models strip job_results at turn time,
+        // so tracking a non-zero estimate here would inflate compaction
+        // triggers. Caller-passed values are silently ignored for local.
+        self.volatile_job_results_tokens = if self.is_local_model {
+            0
+        } else {
+            job_results
+        };
     }
 
     // ── Snapshot & validation ───────────────────────────────────────────

@@ -1006,3 +1006,81 @@ async fn execute_turn_based_no_orphans() {
     assert!(result.success);
     assert_no_orphaned_tool_results(&engine.deps.get_messages());
 }
+
+// ========================================================================
+// 65K context window — local-model ceiling (Ollama)
+//
+// Ollama sessions run with `num_ctx = 65_536` and the default compaction
+// threshold of 0.70. These tests pin the split-point math and tool-result
+// sizer at that window so the local path is parametrically covered.
+// ========================================================================
+
+const LOCAL_CTX_LIMIT: u64 = 65_536;
+const DEFAULT_COMPACT_THRESHOLD: f64 = 0.70;
+
+#[test]
+fn local_window_no_compact_well_below_threshold() {
+    // 45,000 / 65,536 ≈ 0.686 — below 0.70, no compaction.
+    let deps = MockDeps::new(default_messages()).with_tokens(45_000, LOCAL_CTX_LIMIT);
+    let engine = CompactionEngine::new(DEFAULT_COMPACT_THRESHOLD, 5, deps);
+    assert!(!engine.should_compact());
+}
+
+#[test]
+fn local_window_compacts_above_threshold() {
+    // 50,000 / 65,536 ≈ 0.763 — above 0.70, compaction fires.
+    let deps = MockDeps::new(default_messages()).with_tokens(50_000, LOCAL_CTX_LIMIT);
+    let engine = CompactionEngine::new(DEFAULT_COMPACT_THRESHOLD, 5, deps);
+    assert!(engine.should_compact());
+}
+
+#[test]
+fn local_window_all_turns_fit_under_budget() {
+    // Budget = threshold * context_limit = 0.70 * 65_536 ≈ 45_875 tokens.
+    // 12 messages × 3_500 tokens = 6 turns × 7_000 tokens = 42_000 — all fit.
+    // With preserve_recent=10 (> turn count), the turn cap never kicks in, so
+    // the budget alone governs and all turns are preserved → split = 0.
+    let msgs: Vec<Message> = (0..12)
+        .map(|i| {
+            if i % 2 == 0 {
+                Message::user(format!("Q{}", i / 2))
+            } else {
+                Message::assistant(format!("A{}", i / 2))
+            }
+        })
+        .collect();
+    let deps = MockDeps::new(msgs.clone())
+        .with_tokens(50_000, LOCAL_CTX_LIMIT)
+        .with_token_fn(|_| 3_500);
+    let engine = CompactionEngine::new(DEFAULT_COMPACT_THRESHOLD, 10, deps);
+    assert_eq!(engine.compute_split_point(&msgs), 0);
+}
+
+#[test]
+fn local_window_budget_caps_preserved_turns() {
+    // Budget = 0.70 * 65_536 ≈ 45_875 tokens. 20 messages × 4_000 tokens
+    // each = 10 turns × 8_000 tokens:
+    //   - 5 turns × 8_000 = 40_000 ≤ 45_875 → fit
+    //   - 6th turn pushes total to 48_000 > 45_875 AND turns_seen=5>0 → stop
+    // With preserve_recent=10 (≥ turn count), budget is the binding constraint.
+    // Expect split at message index 10 (first 10 compacted, last 10 preserved).
+    let msgs: Vec<Message> = (0..20)
+        .map(|i| {
+            if i % 2 == 0 {
+                Message::user(format!("Q{}", i / 2))
+            } else {
+                Message::assistant(format!("A{}", i / 2))
+            }
+        })
+        .collect();
+    let deps = MockDeps::new(msgs.clone())
+        .with_tokens(60_000, LOCAL_CTX_LIMIT)
+        .with_token_fn(|_| 4_000);
+    let engine = CompactionEngine::new(DEFAULT_COMPACT_THRESHOLD, 10, deps);
+    assert_eq!(
+        engine.compute_split_point(&msgs),
+        10,
+        "budget should cap at 5 turns (10 messages)"
+    );
+}
+

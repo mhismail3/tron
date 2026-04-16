@@ -86,6 +86,52 @@ fn non_ollama_model_gets_core_prompt() {
     assert!(cm.get_system_prompt().contains("YOUR IDENTITY"));
 }
 
+// -- volatile token accounting --
+
+#[test]
+fn cloud_session_counts_all_volatile_tokens() {
+    let mut cm = ContextManager::new(test_config());
+    let baseline = cm.get_current_tokens();
+    cm.set_volatile_tokens(100, 50, 500);
+    let delta = cm.get_current_tokens() - baseline;
+    assert_eq!(delta, 100 + 50 + 500);
+}
+
+#[test]
+fn local_session_excludes_job_results_from_current_tokens() {
+    let config = ContextManagerConfig {
+        model: "gemma4:e4b".into(),
+        system_prompt: Some("You are helpful.".into()),
+        ..test_config()
+    };
+    let mut cm = ContextManager::new(config);
+    let baseline = cm.get_current_tokens();
+    // Pass a non-zero job_results; set_volatile_tokens must coerce it to 0 for
+    // local models, and get_current_tokens must not count it. Skill tokens
+    // flow through because users can still manually activate a skill.
+    cm.set_volatile_tokens(100, 50, 500);
+    let delta = cm.get_current_tokens() - baseline;
+    assert_eq!(delta, 100 + 50, "job_results (500) must be excluded");
+}
+
+#[test]
+fn local_session_snapshot_and_get_current_tokens_agree() {
+    // Regression for a prior bug: the snapshot adapter gated
+    // volatile_job_results_tokens on is_local_model, but get_current_tokens
+    // didn't — so for local sessions with a non-zero volatile job_results
+    // estimate the two totals disagreed. After the fix, they must match
+    // regardless of what callers pass to set_volatile_tokens.
+    let config = ContextManagerConfig {
+        model: "gemma4:e4b".into(),
+        system_prompt: Some("You are helpful.".into()),
+        ..test_config()
+    };
+    let mut cm = ContextManager::new(config);
+    cm.set_volatile_tokens(80, 40, 500);
+    let snap = cm.get_snapshot();
+    assert_eq!(snap.current_tokens, cm.get_current_tokens());
+}
+
 // -- is_local_model --
 
 #[test]
@@ -925,4 +971,49 @@ fn extracted_data_persisted_after_set() {
     assert_eq!(data.current_goal, "build feature X");
     assert_eq!(data.completed_steps, vec!["step 1"]);
     assert_eq!(data.pending_tasks, vec!["step 2"]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 65K local-model window (Ollama)
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn local_window_config() -> ContextManagerConfig {
+    ContextManagerConfig {
+        model: "gemma4:e4b".into(),
+        system_prompt: Some("You are helpful.".into()),
+        working_directory: Some("/tmp".into()),
+        tools: Vec::new(),
+        rules_content: None,
+        compaction: CompactionConfig {
+            threshold: 0.70,
+            preserve_recent_turns: 2,
+            context_limit: 65_536,
+        },
+    }
+}
+
+#[test]
+fn local_window_tool_result_sizer_at_50k_used() {
+    // context_limit=65_536, api_tokens=50_000 → remaining=15_536
+    //   safety = 15_536 / 10 = 1_553
+    //   response_reserve = 8_000
+    //   available = 15_536 - 8_000 - 1_553 = 5_983 tokens
+    //   budget = 5_983 * 4 = 23_932 chars
+    let mut cm = ContextManager::new(local_window_config());
+    cm.set_api_context_tokens(50_000);
+    let budget = cm.get_max_tool_result_size();
+    assert!(
+        (23_000..=24_000).contains(&budget),
+        "expected ~23_932 chars, got {budget}"
+    );
+}
+
+#[test]
+fn local_window_tool_result_sizer_floor_when_tight() {
+    // When remaining < response_reserve, sizer falls back to
+    // TOOL_RESULT_MIN_TOKENS * CHARS_PER_TOKEN = 2_500 * 4 = 10_000 chars.
+    let mut cm = ContextManager::new(local_window_config());
+    cm.set_api_context_tokens(64_000);
+    let budget = cm.get_max_tool_result_size();
+    assert_eq!(budget, 10_000, "expected MIN floor, got {budget}");
 }
