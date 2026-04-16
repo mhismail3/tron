@@ -71,14 +71,19 @@ impl ReasoningLevel {
 
     /// Convert to Anthropic [`AnthropicEffortLevel`].
     ///
-    /// Returns `None` for `ReasoningLevel::None` (use model default).
-    /// Clamps XHigh/Max → High (Anthropic only supports low/medium/high).
+    /// Returns `None` for `ReasoningLevel::None` (use model default). Anthropic
+    /// now supports the full `low/medium/high/xhigh/max` ladder (xhigh is new
+    /// in Opus 4.7). Per-model support is advertised via
+    /// `ClaudeModelInfo::reasoning_levels`; callers that pick a level not
+    /// supported by the target model will surface a 400 from the API.
     pub fn as_anthropic_effort(&self) -> Option<AnthropicEffortLevel> {
         match self {
             Self::None => None,
             Self::Low => Some(AnthropicEffortLevel::Low),
             Self::Medium => Some(AnthropicEffortLevel::Medium),
-            Self::High | Self::XHigh | Self::Max => Some(AnthropicEffortLevel::High),
+            Self::High => Some(AnthropicEffortLevel::High),
+            Self::XHigh => Some(AnthropicEffortLevel::Xhigh),
+            Self::Max => Some(AnthropicEffortLevel::Max),
         }
     }
 
@@ -669,14 +674,15 @@ mod tests {
             ReasoningLevel::High.as_anthropic_effort(),
             Some(AnthropicEffortLevel::High)
         );
-        // XHigh and Max clamp to High for Anthropic
+        // XHigh and Max pass through to Anthropic (Anthropic supports the
+        // full ladder; per-model support is advertised via reasoning_levels).
         assert_eq!(
             ReasoningLevel::XHigh.as_anthropic_effort(),
-            Some(AnthropicEffortLevel::High)
+            Some(AnthropicEffortLevel::Xhigh)
         );
         assert_eq!(
             ReasoningLevel::Max.as_anthropic_effort(),
-            Some(AnthropicEffortLevel::High)
+            Some(AnthropicEffortLevel::Max)
         );
     }
 

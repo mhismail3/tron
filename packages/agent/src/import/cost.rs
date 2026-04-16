@@ -16,9 +16,16 @@ struct Pricing {
 /// Return pricing for a known model, or `None` for unknown models.
 fn pricing(model: &str) -> Option<Pricing> {
     match model {
-        // Opus tier ($15/$75 per MTok)
-        "claude-opus-4-6"
-        | "claude-opus-4-20250514"
+        // Opus 4.6+ tier ($5/$25 per MTok)
+        "claude-opus-4-7"
+        | "claude-opus-4-6" => Some(Pricing {
+            input: 5.0,
+            output: 25.0,
+            cache_read: 0.5,
+            cache_write: 6.25,
+        }),
+        // Legacy Opus tier ($15/$75 per MTok)
+        "claude-opus-4-20250514"
         | "claude-3-opus-20240229" => Some(Pricing {
             input: 15.0,
             output: 75.0,

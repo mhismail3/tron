@@ -675,7 +675,7 @@ mod tests {
         assert!(ids.contains(&MINIMAX_M2_7));
         assert!(ids.contains(&MINIMAX_M2_5));
         assert!(ids.contains(&GEMMA4_E4B));
-        // Total = 10 Anthropic + 8 OpenAI + 7 Google + 7 MiniMax + 9 Kimi + 2 Ollama = 43
-        assert_eq!(ids.len(), 43);
+        // Total = 11 Anthropic + 8 OpenAI + 7 Google + 7 MiniMax + 9 Kimi + 2 Ollama = 44
+        assert_eq!(ids.len(), 44);
     }
 }

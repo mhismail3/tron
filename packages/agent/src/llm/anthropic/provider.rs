@@ -201,7 +201,15 @@ impl AnthropicProvider {
         }
 
         if model_info.is_some_and(|m| m.supports_adaptive_thinking) {
-            Some(json!({ "type": "adaptive" }))
+            let mut obj = json!({ "type": "adaptive" });
+            // Opus 4.7+ omits thinking content by default; we opt in to "summarized"
+            // so thinking blocks remain visible in chat (matches Opus 4.6 default).
+            if let Some(display) = model_info.and_then(|m| m.thinking_display)
+                && let Some(map) = obj.as_object_mut()
+            {
+                let _ = map.insert("display".into(), json!(display));
+            }
+            Some(obj)
         } else {
             let budget = options.thinking_budget.unwrap_or_else(|| {
                 model_info.map_or(DEFAULT_MAX_OUTPUT_TOKENS / 4, |m| m.max_output / 4)
@@ -753,6 +761,23 @@ mod tests {
         };
         let config = provider.build_thinking_config(&options).unwrap();
         assert_eq!(config["type"], "adaptive");
+        // Regression guard: 4.6 must not send the `display` field (API default
+        // was "summarized"; explicit display opt-in is a 4.7-only change).
+        assert!(config.get("display").is_none());
+    }
+
+    #[test]
+    fn thinking_config_adaptive_opus_4_7_opts_in_to_summarized() {
+        let mut cfg = api_key_config();
+        cfg.model = "claude-opus-4-7".into();
+        let provider = AnthropicProvider::new(cfg);
+        let options = ProviderStreamOptions {
+            enable_thinking: Some(true),
+            ..Default::default()
+        };
+        let config = provider.build_thinking_config(&options).unwrap();
+        assert_eq!(config["type"], "adaptive");
+        assert_eq!(config["display"], "summarized");
     }
 
     #[test]
@@ -826,6 +851,32 @@ mod tests {
             ..Default::default()
         };
         assert!(provider.build_output_config(&options).is_none());
+    }
+
+    #[test]
+    fn output_config_opus_4_7_xhigh() {
+        let mut cfg = api_key_config();
+        cfg.model = "claude-opus-4-7".into();
+        let provider = AnthropicProvider::new(cfg);
+        let options = ProviderStreamOptions {
+            effort_level: Some(AnthropicEffortLevel::Xhigh),
+            ..Default::default()
+        };
+        let config = provider.build_output_config(&options).unwrap();
+        assert_eq!(config["effort"], "xhigh");
+    }
+
+    #[test]
+    fn output_config_opus_4_7_max() {
+        let mut cfg = api_key_config();
+        cfg.model = "claude-opus-4-7".into();
+        let provider = AnthropicProvider::new(cfg);
+        let options = ProviderStreamOptions {
+            effort_level: Some(AnthropicEffortLevel::Max),
+            ..Default::default()
+        };
+        let config = provider.build_output_config(&options).unwrap();
+        assert_eq!(config["effort"], "max");
     }
 
     // ── Max tokens ──────────────────────────────────────────────────────

@@ -180,6 +180,12 @@ pub struct ClaudeModelInfo {
     pub reasoning_levels: Option<&'static [&'static str]>,
     /// Default reasoning/effort level. `None` if reasoning not supported.
     pub default_reasoning_level: Option<&'static str>,
+    /// Thinking display mode to send in `thinking.display`.
+    /// `None` → omit the field (matches prior behavior for Opus 4.6 and below,
+    /// where "summarized" was the API default). `Some("summarized")` → explicit
+    /// opt-in (required on Opus 4.7+ to keep summarized thinking blocks visible,
+    /// since their default is "omitted").
+    pub thinking_display: Option<&'static str>,
 }
 
 /// Get model info for a Claude model ID.
@@ -249,7 +255,39 @@ pub fn all_claude_models_api_json() -> Vec<serde_json::Value> {
 static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLock::new(|| {
     let mut m = HashMap::new();
 
-    // Claude Opus 4.6 — latest and most capable
+    // Claude Opus 4.7 — released April 2026, most capable
+    let _ = m.insert(
+        "claude-opus-4-7",
+        ClaudeModelInfo {
+            name: "Claude Opus 4.7",
+            short_name: "Opus 4.7",
+            family: "Claude 4.7",
+            context_window: 1_000_000,
+            max_output: 128_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: false,
+            supports_adaptive_thinking: true,
+            supports_effort: true,
+            supports_tools: true,
+            supports_images: true,
+            input_cost_per_million: 5.0,
+            output_cost_per_million: 25.0,
+            cache_read_cost_per_million: 0.5,
+            description: "Most capable Claude model — xhigh effort, high-res vision",
+            recommended: true,
+            legacy: false,
+            tier: "opus",
+            sort_order: 0,
+            release_date: "2026-04-16",
+            is_deprecated: false,
+            deprecation_date: None,
+            reasoning_levels: Some(&["low", "medium", "high", "xhigh", "max"]),
+            default_reasoning_level: Some("xhigh"),
+            thinking_display: Some("summarized"),
+        },
+    );
+
+    // Claude Opus 4.6
     let _ = m.insert(
         "claude-opus-4-6",
         ClaudeModelInfo {
@@ -267,16 +305,17 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             input_cost_per_million: 5.0,
             output_cost_per_million: 25.0,
             cache_read_cost_per_million: 0.5,
-            description: "Most capable Claude model — adaptive thinking, effort levels",
-            recommended: true,
+            description: "Previous Opus — adaptive thinking, effort levels",
+            recommended: false,
             legacy: false,
             tier: "opus",
-            sort_order: 0,
+            sort_order: 1,
             release_date: "2026-02-01",
             is_deprecated: false,
             deprecation_date: None,
             reasoning_levels: Some(&["low", "medium", "high", "max"]),
             default_reasoning_level: Some("high"),
+            thinking_display: None,
         },
     );
 
@@ -302,12 +341,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: true,
             legacy: false,
             tier: "sonnet",
-            sort_order: 1,
+            sort_order: 2,
             release_date: "2026-02-17",
             is_deprecated: false,
             deprecation_date: None,
             reasoning_levels: Some(&["low", "medium", "high", "max"]),
             default_reasoning_level: Some("medium"),
+            thinking_display: None,
         },
     );
 
@@ -333,12 +373,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             legacy: false,
             tier: "opus",
-            sort_order: 2,
+            sort_order: 3,
             release_date: "2025-11-01",
             is_deprecated: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
+            thinking_display: None,
         },
     );
 
@@ -363,12 +404,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             legacy: true,
             tier: "sonnet",
-            sort_order: 3,
+            sort_order: 4,
             release_date: "2025-09-29",
             is_deprecated: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
+            thinking_display: None,
         },
     );
 
@@ -393,12 +435,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: true,
             legacy: false,
             tier: "haiku",
-            sort_order: 4,
+            sort_order: 5,
             release_date: "2025-10-01",
             is_deprecated: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
+            thinking_display: None,
         },
     );
 
@@ -424,12 +467,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             legacy: true,
             tier: "opus",
-            sort_order: 5,
+            sort_order: 6,
             release_date: "2025-08-05",
             is_deprecated: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
+            thinking_display: None,
         },
     );
 
@@ -455,12 +499,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             legacy: true,
             tier: "opus",
-            sort_order: 6,
+            sort_order: 7,
             release_date: "2025-05-14",
             is_deprecated: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
+            thinking_display: None,
         },
     );
 
@@ -485,12 +530,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             legacy: true,
             tier: "sonnet",
-            sort_order: 7,
+            sort_order: 8,
             release_date: "2025-05-14",
             is_deprecated: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
+            thinking_display: None,
         },
     );
 
@@ -516,12 +562,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             legacy: true,
             tier: "sonnet",
-            sort_order: 8,
+            sort_order: 9,
             release_date: "2025-02-19",
             is_deprecated: true,
             deprecation_date: Some("2025-10-01"),
             reasoning_levels: None,
             default_reasoning_level: None,
+            thinking_display: None,
         },
     );
 
@@ -547,12 +594,13 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             recommended: false,
             legacy: true,
             tier: "haiku",
-            sort_order: 9,
+            sort_order: 10,
             release_date: "2024-03-07",
             is_deprecated: false,
             deprecation_date: None,
             reasoning_levels: None,
             default_reasoning_level: None,
+            thinking_display: None,
         },
     );
 
@@ -908,7 +956,8 @@ mod tests {
         assert!(info.supports_adaptive_thinking);
         assert!(info.supports_effort);
         assert!(info.supports_tools);
-        assert!(info.recommended);
+        // 4.6 is no longer the recommended Opus (4.7 took the spot).
+        assert!(!info.recommended);
         assert!(!info.legacy);
     }
 
@@ -977,12 +1026,13 @@ mod tests {
     #[test]
     fn all_claude_model_ids_contains_expected() {
         let ids = all_claude_model_ids();
+        assert!(ids.contains(&"claude-opus-4-7"));
         assert!(ids.contains(&"claude-opus-4-6"));
         assert!(ids.contains(&"claude-sonnet-4-6"));
         assert!(ids.contains(&"claude-opus-4-5-20251101"));
         assert!(ids.contains(&"claude-sonnet-4-5-20250929"));
         assert!(ids.contains(&"claude-3-haiku-20240307"));
-        assert_eq!(ids.len(), 10); // 10 models total
+        assert_eq!(ids.len(), 11); // 11 models total
     }
 
     // -- SystemPromptBlock --
@@ -1365,7 +1415,7 @@ mod tests {
         assert_eq!(j["supportsReasoning"], true);
         assert!(j["reasoningLevels"].is_array());
         assert_eq!(j["defaultReasoningLevel"], "high");
-        assert_eq!(j["recommended"], true);
+        assert_eq!(j["recommended"], false);
         assert_eq!(j["isLegacy"], false);
         assert!(j["releaseDate"].is_string());
         assert!(j["sortOrder"].is_number());
@@ -1400,11 +1450,12 @@ mod tests {
     #[test]
     fn all_claude_models_api_json_sorted() {
         let models = all_claude_models_api_json();
-        assert_eq!(models.len(), 10);
-        assert_eq!(models[0]["id"], "claude-opus-4-6");
+        assert_eq!(models.len(), 11);
+        assert_eq!(models[0]["id"], "claude-opus-4-7");
         assert_eq!(models[0]["sortOrder"], 0);
-        assert_eq!(models[9]["id"], "claude-3-haiku-20240307");
-        assert_eq!(models[9]["sortOrder"], 9);
+        assert_eq!(models[1]["id"], "claude-opus-4-6");
+        assert_eq!(models[10]["id"], "claude-3-haiku-20240307");
+        assert_eq!(models[10]["sortOrder"], 10);
     }
 
     #[test]
@@ -1412,5 +1463,51 @@ mod tests {
         let m = get_claude_model("claude-haiku-4-5-20251001").unwrap();
         let j = m.to_api_json("claude-haiku-4-5-20251001");
         assert_eq!(j["recommended"], true);
+    }
+
+    // ── Opus 4.7 ──────────────────────────────────────────────────────
+
+    #[test]
+    fn get_claude_model_opus_4_7_capabilities() {
+        let info = get_claude_model("claude-opus-4-7").unwrap();
+        assert_eq!(info.short_name, "Opus 4.7");
+        assert_eq!(info.family, "Claude 4.7");
+        assert!(info.supports_adaptive_thinking);
+        assert!(!info.supports_thinking_beta_headers);
+        assert!(info.supports_effort);
+        assert_eq!(info.default_reasoning_level, Some("xhigh"));
+        assert_eq!(info.thinking_display, Some("summarized"));
+        assert_eq!(info.input_cost_per_million, 5.0);
+        assert_eq!(info.output_cost_per_million, 25.0);
+        assert!(info.recommended);
+        assert!(!info.legacy);
+        assert_eq!(info.sort_order, 0);
+    }
+
+    #[test]
+    fn opus_4_7_supports_xhigh_reasoning() {
+        let info = get_claude_model("claude-opus-4-7").unwrap();
+        let levels = info.reasoning_levels.unwrap();
+        assert!(levels.contains(&"xhigh"));
+        assert!(levels.contains(&"max"));
+        assert_eq!(levels.len(), 5);
+    }
+
+    #[test]
+    fn opus_4_6_has_no_thinking_display() {
+        // Regression guard: 4.6 must keep the legacy behavior (no display field).
+        let info = get_claude_model("claude-opus-4-6").unwrap();
+        assert_eq!(info.thinking_display, None);
+    }
+
+    #[test]
+    fn to_api_json_opus_4_7_exposes_xhigh() {
+        let m = get_claude_model("claude-opus-4-7").unwrap();
+        let j = m.to_api_json("claude-opus-4-7");
+        assert_eq!(j["id"], "claude-opus-4-7");
+        assert_eq!(j["recommended"], true);
+        assert_eq!(j["defaultReasoningLevel"], "xhigh");
+        let levels = j["reasoningLevels"].as_array().unwrap();
+        assert!(levels.iter().any(|v| v == "xhigh"));
     }
 }

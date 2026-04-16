@@ -305,9 +305,9 @@ fn assistant_cost_computed() {
     )];
     let result = transform(items);
 
-    // $15 input + $7.50 output = $22.50
+    // Opus 4.6+ tier: $5 input (1M tokens) + $2.50 output (100K tokens) = $7.50
     assert!(result.total_cost > 0.0);
-    assert!((result.total_cost - 22.5).abs() < 0.01);
+    assert!((result.total_cost - 7.5).abs() < 0.01);
 
     let turn_end = result
         .events

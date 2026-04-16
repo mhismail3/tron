@@ -11,7 +11,10 @@
 // Anthropic / Claude
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Claude Opus 4.6 — latest and most capable.
+/// Claude Opus 4.7 — released 2026-04-16, most capable Claude model.
+pub const CLAUDE_OPUS_4_7: &str = "claude-opus-4-7";
+
+/// Claude Opus 4.6.
 pub const CLAUDE_OPUS_4_6: &str = "claude-opus-4-6";
 
 /// Claude Opus 4.5 (November 2025).

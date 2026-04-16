@@ -21,7 +21,8 @@ use crate::core::events::StreamEvent;
 /// Anthropic effort level for output configuration.
 ///
 /// Controls how much effort the model puts into generating a response.
-/// Valid values for the Anthropic API: `low`, `medium`, `high`.
+/// Valid values: `low`, `medium`, `high`, `xhigh`, `max`. Per-model support
+/// is advertised via `ClaudeModelInfo::reasoning_levels`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AnthropicEffortLevel {
@@ -31,6 +32,10 @@ pub enum AnthropicEffortLevel {
     Medium,
     /// High effort.
     High,
+    /// Extra-high effort (Opus 4.7+).
+    Xhigh,
+    /// Maximum effort (Opus 4.6+).
+    Max,
 }
 
 impl AnthropicEffortLevel {
@@ -41,6 +46,8 @@ impl AnthropicEffortLevel {
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
         }
     }
 }
@@ -434,6 +441,8 @@ mod tests {
             (AnthropicEffortLevel::Low, "low"),
             (AnthropicEffortLevel::Medium, "medium"),
             (AnthropicEffortLevel::High, "high"),
+            (AnthropicEffortLevel::Xhigh, "xhigh"),
+            (AnthropicEffortLevel::Max, "max"),
         ] {
             let json = serde_json::to_string(&level).unwrap();
             assert_eq!(json, format!("\"{expected_str}\""));
@@ -465,7 +474,9 @@ mod tests {
 
     #[test]
     fn invalid_effort_level_fails_deser() {
-        let result = serde_json::from_str::<AnthropicEffortLevel>("\"xhigh\"");
+        // "xhigh" and "max" are now valid (Opus 4.7+); use a genuinely unknown
+        // string to guard against accidental accept-all behavior.
+        let result = serde_json::from_str::<AnthropicEffortLevel>("\"ultra\"");
         assert!(result.is_err());
     }
 

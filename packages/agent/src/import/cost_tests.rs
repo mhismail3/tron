@@ -12,7 +12,21 @@ fn usage(input: i64, output: i64) -> ClaudeUsage {
 #[test]
 fn opus_cost() {
     let cost = estimate_cost("claude-opus-4-6", &usage(1_000_000, 1_000_000));
-    // $15 input + $75 output = $90
+    // $5 input + $25 output = $30 (Opus 4.6+ tier)
+    assert!((cost - 30.0).abs() < 0.001);
+}
+
+#[test]
+fn opus_4_7_cost() {
+    let cost = estimate_cost("claude-opus-4-7", &usage(1_000_000, 1_000_000));
+    // Opus 4.7 is priced the same as 4.6: $5 input + $25 output = $30
+    assert!((cost - 30.0).abs() < 0.001);
+}
+
+#[test]
+fn legacy_opus_cost() {
+    let cost = estimate_cost("claude-opus-4-20250514", &usage(1_000_000, 1_000_000));
+    // Legacy Opus tier: $15 input + $75 output = $90
     assert!((cost - 90.0).abs() < 0.001);
 }
 
@@ -51,15 +65,16 @@ fn cache_tokens_included() {
         cache_creation_input_tokens: 1_000_000,
     };
     let cost = estimate_cost("claude-opus-4-6", &u);
-    // $1.50 cache_read + $18.75 cache_write = $20.25
-    assert!((cost - 20.25).abs() < 0.001);
+    // Opus 4.6+ tier: $0.50 cache_read + $6.25 cache_write = $6.75
+    assert!((cost - 6.75).abs() < 0.001);
 }
 
 #[test]
 fn model_alias_resolution() {
+    // Opus 4.7 and 4.6 share the same tier pricing.
     let u = usage(1_000_000, 0);
-    let cost1 = estimate_cost("claude-opus-4-6", &u);
-    let cost2 = estimate_cost("claude-opus-4-20250514", &u);
+    let cost1 = estimate_cost("claude-opus-4-7", &u);
+    let cost2 = estimate_cost("claude-opus-4-6", &u);
     assert_eq!(cost1, cost2);
 }
 

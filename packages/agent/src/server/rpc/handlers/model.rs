@@ -265,6 +265,7 @@ mod tests {
         let ctx = make_test_context();
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
+        assert!(models.iter().any(|m| m["id"] == "claude-opus-4-7"));
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-6"));
         assert!(models.iter().any(|m| m["id"] == "claude-sonnet-4-6"));
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-5-20251101"));
@@ -291,7 +292,7 @@ mod tests {
             .iter()
             .filter(|m| m["provider"] == "anthropic")
             .count();
-        assert_eq!(anthropic_count, 10);
+        assert_eq!(anthropic_count, 11);
     }
 
     #[tokio::test]
@@ -429,7 +430,8 @@ mod tests {
         assert_eq!(opus["tier"], "opus");
         assert_eq!(opus["family"], "Claude 4.6");
         assert!(opus["description"].is_string());
-        assert_eq!(opus["recommended"], true);
+        // Opus 4.6 is no longer the recommended Opus — Opus 4.7 supersedes it.
+        assert_eq!(opus["recommended"], false);
         assert!(opus["releaseDate"].is_string());
         assert!(opus["maxOutput"].is_number());
         assert_eq!(opus["isLegacy"], false);
