@@ -280,7 +280,7 @@ impl SessionRepo {
             param_values.push(Box::new(origin.to_string()));
         }
         if opts.user_only == Some(true) {
-            sql.push_str(" AND (source IS NULL OR source = 'chat')");
+            sql.push_str(" AND (source IS NULL OR source IN ('chat', 'import'))");
         }
         sql.push_str(" ORDER BY last_activity_at DESC");
         if let Some(limit) = opts.limit {

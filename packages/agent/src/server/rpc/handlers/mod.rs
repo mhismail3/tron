@@ -13,7 +13,8 @@
 //!
 //! `skills` (list, get, refresh), `skill_session` (activate, deactivate,
 //! spell.cast, active — session-scoped skill state), `filesystem` (list, read, mkdir),
-//! `task`/`projects`/`areas` (CRUD), `tree` (visualization, branches)
+//! `task`/`projects`/`areas` (CRUD), `tree` (visualization, branches),
+//! `import` (listSources, listSessions, previewSession, execute)
 //!
 //! ## `register_platform` — Platform-specific
 //!
@@ -36,6 +37,7 @@ pub mod events;
 pub(crate) mod job;
 pub mod filesystem;
 pub mod git;
+pub mod import;
 pub mod logs;
 pub mod mcp;
 pub mod memory;
@@ -199,6 +201,12 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     registry.register("tree.getSubtree", tree::GetSubtreeHandler);
     registry.register("tree.getAncestors", tree::GetAncestorsHandler);
     registry.register("tree.compareBranches", tree::CompareBranchesHandler);
+
+    // Import
+    registry.register("import.listSources", import::ListSourcesHandler);
+    registry.register("import.listSessions", import::ListSessionsHandler);
+    registry.register("import.previewSession", import::PreviewSessionHandler);
+    registry.register("import.execute", import::ExecuteImportHandler);
 }
 
 fn register_platform(registry: &mut MethodRegistry) {
@@ -533,8 +541,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            131,
-            "expected 131 methods, got {}",
+            135,
+            "expected 135 methods, got {}",
             reg.methods().len()
         );
     }

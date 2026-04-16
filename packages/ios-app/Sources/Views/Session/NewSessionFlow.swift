@@ -25,6 +25,9 @@ struct NewSessionFlow: View {
     @State private var showCloneSheet = false
     @State private var showMaxSessionsAlert = false
 
+    // Import from Claude Code
+    @State private var showImportFlow = false
+
     private var canCreate: Bool {
         !isCreating && !workingDirectory.isEmpty && !selectedModel.isEmpty
     }
@@ -129,6 +132,35 @@ struct NewSessionFlow: View {
                         .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.2)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text("Clone a GitHub repo and start a session")
+                            .font(TronTypography.codeCaption)
+                            .foregroundStyle(.tronTextMuted)
+                    }
+
+                    // Import from Claude Code
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Or import a conversation")
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .foregroundStyle(.tronTextSecondary)
+
+                        Button {
+                            showImportFlow = true
+                        } label: {
+                            HStack {
+                                Text("Import from Claude Code")
+                                    .font(TronTypography.messageBody)
+                                    .foregroundStyle(.tronEmerald)
+                                Spacer()
+                                Image(systemName: "square.and.arrow.down")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                    .foregroundStyle(.tronEmerald)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.2)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        Text("Continue a Claude Code conversation in Tron")
                             .font(TronTypography.codeCaption)
                             .foregroundStyle(.tronTextMuted)
                     }
@@ -238,6 +270,16 @@ struct NewSessionFlow: View {
             .onReceive(NotificationCenter.default.publisher(for: .reasoningLevelAction)) { notification in
                 guard let level = notification.object as? String else { return }
                 selectedReasoningLevel = level
+            }
+            .sheet(isPresented: $showImportFlow) {
+                ImportSessionFlow(
+                    rpcClient: rpcClient,
+                    onImported: { sessionId, workingDirectory, model in
+                        logger.info("[IMPORT-DEBUG] NewSessionFlow.onImported: sessionId=\(sessionId), workDir=\(workingDirectory), model=\(model)", category: .session)
+                        logger.info("[IMPORT-DEBUG] NewSessionFlow: calling onSessionCreated", category: .session)
+                        onSessionCreated(sessionId, workingDirectory, model, workingDirectory)
+                    }
+                )
             }
             .sheet(isPresented: $showCloneSheet) {
                 CloneRepoSheet(

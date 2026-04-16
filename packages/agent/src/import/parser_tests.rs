@@ -1,0 +1,150 @@
+use super::*;
+use std::io::Write;
+
+#[test]
+fn decode_project_dir_standard() {
+    assert_eq!(
+        decode_project_dir("-Users-moose-Downloads-projects-tron"),
+        "/Users/moose/Downloads/projects/tron"
+    );
+}
+
+#[test]
+fn decode_project_dir_root() {
+    assert_eq!(decode_project_dir("-"), "/");
+}
+
+#[test]
+fn decode_project_dir_empty() {
+    assert_eq!(decode_project_dir(""), "");
+}
+
+#[test]
+fn decode_project_dir_short_path() {
+    assert_eq!(decode_project_dir("-tmp"), "/tmp");
+}
+
+#[test]
+fn discover_projects_empty_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let projects = discover_projects(dir.path()).unwrap();
+    assert!(projects.is_empty());
+}
+
+#[test]
+fn discover_projects_nonexistent_dir() {
+    let result = discover_projects(Path::new("/nonexistent/path"));
+    assert!(matches!(result, Err(ImportError::NoClaudeDirectory { .. })));
+}
+
+#[test]
+fn discover_projects_with_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let proj_dir = dir.path().join("-Users-test-project");
+    fs::create_dir(&proj_dir).unwrap();
+
+    // Write a sample JSONL file
+    let session_file = proj_dir.join("abc-123.jsonl");
+    let mut f = fs::File::create(&session_file).unwrap();
+    writeln!(f, r#"{{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{{"role":"user","content":"hi"}}}}"#).unwrap();
+
+    let projects = discover_projects(dir.path()).unwrap();
+    assert_eq!(projects.len(), 1);
+    // decode_project_dir checks the filesystem to resolve ambiguous hyphens.
+    // /Users exists but /Users/test doesn't, so "test-project" stays hyphenated.
+    assert_eq!(projects[0].project_path, "/Users/test-project");
+    assert_eq!(projects[0].session_count, 1);
+}
+
+#[test]
+fn discover_projects_skips_empty_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let proj_dir = dir.path().join("-Users-empty");
+    fs::create_dir(&proj_dir).unwrap();
+    // No JSONL files
+
+    let projects = discover_projects(dir.path()).unwrap();
+    assert!(projects.is_empty());
+}
+
+#[test]
+fn discover_sessions_extracts_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let session_file = dir.path().join("sess-001.jsonl");
+    let mut f = fs::File::create(&session_file).unwrap();
+
+    // User message
+    writeln!(f, r#"{{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-01-01T00:00:00Z","promptId":"p1","message":{{"role":"user","content":"hello"}}}}"#).unwrap();
+    // Assistant message
+    writeln!(f, r#"{{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","slug":"my-slug","message":{{"id":"msg1","role":"assistant","model":"claude-opus-4-6","content":[{{"type":"text","text":"hi"}}],"usage":{{"input_tokens":100,"output_tokens":50}}}}}}"#).unwrap();
+    // Custom title
+    writeln!(f, r#"{{"type":"custom-title","customTitle":"My Session","sessionId":"sess-001"}}"#).unwrap();
+
+    let sessions = discover_sessions(dir.path()).unwrap();
+    assert_eq!(sessions.len(), 1);
+
+    let s = &sessions[0];
+    assert_eq!(s.session_uuid, "sess-001");
+    assert_eq!(s.title.as_deref(), Some("My Session"));
+    assert_eq!(s.slug.as_deref(), Some("my-slug"));
+    assert_eq!(s.model.as_deref(), Some("claude-opus-4-6"));
+    assert_eq!(s.first_timestamp.as_deref(), Some("2026-01-01T00:00:00Z"));
+    assert_eq!(s.last_timestamp.as_deref(), Some("2026-01-01T00:00:01Z"));
+    assert_eq!(s.record_count, 3);
+    assert_eq!(s.message_count, 2); // 1 user + 1 assistant
+    assert_eq!(s.input_tokens, 100);
+    assert_eq!(s.output_tokens, 50);
+}
+
+#[test]
+fn parse_session_skips_malformed_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.jsonl");
+    let mut f = fs::File::create(&file).unwrap();
+
+    writeln!(f, r#"{{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{{"role":"user","content":"ok"}}}}"#).unwrap();
+    writeln!(f, "NOT VALID JSON").unwrap();
+    writeln!(f, r#"{{"type":"assistant","uuid":"a1","timestamp":"2026-01-01T00:00:01Z","message":{{"role":"assistant","content":[{{"type":"text","text":"hi"}}]}}}}"#).unwrap();
+
+    let records = parse_session(&file).unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].record_type, "user");
+    assert_eq!(records[1].record_type, "assistant");
+}
+
+#[test]
+fn parse_session_empty_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("empty.jsonl");
+    fs::File::create(&file).unwrap();
+
+    let records = parse_session(&file).unwrap();
+    assert!(records.is_empty());
+}
+
+#[test]
+fn parse_session_file_not_found() {
+    let result = parse_session(Path::new("/nonexistent/file.jsonl"));
+    assert!(matches!(result, Err(ImportError::SessionNotFound { .. })));
+}
+
+#[test]
+fn parse_session_skips_blank_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("blanks.jsonl");
+    let mut f = fs::File::create(&file).unwrap();
+
+    writeln!(f, r#"{{"type":"user","uuid":"u1","message":{{"role":"user","content":"a"}}}}"#).unwrap();
+    writeln!(f).unwrap(); // blank line
+    writeln!(f, "   ").unwrap(); // whitespace-only line
+    writeln!(f, r#"{{"type":"user","uuid":"u2","message":{{"role":"user","content":"b"}}}}"#).unwrap();
+
+    let records = parse_session(&file).unwrap();
+    assert_eq!(records.len(), 2);
+}
+
+#[test]
+fn discover_sessions_nonexistent_dir() {
+    let result = discover_sessions(Path::new("/nonexistent"));
+    assert!(matches!(result, Err(ImportError::SessionNotFound { .. })));
+}

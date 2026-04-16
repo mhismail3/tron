@@ -103,6 +103,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   +-- transcription    Speech-to-text via parakeet-mlx Python sidecar (MLX backend)
   |
   +-- events           SQLite event store, migrations, reconstruction
+  +-- import           Claude Code session import (parse → linearize → assemble → transform → write)
   +-- llm              Provider trait, model registry, SSE streaming, auth
   |     +-- anthropic/   Claude (OAuth + API key, cache pruning)
   |     +-- openai/      GPT/o-series (OAuth + API key)
@@ -129,6 +130,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `skills` | Skill loading + injection | `SkillRegistry`, `process_prompt_for_skills()` |
 | `transcription` | Speech-to-text via MLX sidecar | `MlxEngine`, `TranscriptionResult`, `TranscriptionError` |
 | `events` | Event sourcing + SQLite | `EventStore`, `EventType`, `SessionEvent` |
+| `import` | Claude Code session import | `import_session()`, `ImportResult`, `ClaudeProject`, `ClaudeSessionMeta` |
 | `llm` | LLM abstraction + model registry | `Provider` trait, `ProviderFactory`, `ProviderStreamOptions` |
 | `mcp` | Model Context Protocol integration | MCP client/server types |
 | `tools` | Tool implementations | `TronTool` trait, `ToolRegistry`, per-tool structs |
@@ -266,7 +268,7 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 
 ## RPC API
 
-JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **131 methods** across three groups.
+JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **135 methods** across three groups.
 
 ### Connection
 
@@ -301,7 +303,7 @@ All messages use JSON-RPC 2.0 framing:
 | `logs` | 1 | `logs.ingest` |
 | `memory` | 1 | `memory.retain` |
 
-### Capabilities (24)
+### Capabilities (28)
 
 | Group | Count | Methods |
 |-------|------:|---------|
@@ -309,6 +311,7 @@ All messages use JSON-RPC 2.0 framing:
 | `skill` (registry) | 3 | `skill.list`, `skill.get`, `skill.refresh` |
 | `skill` (session) | 4 | `skill.activate`, `skill.deactivate`, `skill.active`, `spell.cast` |
 | `filesystem` | 4 | `filesystem.listDir`, `filesystem.getHome`, `filesystem.createDir`, `file.read` |
+| `import` | 4 | `import.listSources`, `import.listSessions`, `import.previewSession`, `import.execute` |
 | `tree` | 5 | `tree.getVisualization`, `tree.getBranches`, `tree.getSubtree`, `tree.getAncestors`, `tree.compareBranches` |
 
 ### Platform (52)

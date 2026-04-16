@@ -28,6 +28,7 @@ RPCClient (WebSocket transport)
     ├── WorktreeClient   - worktree status, commits, merges, diffs, branches
     ├── SkillClient      - skill listing, getting, refreshing, removing
     ├── SandboxClient    - container lifecycle (list, start, stop, kill, remove)
+    ├── ImportClient     - Claude Code session import (discover, preview, execute)
     └── MiscClient       - system, device tokens, memory, messages, logs
 ```
 

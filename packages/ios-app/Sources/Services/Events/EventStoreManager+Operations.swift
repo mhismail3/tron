@@ -16,6 +16,7 @@ extension EventStoreManager {
 
         // CRITICAL: Tag with current server origin for filtering
         let serverOrigin = rpcClient.serverOrigin
+        logger.info("[IMPORT-DEBUG] cacheNewSession: sessionId=\(sessionId), workspaceId=\(workspaceId), model=\(model), workDir=\(workingDirectory), serverOrigin=\(serverOrigin)", category: .session)
 
         var session = CachedSession(
             id: sessionId,
@@ -41,7 +42,9 @@ extension EventStoreManager {
         session.source = source
 
         try await eventDB.sessions.insert(session)
+        logger.info("[IMPORT-DEBUG] cacheNewSession: DB insert succeeded, calling loadSessions()", category: .session)
         loadSessions()
+        logger.info("[IMPORT-DEBUG] cacheNewSession: loadSessions() returned, current session count: \(sessions.count), filterByOrigin=\(filterByOrigin), currentServerOrigin=\(currentServerOrigin)", category: .session)
         logger.info("Cached new session: \(sessionId) with origin: \(serverOrigin)", category: .session)
     }
 
