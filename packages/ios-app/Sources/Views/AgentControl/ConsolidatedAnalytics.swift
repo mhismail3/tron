@@ -300,8 +300,6 @@ struct ConsolidatedAnalytics {
 
                 // If this turn already has an entry (multiple assistant messages per turn,
                 // common in imported sessions), accumulate into the existing entry.
-                let hasTokens = Self.extractTokenUsage(from: event.payload) != nil
-                TronLogger.shared.info("[CTX-DEBUG] Analytics: message.assistant turn=\(turn), existingEntry=\(turnNumberToLatestIndex[turn] != nil), hasTokens=\(hasTokens)", category: .session)
                 if let existingIndex = turnNumberToLatestIndex[turn] {
                     if let tokens = Self.extractTokenUsage(from: event.payload) {
                         turnEntries[existingIndex].input += tokens.input
@@ -409,8 +407,6 @@ struct ConsolidatedAnalytics {
                 model: value.model?.shortModelName
             )
         }
-
-        TronLogger.shared.info("[CTX-DEBUG] Analytics summary: \(turnEntries.count) turn entries from \(events.count) events. Per-turn: \(turnEntries.enumerated().map { "t\($0+1):in=\($1.input)/out=\($1.output)/cost=\($1.cost ?? 0)" }.joined(separator: ", "))", category: .session)
 
         self.totalCost = self.turns.reduce(0) { $0 + $1.cost }
         self.totalTurns = self.turns.count

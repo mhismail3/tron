@@ -663,10 +663,7 @@ final class ChatViewModel {
     /// Called by ChatView when models are loaded or model is switched
     func updateContextWindow(from models: [ModelInfo]) {
         if let model = models.first(where: { $0.id == currentModel }) {
-            logger.info("[CTX-DEBUG] ChatViewModel.updateContextWindow: model=\(currentModel), contextWindow=\(model.contextWindow)", category: .session)
             contextState.currentContextWindow = model.contextWindow
-        } else {
-            logger.info("[CTX-DEBUG] ChatViewModel.updateContextWindow: model '\(currentModel)' NOT found in \(models.count) models", category: .session)
         }
     }
 
@@ -690,9 +687,8 @@ final class ChatViewModel {
                 currentTokens: snapshot.currentTokens,
                 contextLimit: snapshot.contextLimit
             )
-            logger.info("[CTX-DEBUG] refreshContextFromServer: contextLimit=\(snapshot.contextLimit), currentTokens=\(snapshot.currentTokens), contextWindowTokens=\(self.contextState.contextWindowTokens)", category: .session)
         } catch {
-            logger.warning("[CTX-DEBUG] refreshContextFromServer FAILED: \(error.localizedDescription). Preserving: contextWindowTokens=\(contextState.contextWindowTokens), currentContextWindow=\(contextState.currentContextWindow)", category: .session)
+            logger.warning("refreshContextFromServer failed: \(error.localizedDescription)", category: .session)
         }
     }
 

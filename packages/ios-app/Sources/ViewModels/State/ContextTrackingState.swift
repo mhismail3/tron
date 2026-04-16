@@ -72,14 +72,12 @@ final class ContextTrackingState {
     /// Only updates contextWindowTokens when the server returns a non-zero value
     /// (zero means the session hasn't been built on the server yet).
     func syncFromServerSnapshot(currentTokens: Int, contextLimit: Int) {
-        TronLogger.shared.info("[CTX-DEBUG] syncFromServerSnapshot called: currentTokens=\(currentTokens), contextLimit=\(contextLimit), BEFORE: currentContextWindow=\(currentContextWindow), contextWindowTokens=\(contextWindowTokens)", category: .session)
         if contextLimit > 0 {
             currentContextWindow = contextLimit
         }
         if currentTokens > 0 {
             contextWindowTokens = currentTokens
         }
-        TronLogger.shared.info("[CTX-DEBUG] syncFromServerSnapshot AFTER: currentContextWindow=\(currentContextWindow), contextWindowTokens=\(contextWindowTokens), contextPercentage=\(contextPercentage)%", category: .session)
     }
 
     /// Update from server's tokenRecord (called on turn_end)
@@ -131,10 +129,7 @@ final class ContextTrackingState {
     /// Update context window based on available model info
     func updateContextWindow(from models: [ModelInfo], currentModel: String) {
         if let model = models.first(where: { $0.id == currentModel }) {
-            TronLogger.shared.info("[CTX-DEBUG] updateContextWindow from model list: model=\(currentModel), contextWindow=\(model.contextWindow), was=\(currentContextWindow)", category: .session)
             currentContextWindow = model.contextWindow
-        } else {
-            TronLogger.shared.info("[CTX-DEBUG] updateContextWindow: model '\(currentModel)' not found in \(models.count) models. currentContextWindow stays \(currentContextWindow)", category: .session)
         }
     }
 

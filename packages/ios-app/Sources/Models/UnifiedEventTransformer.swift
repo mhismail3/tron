@@ -339,7 +339,6 @@ extension UnifiedEventTransformer {
                         cacheCreationTokens: (state.totalTokenUsage.cacheCreationTokens ?? 0) + record.source.rawCacheCreationTokens
                     )
                     state.lastTurnInputTokens = record.computed.contextWindowTokens
-                    TronLogger.shared.info("[CTX-DEBUG] message.assistant tokenRecord path: contextWindowTokens=\(record.computed.contextWindowTokens), rawInput=\(record.source.rawInputTokens), rawOutput=\(record.source.rawOutputTokens), cacheRead=\(record.source.rawCacheReadTokens)", category: .session)
                 } else if let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any] {
                     // Fallback for imported sessions (no tokenRecord, only tokenUsage)
                     let input = (tokenUsage["inputTokens"] as? Int) ?? (tokenUsage["inputTokens"] as? Double).map { Int($0) } ?? 0
@@ -354,9 +353,6 @@ extension UnifiedEventTransformer {
                     )
                     // Use inputTokens as best available approximation for context window size
                     state.lastTurnInputTokens = input
-                    TronLogger.shared.info("[CTX-DEBUG] message.assistant tokenUsage fallback: input=\(input), output=\(output), cacheRead=\(cacheRead), cacheCreation=\(cacheCreation), lastTurnInputTokens=\(input)", category: .session)
-                } else {
-                    TronLogger.shared.info("[CTX-DEBUG] message.assistant: NO tokenRecord AND NO tokenUsage found in payload. Keys: \(Array(event.payload.keys))", category: .session)
                 }
                 if payload.turn > state.currentTurn {
                     state.currentTurn = payload.turn

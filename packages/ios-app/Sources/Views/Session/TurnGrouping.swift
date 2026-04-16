@@ -67,10 +67,6 @@ enum TurnGrouping {
         let sorted = events.sorted { $0.sequence < $1.sequence }
         let turnAssignments = assignTurnNumbers(sorted)
 
-        // Log per-event turn assignments for debugging
-        let assignmentLog = zip(sorted, turnAssignments).map { "seq=\($0.sequence):\($0.eventType.rawValue)→t\($1)" }.joined(separator: ", ")
-        TronLogger.shared.info("[CTX-DEBUG] TurnGrouping assignments: \(assignmentLog)", category: .session)
-
         // Group events by assigned turn number, preserving order
         var turnMap: [(Int, [SessionEvent])] = []
         var currentTurn: Int? = nil
@@ -148,11 +144,12 @@ enum TurnGrouping {
 
             if event.eventType == .messageUser {
                 // User message starts a potential new prompt cycle.
-                // Look ahead to see what raw turn the next assistant message carries.
-                let nextRawTurn = lookAheadForTurn(
+                // Prefer the user message's own turn if present; otherwise
+                // look ahead to the next assistant's turn.
+                let rawTurn = explicitTurns[i] ?? lookAheadForTurn(
                     from: i + 1, events: events, explicitTurns: explicitTurns
                 )
-                if let next = nextRawTurn {
+                if let next = rawTurn {
                     if next <= prevRawTurn {
                         // Cycle boundary: raw turn reset detected.
                         // Shift offset so new cycle continues from current high-water mark.
