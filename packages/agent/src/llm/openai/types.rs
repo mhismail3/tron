@@ -195,6 +195,13 @@ pub struct OpenAIModelInfo {
     pub recommended: bool,
     /// Whether this is a legacy/older generation model.
     pub is_legacy: bool,
+    /// Whether this model has been retired by the provider. Deprecated models
+    /// remain in the registry so existing sessions can still be rendered and
+    /// their costs/capabilities resolved, but they are surfaced as unavailable
+    /// in the iOS picker via `isDeprecated`.
+    pub is_deprecated: bool,
+    /// Retirement date (ISO-8601), if deprecated.
+    pub deprecation_date: Option<&'static str>,
     /// Knowledge cutoff date (ISO-8601), if known.
     pub knowledge_cutoff: Option<&'static str>,
 }
@@ -230,6 +237,8 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             sort_order: 0,
             recommended: true,
             is_legacy: false,
+            is_deprecated: false,
+            deprecation_date: None,
             knowledge_cutoff: None,
         },
     );
@@ -258,6 +267,8 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             sort_order: 1,
             recommended: false,
             is_legacy: false,
+            is_deprecated: false,
+            deprecation_date: None,
             knowledge_cutoff: None,
         },
     );
@@ -286,6 +297,8 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             sort_order: 2,
             recommended: false,
             is_legacy: false,
+            is_deprecated: false,
+            deprecation_date: None,
             knowledge_cutoff: None,
         },
     );
@@ -318,6 +331,8 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             sort_order: 10,
             recommended: false,
             is_legacy: true,
+            is_deprecated: false,
+            deprecation_date: None,
             knowledge_cutoff: Some("2025-08-31"),
         },
     );
@@ -346,6 +361,8 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             sort_order: 11,
             recommended: false,
             is_legacy: true,
+            is_deprecated: false,
+            deprecation_date: None,
             knowledge_cutoff: None,
         },
     );
@@ -373,7 +390,9 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             description: "GPT-5.2 Codex — proven agentic coding model with 400K context.",
             sort_order: 20,
             recommended: false,
-            is_legacy: false,
+            is_legacy: true,
+            is_deprecated: true,
+            deprecation_date: Some("2026-04-14"),
             knowledge_cutoff: None,
         },
     );
@@ -401,7 +420,9 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             description: "GPT-5.1 Codex Max — deep reasoning capabilities with 400K context.",
             sort_order: 30,
             recommended: false,
-            is_legacy: false,
+            is_legacy: true,
+            is_deprecated: true,
+            deprecation_date: Some("2026-04-14"),
             knowledge_cutoff: None,
         },
     );
@@ -429,7 +450,9 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             description: "GPT-5.1 Codex Mini — fast and cost-efficient coding model.",
             sort_order: 31,
             recommended: false,
-            is_legacy: false,
+            is_legacy: true,
+            is_deprecated: true,
+            deprecation_date: Some("2026-04-14"),
             knowledge_cutoff: None,
         },
     );
@@ -478,6 +501,12 @@ impl OpenAIModelInfo {
         });
         if let Some(cutoff) = self.knowledge_cutoff {
             let _ = obj.as_object_mut().unwrap().insert("knowledgeCutoff".into(), serde_json::json!(cutoff));
+        }
+        if self.is_deprecated {
+            let _ = obj.as_object_mut().unwrap().insert("isDeprecated".into(), serde_json::json!(true));
+        }
+        if let Some(date) = self.deprecation_date {
+            let _ = obj.as_object_mut().unwrap().insert("deprecationDate".into(), serde_json::json!(date));
         }
         obj
     }
@@ -974,6 +1003,49 @@ mod tests {
         let m = get_openai_model("gpt-5.4").unwrap();
         let j = m.to_api_json("gpt-5.4");
         assert!(j.get("knowledgeCutoff").is_none());
+    }
+
+    #[test]
+    fn to_api_json_not_deprecated_no_field() {
+        // Non-deprecated models must omit isDeprecated/deprecationDate so
+        // the iOS client's default behavior (isDeprecatedModel == false)
+        // remains a no-op.
+        let m = get_openai_model("gpt-5.4").unwrap();
+        let j = m.to_api_json("gpt-5.4");
+        assert!(j.get("isDeprecated").is_none());
+        assert!(j.get("deprecationDate").is_none());
+    }
+
+    #[test]
+    fn gpt_52_codex_deprecated_2026_04_14() {
+        let m = get_openai_model("gpt-5.2-codex").unwrap();
+        assert!(m.is_deprecated);
+        assert_eq!(m.deprecation_date, Some("2026-04-14"));
+        let j = m.to_api_json("gpt-5.2-codex");
+        assert_eq!(j["isDeprecated"], true);
+        assert_eq!(j["deprecationDate"], "2026-04-14");
+    }
+
+    #[test]
+    fn gpt_51_codex_max_deprecated_2026_04_14() {
+        let m = get_openai_model("gpt-5.1-codex-max").unwrap();
+        assert!(m.is_deprecated);
+        assert_eq!(m.deprecation_date, Some("2026-04-14"));
+    }
+
+    #[test]
+    fn gpt_51_codex_mini_deprecated_2026_04_14() {
+        let m = get_openai_model("gpt-5.1-codex-mini").unwrap();
+        assert!(m.is_deprecated);
+        assert_eq!(m.deprecation_date, Some("2026-04-14"));
+    }
+
+    #[test]
+    fn gpt_53_codex_not_deprecated() {
+        // Regression guard: supported models must not be flipped accidentally.
+        let m = get_openai_model("gpt-5.3-codex").unwrap();
+        assert!(!m.is_deprecated);
+        assert_eq!(m.deprecation_date, None);
     }
 
     #[test]
