@@ -72,31 +72,6 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
     let mut pending_turn_cost: f64 = 0.0;
     let mut has_pending_turn_end = false;
 
-    /// Flush accumulated turn stats as a single `stream.turn_end`.
-    fn flush_turn_end(
-        events: &mut Vec<TronEventSpec>,
-        turn: i64,
-        input: i64,
-        output: i64,
-        cache_read: i64,
-        cache_creation: i64,
-        cost: f64,
-    ) {
-        events.push(TronEventSpec {
-            event_type: EventType::StreamTurnEnd,
-            payload: json!({
-                "turn": turn,
-                "tokenUsage": {
-                    "inputTokens": input,
-                    "outputTokens": output,
-                    "cacheReadTokens": cache_read,
-                    "cacheCreationTokens": cache_creation,
-                },
-                "cost": cost,
-            }),
-        });
-    }
-
     for item in items {
         match item {
             AssembledItem::UserMessage { record, turn } => {
@@ -453,6 +428,31 @@ fn emit_compact_from_user(
         payload: json!({
             "summary": summary,
             "boundaryEventId": null,
+        }),
+    });
+}
+
+/// Flush accumulated turn stats as a single `stream.turn_end`.
+fn flush_turn_end(
+    events: &mut Vec<TronEventSpec>,
+    turn: i64,
+    input: i64,
+    output: i64,
+    cache_read: i64,
+    cache_creation: i64,
+    cost: f64,
+) {
+    events.push(TronEventSpec {
+        event_type: EventType::StreamTurnEnd,
+        payload: json!({
+            "turn": turn,
+            "tokenUsage": {
+                "inputTokens": input,
+                "outputTokens": output,
+                "cacheReadTokens": cache_read,
+                "cacheCreationTokens": cache_creation,
+            },
+            "cost": cost,
         }),
     });
 }

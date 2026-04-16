@@ -19,7 +19,6 @@ fn pricing(model: &str) -> Option<Pricing> {
         // Opus tier ($15/$75 per MTok)
         "claude-opus-4-6"
         | "claude-opus-4-20250514"
-        | "claude-opus-4-6-20250609"
         | "claude-3-opus-20240229" => Some(Pricing {
             input: 15.0,
             output: 75.0,

@@ -198,6 +198,19 @@ struct ImportSessionListView: View {
                     ProgressView().tint(.tronEmerald)
                     Spacer()
                 }
+            } else if let errorMessage {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.title)
+                        .foregroundStyle(.tronCoral)
+                    Text(errorMessage)
+                        .font(TronTypography.subheadline)
+                        .foregroundStyle(.tronTextSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                    Spacer()
+                }
             } else if sessions.isEmpty {
                 VStack(spacing: 12) {
                     Spacer()

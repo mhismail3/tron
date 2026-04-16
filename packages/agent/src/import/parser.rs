@@ -35,8 +35,6 @@ pub struct ClaudeSessionMeta {
     pub first_timestamp: Option<String>,
     /// Timestamp of the last record.
     pub last_timestamp: Option<String>,
-    /// Total number of parseable records.
-    pub record_count: usize,
     /// Number of user + assistant records.
     pub message_count: usize,
     /// Total input tokens across all assistant messages.
@@ -273,7 +271,6 @@ fn extract_session_meta(path: &Path, session_uuid: &str) -> Result<ClaudeSession
         model,
         first_timestamp,
         last_timestamp,
-        record_count: records.len(),
         message_count,
         input_tokens,
         output_tokens,

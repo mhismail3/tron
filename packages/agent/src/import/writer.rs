@@ -72,6 +72,7 @@ pub fn import_session(
         return Err(ImportError::EmptySession);
     }
 
+    // Fallback when no assistant message carried a model ID
     let model = if result.model.is_empty() {
         "claude-sonnet-4-20250514"
     } else {

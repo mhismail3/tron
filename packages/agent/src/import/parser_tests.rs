@@ -90,7 +90,6 @@ fn discover_sessions_extracts_metadata() {
     assert_eq!(s.model.as_deref(), Some("claude-opus-4-6"));
     assert_eq!(s.first_timestamp.as_deref(), Some("2026-01-01T00:00:00Z"));
     assert_eq!(s.last_timestamp.as_deref(), Some("2026-01-01T00:00:01Z"));
-    assert_eq!(s.record_count, 3);
     assert_eq!(s.message_count, 2); // 1 user + 1 assistant
     assert_eq!(s.input_tokens, 100);
     assert_eq!(s.output_tokens, 50);

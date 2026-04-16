@@ -298,9 +298,6 @@ struct NewSessionFlow: View {
                     _ = Task { await loadModels() }
                 }
             }
-            .onAppear {
-                // Don't auto-open workspace selector - let user explicitly tap to select
-            }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
