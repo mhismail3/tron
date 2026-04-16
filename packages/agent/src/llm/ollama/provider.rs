@@ -543,7 +543,7 @@ mod tests {
     #[test]
     fn target_num_ctx_known_model() {
         let provider = OllamaProvider::new(test_config());
-        // E4B has 131K context, capped at 64K
+        // E4B has 65K context window
         assert_eq!(provider.target_num_ctx(), 65_536);
     }
 

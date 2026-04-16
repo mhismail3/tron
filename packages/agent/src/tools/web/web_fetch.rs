@@ -247,6 +247,16 @@ impl TronTool for WebFetchTool {
         .build()
     }
 
+    fn local_definition(&self) -> Tool {
+        ToolSchemaBuilder::new(
+            "WebFetch",
+            "Fetch a URL and extract information. Returns markdown content.",
+        )
+        .required_property("url", json!({"type": "string", "description": "URL to fetch"}))
+        .property("prompt", json!({"type": "string", "description": "What to extract from the page"}))
+        .build()
+    }
+
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let raw_url = match validate_required_string(&params, "url", "the URL to fetch") {
             Ok(u) => u,

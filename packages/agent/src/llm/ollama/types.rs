@@ -74,7 +74,7 @@ static OLLAMA_MODELS: LazyLock<HashMap<&'static str, OllamaModelInfo>> = LazyLoc
             name: "Gemma 4 E4B",
             short_name: "E4B",
             family: "Gemma 4",
-            context_window: 131_072,
+            context_window: 65_536,
             max_output: 8_192,
             supports_thinking: true,
             supports_tools: true,
@@ -91,7 +91,7 @@ static OLLAMA_MODELS: LazyLock<HashMap<&'static str, OllamaModelInfo>> = LazyLoc
             name: "Gemma 4 26B",
             short_name: "26B",
             family: "Gemma 4",
-            context_window: 262_144,
+            context_window: 65_536,
             max_output: 8_192,
             supports_thinking: true,
             supports_tools: true,
@@ -246,7 +246,7 @@ mod tests {
     fn get_ollama_model_e4b() {
         let m = get_ollama_model("gemma4:e4b").unwrap();
         assert_eq!(m.name, "Gemma 4 E4B");
-        assert_eq!(m.context_window, 131_072);
+        assert_eq!(m.context_window, 65_536);
         assert!(m.supports_thinking);
         assert!(m.supports_tools);
         assert!(m.supports_images);
@@ -257,7 +257,7 @@ mod tests {
     fn get_ollama_model_26b() {
         let m = get_ollama_model("gemma4:26b").unwrap();
         assert_eq!(m.name, "Gemma 4 26B");
-        assert_eq!(m.context_window, 262_144);
+        assert_eq!(m.context_window, 65_536);
         assert!(m.supports_thinking);
         assert!(m.supports_tools);
         assert!(m.supports_images);
@@ -296,7 +296,7 @@ mod tests {
         assert_eq!(j["name"], "Gemma 4 E4B");
         assert_eq!(j["provider"], "ollama");
         assert_eq!(j["providerDisplayName"], "Ollama");
-        assert_eq!(j["contextWindow"], 131_072);
+        assert_eq!(j["contextWindow"], 65_536);
         assert_eq!(j["maxOutput"], 8_192);
         assert_eq!(j["supportsThinking"], true);
         assert_eq!(j["supportsImages"], true);

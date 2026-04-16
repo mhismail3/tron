@@ -49,6 +49,43 @@ fn default_system_prompt() {
     assert!(!cm.get_system_prompt().is_empty());
 }
 
+// -- local model system prompt --
+
+#[test]
+fn ollama_model_gets_local_prompt() {
+    let config = ContextManagerConfig {
+        model: "gemma4:e4b".into(),
+        system_prompt: None,
+        ..test_config()
+    };
+    let cm = ContextManager::new(config);
+    let prompt = cm.get_system_prompt();
+    assert!(prompt.contains("Tool routing"));
+    assert!(!prompt.contains("YOUR IDENTITY"));
+}
+
+#[test]
+fn ollama_model_custom_prompt_takes_precedence() {
+    let config = ContextManagerConfig {
+        model: "gemma4:e4b".into(),
+        system_prompt: Some("Custom override".into()),
+        ..test_config()
+    };
+    let cm = ContextManager::new(config);
+    assert_eq!(cm.get_system_prompt(), "Custom override");
+}
+
+#[test]
+fn non_ollama_model_gets_core_prompt() {
+    let config = ContextManagerConfig {
+        model: "claude-sonnet-4-5-20250929".into(),
+        system_prompt: None,
+        ..test_config()
+    };
+    let cm = ContextManager::new(config);
+    assert!(cm.get_system_prompt().contains("YOUR IDENTITY"));
+}
+
 // -- message management --
 
 #[test]

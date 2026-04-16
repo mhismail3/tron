@@ -4,15 +4,22 @@
 //! canonical prompts (OAuth prefix, Codex instructions) are handled by each
 //! provider crate — this module provides the Tron-specific prompts.
 //!
+//! ## Prompts
+//!
+//! - **`core.md`** → [`TRON_CORE_PROMPT`]: Full prompt for cloud models (~5.5K tokens)
+//! - **`chat.md`** → [`TRON_CHAT_PROMPT`]: Lightweight chat sessions
+//! - **`local.md`** → [`TRON_LOCAL_PROMPT`]: Condensed prompt for local models (~460 tokens)
+//!
 //! The default core prompt is loaded from `core.md` via [`include_str!`].
 //! Users can optionally override at two levels:
 //!
 //! 1. **Project**: `.tron/SYSTEM.md` in the working directory
 //! 2. **Global**: `~/.tron/workspace/memory/rules/SYSTEM.md` (manually created)
 //!
-//! Precedence: project override > global override > embedded `TRON_CORE_PROMPT`.
+//! Precedence: project override > global override > embedded default.
+//! For Ollama models, the default is `TRON_LOCAL_PROMPT` instead of `TRON_CORE_PROMPT`.
 //!
-//! The server does NOT auto-seed `SYSTEM.md` — the embedded core.md is used
+//! The server does NOT auto-seed `SYSTEM.md` — the embedded prompts are used
 //! directly. Override files are opt-in for users who want customization.
 
 use std::fs;
@@ -39,6 +46,14 @@ pub const TRON_CORE_PROMPT: &str = include_str!("core.md");
 /// Used when `session.source == "chat"` (quick chat sessions).
 /// Not scoped to a project — no rules or workspace context loaded.
 pub const TRON_CHAT_PROMPT: &str = include_str!("chat.md");
+
+/// Condensed system prompt for local models (Ollama).
+///
+/// ~1,500 tokens vs ~5,500 for `core.md`. Keeps tool routing, file operation
+/// rules, bash/git safety, and communication style. Cuts identity philosophy,
+/// memory management, digital identity, filesystem boundaries, path references,
+/// and specialized tool sections (subagents, containers, self-deployment).
+pub const TRON_LOCAL_PROMPT: &str = include_str!("local.md");
 
 /// Working directory suffix template appended to system prompts.
 pub const WORKING_DIRECTORY_SUFFIX: &str = "\n\nCurrent working directory: {workingDirectory}";
@@ -356,6 +371,25 @@ mod tests {
     fn chat_prompt_is_non_empty() {
         assert!(!TRON_CHAT_PROMPT.is_empty());
         assert!(TRON_CHAT_PROMPT.len() > 500);
+    }
+
+    #[test]
+    fn local_prompt_is_non_empty() {
+        assert!(!TRON_LOCAL_PROMPT.is_empty());
+        assert!(TRON_LOCAL_PROMPT.len() > 500);
+    }
+
+    #[test]
+    fn local_prompt_is_smaller_than_core() {
+        assert!(TRON_LOCAL_PROMPT.len() < TRON_CORE_PROMPT.len() / 2);
+    }
+
+    #[test]
+    fn local_prompt_has_essential_sections() {
+        assert!(TRON_LOCAL_PROMPT.contains("Tool routing"));
+        assert!(TRON_LOCAL_PROMPT.contains("File operations"));
+        assert!(TRON_LOCAL_PROMPT.contains("Bash"));
+        assert!(TRON_LOCAL_PROMPT.contains("Git rules"));
     }
 
     #[test]

@@ -150,7 +150,13 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     debug!(session_id, turn, "turn started");
 
     // 3. Build context (base from CM, external fields from RunContext/params)
-    let context = build_turn_context(context_manager, registry, run_context, server_origin);
+    let context = build_turn_context(
+        context_manager,
+        registry,
+        run_context,
+        server_origin,
+        provider.provider_type(),
+    );
 
     // 4. Build stream options (thinking always enabled — provider handles model-specific config)
     let stream_options = build_stream_options(run_context);
@@ -478,41 +484,93 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     }
 }
 
+/// Tools included in local model context (Ollama). All other tools are excluded
+/// to reduce token overhead. Execution still works for any registered tool if
+/// the model happens to emit a call — filtering is schema-only.
+const LOCAL_MODEL_TOOLS: &[&str] = &["Read", "Write", "Edit", "Bash", "Search", "Find", "WebFetch"];
+
+/// Maximum chars of rules_content to include for local models.
+const LOCAL_RULES_TRUNCATION: usize = 500;
+
 fn build_turn_context(
     context_manager: &mut ContextManager,
     registry: &ToolRegistry,
     run_context: &RunContext,
     server_origin: Option<&str>,
+    provider_type: crate::core::messages::Provider,
 ) -> Context {
-    // Set volatile token estimates for accurate snapshots
-    context_manager.set_volatile_tokens(
-        run_context.volatile_tokens.skill_context,
-        run_context.volatile_tokens.skill_removal,
-        run_context.volatile_tokens.job_results,
-    );
+    let is_local = provider_type == crate::core::messages::Provider::Ollama;
+
+    // Set volatile token estimates for accurate snapshots.
+    // Local models: zero out since skills/jobs are stripped from context.
+    if is_local {
+        context_manager.set_volatile_tokens(0, 0, 0);
+    } else {
+        context_manager.set_volatile_tokens(
+            run_context.volatile_tokens.skill_context,
+            run_context.volatile_tokens.skill_removal,
+            run_context.volatile_tokens.job_results,
+        );
+    }
     // Set server origin for environment token estimation
     context_manager.set_server_origin(server_origin.map(String::from));
 
     let mut context = context_manager.build_base_context();
     context.messages = context_manager.get_messages_arc();
-    context.tools = Some(registry.definitions());
-    context
-        .skill_index_context
-        .clone_from(&run_context.skill_index_context);
-    context
-        .skill_activation_context
-        .clone_from(&run_context.skill_activation_context);
-    context.skill_context.clone_from(&run_context.skill_context);
-    context
-        .skill_removal_context
-        .clone_from(&run_context.skill_removal_context);
-    context
-        .job_results_context
-        .clone_from(&run_context.job_results);
-    context.dynamic_rules_context = run_context
-        .dynamic_rules_context
-        .clone()
-        .or(context.dynamic_rules_context);
+
+    // Tool schemas: reduced set with condensed definitions for local models
+    context.tools = if is_local {
+        Some(registry.local_definitions(LOCAL_MODEL_TOOLS))
+    } else {
+        Some(registry.definitions())
+    };
+
+    if is_local {
+        // Local models: skip memory, skills, and job results to save tokens.
+        // Truncate rules to the most important prefix.
+        context.memory_content = None;
+        context.skill_index_context = None;
+        context.skill_activation_context = None;
+        context.skill_context = None;
+        context.skill_removal_context = None;
+        context.job_results_context = None;
+        if let Some(ref rules) = context.rules_content {
+            if rules.len() > LOCAL_RULES_TRUNCATION {
+                let truncated = &rules[..rules
+                    .char_indices()
+                    .take_while(|&(i, _)| i <= LOCAL_RULES_TRUNCATION)
+                    .last()
+                    .map_or(0, |(i, _)| i)];
+                context.rules_content =
+                    Some(format!("{truncated}\n\n[Truncated — full rules available via Read tool]"));
+            }
+        }
+        // Dynamic rules are short and path-relevant — keep them.
+        context.dynamic_rules_context = run_context
+            .dynamic_rules_context
+            .clone()
+            .or(context.dynamic_rules_context);
+    } else {
+        // Cloud models: full context assembly
+        context
+            .skill_index_context
+            .clone_from(&run_context.skill_index_context);
+        context
+            .skill_activation_context
+            .clone_from(&run_context.skill_activation_context);
+        context.skill_context.clone_from(&run_context.skill_context);
+        context
+            .skill_removal_context
+            .clone_from(&run_context.skill_removal_context);
+        context
+            .job_results_context
+            .clone_from(&run_context.job_results);
+        context.dynamic_rules_context = run_context
+            .dynamic_rules_context
+            .clone()
+            .or(context.dynamic_rules_context);
+    }
+
     context.server_origin = server_origin.map(String::from);
     context
 }

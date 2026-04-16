@@ -455,6 +455,18 @@ impl TronTool for BashTool {
         .build()
     }
 
+    fn local_definition(&self) -> Tool {
+        ToolSchemaBuilder::new(
+            "Bash",
+            "Execute a shell command. Returns stdout/stderr. \
+             Commands timeout after `timeout` ms (default 60000).",
+        )
+        .required_property("command", json!({"type": "string", "description": "The command to execute"}))
+        .property("timeout", json!({"type": "number", "description": "Timeout in ms (default 60000)"}))
+        .property("description", json!({"type": "string", "description": "What the command does"}))
+        .build()
+    }
+
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let command = match validate_required_string(&params, "command", "the shell command") {
             Ok(c) => c,

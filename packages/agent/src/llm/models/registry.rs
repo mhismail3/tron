@@ -648,8 +648,8 @@ mod tests {
 
     #[test]
     fn context_window_ollama() {
-        assert_eq!(model_context_window(GEMMA4_E4B), 131_072);
-        assert_eq!(model_context_window(GEMMA4_26B), 262_144);
+        assert_eq!(model_context_window(GEMMA4_E4B), 65_536);
+        assert_eq!(model_context_window(GEMMA4_26B), 65_536);
     }
 
     #[test]

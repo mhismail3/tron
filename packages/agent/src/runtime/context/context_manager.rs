@@ -63,6 +63,9 @@ pub struct ContextManager {
     volatile_skill_removal_tokens: u64,
     /// Volatile token estimate: background job results.
     volatile_job_results_tokens: u64,
+    /// Local model mode (Ollama). Disables memory/skill token estimation since
+    /// those fields are stripped from the context at turn-build time.
+    is_local_model: bool,
 }
 
 impl ContextManager {
@@ -74,10 +77,26 @@ impl ContextManager {
             config.working_directory = Some(format!("{home}/Workspace"));
         }
 
-        let system_prompt = config
-            .system_prompt
-            .clone()
-            .unwrap_or_else(|| system_prompts::TRON_CORE_PROMPT.to_owned());
+        let is_local = crate::llm::models::registry::detect_provider_from_model(&config.model)
+            == Some(crate::core::messages::Provider::Ollama);
+
+        let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
+            if is_local {
+                system_prompts::TRON_LOCAL_PROMPT.to_owned()
+            } else {
+                system_prompts::TRON_CORE_PROMPT.to_owned()
+            }
+        });
+
+        // Filter tool definitions for token estimation accuracy. Local models
+        // only receive a subset of tools at turn time (see LOCAL_MODEL_TOOLS in
+        // turn_runner.rs), so the estimator should count only those.
+        if is_local {
+            const LOCAL_TOOLS: &[&str] =
+                &["Read", "Write", "Edit", "Bash", "Search", "Find", "WebFetch"];
+            config.tools.retain(|t| LOCAL_TOOLS.contains(&t.name.as_str()));
+        }
+
         let rules_content = config.rules_content.clone();
 
         Self {
@@ -97,6 +116,7 @@ impl ContextManager {
             volatile_skill_context_tokens: 0,
             volatile_skill_removal_tokens: 0,
             volatile_job_results_tokens: 0,
+            is_local_model: is_local,
         }
     }
 
@@ -371,7 +391,12 @@ impl ContextManager {
 
     #[must_use]
     /// Estimate skill index token count.
+    ///
+    /// Returns 0 for local models since skill context is stripped at turn time.
     pub fn estimate_skill_index_tokens(&self) -> u64 {
+        if self.is_local_model {
+            return 0;
+        }
         u64::from(token_estimator::estimate_rules_tokens(
             self.skill_index_content.as_deref(),
         ))
@@ -379,10 +404,22 @@ impl ContextManager {
 
     #[must_use]
     /// Estimate token count for all loaded rules (static + dynamic).
+    ///
+    /// For local models, static rules are capped at the truncation budget
+    /// since `build_turn_context` truncates them before sending.
     pub fn estimate_rules_tokens(&self) -> u64 {
-        let static_rules = u64::from(token_estimator::estimate_rules_tokens(
-            self.rules_content.as_deref(),
-        ));
+        let static_rules = if self.is_local_model {
+            // Truncated to ~500 chars + suffix at turn time
+            let capped = self.rules_content.as_ref().map(|r| {
+                let len = r.len().min(500 + 60); // truncation + suffix
+                len as u64 / u64::from(CHARS_PER_TOKEN)
+            });
+            capped.unwrap_or(0)
+        } else {
+            u64::from(token_estimator::estimate_rules_tokens(
+                self.rules_content.as_deref(),
+            ))
+        };
         let dynamic_rules = u64::from(token_estimator::estimate_rules_tokens(
             self.dynamic_rules_content.as_deref(),
         ));
@@ -403,7 +440,12 @@ impl ContextManager {
 
     #[must_use]
     /// Estimate memory tokens (workspace memory + session memories).
+    ///
+    /// Returns 0 for local models since memory is stripped at turn time.
     pub fn estimate_memory_tokens(&self) -> u64 {
+        if self.is_local_model {
+            return 0;
+        }
         let base = u64::from(token_estimator::estimate_rules_tokens(
             self.memory_content.as_deref(),
         ));

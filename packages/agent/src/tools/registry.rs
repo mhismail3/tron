@@ -55,6 +55,18 @@ impl ToolRegistry {
             .clone()
     }
 
+    /// Return condensed tool schemas for local models, filtered to `allowed` names.
+    ///
+    /// Uses [`TronTool::local_definition()`] for each tool, which may return a
+    /// stripped-down schema with fewer parameters and shorter descriptions.
+    pub fn local_definitions(&self, allowed: &[&str]) -> Vec<Tool> {
+        self.tools
+            .values()
+            .filter(|t| allowed.contains(&t.name()))
+            .map(|t| t.local_definition())
+            .collect()
+    }
+
     /// Return all tool names in registration order.
     pub fn names(&self) -> Vec<String> {
         self.tools.keys().cloned().collect()
@@ -381,5 +393,29 @@ mod tests {
 
         let stopping = reg.turn_stopping_tool_names();
         assert!(stopping.is_empty());
+    }
+
+    #[test]
+    fn local_definitions_filters_by_allowed() {
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(StubTool::new("Read")));
+        reg.register(Arc::new(StubTool::new("Write")));
+        reg.register(Arc::new(StubTool::new("AskUserQuestion")));
+        reg.register(Arc::new(StubTool::new("SpawnSubagent")));
+
+        let defs = reg.local_definitions(&["Read", "Write"]);
+        assert_eq!(defs.len(), 2);
+        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"Read"));
+        assert!(names.contains(&"Write"));
+        assert!(!names.contains(&"AskUserQuestion"));
+    }
+
+    #[test]
+    fn local_definitions_empty_when_no_match() {
+        let mut reg = ToolRegistry::new();
+        reg.register(Arc::new(StubTool::new("Read")));
+        let defs = reg.local_definitions(&["NonExistent"]);
+        assert!(defs.is_empty());
     }
 }

@@ -130,6 +130,15 @@ pub trait TronTool: Send + Sync {
     /// Generate the [`Tool`] schema for the LLM.
     fn definition(&self) -> Tool;
 
+    /// Condensed [`Tool`] schema for local models with limited context windows.
+    ///
+    /// Defaults to the full definition. Override on tools with verbose schemas
+    /// (e.g., Bash, WebFetch) to strip rarely-used parameters and shorten
+    /// descriptions, reducing token overhead for local inference.
+    fn local_definition(&self) -> Tool {
+        self.definition()
+    }
+
     /// Execute the tool with JSON arguments.
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError>;
 }
