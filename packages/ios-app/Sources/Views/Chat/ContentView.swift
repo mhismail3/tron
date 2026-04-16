@@ -319,23 +319,18 @@ struct ContentView: View {
             defaultModel: defaultModel,
             eventStoreManager: eventStoreManager,
             onSessionCreated: { sessionId, workspaceId, model, workingDirectory in
-                logger.info("[IMPORT-DEBUG] ContentView.onSessionCreated: sessionId=\(sessionId), workspaceId=\(workspaceId), model=\(model), workDir=\(workingDirectory)", category: .session)
                 Task {
                     do {
-                        logger.info("[IMPORT-DEBUG] ContentView: calling cacheNewSession...", category: .session)
                         try await eventStoreManager.cacheNewSession(
                             sessionId: sessionId,
                             workspaceId: workspaceId,
                             model: model,
                             workingDirectory: workingDirectory
                         )
-                        logger.info("[IMPORT-DEBUG] ContentView: cacheNewSession succeeded, session count: \(eventStoreManager.sessions.count)", category: .session)
-                        logger.info("[IMPORT-DEBUG] ContentView: session IDs: \(eventStoreManager.sessions.map(\.id))", category: .session)
                     } catch {
-                        logger.error("[IMPORT-DEBUG] ContentView: cacheNewSession FAILED: \(error)", category: .session)
+                        logger.error("cacheNewSession failed: \(error)", category: .session)
                     }
                 }
-                logger.info("[IMPORT-DEBUG] ContentView: setting selectedSessionId=\(sessionId), dismissing sheet", category: .session)
                 selectedSessionId = sessionId
                 showNewSessionSheet = false
             }

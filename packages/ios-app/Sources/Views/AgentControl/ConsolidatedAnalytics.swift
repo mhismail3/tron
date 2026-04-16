@@ -175,21 +175,33 @@ struct ConsolidatedAnalytics {
         return nil
     }
 
-    /// Extract token usage from event payload's tokenRecord.
+    /// Extract token usage from event payload's tokenRecord, falling back to tokenUsage.
+    ///
+    /// Live sessions emit tokenRecord (with source.rawInputTokens etc.).
+    /// Imported sessions only emit tokenUsage (with inputTokens etc.).
     private static func extractTokenUsage(from payload: [String: AnyCodable]) -> (input: Int, output: Int, cacheRead: Int, cacheCreation: Int, cacheCreation5m: Int, cacheCreation1h: Int)? {
-        guard let tokenRecord = payload["tokenRecord"]?.value as? [String: Any],
-              let source = tokenRecord["source"] as? [String: Any] else {
-            return nil
+        // Prefer tokenRecord (live sessions)
+        if let tokenRecord = payload["tokenRecord"]?.value as? [String: Any],
+           let source = tokenRecord["source"] as? [String: Any] {
+            let input = extractInt(source["rawInputTokens"]) ?? 0
+            let output = extractInt(source["rawOutputTokens"]) ?? 0
+            let cacheRead = extractInt(source["rawCacheReadTokens"]) ?? 0
+            let cacheCreation = extractInt(source["rawCacheCreationTokens"]) ?? 0
+            let cacheCreation5m = extractInt(source["rawCacheCreation5mTokens"]) ?? 0
+            let cacheCreation1h = extractInt(source["rawCacheCreation1hTokens"]) ?? 0
+            return (input, output, cacheRead, cacheCreation, cacheCreation5m, cacheCreation1h)
         }
 
-        let input = extractInt(source["rawInputTokens"]) ?? 0
-        let output = extractInt(source["rawOutputTokens"]) ?? 0
-        let cacheRead = extractInt(source["rawCacheReadTokens"]) ?? 0
-        let cacheCreation = extractInt(source["rawCacheCreationTokens"]) ?? 0
-        let cacheCreation5m = extractInt(source["rawCacheCreation5mTokens"]) ?? 0
-        let cacheCreation1h = extractInt(source["rawCacheCreation1hTokens"]) ?? 0
+        // Fallback to tokenUsage (imported sessions)
+        if let tokenUsage = payload["tokenUsage"]?.value as? [String: Any] {
+            let input = extractInt(tokenUsage["inputTokens"]) ?? 0
+            let output = extractInt(tokenUsage["outputTokens"]) ?? 0
+            let cacheRead = extractInt(tokenUsage["cacheReadTokens"]) ?? 0
+            let cacheCreation = extractInt(tokenUsage["cacheCreationTokens"]) ?? 0
+            return (input, output, cacheRead, cacheCreation, 0, 0)
+        }
 
-        return (input, output, cacheRead, cacheCreation, cacheCreation5m, cacheCreation1h)
+        return nil
     }
 
     // MARK: - Cost Breakdown Pricing (display-only)
@@ -285,30 +297,55 @@ struct ConsolidatedAnalytics {
             switch event.eventType {
             case .messageAssistant:
                 guard let turn = Self.extractInt(event.payload["turn"]?.value) else { continue }
-                var acc = TurnAccumulator()
 
-                if let tokens = Self.extractTokenUsage(from: event.payload) {
-                    acc.input = tokens.input
-                    acc.output = tokens.output
-                    acc.cacheRead = tokens.cacheRead
-                    acc.cacheCreation = tokens.cacheCreation
-                    acc.cacheCreation5m = tokens.cacheCreation5m
-                    acc.cacheCreation1h = tokens.cacheCreation1h
+                // If this turn already has an entry (multiple assistant messages per turn,
+                // common in imported sessions), accumulate into the existing entry.
+                let hasTokens = Self.extractTokenUsage(from: event.payload) != nil
+                TronLogger.shared.info("[CTX-DEBUG] Analytics: message.assistant turn=\(turn), existingEntry=\(turnNumberToLatestIndex[turn] != nil), hasTokens=\(hasTokens)", category: .session)
+                if let existingIndex = turnNumberToLatestIndex[turn] {
+                    if let tokens = Self.extractTokenUsage(from: event.payload) {
+                        turnEntries[existingIndex].input += tokens.input
+                        turnEntries[existingIndex].output += tokens.output
+                        turnEntries[existingIndex].cacheRead += tokens.cacheRead
+                        turnEntries[existingIndex].cacheCreation += tokens.cacheCreation
+                        turnEntries[existingIndex].cacheCreation5m += tokens.cacheCreation5m
+                        turnEntries[existingIndex].cacheCreation1h += tokens.cacheCreation1h
+                    }
+                    if let latency = Self.extractInt(event.payload["latency"]?.value), latency > 0 {
+                        turnEntries[existingIndex].latency += latency
+                        latencySum += latency
+                        latencyCount += 1
+                    }
+                    if turnEntries[existingIndex].model == nil,
+                       let model = event.payload["model"]?.value as? String {
+                        turnEntries[existingIndex].model = model
+                    }
+                } else {
+                    var acc = TurnAccumulator()
+
+                    if let tokens = Self.extractTokenUsage(from: event.payload) {
+                        acc.input = tokens.input
+                        acc.output = tokens.output
+                        acc.cacheRead = tokens.cacheRead
+                        acc.cacheCreation = tokens.cacheCreation
+                        acc.cacheCreation5m = tokens.cacheCreation5m
+                        acc.cacheCreation1h = tokens.cacheCreation1h
+                    }
+
+                    if let latency = Self.extractInt(event.payload["latency"]?.value), latency > 0 {
+                        acc.latency = latency
+                        latencySum += latency
+                        latencyCount += 1
+                    }
+
+                    if let model = event.payload["model"]?.value as? String {
+                        acc.model = model
+                    }
+
+                    let index = turnEntries.count
+                    turnEntries.append(acc)
+                    turnNumberToLatestIndex[turn] = index
                 }
-
-                if let latency = Self.extractInt(event.payload["latency"]?.value), latency > 0 {
-                    acc.latency = latency
-                    latencySum += latency
-                    latencyCount += 1
-                }
-
-                if let model = event.payload["model"]?.value as? String {
-                    acc.model = model
-                }
-
-                let index = turnEntries.count
-                turnEntries.append(acc)
-                turnNumberToLatestIndex[turn] = index
 
             case .streamTurnEnd:
                 guard let turn = Self.extractInt(event.payload["turn"]?.value),
@@ -372,6 +409,8 @@ struct ConsolidatedAnalytics {
                 model: value.model?.shortModelName
             )
         }
+
+        TronLogger.shared.info("[CTX-DEBUG] Analytics summary: \(turnEntries.count) turn entries from \(events.count) events. Per-turn: \(turnEntries.enumerated().map { "t\($0+1):in=\($1.input)/out=\($1.output)/cost=\($1.cost ?? 0)" }.joined(separator: ", "))", category: .session)
 
         self.totalCost = self.turns.reduce(0) { $0 + $1.cost }
         self.totalTurns = self.turns.count

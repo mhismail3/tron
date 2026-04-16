@@ -54,6 +54,7 @@ extension ChatViewModel {
 
         // 5. Restore token state for context progress pill
         //    Without this, contextWindowTokens stays 0 and the pill shows empty.
+        logger.info("[CTX-DEBUG] Step 5: state.lastTurnInputTokens=\(state.lastTurnInputTokens), totalTokenUsage=in:\(state.totalTokenUsage.inputTokens)/out:\(state.totalTokenUsage.outputTokens)/cacheRead:\(state.totalTokenUsage.cacheReadTokens ?? 0)/cacheCreate:\(state.totalTokenUsage.cacheCreationTokens ?? 0)", category: .session)
         if let manager = eventStoreManager {
             await updateTokenState(from: state, using: manager)
         } else {
@@ -62,6 +63,7 @@ extension ChatViewModel {
             contextState.lastTurnInputTokens = state.lastTurnInputTokens
             contextState.setTotalTokenUsage(contextWindowSize: state.lastTurnInputTokens, from: usage)
         }
+        logger.info("[CTX-DEBUG] Step 5 done: contextWindowTokens=\(contextState.contextWindowTokens), currentContextWindow=\(contextState.currentContextWindow), percentage=\(contextState.contextPercentage)%", category: .session)
 
         // Use server-authoritative cost when available (avoids DB race on resume)
         if let cost = result.metadata.totalCost {
@@ -76,7 +78,9 @@ extension ChatViewModel {
         }
 
         // 7. Ensure context window limit is set (prefetchModels runs in parallel and may not have completed)
+        logger.info("[CTX-DEBUG] Step 7: BEFORE refreshContextFromServer: contextWindowTokens=\(contextState.contextWindowTokens), currentContextWindow=\(contextState.currentContextWindow), percentage=\(contextState.contextPercentage)%", category: .session)
         await refreshContextFromServer()
+        logger.info("[CTX-DEBUG] Step 7: AFTER refreshContextFromServer: contextWindowTokens=\(contextState.contextWindowTokens), currentContextWindow=\(contextState.currentContextWindow), percentage=\(contextState.contextPercentage)%", category: .session)
 
         hasInitiallyLoaded = true
         messageIndex.rebuild(from: messages)

@@ -275,8 +275,6 @@ struct NewSessionFlow: View {
                 ImportSessionFlow(
                     rpcClient: rpcClient,
                     onImported: { sessionId, workingDirectory, model in
-                        logger.info("[IMPORT-DEBUG] NewSessionFlow.onImported: sessionId=\(sessionId), workDir=\(workingDirectory), model=\(model)", category: .session)
-                        logger.info("[IMPORT-DEBUG] NewSessionFlow: calling onSessionCreated", category: .session)
                         onSessionCreated(sessionId, workingDirectory, model, workingDirectory)
                     }
                 )

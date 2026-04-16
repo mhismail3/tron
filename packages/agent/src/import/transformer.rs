@@ -7,10 +7,12 @@
 
 use serde_json::{json, Value};
 
+use crate::core::messages::{Provider, TokenUsage};
 use crate::events::types::EventType;
 use crate::import::assembler::{AssembledAssistant, AssembledItem};
 use crate::import::cost::estimate_cost;
 use crate::import::types::ClaudeRecord;
+use crate::runtime::pipeline::persistence::build_token_record;
 
 /// A Tron event to be appended during import.
 #[derive(Debug)]
@@ -57,6 +59,9 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
     let mut max_turn: i64 = 0;
     let mut message_count: i64 = 0;
     let mut last_turn_started: i64 = 0;
+
+    // Cross-turn baseline for tokenRecord context window calculation
+    let mut previous_baseline: u64 = 0;
 
     // Per-turn accumulation for deferred stream.turn_end
     let mut pending_turn: i64 = 0;
@@ -188,6 +193,31 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                     normalize_assistant_block(b)
                 }).collect();
 
+                // Build tokenRecord (same structure as native sessions) so iOS
+                // can read computed.contextWindowTokens for the context pill.
+                let usage_for_record = TokenUsage {
+                    input_tokens: am.usage.input_tokens.max(0) as u64,
+                    output_tokens: am.usage.output_tokens.max(0) as u64,
+                    cache_read_tokens: Some(am.usage.cache_read_input_tokens.max(0) as u64),
+                    cache_creation_tokens: Some(am.usage.cache_creation_input_tokens.max(0) as u64),
+                    cache_creation_5m_tokens: None,
+                    cache_creation_1h_tokens: None,
+                    provider_type: Some(Provider::Anthropic),
+                };
+                let token_record = build_token_record(
+                    &usage_for_record,
+                    Provider::Anthropic,
+                    "import",
+                    am.turn.max(0) as u32,
+                    previous_baseline,
+                );
+                // Update baseline for next turn's delta calculation
+                if let Some(computed) = token_record.get("computed") {
+                    if let Some(cwt) = computed.get("contextWindowTokens").and_then(Value::as_u64) {
+                        previous_baseline = cwt;
+                    }
+                }
+
                 let mut assistant_payload = json!({
                     "content": normalized_blocks,
                     "turn": am.turn,
@@ -197,6 +227,7 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                         "cacheReadTokens": am.usage.cache_read_input_tokens,
                         "cacheCreationTokens": am.usage.cache_creation_input_tokens,
                     },
+                    "tokenRecord": token_record,
                     "stopReason": am.stop_reason,
                     "model": am.model,
                 });

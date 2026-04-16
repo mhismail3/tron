@@ -67,6 +67,10 @@ enum TurnGrouping {
         let sorted = events.sorted { $0.sequence < $1.sequence }
         let turnAssignments = assignTurnNumbers(sorted)
 
+        // Log per-event turn assignments for debugging
+        let assignmentLog = zip(sorted, turnAssignments).map { "seq=\($0.sequence):\($0.eventType.rawValue)→t\($1)" }.joined(separator: ", ")
+        TronLogger.shared.info("[CTX-DEBUG] TurnGrouping assignments: \(assignmentLog)", category: .session)
+
         // Group events by assigned turn number, preserving order
         var turnMap: [(Int, [SessionEvent])] = []
         var currentTurn: Int? = nil
@@ -201,7 +205,16 @@ enum TurnGrouping {
     }
 
     /// Extract turn number from event payload if present and positive.
+    ///
+    /// Excludes `stream.turn_start` and `stream.turn_end` — these carry a `turn`
+    /// payload but should not anchor turn numbers. Including them causes
+    /// `prevRawTurn` to be set before the corresponding `message.user`, which
+    /// triggers false cycle-reset detection in imported sessions (where turns
+    /// are globally numbered rather than per-cycle).
     private static func extractPayloadTurn(_ event: SessionEvent) -> Int? {
+        if event.eventType == .streamTurnStart || event.eventType == .streamTurnEnd {
+            return nil
+        }
         if let turn = event.payload["turn"]?.value as? Int, turn > 0 {
             return turn
         }

@@ -14,9 +14,7 @@ struct ImportSessionFlow: View {
             ImportProjectListView(
                 rpcClient: rpcClient,
                 onImported: { sessionId, workingDirectory, model in
-                    logger.info("[IMPORT-DEBUG] ImportSessionFlow.onImported: sessionId=\(sessionId), workDir=\(workingDirectory), model=\(model)", category: .session)
                     dismiss()
-                    logger.info("[IMPORT-DEBUG] ImportSessionFlow: dismiss() called, now calling parent onImported", category: .session)
                     onImported(sessionId, workingDirectory, model)
                 }
             )
@@ -636,7 +634,6 @@ struct ImportSessionPreviewView: View {
             }
 
             await MainActor.run {
-                logger.info("[IMPORT-DEBUG] ImportSessionPreviewView: import succeeded, sessionId=\(sessionId), workDir=\(workingDirectory), model=\(model)", category: .session)
                 isImporting = false
                 onImported(sessionId, workingDirectory, model)
             }
