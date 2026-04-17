@@ -23,6 +23,7 @@ use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{
     opt_bool, opt_string, opt_u64, require_string_param,
 };
+use std::path::PathBuf;
 use crate::server::rpc::registry::MethodHandler;
 use crate::worktree::types::{
     ConflictResolution, MergeStrategy, SyncBlockReason, SyncOutcome,
@@ -37,6 +38,19 @@ fn require_coordinator(ctx: &RpcContext) -> Result<&WorktreeCoordinator, RpcErro
         .ok_or_else(|| RpcError::Internal {
             message: "Worktree isolation is not enabled".into(),
         })
+}
+
+/// Look up the session's original working directory so the coordinator
+/// can fall back to it when the session has no isolated worktree
+/// (passthrough mode — session on `main`, or post-finalize with no
+/// rebranch). Returns `None` when the session isn't registered, which
+/// is propagated as a normal "not found" error by the coordinator.
+fn session_working_dir(ctx: &RpcContext, session_id: &str) -> Option<PathBuf> {
+    ctx.session_manager
+        .get_session(session_id)
+        .ok()
+        .flatten()
+        .map(|s| PathBuf::from(s.working_directory))
 }
 
 fn parse_strategy(s: Option<&str>) -> MergeStrategy {
@@ -165,6 +179,7 @@ impl MethodHandler for SyncMainHandler {
         let dry_run = opt_bool(params.as_ref(), "dryRun").unwrap_or(false);
         let coord = require_coordinator(ctx)?;
 
+        let fallback = session_working_dir(ctx, &session_id);
         let outcome = coord
             .sync_main(
                 &session_id,
@@ -173,6 +188,7 @@ impl MethodHandler for SyncMainHandler {
                 timeout_ms,
                 prune,
                 dry_run,
+                fallback.as_deref(),
             )
             .await
             .map_err(internal)?;
@@ -212,6 +228,7 @@ impl MethodHandler for PushHandler {
             });
 
         let coord = require_coordinator(ctx)?;
+        let fallback = session_working_dir(ctx, &session_id);
         let out = coord
             .push_branch(
                 &session_id,
@@ -222,6 +239,7 @@ impl MethodHandler for PushHandler {
                 dry_run,
                 &protected,
                 override_protected,
+                fallback.as_deref(),
             )
             .await
             .map_err(internal)?;
@@ -249,11 +267,26 @@ impl MethodHandler for ListLocalBranchesHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
+        let fallback = session_working_dir(ctx, &session_id);
         let branches = coord
-            .list_local_branches(&session_id)
+            .list_local_branches(&session_id, fallback.as_deref())
             .await
             .map_err(internal)?;
-        let current = coord.get_info(&session_id).map(|info| info.branch);
+        // `current` is best-effort: isolated sessions read it from the
+        // coordinator's in-memory info, passthrough sessions read it from
+        // git HEAD of the session's working dir.
+        let current = if let Some(info) = coord.get_info(&session_id) {
+            Some(info.branch)
+        } else if let Some(ref dir) = fallback {
+            coord
+                .passthrough_status(dir)
+                .await
+                .ok()
+                .flatten()
+                .map(|s| s.branch)
+        } else {
+            None
+        };
         Ok(json!({
             "branches": branches,
             "current": current,
@@ -275,8 +308,9 @@ impl MethodHandler for ListRemoteBranchesHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let remote = opt_string(params.as_ref(), "remote");
         let coord = require_coordinator(ctx)?;
+        let fallback = session_working_dir(ctx, &session_id);
         let branches = coord
-            .list_remote_branches(&session_id, remote.as_deref())
+            .list_remote_branches(&session_id, remote.as_deref(), fallback.as_deref())
             .await
             .map_err(internal)?;
         Ok(json!({

@@ -9,7 +9,7 @@
 //!   - `RepoMainAdvanced` — repo-wide broadcast so other sessions can
 //!     refresh their divergence chips.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use tracing::debug;
@@ -41,8 +41,9 @@ impl WorktreeCoordinator {
         fetch_timeout_ms: u64,
         prune: bool,
         dry_run: bool,
+        fallback_dir: Option<&Path>,
     ) -> Result<SyncOutcome> {
-        let repo_root = self.repo_root_for_session(session_id)?;
+        let repo_root = self.repo_root_or_cwd(session_id, fallback_dir).await?;
         let _guard = self
             .acquire_repo_lock(&repo_root, session_id, LockedOp::SyncMain)
             .await;
@@ -116,12 +117,27 @@ impl WorktreeCoordinator {
         Ok(outcome)
     }
 
-    /// Look up `session_id`'s repo root from coordinator state.
-    pub(super) fn repo_root_for_session(&self, session_id: &str) -> Result<PathBuf> {
-        self.state
-            .lock()
-            .active_info(session_id)
-            .map(|info| info.repo_root)
-            .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))
+    /// Resolve a repo root for `session_id`, falling back to `fallback_dir`
+    /// when the session has no isolated worktree (passthrough case: the
+    /// session runs directly on the repo's working dir, e.g. a fresh
+    /// session on `main` or a post-finalize session that never rebranched).
+    ///
+    /// All git-workflow RPCs that previously required an active
+    /// `WorktreeInfo` now call this so they work for on-main sessions too.
+    pub(super) async fn repo_root_or_cwd(
+        &self,
+        session_id: &str,
+        fallback_dir: Option<&Path>,
+    ) -> Result<PathBuf> {
+        if let Some(info) = self.state.lock().active_info(session_id) {
+            return Ok(info.repo_root);
+        }
+        if let Some(dir) = fallback_dir
+            && self.git.is_git_repo(dir).await
+            && let Ok(root) = self.git.repo_root(dir).await
+        {
+            return Ok(PathBuf::from(root));
+        }
+        Err(WorktreeError::NotFound(session_id.to_string()))
     }
 }

@@ -43,7 +43,10 @@ struct SourceControlStatusHeader: View {
             }
         }
         .padding(12)
-        .sectionFill(.tronTeal, subtle: true)
+        // Informational header, not a button — drop the glass interactivity
+        // (tilt/highlight on touch) but keep the tinted glass background so it
+        // still reads as a distinct card.
+        .sectionFill(.tronTeal, subtle: true, interactive: false)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 

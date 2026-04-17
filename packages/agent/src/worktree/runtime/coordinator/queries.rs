@@ -28,8 +28,12 @@ impl WorktreeCoordinator {
     /// are returned last; mainline-sounding branches (main, master,
     /// develop) are floated to the top so the picker UI can default
     /// correctly.
-    pub async fn list_local_branches(&self, session_id: &str) -> Result<Vec<String>> {
-        let repo_root = self.repo_root_for_session(session_id)?;
+    pub async fn list_local_branches(
+        &self,
+        session_id: &str,
+        fallback_dir: Option<&std::path::Path>,
+    ) -> Result<Vec<String>> {
+        let repo_root = self.repo_root_or_cwd(session_id, fallback_dir).await?;
         let mut branches = self.git.list_branches_matching(&repo_root, "*").await?;
         let rank = |b: &str| -> u8 {
             if b == "main" || b == "master" {
@@ -59,8 +63,9 @@ impl WorktreeCoordinator {
         &self,
         session_id: &str,
         remote: Option<&str>,
+        fallback_dir: Option<&std::path::Path>,
     ) -> Result<Vec<String>> {
-        let repo_root = self.repo_root_for_session(session_id)?;
+        let repo_root = self.repo_root_or_cwd(session_id, fallback_dir).await?;
         let remote_name = remote.unwrap_or("origin");
         let mut branches = self
             .git
@@ -207,6 +212,54 @@ impl WorktreeCoordinator {
             has_uncommitted_changes: has_changes,
             commit_count,
             is_merged,
+        }))
+    }
+
+    /// Build a passthrough `WorktreeStatus` for a session that never
+    /// acquired an isolated worktree (the session is running directly
+    /// against the repo root — e.g. a fresh session on `main`, or a
+    /// post-finalize session whose worktree was released).
+    ///
+    /// Returns `Ok(None)` when `working_dir` is not inside a git repo.
+    pub async fn passthrough_status(
+        &self,
+        working_dir: &std::path::Path,
+    ) -> Result<Option<crate::worktree::types::WorktreeStatus>> {
+        if !self.git.is_git_repo(working_dir).await {
+            return Ok(None);
+        }
+        let repo_root_str = match self.git.repo_root(working_dir).await {
+            Ok(r) => r,
+            Err(_) => return Ok(None),
+        };
+        let repo_root = std::path::Path::new(&repo_root_str);
+        // On detached HEAD `current_branch` errors — surface the short
+        // commit hash instead so the UI shows something meaningful.
+        let branch = match self.git.current_branch(repo_root).await {
+            Ok(b) => b,
+            Err(_) => self
+                .git
+                .head_commit(repo_root)
+                .await
+                .map(|h| h.chars().take(7).collect())
+                .unwrap_or_else(|_| "HEAD".to_string()),
+        };
+        let head = self
+            .git
+            .head_commit(repo_root)
+            .await
+            .unwrap_or_default();
+        let has_changes = self.git.has_changes(repo_root).await.unwrap_or(false);
+        Ok(Some(crate::worktree::types::WorktreeStatus {
+            isolated: false,
+            branch,
+            base_commit: head,
+            base_branch: None,
+            path: repo_root_str.clone(),
+            repo_root: repo_root_str,
+            has_uncommitted_changes: has_changes,
+            commit_count: 0,
+            is_merged: false,
         }))
     }
 

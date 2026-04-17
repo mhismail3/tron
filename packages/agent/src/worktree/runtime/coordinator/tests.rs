@@ -1465,3 +1465,92 @@ async fn delete_branch_with_stale_worktree_ref() {
         "branch should be deleted"
     );
 }
+
+// ── Passthrough-mode queries ────────────────────────────────────────
+//
+// These cover the "session running directly on main" case: maybe_acquire
+// returns Passthrough, nothing is inserted into active_by_session, but
+// git-workflow RPCs (status, list_local_branches, list_remote_branches,
+// sync_main, push_branch) must still work against the session's
+// original working directory.
+
+#[tokio::test]
+async fn passthrough_status_resolves_on_main_session() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let status = coord.passthrough_status(dir.path()).await.unwrap();
+    let status = status.expect("passthrough repo should yield status");
+    assert!(!status.isolated, "passthrough status must flag isolated=false");
+    // Fresh `git init` default branch name varies by host config; accept
+    // the two values we see in CI.
+    assert!(
+        status.branch == "main" || status.branch == "master",
+        "unexpected branch: {}",
+        status.branch
+    );
+    assert!(status.repo_root.ends_with(dir.path().to_string_lossy().as_ref())
+        || status.repo_root.contains(dir.path().to_string_lossy().as_ref()));
+    assert_eq!(status.commit_count, 0);
+}
+
+#[tokio::test]
+async fn passthrough_status_returns_none_for_non_repo() {
+    let dir = tempdir().unwrap();
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let status = coord.passthrough_status(dir.path()).await.unwrap();
+    assert!(status.is_none());
+}
+
+#[tokio::test]
+async fn list_local_branches_falls_back_to_cwd_when_session_untracked() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    // No `maybe_acquire` → session never tracked, simulating passthrough.
+    let branches = coord
+        .list_local_branches("untracked-sess", Some(dir.path()))
+        .await
+        .unwrap();
+    assert!(!branches.is_empty(), "expected at least the default branch");
+}
+
+#[tokio::test]
+async fn list_local_branches_errors_without_fallback_for_untracked_session() {
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let err = coord
+        .list_local_branches("ghost", None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::worktree::WorktreeError::NotFound(_)),
+        "expected NotFound, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn list_remote_branches_falls_back_to_cwd_when_session_untracked() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    // No remote configured → list is empty but the call must still
+    // resolve a repo root instead of erroring with NotFound.
+    let branches = coord
+        .list_remote_branches("untracked-sess", Some("origin"), Some(dir.path()))
+        .await
+        .unwrap();
+    assert!(branches.is_empty());
+}

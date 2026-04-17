@@ -35,7 +35,7 @@ struct PushSubSheet: View {
                     icon: dryRun ? "eye" : "arrow.up",
                     accent: accent,
                     isBusy: isPushing,
-                    isEnabled: !isPushing,
+                    isEnabled: !isPushing && hasBranch,
                     accessibilityLabel: dryRun ? "Dry Run Push" : "Push"
                 ) { performPush() }
             },
@@ -69,22 +69,36 @@ struct PushSubSheet: View {
         return t.isEmpty ? currentBranch : t
     }
 
+    /// Whether we have a real branch name to push. Empty pushBranch can
+    /// happen briefly before the task() populates it, or if the server
+    /// fails to resolve the session's current branch (detached HEAD). The
+    /// hero switches to a prompt-to-pick phrasing instead of producing
+    /// "Push  to origin" with dangling empty strings.
+    private var hasBranch: Bool {
+        !pushBranch.isEmpty
+    }
+
     // MARK: Dynamic Hero Summary
 
     private var heroTitle: String {
-        dryRun ? "Dry-run push \(pushBranch)" : "Push \(pushBranch)"
+        guard hasBranch else {
+            return dryRun ? "Dry-run push" : "Push branch"
+        }
+        return dryRun ? "Dry-run push \(pushBranch)" : "Push \(pushBranch)"
     }
 
     /// Real-time summary that reflects every toggle change. Protected-branch
     /// caveat stays pinned since it's always true on the server.
     private var heroDescription: String {
+        let target = hasBranch ? pushBranch : "the selected branch"
+        let upstreamTarget = hasBranch ? "origin/\(pushBranch)" : "the remote branch"
         let action = dryRun
-            ? "Simulates a push of \(pushBranch) to origin without touching the remote"
-            : "Pushes \(pushBranch) to origin"
+            ? "Simulates a push of \(target) to origin without touching the remote"
+            : "Pushes \(target) to origin"
 
         var modifiers: [String] = []
         if setUpstream {
-            modifiers.append("sets the upstream to origin/\(pushBranch)")
+            modifiers.append("sets the upstream to \(upstreamTarget)")
         }
         if forceWithLease {
             modifiers.append("force-with-lease rewrites remote history if nobody else has pushed since your last fetch")
@@ -95,6 +109,9 @@ struct PushSubSheet: View {
             sentence += ", " + modifiers.joined(separator: ", and ")
         }
         sentence += ". Protected branches always require an explicit override."
+        if !hasBranch {
+            sentence = "Pick a branch to push. " + sentence
+        }
         return sentence
     }
 
@@ -104,20 +121,16 @@ struct PushSubSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "Branch")
             SettingsCard(accent: accent) {
-                HStack(spacing: 10) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(accent)
-                        .frame(width: 18)
-                    TextField(currentBranch, text: $branch)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 14)
+                BranchPickerField(
+                    rpcClient: rpcClient,
+                    sessionId: sessionId,
+                    accent: accent,
+                    placeholder: currentBranch,
+                    selection: $branch,
+                    source: .local
+                )
             }
-            SettingsCaption(text: "Defaults to the current session branch.")
+            SettingsCaption(text: "Defaults to the current session branch. Any local branch can be pushed.")
         }
     }
 

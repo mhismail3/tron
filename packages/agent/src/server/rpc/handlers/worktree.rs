@@ -70,8 +70,37 @@ impl MethodHandler for GetStatusHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
 
-        match coord.get_status(&session_id).await {
-            Ok(Some(status)) => Ok(serde_json::json!({
+        // Try the coordinator's tracked worktree first (isolated mode).
+        let status = match coord.get_status(&session_id).await {
+            Ok(Some(s)) => Some(s),
+            Ok(None) => {
+                // Passthrough: the session never acquired an isolated
+                // worktree (fresh session on `main`, or post-finalize
+                // without rebranch). Probe the session's own working
+                // directory so the UI still gets a status header.
+                let Ok(working_dir) = require_session_working_dir(ctx, &session_id) else {
+                    return Ok(serde_json::json!({
+                        "hasWorktree": false,
+                        "worktree": null,
+                    }));
+                };
+                let path = std::path::Path::new(&working_dir);
+                coord
+                    .passthrough_status(path)
+                    .await
+                    .map_err(|e| RpcError::Internal {
+                        message: format!("Failed to get passthrough status: {e}"),
+                    })?
+            }
+            Err(e) => {
+                return Err(RpcError::Internal {
+                    message: format!("Failed to get worktree status: {e}"),
+                });
+            }
+        };
+
+        match status {
+            Some(status) => Ok(serde_json::json!({
                 "hasWorktree": true,
                 "worktree": {
                     "isolated": status.isolated,
@@ -85,13 +114,10 @@ impl MethodHandler for GetStatusHandler {
                     "isMerged": status.is_merged,
                 },
             })),
-            Ok(None) => Ok(serde_json::json!({
+            None => Ok(serde_json::json!({
                 "hasWorktree": false,
                 "worktree": null,
             })),
-            Err(e) => Err(RpcError::Internal {
-                message: format!("Failed to get worktree status: {e}"),
-            }),
         }
     }
 }

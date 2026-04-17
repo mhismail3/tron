@@ -112,6 +112,12 @@ struct BranchPickerField: View {
 
 // MARK: - Branch Picker Sheet
 
+/// Branch picker uses a draft-and-confirm pattern: tapping a row stages the
+/// selection (row shows a checkmark) but keeps the sheet open; the trailing
+/// toolbar checkmark commits the draft back to the binding and dismisses,
+/// and the leading xmark dismisses without applying. This matches the way
+/// iOS system pickers (Mail signature, Settings selects) behave so a stray
+/// tap doesn't immediately commit.
 @available(iOS 26.0, *)
 struct BranchPickerSheet: View {
     let accent: Color
@@ -121,6 +127,8 @@ struct BranchPickerSheet: View {
     let errorMessage: String?
     @Binding var selection: String
     @Binding var isPresenting: Bool
+
+    @State private var draft: String = ""
 
     private var emptyStateText: String {
         switch source {
@@ -137,42 +145,57 @@ struct BranchPickerSheet: View {
     }
 
     var body: some View {
-        GitSubSheetContainer(title: navTitle, accent: accent) {
-            if isLoading {
-                HStack(spacing: 8) {
-                    ProgressView().tint(accent)
-                    Text("Loading branches…")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronTextMuted)
+        GitSubSheetContainer(
+            title: navTitle,
+            accent: accent,
+            trailing: {
+                SheetPrimaryActionButton(
+                    icon: "checkmark",
+                    accent: accent,
+                    isEnabled: !draft.isEmpty,
+                    accessibilityLabel: "Confirm Selection"
+                ) {
+                    selection = draft
+                    isPresenting = false
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 32)
-            } else if let errorMessage {
-                Text(errorMessage)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronRose)
+            },
+            content: {
+                if isLoading {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(accent)
+                        Text("Loading branches…")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.tronTextMuted)
+                    }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 32)
-            } else if branches.isEmpty {
-                Text(emptyStateText)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronTextMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 32)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(branches, id: \.self) { branch in
-                        branchRow(branch)
+                } else if let errorMessage {
+                    Text(errorMessage)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronRose)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 32)
+                } else if branches.isEmpty {
+                    Text(emptyStateText)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronTextMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 32)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(branches, id: \.self) { branch in
+                            branchRow(branch)
+                        }
                     }
                 }
             }
-        }
+        )
+        .onAppear { draft = selection }
     }
 
     private func branchRow(_ branch: String) -> some View {
         Button {
-            selection = branch
-            isPresenting = false
+            draft = branch
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "arrow.triangle.branch")
@@ -185,7 +208,7 @@ struct BranchPickerSheet: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
-                if selection == branch {
+                if draft == branch {
                     Image(systemName: "checkmark")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(accent)
@@ -193,10 +216,9 @@ struct BranchPickerSheet: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
-            .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.tronBackground.opacity(0.6))
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .sectionFill(accent, subtle: true)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }
