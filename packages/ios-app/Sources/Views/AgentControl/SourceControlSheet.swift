@@ -91,8 +91,7 @@ struct SourceControlSheet: View {
                                 worktreeStatus: worktreeStatus,
                                 stagedFiles: stagedFiles,
                                 unstagedFiles: unstagedFiles,
-                                onFileSelected: { selectedFileDetail = $0 },
-                                availableHeight: geometry.size.height
+                                onFileSelected: { selectedFileDetail = $0 }
                             )
                             .sheetSection()
                         }
@@ -254,8 +253,7 @@ struct SourceControlSheet: View {
         case .syncMain:
             SyncMainSubSheet(
                 rpcClient: rpcClient,
-                sessionId: sessionId,
-                suggestedTargetBranch: worktreeStatus?.worktree?.baseBranch
+                sessionId: sessionId
             )
         case .finalize:
             FinalizeSessionSubSheet(

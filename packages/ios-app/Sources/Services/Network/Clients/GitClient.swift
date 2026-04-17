@@ -33,6 +33,18 @@ final class GitClient: RPCDomainClient {
         return try await ws.send(method: "git.listLocalBranches", params: params)
     }
 
+    /// List branches published on the session's remote (default `origin`).
+    /// Drives the Merge Changes target picker so only shared branches appear
+    /// as merge targets.
+    func listRemoteBranches(
+        sessionId: String,
+        remote: String? = nil
+    ) async throws -> GitListRemoteBranchesResult {
+        let ws = try requireTransport().requireConnection()
+        let params = GitListRemoteBranchesParams(sessionId: sessionId, remote: remote)
+        return try await ws.send(method: "git.listRemoteBranches", params: params)
+    }
+
     /// Push a session branch to its remote. Protected branches require
     /// `overrideProtected == true`.
     func push(

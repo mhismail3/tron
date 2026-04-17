@@ -270,7 +270,7 @@ Source-control operations (sync main, push, switch branches, finalize a session 
 
 ## RPC API
 
-JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **147 methods** across three groups.
+JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **148 methods** across three groups.
 
 ### Connection
 
@@ -316,7 +316,7 @@ All messages use JSON-RPC 2.0 framing:
 | `import` | 4 | `import.listSources`, `import.listSessions`, `import.previewSession`, `import.execute` |
 | `tree` | 5 | `tree.getVisualization`, `tree.getBranches`, `tree.getSubtree`, `tree.getAncestors`, `tree.compareBranches` |
 
-### Platform (64)
+### Platform (65)
 
 | Group | Count | Methods |
 |-------|------:|---------|
@@ -328,7 +328,7 @@ All messages use JSON-RPC 2.0 framing:
 | `device` | 3 | `device.register`, `device.unregister`, `device.respond` |
 | `plan` | 3 | `plan.enter`, `plan.exit`, `plan.getState` |
 | `voiceNotes` | 3 | `voiceNotes.save`, `voiceNotes.list`, `voiceNotes.delete` |
-| `git` | 4 | `git.clone`, `git.syncMain`, `git.push`, `git.listLocalBranches` |
+| `git` | 5 | `git.clone`, `git.syncMain`, `git.push`, `git.listLocalBranches`, `git.listRemoteBranches` |
 | `repo` | 2 | `repo.listSessions`, `repo.getDivergence` |
 | `sandbox` | 5 | `sandbox.listContainers`, `sandbox.startContainer`, `sandbox.stopContainer`, `sandbox.killContainer`, `sandbox.removeContainer` |
 | `notifications` | 3 | `notifications.list`, `notifications.markRead`, `notifications.markAllRead` |

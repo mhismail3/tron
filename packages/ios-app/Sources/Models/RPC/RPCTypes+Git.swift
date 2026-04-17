@@ -11,6 +11,24 @@ struct GitListLocalBranchesResult: Decodable {
     let current: String?
 }
 
+// MARK: - git.listRemoteBranches
+
+struct GitListRemoteBranchesParams: Encodable {
+    let sessionId: String
+    /// Remote name; defaults to `origin` server-side when omitted.
+    let remote: String?
+
+    init(sessionId: String, remote: String? = nil) {
+        self.sessionId = sessionId
+        self.remote = remote
+    }
+}
+
+struct GitListRemoteBranchesResult: Decodable {
+    let branches: [String]
+    let remote: String
+}
+
 // MARK: - git.syncMain
 
 /// Params for `git.syncMain` — fast-forward local `main` from its upstream.

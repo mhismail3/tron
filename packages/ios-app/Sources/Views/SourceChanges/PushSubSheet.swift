@@ -1,9 +1,14 @@
 import SwiftUI
 
-// MARK: - Push Sub-Sheet
+// MARK: - Push Branch Sub-Sheet
 
-/// Pushes the current session branch to origin. Force-with-lease is tucked
-/// behind an Advanced disclosure to keep the default path safe and simple.
+/// Pushes the current session branch to origin. All options (Set Upstream,
+/// Force with Lease, Dry Run) are surfaced as separate containers with
+/// per-option subtext so the reader never has to guess what each toggle does.
+///
+/// Primary action lives in the trailing toolbar slot; the leading `xmark`
+/// dismisses the sheet. Protected branches always require an explicit
+/// server-side override (not exposed in the UI today).
 @available(iOS 26.0, *)
 struct PushSubSheet: View {
     let rpcClient: RPCClient
@@ -13,7 +18,6 @@ struct PushSubSheet: View {
 
     @State private var branch: String = ""
     @State private var setUpstream: Bool = true
-    @State private var showAdvanced: Bool = false
     @State private var forceWithLease: Bool = false
     @State private var dryRun: Bool = false
     @State private var isPushing = false
@@ -23,30 +27,36 @@ struct PushSubSheet: View {
     private let accent: Color = .tronSky
 
     var body: some View {
-        GitSubSheetContainer(title: "Push", accent: accent) {
-            GitHeroCard(
-                icon: "arrow.up.circle",
-                title: "Push \(pushBranch)",
-                description: "Pushes the session branch to origin. Force-with-lease is available behind Advanced; protected branches always require explicit override.",
-                accent: accent
-            )
+        GitSubSheetContainer(
+            title: "Push Branch",
+            accent: accent,
+            trailing: {
+                SheetPrimaryActionButton(
+                    icon: dryRun ? "eye" : "arrow.up",
+                    accent: accent,
+                    isBusy: isPushing,
+                    isEnabled: !isPushing,
+                    accessibilityLabel: dryRun ? "Dry Run Push" : "Push"
+                ) { performPush() }
+            },
+            content: {
+                GitHeroCard(
+                    icon: "arrow.up.circle",
+                    title: "Push \(pushBranch)",
+                    description: "Pushes the session branch to origin. Protected branches always require an explicit override.",
+                    accent: accent
+                )
 
-            branchCard
-            upstreamCard
-            advancedCard
+                branchCard
+                upstreamCard
+                forceWithLeaseCard
+                dryRunCard
 
-            GitActionButton(
-                title: isPushing ? "Pushing…" : (dryRun ? "Dry Run" : "Push"),
-                icon: "arrow.up",
-                accent: accent,
-                isBusy: isPushing,
-                isEnabled: !isPushing
-            ) { performPush() }
-
-            if let result {
-                resultBanner(result)
+                if let result {
+                    resultBanner(result)
+                }
             }
-        }
+        )
         .tronErrorAlert(message: $errorMessage)
         .task {
             branch = currentBranch
@@ -78,58 +88,46 @@ struct PushSubSheet: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 14)
             }
+            SettingsCaption(text: "Defaults to the current session branch.")
         }
     }
 
     private var upstreamCard: some View {
-        SettingsCard(accent: accent) {
-            SettingsRow(icon: "link", label: "Set Upstream", accentColor: accent) {
-                Toggle("", isOn: $setUpstream)
-                    .labelsHidden()
-                    .tint(accent)
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard(accent: accent) {
+                SettingsRow(icon: "link", label: "Set Upstream", accentColor: accent) {
+                    Toggle("", isOn: $setUpstream)
+                        .labelsHidden()
+                        .tint(accent)
+                }
             }
+            SettingsCaption(text: "Configures the branch to track its remote counterpart so future pushes and pulls don't need a target.")
         }
     }
 
-    private var advancedCard: some View {
+    private var forceWithLeaseCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                    showAdvanced.toggle()
+            SettingsCard(accent: accent) {
+                SettingsRow(icon: "bolt.shield", label: "Force with Lease", accentColor: .tronAmber) {
+                    Toggle("", isOn: $forceWithLease)
+                        .labelsHidden()
+                        .tint(.tronAmber)
                 }
-            } label: {
-                HStack {
-                    Text("Advanced")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.tronTextSecondary)
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
-                        .rotationEffect(.degrees(showAdvanced ? -180 : 0))
-                }
-                .padding(.bottom, 8)
             }
-            .buttonStyle(.plain)
+            SettingsCaption(text: "Safely rewrites remote history only if nobody else has pushed since your last fetch.")
+        }
+    }
 
-            if showAdvanced {
-                SettingsCard(accent: accent) {
-                    VStack(spacing: 0) {
-                        SettingsRow(icon: "bolt.shield", label: "Force with Lease", accentColor: .tronAmber) {
-                            Toggle("", isOn: $forceWithLease)
-                                .labelsHidden()
-                                .tint(.tronAmber)
-                        }
-                        SettingsRowDivider()
-                        SettingsRow(icon: "eye", label: "Dry Run", accentColor: accent) {
-                            Toggle("", isOn: $dryRun)
-                                .labelsHidden()
-                                .tint(accent)
-                        }
-                    }
+    private var dryRunCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard(accent: accent) {
+                SettingsRow(icon: "eye", label: "Dry Run", accentColor: accent) {
+                    Toggle("", isOn: $dryRun)
+                        .labelsHidden()
+                        .tint(accent)
                 }
-                SettingsCaption(text: "Force-with-lease safely rewrites remote history only if nobody else has pushed since your last fetch.")
             }
+            SettingsCaption(text: "Simulates the push and reports what would happen without touching the remote.")
         }
     }
 

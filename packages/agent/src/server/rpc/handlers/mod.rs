@@ -288,6 +288,10 @@ fn register_platform(registry: &mut MethodRegistry) {
         git_workflow::ListLocalBranchesHandler,
     );
     registry.register(
+        "git.listRemoteBranches",
+        git_workflow::ListRemoteBranchesHandler,
+    );
+    registry.register(
         "worktree.finalizeSession",
         git_workflow::FinalizeSessionHandler,
     );
@@ -577,8 +581,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            147,
-            "expected 147 methods, got {}",
+            148,
+            "expected 148 methods, got {}",
             reg.methods().len()
         );
     }

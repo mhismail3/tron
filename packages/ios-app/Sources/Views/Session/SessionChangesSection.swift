@@ -9,8 +9,6 @@ struct SessionChangesSection: View {
     let stagedFiles: [DiffFileEntry]
     let unstagedFiles: [DiffFileEntry]
     let onFileSelected: (FileDetailData) -> Void
-    /// Available height from the parent container, used to vertically center empty states.
-    var availableHeight: CGFloat?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -19,7 +17,7 @@ struct SessionChangesSection: View {
 
             if let diffResult {
                 if !diffResult.isGitRepo {
-                    notGitRepoView
+                    notGitRepoSubtext
                 } else {
                     changesContent(diffResult: diffResult)
                 }
@@ -97,9 +95,9 @@ struct SessionChangesSection: View {
             )
         }
 
-        // No changes
+        // No changes — compact inline subtext below the git action containers.
         if stagedFiles.isEmpty && unstagedFiles.isEmpty {
-            noChangesView
+            cleanTreeSubtext
         }
     }
 
@@ -149,33 +147,33 @@ struct SessionChangesSection: View {
 
     // MARK: - Empty States
 
-    private var emptyStateMinHeight: CGFloat {
-        // Subtract estimated header + padding so the empty state centers
-        // within the visible scroll area, not the full sheet.
-        max((availableHeight ?? 300) - 80, 150)
-    }
-
-    private var noChangesView: some View {
-        VStack(spacing: 14) {
+    /// Compact one-line subtext shown below the git action containers when the
+    /// working tree has no changes. Replaces the older centered icon + large
+    /// text empty state so the layout stays tight.
+    private var cleanTreeSubtext: some View {
+        HStack(spacing: 6) {
             Image(systemName: "checkmark.circle")
-                .font(.system(size: 56, weight: .medium))
-                .foregroundStyle(.tronTeal)
-            Text("Working tree is clean")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextMuted)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+            Text("Working tree is clean.")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
         }
-        .frame(maxWidth: .infinity, minHeight: emptyStateMinHeight)
+        .foregroundStyle(.tronTextMuted)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
     }
 
-    private var notGitRepoView: some View {
-        VStack(spacing: 14) {
+    /// Compact one-line subtext shown when the session's CWD is not a git
+    /// repo. Same treatment as `cleanTreeSubtext` to keep the layout
+    /// consistent.
+    private var notGitRepoSubtext: some View {
+        HStack(spacing: 6) {
             Image(systemName: "questionmark.circle")
-                .font(.system(size: 56, weight: .medium))
-                .foregroundStyle(.tronTeal)
-            Text("Not a git repository")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextMuted)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+            Text("Not a git repository.")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
         }
-        .frame(maxWidth: .infinity, minHeight: emptyStateMinHeight)
+        .foregroundStyle(.tronTextMuted)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
     }
 }

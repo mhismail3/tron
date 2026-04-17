@@ -17,8 +17,10 @@ use super::repo_lock::LockedOp;
 use super::WorktreeCoordinator;
 
 impl WorktreeCoordinator {
-    /// Finalise a session: merge its branch into `target_branch`, then
-    /// move the session's worktree onto a fresh `new_branch_name`.
+    /// Finalise a session: merge its branch into `target_branch`. When
+    /// `rebranch` is true (the default), the session's worktree is then
+    /// moved onto a fresh `new_branch_name`; when false, the worktree stays
+    /// on `source_branch` post-merge and no follow-up branch is created.
     ///
     /// Holds the per-repo lock for the duration.
     #[allow(clippy::too_many_arguments)]
@@ -30,6 +32,7 @@ impl WorktreeCoordinator {
         strategy: MergeStrategy,
         new_branch_name: &str,
         preserve_old: bool,
+        rebranch: bool,
     ) -> Result<FinalizeSessionResult> {
         let info = self
             .state
@@ -59,6 +62,7 @@ impl WorktreeCoordinator {
             strategy.clone(),
             new_branch_name,
             preserve_old,
+            rebranch,
             &self.git,
         )
         .await?;

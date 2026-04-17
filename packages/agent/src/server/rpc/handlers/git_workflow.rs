@@ -242,6 +242,31 @@ impl MethodHandler for ListLocalBranchesHandler {
     }
 }
 
+// ── git.listRemoteBranches ───────────────────────────────────────────
+
+/// Handler for `git.listRemoteBranches` — return every branch published on
+/// the given remote (default `origin`). Used by the Merge Changes target
+/// picker so unpublished/session branches never appear as merge targets.
+pub struct ListRemoteBranchesHandler;
+
+#[async_trait]
+impl MethodHandler for ListRemoteBranchesHandler {
+    #[instrument(skip(self, ctx), fields(method = "git.listRemoteBranches"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let remote = opt_string(params.as_ref(), "remote");
+        let coord = require_coordinator(ctx)?;
+        let branches = coord
+            .list_remote_branches(&session_id, remote.as_deref())
+            .await
+            .map_err(internal)?;
+        Ok(json!({
+            "branches": branches,
+            "remote": remote.unwrap_or_else(|| "origin".into()),
+        }))
+    }
+}
+
 // ── worktree.finalizeSession ─────────────────────────────────────────
 
 /// Handler for `worktree.finalizeSession` — merge session into main and rebranch.
@@ -270,6 +295,10 @@ impl MethodHandler for FinalizeSessionHandler {
         let new_branch_name = opt_string(params.as_ref(), "newBranchName")
             .unwrap_or_else(|| format!("{}-follow-up", info.branch));
         let preserve_old = opt_bool(params.as_ref(), "preserveOld").unwrap_or(true);
+        // `rebranch` defaults to true (the historical behaviour). When the
+        // iOS client sets it to false, the worktree stays on its current
+        // branch post-merge — no follow-up branch is created.
+        let rebranch = opt_bool(params.as_ref(), "rebranch").unwrap_or(true);
 
         match coord
             .finalize_session(
@@ -279,6 +308,7 @@ impl MethodHandler for FinalizeSessionHandler {
                 strategy,
                 &new_branch_name,
                 preserve_old,
+                rebranch,
             )
             .await
         {

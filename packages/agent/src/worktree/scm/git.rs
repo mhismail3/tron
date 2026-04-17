@@ -263,6 +263,31 @@ impl GitExecutor {
             .collect())
     }
 
+    /// List branches on a remote. Returns the branch name with the remote
+    /// prefix stripped (e.g. `origin/main` → `main`) and filters the
+    /// pseudo-ref `HEAD`. Used for the Merge Changes target picker so only
+    /// published/shared branches are offered as merge targets.
+    pub async fn list_remote_branches(&self, repo: &Path, remote: &str) -> Result<Vec<String>> {
+        let pattern = format!("refs/remotes/{remote}/");
+        let output = self
+            .run(
+                repo,
+                &["for-each-ref", "--format=%(refname:short)", &pattern],
+            )
+            .await?;
+        let prefix = format!("{remote}/");
+        let mut names: Vec<String> = output
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.trim())
+            .filter_map(|l| l.strip_prefix(&prefix).map(str::to_string))
+            .filter(|name| name != "HEAD")
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
     /// Get log entries for a branch: (hash, message, date).
     pub async fn branch_log(
         &self,

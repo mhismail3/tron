@@ -2,8 +2,8 @@ import SwiftUI
 
 // MARK: - Git Sub-Sheet Container
 
-/// Shared container for all git workflow sub-sheets (Pull Remote / Finalize /
-/// Push / Repo Sessions / Conflict Resolver).
+/// Shared container for all git workflow sub-sheets (Pull Remote / Merge
+/// Changes / Push Branch / Parallel Sessions / Conflict Resolver).
 ///
 /// Design goals:
 /// - Visual parity across all git workflow sheets (same chrome, spacing, type).
@@ -11,11 +11,30 @@ import SwiftUI
 ///   dismiss affordance).
 /// - Partial-height by default so the parent Source Control sheet remains
 ///   visible in the background.
+/// - Toolbar layout: `xmark` close on the leading edge + optional primary
+///   action on the trailing edge (Pull / Merge / Push / Prune). The trailing
+///   action replaces the older full-width bottom button.
 @available(iOS 26.0, *)
-struct GitSubSheetContainer<Content: View>: View {
+struct GitSubSheetContainer<Content: View, Leading: View, Trailing: View>: View {
     let title: String
     let accent: Color
+    @ViewBuilder let leading: () -> Leading
+    @ViewBuilder let trailing: () -> Trailing
     @ViewBuilder let content: () -> Content
+
+    init(
+        title: String,
+        accent: Color,
+        @ViewBuilder leading: @escaping () -> Leading,
+        @ViewBuilder trailing: @escaping () -> Trailing,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.accent = accent
+        self.leading = leading
+        self.trailing = trailing
+        self.content = content
+    }
 
     var body: some View {
         NavigationStack {
@@ -31,17 +50,61 @@ struct GitSubSheetContainer<Content: View>: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    leading()
+                }
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: title, color: accent)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    SheetDismissButton(color: accent)
+                    trailing()
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(accent)
+    }
+}
+
+// Convenience init: default leading is the standard xmark close button. Keeps
+// existing call sites unchanged (they only pass `trailing` + `content`) while
+// allowing sheets like Parallel Sessions to swap the leading slot for a
+// destructive secondary action (e.g. Prune All).
+@available(iOS 26.0, *)
+extension GitSubSheetContainer where Leading == SheetCloseButton {
+    init(
+        title: String,
+        accent: Color,
+        @ViewBuilder trailing: @escaping () -> Trailing,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.init(
+            title: title,
+            accent: accent,
+            leading: { SheetCloseButton(color: accent) },
+            trailing: trailing,
+            content: content
+        )
+    }
+}
+
+// Convenience init for sheets with no trailing action (e.g. informational
+// overlays). Keeps the call site clean: `GitSubSheetContainer(title:accent:)`.
+@available(iOS 26.0, *)
+extension GitSubSheetContainer where Leading == SheetCloseButton, Trailing == EmptyView {
+    init(
+        title: String,
+        accent: Color,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.init(
+            title: title,
+            accent: accent,
+            leading: { SheetCloseButton(color: accent) },
+            trailing: { EmptyView() },
+            content: content
+        )
     }
 }
 
@@ -83,45 +146,6 @@ struct GitHeroCard: View {
         .padding(14)
         .sectionFill(accent, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
-// MARK: - Git Action Button
-
-/// Full-width primary action button with inline spinner.
-@available(iOS 26.0, *)
-struct GitActionButton: View {
-    let title: String
-    let icon: String
-    let accent: Color
-    var isBusy: Bool = false
-    var isEnabled: Bool = true
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                if isBusy {
-                    ProgressView()
-                        .tint(.white)
-                        .scaleEffect(0.85)
-                } else {
-                    Image(systemName: icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                }
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-            }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isEnabled ? accent : accent.opacity(0.35))
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled || isBusy)
     }
 }
 

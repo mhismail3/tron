@@ -5,13 +5,15 @@ import SwiftUI
 /// Fetches all remote refs and fast-forwards local `main`. Read-only on the
 /// session worktree — only touches the repo root's main branch under the
 /// per-repo lock.
+///
+/// No target-branch selector: pulling is always scoped to the repo's default
+/// branch (auto-detected server-side). The action lives in the trailing
+/// toolbar slot; the leading `xmark` dismisses the sheet.
 @available(iOS 26.0, *)
 struct SyncMainSubSheet: View {
     let rpcClient: RPCClient
     let sessionId: String
-    let suggestedTargetBranch: String?
 
-    @State private var targetBranch: String = ""
     @State private var isSyncing = false
     @State private var outcome: GitSyncOutcome?
     @State private var errorMessage: String?
@@ -19,48 +21,32 @@ struct SyncMainSubSheet: View {
     private let accent: Color = .tronEmerald
 
     var body: some View {
-        GitSubSheetContainer(title: "Pull Remote", accent: accent) {
-            GitHeroCard(
-                icon: "arrow.down.circle",
-                title: "Pull All Remote Changes",
-                description: "Fetches every branch from the remote and fast-forwards the repo's main. Your session worktree stays on its own branch — no files are touched.",
-                accent: accent
-            )
-
-            targetBranchCard
-
-            GitActionButton(
-                title: isSyncing ? "Pulling…" : "Pull Remote",
-                icon: "arrow.down",
-                accent: accent,
-                isBusy: isSyncing,
-                isEnabled: !isSyncing
-            ) { performSync() }
-
-            if let outcome {
-                outcomeBanner(outcome)
-            }
-        }
-        .tronErrorAlert(message: $errorMessage)
-        .task { targetBranch = suggestedTargetBranch ?? "" }
-    }
-
-    // MARK: Target Branch Card
-
-    private var targetBranchCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Target Branch")
-            SettingsCard(accent: accent) {
-                BranchPickerField(
-                    rpcClient: rpcClient,
-                    sessionId: sessionId,
+        GitSubSheetContainer(
+            title: "Pull Remote",
+            accent: accent,
+            trailing: {
+                SheetPrimaryActionButton(
+                    icon: "arrow.down",
                     accent: accent,
-                    placeholder: "auto-detect (main/master)",
-                    selection: $targetBranch
+                    isBusy: isSyncing,
+                    isEnabled: !isSyncing,
+                    accessibilityLabel: "Pull"
+                ) { performSync() }
+            },
+            content: {
+                GitHeroCard(
+                    icon: "arrow.down.circle",
+                    title: "Pull All Remote Changes",
+                    description: "Fetches every branch from the remote and fast-forwards the repo's default branch. Your session worktree stays on its own branch — no files are touched.",
+                    accent: accent
                 )
+
+                if let outcome {
+                    outcomeBanner(outcome)
+                }
             }
-            SettingsCaption(text: "Leave blank to auto-detect the repo's default branch.")
-        }
+        )
+        .tronErrorAlert(message: $errorMessage)
     }
 
     // MARK: Outcome Banner
@@ -113,10 +99,10 @@ struct SyncMainSubSheet: View {
             defer { isSyncing = false }
             outcome = nil
             do {
-                let trimmed = targetBranch.trimmingCharacters(in: .whitespaces)
+                // No targetBranch — server auto-detects the repo's default.
                 outcome = try await rpcClient.git.syncMain(
                     sessionId: sessionId,
-                    targetBranch: trimmed.isEmpty ? nil : trimmed
+                    targetBranch: nil
                 )
             } catch {
                 errorMessage = "Sync failed: \(error.localizedDescription)"

@@ -110,7 +110,8 @@ final class WorktreeClient: RPCDomainClient {
         targetBranch: String? = nil,
         strategy: String? = nil,
         newBranchName: String? = nil,
-        preserveOld: Bool? = nil
+        preserveOld: Bool? = nil,
+        rebranch: Bool? = nil
     ) async throws -> WorktreeFinalizeSessionResult {
         let ws = try requireTransport().requireConnection()
         let params = WorktreeFinalizeSessionParams(
@@ -119,7 +120,8 @@ final class WorktreeClient: RPCDomainClient {
             targetBranch: targetBranch,
             strategy: strategy,
             newBranchName: newBranchName,
-            preserveOld: preserveOld
+            preserveOld: preserveOld,
+            rebranch: rebranch
         )
         return try await ws.send(method: "worktree.finalizeSession", params: params)
     }

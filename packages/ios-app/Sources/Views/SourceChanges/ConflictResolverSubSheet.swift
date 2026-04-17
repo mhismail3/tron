@@ -6,6 +6,11 @@ import SwiftUI
 /// 1. **Pending**: surface conflicts, ask the user to tap "Let Resolver Run".
 /// 2. **Running**: spawn the conflict-resolver subagent and show live status
 ///    until it commits the resolution (or fails, triggering auto-abort).
+///
+/// Primary action lives in the trailing toolbar slot (changes per stage);
+/// leading `xmark` dismisses. Abort in the pending stage is surfaced as a
+/// compact secondary link inline with the content — it's destructive but
+/// infrequent, so doesn't earn the toolbar slot.
 @available(iOS 26.0, *)
 struct ConflictResolverSubSheet: View {
     let rpcClient: RPCClient
@@ -37,13 +42,18 @@ struct ConflictResolverSubSheet: View {
     }
 
     var body: some View {
-        GitSubSheetContainer(title: "Conflict Resolver", accent: accent) {
-            switch stage {
-            case .pending: pendingContent
-            case .running: runningContent
-            case .failed: failedContent
+        GitSubSheetContainer(
+            title: "Conflict Resolver",
+            accent: accent,
+            trailing: { trailingAction },
+            content: {
+                switch stage {
+                case .pending: pendingContent
+                case .running: runningContent
+                case .failed: failedContent
+                }
             }
-        }
+        )
         .tronErrorAlert(message: $errorMessage)
         .task { await loadConflicts() }
         // Server-side transitions (subagent commits, peer aborts, crash
@@ -56,14 +66,40 @@ struct ConflictResolverSubSheet: View {
         }
     }
 
+    // MARK: - Toolbar Trailing
+
+    @ViewBuilder
+    private var trailingAction: some View {
+        switch stage {
+        case .pending:
+            SheetPrimaryActionButton(
+                icon: "wand.and.stars",
+                accent: accent,
+                isBusy: isSpawning,
+                isEnabled: !isSpawning && !conflicts.isEmpty,
+                accessibilityLabel: "Let Resolver Run"
+            ) { spawnSubagent() }
+        case .running:
+            SheetPrimaryActionButton(
+                icon: "stop.circle",
+                accent: .tronError,
+                isBusy: isAborting,
+                isEnabled: !isAborting,
+                accessibilityLabel: "Cancel Resolution"
+            ) { Task { await performAbort(kind: .cancel) } }
+        case .failed:
+            EmptyView()
+        }
+    }
+
     // MARK: - Pending Stage
 
     private var pendingContent: some View {
-        VStack(spacing: 18) {
+        Group {
             GitHeroCard(
                 icon: "exclamationmark.triangle",
                 title: conflictTitle,
-                description: "A merge is in progress and needs manual edits. Tap \"Let Resolver Run\" to spawn a subagent that will read each file, choose ours/theirs or hand-edit, and commit the resolution.",
+                description: "A merge is in progress and needs manual edits. Tap the wand in the toolbar to spawn a subagent that will read each file, choose ours/theirs or hand-edit, and commit the resolution.",
                 accent: accent
             )
 
@@ -76,32 +112,7 @@ struct ConflictResolverSubSheet: View {
                 conflictsCard
             }
 
-            GitActionButton(
-                title: isSpawning ? "Spawning Subagent…" : "Let Resolver Run",
-                icon: "wand.and.stars",
-                accent: accent,
-                isBusy: isSpawning,
-                isEnabled: !isSpawning && !conflicts.isEmpty
-            ) { spawnSubagent() }
-
-            Button {
-                Task { await performAbort(kind: .manual) }
-            } label: {
-                HStack {
-                    Image(systemName: "xmark.circle")
-                    Text(isAborting ? "Aborting…" : "Abort Merge")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                }
-                .foregroundStyle(.tronError)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.tronError.opacity(0.10))
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(isAborting || isSpawning)
+            abortInlineLink
         }
     }
 
@@ -162,10 +173,32 @@ struct ConflictResolverSubSheet: View {
             .background(Capsule().fill(tint.opacity(0.12)))
     }
 
+    /// Secondary destructive action — rare enough that it doesn't warrant
+    /// the toolbar slot, but surfaced prominently so the user has a clear
+    /// escape hatch out of the merge.
+    private var abortInlineLink: some View {
+        Button {
+            Task { await performAbort(kind: .manual) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "xmark.circle")
+                Text(isAborting ? "Aborting…" : "Abort Merge")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+            }
+            .foregroundStyle(.tronError)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.tronError.opacity(0.10)))
+        }
+        .buttonStyle(.plain)
+        .disabled(isAborting || isSpawning)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
     // MARK: - Running Stage
 
     private var runningContent: some View {
-        VStack(spacing: 18) {
+        Group {
             GitHeroCard(
                 icon: "wand.and.stars",
                 title: "Resolver Running",
@@ -191,32 +224,13 @@ struct ConflictResolverSubSheet: View {
                     }
                 }
             }
-
-            Button {
-                Task { await performAbort(kind: .cancel) }
-            } label: {
-                HStack {
-                    Image(systemName: "stop.circle")
-                    Text(isAborting ? "Canceling…" : "Cancel Resolution")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                }
-                .foregroundStyle(.tronError)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.tronError.opacity(0.10))
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(isAborting)
         }
     }
 
     // MARK: - Failed Stage
 
     private var failedContent: some View {
-        VStack(spacing: 18) {
+        Group {
             GitHeroCard(
                 icon: "xmark.octagon",
                 title: "Resolution Aborted",
@@ -229,21 +243,6 @@ struct ConflictResolverSubSheet: View {
                 title: "Merge aborted",
                 detail: abortedMessage ?? "Any stashed work was preserved."
             )
-
-            Button {
-                dismiss()
-            } label: {
-                Text("Close")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(accent)
-                    }
-            }
-            .buttonStyle(.plain)
         }
     }
 

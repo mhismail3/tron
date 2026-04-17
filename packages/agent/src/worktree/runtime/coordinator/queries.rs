@@ -46,6 +46,39 @@ impl WorktreeCoordinator {
         Ok(branches)
     }
 
+    /// List published branch names on the given remote (default `origin`).
+    /// Returns names with the remote prefix stripped. Used by the Merge
+    /// Changes target picker so merge targets are restricted to shared/
+    /// published branches — session branches and unpushed local branches are
+    /// never valid merge targets in this UI.
+    ///
+    /// Mainline-sounding branches (`main`, `master`, `develop`, `dev`) are
+    /// floated to the top the same way as `list_local_branches` so the
+    /// picker's default is consistent.
+    pub async fn list_remote_branches(
+        &self,
+        session_id: &str,
+        remote: Option<&str>,
+    ) -> Result<Vec<String>> {
+        let repo_root = self.repo_root_for_session(session_id)?;
+        let remote_name = remote.unwrap_or("origin");
+        let mut branches = self
+            .git
+            .list_remote_branches(&repo_root, remote_name)
+            .await?;
+        let rank = |b: &str| -> u8 {
+            if b == "main" || b == "master" {
+                0
+            } else if b == "develop" || b == "dev" {
+                1
+            } else {
+                2
+            }
+        };
+        branches.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
+        Ok(branches)
+    }
+
     /// Count commits on `head` that are not on `base` (i.e. how far ahead
     /// `head` is). Delegates to `git.commit_count_between`.
     pub async fn commit_count(

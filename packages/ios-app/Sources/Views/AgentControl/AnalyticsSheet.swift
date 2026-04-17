@@ -112,9 +112,10 @@ struct AnalyticsSheet: View {
                         .foregroundStyle(.tronTextMuted)
                         .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
+                .padding(10)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(10)
 
             // Expanded detail
             if isExpanded {

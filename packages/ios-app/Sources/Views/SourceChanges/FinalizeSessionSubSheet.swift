@@ -1,12 +1,16 @@
 import SwiftUI
 
-// MARK: - Finalize Session Sub-Sheet
+// MARK: - Merge Changes Sub-Sheet
 
-/// Merges the session branch into main (or the configured target branch) and
-/// rebranches the worktree onto a fresh session branch for continued work.
+/// Merges the session branch into the configured target branch. By default
+/// also rebranches the worktree onto a fresh session branch so new work stays
+/// isolated; that follow-up can be disabled via the "Auto-create new session
+/// branch" toggle, which leaves the worktree on the original source branch.
 ///
 /// On conflicts, the sub-sheet swaps its payload to the `ConflictResolverSubSheet`
 /// flow, keeping the user in the same sheet for the full resolution cycle.
+///
+/// Primary action lives in the trailing toolbar slot; leading `xmark` dismisses.
 @available(iOS 26.0, *)
 struct FinalizeSessionSubSheet: View {
     let rpcClient: RPCClient
@@ -20,6 +24,7 @@ struct FinalizeSessionSubSheet: View {
     @State private var targetBranch: String = ""
     @State private var strategy: MergeStrategy = .merge
     @State private var deleteOldBranch: Bool = false
+    @State private var rebranch: Bool = true
     @State private var isFinalizing = false
     @State private var result: WorktreeFinalizeSessionResult?
     @State private var errorMessage: String?
@@ -37,59 +42,79 @@ struct FinalizeSessionSubSheet: View {
             case .squash: "square.stack.3d.down.forward"
             }
         }
+        var description: String {
+            switch self {
+            case .merge:
+                "Creates a merge commit that joins the two histories. Preserves both branches' commits verbatim."
+            case .rebase:
+                "Replays the session's commits on top of the target branch. Keeps history linear with no merge commit."
+            case .squash:
+                "Combines every session commit into a single new commit on the target branch."
+            }
+        }
     }
 
     var body: some View {
-        GitSubSheetContainer(title: "Finalize Session", accent: accent) {
-            GitHeroCard(
-                icon: "checkmark.seal",
-                title: "Merge to \(displayTarget)",
-                description: "Merges this session's work into \(displayTarget), then creates a fresh session branch so new changes stay isolated.",
-                accent: accent
-            )
+        GitSubSheetContainer(
+            title: "Merge Changes",
+            accent: accent,
+            trailing: {
+                SheetPrimaryActionButton(
+                    icon: "checkmark.seal",
+                    accent: accent,
+                    isBusy: isFinalizing,
+                    isEnabled: !isFinalizing && result == nil,
+                    accessibilityLabel: "Merge"
+                ) { performFinalize() }
+            },
+            content: {
+                GitHeroCard(
+                    icon: "checkmark.seal",
+                    title: "Merge to \(displayTarget)",
+                    description: rebranch
+                        ? "Merges this session's work into \(displayTarget), then creates a fresh session branch so new changes stay isolated."
+                        : "Merges this session's work into \(displayTarget). The worktree stays on the current session branch afterwards.",
+                    accent: accent
+                )
 
-            targetBranchCard
-            strategyCard
-            policyCard
+                targetBranchCard
+                strategyCard
+                rebranchCard
+                if rebranch {
+                    deleteOldCard
+                }
 
-            GitActionButton(
-                title: isFinalizing ? "Finalizing…" : "Finalize",
-                icon: "checkmark.seal",
-                accent: accent,
-                isBusy: isFinalizing,
-                isEnabled: !isFinalizing && result == nil
-            ) { performFinalize() }
-
-            if let result {
-                if result.conflicts == true {
-                    GitResultBanner(
-                        kind: .warning,
-                        title: "Conflicts detected",
-                        detail: result.error ?? "Launch the Conflict Resolver to continue."
-                    )
-                    Button {
-                        dismiss()
-                        onConflicts?(result)
-                    } label: {
-                        HStack {
-                            Image(systemName: "wand.and.stars")
-                            Text("Open Conflict Resolver")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                if let result {
+                    if result.conflicts == true {
+                        GitResultBanner(
+                            kind: .warning,
+                            title: "Conflicts detected",
+                            detail: result.error ?? "Launch the Conflict Resolver to continue."
+                        )
+                        Button {
+                            dismiss()
+                            onConflicts?(result)
+                        } label: {
+                            HStack {
+                                Image(systemName: "wand.and.stars")
+                                Text("Open Conflict Resolver")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            }
+                            .foregroundStyle(.tronRose)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color.tronRose.opacity(0.12))
+                            }
                         }
-                        .foregroundStyle(.tronRose)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.tronRose.opacity(0.12))
-                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        finalizeSuccessBanner(result)
                     }
-                    .buttonStyle(.plain)
-                } else {
-                    finalizeSuccessBanner(result)
                 }
             }
-        }
+        )
         .tronErrorAlert(message: $errorMessage)
         .task {
             targetBranch = suggestedTargetBranch ?? ""
@@ -114,9 +139,11 @@ struct FinalizeSessionSubSheet: View {
                     sessionId: sessionId,
                     accent: accent,
                     placeholder: "main",
-                    selection: $targetBranch
+                    selection: $targetBranch,
+                    source: .remote()
                 )
             }
+            SettingsCaption(text: "Only branches published on origin are valid merge targets. Session branches and unpushed local branches are hidden.")
         }
     }
 
@@ -151,16 +178,35 @@ struct FinalizeSessionSubSheet: View {
                 }
                 .padding(.horizontal, 4)
             }
+            SettingsCaption(text: strategy.description)
         }
     }
 
-    private var policyCard: some View {
-        SettingsCard(accent: accent) {
-            SettingsRow(icon: "trash", label: "Delete Old Session Branch", accentColor: accent) {
-                Toggle("", isOn: $deleteOldBranch)
-                    .labelsHidden()
-                    .tint(accent)
+    private var rebranchCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard(accent: accent) {
+                SettingsRow(icon: "arrow.triangle.branch", label: "Auto-create new session branch", accentColor: accent) {
+                    Toggle("", isOn: $rebranch)
+                        .labelsHidden()
+                        .tint(accent)
+                }
             }
+            SettingsCaption(text: rebranch
+                ? "After merging, creates a fresh session branch and moves the worktree onto it so new changes stay isolated."
+                : "Skips the follow-up branch. Worktree stays on the current session branch after the merge completes.")
+        }
+    }
+
+    private var deleteOldCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard(accent: accent) {
+                SettingsRow(icon: "trash", label: "Delete Old Session Branch", accentColor: .tronAmber) {
+                    Toggle("", isOn: $deleteOldBranch)
+                        .labelsHidden()
+                        .tint(.tronAmber)
+                }
+            }
+            SettingsCaption(text: "Removes the session branch after the merge succeeds. The commits stay in history via the merge commit.")
         }
     }
 
@@ -169,10 +215,10 @@ struct FinalizeSessionSubSheet: View {
         let detail = successDetail(r)
         GitResultBanner(
             kind: .success,
-            title: "Finalized to \(displayTarget)",
+            title: "Merged into \(displayTarget)",
             detail: detail.isEmpty ? nil : detail
         )
-        if deleteOldBranch, r.oldBranchDeleted == false {
+        if rebranch, deleteOldBranch, r.oldBranchDeleted == false {
             GitResultBanner(
                 kind: .warning,
                 title: "Old branch not deleted",
@@ -184,7 +230,7 @@ struct FinalizeSessionSubSheet: View {
     private func successDetail(_ r: WorktreeFinalizeSessionResult) -> String {
         var detail = ""
         if let newBranch = r.newBranch {
-            detail += "New session branch: \(newBranch)"
+            detail += rebranch ? "New session branch: \(newBranch)" : "Worktree stays on: \(newBranch)"
         }
         if let commit = r.mergeCommit {
             if !detail.isEmpty { detail += "\n" }
@@ -206,11 +252,12 @@ struct FinalizeSessionSubSheet: View {
                     sessionId: sessionId,
                     targetBranch: trimmed.isEmpty ? nil : trimmed,
                     strategy: strategy.rawValue,
-                    preserveOld: !deleteOldBranch
+                    preserveOld: !deleteOldBranch,
+                    rebranch: rebranch
                 )
                 result = r
             } catch {
-                errorMessage = "Finalize failed: \(error.localizedDescription)"
+                errorMessage = "Merge failed: \(error.localizedDescription)"
             }
         }
     }

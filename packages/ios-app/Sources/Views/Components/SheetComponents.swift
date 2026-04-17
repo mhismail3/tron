@@ -34,6 +34,57 @@ struct SheetDismissButton: View {
     }
 }
 
+// MARK: - Sheet Close Button
+
+/// Standard `xmark` dismiss button, used in the top-leading toolbar slot of
+/// git workflow sub-sheets so the top-trailing slot is free for a primary
+/// action (Pull / Merge / Push / Prune).
+@available(iOS 26.0, *)
+struct SheetCloseButton: View {
+    let color: Color
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "xmark")
+                .font(TronTypography.buttonSM)
+                .foregroundStyle(color)
+        }
+        .accessibilityLabel("Close")
+    }
+}
+
+// MARK: - Sheet Primary Action Button
+
+/// Glyph-only toolbar button used as the primary action of a sheet
+/// (top-trailing slot, replacing the checkmark dismiss). Shows a spinner
+/// while `isBusy`, and fades to muted when disabled.
+@available(iOS 26.0, *)
+struct SheetPrimaryActionButton: View {
+    let icon: String
+    let accent: Color
+    var isBusy: Bool = false
+    var isEnabled: Bool = true
+    var accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            if isBusy {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .tint(accent)
+            } else {
+                Image(systemName: icon)
+                    .font(TronTypography.buttonSM)
+                    .foregroundStyle(isEnabled ? accent : .tronTextMuted.opacity(0.5))
+            }
+        }
+        .disabled(!isEnabled || isBusy)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 // MARK: - Error Alert
 
 /// Standard error alert driven by an optional error message string.

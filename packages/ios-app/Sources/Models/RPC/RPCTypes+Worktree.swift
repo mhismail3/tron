@@ -207,6 +207,9 @@ struct WorktreeFinalizeSessionParams: Encodable {
     let strategy: String?      // "merge" | "rebase" | "squash"
     let newBranchName: String?
     let preserveOld: Bool?
+    /// When false, the worktree stays on its current branch post-merge
+    /// (no follow-up branch is created). Defaults to true server-side.
+    let rebranch: Bool?
 
     init(
         sessionId: String,
@@ -214,7 +217,8 @@ struct WorktreeFinalizeSessionParams: Encodable {
         targetBranch: String? = nil,
         strategy: String? = nil,
         newBranchName: String? = nil,
-        preserveOld: Bool? = nil
+        preserveOld: Bool? = nil,
+        rebranch: Bool? = nil
     ) {
         self.sessionId = sessionId
         self.sourceBranch = sourceBranch
@@ -222,6 +226,7 @@ struct WorktreeFinalizeSessionParams: Encodable {
         self.strategy = strategy
         self.newBranchName = newBranchName
         self.preserveOld = preserveOld
+        self.rebranch = rebranch
     }
 }
 

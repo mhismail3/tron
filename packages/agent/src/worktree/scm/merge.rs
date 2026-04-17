@@ -180,19 +180,26 @@ async fn do_squash(
     }
 }
 
-/// Atomic "merge session branch into target, then rebranch the session"
-/// operation. This is the happy-path finalisation flow — conflicts must
-/// already have been resolved (via `conflict.rs`) BEFORE calling this.
+/// Atomic "merge session branch into target, then optionally rebranch the
+/// session" operation. This is the happy-path finalisation flow — conflicts
+/// must already have been resolved (via `conflict.rs`) BEFORE calling this.
 ///
 /// Steps:
 /// 1. `merge_session(source -> target)` — errors if it would conflict
 ///    (caller should have run the conflict state machine first).
-/// 2. Create `new_branch_name` from `target`'s new tip.
-/// 3. If `!preserve_old`, delete the old `source` branch.
+/// 2. If `rebranch`: create `new_branch_name` from `target`'s new tip and
+///    move the worktree onto it.
+/// 3. If `rebranch && !preserve_old`: delete the old `source` branch.
+///
+/// When `rebranch == false`, steps 2 and 3 are skipped entirely: the
+/// worktree stays on `source_branch` (which still points at its pre-merge
+/// HEAD). The old branch is never deleted in this mode — the worktree is
+/// still checked out on it.
 ///
 /// Atomicity: if any step fails, the partial state is rolled back where
 /// practical — the new branch is deleted if step 3 fails after step 2
 /// succeeded; if step 1 errors, nothing else runs.
+#[allow(clippy::too_many_arguments)]
 pub async fn finalize_session(
     repo_root: &Path,
     worktree_path: &Path,
@@ -202,6 +209,7 @@ pub async fn finalize_session(
     strategy: MergeStrategy,
     new_branch_name: &str,
     preserve_old: bool,
+    rebranch: bool,
     git: &GitExecutor,
 ) -> Result<FinalizeSessionResult> {
     // 1. Merge source into target in the repo root (target is checked out
@@ -214,6 +222,40 @@ pub async fn finalize_session(
     let merge_commit = merge.merge_commit.clone().ok_or_else(|| {
         WorktreeError::Git("merge reported success but returned no commit sha".to_string())
     })?;
+
+    // Shortcut: if the caller opted out of rebranching, leave the worktree
+    // on `source_branch` post-merge. The source branch itself is unchanged;
+    // only `target_branch` advanced in step 1. We never touch the old
+    // branch in this mode because the worktree is still checked out on it.
+    //
+    // Defensive: in the real session case, `merge_session` ran in `repo_root`
+    // and left the worktree untouched (it was never on `target_branch`). But
+    // when `repo_root == worktree_path` (e.g. a session rooted directly at
+    // the main repo, or certain tests) the merge left the worktree on
+    // `target_branch`. Force a checkout back to `source_branch` to make the
+    // invariant hold in both cases.
+    if !rebranch {
+        if let Ok(current) = git.current_branch(worktree_path).await
+            && current != source_branch
+        {
+            git.force_checkout(worktree_path, source_branch).await?;
+        }
+        let head = git.rev_parse_verify(worktree_path, "HEAD").await?;
+        debug!(
+            source = source_branch,
+            target = target_branch,
+            merge_commit,
+            "finalize_session complete (no rebranch)"
+        );
+        return Ok(FinalizeSessionResult {
+            merge_commit,
+            new_branch: source_branch.to_string(),
+            new_base_commit: head,
+            old_branch_deleted: false,
+            old_branch_delete_error: None,
+            strategy,
+        });
+    }
 
     // 2. Create the new follow-up branch as a ref pointing at target's
     //    new tip, then switch the session's worktree onto it. We do this
@@ -393,6 +435,7 @@ mod tests {
             MergeStrategy::Merge,
             "session/s1-followup",
             true, // preserve old
+            true, // rebranch
             &git,
         )
         .await
@@ -424,6 +467,7 @@ mod tests {
             MergeStrategy::Merge,
             "session/s1-followup",
             true,
+            true, // rebranch
             &git,
         )
         .await
@@ -452,6 +496,7 @@ mod tests {
             MergeStrategy::Merge,
             "session/s1-followup",
             false, // delete old
+            true,  // rebranch
             &git,
         )
         .await
@@ -482,6 +527,7 @@ mod tests {
             MergeStrategy::Merge,
             "session/s1-followup",
             false,
+            true, // rebranch
             &git,
         )
         .await
@@ -511,12 +557,59 @@ mod tests {
             MergeStrategy::Merge,
             "session/s1-followup",
             true,
+            true, // rebranch
             &git,
         )
         .await
         .unwrap();
         assert!(
             git.show_ref_verify(dir.path(), "refs/heads/session/s1-followup").await
+        );
+    }
+
+    /// When `rebranch == false`, the merge still lands on `target_branch`
+    /// but the worktree stays on `source_branch` — no follow-up branch is
+    /// created, and the old branch is preserved even if delete was
+    /// requested (the worktree is still checked out on it).
+    #[tokio::test]
+    async fn finalize_no_rebranch_stays_on_source() {
+        let dir = tempdir().unwrap();
+        let git = tf::init_repo(dir.path()).await;
+        tf::checkout_new_branch(dir.path(), "session/s1").await;
+        tf::add_commit(dir.path(), "feat.txt", "feat", "feat").await;
+
+        let out = finalize_session(
+            dir.path(),
+            dir.path(),
+            "s1",
+            "session/s1",
+            "main",
+            MergeStrategy::Merge,
+            "session/s1-followup",
+            false, // delete_old requested…
+            false, // …but rebranch=false forces preservation
+            &git,
+        )
+        .await
+        .unwrap();
+
+        assert!(!out.merge_commit.is_empty());
+        // Worktree stays on the original session branch.
+        assert_eq!(out.new_branch, "session/s1");
+        assert_eq!(
+            git.current_branch(dir.path()).await.unwrap(),
+            "session/s1"
+        );
+        // No follow-up branch was created.
+        assert!(
+            !git.show_ref_verify(dir.path(), "refs/heads/session/s1-followup").await,
+            "follow-up branch must not exist when rebranch=false"
+        );
+        // Source branch preserved even though caller passed delete=true.
+        assert!(!out.old_branch_deleted);
+        assert!(
+            git.show_ref_verify(dir.path(), "refs/heads/session/s1").await,
+            "source branch must still exist when rebranch=false"
         );
     }
 }

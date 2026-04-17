@@ -1,12 +1,13 @@
 import SwiftUI
 
-// MARK: - Repo Sessions Sub-Sheet
+// MARK: - Parallel Sessions Sub-Sheet
 
 /// Lists every session branch in this repo, grouped as:
 ///   1. **This Session** — branch name + icon only, non-interactive.
 ///   2. **Active Sessions** — other live sessions in this repo. Tap to jump.
 ///   3. **Ended Sessions** — preserved branches from finalized/ended sessions.
-///      Non-interactive; cleared as a group via the inline Prune button.
+///      Non-interactive; cleared as a group via the trailing Prune All toolbar
+///      action (only surfaced when ended branches exist).
 ///
 /// Refreshes live from `repo.*` and `worktree.*` events by observing
 /// `gitWorkflowState.divergenceRefreshTick`.
@@ -40,25 +41,45 @@ struct RepoSessionsSubSheet: View {
     }
 
     var body: some View {
-        GitSubSheetContainer(title: "Repo Sessions", accent: accent) {
-            GitHeroCard(
-                icon: "rectangle.stack.person.crop",
-                title: "Sessions in this Repo",
-                description: "Every session has its own worktree and branch. Main mutations (sync, finalize) are serialized; all other ops run in parallel.",
-                accent: accent
-            )
+        // Parallel Sessions has no primary "commit" action — it's a listing
+        // sheet. We swap the usual chrome: the destructive Prune All button
+        // lives on the leading edge (labeled for clarity since destructive
+        // actions warrant text, not just a glyph), and the trailing edge
+        // gets a checkmark dismiss so the user can close with a single tap
+        // near their thumb.
+        GitSubSheetContainer(
+            title: "Parallel Sessions",
+            accent: accent,
+            leading: {
+                if !endedBranches.isEmpty {
+                    pruneToolbarButton
+                } else {
+                    EmptyView()
+                }
+            },
+            trailing: {
+                SheetDismissButton(color: accent)
+            },
+            content: {
+                GitHeroCard(
+                    icon: "rectangle.stack.person.crop",
+                    title: "Sessions in this Repo",
+                    description: "Every session has its own worktree and branch. Main mutations (sync, finalize) are serialized; all other ops run in parallel.",
+                    accent: accent
+                )
 
-            if isLoading && activeSessions.isEmpty && endedBranches.isEmpty {
-                loadingState
-            } else {
-                thisSessionSection
-                otherActiveSection
-                endedSection
-                if hasNoSessions {
-                    emptyState
+                if isLoading && activeSessions.isEmpty && endedBranches.isEmpty {
+                    loadingState
+                } else {
+                    thisSessionSection
+                    otherActiveSection
+                    endedSection
+                    if hasNoSessions {
+                        emptyState
+                    }
                 }
             }
-        }
+        )
         .tronErrorAlert(message: $errorMessage)
         .task { await loadAll() }
         .onChange(of: gitWorkflowState?.divergenceRefreshTick ?? 0) { _, _ in
@@ -116,11 +137,7 @@ struct RepoSessionsSubSheet: View {
     private var endedSection: some View {
         if !endedBranches.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    SettingsSectionHeader(title: "Ended Sessions")
-                    Spacer()
-                    pruneButton
-                }
+                SettingsSectionHeader(title: "Ended Sessions")
                 SettingsCard(accent: .tronTextMuted) {
                     VStack(spacing: 0) {
                         ForEach(Array(endedBranches.enumerated()), id: \.element.branch) { index, branch in
@@ -247,27 +264,26 @@ struct RepoSessionsSubSheet: View {
     // MARK: Prune
 
     @ViewBuilder
-    private var pruneButton: some View {
+    private var pruneToolbarButton: some View {
         Button {
             showPruneConfirmation = true
         } label: {
             HStack(spacing: 4) {
                 if isPruning {
-                    ProgressView().controlSize(.small).tint(.tronError)
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(.tronError)
                 } else {
                     Image(systemName: "trash")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .font(TronTypography.buttonSM)
                 }
-                Text(isPruning ? "Pruning…" : "Prune All")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                Text(isPruning ? "Pruning…" : "Prune")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
             }
             .foregroundStyle(.tronError)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(Color.tronError.opacity(0.12)))
         }
-        .buttonStyle(.plain)
         .disabled(isPruning)
+        .accessibilityLabel("Prune All Ended Branches")
         .popover(isPresented: $showPruneConfirmation, arrowEdge: .top) {
             GlassActionSheet(
                 actions: [
