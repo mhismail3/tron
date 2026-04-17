@@ -15,30 +15,7 @@ enum SourceControlMetadata {
         !isLoading && (worktreeStatus?.worktree?.hasUncommittedChanges == true)
     }
 
-    static func canMerge(
-        worktreeStatus: WorktreeGetStatusResult?,
-        isLoading: Bool
-    ) -> Bool {
-        !isLoading
-            && (worktreeStatus?.worktree?.commitCount ?? 0) > 0
-            && worktreeStatus?.worktree?.isMerged != true
-    }
-
     // MARK: - Display Helpers
-
-    static func commitLabel(for status: WorktreeGetStatusResult?) -> String {
-        let count = status?.worktree?.commitCount ?? 0
-        return count == 1 ? "1 commit" : "\(count) commits"
-    }
-
-    static func showTabs(
-        diffResult: WorktreeGetDiffResult?,
-        worktreeStatus: WorktreeGetStatusResult?,
-        branches: [SessionBranchInfo]
-    ) -> Bool {
-        guard diffResult?.isGitRepo == true else { return false }
-        return worktreeStatus?.hasWorktree == true || !branches.isEmpty
-    }
 
     /// Label shown when a file has no diff content, based on its change status.
     static func noChangeLabel(for status: FileChangeStatus) -> String {

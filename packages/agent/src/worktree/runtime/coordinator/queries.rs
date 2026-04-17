@@ -24,6 +24,101 @@ impl WorktreeCoordinator {
         self.state.lock().active_info(session_id)
     }
 
+    /// List every local branch in the session's repo. Session/* branches
+    /// are returned last; mainline-sounding branches (main, master,
+    /// develop) are floated to the top so the picker UI can default
+    /// correctly.
+    pub async fn list_local_branches(&self, session_id: &str) -> Result<Vec<String>> {
+        let repo_root = self.repo_root_for_session(session_id)?;
+        let mut branches = self.git.list_branches_matching(&repo_root, "*").await?;
+        let rank = |b: &str| -> u8 {
+            if b == "main" || b == "master" {
+                0
+            } else if b == "develop" || b == "dev" {
+                1
+            } else if b.starts_with(&self.config.branch_prefix) {
+                3
+            } else {
+                2
+            }
+        };
+        branches.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
+        Ok(branches)
+    }
+
+    /// Count commits on `head` that are not on `base` (i.e. how far ahead
+    /// `head` is). Delegates to `git.commit_count_between`.
+    pub async fn commit_count(
+        &self,
+        repo_root: &std::path::Path,
+        base: &str,
+        head: &str,
+    ) -> Result<usize> {
+        let mb = self.git.merge_base(repo_root, base, head).await?;
+        self.git.commit_count_between(repo_root, &mb, head).await
+    }
+
+    /// Compute `(ahead, behind)` for two refs sharing a merge base.
+    /// Both values are 0 when the refs are equal or the merge base
+    /// equals both.
+    pub async fn ahead_behind(
+        &self,
+        repo_root: &std::path::Path,
+        base: &str,
+        head: &str,
+    ) -> Result<(usize, usize)> {
+        let mb = self.git.merge_base(repo_root, base, head).await?;
+        let ahead = self
+            .git
+            .commit_count_between(repo_root, &mb, head)
+            .await
+            .unwrap_or(0);
+        let behind = self
+            .git
+            .commit_count_between(repo_root, &mb, base)
+            .await
+            .unwrap_or(0);
+        Ok((ahead, behind))
+    }
+
+    /// Like [`ahead_behind`] but returns `Ok(None)` when either ref fails
+    /// to resolve (e.g. no origin remote configured, no upstream set, stale
+    /// ref). Callers use this to distinguish "genuinely 0/0" from
+    /// "comparison not applicable" so the UI can fade or hide the chip
+    /// instead of lying with a zero.
+    pub async fn ahead_behind_optional(
+        &self,
+        repo_root: &std::path::Path,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<(usize, usize)>> {
+        match self.git.merge_base(repo_root, base, head).await {
+            Ok(mb) => {
+                let ahead = self
+                    .git
+                    .commit_count_between(repo_root, &mb, head)
+                    .await
+                    .unwrap_or(0);
+                let behind = self
+                    .git
+                    .commit_count_between(repo_root, &mb, base)
+                    .await
+                    .unwrap_or(0);
+                Ok(Some((ahead, behind)))
+            }
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Returns `true` when `remote` is configured on `repo_root`.
+    pub async fn has_remote(&self, repo_root: &std::path::Path, remote: &str) -> bool {
+        self.git
+            .remote_list(repo_root)
+            .await
+            .map(|v| v.iter().any(|r| r == remote))
+            .unwrap_or(false)
+    }
+
     /// Get enriched status for a session's worktree.
     ///
     /// Queries git for uncommitted changes and commit count since base.

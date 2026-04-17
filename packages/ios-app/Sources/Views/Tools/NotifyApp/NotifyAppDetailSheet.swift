@@ -71,11 +71,11 @@ struct NotifyAppDetailSheet: View {
         ToolDetailSection(title: "Message", accent: .tronEmerald, tint: tint) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(data.title)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(tint.body)
 
                 Text(data.body)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(tint.secondary)
             }
         }
@@ -97,7 +97,7 @@ struct NotifyAppDetailSheet: View {
     private var errorSection: some View {
         ToolDetailSection(title: "Error", accent: .tronError, tint: tint) {
             Text(data.errorMessage ?? "Failed to deliver notification")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronError)
         }
     }
@@ -115,11 +115,11 @@ struct NotifyAppDetailSheetFallback: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(data.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
 
                     Text(data.body)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .regular))
                         .foregroundStyle(.tronTextSecondary)
 
                     if let sheetContent = data.sheetContent, !sheetContent.isEmpty {

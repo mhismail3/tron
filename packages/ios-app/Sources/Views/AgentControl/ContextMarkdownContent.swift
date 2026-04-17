@@ -38,7 +38,7 @@ struct ContextMarkdownContent: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let language, !language.isEmpty {
                     Text(language)
-                        .font(TronTypography.mono(size: TronTypography.sizeXS, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
                         .foregroundStyle(.tronTextMuted)
                         .padding(.horizontal, 8)
                         .padding(.top, 6)
@@ -69,7 +69,7 @@ struct ContextMarkdownContent: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("\u{2022}")
-                            .font(TronTypography.mono(size: baseSize))
+                            .font(TronTypography.sans(size: baseSize))
                             .foregroundStyle(.tronTextMuted)
                         Text(inlineMarkdown(from: item, size: baseSize))
                             .foregroundStyle(textColor)
@@ -81,7 +81,7 @@ struct ContextMarkdownContent: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("\(index + 1).")
-                            .font(TronTypography.mono(size: baseSize, weight: .medium))
+                            .font(TronTypography.sans(size: baseSize, weight: .medium))
                             .foregroundStyle(.tronTextMuted)
                             .frame(minWidth: 14, alignment: .trailing)
                         Text(inlineMarkdown(from: item, size: baseSize))

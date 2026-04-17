@@ -446,6 +446,193 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             });
             Some(session_scoped(event, "worktree.renamed", Some(data)))
         }
+        TronEvent::WorktreeMainSynced {
+            main_branch,
+            old_head,
+            new_head,
+            advanced_by,
+            ..
+        } => Some(session_scoped(
+            event,
+            "worktree.main_synced",
+            Some(json!({
+                "mainBranch": main_branch,
+                "oldHead": old_head,
+                "newHead": new_head,
+                "advancedBy": advanced_by,
+            })),
+        )),
+        TronEvent::WorktreeSessionFinalized {
+            source_branch,
+            target_branch,
+            merge_commit,
+            strategy,
+            new_branch,
+            new_base_commit,
+            old_branch_deleted,
+            old_branch_delete_error,
+            ..
+        } => {
+            let mut data = json!({
+                "sourceBranch": source_branch,
+                "targetBranch": target_branch,
+                "strategy": strategy,
+                "newBranch": new_branch,
+                "newBaseCommit": new_base_commit,
+                "oldBranchDeleted": old_branch_deleted,
+            });
+            set_opt(&mut data, "mergeCommit", merge_commit);
+            set_opt(&mut data, "oldBranchDeleteError", old_branch_delete_error);
+            Some(session_scoped(event, "worktree.session_finalized", Some(data)))
+        }
+        TronEvent::WorktreeMergeStarted {
+            source_branch,
+            target_branch,
+            strategy,
+            conflict_count,
+            ..
+        } => Some(session_scoped(
+            event,
+            "worktree.merge_started",
+            Some(json!({
+                "sourceBranch": source_branch,
+                "targetBranch": target_branch,
+                "strategy": strategy,
+                "conflictCount": conflict_count,
+            })),
+        )),
+        TronEvent::WorktreeConflictDetected {
+            source_branch,
+            target_branch,
+            paths,
+            ..
+        } => Some(session_scoped(
+            event,
+            "worktree.conflict_detected",
+            Some(json!({
+                "sourceBranch": source_branch,
+                "targetBranch": target_branch,
+                "paths": paths,
+            })),
+        )),
+        TronEvent::WorktreeConflictResolved {
+            path,
+            resolution,
+            remaining,
+            ..
+        } => Some(session_scoped(
+            event,
+            "worktree.conflict_resolved",
+            Some(json!({
+                "path": path,
+                "resolution": resolution,
+                "remaining": remaining,
+            })),
+        )),
+        TronEvent::WorktreeMergeContinued {
+            merge_commit,
+            strategy,
+            ..
+        } => Some(session_scoped(
+            event,
+            "worktree.merge_continued",
+            Some(json!({
+                "mergeCommit": merge_commit,
+                "strategy": strategy,
+            })),
+        )),
+        TronEvent::WorktreeMergeAborted {
+            strategy, reason, ..
+        } => Some(session_scoped(
+            event,
+            "worktree.merge_aborted",
+            Some(json!({
+                "strategy": strategy,
+                "reason": reason,
+            })),
+        )),
+        TronEvent::WorktreePushed {
+            branch,
+            remote,
+            set_upstream,
+            dry_run,
+            force_with_lease,
+            ..
+        } => Some(session_scoped(
+            event,
+            "worktree.pushed",
+            Some(json!({
+                "branch": branch,
+                "remote": remote,
+                "setUpstream": set_upstream,
+                "dryRun": dry_run,
+                "forceWithLease": force_with_lease,
+            })),
+        )),
+        TronEvent::WorktreePendingMergeDetected {
+            source_branch,
+            target_branch,
+            strategy,
+            started_at_ms,
+            auto_abort_at_ms,
+            ..
+        } => Some(session_scoped(
+            event,
+            "worktree.pending_merge_detected",
+            Some(json!({
+                "sourceBranch": source_branch,
+                "targetBranch": target_branch,
+                "strategy": strategy,
+                "startedAtMs": started_at_ms,
+                "autoAbortAtMs": auto_abort_at_ms,
+            })),
+        )),
+        TronEvent::RepoLockAcquired {
+            repo_root,
+            session_id,
+            op,
+            ..
+        } => Some(global(
+            event,
+            "repo.lock_acquired",
+            Some(json!({
+                "repoRoot": repo_root,
+                "sessionId": session_id,
+                "op": op,
+            })),
+        )),
+        TronEvent::RepoLockReleased {
+            repo_root,
+            session_id,
+            op,
+            ..
+        } => Some(global(
+            event,
+            "repo.lock_released",
+            Some(json!({
+                "repoRoot": repo_root,
+                "sessionId": session_id,
+                "op": op,
+            })),
+        )),
+        TronEvent::RepoMainAdvanced {
+            repo_root,
+            old_head,
+            new_head,
+            source_session_id,
+            cause,
+            ..
+        } => Some(global(
+            event,
+            "repo.main_advanced",
+            Some(json!({
+                "repoRoot": repo_root,
+                "oldHead": old_head,
+                "newHead": new_head,
+                "sourceSessionId": source_session_id,
+                "cause": cause,
+            })),
+        )),
         TronEvent::SessionProcessingChanged { is_processing, .. } => Some(global(
             event,
             "session.processing_changed",

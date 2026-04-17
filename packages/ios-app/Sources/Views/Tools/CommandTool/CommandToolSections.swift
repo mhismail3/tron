@@ -83,7 +83,7 @@ struct CommandToolStatusSection: View {
             HStack(spacing: 6) {
                 statusIcon
                 Text(statusText)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                     .foregroundStyle(statusColor)
             }
             .padding(.horizontal, 10)
@@ -96,7 +96,7 @@ struct CommandToolStatusSection: View {
                     Image(systemName: "clock")
                         .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     Text(duration)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 }
                 .foregroundStyle(.tronTextMuted)
             }
@@ -151,7 +151,7 @@ struct CommandToolArgumentsSection: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronTextMuted)
                 Text("Arguments")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronTextMuted)
             }
 
@@ -180,7 +180,7 @@ struct CommandToolResultSection: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronTextMuted)
                 Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronTextMuted)
 
                 if data.isResultTruncated {
@@ -189,7 +189,7 @@ struct CommandToolResultSection: View {
                         Image(systemName: "scissors")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         Text("Truncated")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                     }
                     .foregroundStyle(.tronAmber)
                     .padding(.horizontal, 8)
@@ -221,7 +221,7 @@ struct CommandToolStreamingResultSection: View {
                     .scaleEffect(0.5)
                     .tint(.tronAmber)
                 Text("Output")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronTextMuted)
             }
 
@@ -244,7 +244,7 @@ struct CommandToolRunningSection: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody2))
                     .foregroundStyle(.tronTextMuted)
                 Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronTextMuted)
             }
 
@@ -253,7 +253,7 @@ struct CommandToolRunningSection: View {
                     .scaleEffect(0.8)
                     .tint(.tronAmber)
                 Text("Waiting for result...")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .regular))
                     .foregroundStyle(.tronTextMuted)
             }
             .padding(.horizontal, 12)

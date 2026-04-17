@@ -91,6 +91,9 @@ final class ChatViewModel {
     let modelPickerState: ModelPickerState
     /// Worktree isolation state (status, loading)
     let worktreeState = WorktreeIsolationState()
+    /// Git workflow state — lock holder, pending merge, conflict banner,
+    /// divergence chips. Populated by worktree/repo event handlers.
+    let gitWorkflowState = GitWorkflowState()
     /// Pull-up panel state (suggestions, position, drag)
     let pullUpPanelState = PullUpPanelState()
     // MARK: - Protocol Conformance (Context Protocols)

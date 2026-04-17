@@ -83,7 +83,7 @@ struct ModelChangeNotificationView: View {
                     .foregroundStyle(.tronTextMuted)
 
                 Text(from)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 
                 Image(systemName: "arrow.right")
@@ -91,7 +91,7 @@ struct ModelChangeNotificationView: View {
                     .foregroundStyle(.tronTextMuted)
 
                 Text(to)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
                     .foregroundStyle(.tronEmerald)
             }
         }
@@ -116,7 +116,7 @@ struct ReasoningLevelChangeNotificationView: View {
                     .foregroundStyle(.tronTextMuted)
 
                 Text(from)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 
                 Image(systemName: "arrow.right")
@@ -124,7 +124,7 @@ struct ReasoningLevelChangeNotificationView: View {
                     .foregroundStyle(.tronTextMuted)
 
                 Text(to)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
                     .foregroundStyle(.tronEmerald)
             }
         }

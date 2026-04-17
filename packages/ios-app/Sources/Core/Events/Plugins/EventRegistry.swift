@@ -120,6 +120,20 @@ final class EventRegistry: @unchecked Sendable {
         register(WorktreeCommitPlugin.self)
         register(WorktreeMergedPlugin.self)
         register(WorktreeReleasedPlugin.self)
+        register(WorktreeMainSyncedPlugin.self)
+        register(WorktreeSessionFinalizedPlugin.self)
+        register(WorktreeMergeStartedPlugin.self)
+        register(WorktreeConflictDetectedPlugin.self)
+        register(WorktreeConflictResolvedPlugin.self)
+        register(WorktreeMergeContinuedPlugin.self)
+        register(WorktreeMergeAbortedPlugin.self)
+        register(WorktreePushedPlugin.self)
+        register(WorktreePendingMergeDetectedPlugin.self)
+
+        // Repo events
+        register(RepoLockAcquiredPlugin.self)
+        register(RepoLockReleasedPlugin.self)
+        register(RepoMainAdvancedPlugin.self)
 
         // Display streaming events
         register(DisplayFramePlugin.self)

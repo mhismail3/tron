@@ -163,7 +163,7 @@ struct WaitToolDetailSheet: View {
     private var jobsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Jobs")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(tint.heading)
 
             VStack(spacing: 0) {
@@ -204,7 +204,7 @@ struct WaitToolDetailSheet: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(.tronTextPrimary)
                         .lineLimit(1)
 

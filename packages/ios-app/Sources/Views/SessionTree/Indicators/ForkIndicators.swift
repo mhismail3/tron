@@ -14,7 +14,7 @@ struct ForkPointIndicator: View {
                 Image(systemName: "tuningfork")
                     .font(TronTypography.sans(size: TronTypography.sizeSM))
                 Text("FORKED HERE")
-                    .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .bold))
             }
             .foregroundStyle(.tronPurple)
             .padding(.horizontal, 10)

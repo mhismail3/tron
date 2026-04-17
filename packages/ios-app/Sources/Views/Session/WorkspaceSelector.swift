@@ -155,7 +155,7 @@ struct WorkspaceSelector: View {
                                     .foregroundStyle(.tronEmerald)
                                     .frame(width: 16)
                                 Text("Go Up")
-                                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                                     .foregroundStyle(.tronEmerald)
                                 Spacer()
                             }
@@ -182,7 +182,7 @@ struct WorkspaceSelector: View {
                                     .foregroundStyle(.tronEmerald)
                                     .frame(width: 16)
                                 Text(entry.name)
-                                    .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody3))
                                     .foregroundStyle(.tronEmerald)
                                 Spacer()
                                 Image(systemName: "chevron.right")
@@ -265,7 +265,7 @@ struct WorkspaceSelector: View {
                         .frame(width: 16)
 
                     TextField("Folder name", text: $newFolderName)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
                         .foregroundStyle(.tronEmerald)
                         .textFieldStyle(.plain)
                         .autocorrectionDisabled()
@@ -334,7 +334,7 @@ struct WorkspaceSelector: View {
                         .foregroundStyle(.tronEmerald.opacity(0.8))
                         .frame(width: 16)
                     Text("New Folder")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(.tronEmerald.opacity(0.8))
                     Spacer()
                 }

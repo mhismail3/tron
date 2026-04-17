@@ -61,13 +61,13 @@ struct StandaloneToolResultView: View {
             HStack(spacing: 8) {
                 let (iconName, iconColor) = toolIconConfig
                 Image(systemName: iconName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .bold))
                     .foregroundStyle(result.isError ? .tronError : iconColor)
 
                 // Show tool name if available, otherwise "result" or "error"
                 if let toolName = result.toolName {
                     Text(toolName)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
 
                     if !toolDetail.isEmpty {
@@ -78,7 +78,7 @@ struct StandaloneToolResultView: View {
                     }
                 } else {
                     Text(result.isError ? "error" : "result")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(result.isError ? .tronError : .tronTextPrimary)
                 }
 
@@ -127,10 +127,10 @@ struct ErrorContentView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronError)
             Text(message)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextSecondary)
         }
         .padding(10)

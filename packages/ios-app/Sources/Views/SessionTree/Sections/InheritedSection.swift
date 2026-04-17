@@ -32,7 +32,7 @@ struct InheritedSection: View {
                             .foregroundStyle(.tronTextPrimary)
 
                         Text(displaySessionId)
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronPurple)
                     }
 

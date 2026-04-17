@@ -617,6 +617,22 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleWorktreeReleasedCalledWith = result
     }
 
+    // Git Workflow extensions
+    func handleWorktreeMainSynced(_ result: WorktreeMainSyncedPlugin.Result) {}
+    func handleWorktreeSessionFinalized(_ result: WorktreeSessionFinalizedPlugin.Result) {}
+    func handleWorktreeMergeStarted(_ result: WorktreeMergeStartedPlugin.Result) {}
+    func handleWorktreeConflictDetected(_ result: WorktreeConflictDetectedPlugin.Result) {}
+    func handleWorktreeConflictResolved(_ result: WorktreeConflictResolvedPlugin.Result) {}
+    func handleWorktreeMergeContinued(_ result: WorktreeMergeContinuedPlugin.Result) {}
+    func handleWorktreeMergeAborted(_ result: WorktreeMergeAbortedPlugin.Result) {}
+    func handleWorktreePushed(_ result: WorktreePushedPlugin.Result) {}
+    func handleWorktreePendingMergeDetected(_ result: WorktreePendingMergeDetectedPlugin.Result) {}
+
+    // Repo events
+    func handleRepoLockAcquired(_ result: RepoLockAcquiredPlugin.Result) {}
+    func handleRepoLockReleased(_ result: RepoLockReleasedPlugin.Result) {}
+    func handleRepoMainAdvanced(_ result: RepoMainAdvancedPlugin.Result) {}
+
     // Display streaming
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result) {}
 

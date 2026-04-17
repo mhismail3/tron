@@ -37,7 +37,7 @@ struct DashboardToolbarContent: ToolbarContent {
         }
         ToolbarItem(placement: .principal) {
             Text(title)
-                .font(TronTypography.mono(size: 20, weight: .bold))
+                .font(TronTypography.sans(size: 20, weight: .bold))
                 .foregroundStyle(accent)
         }
         ToolbarItemGroup(placement: .topBarTrailing) {

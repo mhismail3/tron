@@ -27,10 +27,10 @@ struct ContextSettingsPage: View {
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 18)
                     Text("Threshold")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     Spacer()
                     Text("\(Int(settingsState.triggerTokenThreshold * 100))%")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
                         .monospacedDigit()
                 }
@@ -66,7 +66,7 @@ struct ContextSettingsPage: View {
             SettingsCard {
                 SettingsRow(icon: "arrow.counterclockwise.circle", label: "Keep Recent Turns") {
                     Text("\(settingsState.preserveRecentCount)")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
                         .monospacedDigit()
                         .frame(minWidth: 20)
@@ -103,7 +103,7 @@ struct ContextSettingsPage: View {
             SettingsCard {
                 SettingsRow(icon: "brain", label: "Auto-Retain") {
                     Text(autoRetainDisplayText)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
                         .monospacedDigit()
                         .frame(minWidth: 30, alignment: .trailing)
@@ -148,7 +148,7 @@ struct ContextSettingsPage: View {
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 18)
                     Text("On Compaction")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     Spacer()
                     skillsCompactionToggle
                 }
@@ -177,7 +177,7 @@ struct ContextSettingsPage: View {
         } label: {
             HStack(spacing: 4) {
                 Text(labels[currentIndex])
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 Image(systemName: "chevron.up.chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
             }

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Client for worktree-related RPC methods.
-/// Handles worktree status, commits, merges, diffs, and branch management.
+/// Handles worktree status, commits, finalize, diffs, conflict state, and branch management.
 final class WorktreeClient: RPCDomainClient {
 
     // MARK: - Status
@@ -14,7 +14,7 @@ final class WorktreeClient: RPCDomainClient {
         return try await ws.send(method: "worktree.getStatus", params: params)
     }
 
-    // MARK: - Commit & Merge
+    // MARK: - Commit
 
     /// Commit changes in a session's worktree
     func commit(sessionId: String, message: String) async throws -> WorktreeCommitResult {
@@ -25,28 +25,6 @@ final class WorktreeClient: RPCDomainClient {
 
         if result.success {
             logger.info("Committed worktree changes: \(result.commitHash ?? "unknown")", category: .session)
-        }
-
-        return result
-    }
-
-    /// Merge a session's worktree to a target branch
-    func merge(
-        sessionId: String,
-        targetBranch: String,
-        strategy: String? = nil
-    ) async throws -> WorktreeMergeResult {
-        let ws = try requireTransport().requireConnection()
-
-        let params = WorktreeMergeParams(
-            sessionId: sessionId,
-            targetBranch: targetBranch,
-            strategy: strategy
-        )
-        let result: WorktreeMergeResult = try await ws.send(method: "worktree.merge", params: params)
-
-        if result.success {
-            logger.info("Merged worktree to \(targetBranch): \(result.mergeCommit ?? "unknown")", category: .session)
         }
 
         return result
@@ -119,5 +97,67 @@ final class WorktreeClient: RPCDomainClient {
         let ws = try requireTransport().requireConnection()
         let params = WorktreeDiscardFilesParams(sessionId: sessionId, paths: paths)
         return try await ws.send(method: "worktree.discardFiles", params: params)
+    }
+
+    // MARK: - Git Workflow Suite
+
+    /// Finalize a session: merge into `targetBranch`, then open a fresh
+    /// session-follow-up branch for continued work. On conflict returns a
+    /// two-shape response — callers must check `.conflicts == true`.
+    func finalizeSession(
+        sessionId: String,
+        sourceBranch: String? = nil,
+        targetBranch: String? = nil,
+        strategy: String? = nil,
+        newBranchName: String? = nil,
+        preserveOld: Bool? = nil
+    ) async throws -> WorktreeFinalizeSessionResult {
+        let ws = try requireTransport().requireConnection()
+        let params = WorktreeFinalizeSessionParams(
+            sessionId: sessionId,
+            sourceBranch: sourceBranch,
+            targetBranch: targetBranch,
+            strategy: strategy,
+            newBranchName: newBranchName,
+            preserveOld: preserveOld
+        )
+        return try await ws.send(method: "worktree.finalizeSession", params: params)
+    }
+
+    /// Probe current conflicts from `.git/MERGE_HEAD`. Idempotent — safe to
+    /// call at any time; returns an empty array if no merge is in-flight.
+    func listConflicts(sessionId: String) async throws -> [ConflictedFile] {
+        let ws = try requireTransport().requireConnection()
+        let params = WorktreeListConflictsParams(sessionId: sessionId)
+        let result: WorktreeListConflictsResult = try await ws.send(
+            method: "worktree.listConflicts",
+            params: params
+        )
+        return result.conflicts
+    }
+
+    /// Abort the merge, restoring pre-merge working tree state.
+    func abortMerge(
+        sessionId: String,
+        reason: String? = nil
+    ) async throws -> WorktreeAbortMergeResult {
+        let ws = try requireTransport().requireConnection()
+        let params = WorktreeAbortMergeParams(sessionId: sessionId, reason: reason)
+        return try await ws.send(method: "worktree.abortMerge", params: params)
+    }
+
+    /// Spawn the `conflict-resolver` subagent to drive resolution.
+    ///
+    /// On success, `subagentSessionId` identifies the child session whose
+    /// chat stream the UI can embed live. `spawned == false` indicates a
+    /// configuration issue (no subagent manager on the server) — the UI
+    /// should degrade gracefully to manual resolution.
+    func resolveConflictsWithSubagent(sessionId: String) async throws -> WorktreeResolveWithSubagentResult {
+        let ws = try requireTransport().requireConnection()
+        let params = WorktreeResolveWithSubagentParams(sessionId: sessionId)
+        return try await ws.send(
+            method: "worktree.resolveConflictsWithSubagent",
+            params: params
+        )
     }
 }

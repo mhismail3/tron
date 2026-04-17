@@ -95,7 +95,7 @@ struct WebSearchToolDetailSheet: View {
         ToolDetailSection(title: "Query", accent: .tronInfo, tint: tint) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(query)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(tint.body)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -159,7 +159,7 @@ struct WebSearchToolDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()
@@ -195,12 +195,12 @@ struct WebSearchToolDetailSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .top, spacing: 6) {
                     Text("\(index).")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                         .foregroundStyle(tint.subtle)
                         .frame(width: 20, alignment: .trailing)
 
                     Text(result.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.tronInfo)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -223,7 +223,7 @@ struct WebSearchToolDetailSheet: View {
 
                 if let age = result.age {
                     Text(age)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(tint.subtle)
                         .padding(.leading, 26)
                 }

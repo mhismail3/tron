@@ -650,7 +650,8 @@ fn init_worktree(
     services: &ServiceState,
     settings: &tron::settings::TronSettings,
 ) -> Option<Arc<tron::worktree::WorktreeCoordinator>> {
-    let wt_config = tron::worktree::WorktreeConfig::from_settings(&settings.session);
+    let wt_config =
+        tron::worktree::WorktreeConfig::from_settings_with_git(&settings.session, &settings.git);
     let coord = Arc::new(tron::worktree::WorktreeCoordinator::with_broadcast(
         wt_config,
         services.event_store.clone(),
@@ -664,6 +665,17 @@ fn init_worktree(
         let count = coord_for_recovery.recover_orphans().await;
         if count > 0 {
             tracing::info!(count, "recovered orphaned worktrees");
+        }
+    });
+    // Rebuild pending-merge state from `.git/MERGE_HEAD` / `.git/rebase-merge/`
+    // left behind by a crashed server. Surfaces a banner in iOS and arms
+    // the auto-abort timer so half-merged sessions can't linger forever.
+    let coord_for_pending = coord.clone();
+    #[allow(clippy::let_underscore_future)]
+    let _ = tokio::spawn(async move {
+        let count = coord_for_pending.rebuild_pending_merges().await;
+        if count > 0 {
+            tracing::info!(count, "reconstructed pending merges after crash");
         }
     });
     // Wire coordinator into SessionManager (for end_session release)

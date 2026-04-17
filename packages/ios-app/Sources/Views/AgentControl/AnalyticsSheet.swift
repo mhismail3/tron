@@ -27,7 +27,7 @@ struct AnalyticsSheet: View {
                     if !analytics.turns.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Per-Turn Breakdown")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                                 .foregroundStyle(.tronTextSecondary)
 
                             LazyVStack(spacing: 6) {
@@ -78,7 +78,7 @@ struct AnalyticsSheet: View {
                 HStack(spacing: 8) {
                     // Turn number badge
                     Text("\(turnData.turn)")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .bold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .bold))
                         .foregroundStyle(.tronRose)
                         .frame(width: 24, height: 24)
                         .background(Color.tronRose.opacity(0.2))
@@ -87,12 +87,12 @@ struct AnalyticsSheet: View {
                     // Preview text
                     if let preview = turnGroup?.displayPreview {
                         Text(preview)
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
                             .lineLimit(1)
                     } else {
                         Text("Turn \(turnData.turn)")
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
                     }
 
@@ -100,11 +100,11 @@ struct AnalyticsSheet: View {
 
                     // Compact stats
                     Text(TokenFormatter.format(turnData.totalTokens))
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(.tronRose)
 
                     Text(formatCost(turnData.cost))
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(.tronRose)
 
                     Image(systemName: "chevron.down")
@@ -183,15 +183,15 @@ struct AnalyticsSheet: View {
     private func analyticsPill(label: String, tokens: Int, cost: Double) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                .font(TronTypography.sans(size: TronTypography.sizeXS))
                 .foregroundStyle(.tronTextMuted)
             HStack {
                 Text(TokenFormatter.format(tokens))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronRose)
                 Spacer()
                 Text(formatCost(cost))
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.tronRose)
             }
         }
@@ -204,10 +204,10 @@ struct AnalyticsSheet: View {
     private func statItem(value: String, label: String, color: Color? = nil) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                .font(TronTypography.sans(size: TronTypography.sizeXS))
                 .foregroundStyle(.tronTextMuted)
             Text(value)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(color ?? .tronRose)
         }
         .padding(.horizontal, 8)

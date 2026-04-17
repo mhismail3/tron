@@ -7,6 +7,7 @@
 
 mod api;
 mod context;
+mod git;
 mod guardrails;
 mod memory;
 mod server;
@@ -16,6 +17,7 @@ mod ui;
 
 pub use api::*;
 pub use context::*;
+pub use git::*;
 pub use guardrails::*;
 pub use memory::*;
 pub use server::*;
@@ -75,6 +77,8 @@ pub struct TronSettings {
     pub skills: SkillsSettings,
     /// Memory retention settings (auto-retain interval, model).
     pub memory: MemorySettings,
+    /// Git workflow settings (sync, push, switch, finalize, conflict resolution).
+    pub git: GitWorkflowSettings,
     /// Optional guardrail safety rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guardrails: Option<GuardrailSettings>,
@@ -101,6 +105,7 @@ impl Default for TronSettings {
             ui: UiSettings::default(),
             skills: SkillsSettings::default(),
             memory: MemorySettings::default(),
+            git: GitWorkflowSettings::default(),
             guardrails: None,
             mcp: crate::mcp::types::McpSettings::default(),
         }

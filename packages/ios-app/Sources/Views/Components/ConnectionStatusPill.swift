@@ -62,7 +62,7 @@ struct ConnectionStatusPill: View {
                 statusIcon(for: state)
 
                 Text(statusText(for: state))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(color)
 
                 if case .reconnecting(_, let seconds) = state, seconds > 0 {

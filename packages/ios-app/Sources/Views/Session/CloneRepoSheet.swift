@@ -106,7 +106,7 @@ struct CloneRepoSheet: View {
     private var urlInputSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("GitHub URL")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -180,7 +180,7 @@ struct CloneRepoSheet: View {
     private var destinationSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Destination")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
             Button {
@@ -188,7 +188,7 @@ struct CloneRepoSheet: View {
             } label: {
                 HStack {
                     Text(displayDestinationPath)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
                         .foregroundStyle(.tronEmerald)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -222,13 +222,13 @@ struct CloneRepoSheet: View {
                         .scaleEffect(0.9)
                         .tint(.tronBackground)
                     Text("Cloning...")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronBackground)
                 } else {
                     Image(systemName: "arrow.down.doc.fill")
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                     Text("Clone Repository")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 }
             }
             .frame(maxWidth: .infinity)
@@ -248,7 +248,7 @@ struct CloneRepoSheet: View {
                 .foregroundStyle(.tronError)
             VStack(alignment: .leading, spacing: 6) {
                 Text(error)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3))
                     .foregroundStyle(.tronError)
 
                 Button {

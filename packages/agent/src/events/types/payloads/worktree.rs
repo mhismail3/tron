@@ -83,3 +83,139 @@ pub struct WorktreeRenamedPayload {
     /// New branch name.
     pub new_branch: String,
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase-4 git-workflow-suite payloads
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Emitted after `sync_main` successfully fast-forwards the repo-root
+/// main branch (or confirms it's already up-to-date).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeMainSyncedPayload {
+    /// Main branch name (resolved if auto-detected).
+    pub main_branch: String,
+    /// HEAD before the sync.
+    pub old_head: String,
+    /// HEAD after the sync (equal to `old_head` when already up-to-date).
+    pub new_head: String,
+    /// Commits fast-forwarded. 0 means no-op.
+    pub advanced_by: u64,
+}
+
+/// Emitted after `finalize_session` successfully merges + rebranches.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeSessionFinalizedPayload {
+    /// Branch that was merged in.
+    pub source_branch: String,
+    /// Branch the merge landed on (usually `main`).
+    pub target_branch: String,
+    /// Merge commit sha (absent for FF — rare for finalize).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merge_commit: Option<String>,
+    /// Merge strategy used.
+    pub strategy: String,
+    /// Fresh follow-up branch the session moved onto after the merge.
+    pub new_branch: String,
+    /// New HEAD of the follow-up branch.
+    pub new_base_commit: String,
+    /// Whether the old source branch was deleted.
+    pub old_branch_deleted: bool,
+    /// If `preserve_old == false` but the delete failed, this holds the
+    /// git error string. `None` otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_branch_delete_error: Option<String>,
+}
+
+/// Emitted when a merge-with-conflicts is started via
+/// `start_merge_keep_conflicts`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeMergeStartedPayload {
+    /// Source branch being merged.
+    pub source_branch: String,
+    /// Target branch receiving the merge.
+    pub target_branch: String,
+    /// Strategy being used.
+    pub strategy: String,
+    /// Count of conflicted files, if conflicts were detected at start.
+    pub conflict_count: u32,
+}
+
+/// Emitted each time conflicts are detected or re-listed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeConflictDetectedPayload {
+    /// Source branch.
+    pub source_branch: String,
+    /// Target branch.
+    pub target_branch: String,
+    /// Conflicted file paths (repo-relative).
+    pub paths: Vec<String>,
+}
+
+/// Emitted after one conflict is resolved.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeConflictResolvedPayload {
+    /// File resolved.
+    pub path: String,
+    /// Resolution applied (`ours` / `theirs` / `manual`).
+    pub resolution: String,
+    /// Remaining conflicts in this merge.
+    pub remaining: u32,
+}
+
+/// Emitted after `continue_merge` completes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeMergeContinuedPayload {
+    /// Merge commit sha produced.
+    pub merge_commit: String,
+    /// Strategy used.
+    pub strategy: String,
+}
+
+/// Emitted after `abort_merge`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeMergeAbortedPayload {
+    /// Strategy that was in flight.
+    pub strategy: String,
+    /// Reason for the abort. `"user"` / `"subagent_failed"` / `"auto_recovery"`.
+    pub reason: String,
+}
+
+/// Emitted after a push succeeds.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreePushedPayload {
+    /// Branch pushed.
+    pub branch: String,
+    /// Remote pushed to.
+    pub remote: String,
+    /// Whether `-u` was set on this push.
+    pub set_upstream: bool,
+    /// Whether this was a `--dry-run`.
+    pub dry_run: bool,
+    /// Whether `--force-with-lease` was used.
+    pub force_with_lease: bool,
+}
+
+/// Emitted at coordinator startup when a pending merge is reconstructed
+/// from `.git/MERGE_HEAD` / `.git/rebase-merge/` (crash recovery).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreePendingMergeDetectedPayload {
+    /// Source branch (may be unknown — resolved from MERGE_MSG if possible).
+    pub source_branch: String,
+    /// Target branch.
+    pub target_branch: String,
+    /// Strategy in flight.
+    pub strategy: String,
+    /// Epoch ms when the merge started (derived from MERGE_MSG mtime).
+    pub started_at_ms: u64,
+    /// Epoch ms when the auto-abort timer fires.
+    pub auto_abort_at_ms: u64,
+}

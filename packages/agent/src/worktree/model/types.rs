@@ -24,6 +24,9 @@ pub struct WorktreeConfig {
     pub delete_on_release: bool,
     /// Timeout for git commands in milliseconds.
     pub timeout_ms: u64,
+    /// How long a crash-recovered pending merge can sit before being
+    /// auto-aborted, in milliseconds. Default 30 minutes.
+    pub auto_abort_ms: u64,
 }
 
 impl Default for WorktreeConfig {
@@ -36,6 +39,7 @@ impl Default for WorktreeConfig {
             preserve_branches: true,
             delete_on_release: true,
             timeout_ms: 30_000,
+            auto_abort_ms: 30 * 60 * 1000,
         }
     }
 }
@@ -52,7 +56,18 @@ impl WorktreeConfig {
             preserve_branches: iso.preserve_branches,
             delete_on_release: iso.delete_worktree_on_release,
             timeout_ms: session.worktree_timeout_ms,
+            auto_abort_ms: 30 * 60 * 1000,
         }
+    }
+
+    /// Build from settings, threading in `git` workflow options.
+    pub fn from_settings_with_git(
+        session: &crate::settings::types::SessionSettings,
+        git: &crate::settings::types::GitWorkflowSettings,
+    ) -> Self {
+        let mut cfg = Self::from_settings(session);
+        cfg.auto_abort_ms = git.crash_recovery_abort_timeout_ms;
+        cfg
     }
 }
 
@@ -104,6 +119,20 @@ pub enum MergeStrategy {
     Rebase,
     /// Squash all commits into one on target.
     Squash,
+}
+
+impl MergeStrategy {
+    /// Canonical wire label (`"merge" | "rebase" | "squash"`).
+    ///
+    /// Used by RPC handlers and event payload builders — lives here so
+    /// every call site agrees on the casing.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::Rebase => "rebase",
+            Self::Squash => "squash",
+        }
+    }
 }
 
 /// Result of a merge operation.
@@ -274,6 +303,217 @@ pub struct PruneFailure {
     /// Error message.
     pub error: String,
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Phase 1 — git primitive output types
+// ────────────────────────────────────────────────────────────────────────
+
+/// Structured output from a `git push`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PushOutput {
+    /// Whether the push succeeded at the ref level. A dry-run that would
+    /// have succeeded still returns `true`.
+    pub success: bool,
+    /// The branch that was pushed.
+    pub branch: String,
+    /// The remote that was pushed to (e.g. `origin`).
+    pub remote: String,
+    /// Whether `--set-upstream` was used to establish tracking.
+    pub set_upstream: bool,
+    /// Whether this was a dry run (no side effects).
+    pub dry_run: bool,
+    /// Raw stderr (git prints `To <url>` / `+ <ref>` info to stderr).
+    pub stderr: String,
+}
+
+/// A file with unresolved merge/rebase conflicts, including the three
+/// stages pulled from the index.
+///
+/// Stage numbering matches git:
+/// - `base`  — stage 1 (common ancestor; `None` if this was an add/add or
+///   rename/rename conflict where there is no common ancestor content).
+/// - `ours`  — stage 2 (the currently-checked-out side).
+/// - `theirs` — stage 3 (the side being merged in).
+///
+/// Each side is `Option<Vec<u8>>` because:
+/// - `None` ≈ "not present on this side" (delete/modify conflicts).
+/// - `Some(bytes)` ≈ raw blob contents (may be binary).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConflictedFile {
+    /// Path relative to the repo root.
+    pub path: String,
+    /// Whether git detected the blob(s) as binary.
+    pub is_binary: bool,
+    /// Content of the common ancestor (stage 1).
+    pub base: Option<Vec<u8>>,
+    /// Content as we had it (stage 2).
+    pub ours: Option<Vec<u8>>,
+    /// Content as the incoming side had it (stage 3).
+    pub theirs: Option<Vec<u8>>,
+    /// Broad category reported by git's `ls-files --unmerged` / `status`.
+    pub kind: ConflictKind,
+}
+
+/// What kind of conflict a file represents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictKind {
+    /// Both sides modified the file (classic content conflict).
+    BothModified,
+    /// Both sides added the file with different content.
+    BothAdded,
+    /// Our side deleted, theirs modified.
+    DeletedByUs,
+    /// Theirs deleted, we modified.
+    DeletedByThem,
+    /// Both sides renamed the file to different names, or a rename collided
+    /// with a modification. Reported generically — callers that care about
+    /// the exact shape should inspect `git status` directly.
+    Rename,
+    /// Something else (mode conflict, submodule conflict, etc.).
+    Other,
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Phase 2 — SCM module result types
+// ────────────────────────────────────────────────────────────────────────
+
+/// Outcome of `sync_main` (fast-forward local `main` from its upstream).
+///
+/// The variants mirror the three shapes the caller must distinguish:
+/// 1. Already up-to-date → no-op.
+/// 2. Fast-forwarded → local advanced by N commits.
+/// 3. Blocked → could not proceed safely; caller gets a typed reason so
+///    the iOS UI can show appropriate guidance ("pull with rebase",
+///    "commit or stash first", "configure origin", etc.).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SyncOutcome {
+    /// Local was already at or past the remote.
+    UpToDate {
+        /// Commit HEAD points at.
+        head: String,
+    },
+    /// Local was fast-forwarded `advanced_by` commits to `new_head`.
+    FastForwarded {
+        /// Commit HEAD previously pointed at.
+        old_head: String,
+        /// New HEAD after FF.
+        new_head: String,
+        /// How many commits were pulled in.
+        advanced_by: usize,
+    },
+    /// Sync did not run; caller must address the blocker first.
+    Blocked(SyncBlockReason),
+}
+
+/// Why a sync did not run. Surfaces as typed variants (mapped into the
+/// iOS `SyncMainSubSheet` banner without string-matching).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SyncBlockReason {
+    /// No remote configured for the repo.
+    NoRemote,
+    /// Working tree at repo root has uncommitted changes.
+    DirtyWorkingTree,
+    /// Local has commits the remote doesn't — must push first.
+    LocalAhead {
+        /// How many commits local is ahead.
+        ahead: usize,
+    },
+    /// Local and remote have diverged — caller chooses rebase vs merge.
+    Diverged {
+        /// Commits local is ahead.
+        ahead: usize,
+        /// Commits local is behind.
+        behind: usize,
+    },
+    /// Repo has no commits yet.
+    EmptyRepository,
+    /// HEAD is detached; we can't safely fast-forward.
+    DetachedHead,
+    /// Default branch (`main`/`master`) could not be resolved.
+    NoDefaultBranch,
+    /// HEAD is on a branch other than the default. Sync operates in-place
+    /// on the repo-root checkout; silently switching branches would be a
+    /// footgun so we refuse.
+    NotOnDefaultBranch {
+        /// Name of the branch HEAD is currently on.
+        current: String,
+        /// Default branch that sync wants to advance.
+        expected: String,
+    },
+    /// Remote operation failed (timeout, auth, etc.). Message is human-
+    /// readable and safe to show the user.
+    RemoteError(String),
+}
+
+/// Result of `finalize_session` — the "merge session branch into main and
+/// move session to a fresh follow-up branch" atomic operation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FinalizeSessionResult {
+    /// The merge commit written onto the target branch.
+    pub merge_commit: String,
+    /// The freshly-created follow-up branch the worktree now points at.
+    pub new_branch: String,
+    /// HEAD of the new follow-up branch (same as the target branch tip).
+    pub new_base_commit: String,
+    /// Whether the old session branch was deleted (`!preserve_old`).
+    pub old_branch_deleted: bool,
+    /// If the delete was requested (`!preserve_old`) but failed, this
+    /// carries the git error message so the UI can surface it. `None`
+    /// when preserve_old was true OR when the delete succeeded.
+    pub old_branch_delete_error: Option<String>,
+    /// Merge strategy that was actually used.
+    pub strategy: MergeStrategy,
+}
+
+/// In-flight merge/rebase state kept by the coordinator for the duration
+/// of a conflict resolution session.
+///
+/// Reconstructed from `.git/MERGE_HEAD` (or `.git/rebase-merge/`) on
+/// coordinator startup so a crash mid-merge doesn't silently lose state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingMergeState {
+    /// The session this merge belongs to.
+    pub session_id: String,
+    /// Which branch we were merging from.
+    pub source_branch: String,
+    /// Which branch we were merging into.
+    pub target_branch: String,
+    /// Strategy that was used (Merge / Rebase / Squash).
+    pub strategy: MergeStrategy,
+    /// Unix millis when the merge started. Used for the
+    /// `crash_recovery_abort_timeout_ms` auto-abort.
+    pub started_at_ms: i64,
+    /// Did we recover this from disk at coordinator startup (vs start it
+    /// this process)?
+    pub crash_recovered: bool,
+}
+
+/// Instruction for `resolve_conflict`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ConflictResolution {
+    /// Take our side's content (stage 2).
+    Ours,
+    /// Take their side's content (stage 3).
+    Theirs,
+    /// The file has already been edited and is ready — just mark resolved
+    /// (`git add <path>`).
+    MarkResolved,
+}
+
+impl ConflictResolution {
+    /// Canonical wire label (`"ours" | "theirs" | "markResolved"`).
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ours => "ours",
+            Self::Theirs => "theirs",
+            Self::MarkResolved => "markResolved",
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

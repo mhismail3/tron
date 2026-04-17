@@ -988,6 +988,135 @@ tron_events! {
         new_branch: String,
     } => "worktree.renamed",
 
+    // -- Git workflow suite (Phase 4) --
+
+    /// Local main fast-forwarded from remote.
+    WorktreeMainSynced {
+        #[serde(rename = "mainBranch")]
+        main_branch: String,
+        #[serde(rename = "oldHead")]
+        old_head: String,
+        #[serde(rename = "newHead")]
+        new_head: String,
+        #[serde(rename = "advancedBy")]
+        advanced_by: u64,
+    } => "worktree.main_synced",
+
+    /// Session finalized (merge + rebranch).
+    WorktreeSessionFinalized {
+        #[serde(rename = "sourceBranch")]
+        source_branch: String,
+        #[serde(rename = "targetBranch")]
+        target_branch: String,
+        #[serde(rename = "mergeCommit", skip_serializing_if = "Option::is_none")]
+        merge_commit: Option<String>,
+        strategy: String,
+        #[serde(rename = "newBranch")]
+        new_branch: String,
+        #[serde(rename = "newBaseCommit")]
+        new_base_commit: String,
+        #[serde(rename = "oldBranchDeleted")]
+        old_branch_deleted: bool,
+        #[serde(rename = "oldBranchDeleteError", skip_serializing_if = "Option::is_none")]
+        old_branch_delete_error: Option<String>,
+    } => "worktree.session_finalized",
+
+    /// Merge started with conflicts kept on disk.
+    WorktreeMergeStarted {
+        #[serde(rename = "sourceBranch")]
+        source_branch: String,
+        #[serde(rename = "targetBranch")]
+        target_branch: String,
+        strategy: String,
+        #[serde(rename = "conflictCount")]
+        conflict_count: u32,
+    } => "worktree.merge_started",
+
+    /// Conflict(s) detected in an in-flight merge.
+    WorktreeConflictDetected {
+        #[serde(rename = "sourceBranch")]
+        source_branch: String,
+        #[serde(rename = "targetBranch")]
+        target_branch: String,
+        paths: Vec<String>,
+    } => "worktree.conflict_detected",
+
+    /// Single conflict resolved.
+    WorktreeConflictResolved {
+        path: String,
+        resolution: String,
+        remaining: u32,
+    } => "worktree.conflict_resolved",
+
+    /// In-flight merge continued after conflicts cleared.
+    WorktreeMergeContinued {
+        #[serde(rename = "mergeCommit")]
+        merge_commit: String,
+        strategy: String,
+    } => "worktree.merge_continued",
+
+    /// In-flight merge aborted.
+    WorktreeMergeAborted {
+        strategy: String,
+        reason: String,
+    } => "worktree.merge_aborted",
+
+    /// Branch pushed to remote.
+    WorktreePushed {
+        branch: String,
+        remote: String,
+        #[serde(rename = "setUpstream")]
+        set_upstream: bool,
+        #[serde(rename = "dryRun")]
+        dry_run: bool,
+        #[serde(rename = "forceWithLease")]
+        force_with_lease: bool,
+    } => "worktree.pushed",
+
+    /// Pending merge detected during crash recovery.
+    WorktreePendingMergeDetected {
+        #[serde(rename = "sourceBranch")]
+        source_branch: String,
+        #[serde(rename = "targetBranch")]
+        target_branch: String,
+        strategy: String,
+        #[serde(rename = "startedAtMs")]
+        started_at_ms: u64,
+        #[serde(rename = "autoAbortAtMs")]
+        auto_abort_at_ms: u64,
+    } => "worktree.pending_merge_detected",
+
+    /// Per-repo lock acquired by a session.
+    RepoLockAcquired {
+        #[serde(rename = "repoRoot")]
+        repo_root: String,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        op: String,
+    } => "repo.lock_acquired",
+
+    /// Per-repo lock released.
+    RepoLockReleased {
+        #[serde(rename = "repoRoot")]
+        repo_root: String,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        op: String,
+    } => "repo.lock_released",
+
+    /// Main branch advanced in a repo (cross-session broadcast).
+    RepoMainAdvanced {
+        #[serde(rename = "repoRoot")]
+        repo_root: String,
+        #[serde(rename = "oldHead")]
+        old_head: String,
+        #[serde(rename = "newHead")]
+        new_head: String,
+        #[serde(rename = "sourceSessionId")]
+        source_session_id: String,
+        cause: String,
+    } => "repo.main_advanced",
+
     // -- Display streaming --
 
     /// A single frame in a display stream (transient, not persisted).
@@ -1975,11 +2104,94 @@ mod tests {
                 completed_at: "2026-01-01T00:00:00Z".into(),
             },
             TronEvent::JobBackgrounded {
-                base,
+                base: base.clone(),
                 job_id: "proc-1".into(),
                 reason: "auto_timeout".into(),
                 label: "test".into(),
                 tool_call_id: "tc-1".into(),
+            },
+            TronEvent::WorktreeMainSynced {
+                base: base.clone(),
+                main_branch: "main".into(),
+                old_head: "abc".into(),
+                new_head: "def".into(),
+                advanced_by: 3,
+            },
+            TronEvent::WorktreeSessionFinalized {
+                base: base.clone(),
+                source_branch: "session/1".into(),
+                target_branch: "main".into(),
+                merge_commit: Some("def".into()),
+                strategy: "merge".into(),
+                new_branch: "session/1/next".into(),
+                new_base_commit: "def".into(),
+                old_branch_deleted: false,
+                old_branch_delete_error: None,
+            },
+            TronEvent::WorktreeMergeStarted {
+                base: base.clone(),
+                source_branch: "session/1".into(),
+                target_branch: "main".into(),
+                strategy: "merge".into(),
+                conflict_count: 2,
+            },
+            TronEvent::WorktreeConflictDetected {
+                base: base.clone(),
+                source_branch: "session/1".into(),
+                target_branch: "main".into(),
+                paths: vec!["f.txt".into()],
+            },
+            TronEvent::WorktreeConflictResolved {
+                base: base.clone(),
+                path: "f.txt".into(),
+                resolution: "ours".into(),
+                remaining: 0,
+            },
+            TronEvent::WorktreeMergeContinued {
+                base: base.clone(),
+                merge_commit: "def".into(),
+                strategy: "merge".into(),
+            },
+            TronEvent::WorktreeMergeAborted {
+                base: base.clone(),
+                strategy: "merge".into(),
+                reason: "user".into(),
+            },
+            TronEvent::WorktreePushed {
+                base: base.clone(),
+                branch: "session/1".into(),
+                remote: "origin".into(),
+                set_upstream: true,
+                dry_run: false,
+                force_with_lease: false,
+            },
+            TronEvent::WorktreePendingMergeDetected {
+                base: base.clone(),
+                source_branch: "session/1".into(),
+                target_branch: "main".into(),
+                strategy: "merge".into(),
+                started_at_ms: 0,
+                auto_abort_at_ms: 0,
+            },
+            TronEvent::RepoLockAcquired {
+                base: base.clone(),
+                repo_root: "/repo".into(),
+                session_id: "s1".into(),
+                op: "syncMain".into(),
+            },
+            TronEvent::RepoLockReleased {
+                base: base.clone(),
+                repo_root: "/repo".into(),
+                session_id: "s1".into(),
+                op: "syncMain".into(),
+            },
+            TronEvent::RepoMainAdvanced {
+                base,
+                repo_root: "/repo".into(),
+                old_head: "abc".into(),
+                new_head: "def".into(),
+                source_session_id: "s1".into(),
+                cause: "sync".into(),
             },
         ];
 

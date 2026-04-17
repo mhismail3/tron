@@ -32,7 +32,7 @@ struct ToolCodeBlock: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(title)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()
@@ -45,7 +45,7 @@ struct ToolCodeBlock: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let note = headerNote {
                     Text(note)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(tint.subtle)
                         .padding(.bottom, 6)
                 }

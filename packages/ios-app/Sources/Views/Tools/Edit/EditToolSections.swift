@@ -19,7 +19,7 @@ struct EditDiffSection: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Changes")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()
@@ -93,7 +93,7 @@ struct EditSeparatorRow: View {
                 .fill(Color.orange.opacity(0.15))
                 .frame(height: 1)
             Text("\u{22EF}")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted.opacity(0.4))
             Rectangle()
                 .fill(Color.orange.opacity(0.15))

@@ -35,7 +35,7 @@ struct CommandToolDetailSheet: View {
                                 Text("Open")
                             }
                         }
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(data.iconColor)
                     }
                 }
@@ -45,7 +45,7 @@ struct CommandToolDetailSheet: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBody))
                             .foregroundStyle(data.iconColor)
                         Text(data.displayName)
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(data.iconColor)
                     }
                 }
@@ -53,7 +53,7 @@ struct CommandToolDetailSheet: View {
                     Button("Done") {
                         dismiss()
                     }
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(data.iconColor)
                 }
             }

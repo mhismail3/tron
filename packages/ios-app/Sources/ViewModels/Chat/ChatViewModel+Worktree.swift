@@ -39,31 +39,6 @@ extension ChatViewModel {
         }
     }
 
-    /// Merge the session's worktree branch into a target branch
-    func mergeWorktree(targetBranch: String, strategy: String? = nil) async {
-        worktreeState.isLoading = true
-        defer { worktreeState.isLoading = false }
-
-        do {
-            let result = try await rpcClient.worktree.merge(
-                sessionId: sessionId,
-                targetBranch: targetBranch,
-                strategy: strategy
-            )
-            if !result.success {
-                if let conflicts = result.conflicts, !conflicts.isEmpty {
-                    showErrorAlert("Merge conflicts in: \(conflicts.joined(separator: ", "))")
-                } else if let error = result.error {
-                    showErrorAlert(error)
-                }
-            }
-            // Refresh status after merge attempt
-            await requestWorktreeStatus()
-        } catch {
-            showErrorAlert("Merge failed: \(error.localizedDescription)")
-        }
-    }
-
     // MARK: - Real-time WebSocket Event Handlers
 
     func handleWorktreeAcquired(_ result: WorktreeAcquiredPlugin.Result) {
@@ -112,6 +87,85 @@ extension ChatViewModel {
         worktreeState.status = WorktreeGetStatusResult(
             hasWorktree: false,
             worktree: nil
+        )
+    }
+
+    // MARK: - Git Workflow Event Handlers
+
+    func handleWorktreeMainSynced(_ result: WorktreeMainSyncedPlugin.Result) {
+        // Divergence chips in SourceControlStatusHeader are recomputed on sheet
+        // reload; nothing to mutate in ChatViewModel state.
+        logDebug("worktree.main_synced advancedBy=\(result.advancedBy)")
+    }
+
+    func handleWorktreeSessionFinalized(_ result: WorktreeSessionFinalizedPlugin.Result) {
+        // Rebranch occurred — refresh worktree status to pick up new branch/base.
+        Task { await requestWorktreeStatus() }
+        // Route to APNs-style local notification if app is backgrounded.
+        GitNotificationRouter.shared.postFinalizeCompleted(
+            sessionId: sessionId,
+            sourceBranch: result.sourceBranch,
+            targetBranch: result.targetBranch,
+            mergeCommit: result.mergeCommit,
+            success: true
+        )
+    }
+
+    func handleWorktreeMergeStarted(_ result: WorktreeMergeStartedPlugin.Result) {
+        logDebug("worktree.merge_started \(result.sourceBranch) → \(result.targetBranch)")
+    }
+
+    func handleWorktreeConflictDetected(_ result: WorktreeConflictDetectedPlugin.Result) {
+        gitWorkflowState.conflictBanner = ConflictBanner(
+            sourceBranch: result.sourceBranch,
+            targetBranch: result.targetBranch,
+            paths: result.paths
+        )
+    }
+
+    func handleWorktreeConflictResolved(_ result: WorktreeConflictResolvedPlugin.Result) {
+        // Each resolution ticks down the banner's path count; drop the
+        // banner when nothing remains.
+        if let banner = gitWorkflowState.conflictBanner {
+            let remainingPaths = banner.paths.filter { $0 != result.path }
+            if result.remaining == 0 || remainingPaths.isEmpty {
+                gitWorkflowState.conflictBanner = nil
+            } else {
+                gitWorkflowState.conflictBanner = ConflictBanner(
+                    sourceBranch: banner.sourceBranch,
+                    targetBranch: banner.targetBranch,
+                    paths: remainingPaths
+                )
+            }
+        }
+    }
+
+    func handleWorktreeMergeContinued(_ result: WorktreeMergeContinuedPlugin.Result) {
+        // Resolver succeeded — clear banners and refresh status.
+        gitWorkflowState.conflictBanner = nil
+        gitWorkflowState.pendingMerge = nil
+        Task { await requestWorktreeStatus() }
+    }
+
+    func handleWorktreeMergeAborted(_ result: WorktreeMergeAbortedPlugin.Result) {
+        // Abort restores the pre-merge state — clear banners either way.
+        gitWorkflowState.conflictBanner = nil
+        gitWorkflowState.pendingMerge = nil
+        Task { await requestWorktreeStatus() }
+    }
+
+    func handleWorktreePushed(_ result: WorktreePushedPlugin.Result) {
+        // A successful push advances origin — chips are now stale.
+        gitWorkflowState.markDivergenceStale()
+    }
+
+    func handleWorktreePendingMergeDetected(_ result: WorktreePendingMergeDetectedPlugin.Result) {
+        gitWorkflowState.pendingMerge = PendingMergeBanner(
+            sourceBranch: result.sourceBranch,
+            targetBranch: result.targetBranch,
+            strategy: result.strategy,
+            startedAtMs: result.startedAtMs,
+            autoAbortAtMs: result.autoAbortAtMs
         )
     }
 }

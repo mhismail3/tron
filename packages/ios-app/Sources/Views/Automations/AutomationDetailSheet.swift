@@ -77,7 +77,7 @@ struct AutomationDetailSheet: View {
             SettingsCard(accent: .tronCoral) {
                 SettingsRow(icon: currentJob.payload.icon, label: currentJob.payload.typeLabel, accentColor: .tronCoral) {
                     Text(currentJob.enabled ? "Active" : "Paused")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(currentJob.enabled ? .tronSuccess : .tronTextMuted)
                 }
 
@@ -85,7 +85,7 @@ struct AutomationDetailSheet: View {
 
                 SettingsRow(icon: "clock", label: "Schedule", accentColor: .tronCoral) {
                     Text(currentJob.schedule.summary)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(1)
                 }
@@ -96,7 +96,7 @@ struct AutomationDetailSheet: View {
                     SettingsRowDivider()
                     SettingsRow(icon: "text.alignleft", label: "Description", accentColor: .tronCoral) {
                         Text(desc)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3))
                             .foregroundStyle(.tronTextSecondary)
                             .lineLimit(2)
                     }
@@ -125,7 +125,7 @@ struct AutomationDetailSheet: View {
             SettingsRowDivider()
             SettingsRow(icon: "brain", label: "Prompt", accentColor: .tronCoral) {
                 Text(prompt)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3))
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
             }
@@ -133,7 +133,7 @@ struct AutomationDetailSheet: View {
                 SettingsRowDivider()
                 SettingsRow(icon: "cpu", label: "Model", accentColor: .tronCoral) {
                     Text(model)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
                         .foregroundStyle(.tronTextSecondary)
                 }
             }
@@ -149,7 +149,7 @@ struct AutomationDetailSheet: View {
                 SettingsRowDivider()
                 SettingsRow(icon: "arrow.up.arrow.down", label: "Method", accentColor: .tronCoral) {
                     Text(method.uppercased())
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(.tronCoral)
                 }
             }
@@ -172,7 +172,7 @@ struct AutomationDetailSheet: View {
                 .frame(width: 18)
             ForEach(currentJob.tags, id: \.self) { tag in
                 Text(tag)
-                    .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                     .foregroundStyle(.tronCoral.opacity(0.8))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -216,12 +216,12 @@ struct AutomationDetailSheet: View {
                             .controlSize(.mini)
                             .tint(.tronCoral)
                         Text(item.value)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(item.accent)
                     }
                 } else {
                     Text(item.value)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
                         .foregroundStyle(item.valueColor)
                 }
             }
@@ -268,7 +268,7 @@ struct AutomationDetailSheet: View {
                 }
             } label: {
                 Label("Run Now", systemImage: "play.fill")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronCoral)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -291,7 +291,7 @@ struct AutomationDetailSheet: View {
             } label: {
                 let tint: Color = currentJob.enabled ? .orange : .tronSuccess
                 Label(currentJob.enabled ? "Pause" : "Enable", systemImage: currentJob.enabled ? "pause.fill" : "play.fill")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(tint)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -307,7 +307,7 @@ struct AutomationDetailSheet: View {
 
             Button(action: onDelete) {
                 Image(systemName: "trash")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronError)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -335,7 +335,7 @@ struct AutomationDetailSheet: View {
                     .padding(.vertical, 16)
             } else if recentRuns.isEmpty {
                 Text("No runs yet")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTextMuted)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 16)
@@ -356,7 +356,7 @@ struct AutomationDetailSheet: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(DateParser.shortDateTime(run.startedAt))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTextPrimary)
 
                 if let duration = run.durationMs {
@@ -369,7 +369,7 @@ struct AutomationDetailSheet: View {
             Spacer()
 
             Text(run.status)
-                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                 .foregroundStyle(runStatusColor(run.status))
 
             Image(systemName: "chevron.right")

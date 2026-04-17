@@ -15,14 +15,14 @@ struct AutomationRow: View {
                     .foregroundStyle(.tronCoral)
 
                 Text(job.name)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronCoral)
                     .lineLimit(1)
 
                 Spacer()
 
                 Text(job.payload.typeLabel)
-                    .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                     .foregroundStyle(.tronCoral.opacity(0.7))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -88,7 +88,7 @@ struct AutomationRow: View {
                 HStack(spacing: 4) {
                     ForEach(job.tags.prefix(3), id: \.self) { tag in
                         Text(tag)
-                            .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                             .foregroundStyle(.tronCoral.opacity(0.6))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1)

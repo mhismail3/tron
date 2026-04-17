@@ -16,7 +16,7 @@ struct ToolDetailSection<Trailing: View, Content: View>: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(title)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()

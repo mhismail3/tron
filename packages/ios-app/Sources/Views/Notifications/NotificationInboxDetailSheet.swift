@@ -43,7 +43,7 @@ struct NotificationInboxDetailSheet: View {
                         HStack(spacing: 6) {
                             Image(systemName: "bell.badge.fill")
                             Text("Notification")
-                                .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                         }
                         .foregroundStyle(.tronEmerald)
                     }
@@ -56,7 +56,7 @@ struct NotificationInboxDetailSheet: View {
                                     Image(systemName: "checkmark.circle")
                                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                                     Text("Mark Read")
-                                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                                 }
                                 .foregroundStyle(.tronEmerald)
                             }
@@ -89,22 +89,22 @@ struct NotificationInboxDetailSheet: View {
                 // Header
                 VStack(alignment: .leading, spacing: 12) {
                     Text(notification.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeLargeTitle, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
 
                     Text(notification.body)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .regular))
                         .foregroundStyle(.tronTextSecondary)
 
                     // Timestamp + session info
                     HStack(spacing: 8) {
                         Text(DateParser.relativeAbbreviated(notification.timestamp))
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .regular))
                             .foregroundStyle(.tronTextMuted)
 
                         if let sessionTitle = notification.sessionTitle {
                             Text(sessionTitle)
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .regular))
                                 .foregroundStyle(.tronTextMuted)
                                 .lineLimit(1)
                         }
@@ -119,7 +119,7 @@ struct NotificationInboxDetailSheet: View {
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.tronSlate)
                             Text("Details")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                                 .foregroundStyle(.tronTextMuted)
                             Spacer()
                         }

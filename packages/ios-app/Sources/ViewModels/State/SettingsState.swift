@@ -34,6 +34,23 @@ final class SettingsState {
 
     var autoRetainInterval: Int = 10
 
+    // MARK: - Git Workflow
+
+    /// Override the auto-detected main/master branch used for sync/finalize.
+    /// Empty string means "auto-detect".
+    var gitTargetBranch: String = ""
+    /// Branches that require `overrideProtected == true` for push.
+    var gitProtectedBranches: [String] = ["main", "master", "develop"]
+    /// `"keep"` | `"deleteOnFinalize"`.
+    var gitSessionBranchPolicy: String = "keep"
+    /// `"merge"` | `"rebase"` | `"squash"`.
+    var gitMergeStrategy: String = "merge"
+    var gitAutoSetUpstream: Bool = true
+    var gitCrashRecoveryAbortTimeoutMs: UInt64 = 30 * 60 * 1000
+    var gitOpTimeoutNetworkMs: UInt64 = 60_000
+    var gitOpTimeoutLocalMs: UInt64 = 30_000
+    var gitSubagentConflictResolutionEnabled: Bool = true
+
     // MARK: - Connection Presets
 
     var connectionPresets: [ConnectionPreset] = []
@@ -130,5 +147,15 @@ final class SettingsState {
         skillsCompactionPolicy = settings.skillsCompactionPolicy
         skillsShowIndex = settings.skillsShowIndex
         autoRetainInterval = settings.autoRetainInterval
+
+        gitTargetBranch = settings.gitTargetBranch ?? ""
+        gitProtectedBranches = settings.gitProtectedBranches
+        gitSessionBranchPolicy = settings.gitSessionBranchPolicy
+        gitMergeStrategy = settings.gitMergeStrategy
+        gitAutoSetUpstream = settings.gitAutoSetUpstream
+        gitCrashRecoveryAbortTimeoutMs = settings.gitCrashRecoveryAbortTimeoutMs
+        gitOpTimeoutNetworkMs = settings.gitOpTimeoutNetworkMs
+        gitOpTimeoutLocalMs = settings.gitOpTimeoutLocalMs
+        gitSubagentConflictResolutionEnabled = settings.gitSubagentConflictResolutionEnabled
     }
 }

@@ -35,7 +35,7 @@ struct NotificationListSheet: View {
                                 Image(systemName: "checkmark.circle")
                                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                                 Text("Read All")
-                                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             }
                             .foregroundStyle(.tronEmerald)
                         }
@@ -83,7 +83,7 @@ struct NotificationListSheet: View {
                 .font(TronTypography.sans(size: 40))
                 .foregroundStyle(.tronTextMuted)
             Text("No notifications")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -126,7 +126,7 @@ private struct NotificationRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 // Title
                 Text(notification.title)
-                    .font(TronTypography.mono(
+                    .font(TronTypography.sans(
                         size: TronTypography.sizeBody,
                         weight: notification.isRead ? .regular : .semibold
                     ))
@@ -135,19 +135,19 @@ private struct NotificationRow: View {
 
                 // Body preview
                 Text(notification.body)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .regular))
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
 
                 // Metadata row
                 HStack(spacing: 8) {
                     Text(DateParser.relativeAbbreviated(notification.timestamp))
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .regular))
                         .foregroundStyle(.tronTextMuted)
 
                     if let sessionTitle = notification.sessionTitle {
                         Text(sessionTitle)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .regular))
                             .foregroundStyle(.tronTextMuted)
                             .lineLimit(1)
                     }

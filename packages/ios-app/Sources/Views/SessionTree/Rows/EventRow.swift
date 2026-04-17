@@ -47,7 +47,7 @@ struct ForkButton: View {
                     Task { await onFork() }
                 } label: {
                     Text("Fork Session")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                         .foregroundStyle(.tronAmber)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
@@ -62,7 +62,7 @@ struct ForkButton: View {
                     }
                 } label: {
                     Text("Cancel")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                         .foregroundStyle(.tronTextMuted)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -85,7 +85,7 @@ struct ForkButton: View {
                         .tint(.tronAmber)
                 } else {
                     Text("Fork")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                         .foregroundStyle(.tronAmber)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -132,7 +132,7 @@ struct EventRow: View {
 
                 // Summary + expand indicator
                 Text(event.summary)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(isMuted ? .tronTextMuted : .tronTextPrimary)
                     .lineLimit(1)
 

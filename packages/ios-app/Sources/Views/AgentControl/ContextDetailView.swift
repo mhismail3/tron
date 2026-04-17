@@ -222,7 +222,7 @@ struct ContextDetailView: View {
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronCyan)
             Text(title)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronCyan)
             Spacer()
         }

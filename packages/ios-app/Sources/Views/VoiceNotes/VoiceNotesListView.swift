@@ -164,7 +164,7 @@ struct VoiceNoteRow: View {
                     .foregroundStyle(.tronTeal)
 
                 Text(note.formattedDate)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTeal)
 
                 Spacer()
@@ -176,7 +176,7 @@ struct VoiceNoteRow: View {
 
             if !note.preview.isEmpty {
                 Text(note.preview)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3))
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
             }

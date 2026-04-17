@@ -20,7 +20,7 @@ struct ToolEmptyState: View {
                     .font(TronTypography.sans(size: 28))
                     .foregroundStyle(tint.subtle)
                 Text(message)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(tint.subtle)
                 if let subtitle {
                     Text(subtitle)

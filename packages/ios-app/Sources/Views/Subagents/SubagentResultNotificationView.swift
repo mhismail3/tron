@@ -54,11 +54,11 @@ struct SubagentResultNotificationView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(titleText)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
 
                     Text(subtitleText)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(1)
                 }
@@ -68,7 +68,7 @@ struct SubagentResultNotificationView: View {
                 // Tap hint
                 HStack(spacing: 4) {
                     Text(reviewText)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     Image(systemName: "chevron.right")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 }

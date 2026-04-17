@@ -78,7 +78,7 @@ struct AppearanceSettingsPage: View {
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 18)
                     Text("Color Mode")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     Spacer()
                     themeToggle
                 }
@@ -103,7 +103,7 @@ struct AppearanceSettingsPage: View {
                         Image(systemName: mode.icon)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         Text(mode.label)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                     }
                     .foregroundStyle(isSelected ? .tronSurface : .tronEmerald)
                     .padding(.horizontal, 8)
@@ -136,10 +136,10 @@ struct AppearanceSettingsPage: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(fontSettings.selectedFamily.displayName)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
                         Text(fontSettings.selectedFamily.shortDescription)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                     }
 
@@ -195,10 +195,10 @@ struct AppearanceSettingsPage: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(fontSettings.selectedMonoFamily.displayName)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
                         Text(fontSettings.selectedMonoFamily.shortDescription)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                     }
 
@@ -257,7 +257,7 @@ struct AppearanceSettingsPage: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             Text(category.displayName)
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                                 .foregroundStyle(.tronTextMuted)
                                 .frame(width: 32, alignment: .leading)
 
@@ -290,7 +290,7 @@ struct AppearanceSettingsPage: View {
             }
         } label: {
             Text(family.displayName)
-                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(isSelected ? .tronSurface : .tronTextPrimary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -312,11 +312,11 @@ struct AppearanceSettingsPage: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(axis.displayName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
                 Spacer()
                 Text(axisValueLabel(axis, family: family))
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronEmerald)
                     .monospacedDigit()
                     .contentTransition(.numericText())
@@ -329,11 +329,11 @@ struct AppearanceSettingsPage: View {
                 Text(axis.displayName)
             } minimumValueLabel: {
                 Text(axis.minLabel)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             } maximumValueLabel: {
                 Text(axis.maxLabel)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             }
             .tint(.tronEmerald)
@@ -370,10 +370,10 @@ struct AppearanceSettingsPage: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(appearanceSettings.thinkingIndicatorStyle.displayName)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
                         Text("Thinking animation")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                     }
 
@@ -412,7 +412,7 @@ struct AppearanceSettingsPage: View {
                 Image(systemName: style.icon)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 Text(style.displayName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
             }
             .foregroundStyle(isSelected ? .tronSurface : .tronTextPrimary)
             .padding(.horizontal, 10)

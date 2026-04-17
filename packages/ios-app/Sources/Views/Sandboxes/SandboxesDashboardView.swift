@@ -209,7 +209,7 @@ struct SandboxesDashboardView: View {
     private func sectionHeader(_ title: String, color: Color) -> some View {
         HStack {
             Text(title)
-                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                 .foregroundStyle(color)
             Spacer()
         }

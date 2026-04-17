@@ -13,7 +13,7 @@ struct WorktreeBadge: View {
                 .frame(width: 10, height: 10)
 
             Text(worktree.shortBranch)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
 
             if worktree.hasUncommittedChanges == true {
                 Circle()

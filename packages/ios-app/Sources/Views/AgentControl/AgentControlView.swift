@@ -20,6 +20,10 @@ struct AgentControlView: View {
     var currentModelId: String = ""
     /// Callback for "Ask Agent" actions from branch management
     var onAskAgent: ((String) -> Void)?
+    /// Shared git workflow state (lock holder, conflict banners, divergence).
+    /// When provided, propagated into `SourceControlSheet` so header chips
+    /// and sub-sheets render peer-session state.
+    var gitWorkflowState: GitWorkflowState?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
@@ -134,12 +138,7 @@ struct AgentControlView: View {
                     sessionId: sessionId,
                     initialDiffResult: diffResult,
                     initialWorktreeStatus: worktreeStatus,
-                    initialBranches: branches,
-                    onAskAgent: { message in
-                        showSourceControl = false
-                        dismiss()
-                        onAskAgent?(message)
-                    }
+                    gitWorkflowState: gitWorkflowState
                 )
             }
             .tronErrorAlert(message: $errorMessage)

@@ -11,9 +11,9 @@ struct SubagentStatBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
             Text(value)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
         }
         .foregroundStyle(color)
         .padding(.horizontal, 8)

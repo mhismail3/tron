@@ -45,7 +45,7 @@ private struct QueryHeader: View {
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronInfo)
                 Text("Search: \"\(query)\"")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextPrimary)
                     .lineLimit(2)
             }
@@ -122,7 +122,7 @@ private struct SearchResultRow: View {
                         .frame(width: 16, alignment: .trailing)
 
                     Text(result.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.tronInfo)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -166,7 +166,7 @@ private struct NoResultsView: View {
                 .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronTextMuted)
             Text("No results found")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .regular))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .regular))
                 .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity)
@@ -183,7 +183,7 @@ private struct WebSearchErrorBanner: View {
                 .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronWarning)
             Text(message)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .regular))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .regular))
                 .foregroundStyle(.tronWarning)
         }
         .padding(8)

@@ -394,7 +394,7 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Tron")
-                        .font(TronTypography.mono(size: 20, weight: .bold))
+                        .font(TronTypography.sans(size: 20, weight: .bold))
                         .foregroundStyle(.tronEmerald)
                 }
             }

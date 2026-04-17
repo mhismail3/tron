@@ -61,7 +61,7 @@ struct AskUserQuestionSheet: View {
                 }
                 ToolbarItem(placement: .principal) {
                     Text(readOnly ? "Answers" : "Questions")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
                         .foregroundStyle(readOnly ? .tronSuccess : .tronAmber)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -73,7 +73,7 @@ struct AskUserQuestionSheet: View {
                                 Image(systemName: "paperplane.fill")
                                     .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
                                 Text("Submit")
-                                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             }
                             .foregroundStyle(hasAnyAnswer ? .tronAmber : .tronTextMuted)
                         }

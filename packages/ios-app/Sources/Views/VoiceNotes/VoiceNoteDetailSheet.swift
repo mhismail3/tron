@@ -33,7 +33,7 @@ struct VoiceNoteDetailSheet: View {
 
                     // Transcription content
                     Text(note.transcript)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodyLG))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodyLG))
                         .foregroundStyle(.tronTextPrimary)
                         .textSelection(.enabled)
                 }

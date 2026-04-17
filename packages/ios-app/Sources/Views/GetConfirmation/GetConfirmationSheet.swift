@@ -55,7 +55,7 @@ struct GetConfirmationSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(readOnly ? decisionTitle : "Confirm Action")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
                         .foregroundStyle(accentColor)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -89,7 +89,7 @@ struct GetConfirmationSheet: View {
                 .foregroundStyle(riskColor)
 
             Text(riskLabel)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(riskColor)
 
             Spacer()
@@ -116,7 +116,7 @@ struct GetConfirmationSheet: View {
             Image(systemName: toolData.decision == .approved ? "checkmark.circle.fill" : "xmark.circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
             Text(toolData.decision?.rawValue ?? "")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
         }
         .foregroundStyle(toolData.decision == .approved ? Color.tronSuccess : Color.tronError)
     }
@@ -176,7 +176,7 @@ struct GetConfirmationSheet: View {
                     Image(systemName: "xmark")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     Text("Deny")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 }
                 .foregroundStyle(.tronError)
                 .frame(maxWidth: .infinity)
@@ -202,7 +202,7 @@ struct GetConfirmationSheet: View {
                     Image(systemName: "checkmark")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     Text("Approve")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 }
                 .foregroundStyle(.tronSuccess)
                 .frame(maxWidth: .infinity)

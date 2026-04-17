@@ -24,7 +24,7 @@ private struct CollapsibleSkillsSection<RowContent: View>: View {
                     .foregroundStyle(accent)
                     .frame(width: 18)
                 Text(title)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(accent)
 
                 Text("\(count)")
@@ -34,7 +34,7 @@ private struct CollapsibleSkillsSection<RowContent: View>: View {
                 Spacer()
 
                 Text(TokenFormatter.format(tokens))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 
                 Image(systemName: "chevron.down")
@@ -292,7 +292,7 @@ struct AddedSkillRow: View {
                                 .scaleEffect(0.7)
                                 .tint(.tronCyan)
                             Text("Loading content...")
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronTextMuted)
                         }
                         .frame(maxWidth: .infinity)
@@ -310,7 +310,7 @@ struct AddedSkillRow: View {
                         .padding(.horizontal, 8)
                     } else {
                         Text("Content not available")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
                             .padding(8)
                     }

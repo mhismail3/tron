@@ -35,7 +35,7 @@ struct MemoryRetainDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Summary")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 
                 Spacer()
@@ -58,7 +58,7 @@ struct MemoryRetainDetailSheet: View {
                         .foregroundStyle(.tronPink)
 
                     Text(title)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronPink)
 
                     Spacer()
@@ -66,14 +66,14 @@ struct MemoryRetainDetailSheet: View {
 
                 if let summary, !summary.isEmpty {
                     Text(summary)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextSecondary)
                         .lineSpacing(4)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text("No summary available")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextDisabled)
                         .italic()
                 }

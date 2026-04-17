@@ -9,7 +9,7 @@ struct ContainerRow: View {
             // Row 1: Name + status badge + relative date
             HStack(spacing: 6) {
                 Text(container.name)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronIndigo)
                     .lineLimit(1)
 
@@ -24,7 +24,7 @@ struct ContainerRow: View {
 
             // Row 2: Image name
             Text(container.image)
-                .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
                 .foregroundStyle(.tronTextMuted)
                 .lineLimit(1)
 
@@ -33,7 +33,7 @@ struct ContainerRow: View {
                 HStack(spacing: 6) {
                     ForEach(container.ports, id: \.self) { port in
                         Text(port)
-                            .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                             .foregroundStyle(.tronIndigo.opacity(0.8))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
@@ -43,7 +43,7 @@ struct ContainerRow: View {
 
                     if let purpose = container.purpose {
                         Text(purpose)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3))
                             .foregroundStyle(.tronTextMuted)
                             .lineLimit(1)
                     }
@@ -66,7 +66,7 @@ struct ContainerRow: View {
 
     private var statusBadge: some View {
         Text(container.status)
-            .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+            .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
             .foregroundStyle(statusColor)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)

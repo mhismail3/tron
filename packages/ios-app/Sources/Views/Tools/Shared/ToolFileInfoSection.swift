@@ -18,7 +18,7 @@ struct ToolFileInfoSection: View {
                     .foregroundStyle(accent)
 
                 Text(fileInfo.fileName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(tint.name)
                     .lineLimit(1)
 
@@ -26,7 +26,7 @@ struct ToolFileInfoSection: View {
 
                 if !fileInfo.fileExtension.isEmpty {
                     Text(fileInfo.fileExtension.uppercased())
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                         .foregroundStyle(.tronTextPrimary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)

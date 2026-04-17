@@ -27,6 +27,44 @@ pub enum WorktreeError {
     #[error("branch is active: {0}")]
     BranchActive(String),
 
+    /// Remote authentication failed (e.g. SSH key rejected, HTTPS 401).
+    #[error("git authentication failed: {0}")]
+    AuthFailure(String),
+
+    /// Remote network operation timed out or host unreachable.
+    #[error("git network error: {0}")]
+    NetworkTimeout(String),
+
+    /// Push rejected because the upstream ref moved (non-fast-forward).
+    #[error("push rejected: non-fast-forward — {0}")]
+    NonFastForward(String),
+
+    /// No remote is configured for the operation (e.g. `git push` without
+    /// `origin`).
+    #[error("no remote configured: {0}")]
+    NoRemoteConfigured(String),
+
+    /// Operation was refused because the target branch is protected.
+    #[error("protected branch: {0}")]
+    ProtectedBranch(String),
+
+    /// Operation was refused because the working tree has uncommitted
+    /// changes and the operation cannot safely proceed.
+    #[error("dirty working tree: {0}")]
+    DirtyWorkingTree(String),
+
+    /// Merge produced conflicts that must be resolved before the operation
+    /// can proceed (e.g. before `finalize_session` re-branches). Carries the
+    /// conflicted-file count so callers can surface it without re-querying
+    /// the worktree.
+    #[error("merge has conflicts ({0} file(s)); resolve first")]
+    MergeConflicts(usize),
+
+    /// No merge is in progress for the session (e.g. `merge_context`,
+    /// `continue_merge`, `abort_merge` invoked on a clean worktree).
+    #[error("session has no pending merge")]
+    NoPendingMerge,
+
     /// Event store error.
     #[error("event store: {0}")]
     EventStore(String),

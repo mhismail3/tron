@@ -109,6 +109,14 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var job: JobClient = JobClient(transport: self)
 
+    /// Git workflow client — `git.syncMain`, `git.push`.
+    @ObservationIgnored
+    lazy var git: GitClient = GitClient(transport: self)
+
+    /// Repo-scoped queries spanning sibling sessions.
+    @ObservationIgnored
+    lazy var repo: RepoClient = RepoClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.

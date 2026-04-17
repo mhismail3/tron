@@ -18,7 +18,7 @@ struct ToolRunningSpinner: View {
                     .tint(accent)
                     .scaleEffect(1.1)
                 Text(actionText)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(tint.subtle)
             }
             .frame(maxWidth: .infinity)

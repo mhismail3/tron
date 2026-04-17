@@ -25,8 +25,26 @@ struct ServerSettings: Decodable {
     let autoRetainInterval: Int
     let retainModel: String
 
+    // MARK: - Git Workflow
+
+    let gitTargetBranch: String?
+    let gitProtectedBranches: [String]
+    let gitSessionBranchPolicy: String        // "keep" | "deleteOnFinalize"
+    let gitMergeStrategy: String              // "merge" | "rebase" | "squash"
+    let gitAutoSetUpstream: Bool
+    let gitCrashRecoveryAbortTimeoutMs: UInt64
+    let gitOpTimeoutNetworkMs: UInt64
+    let gitOpTimeoutLocalMs: UInt64
+    let gitSubagentConflictResolutionEnabled: Bool
+
     private enum CodingKeys: String, CodingKey {
-        case models, server, context, session, hooks, skills, memory
+        case models, server, context, session, hooks, skills, memory, git
+    }
+
+    private enum GitKeys: String, CodingKey {
+        case targetBranch, protectedBranches, sessionBranchPolicy, mergeStrategy
+        case autoSetUpstream, crashRecoveryAbortTimeoutMs, opTimeoutNetworkMs
+        case opTimeoutLocalMs, subagentConflictResolutionEnabled
     }
 
     private enum SkillsKeys: String, CodingKey {
@@ -132,6 +150,29 @@ struct ServerSettings: Decodable {
             autoRetainInterval = 10
             retainModel = "claude-sonnet-4-6"
         }
+
+        // git.*
+        if let gitContainer = try? container.nestedContainer(keyedBy: GitKeys.self, forKey: .git) {
+            gitTargetBranch = try? gitContainer.decodeIfPresent(String.self, forKey: .targetBranch)
+            gitProtectedBranches = (try? gitContainer.decodeIfPresent([String].self, forKey: .protectedBranches)) ?? ["main", "master", "develop"]
+            gitSessionBranchPolicy = (try? gitContainer.decodeIfPresent(String.self, forKey: .sessionBranchPolicy)) ?? "keep"
+            gitMergeStrategy = (try? gitContainer.decodeIfPresent(String.self, forKey: .mergeStrategy)) ?? "merge"
+            gitAutoSetUpstream = (try? gitContainer.decodeIfPresent(Bool.self, forKey: .autoSetUpstream)) ?? true
+            gitCrashRecoveryAbortTimeoutMs = (try? gitContainer.decodeIfPresent(UInt64.self, forKey: .crashRecoveryAbortTimeoutMs)) ?? (30 * 60 * 1000)
+            gitOpTimeoutNetworkMs = (try? gitContainer.decodeIfPresent(UInt64.self, forKey: .opTimeoutNetworkMs)) ?? 60_000
+            gitOpTimeoutLocalMs = (try? gitContainer.decodeIfPresent(UInt64.self, forKey: .opTimeoutLocalMs)) ?? 30_000
+            gitSubagentConflictResolutionEnabled = (try? gitContainer.decodeIfPresent(Bool.self, forKey: .subagentConflictResolutionEnabled)) ?? true
+        } else {
+            gitTargetBranch = nil
+            gitProtectedBranches = ["main", "master", "develop"]
+            gitSessionBranchPolicy = "keep"
+            gitMergeStrategy = "merge"
+            gitAutoSetUpstream = true
+            gitCrashRecoveryAbortTimeoutMs = 30 * 60 * 1000
+            gitOpTimeoutNetworkMs = 60_000
+            gitOpTimeoutLocalMs = 30_000
+            gitSubagentConflictResolutionEnabled = true
+        }
     }
 
     struct CompactionSettings: Decodable {
@@ -233,6 +274,20 @@ struct ServerSettingsUpdate: Encodable {
 
     var skills: SkillsUpdate?
     var memory: MemoryUpdate?
+
+    struct GitUpdate: Encodable {
+        var targetBranch: String?
+        var protectedBranches: [String]?
+        var sessionBranchPolicy: String?
+        var mergeStrategy: String?
+        var autoSetUpstream: Bool?
+        var crashRecoveryAbortTimeoutMs: UInt64?
+        var opTimeoutNetworkMs: UInt64?
+        var opTimeoutLocalMs: UInt64?
+        var subagentConflictResolutionEnabled: Bool?
+    }
+
+    var git: GitUpdate?
 }
 
 /// Enable/disable toggle for a built-in hook.

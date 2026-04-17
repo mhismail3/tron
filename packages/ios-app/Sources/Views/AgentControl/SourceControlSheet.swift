@@ -10,27 +10,41 @@ struct SourceControlSheet: View {
     let sessionId: String
     var initialDiffResult: WorktreeGetDiffResult?
     var initialWorktreeStatus: WorktreeGetStatusResult?
-    var initialBranches: [SessionBranchInfo] = []
-    var onAskAgent: ((String) -> Void)?
+    /// Shared git workflow state (lock holder, pending merge, conflict banners,
+    /// divergence). Header chips and sub-sheets read peer-session signals from
+    /// here; populated by `ChatViewModel+Worktree.swift`/`+Repo.swift` handlers.
+    var gitWorkflowState: GitWorkflowState?
 
     @Environment(\.dismiss) private var dismiss
 
     // Self-managed data state
     @State private var diffResult: WorktreeGetDiffResult?
     @State private var worktreeStatus: WorktreeGetStatusResult?
-    @State private var branches: [SessionBranchInfo] = []
 
     // Git actions
     @State private var isCommitting = false
-    @State private var isMerging = false
     @State private var showCommitConfirmation = false
-    @State private var showMergeConfirmation = false
     @State private var errorMessage: String?
 
     // Sub-sheets
     @State private var selectedFileDetail: FileDetailData?
-    @State private var showAllBranches = false
     @State private var isReloading = false
+
+    // Git workflow sub-sheets
+    @State private var activeGitAction: GitActionSheet?
+    @State private var divergence: RepoDivergence?
+    @State private var repoSessionCount: Int = 0
+
+    // Server-sourced defaults for git sub-sheets. Fetched once in `.task`;
+    // fall back to hard-coded defaults if the RPC fails.
+    @State private var defaultMergeStrategy: String = "merge"
+    @State private var defaultSessionBranchPolicy: String = "keep"
+    @State private var defaultAutoSetUpstream: Bool = true
+
+    enum GitActionSheet: String, Identifiable {
+        case syncMain, finalize, push, repoSessions, conflictResolver
+        var id: String { rawValue }
+    }
 
     // MARK: - Computed Properties
 
@@ -49,17 +63,6 @@ struct SourceControlSheet: View {
         )
     }
 
-    private var canMerge: Bool {
-        SourceControlMetadata.canMerge(
-            worktreeStatus: worktreeStatus,
-            isLoading: isMerging
-        )
-    }
-
-    private var showBranchesButton: Bool {
-        diffResult?.isGitRepo == true || diffResult == nil
-    }
-
     // MARK: - Body
 
     var body: some View {
@@ -69,31 +72,34 @@ struct SourceControlSheet: View {
                 GeometryReader { geometry in
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 16) {
+                            if let info = worktreeStatus?.worktree {
+                                SourceControlStatusHeader(
+                                    branch: info.branch,
+                                    worktreePath: info.path,
+                                    divergence: divergence,
+                                    lockHolder: gitWorkflowState?.lockHolder,
+                                    pendingMerge: gitWorkflowState?.pendingMerge
+                                )
+                                .sheetSection()
+                            }
+
+                            gitActionsCard
+                                .sheetSection()
+
                             SessionChangesSection(
                                 diffResult: diffResult,
                                 worktreeStatus: worktreeStatus,
                                 stagedFiles: stagedFiles,
                                 unstagedFiles: unstagedFiles,
-                                branches: branches,
                                 onFileSelected: { selectedFileDetail = $0 },
-                                onShowAllBranches: { showAllBranches = true },
-                                hideBranchesRow: true,
                                 availableHeight: geometry.size.height
                             )
-                            .padding(.horizontal)
+                            .sheetSection()
                         }
                         .padding(.vertical)
                         .frame(width: geometry.size.width)
                     }
                     .frame(width: geometry.size.width)
-                }
-
-                // Bottom-pinned branches button
-                if showBranchesButton {
-                    viewAllBranchesButton
-                        .padding(.horizontal)
-                        .padding(.bottom, 16)
-                        .padding(.top, 8)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -101,7 +107,6 @@ struct SourceControlSheet: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     commitButton
-                    mergeButton
                 }
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: "Source Control", color: .tronTeal)
@@ -135,8 +140,14 @@ struct SourceControlSheet: View {
                 // Pre-populate from parent's data, then refresh in background
                 diffResult = initialDiffResult
                 worktreeStatus = initialWorktreeStatus
-                branches = initialBranches
                 await loadData()
+                await loadDivergence()
+                await loadGitDefaults()
+            }
+            // Sibling-session main advances / local finalize|sync|push all
+            // bump the tick — re-pull divergence chips so they stay fresh.
+            .onChange(of: gitWorkflowState?.divergenceRefreshTick ?? 0) { _, _ in
+                Task { await loadDivergence() }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
@@ -155,52 +166,149 @@ struct SourceControlSheet: View {
             .presentationDragIndicator(.hidden)
             .adaptivePresentationDetents([.medium, .large])
         }
-        .sheet(isPresented: $showAllBranches, onDismiss: {
-            Task { await loadData() }
-        }) {
-            AllBranchesSheet(
-                rpcClient: rpcClient,
-                sessionId: sessionId,
-                initialBranches: branches,
-                onAskAgent: { message in
-                    showAllBranches = false
-                    dismiss()
-                    onAskAgent?(message)
-                }
-            )
+        .sheet(item: $activeGitAction, onDismiss: {
+            Task { await loadData(); await loadDivergence() }
+        }) { action in
+            gitActionSheet(for: action)
         }
     }
 
-    // MARK: - View All Branches Button
+    // MARK: - Git Actions Card
 
-    private var viewAllBranchesButton: some View {
-        Button(action: { showAllBranches = true }) {
-            HStack(spacing: 10) {
-                Image(systemName: "arrow.triangle.branch")
+    private var gitActionsCard: some View {
+        VStack(spacing: 8) {
+            gitActionRow(
+                icon: "arrow.down.circle",
+                title: "Pull Remote",
+                subtitle: "Fetch all remote changes and fast-forward main",
+                tint: .tronEmerald
+            ) { activeGitAction = .syncMain }
+
+            gitActionRow(
+                icon: "checkmark.seal",
+                title: "Finalize Session",
+                subtitle: "Merge session into \(worktreeStatus?.worktree?.baseBranch ?? "main") and rebranch",
+                tint: .tronCoral
+            ) { activeGitAction = .finalize }
+
+            gitActionRow(
+                icon: "arrow.up.circle",
+                title: "Push",
+                subtitle: "Push session branch to origin",
+                tint: .tronSky
+            ) { activeGitAction = .push }
+
+            if repoSessionCount > 0 {
+                gitActionRow(
+                    icon: "rectangle.stack.person.crop",
+                    title: "\(repoSessionCount) Sessions in this Repo",
+                    subtitle: "View and jump to sibling sessions",
+                    tint: .tronAmber
+                ) { activeGitAction = .repoSessions }
+            }
+        }
+    }
+
+    private func gitActionRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronTeal)
-
-                Text("View All Branches")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTextPrimary)
-
-                if !branches.isEmpty {
-                    Text("\(branches.count)")
-                        .font(TronTypography.pillValue)
-                        .countBadge(.tronTeal)
+                    .foregroundStyle(tint)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(subtitle)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
-
-                Spacer()
-
+                Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.tronTextMuted)
             }
-            .padding(12)
-            .sectionFill(.tronTeal)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .sectionFill(tint, subtle: true)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Git Action Sheet Router
+
+    @ViewBuilder
+    private func gitActionSheet(for action: GitActionSheet) -> some View {
+        switch action {
+        case .syncMain:
+            SyncMainSubSheet(
+                rpcClient: rpcClient,
+                sessionId: sessionId,
+                suggestedTargetBranch: worktreeStatus?.worktree?.baseBranch
+            )
+        case .finalize:
+            FinalizeSessionSubSheet(
+                rpcClient: rpcClient,
+                sessionId: sessionId,
+                suggestedTargetBranch: worktreeStatus?.worktree?.baseBranch,
+                defaultStrategy: defaultMergeStrategy,
+                defaultSessionBranchPolicy: defaultSessionBranchPolicy,
+                onConflicts: { _ in
+                    activeGitAction = .conflictResolver
+                }
+            )
+        case .push:
+            PushSubSheet(
+                rpcClient: rpcClient,
+                sessionId: sessionId,
+                currentBranch: worktreeStatus?.worktree?.branch ?? "",
+                defaultAutoSetUpstream: defaultAutoSetUpstream
+            )
+        case .repoSessions:
+            RepoSessionsSubSheet(
+                rpcClient: rpcClient,
+                sessionId: sessionId,
+                gitWorkflowState: gitWorkflowState,
+                onSelectSession: { _ in
+                    activeGitAction = nil
+                    dismiss()
+                }
+            )
+        case .conflictResolver:
+            ConflictResolverSubSheet(
+                rpcClient: rpcClient,
+                sessionId: sessionId,
+                gitWorkflowState: gitWorkflowState
+            )
+        }
+    }
+
+    private func loadDivergence() async {
+        divergence = try? await rpcClient.repo.getDivergence(sessionId: sessionId)
+        if let sessions = try? await rpcClient.repo.listSessions(sessionId: sessionId) {
+            repoSessionCount = max(0, sessions.count - 1)
+        }
+    }
+
+    /// Fetch `git.*` defaults from server settings so sub-sheets reflect the
+    /// user's preferences (strategy, branch policy, upstream behavior) instead
+    /// of the hard-coded fallbacks. Failure silently keeps the defaults.
+    private func loadGitDefaults() async {
+        guard let settings = try? await rpcClient.settings.get() else { return }
+        defaultMergeStrategy = settings.gitMergeStrategy
+        defaultSessionBranchPolicy = settings.gitSessionBranchPolicy
+        defaultAutoSetUpstream = settings.gitAutoSetUpstream
     }
 
     // MARK: - Toolbar Buttons
@@ -234,50 +342,14 @@ struct SourceControlSheet: View {
         }
     }
 
-    @ViewBuilder
-    private var mergeButton: some View {
-        Button { showMergeConfirmation = true } label: {
-            if isMerging {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: "arrow.triangle.merge")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(canMerge ? .tronTeal : .tronTextMuted.opacity(0.5))
-            }
-        }
-        .disabled(!canMerge || isMerging)
-        .accessibilityLabel("Merge")
-        .popover(isPresented: $showMergeConfirmation, arrowEdge: .top) {
-            GlassActionSheet(
-                actions: [
-                    GlassAction(
-                        title: "Merge to \(worktreeStatus?.worktree?.baseBranch ?? "main")",
-                        icon: "arrow.triangle.merge",
-                        color: .tronTeal,
-                        role: .default
-                    ) {
-                        showMergeConfirmation = false
-                        mergeChanges()
-                    },
-                    GlassAction(title: "Cancel", icon: nil, color: .tronTextMuted, role: .cancel) {
-                        showMergeConfirmation = false
-                    }
-                ]
-            )
-            .presentationCompactAdaptation(.popover)
-        }
-    }
-
     // MARK: - Data Loading
 
     private func loadData() async {
         do {
             async let diff = rpcClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
             async let status: WorktreeGetStatusResult? = { try? await rpcClient.worktree.getStatus(sessionId: sessionId) }()
-            async let branchList = { (try? await rpcClient.worktree.listSessionBranches(sessionId: sessionId)) ?? [] }()
             diffResult = try await diff
             worktreeStatus = await status
-            branches = await branchList
         } catch {
             errorMessage = "Failed to load changes: \(error.localizedDescription)"
         }
@@ -306,28 +378,4 @@ struct SourceControlSheet: View {
         }
     }
 
-    private func mergeChanges() {
-        Task {
-            isMerging = true
-            defer { isMerging = false }
-
-            do {
-                let targetBranch = worktreeStatus?.worktree?.baseBranch ?? "main"
-                let mergeResult = try await rpcClient.worktree.merge(
-                    sessionId: sessionId,
-                    targetBranch: targetBranch
-                )
-                if !mergeResult.success {
-                    if let conflicts = mergeResult.conflicts, !conflicts.isEmpty {
-                        errorMessage = "Merge conflicts in: \(conflicts.joined(separator: ", "))"
-                    } else if let error = mergeResult.error {
-                        errorMessage = error
-                    }
-                }
-                await loadData()
-            } catch {
-                errorMessage = "Merge failed: \(error.localizedDescription)"
-            }
-        }
-    }
 }

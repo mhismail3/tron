@@ -37,6 +37,7 @@ pub mod events;
 pub(crate) mod job;
 pub mod filesystem;
 pub mod git;
+pub mod git_workflow;
 pub mod import;
 pub mod logs;
 pub mod mcp;
@@ -278,6 +279,41 @@ fn register_platform(registry: &mut MethodRegistry) {
 
     // Git
     registry.register("git.clone", git::CloneHandler);
+
+    // Git workflow (Phase 5)
+    registry.register("git.syncMain", git_workflow::SyncMainHandler);
+    registry.register("git.push", git_workflow::PushHandler);
+    registry.register(
+        "git.listLocalBranches",
+        git_workflow::ListLocalBranchesHandler,
+    );
+    registry.register(
+        "worktree.finalizeSession",
+        git_workflow::FinalizeSessionHandler,
+    );
+    registry.register("worktree.startMerge", git_workflow::StartMergeHandler);
+    registry.register(
+        "worktree.listConflicts",
+        git_workflow::ListConflictsHandler,
+    );
+    registry.register(
+        "worktree.resolveConflict",
+        git_workflow::ResolveConflictHandler,
+    );
+    registry.register(
+        "worktree.continueMerge",
+        git_workflow::ContinueMergeHandler,
+    );
+    registry.register("worktree.abortMerge", git_workflow::AbortMergeHandler);
+    registry.register(
+        "worktree.resolveConflictsWithSubagent",
+        git_workflow::ResolveConflictsWithSubagentHandler,
+    );
+    registry.register(
+        "repo.listSessions",
+        git_workflow::ListRepoSessionsHandler,
+    );
+    registry.register("repo.getDivergence", git_workflow::GetDivergenceHandler);
 
     // Sandbox
     registry.register("sandbox.listContainers", sandbox::ListContainersHandler);
@@ -541,8 +577,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            135,
-            "expected 135 methods, got {}",
+            147,
+            "expected 147 methods, got {}",
             reg.methods().len()
         );
     }

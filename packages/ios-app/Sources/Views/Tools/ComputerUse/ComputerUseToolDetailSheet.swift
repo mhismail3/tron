@@ -149,7 +149,7 @@ struct ComputerUseToolDetailSheet: View {
                         .foregroundStyle(.purple)
 
                     Text(actionDisplayName)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(tint.body)
                 }
 
@@ -232,11 +232,11 @@ struct ComputerUseToolDetailSheet: View {
                 .foregroundStyle(tint.subtle)
                 .frame(width: 16)
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(tint.secondary)
             Spacer()
             Text(value)
-                .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
                 .foregroundStyle(tint.body)
                 .lineLimit(2)
                 .multilineTextAlignment(.trailing)
@@ -275,7 +275,7 @@ struct ComputerUseToolDetailSheet: View {
             trailing: ToolCopyButton(content: result, accent: .purple)
         ) {
             Text(result)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(tint.body)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -287,7 +287,7 @@ struct ComputerUseToolDetailSheet: View {
     private func errorSection(_ result: String) -> some View {
         ToolDetailSection(title: "Error", accent: .tronError, tint: tint) {
             Text(result)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronError)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)

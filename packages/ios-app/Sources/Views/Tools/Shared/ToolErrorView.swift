@@ -20,7 +20,7 @@ struct ToolErrorView: View {
                     .foregroundStyle(.tronError)
 
                 Text(title)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(.tronError)
             }
 
@@ -36,7 +36,7 @@ struct ToolErrorView: View {
             }
 
             Text(suggestion)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(tint.subtle)
         }
     }

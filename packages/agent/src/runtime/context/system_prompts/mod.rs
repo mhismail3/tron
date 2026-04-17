@@ -170,6 +170,71 @@ evidence:
 - If no identity-relevant facts were revealed, omit the core memory section entirely.
 - Do NOT include JSON, code fences, or tool call traces."#;
 
+/// Git workflow prompt block — injected conditionally when the session
+/// has an active worktree.
+///
+/// Teaches the LLM:
+/// - it is inside an isolated session branch in a worktree (not on `main`);
+/// - how to reason about source-control state via standard `git` commands;
+/// - which destructive operations are reserved for the user's Source
+///   Control sheet (sync, push, switch, finalize merge) — the agent does
+///   not drive those directly.
+pub const GIT_WORKFLOW_PROMPT: &str = r#"
+## Git Workflow
+
+You are running inside an **isolated git worktree** on a dedicated session branch — **not** on the user's `main`. Every file edit lands in that worktree; the user's editor at the repo root is untouched until the user chooses to finalise via the iOS Source Control sheet.
+
+### What you do directly
+
+Use `Bash` with standard `git` commands for everything source-control related. There are no typed git tools — just `git` via the shell.
+
+Common read-only inspection:
+
+- `git status` — working tree state.
+- `git diff` / `git diff --cached` — unstaged / staged changes.
+- `git log --oneline -20` — recent history on the current branch.
+- `git branch --show-current` — the session branch name.
+- `git log --oneline <branch>..HEAD` — commits on this branch vs another.
+
+Making commits as you work:
+
+- `git add <path>` (or `git add -A` when appropriate) followed by `git commit -m "<message>"`.
+- Commit small, logical units. The user reviews your branch in the Source Control sheet before finalising.
+
+### What the user drives (do NOT do these yourself)
+
+These operations belong to the user via the Source Control sheet. Don't run them from `Bash`:
+
+- `git push` — the user decides when to publish the branch.
+- `git merge <session> → main`, `git rebase --onto main`, finalizing a session — the user drives finalize from the sheet.
+- `git fetch origin` + fast-forwarding `main` — the user taps "Sync Main".
+- `git checkout <other-branch>` / `git switch <other-branch>` — the user drives branch switching from the sheet.
+
+If you believe one of these is needed to make progress, tell the user what you want them to do and why — **don't** shell out to do it yourself.
+
+### Merge conflicts
+
+If a merge or rebase is in progress and produces conflicts (you'll see `<<<<<<<` / `=======` / `>>>>>>>` markers in files, and `git status` will report `Unmerged paths`):
+
+1. Enumerate: `git diff --name-only --diff-filter=U`.
+2. For each conflicted file, resolve using one of:
+   - `git checkout --ours -- <path> && git add -- <path>` (keep this branch's version wholesale),
+   - `git checkout --theirs -- <path> && git add -- <path>` (keep incoming version wholesale),
+   - `Edit` the file manually to produce marker-free merged content, then `git add -- <path>`.
+3. When `git diff --name-only --diff-filter=U` is empty: finish with `git commit --no-edit` (merge) or `git rebase --continue` (rebase).
+4. Abort path (last resort): `git merge --abort` or `git rebase --abort`.
+
+Note: the user can instead delegate conflict resolution to a dedicated subagent from the Source Control sheet — that's usually preferable for large conflict sets.
+
+### Hard rules
+
+- **NEVER** run destructive operations on uncommitted work: `git reset --hard`, `git checkout --`, `git clean -f`, `git restore --staged` on files you didn't modify, etc. Ask the user first.
+- **NEVER** force-push (`--force`, `--force-with-lease`) anywhere. This is the user's decision from the Source Control sheet if needed.
+- **NEVER** push to a protected branch (`main`, `master`, `develop`).
+- **NEVER** edit `.git/` directly.
+- The user's editor is still open at the repo root on `main`. Changes you make inside the session worktree are invisible there until the user finalises.
+"#;
+
 // =============================================================================
 // File-Based System Prompt Loading
 // =============================================================================
@@ -414,6 +479,44 @@ mod tests {
         assert!(MEMORY_RETAIN_SUMMARIZER_PROMPT.contains("Completed"));
         assert!(MEMORY_RETAIN_SUMMARIZER_PROMPT.contains("Context"));
         assert!(MEMORY_RETAIN_SUMMARIZER_PROMPT.contains("title"));
+    }
+
+    #[test]
+    fn git_workflow_prompt_covers_key_surface() {
+        assert!(!GIT_WORKFLOW_PROMPT.is_empty());
+        // Section heading so it renders correctly when appended to memory.
+        assert!(GIT_WORKFLOW_PROMPT.contains("## Git Workflow"));
+        // The prompt must NOT mention the now-removed typed git tools —
+        // a regression there would teach the LLM to call non-existent
+        // tools and fail noisily at runtime.
+        for removed in [
+            "WorktreeStatus",
+            "GitSyncMain",
+            "GitPush",
+            "GitSwitch",
+            "GitMergeSession",
+            "GitConflict",
+        ] {
+            assert!(
+                !GIT_WORKFLOW_PROMPT.contains(removed),
+                "GIT_WORKFLOW_PROMPT must not reference removed tool `{removed}`"
+            );
+        }
+        // Core raw-git guidance the agent needs so it doesn't have to
+        // guess the shape of the workflow.
+        for needle in [
+            "isolated git worktree",
+            "git status",
+            "git add",
+            "git commit",
+            "<<<<<<<",
+            "Source Control sheet",
+        ] {
+            assert!(
+                GIT_WORKFLOW_PROMPT.contains(needle),
+                "GIT_WORKFLOW_PROMPT must mention `{needle}`"
+            );
+        }
     }
 
     // ── System prompt builders ───────────────────────────────────────────

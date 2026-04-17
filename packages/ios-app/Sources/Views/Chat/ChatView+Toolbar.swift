@@ -58,7 +58,7 @@ extension ChatView {
                 }
                 TypewriterText(
                     text: eventStoreManager.activeSession?.displayTitle ?? "Chat",
-                    font: TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold),
+                    font: TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold),
                     color: .tronEmerald
                 )
                 .lineLimit(1)

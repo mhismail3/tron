@@ -61,7 +61,7 @@ struct SearchMatchesSection: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()
@@ -111,14 +111,14 @@ struct SearchFileGroupView: View {
                     .foregroundStyle(.purple)
 
                 Text(group.filePath)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(tint.secondary)
                     .lineLimit(1)
 
                 Spacer(minLength: 4)
 
                 Text("\(group.matches.count)")
-                    .font(TronTypography.mono(size: 9, weight: .medium))
+                    .font(TronTypography.sans(size: 9, weight: .medium))
                     .foregroundStyle(.purple)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -182,7 +182,7 @@ struct SearchFileListSection: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Files")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()
@@ -212,7 +212,7 @@ struct SearchFileListSection: View {
                 .frame(width: 16, alignment: .center)
 
             Text(path)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(tint.body)
                 .lineLimit(1)
         }
@@ -233,7 +233,7 @@ struct SearchStreamingMatchesSection: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()

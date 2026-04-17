@@ -9,7 +9,7 @@ struct LoadingHistoryView: View {
             ProgressView()
                 .tint(.tronPurple)
             Text("Loading history...")
-                .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
                 .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

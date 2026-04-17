@@ -51,7 +51,7 @@ struct CompactionDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
             Text("Compression")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
             // Card content
@@ -96,7 +96,7 @@ struct CompactionDetailSheet: View {
             // Section header
             HStack {
                 Text("Summary")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 
                 Spacer()
@@ -121,7 +121,7 @@ struct CompactionDetailSheet: View {
                         .foregroundStyle(.cyan)
 
                     Text("Compaction Summary")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.cyan)
 
                     Spacer()
@@ -130,14 +130,14 @@ struct CompactionDetailSheet: View {
                 // Summary content
                 if let summary = summary, !summary.isEmpty {
                     Text(summary)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextSecondary)
                         .lineSpacing(4)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text("No summary available")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextDisabled)
                         .italic()
                 }
@@ -194,7 +194,7 @@ private struct CompactionStatBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
             if !value.isEmpty {
                 Text(value)
                     .font(TronTypography.pillValue)

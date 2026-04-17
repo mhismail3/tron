@@ -34,7 +34,7 @@ struct StreamSheetView: View {
                             .font(.system(size: 40))
                             .foregroundStyle(.tronTextMuted)
                         Text("Stream ended")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextMuted)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -44,7 +44,7 @@ struct StreamSheetView: View {
                             .progressViewStyle(CircularProgressViewStyle(tint: .tronIndigo))
                             .scaleEffect(1.5)
                         Text("Waiting for stream...")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextMuted)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -68,7 +68,7 @@ struct StreamSheetView: View {
                         Image(systemName: "play.rectangle.fill")
                             .foregroundStyle(.tronIndigo)
                         Text(isActive ? "Live Stream" : "Stream Ended")
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(.tronIndigo)
                     }
                 }

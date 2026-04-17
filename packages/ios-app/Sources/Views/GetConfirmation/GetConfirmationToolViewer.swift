@@ -16,7 +16,7 @@ struct GetConfirmationToolViewer: View {
                 statusIcon
 
                 Text(statusText)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(textColor)
                     .lineLimit(1)
 

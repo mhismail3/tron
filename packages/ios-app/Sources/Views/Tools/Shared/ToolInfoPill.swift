@@ -14,7 +14,7 @@ struct ToolInfoPill: View {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
         }
         .foregroundStyle(color)
         .padding(.horizontal, 8)

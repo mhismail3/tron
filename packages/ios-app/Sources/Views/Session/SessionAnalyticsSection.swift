@@ -36,19 +36,19 @@ struct SessionAnalyticsSection: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(TokenFormatter.format(totalTokens))
-                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronRose)
                 Text("tokens")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(formatCost(analytics.totalCost))
-                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronRose)
                 Text("total cost")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             }
 
@@ -83,11 +83,11 @@ struct SessionAnalyticsSection: View {
     private func categoryPill(label: String, tokens: Int) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                .font(TronTypography.sans(size: TronTypography.sizeXS))
                 .foregroundStyle(.tronTextMuted)
 
             Text(TokenFormatter.format(tokens))
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronRose)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -126,10 +126,10 @@ struct SessionAnalyticsSection: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                .font(TronTypography.sans(size: TronTypography.sizeXS))
                 .foregroundStyle(.tronTextMuted)
             Text(value)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(color ?? .tronRose)
         }
         .padding(.horizontal, 8)

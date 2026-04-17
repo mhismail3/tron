@@ -59,17 +59,10 @@ enum TronTypography {
 
     // MARK: - Factory Methods
 
-    /// Create a font in the user-selected family
-    @MainActor
-    static func mono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        TronFontLoader.createFont(
-            size: size,
-            weight: TronFontLoader.weight(from: weight),
-            mono: false
-        )
-    }
-
-    /// Create a font in the user-selected family (alias for mono)
+    /// Create a font in the user-selected body family (proportional).
+    /// For monospace content (paths, code, hashes, aligned values) use
+    /// `code(...)` instead — that's the only entry point that returns a
+    /// true monospace face.
     @MainActor
     static func sans(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         TronFontLoader.createFont(
@@ -79,7 +72,8 @@ enum TronTypography {
         )
     }
 
-    /// Create a Recursive Mono font — only for actual code content
+    /// Create a Recursive Mono font — the only true monospace entry point.
+    /// Use for file paths, code, hex, hashes, aligned tabular text, etc.
     @MainActor
     static func code(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         TronFontLoader.createFont(
@@ -113,30 +107,30 @@ enum TronTypography {
     // MARK: - Semantic Presets (Selected Font)
 
     /// Secondary text, captions - 11pt
-    @MainActor static var codeCaption: Font { mono(size: sizeBody2) }
+    @MainActor static var codeCaption: Font { sans(size: sizeBody2) }
 
     /// Small metrics text - 10pt
-    @MainActor static var codeSM: Font { mono(size: sizeCaption) }
+    @MainActor static var codeSM: Font { sans(size: sizeCaption) }
 
     /// File paths - Medium 11pt
-    @MainActor static var filePath: Font { mono(size: sizeBody2, weight: .medium) }
+    @MainActor static var filePath: Font { sans(size: sizeBody2, weight: .medium) }
 
     /// Pill values (token counts) - Medium 10pt
-    @MainActor static var pillValue: Font { mono(size: sizeCaption, weight: .medium) }
+    @MainActor static var pillValue: Font { sans(size: sizeCaption, weight: .medium) }
 
     /// Timer display - Bold 56pt
-    @MainActor static var timerDisplay: Font { mono(size: sizeTimer, weight: .bold) }
+    @MainActor static var timerDisplay: Font { sans(size: sizeTimer, weight: .bold) }
 
     // MARK: - Semantic Presets (Selected Font)
 
     /// Chat messages - 14pt
-    @MainActor static var messageBody: Font { mono(size: sizeBody) }
+    @MainActor static var messageBody: Font { sans(size: sizeBody) }
 
     /// Input fields - 15pt
-    @MainActor static var input: Font { mono(size: sizeBodyLG) }
+    @MainActor static var input: Font { sans(size: sizeBodyLG) }
 
     /// Display text - SemiBold 32pt
-    @MainActor static var display: Font { mono(size: sizeDisplay, weight: .semibold) }
+    @MainActor static var display: Font { sans(size: sizeDisplay, weight: .semibold) }
 
     /// Primary buttons - SemiBold 16pt
     @MainActor static var button: Font { sans(size: sizeTitle, weight: .semibold) }

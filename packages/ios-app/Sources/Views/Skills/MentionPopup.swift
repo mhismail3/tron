@@ -86,7 +86,7 @@ struct MentionPopup: View {
                         .foregroundStyle(style.tintColor)
 
                     Text(style.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(style.tintColor)
 
                     if !query.isEmpty {
@@ -195,7 +195,7 @@ private struct MentionRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
                         Text("\(style.prefix)\(skill.name)")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(tint.name)
 
                         ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in

@@ -54,7 +54,7 @@ private struct SourceHeader: View {
 
                 if case .raw(let method, _) = mode, method != "GET" {
                     Text(method)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .bold))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -63,7 +63,7 @@ private struct SourceHeader: View {
                 }
 
                 Text(source.title.isEmpty ? source.domain : source.title)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextPrimary)
                     .lineLimit(1)
             }
@@ -135,7 +135,7 @@ private struct HttpStatusBadge: View {
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
             Text(statusText)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(statusColor)
         }
     }
@@ -164,7 +164,7 @@ private struct AnswerSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(displayAnswer)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .regular))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .regular))
                 .foregroundStyle(.tronTextSecondary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -193,7 +193,7 @@ private struct WebFetchErrorBanner: View {
                 .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronWarning)
             Text(message)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .regular))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .regular))
                 .foregroundStyle(.tronWarning)
         }
         .padding(8)

@@ -14,7 +14,7 @@ struct BashCommandSection: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let desc = commandDescription, !desc.isEmpty {
                     Text(desc)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(tint.secondary)
                 }
 
@@ -175,7 +175,7 @@ struct BashLineNumberedOutput: View {
                         Image(systemName: "ellipsis")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         Text("\(config.hiddenLineCount) more lines")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                         Image(systemName: "chevron.down")
                             .font(TronTypography.sans(size: TronTypography.sizeSM))
                     }
@@ -237,7 +237,7 @@ struct BashStreamingOutputView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Output")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()

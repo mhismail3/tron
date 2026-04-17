@@ -54,7 +54,7 @@ struct ContainerDetailSheet: View {
                                 Text("Open")
                             }
                         }
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronIndigo)
                     }
                 }
@@ -64,7 +64,7 @@ struct ContainerDetailSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronIndigo)
                 }
             }
@@ -79,7 +79,7 @@ struct ContainerDetailSheet: View {
         HStack(spacing: 16) {
             // Status badge
             Text(container.status)
-                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .medium))
                 .foregroundStyle(statusColor)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -109,7 +109,7 @@ struct ContainerDetailSheet: View {
     private var portsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Ports")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronIndigo.opacity(0.7))
 
             ForEach(container.ports, id: \.self) { port in
@@ -119,13 +119,13 @@ struct ContainerDetailSheet: View {
                         .foregroundStyle(.tronIndigo.opacity(0.6))
 
                     Text(port)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.tronTextPrimary)
 
                     if let ip = hostIp {
                         let hostPort = port.split(separator: ":").first.map(String.init) ?? port
                         Text("http://\(ip):\(hostPort)")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3))
                             .foregroundStyle(.tronIndigo.opacity(0.6))
                     }
 
@@ -147,7 +147,7 @@ struct ContainerDetailSheet: View {
     private var detailsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Details")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronIndigo.opacity(0.7))
 
             if let purpose = container.purpose {
@@ -176,10 +176,10 @@ struct ContainerDetailSheet: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(TronTypography.mono(size: TronTypography.sizeSM))
+                    .font(TronTypography.sans(size: TronTypography.sizeSM))
                     .foregroundStyle(.tronTextMuted)
                 Text(value)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
                     .truncationMode(.middle)
@@ -194,12 +194,12 @@ struct ContainerDetailSheet: View {
     private var rawJSONSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Sandbox Record")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(prettyPrintContainer())
-                    .font(TronTypography.mono(size: 11))
+                    .font(TronTypography.sans(size: 11))
                     .foregroundStyle(.tronTextSecondary)
                     .lineSpacing(3)
                     .textSelection(.enabled)

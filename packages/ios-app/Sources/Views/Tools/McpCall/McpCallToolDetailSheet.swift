@@ -96,7 +96,7 @@ struct McpCallToolDetailSheet: View {
     private var serverSection: some View {
         ToolDetailSection(title: "Server", accent: .tronEmerald, tint: tint) {
             Text("\(server).\(tool)")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(tint.body)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -128,7 +128,7 @@ struct McpCallToolDetailSheet: View {
     private var resultSection: some View {
         ToolDetailSection(title: "Result", accent: .tronEmerald, tint: tint, trailing: ToolCopyButton(content: resultText, accent: .tronEmerald)) {
             Text(resultText)
-                .font(resultLooksLikeCode ? TronTypography.codeContent : TronTypography.mono(size: TronTypography.sizeBody))
+                .font(resultLooksLikeCode ? TronTypography.codeContent : TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(tint.body)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)

@@ -88,6 +88,26 @@ impl WorktreeCoordinator {
             base_branch: info.base_branch.clone(),
         });
 
+        // Emit a generic `metadata.update` so iOS (and any other
+        // consumer of the persisted event log) can react to
+        // `worktree.active` becoming set without knowing about the
+        // specific `WorktreeAcquired` variant.
+        let _ = self.event_store.append(&AppendOptions {
+            session_id,
+            event_type: EventType::MetadataUpdate,
+            payload: json!({
+                "key": "worktree.active",
+                "newValue": {
+                    "path": info.worktree_path.to_string_lossy(),
+                    "branch": info.branch,
+                    "baseBranch": info.base_branch,
+                    "repoRoot": info.repo_root.to_string_lossy(),
+                },
+            }),
+            parent_id: None,
+            sequence: None,
+        });
+
         debug!(session_id, branch = %info.branch, "worktree acquired");
         Ok(AcquireResult::Acquired(info))
     }
@@ -130,6 +150,20 @@ impl WorktreeCoordinator {
             final_commit: release_info.final_commit.clone(),
             branch_preserved: release_info.branch_preserved,
             deleted: release_info.deleted,
+        });
+
+        // Mirror of the acquire-time metadata.update — clears
+        // `worktree.active` so iOS-side state machines can tear down
+        // git UI without a dedicated release event handler.
+        let _ = self.event_store.append(&AppendOptions {
+            session_id,
+            event_type: EventType::MetadataUpdate,
+            payload: json!({
+                "key": "worktree.active",
+                "newValue": serde_json::Value::Null,
+            }),
+            parent_id: None,
+            sequence: None,
         });
 
         Ok(())

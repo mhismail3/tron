@@ -87,7 +87,7 @@ struct FileDetailSheet: View {
             statusIcon
 
             Text(statusLabel)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(tint.secondary)
 
             Spacer()
@@ -96,12 +96,12 @@ struct FileDetailSheet: View {
                 HStack(spacing: 6) {
                     if file.additions > 0 {
                         Text("+\(file.additions)")
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                             .foregroundStyle(.tronSuccess)
                     }
                     if file.deletions > 0 {
                         Text("-\(file.deletions)")
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                             .foregroundStyle(.tronError)
                     }
                 }
@@ -220,7 +220,7 @@ struct FileDetailSheet: View {
                 .fill(langColor.opacity(0.15))
                 .frame(height: 1)
             Text("\u{22EF}")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted.opacity(0.4))
             Rectangle()
                 .fill(langColor.opacity(0.15))
@@ -399,7 +399,7 @@ struct FileDetailSheet: View {
                 .font(TronTypography.sans(size: 28))
                 .foregroundStyle(tint.subtle)
             Text(message)
-                .font(TronTypography.mono(size: TronTypography.sizeBody))
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(tint.subtle)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

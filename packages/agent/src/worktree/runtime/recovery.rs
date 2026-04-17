@@ -2,15 +2,21 @@
 //!
 //! Scans for worktrees with branches matching the session prefix
 //! that don't belong to any active session.
+//!
+//! Also scans active session worktrees for in-progress merges/rebases
+//! (`.git/MERGE_HEAD`, `.git/rebase-merge/`) and reconstructs
+//! `PendingMergeState` entries so the coordinator's conflict-resolution
+//! state survives a crash mid-merge.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tracing::{debug, info, warn};
 
 use crate::worktree::errors::Result;
 use crate::worktree::git::GitExecutor;
-use crate::worktree::types::WorktreeConfig;
+use crate::worktree::types::{MergeStrategy, PendingMergeState, WorktreeConfig, WorktreeInfo};
 
 /// Information about a recovered orphan worktree.
 #[derive(Clone, Debug)]
@@ -164,6 +170,135 @@ pub async fn recover_repo(
     }
 
     Ok(recovered)
+}
+
+/// Scan a session's worktree for an in-progress merge or rebase and
+/// return a reconstructed `PendingMergeState` if one exists.
+///
+/// Source of truth is `.git/MERGE_HEAD` (for merges) or `.git/rebase-merge/`
+/// (for rebases). These stick around across a server restart, so we can
+/// surface them to the UI and let the user decide whether to continue or
+/// abort.
+///
+/// Best-effort: if we can't read any metadata (e.g. MERGE_MSG missing) we
+/// still return a `PendingMergeState` with placeholder source/target.
+pub async fn reconstruct_pending_merge(
+    info: &WorktreeInfo,
+    git: &GitExecutor,
+) -> Option<PendingMergeState> {
+    let has_merge = git
+        .has_merge_in_progress(&info.worktree_path)
+        .await
+        .unwrap_or(false);
+    let has_rebase = git
+        .has_rebase_in_progress(&info.worktree_path)
+        .await
+        .unwrap_or(false);
+    if !has_merge && !has_rebase {
+        return None;
+    }
+
+    let strategy = if has_rebase {
+        MergeStrategy::Rebase
+    } else {
+        MergeStrategy::Merge
+    };
+
+    // Best-effort source/target recovery.
+    let (source_branch, target_branch) = recover_merge_source_target(&info.worktree_path, git)
+        .await
+        .unwrap_or_else(|| (info.branch.clone(), default_target_branch(info)));
+
+    let started_at_ms = file_mtime_ms(
+        info.worktree_path
+            .join(if has_rebase {
+                ".git/rebase-merge"
+            } else {
+                ".git/MERGE_HEAD"
+            })
+            .as_path(),
+    )
+    .unwrap_or_else(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    });
+
+    Some(PendingMergeState {
+        session_id: info.session_id.clone(),
+        source_branch,
+        target_branch,
+        strategy,
+        started_at_ms,
+        crash_recovered: true,
+    })
+}
+
+/// Best-effort extraction of `(source, target)` for an in-progress merge.
+///
+/// Tries `.git/MERGE_MSG` first (git writes `Merge branch 'foo' into bar`
+/// style content) then `.git/rebase-merge/head-name` + `onto_name`.
+async fn recover_merge_source_target(
+    worktree: &Path,
+    git: &GitExecutor,
+) -> Option<(String, String)> {
+    let git_dir: PathBuf = git.git_dir_path(worktree).await.ok()?;
+
+    // Merge form.
+    if let Ok(msg) = std::fs::read_to_string(git_dir.join("MERGE_MSG"))
+        && let Some((src, tgt)) = parse_merge_msg(&msg)
+    {
+        return Some((src, tgt));
+    }
+
+    // Rebase form.
+    let rb = git_dir.join("rebase-merge");
+    if rb.is_dir() {
+        let head_name = std::fs::read_to_string(rb.join("head-name"))
+            .ok()
+            .map(|s| s.trim().trim_start_matches("refs/heads/").to_string());
+        let onto_name = std::fs::read_to_string(rb.join("onto_name"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .or_else(|| std::fs::read_to_string(rb.join("onto")).ok());
+        if let (Some(src), Some(tgt)) = (head_name, onto_name) {
+            return Some((src, tgt.trim().to_string()));
+        }
+    }
+    None
+}
+
+/// Extract source/target from a MERGE_MSG file body.
+///
+/// Examples the parser accepts:
+/// - `Merge branch 'feature/a' into main`
+/// - `Merge branch 'feature/a'` (target defaults to `main`)
+fn parse_merge_msg(msg: &str) -> Option<(String, String)> {
+    let first = msg.lines().next()?;
+    // Crude but reliable: look for single-quoted source.
+    let src_start = first.find('\'')?;
+    let src_end = first[src_start + 1..].find('\'')?;
+    let source = first[src_start + 1..src_start + 1 + src_end].to_string();
+
+    let after = &first[src_start + 1 + src_end + 1..];
+    let target = after
+        .split_whitespace()
+        .nth(1) // "into <branch>"
+        .map(std::string::ToString::to_string)
+        .unwrap_or_else(|| "main".to_string());
+    Some((source, target))
+}
+
+fn default_target_branch(info: &WorktreeInfo) -> String {
+    info.base_branch.clone().unwrap_or_else(|| "main".into())
+}
+
+fn file_mtime_ms(path: &Path) -> Option<i64> {
+    let md = std::fs::metadata(path).ok()?;
+    let mt = md.modified().ok()?;
+    let d = mt.duration_since(UNIX_EPOCH).ok()?;
+    Some(d.as_millis() as i64)
 }
 
 #[cfg(test)]
@@ -326,6 +461,72 @@ mod tests {
         assert!(
             result.is_empty(),
             "renamed active branch should not be treated as orphan"
+        );
+    }
+
+    #[tokio::test]
+    async fn reconstruct_pending_merge_from_merge_head() {
+        use crate::worktree::test_fixtures as tf;
+        let dir = tempdir().unwrap();
+        let git = tf::init_repo(dir.path()).await;
+        tf::make_conflict(dir.path(), "a", "b", "f.txt").await;
+        // Kick off a conflicting merge without aborting.
+        crate::worktree::conflict::start_merge_keep_conflicts(
+            dir.path(),
+            "sess-1",
+            "b",
+            "a",
+            crate::worktree::types::MergeStrategy::Merge,
+            &git,
+        )
+        .await
+        .unwrap();
+
+        // Simulate coordinator restart: fabricate a WorktreeInfo pointing
+        // at the same dir (no worktree separation in this test).
+        let info = WorktreeInfo {
+            session_id: "sess-1".into(),
+            worktree_path: dir.path().to_path_buf(),
+            branch: "b".into(),
+            base_commit: git.head_commit(dir.path()).await.unwrap(),
+            base_branch: Some("a".into()),
+            original_working_dir: dir.path().to_path_buf(),
+            repo_root: dir.path().to_path_buf(),
+        };
+        let pending = reconstruct_pending_merge(&info, &git)
+            .await
+            .expect("pending merge must be reconstructed");
+        assert_eq!(pending.session_id, "sess-1");
+        assert!(pending.crash_recovered);
+        assert_eq!(pending.strategy, MergeStrategy::Merge);
+    }
+
+    #[tokio::test]
+    async fn reconstruct_pending_merge_none_when_clean() {
+        use crate::worktree::test_fixtures as tf;
+        let dir = tempdir().unwrap();
+        let git = tf::init_repo(dir.path()).await;
+        let info = WorktreeInfo {
+            session_id: "sess-clean".into(),
+            worktree_path: dir.path().to_path_buf(),
+            branch: "main".into(),
+            base_commit: git.head_commit(dir.path()).await.unwrap(),
+            base_branch: Some("main".into()),
+            original_working_dir: dir.path().to_path_buf(),
+            repo_root: dir.path().to_path_buf(),
+        };
+        assert!(reconstruct_pending_merge(&info, &git).await.is_none());
+    }
+
+    #[test]
+    fn parse_merge_msg_shapes() {
+        assert_eq!(
+            parse_merge_msg("Merge branch 'feature/a' into main\n"),
+            Some(("feature/a".to_string(), "main".to_string()))
+        );
+        assert_eq!(
+            parse_merge_msg("Merge branch 'foo'"),
+            Some(("foo".to_string(), "main".to_string()))
         );
     }
 

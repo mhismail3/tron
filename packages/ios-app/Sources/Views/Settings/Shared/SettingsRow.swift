@@ -16,7 +16,7 @@ struct SettingsRow<Trailing: View>: View {
                 .foregroundStyle(accentColor)
                 .frame(width: 18)
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(labelColor)
             Spacer()
             trailing()

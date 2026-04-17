@@ -15,6 +15,7 @@ pub mod message;
 pub mod message_ops;
 pub mod metadata;
 pub mod notification;
+pub mod repo;
 pub mod rules;
 pub mod session;
 pub mod skill;

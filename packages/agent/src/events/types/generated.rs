@@ -133,6 +133,30 @@ define_events! {
         LlmHookResult => "hook.llm_result" => payloads::hook::LlmHookResultPayload,
         /// Memory retained (marks boundary for next Retain operation).
         MemoryRetained => "memory.retained" => payloads::memory::MemoryRetainedPayload,
+        /// Local main fast-forwarded from remote.
+        WorktreeMainSynced => "worktree.main_synced" => payloads::worktree::WorktreeMainSyncedPayload,
+        /// Session finalized (merge + rebranch).
+        WorktreeSessionFinalized => "worktree.session_finalized" => payloads::worktree::WorktreeSessionFinalizedPayload,
+        /// Merge started with conflicts kept on disk.
+        WorktreeMergeStarted => "worktree.merge_started" => payloads::worktree::WorktreeMergeStartedPayload,
+        /// Conflict(s) detected in an in-flight merge.
+        WorktreeConflictDetected => "worktree.conflict_detected" => payloads::worktree::WorktreeConflictDetectedPayload,
+        /// Single conflict resolved.
+        WorktreeConflictResolved => "worktree.conflict_resolved" => payloads::worktree::WorktreeConflictResolvedPayload,
+        /// In-flight merge continued after conflicts cleared.
+        WorktreeMergeContinued => "worktree.merge_continued" => payloads::worktree::WorktreeMergeContinuedPayload,
+        /// In-flight merge aborted.
+        WorktreeMergeAborted => "worktree.merge_aborted" => payloads::worktree::WorktreeMergeAbortedPayload,
+        /// Branch pushed to remote.
+        WorktreePushed => "worktree.pushed" => payloads::worktree::WorktreePushedPayload,
+        /// Pending merge detected during crash recovery.
+        WorktreePendingMergeDetected => "worktree.pending_merge_detected" => payloads::worktree::WorktreePendingMergeDetectedPayload,
+        /// Per-repo lock acquired by a session.
+        RepoLockAcquired => "repo.lock_acquired" => payloads::repo::RepoLockAcquiredPayload,
+        /// Per-repo lock released.
+        RepoLockReleased => "repo.lock_released" => payloads::repo::RepoLockReleasedPayload,
+        /// Main branch advanced in a repo (cross-session broadcast).
+        RepoMainAdvanced => "repo.main_advanced" => payloads::repo::RepoMainAdvancedPayload,
     }
     raw_events {
     }
@@ -148,7 +172,15 @@ define_events! {
         /// Whether this is a config event (`config.*`).
         is_config_type => [ConfigModelSwitch, ConfigPromptUpdate, ConfigReasoningLevel],
         /// Whether this is a worktree event (`worktree.*`).
-        is_worktree_type => [WorktreeAcquired, WorktreeCommit, WorktreeReleased, WorktreeMerged, WorktreeRenamed],
+        is_worktree_type => [
+            WorktreeAcquired, WorktreeCommit, WorktreeReleased, WorktreeMerged, WorktreeRenamed,
+            WorktreeMainSynced, WorktreeSessionFinalized,
+            WorktreeMergeStarted, WorktreeConflictDetected, WorktreeConflictResolved,
+            WorktreeMergeContinued, WorktreeMergeAborted, WorktreePushed,
+            WorktreePendingMergeDetected
+        ],
+        /// Whether this is a repo-wide event (`repo.*`).
+        is_repo_type => [RepoLockAcquired, RepoLockReleased, RepoMainAdvanced],
         /// Whether this is a subagent event (`subagent.*`).
         is_subagent_type => [SubagentSpawned, SubagentStatusUpdate, SubagentCompleted, SubagentFailed, SubagentResultsConsumed],
         /// Whether this is a hook event (`hook.*`).
@@ -168,7 +200,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 61] = [
+    const EXPECTED: [(EventType, &str); 73] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -254,11 +286,38 @@ mod tests {
         ),
         (EventType::LlmHookResult, "hook.llm_result"),
         (EventType::MemoryRetained, "memory.retained"),
+        (EventType::WorktreeMainSynced, "worktree.main_synced"),
+        (
+            EventType::WorktreeSessionFinalized,
+            "worktree.session_finalized",
+        ),
+        (EventType::WorktreeMergeStarted, "worktree.merge_started"),
+        (
+            EventType::WorktreeConflictDetected,
+            "worktree.conflict_detected",
+        ),
+        (
+            EventType::WorktreeConflictResolved,
+            "worktree.conflict_resolved",
+        ),
+        (
+            EventType::WorktreeMergeContinued,
+            "worktree.merge_continued",
+        ),
+        (EventType::WorktreeMergeAborted, "worktree.merge_aborted"),
+        (EventType::WorktreePushed, "worktree.pushed"),
+        (
+            EventType::WorktreePendingMergeDetected,
+            "worktree.pending_merge_detected",
+        ),
+        (EventType::RepoLockAcquired, "repo.lock_acquired"),
+        (EventType::RepoLockReleased, "repo.lock_released"),
+        (EventType::RepoMainAdvanced, "repo.main_advanced"),
     ];
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 61);
+        assert_eq!(ALL_EVENT_TYPES.len(), 73);
     }
 
     #[test]

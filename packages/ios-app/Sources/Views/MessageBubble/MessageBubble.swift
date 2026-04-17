@@ -131,7 +131,7 @@ struct MessageBubble: View {
             } else {
                 // Fallback without subagent result notification for older iOS
                 Text(event.textContent)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
             }
 
@@ -186,7 +186,7 @@ struct AnsweredQuestionsChipView: View {
                 .foregroundStyle(.tronSuccess)
 
             Text("Answered agent's questions")
-                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
         }
         .padding(.horizontal, 12)
@@ -210,7 +210,7 @@ struct ConfirmedActionChipView: View {
                 .foregroundStyle(approved ? .tronSuccess : .tronError)
 
             Text(approved ? "Approved action" : "Denied action")
-                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
         }
         .padding(.horizontal, 12)
@@ -236,7 +236,7 @@ struct SubagentResultsDeliveredChipView: View {
             Text(subagentCount == 1
                  ? "Sent sub-agent result"
                  : "Sent \(subagentCount) sub-agent results")
-                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
         }
         .padding(.horizontal, 12)

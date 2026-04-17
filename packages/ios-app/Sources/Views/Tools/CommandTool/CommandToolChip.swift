@@ -15,7 +15,7 @@ struct CommandToolChip: View {
                 statusIcon
 
                 Text(data.displayName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(statusColor)
 
                 if !data.summary.isEmpty {

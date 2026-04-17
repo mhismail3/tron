@@ -42,7 +42,7 @@ struct AutomationFormSheet: View {
             ScrollView {
                 VStack(spacing: 24) {
                     Text("Tip: use @manage-automations in a session to create these conversationally.")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
@@ -137,7 +137,7 @@ struct AutomationFormSheet: View {
                 case "every":
                     SettingsRow(icon: "timer", label: "Every \(intervalMinutes) min", accentColor: .tronCoral) {
                         Text("\(intervalMinutes)")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
                             .foregroundStyle(.tronCoral)
                             .monospacedDigit()
                             .frame(minWidth: 30, alignment: .trailing)
@@ -211,7 +211,7 @@ struct AutomationFormSheet: View {
                 SettingsRowDivider()
                 SettingsRow(icon: "arrow.counterclockwise", label: "Max Retries", accentColor: .tronCoral) {
                     Text("\(maxRetries)")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronCoral)
                         .monospacedDigit()
                         .frame(minWidth: 30, alignment: .trailing)
@@ -220,7 +220,7 @@ struct AutomationFormSheet: View {
                 SettingsRowDivider()
                 SettingsRow(icon: "xmark.octagon", label: "Auto-Disable", accentColor: .tronCoral) {
                     Text(autoDisableAfter == 0 ? "Off" : "\(autoDisableAfter)")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronCoral)
                         .monospacedDigit()
                         .frame(minWidth: 30, alignment: .trailing)
@@ -257,13 +257,13 @@ struct AutomationFormSheet: View {
             Image(systemName: icon)
                 .font(codeFont
                     ? TronTypography.code(size: TronTypography.sizeBody)
-                    : TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    : TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronCoral)
                 .frame(width: 18)
             TextField(placeholder, text: text, axis: axis)
                 .font(codeFont
                     ? TronTypography.code(size: TronTypography.sizeBody)
-                    : TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    : TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronTextPrimary)
                 .lineLimit(axis == .vertical ? 1...5 : 1...1)
                 .keyboardType(keyboard)
@@ -288,7 +288,7 @@ struct AutomationFormSheet: View {
         } label: {
             HStack(spacing: 4) {
                 Text(labels[currentIndex])
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 Image(systemName: "chevron.up.chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
             }

@@ -149,7 +149,7 @@ private struct ImportProjectCard: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(source.projectName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextPrimary)
 
                 Text(source.projectPath)
@@ -162,7 +162,7 @@ private struct ImportProjectCard: View {
             Spacer()
 
             Text("\(source.sessionCount)")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                 .foregroundStyle(.tronEmerald)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -291,7 +291,7 @@ private struct ImportSessionRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(session.displayTitle)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(isImported ? .tronTextMuted : .tronTextPrimary)
                     .lineLimit(2)
 
@@ -379,7 +379,7 @@ struct ImportSessionPreviewView: View {
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Preview")
-                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronTextSecondary)
 
                             ForEach(Array(processedMessages(preview.messages).enumerated()), id: \.offset) { _, item in
@@ -462,7 +462,7 @@ struct ImportSessionPreviewView: View {
     private func statChip(_ label: String, _ value: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 .foregroundStyle(.tronEmerald)
             Text(label)
                 .font(TronTypography.codeCaption)

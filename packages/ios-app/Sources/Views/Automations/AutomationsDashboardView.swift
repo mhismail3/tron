@@ -184,10 +184,10 @@ struct AutomationsDashboardView: View {
     private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
         HStack {
             Text(title)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(color)
             Text("(\(count))")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(color.opacity(0.6))
             Spacer()
         }

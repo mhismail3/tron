@@ -9,25 +9,36 @@
 //!
 //! ## Submodules
 //!
-//! | Module         | Contents |
-//! |----------------|----------|
-//! | `lifecycle`    | `maybe_acquire`, `release`, `effective_working_dir`, `rename_branch` |
-//! | `transactions` | `commit`, `merge` |
-//! | `queries`      | `list_active`, `list_for_repo`, `get_info`, `get_status`, `list_session_branches` |
-//! | `diff`         | `get_committed_diff`, `committed_diff_for_branch` |
-//! | `branch`       | `delete_session_branch`, `prune_session_branches` |
-//! | `recovery`     | `rebuild_from_events`, `recover_orphans` |
-//! | `utils`        | `split_diff_by_file`, `count_diff_stats` (free functions) |
+//! | Module          | Contents |
+//! |-----------------|----------|
+//! | `lifecycle`     | `maybe_acquire`, `release`, `effective_working_dir`, `rename_branch` |
+//! | `transactions`  | `commit`, `merge` |
+//! | `queries`       | `list_active`, `list_for_repo`, `get_info`, `get_status`, `list_session_branches` |
+//! | `diff`          | `get_committed_diff`, `committed_diff_for_branch` |
+//! | `branch`        | `delete_session_branch`, `prune_session_branches` |
+//! | `recovery`      | `rebuild_from_events`, `recover_orphans` |
+//! | `repo_lock`     | Per-repo async mutex for `sync_main` / `finalize_session` serialization |
+//! | `sync`          | `sync_main` — lock-guarded FF of local `main` from its upstream |
+//! | `finalize`      | `finalize_session` — lock-guarded merge + rebranch |
+//! | `conflict_ops`  | Conflict state machine (`start_merge_keep_conflicts`, `list_conflicts`, `resolve_conflict`, `continue_merge`, `abort_merge`) |
+//! | `push_ops`      | `push_branch` with protected-branch rules |
+//! | `utils`         | `split_diff_by_file`, `count_diff_stats` (free functions) |
 
 mod branch;
+mod conflict_ops;
 mod diff;
+mod finalize;
 mod lifecycle;
+mod push_ops;
 mod queries;
 mod recovery;
+mod repo_lock;
+mod sync;
 mod transactions;
 /// Diff parsing utilities — `split_diff_by_file` and `count_diff_stats`.
 pub mod utils;
 
+pub use repo_lock::{LockGuard, LockHolder, LockedOp};
 pub use utils::{split_diff_by_file, count_diff_stats};
 
 use std::collections::{HashMap, HashSet};
@@ -35,14 +46,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex as AsyncMutex};
 
 use crate::core::events::TronEvent;
 use crate::events::EventStore;
 
 use crate::worktree::git::GitExecutor;
 use crate::worktree::types::{
-    WorktreeConfig, WorktreeInfo,
+    PendingMergeState, WorktreeConfig, WorktreeInfo,
 };
 
 /// All active worktree state, kept coherent behind a single lock.
@@ -50,6 +61,15 @@ use crate::worktree::types::{
 pub(super) struct CoordinatorState {
     pub(super) active_by_session: HashMap<String, WorktreeInfo>,
     pub(super) sessions_by_repo: HashMap<PathBuf, HashSet<String>>,
+    /// In-flight merges/rebases keyed by `session_id`. Populated by
+    /// `conflict_ops::start_merge_keep_conflicts` and cleared on
+    /// `continue_merge` / `abort_merge`. Reconstructed from
+    /// `.git/MERGE_HEAD` at coordinator startup (crash recovery).
+    pub(super) pending_merges: HashMap<String, PendingMergeState>,
+    /// Per-repo async mutex held only while `sync_main` or
+    /// `finalize_session` is running in that repo. Keyed by canonical
+    /// `repo_root`. All other per-session ops run freely in parallel.
+    pub(super) repo_locks: HashMap<PathBuf, Arc<AsyncMutex<()>>>,
 }
 
 impl CoordinatorState {

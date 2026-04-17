@@ -132,7 +132,7 @@ struct SessionSettingsPage: View {
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 18)
                     Text("Isolation Mode")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     Spacer()
                     isolationToggle
                 }
@@ -161,7 +161,7 @@ struct SessionSettingsPage: View {
         } label: {
             HStack(spacing: 4) {
                 Text(labels[currentIndex])
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 Image(systemName: "chevron.up.chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
             }
@@ -196,7 +196,7 @@ struct SessionSettingsPage: View {
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 18)
                     Text("Drain Mode")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     Spacer()
                     queueDrainModeToggle
                 }
@@ -225,7 +225,7 @@ struct SessionSettingsPage: View {
         } label: {
             HStack(spacing: 4) {
                 Text(labels[currentIndex])
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 Image(systemName: "chevron.up.chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
             }
@@ -248,7 +248,7 @@ struct SessionSettingsPage: View {
                 // Max Sessions
                 SettingsRow(icon: "square.stack.3d.up", label: "Max Sessions") {
                     Text("\(settingsState.maxConcurrentSessions)")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
                         .monospacedDigit()
                         .frame(minWidth: 30, alignment: .trailing)
@@ -268,7 +268,7 @@ struct SessionSettingsPage: View {
                 // Cache TTL
                 SettingsRow(icon: "clock.arrow.circlepath", label: "Cache TTL") {
                     Text(cacheTtlDisplayText)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
                         .monospacedDigit()
                         .frame(minWidth: 30, alignment: .trailing)
@@ -297,10 +297,10 @@ struct SessionSettingsPage: View {
                 .foregroundStyle(.tronEmerald)
                 .frame(width: 18)
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
             Spacer()
             Text(value)
-                .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3))
                 .foregroundStyle(.tronEmerald)
                 .lineLimit(1)
             Image(systemName: "chevron.right")

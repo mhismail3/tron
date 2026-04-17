@@ -44,7 +44,7 @@ struct ProviderErrorDetailSheet: View {
                 .foregroundStyle(.tronTextMuted)
 
             Text("This error came from the \(ErrorCategoryDisplay.providerDisplayName(for: data.provider)) API, not from Tron.")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
         }
         .padding(.horizontal)
@@ -55,7 +55,7 @@ struct ProviderErrorDetailSheet: View {
     private var infoBadges: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Info")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
             VStack(spacing: 12) {
@@ -95,7 +95,7 @@ struct ProviderErrorDetailSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Error Message")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 
                 Spacer()
@@ -116,14 +116,14 @@ struct ProviderErrorDetailSheet: View {
                         .foregroundStyle(.red)
 
                     Text("Details")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.red)
 
                     Spacer()
                 }
 
                 Text(data.message)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTextSecondary)
                     .lineSpacing(4)
                     .textSelection(.enabled)
@@ -150,7 +150,7 @@ private struct ErrorBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
             if !value.isEmpty {
                 Text(value)
                     .font(TronTypography.pillValue)

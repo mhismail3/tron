@@ -17,7 +17,7 @@ struct ToolsSection: View {
                     .foregroundStyle(.tronSlate)
                     .frame(width: 18)
                 Text("Tools")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronSlate)
 
                 Text("\(toolsContent.count)")
@@ -26,7 +26,7 @@ struct ToolsSection: View {
 
                 Spacer()
                 Text(TokenFormatter.format(tokens))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
@@ -85,7 +85,7 @@ struct ToolGridItem: View {
                 .foregroundStyle(descriptor.iconColor)
                 .frame(width: 14)
             Text(tool.name)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
                 .lineLimit(1)
         }

@@ -44,7 +44,7 @@ struct SubagentResultsListSheet: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text("Send All")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             Image(systemName: "paperplane.fill")
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         }
@@ -74,11 +74,11 @@ struct SubagentResultsListSheet: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(subagent.status == .failed ? "Agent failed" : "Agent completed")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronTextPrimary)
 
                 Text(subagent.taskPreview)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
             }
@@ -87,7 +87,7 @@ struct SubagentResultsListSheet: View {
 
             if let duration = subagent.formattedDuration {
                 Text(duration)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
             }
 

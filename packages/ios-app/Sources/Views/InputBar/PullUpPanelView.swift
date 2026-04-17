@@ -24,7 +24,7 @@ struct PullUpPanelView: View {
                         onSuggestionTapped?(suggestion)
                     } label: {
                         Text(suggestion)
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                             .foregroundStyle(.tronEmerald)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)

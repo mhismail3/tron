@@ -33,10 +33,10 @@ struct MCPServersPage: View {
                         .font(.system(size: 32))
                         .foregroundStyle(.tronTextMuted)
                     Text("No MCP servers configured")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronTextMuted)
                     Text("Add an MCP server to extend the agent with external tools.")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
                         .multilineTextAlignment(.center)
                 }
@@ -45,7 +45,7 @@ struct MCPServersPage: View {
             } else {
                 HStack {
                     Text("Servers")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.tronTextSecondary)
                     if !servers.isEmpty {
                         Text("\(servers.count)")
@@ -73,7 +73,7 @@ struct MCPServersPage: View {
 
             if let error = loadError {
                 Text(error)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronError)
                     .padding(.horizontal, 4)
             }
@@ -225,11 +225,11 @@ private struct MCPServerCard: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(server.name)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronTextPrimary)
                     HStack(spacing: 6) {
                         Text(server.health.rawValue)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(healthColor)
                         if server.toolCount > 0 {
                             Text("\(server.toolCount)")
@@ -238,7 +238,7 @@ private struct MCPServerCard: View {
                         }
                         if let error = server.lastError {
                             Text(error)
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronError)
                                 .lineLimit(1)
                         }
@@ -297,7 +297,7 @@ private struct MCPServerCard: View {
                                 .tint(.tronEmerald)
                                 .scaleEffect(0.6)
                             Text("Loading tools...")
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronTextMuted)
                         }
                         .padding(.horizontal, 8)
@@ -316,7 +316,7 @@ private struct MCPServerCard: View {
                         }
                     } else if tools != nil {
                         Text("No tools discovered")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -373,7 +373,7 @@ private struct MCPToolRow: View {
                 VStack(alignment: .leading, spacing: 6) {
                     if !tool.description.isEmpty {
                         Text(tool.description)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                             .padding(.horizontal, 8)
                     }
@@ -405,11 +405,11 @@ private struct MCPParamRow: View {
                     .font(TronTypography.code(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextPrimary)
                 Text(param.paramType)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
                 if param.required {
                     Text("required")
-                        .font(TronTypography.mono(size: TronTypography.sizeXS))
+                        .font(TronTypography.sans(size: TronTypography.sizeXS))
                         .foregroundStyle(.tronEmerald)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -419,7 +419,7 @@ private struct MCPParamRow: View {
             }
             if !param.description.isEmpty {
                 Text(param.description)
-                    .font(TronTypography.mono(size: TronTypography.sizeXS))
+                    .font(TronTypography.sans(size: TronTypography.sizeXS))
                     .foregroundStyle(.tronTextMuted)
             }
         }
@@ -462,10 +462,10 @@ private struct AddMCPServerSheet: View {
                                 .foregroundStyle(.tronEmerald)
                                 .frame(width: 18)
                             Text("Name")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             Spacer()
                             TextField("Server name", text: $name)
-                                .font(TronTypography.mono(size: TronTypography.sizeBody))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
                                 .multilineTextAlignment(.trailing)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
@@ -484,10 +484,10 @@ private struct AddMCPServerSheet: View {
                                 .foregroundStyle(.tronEmerald)
                                 .frame(width: 18)
                             Text("Command")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             Spacer()
                             TextField("npx, uvx", text: $command)
-                                .font(TronTypography.mono(size: TronTypography.sizeBody))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
                                 .multilineTextAlignment(.trailing)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
@@ -506,10 +506,10 @@ private struct AddMCPServerSheet: View {
                                 .foregroundStyle(.tronEmerald)
                                 .frame(width: 18)
                             Text("Args")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             Spacer()
                             TextField("space-separated", text: $argsText)
-                                .font(TronTypography.mono(size: TronTypography.sizeBody))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
                                 .multilineTextAlignment(.trailing)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
@@ -525,7 +525,7 @@ private struct AddMCPServerSheet: View {
 
                     if let error = addError {
                         Text(error)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronError)
                             .padding(.horizontal, 4)
                     }

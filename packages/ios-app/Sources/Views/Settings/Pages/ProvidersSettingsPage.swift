@@ -218,7 +218,7 @@ private struct ProviderCard: View {
                     .frame(maxWidth: 22, maxHeight: 22)
                     .frame(width: 26, height: 26)
                 Text(provider.displayName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(provider.color)
                 Spacer()
                 Image(systemName: isConfigured ? "checkmark.circle.fill" : "circle")
@@ -287,7 +287,7 @@ private struct ProviderCard: View {
                                     Image(systemName: "lock.shield")
                                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                     Text("OAuth Login")
-                                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                                 }
                                 .foregroundStyle(provider.color)
                                 .padding(.horizontal, 10)
@@ -304,7 +304,7 @@ private struct ProviderCard: View {
                                 Image(systemName: "key.horizontal")
                                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 Text("Add Key")
-                                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             }
                             .foregroundStyle(provider.color)
                             .padding(.horizontal, 10)
@@ -388,10 +388,10 @@ private struct CredentialRow: View {
             // Label + status
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                     .foregroundStyle(.tronTextPrimary)
                 Text(status)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(statusColor)
             }
 
@@ -464,7 +464,7 @@ private struct AddApiKeyRow: View {
                     }
                 } label: {
                     Text("Add")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 }
                 .disabled(label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || key.isEmpty || isSaving)
                 .buttonStyle(.borderedProminent)
@@ -499,7 +499,7 @@ private struct GoogleProviderFields: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Google Cloud Settings")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronCyan)
                 Spacer()
                 if isConfigured && !isEditing {
@@ -507,7 +507,7 @@ private struct GoogleProviderFields: View {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isEditing = true }
                     } label: {
                         Text("Edit")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(.tronCyan)
                     }
                     .buttonStyle(.plain)
@@ -519,7 +519,7 @@ private struct GoogleProviderFields: View {
                 // Input fields
                 HStack {
                     Text("Client ID")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
                     Spacer()
                     TextField("OAuth client ID", text: $clientId)
@@ -531,7 +531,7 @@ private struct GoogleProviderFields: View {
 
                 HStack {
                     Text("Client Secret")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
                     Spacer()
                     SecureField("OAuth secret", text: $clientSecret)
@@ -543,7 +543,7 @@ private struct GoogleProviderFields: View {
 
                 HStack {
                     Text("Project ID")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
                     Spacer()
                     TextField("GCP project", text: $projectId)
@@ -570,7 +570,7 @@ private struct GoogleProviderFields: View {
                         }
                     } label: {
                         Text("Save")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                     }
                     .disabled(isSaving || (clientId.isEmpty && clientSecret.isEmpty && projectId.isEmpty))
                     .buttonStyle(.borderedProminent)
@@ -584,7 +584,7 @@ private struct GoogleProviderFields: View {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isEditing = false }
                         } label: {
                             Text("Cancel")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                         }
                         .buttonStyle(.bordered)
                     }
@@ -610,7 +610,7 @@ private struct GoogleProviderFields: View {
                         Task { await onClear() }
                     } label: {
                         Text("Clear All")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                     }
                     .buttonStyle(.bordered)
 
@@ -632,11 +632,11 @@ private struct GoogleConfigRow: View {
     var body: some View {
         HStack {
             Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextSecondary)
             Spacer()
             Text(status)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(statusColor)
         }
     }
@@ -668,12 +668,12 @@ private struct ServiceCard: View {
                     .foregroundStyle(service.color)
                     .frame(width: 18, height: 18)
                 Text(service.displayName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(service.color)
                 Spacer()
                 if let hint = serviceAuth?.apiKeyHint {
                     Text(hint)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
                 }
                 Image(systemName: isConfigured ? "checkmark.circle.fill" : "circle")
@@ -708,7 +708,7 @@ private struct ServiceCard: View {
                             }
                         } label: {
                             Text("Save")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                         }
                         .disabled(apiKey.isEmpty || isSaving)
                         .buttonStyle(.borderedProminent)
@@ -719,7 +719,7 @@ private struct ServiceCard: View {
                                 Task { await onClear() }
                             } label: {
                                 Text("Clear")
-                                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             }
                             .buttonStyle(.bordered)
                         }

@@ -450,7 +450,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         let worktree_context = format!(
             "\n\n## Environment Isolation\n\
              Working in git worktree: {}\n\
-             Branch: {}{}",
+             Branch: {}{}\n{}",
             worktree.worktree_path.display(),
             worktree.branch,
             worktree
@@ -458,6 +458,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 .as_ref()
                 .map(|branch| format!(" (based on {branch})"))
                 .unwrap_or_default(),
+            crate::runtime::context::system_prompts::GIT_WORKFLOW_PROMPT,
         );
         Some(match memory {
             Some(memory) => format!("{memory}{worktree_context}"),

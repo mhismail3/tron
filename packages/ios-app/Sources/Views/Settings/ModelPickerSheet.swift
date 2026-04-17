@@ -132,7 +132,7 @@ struct ModelPickerSheet: View {
                 Image(systemName: Color.reasoningLevelIcon(reasoningLevel))
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 Text(reasoningLevelLabel(reasoningLevel))
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
             }
             .foregroundStyle(selectedProviderColor)
         }
@@ -194,7 +194,7 @@ private struct ProviderSection: View {
                     .frame(maxWidth: 22, maxHeight: 22)
                     .frame(width: 26, height: 26)
                 Text(provider.displayName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(provider.color)
                 Spacer()
 
@@ -259,7 +259,7 @@ private struct FamilySection: View {
             // Family header
             HStack(spacing: 8) {
                 Text(family.id)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(family.isDeprecated ? .tronTextMuted : .tronTextSecondary)
                     .strikethrough(family.isDeprecated, color: .tronTextMuted)
 
@@ -359,12 +359,12 @@ private struct ModelCard: View {
                     // Name row
                     HStack(spacing: 6) {
                         Text(model.formattedModelName)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(model.isDisabled ? .tronTextMuted : .tronTextPrimary)
 
                         if model.recommended == true {
                             Text("Recommended")
-                                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                                .font(TronTypography.sans(size: TronTypography.sizeXS))
                                 .foregroundStyle(providerColor)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -374,7 +374,7 @@ private struct ModelCard: View {
 
                         if model.isDeprecatedModel {
                             Text("Deprecated")
-                                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                                .font(TronTypography.sans(size: TronTypography.sizeXS))
                                 .foregroundStyle(.red)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -382,7 +382,7 @@ private struct ModelCard: View {
                                 .clipShape(Capsule())
                         } else if model.isUnavailable {
                             Text("Unavailable")
-                                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                                .font(TronTypography.sans(size: TronTypography.sizeXS))
                                 .foregroundStyle(.tronTextMuted)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -390,7 +390,7 @@ private struct ModelCard: View {
                                 .clipShape(Capsule())
                         } else if model.isPreview {
                             Text("Preview")
-                                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                                .font(TronTypography.sans(size: TronTypography.sizeXS))
                                 .foregroundStyle(.orange)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -412,7 +412,7 @@ private struct ModelCard: View {
                                 .foregroundStyle(.tronTextMuted)
                         }
                     }
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .lineLimit(1)
                 }
 
@@ -441,14 +441,14 @@ private struct ModelCard: View {
                     // Unavailable reason (install instructions)
                     if let reason = model.unavailableReason, model.isUnavailable {
                         Text(reason)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronAmber)
                     }
 
                     // Description
                     if let desc = model.modelDescription, !desc.isEmpty {
                         Text(desc)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                     }
 
@@ -468,14 +468,14 @@ private struct ModelCard: View {
                     // Deprecation date
                     if let depDate = model.deprecationDate {
                         Text("Deprecated \(depDate)")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.red.opacity(0.7))
                     }
 
                     // Release date
                     if let date = model.releaseDate {
                         Text("Released \(date)")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
                     }
                 }
@@ -504,7 +504,7 @@ private struct ModelCard: View {
             Image(systemName: icon)
             Text(label)
         }
-        .font(TronTypography.mono(size: TronTypography.sizeXS))
+        .font(TronTypography.sans(size: TronTypography.sizeXS))
         .foregroundStyle(color)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)

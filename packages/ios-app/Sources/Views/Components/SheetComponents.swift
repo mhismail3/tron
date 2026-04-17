@@ -11,7 +11,7 @@ struct SheetTitle: View {
 
     var body: some View {
         Text(title)
-            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
             .foregroundStyle(color)
     }
 }
@@ -84,7 +84,7 @@ struct LoadingToolbarButton: View {
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 }
                 Text(label)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
             }
             .foregroundStyle(isEnabled ? color : .tronTextMuted)
         }

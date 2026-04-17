@@ -14,7 +14,7 @@ struct ManageProcessResultViewer: View {
                     .font(.caption)
                     .foregroundStyle(.tronSlate)
                 Text(action)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.tronSlate)
             }
             if !result.isEmpty {

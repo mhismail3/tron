@@ -46,7 +46,7 @@ struct ReadResultViewer: View {
             // File info header
             HStack(spacing: 8) {
                 Image(systemName: "doc.text")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(languageColor)
 
                 Text(fileName)
@@ -120,7 +120,7 @@ struct WriteResultViewer: View {
             // Success message
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronSuccess)
 
                 Text(result)

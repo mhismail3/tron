@@ -21,7 +21,7 @@ struct DiffFileRow<FileType: DiffFileDisplayable>: View {
                     .frame(width: 18)
 
                 Text(file.displayPath)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTextPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -32,12 +32,12 @@ struct DiffFileRow<FileType: DiffFileDisplayable>: View {
                     HStack(spacing: 4) {
                         if file.displayAdditions > 0 {
                             Text("+\(file.displayAdditions)")
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                                 .foregroundStyle(.tronSuccess)
                         }
                         if file.displayDeletions > 0 {
                             Text("-\(file.displayDeletions)")
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                                 .foregroundStyle(.tronError)
                         }
                     }

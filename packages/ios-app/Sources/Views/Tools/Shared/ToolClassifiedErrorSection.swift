@@ -22,7 +22,7 @@ struct ToolClassifiedErrorSection<AdditionalContent: View>: View {
                         .foregroundStyle(.tronError)
 
                     Text(classification.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronError)
                 }
 
@@ -33,7 +33,7 @@ struct ToolClassifiedErrorSection<AdditionalContent: View>: View {
                 }
 
                 Text(classification.suggestion)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(errorTint.subtle)
             }
         }

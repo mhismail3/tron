@@ -45,7 +45,7 @@ struct GlobResultsSection: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()
@@ -101,13 +101,13 @@ struct GlobFileRow: View {
 
             if let size = entry.size {
                 Text(size)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(tint.subtle)
             }
 
             if !ext.isEmpty && !entry.isDirectory {
                 Text(ext.uppercased())
-                    .font(TronTypography.mono(size: 9, weight: .medium))
+                    .font(TronTypography.sans(size: 9, weight: .medium))
                     .foregroundStyle(.tronTextPrimary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -135,7 +135,7 @@ struct GlobStreamingResultsSection: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Results")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()

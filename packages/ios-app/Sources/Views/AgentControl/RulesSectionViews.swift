@@ -17,7 +17,7 @@ struct RulesSection: View {
                     .foregroundStyle(.tronIndigo)
                     .frame(width: 18)
                 Text("Rules")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronIndigo)
 
                 // Count badge
@@ -28,7 +28,7 @@ struct RulesSection: View {
                 Spacer()
 
                 Text(TokenFormatter.format(rules.tokens))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 
                 Image(systemName: "chevron.down")
@@ -87,12 +87,12 @@ struct RulesFileRow: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(file.displayPath)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(1)
 
                     Text(file.label)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
                 }
 
@@ -127,7 +127,7 @@ struct RulesFileRow: View {
                                 .scaleEffect(0.7)
                                 .tint(.tronIndigo)
                             Text("Loading content...")
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronTextMuted)
                         }
                         .frame(maxWidth: .infinity)
@@ -166,7 +166,7 @@ struct RulesFileRow: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     } else {
                         Text("Content not available")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
                             .padding(8)
                     }

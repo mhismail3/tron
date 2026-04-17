@@ -51,7 +51,7 @@ struct NewSessionFlow: View {
                                         workingDirectory = workspace.path
                                     } label: {
                                         Text(workspace.name)
-                                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                                             .foregroundStyle(.tronEmerald)
                                             .padding(.horizontal, 12)
                                             .padding(.vertical, 6)
@@ -73,7 +73,7 @@ struct NewSessionFlow: View {
                     // Workspace section
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Workspace")
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronTextSecondary)
 
                         Button {
@@ -110,7 +110,7 @@ struct NewSessionFlow: View {
                     // Clone from GitHub option
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Or clone a repository")
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronTextSecondary)
 
                         Button {
@@ -139,7 +139,7 @@ struct NewSessionFlow: View {
                     // Import from Claude Code
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Or import a conversation")
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronTextSecondary)
 
                         Button {
@@ -169,7 +169,7 @@ struct NewSessionFlow: View {
                     // Extra spacing above to visually separate from workspace/clone group
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Model")
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronTextSecondary)
 
                         Button {

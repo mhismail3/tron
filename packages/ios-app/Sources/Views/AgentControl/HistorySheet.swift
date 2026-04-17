@@ -81,7 +81,7 @@ struct HistorySheet: View {
         // Current session turns
         if currentTurns.isEmpty {
             Text("No new turns since fork")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextMuted)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
@@ -166,7 +166,7 @@ struct HistorySheet: View {
                     HStack(spacing: 8) {
                         // Turn number badge
                         Text("\(turn.turnNumber)")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .bold))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .bold))
                             .foregroundStyle(muted ? .tronTextMuted : .tronCoral)
                             .frame(width: 24, height: 24)
                             .background((muted ? Color.tronTextMuted : Color.tronCoral).opacity(0.2))
@@ -186,7 +186,7 @@ struct HistorySheet: View {
                         }
 
                         Text(turn.displayPreview ?? (turn.turnNumber == 0 ? "Pre-session activity" : "Tool use"))
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(muted ? .tronTextMuted : .tronTextPrimary)
                             .lineLimit(1)
 
@@ -206,7 +206,7 @@ struct HistorySheet: View {
                                     Image(systemName: "clock")
                                         .font(TronTypography.sans(size: TronTypography.sizeXS))
                                     Text(DurationFormatter.format(data.latency, style: .compact))
-                                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 }
                                 .foregroundStyle(muted ? .tronTextMuted : .tronSlate)
                             }
@@ -216,7 +216,7 @@ struct HistorySheet: View {
                                     Image(systemName: "hammer.fill")
                                         .font(TronTypography.sans(size: TronTypography.sizeXS))
                                     Text("\(data.toolCount)")
-                                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 }
                                 .foregroundStyle(muted ? .tronTextMuted : .tronCyan)
                             }
@@ -226,7 +226,7 @@ struct HistorySheet: View {
                                     Image(systemName: "exclamationmark.triangle.fill")
                                         .font(TronTypography.sans(size: TronTypography.sizeXS))
                                     Text("\(data.errorCount)")
-                                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                                 }
                                 .foregroundStyle(.tronError)
                             }
@@ -263,7 +263,7 @@ struct HistorySheet: View {
 
             if mainItems.isEmpty && postTurnItems.isEmpty {
                 Text("No events in this turn")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
@@ -280,7 +280,7 @@ struct HistorySheet: View {
                             .fill(Color.tronTextMuted.opacity(0.2))
                             .frame(height: 1)
                         Text("Post-turn")
-                            .font(TronTypography.mono(size: TronTypography.sizeXS, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
                             .foregroundStyle(.tronTextMuted)
                         Rectangle()
                             .fill(Color.tronTextMuted.opacity(0.2))
@@ -337,7 +337,7 @@ struct HistorySheet: View {
                 .frame(width: 20)
 
             Text(displayName)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextPrimary)
                 .lineLimit(1)
 
@@ -347,7 +347,7 @@ struct HistorySheet: View {
                 HStack(spacing: 4) {
                     if let duration {
                         Text("\(duration)ms")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
                     }
                     Image(systemName: statusIcon)
@@ -406,10 +406,10 @@ struct HistorySheet: View {
                 .font(TronTypography.sans(size: TronTypography.sizeDisplay))
                 .foregroundStyle(.tronTextMuted)
             Text("No turns yet")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
             Text("Events will appear as you chat")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity)

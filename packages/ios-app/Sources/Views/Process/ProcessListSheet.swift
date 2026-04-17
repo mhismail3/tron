@@ -57,7 +57,7 @@ struct ProcessListSheet: View {
                 .font(.system(size: 40))
                 .foregroundStyle(.tronTextMuted.opacity(0.5))
             Text("No background processes")
-                .font(TronTypography.mono(size: TronTypography.sizeBody))
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -76,29 +76,29 @@ private struct ProcessRow: View {
             statusIcon
             VStack(alignment: .leading, spacing: 4) {
                 Text(process.label)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                 HStack(spacing: 8) {
                     Text(process.kind)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
                     if let duration = process.durationMs {
                         Text(formatDuration(duration))
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
                     } else if process.status == .running {
                         Text("running...")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronEmerald.opacity(0.7))
                     } else if process.status == .cancelling {
                         Text("cancelling...")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
                     }
                     if let exitCode = process.exitCode, exitCode != 0 {
                         Text("exit \(exitCode)")
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronError)
                     }
                 }

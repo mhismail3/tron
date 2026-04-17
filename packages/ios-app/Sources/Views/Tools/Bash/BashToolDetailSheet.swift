@@ -263,7 +263,7 @@ struct BashToolDetailSheet: View {
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Output")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()

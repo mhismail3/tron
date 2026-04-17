@@ -34,7 +34,7 @@ struct SettingsView: View {
 
     /// Settings sub-pages, driven by a single `.sheet(item:)`.
     enum SettingsPage: String, Identifiable {
-        case server, session, agent, providers, app, mcpServers, hooks
+        case server, session, agent, providers, app, mcpServers, hooks, gitWorkflow
         var id: String { rawValue }
     }
 
@@ -67,9 +67,9 @@ struct SettingsView: View {
         } content: {
             categoriesCard
             dangerZoneCard
-                .cardEntrance(visible: cardsVisible, index: 7)
-            footerView
                 .cardEntrance(visible: cardsVisible, index: 8)
+            footerView
+                .cardEntrance(visible: cardsVisible, index: 9)
         }
         #if DEBUG || BETA
         .sheet(isPresented: $showLogViewer) {
@@ -115,6 +115,8 @@ struct SettingsView: View {
                     MCPServersPage()
                 case .hooks:
                     HooksSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
+                case .gitWorkflow:
+                    GitWorkflowSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
                 }
             }
             .adaptivePresentationDetents([.medium, .large])
@@ -196,13 +198,20 @@ struct SettingsView: View {
             }
             .cardEntrance(visible: cardsVisible, index: 5)
 
+            SettingsCard {
+                categoryRow(icon: "point.3.connected.trianglepath.dotted", label: "Git Workflow", subtitle: "Configure sync, merge, push, and conflict policies") {
+                    activePage = .gitWorkflow
+                }
+            }
+            .cardEntrance(visible: cardsVisible, index: 6)
+
             if #available(iOS 26.0, *) {
                 SettingsCard {
                     categoryRow(icon: "paintbrush", label: "App", subtitle: "Change how the iOS app looks and behaves") {
                         activePage = .app
                     }
                 }
-                .cardEntrance(visible: cardsVisible, index: 6)
+                .cardEntrance(visible: cardsVisible, index: 7)
             }
         }
     }
@@ -217,10 +226,10 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronTextPrimary)
                     Text(subtitle)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
                 }
 
@@ -254,7 +263,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.tronError)
                                 .frame(width: 18)
                             Text("Archive All Sessions")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                                 .foregroundStyle(.tronError)
                             Spacer()
                             if isArchivingAll {
@@ -290,7 +299,7 @@ struct SettingsView: View {
 
     private var footerView: some View {
         Text("Built by Moose \u{1FACE} \u{00B7} v0.1.0")
-            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+            .font(TronTypography.sans(size: TronTypography.sizeCaption))
             .foregroundStyle(.tronTextMuted)
             .frame(maxWidth: .infinity)
             .padding(.top, 16)

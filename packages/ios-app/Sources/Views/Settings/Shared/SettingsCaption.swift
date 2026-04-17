@@ -6,7 +6,7 @@ struct SettingsCaption: View {
 
     var body: some View {
         Text(text)
-            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+            .font(TronTypography.sans(size: TronTypography.sizeCaption))
             .foregroundStyle(.tronTextMuted)
             .padding(.top, 6)
             .padding(.horizontal, 4)

@@ -7,7 +7,7 @@ struct SettingsSectionHeader: View {
 
     var body: some View {
         Text(title)
-            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
             .foregroundStyle(color)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, 8)

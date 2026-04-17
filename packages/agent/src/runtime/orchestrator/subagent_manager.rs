@@ -85,6 +85,10 @@ pub struct SubsessionConfig {
     pub inherit_tools: bool,
     /// Tools to deny from the inherited set.
     pub denied_tools: Vec<String>,
+    /// Optional strict allowlist — when `Some`, ONLY these tools are kept
+    /// (applied after `denied_tools`). Future-proof: new tools added to
+    /// the registry won't leak into a restricted subagent.
+    pub allowed_tools: Option<Vec<String>>,
     /// Reasoning effort level (default Some(Medium)).
     pub reasoning_level: Option<ReasoningLevel>,
     /// Spawn type for event tagging (default `Subsession`).
@@ -105,6 +109,7 @@ impl Default for SubsessionConfig {
             max_depth: 0,
             inherit_tools: false,
             denied_tools: vec![],
+            allowed_tools: None,
             reasoning_level: Some(ReasoningLevel::Medium),
             spawn_type: SpawnType::Subsession,
         }
@@ -288,6 +293,19 @@ impl SubagentManager {
                 let mut registry = factory();
                 for name in &config.denied_tools {
                     let _ = registry.remove(name);
+                }
+                // Strict allowlist — remove anything not in the allowed set.
+                if let Some(ref allowed) = config.allowed_tools {
+                    let allowed_set: std::collections::HashSet<&str> =
+                        allowed.iter().map(String::as_str).collect();
+                    let to_remove: Vec<String> = registry
+                        .names()
+                        .into_iter()
+                        .filter(|n| !allowed_set.contains(n.as_str()))
+                        .collect();
+                    for name in to_remove {
+                        let _ = registry.remove(&name);
+                    }
                 }
                 registry
             } else {

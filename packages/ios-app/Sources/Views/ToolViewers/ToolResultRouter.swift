@@ -30,12 +30,12 @@ struct ToolResultRouter: View {
     private var toolHeader: some View {
         HStack(spacing: 8) {
             Image(systemName: descriptor.icon)
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
                 .foregroundStyle(descriptor.iconColor)
                 .frame(width: 16)
 
             Text(descriptor.displayName)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
 
             let detail = descriptor.summaryExtractor(tool.arguments)

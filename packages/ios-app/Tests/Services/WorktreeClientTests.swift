@@ -28,17 +28,6 @@ struct WorktreeClientTests {
         }
     }
 
-    @Test("merge throws when webSocket is nil")
-    func mergeNoConnection() async {
-        let transport = MockRPCTransport()
-        transport.webSocket = nil
-        let client = WorktreeClient(transport: transport)
-
-        await #expect(throws: RPCClientError.self) {
-            _ = try await client.merge(sessionId: "test-session", targetBranch: "main")
-        }
-    }
-
     @Test("listSessionBranches throws when webSocket is nil")
     func listSessionBranchesNoConnection() async {
         let transport = MockRPCTransport()

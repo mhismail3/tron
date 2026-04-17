@@ -27,7 +27,7 @@ struct ToolStatusBadge: View {
                     .foregroundStyle(statusColor)
             }
             Text(status.label)
-                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(statusColor)
         }
         .padding(.horizontal, 10)

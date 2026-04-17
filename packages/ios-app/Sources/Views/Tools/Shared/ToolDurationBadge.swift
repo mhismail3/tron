@@ -12,7 +12,7 @@ struct ToolDurationBadge: View {
             Image(systemName: "clock")
                 .font(TronTypography.sans(size: TronTypography.sizeBody2))
             Text(DurationFormatter.format(durationMs, style: .compact))
-                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
         }
         .foregroundStyle(.tronTextMuted)
         .padding(.horizontal, 10)

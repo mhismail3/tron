@@ -56,7 +56,7 @@ struct SessionSidebar: View {
                         }
                     } label: {
                         Text(workspace.name)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                             .foregroundStyle(isSelected ? .white : .tronEmerald)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
@@ -233,7 +233,7 @@ struct CachedSessionSidebarRow: View {
                             .foregroundStyle(.tronPurple)
                     }
                     Text(session.displayTitle)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronEmerald)
                         .lineLimit(1)
 
@@ -271,7 +271,7 @@ struct CachedSessionSidebarRow: View {
                 }
                 .fixedSize()
             }
-            .font(TronTypography.mono(size: TronTypography.sizeXS))
+            .font(TronTypography.sans(size: TronTypography.sizeXS))
             .foregroundStyle(.tronTextMuted.opacity(0.5))
             .padding(.top, 2)
         }
@@ -360,7 +360,7 @@ struct MiniChatActivityView: View {
                 Text("⚠").foregroundStyle(.red.opacity(0.8))
                 Text(line.text).foregroundStyle(.red.opacity(0.8))
             }
-            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
             .lineLimit(1).truncationMode(.tail)
         }
     }
@@ -380,7 +380,7 @@ struct MiniMessageRow: View {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 Text(text)
-                    .font(TronTypography.mono(size: Self.captionSize, weight: .regular))
+                    .font(TronTypography.sans(size: Self.captionSize, weight: .regular))
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -460,19 +460,19 @@ struct MiniToolChip: View {
             }
 
             Text(name)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 .foregroundStyle(statusColor)
 
             if let summary, !summary.isEmpty {
                 Text(summary)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .regular))
                     .foregroundStyle(statusColor.opacity(0.6))
                     .lineLimit(1)
             }
 
             if let duration {
                 Text(duration)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .regular))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .regular))
                     .foregroundStyle(statusColor.opacity(0.4))
             }
         }

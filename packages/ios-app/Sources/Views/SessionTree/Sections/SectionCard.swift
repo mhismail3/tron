@@ -16,7 +16,7 @@ struct SectionCard<Content: View>: View {
                 Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 Text(title)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
             }
             .foregroundStyle(accentColor.opacity(0.8))
             .padding(.leading, 4)
@@ -53,7 +53,7 @@ struct GlassSectionCard<Content: View>: View {
                 Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 Text(title)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
             }
             .foregroundStyle(accentColor.opacity(0.8))
             .padding(.leading, 4)

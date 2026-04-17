@@ -19,7 +19,7 @@ struct ThisSessionSection: View {
                         .foregroundStyle(.tronTextMuted.opacity(0.5))
 
                     Text("No new messages yet")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextMuted)
 
                     Text("Start chatting to build history")

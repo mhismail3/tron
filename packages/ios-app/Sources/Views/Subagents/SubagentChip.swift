@@ -15,7 +15,7 @@ struct SubagentChip: View {
                 statusIcon
 
                 Text(data.status.label)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(data.status.color)
                     .lineLimit(1)
 

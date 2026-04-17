@@ -15,7 +15,7 @@ struct ToolResultNote: View {
                 .foregroundStyle(.tronSuccess)
 
             Text(text)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(tint.secondary)
                 .lineLimit(2)
         }

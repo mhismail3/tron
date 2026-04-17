@@ -53,10 +53,10 @@ struct AutomationRunDetailSheet: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(run.status.capitalized)
-                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .bold))
                     .foregroundStyle(statusColor)
                 Text(run.jobName)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronTextMuted)
             }
 
@@ -64,7 +64,7 @@ struct AutomationRunDetailSheet: View {
 
             if run.attempt > 0 {
                 Text("Attempt \(run.attempt + 1)")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronCoral)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -83,7 +83,7 @@ struct AutomationRunDetailSheet: View {
             SettingsCard(accent: .tronCoral) {
                 SettingsRow(icon: "play", label: "Started", accentColor: .tronCoral) {
                     Text(DateParser.shortDateTime(run.startedAt))
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3))
                         .foregroundStyle(.tronTextSecondary)
                         .textSelection(.enabled)
                 }
@@ -92,7 +92,7 @@ struct AutomationRunDetailSheet: View {
                     SettingsRowDivider()
                     SettingsRow(icon: "stop", label: "Completed", accentColor: .tronCoral) {
                         Text(DateParser.shortDateTime(completed))
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3))
                             .foregroundStyle(.tronTextSecondary)
                             .textSelection(.enabled)
                     }
@@ -102,7 +102,7 @@ struct AutomationRunDetailSheet: View {
                     SettingsRowDivider()
                     SettingsRow(icon: "timer", label: "Duration", accentColor: .tronCoral) {
                         Text(DurationFormatter.format(duration))
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3))
                             .foregroundStyle(.tronTextSecondary)
                     }
                 }
@@ -111,7 +111,7 @@ struct AutomationRunDetailSheet: View {
                     SettingsRowDivider()
                     SettingsRow(icon: "number", label: "Exit Code", accentColor: .tronCoral) {
                         Text("\(exitCode)")
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(exitCode == 0 ? .tronSuccess : .tronError)
                     }
                 }
@@ -120,7 +120,7 @@ struct AutomationRunDetailSheet: View {
                     SettingsRowDivider()
                     SettingsRow(icon: "paperplane", label: "Delivery", accentColor: .tronCoral) {
                         Text(deliveryStatus)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody3))
                             .foregroundStyle(.tronTextSecondary)
                     }
                 }
@@ -157,7 +157,7 @@ struct AutomationRunDetailSheet: View {
             SettingsCard(accent: .tronCoral) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     Text(output)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextPrimary)
                         .textSelection(.enabled)
                 }
@@ -174,7 +174,7 @@ struct AutomationRunDetailSheet: View {
 
             SettingsCard(accent: .tronError) {
                 Text(error)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.tronError)
                     .textSelection(.enabled)
                     .padding(12)

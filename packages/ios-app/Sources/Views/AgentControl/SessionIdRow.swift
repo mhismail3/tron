@@ -16,7 +16,7 @@ struct SessionIdRow: View {
                 .frame(width: 16)
 
             Text("Session ID")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronAmber)
 
             Spacer()

@@ -24,7 +24,7 @@ private struct CardTitle: View {
 
     var body: some View {
         Text(title)
-            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
+            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
             .foregroundStyle(color)
     }
 }
@@ -110,7 +110,7 @@ struct ContextUsageGaugeView: View {
                 .padding(.horizontal, 4)
 
                 Text("\(Int((usagePercent * 100).rounded()))%")
-                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(usageColor)
                     .layoutPriority(1)
             }
@@ -149,7 +149,7 @@ struct ModelControlView: View {
                 Spacer()
 
                 Text(displayName)
-                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronPurple)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
@@ -193,11 +193,11 @@ struct SourceControlCardView: View {
 
                 if isGitRepo == false {
                     Text("Untracked")
-                        .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                         .foregroundStyle(.tronTeal)
                 } else {
                     Text(branchName ?? "Loading...")
-                        .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                         .foregroundStyle(branchName != nil ? .tronTeal : .tronTextMuted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
@@ -262,11 +262,11 @@ struct AnalyticsCardView: View {
                 Spacer()
 
                 Text(TokenFormatter.format(totalTokens))
-                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronRose)
 
                 Text(formatCost(totalCost))
-                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronRose)
             }
             .lineLimit(1)
@@ -305,7 +305,7 @@ struct HistoryCardView: View {
                 Spacer()
 
                 Text("\(totalTurns) \(totalTurns == 1 ? "turn" : "turns")")
-                    .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronCoral)
             }
 

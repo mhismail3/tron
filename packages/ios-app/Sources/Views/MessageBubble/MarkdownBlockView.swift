@@ -109,7 +109,7 @@ struct MarkdownBlockView: View {
         VStack(alignment: .leading, spacing: 0) {
             if let language, !language.isEmpty {
                 Text(language)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)

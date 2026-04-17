@@ -76,7 +76,7 @@ struct HooksSettingsPage: View {
             SettingsCard {
                 SettingsRow(icon: "cpu", label: "Model") {
                     Text(ModelNameFormatter.format(settingsState.hooksLlmModel, style: .short))
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -98,11 +98,11 @@ struct HooksSettingsPage: View {
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 18)
                     Text("~/.tron/hooks/")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 }
 
                 Text("Place .prompt or script files (.sh, .js, .ts) with YAML frontmatter. Hooks are discovered fresh each session \u{2014} no restart needed.")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

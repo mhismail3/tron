@@ -46,7 +46,8 @@ struct ChatSheetContent: View {
                 onAskAgent: { message in
                     viewModel.pendingSourceChangesPrompt = message
                     sheetCoordinator?.dismiss()
-                }
+                },
+                gitWorkflowState: viewModel.gitWorkflowState
             )
 
         case .skillDetail(let skill, let mode):

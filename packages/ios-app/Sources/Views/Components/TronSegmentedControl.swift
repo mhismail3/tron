@@ -17,7 +17,7 @@ struct TronSegmentedControl<T: Hashable>: View {
                     }
                 } label: {
                     Text(option.label)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(isSelected ? .tronSurface : accent)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)

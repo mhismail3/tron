@@ -81,7 +81,7 @@ struct ThinkingDetailSheet: View {
                             PulsingIcon(icon: .thinking, size: 12, color: .tronPurple)
                         }
                         Text("Thinking")
-                            .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .semibold))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
                             .foregroundStyle(.tronPurple)
                     }
                 }

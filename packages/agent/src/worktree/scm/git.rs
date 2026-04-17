@@ -9,6 +9,7 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 use crate::worktree::errors::{Result, WorktreeError};
+use crate::worktree::types::{ConflictKind, ConflictedFile, PushOutput};
 
 /// Parsed entry from `git worktree list --porcelain`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,6 +119,26 @@ impl GitExecutor {
     pub async fn branch_rename(&self, repo: &Path, old_name: &str, new_name: &str) -> Result<()> {
         let _ = self.run(repo, &["branch", "-m", old_name, new_name]).await?;
         Ok(())
+    }
+
+    /// Create a new branch ref pointing at `start_point` WITHOUT checking
+    /// it out. Fails with `BranchExists` if the branch already exists.
+    pub async fn branch_create_from(
+        &self,
+        repo: &Path,
+        new_branch: &str,
+        start_point: &str,
+    ) -> Result<()> {
+        let (_stdout, stderr, ok) = self
+            .run_capture(repo, &["branch", new_branch, start_point])
+            .await?;
+        if ok {
+            Ok(())
+        } else if stderr.contains("already exists") {
+            Err(WorktreeError::BranchExists(new_branch.to_string()))
+        } else {
+            Err(WorktreeError::Git(stderr))
+        }
     }
 
     /// Check if there are uncommitted changes.
@@ -321,6 +342,578 @@ impl GitExecutor {
         .await
     }
 
+    // ────────────────────────────────────────────────────────────────
+    // Phase 1 primitives — remote operations
+    // ────────────────────────────────────────────────────────────────
+
+    /// List configured remote names (e.g. `["origin"]`).
+    pub async fn remote_list(&self, repo: &Path) -> Result<Vec<String>> {
+        let output = self.run(repo, &["remote"]).await?;
+        Ok(output
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(std::string::ToString::to_string)
+            .collect())
+    }
+
+    /// Get the URL for a named remote (`origin` by default if caller wants).
+    pub async fn remote_get_url(&self, repo: &Path, remote: &str) -> Result<String> {
+        self.run(repo, &["remote", "get-url", remote]).await
+    }
+
+    /// Fetch from a remote using the executor's default timeout.
+    pub async fn fetch(&self, repo: &Path, remote: &str) -> Result<()> {
+        let _ = self.run(repo, &["fetch", remote]).await?;
+        Ok(())
+    }
+
+    /// Fetch from a remote with a caller-supplied timeout in milliseconds.
+    ///
+    /// Uses the same stderr classifier as `push` so network / auth errors
+    /// surface as typed variants.
+    pub async fn fetch_timeout(
+        &self,
+        repo: &Path,
+        remote: &str,
+        timeout_ms: u64,
+    ) -> Result<()> {
+        let args: &[&str] = &["fetch", remote];
+        self.run_with_timeout(repo, args, Duration::from_millis(timeout_ms))
+            .await
+            .map(|_| ())
+            .map_err(classify_remote_error)
+    }
+
+    /// Resolve the HEAD of a remote branch via `git ls-remote`.
+    ///
+    /// Returns `Ok(Some(sha))` if the remote has a matching ref, `Ok(None)`
+    /// if the remote is reachable but the branch is absent. `Err` surfaces
+    /// auth/network failures.
+    pub async fn ls_remote_head(
+        &self,
+        repo: &Path,
+        remote: &str,
+        branch: &str,
+    ) -> Result<Option<String>> {
+        let args: &[&str] = &["ls-remote", remote, branch];
+        let output = self
+            .run(repo, args)
+            .await
+            .map_err(classify_remote_error)?;
+        if output.trim().is_empty() {
+            return Ok(None);
+        }
+        // Each line: <sha>\t<ref>. Take the first.
+        let first = output.lines().next().unwrap_or("");
+        let sha = first.split_whitespace().next().unwrap_or("").to_string();
+        if sha.is_empty() { Ok(None) } else { Ok(Some(sha)) }
+    }
+
+    /// Push a branch to a remote. Returns a structured `PushOutput`.
+    ///
+    /// - `force_with_lease` uses `--force-with-lease` (safer than `--force`).
+    /// - `set_upstream` adds `-u` so subsequent pulls use the configured tracking.
+    /// - `dry_run` adds `--dry-run` — git will report the refs it would
+    ///   update but touches nothing remote.
+    ///
+    /// Stderr is inspected for the classic "rejected (non-fast-forward)"
+    /// phrase so callers can react without re-parsing it.
+    pub async fn push(
+        &self,
+        repo: &Path,
+        remote: &str,
+        branch: &str,
+        force_with_lease: bool,
+        set_upstream: bool,
+        dry_run: bool,
+    ) -> Result<PushOutput> {
+        let mut args: Vec<String> = vec!["push".to_string()];
+        if force_with_lease {
+            args.push("--force-with-lease".to_string());
+        }
+        if set_upstream {
+            args.push("-u".to_string());
+        }
+        if dry_run {
+            args.push("--dry-run".to_string());
+        }
+        args.push(remote.to_string());
+        args.push(branch.to_string());
+
+        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (stdout, stderr, ok) = self.run_capture(repo, &argv).await?;
+
+        if !ok {
+            return Err(classify_push_error(stderr));
+        }
+
+        // Even on success, git writes progress to stderr. Return it so
+        // callers can show "To <url>" / per-ref update lines if they want.
+        let _ = stdout;
+        Ok(PushOutput {
+            success: true,
+            branch: branch.to_string(),
+            remote: remote.to_string(),
+            set_upstream,
+            dry_run,
+            stderr,
+        })
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 1 primitives — reset & stash
+    // ────────────────────────────────────────────────────────────────
+
+    /// Hard-reset the current branch to a commit, discarding the working
+    /// tree and index. Used as a rollback primitive — NEVER surface this to
+    /// users without safeguards; the plan's invariants forbid discarding
+    /// uncommitted work except to restore a pre-op state.
+    pub async fn reset_hard(&self, dir: &Path, target: &str) -> Result<()> {
+        let _ = self.run(dir, &["reset", "--hard", target]).await?;
+        Ok(())
+    }
+
+    /// Reset the index to MERGE_HEAD's state — specifically designed to
+    /// undo a conflicted `merge --no-commit`. Leaves the working tree alone.
+    pub async fn reset_merge(&self, dir: &Path) -> Result<()> {
+        let _ = self.run(dir, &["reset", "--merge"]).await?;
+        Ok(())
+    }
+
+    /// Push a stash entry with a custom message. Returns `Ok(Some(ref))`
+    /// with the stash ref (e.g. `stash@{0}`) if a stash was created, or
+    /// `Ok(None)` if there was nothing to stash.
+    pub async fn stash_push(&self, dir: &Path, message: &str) -> Result<Option<String>> {
+        // `git stash push -u -m <msg>` — -u includes untracked.
+        let output = self
+            .run(dir, &["stash", "push", "-u", "-m", message])
+            .await?;
+        // git prints "No local changes to save" (to stdout) when there's
+        // nothing; on success it prints "Saved working directory..."
+        if output.is_empty() || output.contains("No local changes") {
+            return Ok(None);
+        }
+        // The ref is always stash@{0} for the most recent stash.
+        Ok(Some("stash@{0}".to_string()))
+    }
+
+    /// Pop the most recent stash (or a specific ref). Returns
+    /// `Ok(())` on clean pop; surfaces conflicts as `WorktreeError::Git`
+    /// so callers can detect and leave the stash list intact.
+    pub async fn stash_pop(&self, dir: &Path, stash_ref: Option<&str>) -> Result<()> {
+        let args: Vec<&str> = match stash_ref {
+            Some(r) => vec!["stash", "pop", r],
+            None => vec!["stash", "pop"],
+        };
+        let _ = self.run(dir, &args).await?;
+        Ok(())
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 1 primitives — config & refs
+    // ────────────────────────────────────────────────────────────────
+
+    /// Read a config value. Returns `Ok(None)` if the key is unset (git
+    /// returns a non-zero exit code for missing keys).
+    pub async fn config_get(&self, dir: &Path, key: &str) -> Result<Option<String>> {
+        let (stdout, _stderr, ok) = self
+            .run_capture(dir, &["config", "--get", key])
+            .await?;
+        if ok {
+            Ok(Some(stdout.trim().to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Verify a ref exists (`git show-ref --verify --quiet <full-ref>`).
+    ///
+    /// `full_ref` must be fully qualified, e.g. `refs/heads/main`.
+    pub async fn show_ref_verify(&self, dir: &Path, full_ref: &str) -> bool {
+        self.run_status(dir, &["show-ref", "--verify", "--quiet", full_ref])
+            .await
+    }
+
+    /// Pick the first ref from `candidates` that exists, returning its
+    /// short name (e.g. `"main"`), or `None` if none exist.
+    ///
+    /// Used for default-branch detection (`main` or `master`).
+    pub async fn for_each_ref_first_existing(
+        &self,
+        dir: &Path,
+        candidates: &[&str],
+    ) -> Option<String> {
+        for c in candidates {
+            let full = format!("refs/heads/{c}");
+            if self.show_ref_verify(dir, &full).await {
+                return Some((*c).to_string());
+            }
+        }
+        None
+    }
+
+    /// `git rev-parse --verify <ref>` — returns `Ok(sha)` on success,
+    /// `Err` if the ref is missing. Strict form of `head_commit`.
+    pub async fn rev_parse_verify(&self, dir: &Path, rev: &str) -> Result<String> {
+        self.run(dir, &["rev-parse", "--verify", rev]).await
+    }
+
+    /// Fast-forward-only merge. If `target` is not an ancestor of HEAD's
+    /// upstream, git refuses and this returns an error; the working tree
+    /// stays at its pre-merge state.
+    pub async fn merge_ff_only(&self, dir: &Path, source: &str) -> Result<String> {
+        let _ = self.run(dir, &["merge", "--ff-only", source]).await?;
+        self.run(dir, &["rev-parse", "HEAD"]).await
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 1 primitives — branch / worktree
+    // ────────────────────────────────────────────────────────────────
+
+    /// Create a new branch from a start point and check it out.
+    ///
+    /// Fails with `WorktreeError::BranchExists` if the branch already
+    /// exists — callers that want idempotence should check first.
+    pub async fn checkout_new_branch_from(
+        &self,
+        dir: &Path,
+        new_branch: &str,
+        start_point: &str,
+    ) -> Result<()> {
+        let (_stdout, stderr, ok) = self
+            .run_capture(dir, &["checkout", "-b", new_branch, start_point])
+            .await?;
+        if ok {
+            Ok(())
+        } else if stderr.contains("already exists") {
+            Err(WorktreeError::BranchExists(new_branch.to_string()))
+        } else {
+            Err(WorktreeError::Git(stderr))
+        }
+    }
+
+    /// Force-checkout a branch or ref, discarding local changes. Used as
+    /// an internal rollback primitive; unsafe to expose directly.
+    pub async fn force_checkout(&self, dir: &Path, branch: &str) -> Result<()> {
+        let _ = self.run(dir, &["checkout", "--force", branch]).await?;
+        Ok(())
+    }
+
+    /// Update a ref to point at a new value.
+    ///
+    /// Thin wrapper over `git update-ref` — callers must know the ref
+    /// name is fully qualified (e.g. `refs/heads/main`).
+    pub async fn update_ref(&self, dir: &Path, full_ref: &str, new_sha: &str) -> Result<()> {
+        let _ = self.run(dir, &["update-ref", full_ref, new_sha]).await?;
+        Ok(())
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 1 primitives — conflict helpers
+    // ────────────────────────────────────────────────────────────────
+
+    /// Is there an in-progress merge? (Detected via `.git/MERGE_HEAD`.)
+    pub async fn has_merge_in_progress(&self, dir: &Path) -> Result<bool> {
+        let git_dir = self.git_dir(dir).await?;
+        Ok(Path::new(&git_dir).join("MERGE_HEAD").exists())
+    }
+
+    /// Is there an in-progress rebase? (Detected via
+    /// `.git/rebase-merge/` or `.git/rebase-apply/`.)
+    pub async fn has_rebase_in_progress(&self, dir: &Path) -> Result<bool> {
+        let git_dir = self.git_dir(dir).await?;
+        let gd = Path::new(&git_dir);
+        Ok(gd.join("rebase-merge").is_dir() || gd.join("rebase-apply").is_dir())
+    }
+
+    /// List currently staged files (those that would go into the next
+    /// commit). Uses `git diff --cached --name-only`.
+    pub async fn staged_files(&self, dir: &Path) -> Result<Vec<String>> {
+        let output = self.run(dir, &["diff", "--cached", "--name-only"]).await?;
+        Ok(output
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(std::string::ToString::to_string)
+            .collect())
+    }
+
+    /// Read the three index stages for a conflicted path and return a
+    /// `ConflictedFile` describing the conflict shape.
+    ///
+    /// Uses `git ls-files --unmerged -z` to determine which stages exist
+    /// (1/2/3) and `git show :<stage>:<path>` to read each stage's blob.
+    /// Binary detection: we run `git check-attr` — cheap, authoritative,
+    /// and respects `.gitattributes`. As a fallback we treat a NUL byte
+    /// in any stage as binary.
+    pub async fn conflict_sections(
+        &self,
+        dir: &Path,
+        path: &str,
+    ) -> Result<ConflictedFile> {
+        // 1. Figure out which stages exist. Output from ls-files --unmerged:
+        //    <mode> SP <sha> SP <stage>\t<path>\0
+        // For simplicity we just split on \t (path may legitimately contain
+        // tabs but that's very rare; we ignore that edge case here).
+        let (ls_out, _err, ok) = self
+            .run_capture(dir, &["ls-files", "--unmerged", "--", path])
+            .await?;
+        if !ok || ls_out.trim().is_empty() {
+            return Err(WorktreeError::Git(format!("not an unmerged path: {path}")));
+        }
+        let mut have_stage = [false; 4]; // index 1..=3 used
+        for line in ls_out.lines() {
+            // <mode> <sha> <stage>\t<path>
+            let mut iter = line.split_whitespace();
+            let _mode = iter.next();
+            let _sha = iter.next();
+            if let Some(stage_str) = iter.next()
+                && let Ok(stage) = stage_str.parse::<usize>()
+                && (1..=3).contains(&stage)
+            {
+                have_stage[stage] = true;
+            }
+        }
+
+        // 2. Read each stage's blob (if present).
+        let base = if have_stage[1] {
+            Some(self.show_blob_bytes(dir, &format!(":1:{path}")).await?)
+        } else {
+            None
+        };
+        let ours = if have_stage[2] {
+            Some(self.show_blob_bytes(dir, &format!(":2:{path}")).await?)
+        } else {
+            None
+        };
+        let theirs = if have_stage[3] {
+            Some(self.show_blob_bytes(dir, &format!(":3:{path}")).await?)
+        } else {
+            None
+        };
+
+        // 3. Determine conflict kind from stage presence (classic matrix).
+        let kind = match (have_stage[1], have_stage[2], have_stage[3]) {
+            (true, true, true) => ConflictKind::BothModified,
+            (false, true, true) => ConflictKind::BothAdded,
+            (true, false, true) => ConflictKind::DeletedByUs,
+            (true, true, false) => ConflictKind::DeletedByThem,
+            _ => ConflictKind::Other,
+        };
+
+        // 4. Binary detection: `check-attr binary <path>` returns
+        //    "<path>: binary: set" if .gitattributes marks it binary; else
+        //    we fall back to scanning for NUL bytes in any present stage.
+        let binary_attr = self
+            .run(dir, &["check-attr", "binary", "--", path])
+            .await
+            .ok()
+            .map(|s| s.contains(": set"))
+            .unwrap_or(false);
+        let nul_in_any = [&base, &ours, &theirs]
+            .iter()
+            .any(|b| b.as_ref().is_some_and(|v| v.contains(&0u8)));
+        let is_binary = binary_attr || nul_in_any;
+
+        Ok(ConflictedFile {
+            path: path.to_string(),
+            is_binary,
+            base,
+            ours,
+            theirs,
+            kind,
+        })
+    }
+
+    /// Resolve a conflicted path by taking "ours" (stage 2).
+    ///
+    /// Runs `git checkout --ours -- <path>` then stages the result. For
+    /// delete/modify conflicts where "ours" deleted, this leaves the file
+    /// deleted (and stages the deletion).
+    pub async fn checkout_ours(&self, dir: &Path, path: &str) -> Result<()> {
+        // If ours deleted the file, `checkout --ours` errors — recover by
+        // removing via `git rm`.
+        match self.run(dir, &["checkout", "--ours", "--", path]).await {
+            Ok(_) => {
+                let _ = self.run(dir, &["add", "--", path]).await?;
+                Ok(())
+            }
+            Err(_) => {
+                let _ = self.run(dir, &["rm", "-f", "--", path]).await?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Resolve a conflicted path by taking "theirs" (stage 3). Mirror of
+    /// `checkout_ours`.
+    pub async fn checkout_theirs(&self, dir: &Path, path: &str) -> Result<()> {
+        match self.run(dir, &["checkout", "--theirs", "--", path]).await {
+            Ok(_) => {
+                let _ = self.run(dir, &["add", "--", path]).await?;
+                Ok(())
+            }
+            Err(_) => {
+                let _ = self.run(dir, &["rm", "-f", "--", path]).await?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Complete an in-progress merge after conflicts were resolved. Uses
+    /// `--no-edit` so git accepts the default commit message.
+    pub async fn merge_continue(&self, dir: &Path, message: Option<&str>) -> Result<String> {
+        match message {
+            Some(m) => {
+                let _ = self
+                    .run(dir, &["commit", "--no-edit", "-m", m])
+                    .await?;
+            }
+            None => {
+                let _ = self.run(dir, &["commit", "--no-edit"]).await?;
+            }
+        }
+        self.run(dir, &["rev-parse", "HEAD"]).await
+    }
+
+    /// Continue an in-progress rebase after conflicts were resolved. Needs
+    /// `GIT_EDITOR=true` so git doesn't open an editor on the commit message.
+    pub async fn rebase_continue(&self, dir: &Path) -> Result<()> {
+        let _ = self
+            .run_with_env(dir, &["rebase", "--continue"], &[("GIT_EDITOR", "true")])
+            .await?;
+        Ok(())
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Internal helpers
+    // ────────────────────────────────────────────────────────────────
+
+    /// Public form of `git_dir` — resolves the worktree's `.git` directory
+    /// (or worktree git-dir) as an absolute path.
+    pub async fn git_dir_path(&self, dir: &Path) -> Result<std::path::PathBuf> {
+        self.git_dir(dir).await.map(std::path::PathBuf::from)
+    }
+
+    /// Resolve `.git` directory for a worktree / repo.
+    async fn git_dir(&self, dir: &Path) -> Result<String> {
+        self.run(dir, &["rev-parse", "--git-dir"]).await.map(|s| {
+            // If the result is relative (often just ".git"), anchor it to
+            // the caller's `dir`.
+            let p = Path::new(&s);
+            if p.is_absolute() {
+                s
+            } else {
+                dir.join(p).to_string_lossy().to_string()
+            }
+        })
+    }
+
+    /// Read a blob by its `:<stage>:<path>` index address, returning raw
+    /// bytes (unlike `run` which is UTF-8-lossy trimmed).
+    async fn show_blob_bytes(&self, dir: &Path, spec: &str) -> Result<Vec<u8>> {
+        let output = tokio::time::timeout(
+            self.timeout,
+            tokio::process::Command::new("git")
+                .args(["show", spec])
+                .current_dir(dir)
+                .output(),
+        )
+        .await
+        .map_err(|_| WorktreeError::Timeout(self.timeout.as_millis() as u64))?
+        .map_err(|e| WorktreeError::Git(format!("failed to execute git: {e}")))?;
+        if output.status.success() {
+            Ok(output.stdout)
+        } else {
+            Err(WorktreeError::Git(
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ))
+        }
+    }
+
+    /// Like `run` but preserves stdout/stderr/status separately. Used by
+    /// commands where stderr content is meaningful even on success.
+    async fn run_capture(
+        &self,
+        dir: &Path,
+        args: &[&str],
+    ) -> Result<(String, String, bool)> {
+        debug!(dir = %dir.display(), args = ?args, "git (capture)");
+        let output = tokio::time::timeout(
+            self.timeout,
+            tokio::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output(),
+        )
+        .await
+        .map_err(|_| WorktreeError::Timeout(self.timeout.as_millis() as u64))?
+        .map_err(|e| WorktreeError::Git(format!("failed to execute git: {e}")))?;
+        Ok((
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            output.status.success(),
+        ))
+    }
+
+    /// Like `run` but uses the caller-supplied timeout instead of
+    /// `self.timeout` (used by long-running network ops).
+    async fn run_with_timeout(
+        &self,
+        dir: &Path,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<String> {
+        debug!(dir = %dir.display(), args = ?args, timeout_ms = %timeout.as_millis(), "git (custom timeout)");
+        let output = tokio::time::timeout(
+            timeout,
+            tokio::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output(),
+        )
+        .await
+        .map_err(|_| WorktreeError::NetworkTimeout(format!(
+            "git {} timed out after {}ms",
+            args.join(" "),
+            timeout.as_millis()
+        )))?
+        .map_err(|e| WorktreeError::Git(format!("failed to execute git: {e}")))?;
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            Err(WorktreeError::Git(
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ))
+        }
+    }
+
+    /// Like `run` but with extra environment variables set (e.g.
+    /// `GIT_EDITOR=true` so rebase --continue doesn't prompt).
+    async fn run_with_env(
+        &self,
+        dir: &Path,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<String> {
+        debug!(dir = %dir.display(), args = ?args, env = ?env, "git (env)");
+        let mut cmd = tokio::process::Command::new("git");
+        let _ = cmd.args(args).current_dir(dir);
+        for (k, v) in env {
+            let _ = cmd.env(k, v);
+        }
+        let output = tokio::time::timeout(self.timeout, cmd.output())
+            .await
+            .map_err(|_| WorktreeError::Timeout(self.timeout.as_millis() as u64))?
+            .map_err(|e| WorktreeError::Git(format!("failed to execute git: {e}")))?;
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            Err(WorktreeError::Git(
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ))
+        }
+    }
+
     /// Run a git command and return whether it succeeded (exit code 0).
     async fn run_status(&self, dir: &Path, args: &[&str]) -> bool {
         debug!(dir = %dir.display(), args = ?args, "git (status check)");
@@ -336,7 +929,7 @@ impl GitExecutor {
     }
 
     /// Run a git command with timeout.
-    async fn run(&self, dir: &Path, args: &[&str]) -> Result<String> {
+    pub(crate) async fn run(&self, dir: &Path, args: &[&str]) -> Result<String> {
         debug!(dir = %dir.display(), args = ?args, "git");
 
         let output = tokio::time::timeout(
@@ -358,6 +951,62 @@ impl GitExecutor {
             Err(WorktreeError::Git(stderr))
         }
     }
+}
+
+/// Map a `run`-style error from a remote/push operation onto a typed
+/// `WorktreeError` variant by pattern-matching on the stderr string.
+///
+/// Falls back to the original `Git(String)` variant if no pattern matches,
+/// so callers still get the raw message for surfacing to the user.
+pub(crate) fn classify_remote_error(e: WorktreeError) -> WorktreeError {
+    let msg = match &e {
+        WorktreeError::Git(m) => m.clone(),
+        _ => return e,
+    };
+    let lower = msg.to_lowercase();
+    if lower.contains("authentication failed")
+        || lower.contains("could not read username")
+        || lower.contains("permission denied (publickey)")
+        || lower.contains("permission denied")
+        || lower.contains("terminal prompts disabled")
+        || lower.contains("403 forbidden")
+        || lower.contains("401 unauthorized")
+    {
+        WorktreeError::AuthFailure(msg)
+    } else if lower.contains("could not resolve host")
+        || lower.contains("connection refused")
+        || lower.contains("connection timed out")
+        || lower.contains("connection reset")
+        || lower.contains("network is unreachable")
+        || lower.contains("operation timed out")
+    {
+        WorktreeError::NetworkTimeout(msg)
+    } else if lower.contains("no such remote")
+        || lower.contains("does not appear to be a git repository")
+        || lower.contains("no configured push destination")
+    {
+        WorktreeError::NoRemoteConfigured(msg)
+    } else {
+        WorktreeError::Git(msg)
+    }
+}
+
+/// Like `classify_remote_error` but also recognises the non-fast-forward
+/// rejection patterns that can come out of `git push`.
+pub(crate) fn classify_push_error(stderr: String) -> WorktreeError {
+    let lower = stderr.to_lowercase();
+    if lower.contains("(non-fast-forward)")
+        || lower.contains("rejected")
+            && (lower.contains("non-fast-forward") || lower.contains("fetch first"))
+    {
+        return WorktreeError::NonFastForward(stderr);
+    }
+    if lower.contains("stale info") || lower.contains("force-with-lease") {
+        // Stale force-with-lease — also a non-FF variant. Surface as non-FF.
+        return WorktreeError::NonFastForward(stderr);
+    }
+    // Delegate the rest to the generic remote classifier.
+    classify_remote_error(WorktreeError::Git(stderr))
 }
 
 /// Parse `git worktree list --porcelain` output.
@@ -983,3 +1632,556 @@ branch refs/heads/session/x
         assert!(has_changes);
     }
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 1 primitive tests
+// ══════════════════════════════════════════════════════════════════════
+//
+// These sit in a separate `#[cfg(test)]` module so they can reach the
+// shared fixtures at `crate::worktree::test_fixtures::*` without needing
+// to import them into the legacy (inline) tests above.
+
+#[cfg(test)]
+mod phase1_tests {
+    use super::*;
+    use crate::worktree::test_fixtures::{
+        add_commit, checkout_new_branch, init_repo, init_repo_with_origin, make_conflict,
+        make_deleted_by_us_conflict, run_cmd, run_cmd_ok,
+    };
+    use tempfile::tempdir;
+
+    // ── classifier unit tests ──────────────────────────────────────
+
+    #[test]
+    fn classify_push_error_non_fast_forward() {
+        let e = classify_push_error(
+            "! [rejected] main -> main (non-fast-forward)\nerror: failed to push"
+                .to_string(),
+        );
+        matches!(e, WorktreeError::NonFastForward(_))
+            .then_some(())
+            .expect("expected NonFastForward");
+    }
+
+    #[test]
+    fn classify_push_error_stale_lease() {
+        let e = classify_push_error(
+            "! [rejected] main -> main (stale info)\nhint: force-with-lease".to_string(),
+        );
+        matches!(e, WorktreeError::NonFastForward(_))
+            .then_some(())
+            .expect("stale lease should classify as NonFastForward");
+    }
+
+    #[test]
+    fn classify_remote_error_auth_publickey() {
+        let e = classify_remote_error(WorktreeError::Git(
+            "Permission denied (publickey). fatal: Could not read from remote repository.".to_string(),
+        ));
+        matches!(e, WorktreeError::AuthFailure(_))
+            .then_some(())
+            .expect("expected AuthFailure");
+    }
+
+    #[test]
+    fn classify_remote_error_network_host() {
+        let e = classify_remote_error(WorktreeError::Git(
+            "fatal: unable to access 'https://x/': Could not resolve host: x".to_string(),
+        ));
+        matches!(e, WorktreeError::NetworkTimeout(_))
+            .then_some(())
+            .expect("expected NetworkTimeout");
+    }
+
+    #[test]
+    fn classify_remote_error_no_remote() {
+        let e = classify_remote_error(WorktreeError::Git(
+            "fatal: No configured push destination.".to_string(),
+        ));
+        matches!(e, WorktreeError::NoRemoteConfigured(_))
+            .then_some(())
+            .expect("expected NoRemoteConfigured");
+    }
+
+    #[test]
+    fn classify_remote_error_passthrough_unknown() {
+        let e = classify_remote_error(WorktreeError::Git("something else entirely".to_string()));
+        assert!(matches!(e, WorktreeError::Git(_)));
+    }
+
+    // ── remote helpers ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn remote_list_empty() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        assert!(git.remote_list(dir.path()).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn remote_list_and_get_url() {
+        let work = tempdir().unwrap();
+        let origin = tempdir().unwrap();
+        let git = init_repo_with_origin(work.path(), origin.path()).await;
+        let remotes = git.remote_list(work.path()).await.unwrap();
+        assert_eq!(remotes, vec!["origin"]);
+        let url = git.remote_get_url(work.path(), "origin").await.unwrap();
+        assert!(url.contains(&*origin.path().to_string_lossy()));
+    }
+
+    #[tokio::test]
+    async fn ls_remote_head_existing_branch() {
+        let work = tempdir().unwrap();
+        let origin = tempdir().unwrap();
+        let git = init_repo_with_origin(work.path(), origin.path()).await;
+        let sha = git.ls_remote_head(work.path(), "origin", "main").await.unwrap();
+        assert!(sha.is_some(), "expected sha for origin/main");
+        assert_eq!(sha.as_ref().unwrap().len(), 40);
+    }
+
+    #[tokio::test]
+    async fn ls_remote_head_missing_branch_is_none() {
+        let work = tempdir().unwrap();
+        let origin = tempdir().unwrap();
+        let git = init_repo_with_origin(work.path(), origin.path()).await;
+        let sha = git
+            .ls_remote_head(work.path(), "origin", "does-not-exist")
+            .await
+            .unwrap();
+        assert!(sha.is_none());
+    }
+
+    // ── push ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn push_dry_run_no_side_effects() {
+        let work = tempdir().unwrap();
+        let origin = tempdir().unwrap();
+        let git = init_repo_with_origin(work.path(), origin.path()).await;
+
+        // New commit locally, not yet pushed.
+        let head_before_remote = git
+            .ls_remote_head(work.path(), "origin", "main")
+            .await
+            .unwrap();
+
+        add_commit(work.path(), "a.txt", "a", "local a").await;
+
+        let out = git
+            .push(work.path(), "origin", "main", false, false, true /* dry_run */)
+            .await
+            .unwrap();
+        assert!(out.success);
+        assert!(out.dry_run);
+
+        // Remote head is unchanged.
+        let head_after = git
+            .ls_remote_head(work.path(), "origin", "main")
+            .await
+            .unwrap();
+        assert_eq!(head_before_remote, head_after);
+    }
+
+    #[tokio::test]
+    async fn push_real_advances_remote() {
+        let work = tempdir().unwrap();
+        let origin = tempdir().unwrap();
+        let git = init_repo_with_origin(work.path(), origin.path()).await;
+        let head_before = git
+            .ls_remote_head(work.path(), "origin", "main")
+            .await
+            .unwrap();
+
+        let local_head = add_commit(work.path(), "a.txt", "a", "local a").await;
+        let out = git
+            .push(work.path(), "origin", "main", false, false, false)
+            .await
+            .unwrap();
+        assert!(out.success);
+
+        let head_after = git
+            .ls_remote_head(work.path(), "origin", "main")
+            .await
+            .unwrap();
+        assert_ne!(head_before, head_after);
+        assert_eq!(head_after.as_deref(), Some(local_head.as_str()));
+    }
+
+    #[tokio::test]
+    async fn push_non_ff_rejected() {
+        // Two clones of the same origin diverge; the second to push is rejected.
+        let base = tempdir().unwrap();
+        let origin = base.path().join("origin.git");
+        let work_a = base.path().join("a");
+        let work_b = base.path().join("b");
+        std::fs::create_dir_all(&origin).unwrap();
+        run_cmd(&origin, &["git", "init", "--bare"]).await;
+        run_cmd(&origin, &["git", "symbolic-ref", "HEAD", "refs/heads/main"]).await;
+
+        // Seed origin via a throwaway clone.
+        let seed = base.path().join("seed");
+        run_cmd(
+            base.path(),
+            &[
+                "git",
+                "clone",
+                &origin.to_string_lossy(),
+                &seed.to_string_lossy(),
+            ],
+        )
+        .await;
+        run_cmd(&seed, &["git", "config", "user.email", "t@t"]).await;
+        run_cmd(&seed, &["git", "config", "user.name", "t"]).await;
+        run_cmd(&seed, &["git", "config", "commit.gpgsign", "false"]).await;
+        std::fs::write(seed.join("README.md"), "init\n").unwrap();
+        run_cmd(&seed, &["git", "add", "-A"]).await;
+        run_cmd(&seed, &["git", "commit", "-m", "init"]).await;
+        run_cmd(&seed, &["git", "push", "origin", "main"]).await;
+
+        // Clone a and b.
+        for d in [&work_a, &work_b] {
+            run_cmd(
+                base.path(),
+                &[
+                    "git",
+                    "clone",
+                    &origin.to_string_lossy(),
+                    &d.to_string_lossy(),
+                ],
+            )
+            .await;
+            run_cmd(d, &["git", "config", "user.email", "t@t"]).await;
+            run_cmd(d, &["git", "config", "user.name", "t"]).await;
+            run_cmd(d, &["git", "config", "commit.gpgsign", "false"]).await;
+        }
+
+        // a commits + pushes.
+        std::fs::write(work_a.join("a.txt"), "a").unwrap();
+        run_cmd(&work_a, &["git", "add", "-A"]).await;
+        run_cmd(&work_a, &["git", "commit", "-m", "a"]).await;
+        run_cmd(&work_a, &["git", "push", "origin", "main"]).await;
+
+        // b commits but hasn't fetched; push must be rejected.
+        std::fs::write(work_b.join("b.txt"), "b").unwrap();
+        run_cmd(&work_b, &["git", "add", "-A"]).await;
+        run_cmd(&work_b, &["git", "commit", "-m", "b"]).await;
+
+        let git = GitExecutor::new(30_000);
+        let err = git
+            .push(&work_b, "origin", "main", false, false, false)
+            .await
+            .expect_err("push should be rejected");
+        assert!(
+            matches!(err, WorktreeError::NonFastForward(_)),
+            "expected NonFastForward, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn push_set_upstream_creates_tracking() {
+        let work = tempdir().unwrap();
+        let origin = tempdir().unwrap();
+        let git = init_repo_with_origin(work.path(), origin.path()).await;
+
+        // New branch, no upstream yet.
+        checkout_new_branch(work.path(), "feature").await;
+        add_commit(work.path(), "f.txt", "f", "feat").await;
+
+        let out = git
+            .push(work.path(), "origin", "feature", false, true, false)
+            .await
+            .unwrap();
+        assert!(out.set_upstream);
+        assert!(out.success);
+
+        // Confirm tracking exists.
+        let upstream = git
+            .config_get(work.path(), "branch.feature.merge")
+            .await
+            .unwrap();
+        assert_eq!(upstream.as_deref(), Some("refs/heads/feature"));
+    }
+
+    // ── reset_hard / stash ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn reset_hard_discards_wip() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let base = git.head_commit(dir.path()).await.unwrap();
+        std::fs::write(dir.path().join("wip.txt"), "wip").unwrap();
+        run_cmd(dir.path(), &["git", "add", "-A"]).await;
+        run_cmd(dir.path(), &["git", "commit", "-m", "wip"]).await;
+
+        git.reset_hard(dir.path(), &base).await.unwrap();
+        let head = git.head_commit(dir.path()).await.unwrap();
+        assert_eq!(head, base);
+        assert!(!dir.path().join("wip.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn stash_push_returns_none_when_clean() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let r = git.stash_push(dir.path(), "nothing").await.unwrap();
+        assert!(r.is_none());
+    }
+
+    #[tokio::test]
+    async fn stash_push_then_pop_restores_files() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        std::fs::write(dir.path().join("wip.txt"), "contents").unwrap();
+        let r = git.stash_push(dir.path(), "msg").await.unwrap();
+        assert_eq!(r.as_deref(), Some("stash@{0}"));
+        assert!(!dir.path().join("wip.txt").exists(),
+            "stash should remove wip from working tree");
+
+        git.stash_pop(dir.path(), None).await.unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("wip.txt")).unwrap(), "contents");
+    }
+
+    // ── config / refs ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn config_get_present_and_missing() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+
+        let present = git.config_get(dir.path(), "user.email").await.unwrap();
+        assert_eq!(present.as_deref(), Some("test@test.com"));
+
+        let missing = git.config_get(dir.path(), "does.not.exist").await.unwrap();
+        assert!(missing.is_none());
+    }
+
+    #[tokio::test]
+    async fn show_ref_verify_true_false() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        assert!(git.show_ref_verify(dir.path(), "refs/heads/main").await);
+        assert!(!git.show_ref_verify(dir.path(), "refs/heads/nope").await);
+    }
+
+    #[tokio::test]
+    async fn for_each_ref_first_existing_picks_main() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let r = git
+            .for_each_ref_first_existing(dir.path(), &["master", "main"])
+            .await;
+        assert_eq!(r.as_deref(), Some("master").or(Some("main")).and(Some("main")));
+        let r = git
+            .for_each_ref_first_existing(dir.path(), &["main", "master"])
+            .await;
+        assert_eq!(r.as_deref(), Some("main"));
+        let r = git
+            .for_each_ref_first_existing(dir.path(), &["nope", "zzz"])
+            .await;
+        assert!(r.is_none());
+    }
+
+    #[tokio::test]
+    async fn rev_parse_verify_valid_and_invalid() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let sha = git.rev_parse_verify(dir.path(), "HEAD").await.unwrap();
+        assert_eq!(sha.len(), 40);
+        assert!(git.rev_parse_verify(dir.path(), "nonexistent").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn merge_ff_only_succeeds() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let base = git.head_commit(dir.path()).await.unwrap();
+        checkout_new_branch(dir.path(), "feature").await;
+        add_commit(dir.path(), "f.txt", "f", "feat").await;
+        let feature_head = git.head_commit(dir.path()).await.unwrap();
+
+        // Go back to main, FF-merge feature.
+        run_cmd(dir.path(), &["git", "checkout", "main"]).await;
+        assert_eq!(git.head_commit(dir.path()).await.unwrap(), base);
+        let new_head = git.merge_ff_only(dir.path(), "feature").await.unwrap();
+        assert_eq!(new_head, feature_head);
+    }
+
+    #[tokio::test]
+    async fn merge_ff_only_rejects_non_ff() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        // diverge: main has a commit that feature doesn't.
+        checkout_new_branch(dir.path(), "feature").await;
+        add_commit(dir.path(), "f.txt", "f", "feat").await;
+        run_cmd(dir.path(), &["git", "checkout", "main"]).await;
+        add_commit(dir.path(), "m.txt", "m", "main advance").await;
+        let err = git.merge_ff_only(dir.path(), "feature").await;
+        assert!(err.is_err(), "non-ff ff-only merge must fail");
+    }
+
+    // ── branch / worktree ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn checkout_new_branch_from_success() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        git.checkout_new_branch_from(dir.path(), "feature/new", "HEAD")
+            .await
+            .unwrap();
+        assert_eq!(
+            git.current_branch(dir.path()).await.unwrap(),
+            "feature/new"
+        );
+    }
+
+    #[tokio::test]
+    async fn checkout_new_branch_from_already_exists() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        run_cmd(dir.path(), &["git", "branch", "exists"]).await;
+        let err = git
+            .checkout_new_branch_from(dir.path(), "exists", "HEAD")
+            .await
+            .expect_err("should fail");
+        assert!(matches!(err, WorktreeError::BranchExists(n) if n == "exists"));
+    }
+
+    #[tokio::test]
+    async fn force_checkout_drops_wip() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        checkout_new_branch(dir.path(), "other").await;
+        run_cmd(dir.path(), &["git", "checkout", "main"]).await;
+        std::fs::write(dir.path().join("wip.txt"), "wip").unwrap();
+        // checkout would normally refuse with uncommitted wip if conflicting,
+        // but untracked files are tolerated — ensure --force path works.
+        git.force_checkout(dir.path(), "other").await.unwrap();
+        assert_eq!(git.current_branch(dir.path()).await.unwrap(), "other");
+    }
+
+    #[tokio::test]
+    async fn update_ref_moves_branch() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let base = git.head_commit(dir.path()).await.unwrap();
+        add_commit(dir.path(), "a.txt", "a", "a").await;
+        // Move main backward with update-ref. symbolic-ref still points to
+        // main, so `rev-parse refs/heads/main` should now return `base`.
+        git.update_ref(dir.path(), "refs/heads/main", &base)
+            .await
+            .unwrap();
+        let r = git
+            .rev_parse_verify(dir.path(), "refs/heads/main")
+            .await
+            .unwrap();
+        assert_eq!(r, base);
+    }
+
+    // ── conflict helpers ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn has_merge_in_progress_false_then_true() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        assert!(!git.has_merge_in_progress(dir.path()).await.unwrap());
+
+        make_conflict(dir.path(), "a", "b", "f.txt").await;
+        // Attempt the merge — will conflict, not auto-abort here.
+        let _ = run_cmd_ok(dir.path(), &["git", "merge", "--no-ff", "b"]).await;
+        assert!(git.has_merge_in_progress(dir.path()).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn has_rebase_in_progress_false_by_default() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        assert!(!git.has_rebase_in_progress(dir.path()).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn staged_files_reports_added() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        assert!(git.staged_files(dir.path()).await.unwrap().is_empty());
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        run_cmd(dir.path(), &["git", "add", "a.txt"]).await;
+        assert_eq!(git.staged_files(dir.path()).await.unwrap(), vec!["a.txt"]);
+    }
+
+    #[tokio::test]
+    async fn conflict_sections_both_modified_content() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        make_conflict(dir.path(), "a", "b", "f.txt").await;
+        // Trigger the merge so the index holds stages 1/2/3.
+        let _ = run_cmd_ok(dir.path(), &["git", "merge", "--no-ff", "b"]).await;
+
+        let cf = git.conflict_sections(dir.path(), "f.txt").await.unwrap();
+        assert_eq!(cf.path, "f.txt");
+        assert_eq!(cf.kind, ConflictKind::BothModified);
+        assert!(!cf.is_binary);
+        assert_eq!(cf.base.as_deref(), Some(b"base line\n".as_slice()));
+        assert_eq!(cf.ours.as_deref(), Some(b"from A\n".as_slice()));
+        assert_eq!(cf.theirs.as_deref(), Some(b"from B\n".as_slice()));
+    }
+
+    #[tokio::test]
+    async fn conflict_sections_deleted_by_us() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        make_deleted_by_us_conflict(dir.path(), "a", "b", "gone.txt").await;
+        let _ = run_cmd_ok(dir.path(), &["git", "merge", "--no-ff", "b"]).await;
+        let cf = git.conflict_sections(dir.path(), "gone.txt").await.unwrap();
+        assert_eq!(cf.kind, ConflictKind::DeletedByUs);
+        assert!(cf.base.is_some());
+        assert!(cf.ours.is_none());
+        assert!(cf.theirs.is_some());
+    }
+
+    #[tokio::test]
+    async fn checkout_ours_resolves_content_conflict() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        make_conflict(dir.path(), "a", "b", "f.txt").await;
+        let _ = run_cmd_ok(dir.path(), &["git", "merge", "--no-ff", "b"]).await;
+
+        git.checkout_ours(dir.path(), "f.txt").await.unwrap();
+        let contents = std::fs::read_to_string(dir.path().join("f.txt")).unwrap();
+        assert_eq!(contents, "from A\n");
+        // The file is no longer unmerged (conflict_files reports empty).
+        // Note: `staged_files` (diff --cached) may be empty because "ours"
+        // content already matches HEAD for the current branch — that's
+        // correct behaviour.
+        let conflicts = git.conflict_files(dir.path()).await.unwrap();
+        assert!(
+            conflicts.iter().all(|f| f != "f.txt"),
+            "f.txt should no longer be unmerged, got {conflicts:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn checkout_theirs_resolves_content_conflict() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        make_conflict(dir.path(), "a", "b", "f.txt").await;
+        let _ = run_cmd_ok(dir.path(), &["git", "merge", "--no-ff", "b"]).await;
+
+        git.checkout_theirs(dir.path(), "f.txt").await.unwrap();
+        let contents = std::fs::read_to_string(dir.path().join("f.txt")).unwrap();
+        assert_eq!(contents, "from B\n");
+    }
+
+    #[tokio::test]
+    async fn merge_continue_commits_resolved() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        make_conflict(dir.path(), "a", "b", "f.txt").await;
+        let _ = run_cmd_ok(dir.path(), &["git", "merge", "--no-ff", "b"]).await;
+        git.checkout_theirs(dir.path(), "f.txt").await.unwrap();
+
+        let sha = git.merge_continue(dir.path(), None).await.unwrap();
+        assert_eq!(sha.len(), 40);
+        assert!(!git.has_merge_in_progress(dir.path()).await.unwrap());
+    }
+}
+

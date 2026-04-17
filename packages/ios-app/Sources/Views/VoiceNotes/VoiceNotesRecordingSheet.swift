@@ -51,7 +51,7 @@ struct VoiceNotesRecordingSheet: View {
                 // Max duration indicator
                 if recorder.isRecording {
                     Text("Max: 15 minutes")
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextDisabled)
                 }
 

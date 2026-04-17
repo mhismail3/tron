@@ -15,7 +15,7 @@ struct NotifyAppChip: View {
                 statusIcon
 
                 Text("Notification sent")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(data.status.color)
                     .lineLimit(1)
 

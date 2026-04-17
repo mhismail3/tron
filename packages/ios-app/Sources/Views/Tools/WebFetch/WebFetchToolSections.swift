@@ -19,12 +19,12 @@ struct WebFetchSourceSection: View {
 
                     if let source, !source.title.isEmpty {
                         Text(source.title)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(tint.name)
                             .lineLimit(2)
                     } else {
                         Text(domain)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(tint.name)
                             .lineLimit(1)
                     }
@@ -55,7 +55,7 @@ struct WebFetchPromptSection: View {
     var body: some View {
         ToolDetailSection(title: "Prompt", accent: .tronInfo, tint: tint) {
             Text(prompt)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(tint.body)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -74,7 +74,7 @@ struct WebFetchAnswerSection: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Answer")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()
@@ -108,7 +108,7 @@ struct WebFetchRawHttpInfoSection: View {
         ToolDetailSection(title: "Request", accent: .tronInfo, tint: tint) {
             HStack(spacing: 12) {
                 Text(method)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
@@ -117,7 +117,7 @@ struct WebFetchRawHttpInfoSection: View {
 
                 if let status = httpStatus {
                     Text("→ \(status)")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(statusColor(status))
                 }
 
@@ -156,7 +156,7 @@ struct WebFetchRawResponseBodySection: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Response")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()
@@ -186,7 +186,7 @@ struct WebFetchStreamingAnswerSection: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Answer")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(tint.heading)
 
                 Spacer()
