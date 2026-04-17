@@ -40,17 +40,27 @@ struct GitSyncMainParams: Encodable {
     let remote: String?
     /// Fetch timeout in milliseconds.
     let fetchTimeoutMs: UInt64?
+    /// Adds `--prune` to the fetch so local remote-tracking refs for
+    /// branches deleted upstream are removed.
+    let prune: Bool?
+    /// Runs the fetch but skips the local fast-forward, returning a
+    /// `dryRunPreview` outcome so the user can verify what would happen.
+    let dryRun: Bool?
 
     init(
         sessionId: String,
         targetBranch: String? = nil,
         remote: String? = nil,
-        fetchTimeoutMs: UInt64? = nil
+        fetchTimeoutMs: UInt64? = nil,
+        prune: Bool? = nil,
+        dryRun: Bool? = nil
     ) {
         self.sessionId = sessionId
         self.targetBranch = targetBranch
         self.remote = remote
         self.fetchTimeoutMs = fetchTimeoutMs
+        self.prune = prune
+        self.dryRun = dryRun
     }
 }
 
@@ -76,10 +86,12 @@ enum GitSyncBlockReason: Equatable {
 enum GitSyncOutcome: Decodable, Equatable {
     case upToDate(head: String)
     case fastForwarded(oldHead: String, newHead: String, advancedBy: UInt64)
+    case dryRunPreview(head: String, remoteHead: String, wouldAdvanceBy: UInt64)
     case blocked(reason: GitSyncBlockReason)
 
     private enum CodingKeys: String, CodingKey {
         case outcome, head, oldHead, newHead, advancedBy
+        case remoteHead, wouldAdvanceBy
         case reason, ahead, behind, message, current, expected
     }
 
@@ -94,6 +106,12 @@ enum GitSyncOutcome: Decodable, Equatable {
                 oldHead: try c.decode(String.self, forKey: .oldHead),
                 newHead: try c.decode(String.self, forKey: .newHead),
                 advancedBy: try c.decode(UInt64.self, forKey: .advancedBy)
+            )
+        case "dryRunPreview":
+            self = .dryRunPreview(
+                head: try c.decode(String.self, forKey: .head),
+                remoteHead: try c.decode(String.self, forKey: .remoteHead),
+                wouldAdvanceBy: try c.decode(UInt64.self, forKey: .wouldAdvanceBy)
             )
         case "blocked":
             let reasonKey = try c.decode(String.self, forKey: .reason)

@@ -395,15 +395,21 @@ impl GitExecutor {
     /// Fetch from a remote with a caller-supplied timeout in milliseconds.
     ///
     /// Uses the same stderr classifier as `push` so network / auth errors
-    /// surface as typed variants.
+    /// surface as typed variants. `prune` maps to `git fetch --prune`, which
+    /// removes local remote-tracking refs for branches deleted upstream.
     pub async fn fetch_timeout(
         &self,
         repo: &Path,
         remote: &str,
         timeout_ms: u64,
+        prune: bool,
     ) -> Result<()> {
-        let args: &[&str] = &["fetch", remote];
-        self.run_with_timeout(repo, args, Duration::from_millis(timeout_ms))
+        let mut args: Vec<&str> = vec!["fetch"];
+        if prune {
+            args.push("--prune");
+        }
+        args.push(remote);
+        self.run_with_timeout(repo, &args, Duration::from_millis(timeout_ms))
             .await
             .map(|_| ())
             .map_err(classify_remote_error)

@@ -99,6 +99,16 @@ fn sync_outcome_json(o: &SyncOutcome) -> Value {
             "newHead": new_head,
             "advancedBy": *advanced_by as u64,
         }),
+        SyncOutcome::DryRunPreview {
+            head,
+            remote_head,
+            would_advance_by,
+        } => json!({
+            "outcome": "dryRunPreview",
+            "head": head,
+            "remoteHead": remote_head,
+            "wouldAdvanceBy": *would_advance_by as u64,
+        }),
         SyncOutcome::Blocked(reason) => {
             let (kind, extras) = match reason {
                 SyncBlockReason::NoRemote => ("noRemote", json!({})),
@@ -151,10 +161,19 @@ impl MethodHandler for SyncMainHandler {
         let target = opt_string(params.as_ref(), "targetBranch");
         let remote = opt_string(params.as_ref(), "remote").unwrap_or_else(|| "origin".into());
         let timeout_ms = opt_u64(params.as_ref(), "fetchTimeoutMs", 60_000);
+        let prune = opt_bool(params.as_ref(), "prune").unwrap_or(false);
+        let dry_run = opt_bool(params.as_ref(), "dryRun").unwrap_or(false);
         let coord = require_coordinator(ctx)?;
 
         let outcome = coord
-            .sync_main(&session_id, target.as_deref(), &remote, timeout_ms)
+            .sync_main(
+                &session_id,
+                target.as_deref(),
+                &remote,
+                timeout_ms,
+                prune,
+                dry_run,
+            )
             .await
             .map_err(internal)?;
         Ok(sync_outcome_json(&outcome))

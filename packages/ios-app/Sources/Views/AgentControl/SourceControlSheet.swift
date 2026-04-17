@@ -185,14 +185,14 @@ struct SourceControlSheet: View {
 
             gitActionRow(
                 icon: "checkmark.seal",
-                title: "Finalize Session",
-                subtitle: "Merge session into \(worktreeStatus?.worktree?.baseBranch ?? "main") and rebranch",
+                title: "Merge Changes",
+                subtitle: "Merge session branch and rebranch",
                 tint: .tronCoral
             ) { activeGitAction = .finalize }
 
             gitActionRow(
                 icon: "arrow.up.circle",
-                title: "Push",
+                title: "Push Branch",
                 subtitle: "Push session branch to origin",
                 tint: .tronSky
             ) { activeGitAction = .push }
@@ -200,7 +200,7 @@ struct SourceControlSheet: View {
             if repoSessionCount > 0 {
                 gitActionRow(
                     icon: "rectangle.stack.person.crop",
-                    title: "\(repoSessionCount) Sessions in this Repo",
+                    title: "\(repoSessionCount) Parallel \(repoSessionCount == 1 ? "Session" : "Sessions")",
                     subtitle: "View and jump to sibling sessions",
                     tint: .tronAmber
                 ) { activeGitAction = .repoSessions }

@@ -42,8 +42,8 @@ struct PushSubSheet: View {
             content: {
                 GitHeroCard(
                     icon: "arrow.up.circle",
-                    title: "Push \(pushBranch)",
-                    description: "Pushes the session branch to origin. Protected branches always require an explicit override.",
+                    title: heroTitle,
+                    description: heroDescription,
                     accent: accent
                 )
 
@@ -67,6 +67,35 @@ struct PushSubSheet: View {
     private var pushBranch: String {
         let t = branch.trimmingCharacters(in: .whitespaces)
         return t.isEmpty ? currentBranch : t
+    }
+
+    // MARK: Dynamic Hero Summary
+
+    private var heroTitle: String {
+        dryRun ? "Dry-run push \(pushBranch)" : "Push \(pushBranch)"
+    }
+
+    /// Real-time summary that reflects every toggle change. Protected-branch
+    /// caveat stays pinned since it's always true on the server.
+    private var heroDescription: String {
+        let action = dryRun
+            ? "Simulates a push of \(pushBranch) to origin without touching the remote"
+            : "Pushes \(pushBranch) to origin"
+
+        var modifiers: [String] = []
+        if setUpstream {
+            modifiers.append("sets the upstream to origin/\(pushBranch)")
+        }
+        if forceWithLease {
+            modifiers.append("force-with-lease rewrites remote history if nobody else has pushed since your last fetch")
+        }
+
+        var sentence = action
+        if !modifiers.isEmpty {
+            sentence += ", " + modifiers.joined(separator: ", and ")
+        }
+        sentence += ". Protected branches always require an explicit override."
+        return sentence
     }
 
     // MARK: Cards
@@ -95,7 +124,7 @@ struct PushSubSheet: View {
     private var upstreamCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsCard(accent: accent) {
-                SettingsRow(icon: "link", label: "Set Upstream", accentColor: accent) {
+                SettingsRow(icon: "link", label: "Set upstream", accentColor: accent) {
                     Toggle("", isOn: $setUpstream)
                         .labelsHidden()
                         .tint(accent)
@@ -108,7 +137,7 @@ struct PushSubSheet: View {
     private var forceWithLeaseCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsCard(accent: accent) {
-                SettingsRow(icon: "bolt.shield", label: "Force with Lease", accentColor: .tronAmber) {
+                SettingsRow(icon: "bolt.shield", label: "Force with lease", accentColor: .tronAmber) {
                     Toggle("", isOn: $forceWithLease)
                         .labelsHidden()
                         .tint(.tronAmber)
@@ -121,7 +150,7 @@ struct PushSubSheet: View {
     private var dryRunCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsCard(accent: accent) {
-                SettingsRow(icon: "eye", label: "Dry Run", accentColor: accent) {
+                SettingsRow(icon: "eye", label: "Dry run", accentColor: accent) {
                     Toggle("", isOn: $dryRun)
                         .labelsHidden()
                         .tint(accent)

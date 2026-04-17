@@ -13,14 +13,18 @@ final class GitClient: RPCDomainClient {
         sessionId: String,
         targetBranch: String? = nil,
         remote: String? = nil,
-        fetchTimeoutMs: UInt64? = nil
+        fetchTimeoutMs: UInt64? = nil,
+        prune: Bool? = nil,
+        dryRun: Bool? = nil
     ) async throws -> GitSyncOutcome {
         let ws = try requireTransport().requireConnection()
         let params = GitSyncMainParams(
             sessionId: sessionId,
             targetBranch: targetBranch,
             remote: remote,
-            fetchTimeoutMs: fetchTimeoutMs
+            fetchTimeoutMs: fetchTimeoutMs,
+            prune: prune,
+            dryRun: dryRun
         )
         return try await ws.send(method: "git.syncMain", params: params)
     }

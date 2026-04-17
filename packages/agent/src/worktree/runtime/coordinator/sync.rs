@@ -30,22 +30,33 @@ impl WorktreeCoordinator {
     /// `main`/`master` ref probe if `None`.
     ///
     /// `fetch_timeout_ms` is plumbed through to the network fetch so the
-    /// UI's cancel timeout is respected.
+    /// UI's cancel timeout is respected. `prune` adds `--prune` to the fetch
+    /// so stale remote-tracking branches are cleaned up; `dry_run` runs the
+    /// fetch but skips the fast-forward and returns a `DryRunPreview`.
     pub async fn sync_main(
         &self,
         session_id: &str,
         main_branch: Option<&str>,
         remote: &str,
         fetch_timeout_ms: u64,
+        prune: bool,
+        dry_run: bool,
     ) -> Result<SyncOutcome> {
         let repo_root = self.repo_root_for_session(session_id)?;
         let _guard = self
             .acquire_repo_lock(&repo_root, session_id, LockedOp::SyncMain)
             .await;
 
-        let outcome =
-            scm_sync::sync_main(&repo_root, main_branch, remote, &self.git, fetch_timeout_ms)
-                .await?;
+        let outcome = scm_sync::sync_main(
+            &repo_root,
+            main_branch,
+            remote,
+            &self.git,
+            fetch_timeout_ms,
+            prune,
+            dry_run,
+        )
+        .await?;
 
         if let SyncOutcome::FastForwarded {
             old_head,

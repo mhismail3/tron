@@ -403,6 +403,17 @@ pub enum SyncOutcome {
         /// How many commits were pulled in.
         advanced_by: usize,
     },
+    /// Dry-run result: shows what a real sync would do without modifying
+    /// local `main`. The fetch still ran (so remote-tracking refs are fresh
+    /// and `--prune` is honored), but no fast-forward was applied.
+    DryRunPreview {
+        /// Current local HEAD (unchanged).
+        head: String,
+        /// Remote tip that a real sync would fast-forward to.
+        remote_head: String,
+        /// How many commits the FF would advance.
+        would_advance_by: usize,
+    },
     /// Sync did not run; caller must address the blocker first.
     Blocked(SyncBlockReason),
 }

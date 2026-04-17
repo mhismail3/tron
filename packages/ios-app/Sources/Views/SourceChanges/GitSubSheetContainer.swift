@@ -138,7 +138,6 @@ struct GitHeroCard: View {
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
                         .fixedSize(horizontal: false, vertical: true)
-                        .lineLimit(3)
                 }
                 Spacer(minLength: 0)
             }
@@ -146,6 +145,8 @@ struct GitHeroCard: View {
         .padding(14)
         .sectionFill(accent, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .animation(.smooth(duration: 0.25), value: title)
+        .animation(.smooth(duration: 0.25), value: description)
     }
 }
 

@@ -2,10 +2,13 @@ import SwiftUI
 
 // MARK: - Merge Changes Sub-Sheet
 
-/// Merges the session branch into the configured target branch. By default
-/// also rebranches the worktree onto a fresh session branch so new work stays
-/// isolated; that follow-up can be disabled via the "Auto-create new session
-/// branch" toggle, which leaves the worktree on the original source branch.
+/// Merges the session branch into the configured target branch. Defaults to
+/// the repo's base branch (typically `main`); the remote-branch picker is
+/// still available for edge cases where a session needs to merge into a
+/// non-default integration branch. By default also rebranches the worktree
+/// onto a fresh session branch so new work stays isolated; that follow-up can
+/// be disabled via the "Auto-create new session branch" toggle, which leaves
+/// the worktree on the original source branch.
 ///
 /// On conflicts, the sub-sheet swaps its payload to the `ConflictResolverSubSheet`
 /// flow, keeping the user in the same sheet for the full resolution cycle.
@@ -52,6 +55,14 @@ struct FinalizeSessionSubSheet: View {
                 "Combines every session commit into a single new commit on the target branch."
             }
         }
+        // Short verb phrase used by the dynamic hero summary.
+        var summaryVerb: String {
+            switch self {
+            case .merge: "Creates a merge commit joining this session's work"
+            case .rebase: "Replays this session's commits"
+            case .squash: "Squashes this session's work into a single commit"
+            }
+        }
     }
 
     var body: some View {
@@ -70,10 +81,8 @@ struct FinalizeSessionSubSheet: View {
             content: {
                 GitHeroCard(
                     icon: "checkmark.seal",
-                    title: "Merge to \(displayTarget)",
-                    description: rebranch
-                        ? "Merges this session's work into \(displayTarget), then creates a fresh session branch so new changes stay isolated."
-                        : "Merges this session's work into \(displayTarget). The worktree stays on the current session branch afterwards.",
+                    title: heroTitle,
+                    description: heroDescription,
                     accent: accent
                 )
 
@@ -117,7 +126,7 @@ struct FinalizeSessionSubSheet: View {
         )
         .tronErrorAlert(message: $errorMessage)
         .task {
-            targetBranch = suggestedTargetBranch ?? ""
+            targetBranch = suggestedTargetBranch ?? "main"
             strategy = MergeStrategy(rawValue: defaultStrategy) ?? .merge
             deleteOldBranch = (defaultSessionBranchPolicy == "deleteOnFinalize")
         }
@@ -126,6 +135,30 @@ struct FinalizeSessionSubSheet: View {
     private var displayTarget: String {
         let t = targetBranch.trimmingCharacters(in: .whitespaces)
         return t.isEmpty ? (suggestedTargetBranch ?? "main") : t
+    }
+
+    // MARK: Dynamic Hero Summary
+
+    /// Short, action-oriented title that reflects the picked target.
+    private var heroTitle: String {
+        "Merge to \(displayTarget)"
+    }
+
+    /// Real-time summary of exactly what this sheet will do given the current
+    /// settings. Rebuilt on every render, so flipping a toggle immediately
+    /// updates the copy.
+    private var heroDescription: String {
+        var sentence = "\(strategy.summaryVerb) into \(displayTarget)"
+        if rebranch {
+            sentence += ", then creates a fresh session branch so new changes stay isolated"
+            if deleteOldBranch {
+                sentence += " and deletes the old session branch"
+            }
+        } else {
+            sentence += ". The worktree stays on the current session branch afterwards"
+            return sentence + "."
+        }
+        return sentence + "."
     }
 
     // MARK: Cards
@@ -143,7 +176,7 @@ struct FinalizeSessionSubSheet: View {
                     source: .remote()
                 )
             }
-            SettingsCaption(text: "Only branches published on origin are valid merge targets. Session branches and unpushed local branches are hidden.")
+            SettingsCaption(text: "Defaults to main. Only branches published on origin are valid merge targets.")
         }
     }
 
@@ -200,7 +233,7 @@ struct FinalizeSessionSubSheet: View {
     private var deleteOldCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsCard(accent: accent) {
-                SettingsRow(icon: "trash", label: "Delete Old Session Branch", accentColor: .tronAmber) {
+                SettingsRow(icon: "trash", label: "Delete old session branch", accentColor: .tronAmber) {
                     Toggle("", isOn: $deleteOldBranch)
                         .labelsHidden()
                         .tint(.tronAmber)
