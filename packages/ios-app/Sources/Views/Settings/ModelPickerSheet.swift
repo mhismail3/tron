@@ -261,7 +261,6 @@ private struct FamilySection: View {
                 Text(family.id)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(family.isDeprecated ? .tronTextMuted : .tronTextSecondary)
-                    .strikethrough(family.isDeprecated, color: .tronTextMuted)
 
                 // Model count badge
                 Text("\(family.models.count)")
@@ -269,11 +268,11 @@ private struct FamilySection: View {
                     .countBadge(providerColor)
 
                 if family.isDeprecated {
-                    Text("Retired")
-                        .font(TronTypography.pillValue)
+                    Text("Deprecated")
+                        .font(TronTypography.sans(size: TronTypography.sizeXS))
                         .foregroundStyle(.red)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
                         .background(Color.red.opacity(0.15))
                         .clipShape(Capsule())
                 } else if family.isLatest {
