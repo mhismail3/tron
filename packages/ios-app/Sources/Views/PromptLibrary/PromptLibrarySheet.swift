@@ -53,6 +53,19 @@ struct PromptLibrarySheet: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                if state.activeTab == .history {
+                    TronSearchBar(
+                        text: Binding(
+                            get: { state.historySearch },
+                            set: { state.setSearch($0, rpc: rpcClient) }
+                        ),
+                        prompt: "Search prompts"
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                }
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {

@@ -205,6 +205,7 @@
 		439B9BD7A124E381ADB7974D /* QueuedMessageChipsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D7AD1B96B2C212ED477C66 /* QueuedMessageChipsView.swift */; };
 		43BA34884D69600B7E5AEACB /* AskUserQuestionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81AD25FBBB782DF4866A5852 /* AskUserQuestionTypes.swift */; };
 		43BDB1C765927BE67FE06CBD /* MessageHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35BDCD7F29207A366C356FF4 /* MessageHandlers.swift */; };
+		44D488294A92D0D3D20ECD41 /* TronSearchBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5907BCE1A8CA16323496E0C /* TronSearchBar.swift */; };
 		451D7F5ABE9BF76F00DE14CD /* DisplayStreamState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E656D23A2352751AB4427E /* DisplayStreamState.swift */; };
 		45547C33D9EC4977CC374547 /* ToolPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36D5C1A94E170CFF37A3544A /* ToolPayloads.swift */; };
 		467E6A490BB8E384A9ED45BD /* ErrorHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AB51ED817BDAB05A25CA903 /* ErrorHandlerTests.swift */; };
@@ -1253,6 +1254,7 @@
 		A469493C34CE771CE26B5DCE /* SessionClientProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionClientProtocol.swift; sourceTree = "<group>"; };
 		A4B267367C2A7F8D7FCB90DE /* WorkspaceValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceValidationTests.swift; sourceTree = "<group>"; };
 		A570CDAD7B9A2A4D7F52BE48 /* SubagentResultAvailablePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentResultAvailablePlugin.swift; sourceTree = "<group>"; };
+		A5907BCE1A8CA16323496E0C /* TronSearchBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronSearchBar.swift; sourceTree = "<group>"; };
 		A5ABAB315B28D05412B8C2A3 /* RPCTypes+Diff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Diff.swift"; sourceTree = "<group>"; };
 		A5D4142619E7C63B4A63C1DF /* GetConfirmationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GetConfirmationState.swift; sourceTree = "<group>"; };
 		A6704CE7E76B248474B6745B /* DraftMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftMetadataTests.swift; sourceTree = "<group>"; };
@@ -2871,6 +2873,7 @@
 				0A040FD623C1D967A7D03F60 /* FlowLayout.swift */,
 				6A728932D4055DD33082C067 /* LineNumberedContentView.swift */,
 				96EF9AB59494D73FF5844A32 /* SheetComponents.swift */,
+				A5907BCE1A8CA16323496E0C /* TronSearchBar.swift */,
 				24C19F8456129A0C2DE081A9 /* TronSegmentedControl.swift */,
 				8878C9A16390B62C79B0C2A3 /* TypewriterAnimationState.swift */,
 				2E2F2BF782B756D47E100F37 /* TypewriterText.swift */,
@@ -3995,6 +3998,7 @@
 				7704175EFC374D5E5425BC6D /* TronIcons.swift in Sources */,
 				B523893BDC7E79D4FBF86800 /* TronLogger.swift in Sources */,
 				8D03520968C046CF0A0C5CC9 /* TronMobileApp.swift in Sources */,
+				44D488294A92D0D3D20ECD41 /* TronSearchBar.swift in Sources */,
 				8F87030DCAF118C73ED9DE23 /* TronSegmentedControl.swift in Sources */,
 				AF995741399CFE0412212FE4 /* TronSpacing.swift in Sources */,
 				ADE823483A87985C5E503A9C /* TronStepper.swift in Sources */,

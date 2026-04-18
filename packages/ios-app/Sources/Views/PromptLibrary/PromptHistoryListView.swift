@@ -20,10 +20,6 @@ struct PromptHistoryListView: View {
                 listContent
             }
         }
-        .searchable(text: Binding(
-            get: { state.historySearch },
-            set: { state.setSearch($0, rpc: rpcClient) }
-        ), prompt: "Search prompts")
     }
 
     private var listContent: some View {
