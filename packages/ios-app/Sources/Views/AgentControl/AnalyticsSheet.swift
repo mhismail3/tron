@@ -16,6 +16,11 @@ struct AnalyticsSheet: View {
         Dictionary(turnGroups.map { ($0.turnNumber, $0) }, uniquingKeysWith: { _, last in last })
     }
 
+    /// Enable liquid glass on turn cards only for short histories; large lists fall back to plain fill to avoid rendering glitches.
+    private var useGlassForTurns: Bool {
+        analytics.turns.count <= 25
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
@@ -125,7 +130,7 @@ struct AnalyticsSheet: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
         }
-        .sectionFill(.tronRose, cornerRadius: 10, subtle: true, compact: false)
+        .sectionFill(.tronRose, cornerRadius: 10, subtle: true, compact: useGlassForTurns)
     }
 
     // MARK: - Expanded Turn Detail
@@ -199,7 +204,7 @@ struct AnalyticsSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .sectionFill(.tronRose, cornerRadius: 8, subtle: true, compact: false)
+        .sectionFill(.tronRose, cornerRadius: 8, subtle: true, compact: useGlassForTurns, interactive: false)
     }
 
     private func statItem(value: String, label: String, color: Color? = nil) -> some View {

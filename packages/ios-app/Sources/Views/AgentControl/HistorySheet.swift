@@ -28,6 +28,11 @@ struct HistorySheet: View {
         turnGroups.filter { !$0.isInherited }
     }
 
+    /// Enable liquid glass on turn cards only for short histories; large lists fall back to plain fill to avoid rendering glitches.
+    private var useGlassForTurns: Bool {
+        turnGroups.count <= 25
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
@@ -247,7 +252,7 @@ struct HistorySheet: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
         }
-        .sectionFill(muted ? .tronSlate : .tronCoral, cornerRadius: 10, subtle: true, compact: false)
+        .sectionFill(muted ? .tronSlate : .tronCoral, cornerRadius: 10, subtle: true, compact: useGlassForTurns)
     }
 
     // MARK: - Events Content

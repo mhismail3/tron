@@ -26,7 +26,7 @@ struct SessionAnalyticsSection: View {
                 statsRow
             }
             .padding(14)
-            .sectionFill(.tronRose)
+            .sectionFill(.tronRose, interactive: false)
         }
     }
 
