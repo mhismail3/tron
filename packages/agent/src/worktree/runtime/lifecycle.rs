@@ -14,7 +14,6 @@ use crate::worktree::types::{ReleaseInfo, WorktreeConfig, WorktreeInfo};
 /// 1. Resolve repo root from `working_dir`
 /// 2. Compute worktree path and branch name
 /// 3. Create the worktree via `git worktree add`
-/// 4. Ensure `.worktrees` is gitignored
 pub async fn create(
     session_id: &str,
     working_dir: &Path,
@@ -53,8 +52,6 @@ pub async fn create(
                 e
             }
         })?;
-
-    ensure_gitignore(&repo_root, &config.base_dir_name).await?;
 
     let info = WorktreeInfo {
         session_id: session_id.to_string(),
@@ -174,33 +171,6 @@ pub async fn remove(
     })
 }
 
-/// Ensure the worktree base dir is in `.gitignore`.
-async fn ensure_gitignore(repo_root: &Path, base_dir_name: &str) -> Result<()> {
-    use std::fmt::Write;
-    let gitignore = repo_root.join(".gitignore");
-    let pattern = format!("{base_dir_name}/");
-
-    let content = if gitignore.exists() {
-        tokio::fs::read_to_string(&gitignore).await?
-    } else {
-        String::new()
-    };
-
-    if content.lines().any(|l| l.trim() == pattern) {
-        return Ok(());
-    }
-
-    let mut new_content = content;
-    if !new_content.is_empty() && !new_content.ends_with('\n') {
-        new_content.push('\n');
-    }
-    let _ = write!(new_content, "\n# Tron agent worktrees\n{pattern}\n");
-
-    tokio::fs::write(&gitignore, new_content).await?;
-    debug!(path = %gitignore.display(), "added {pattern} to .gitignore");
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,50 +233,6 @@ mod tests {
 
         assert_ne!(first.branch, second.branch);
         assert_ne!(first.worktree_path, second.worktree_path);
-    }
-
-    #[tokio::test]
-    async fn create_updates_gitignore() {
-        let dir = tempdir().unwrap();
-        let git = init_repo(dir.path()).await;
-        let config = WorktreeConfig::default();
-
-        let _ = create("session-123456", dir.path(), &config, &git)
-            .await
-            .unwrap();
-
-        let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-        assert!(gitignore.contains(".worktrees/"));
-    }
-
-    #[tokio::test]
-    async fn create_gitignore_idempotent() {
-        let dir = tempdir().unwrap();
-        let git = init_repo(dir.path()).await;
-        let config = WorktreeConfig::default();
-
-        let _ = create("session-aaaa1234", dir.path(), &config, &git)
-            .await
-            .unwrap();
-
-        // Remove worktree so we can create another
-        let wt_path = dir
-            .path()
-            .join(".worktrees")
-            .join("session")
-            .join("session-aaaa1234");
-        let _ = git.worktree_remove(dir.path(), &wt_path, true).await;
-        let _ = git
-            .branch_delete(dir.path(), "session/session-aaaa1234", true)
-            .await;
-
-        let _ = create("session-bbbb5678", dir.path(), &config, &git)
-            .await
-            .unwrap();
-
-        let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-        let count = gitignore.matches(".worktrees/").count();
-        assert_eq!(count, 1, "gitignore should not have duplicates");
     }
 
     #[tokio::test]

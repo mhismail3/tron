@@ -127,3 +127,144 @@ struct CommittedFileEntryTests {
         #expect(entry.shortHash == "abc1234")
     }
 }
+
+@Suite("WorktreeCommitParams Tests")
+struct WorktreeCommitParamsTests {
+
+    private func encode(_ params: WorktreeCommitParams) -> [String: Any] {
+        let data = try! JSONEncoder().encode(params)
+        return try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+    }
+
+    @Test("required fields always encoded")
+    func requiredFieldsOnly() {
+        let params = WorktreeCommitParams(sessionId: "s1", message: "hi")
+        let dict = encode(params)
+        #expect(dict["sessionId"] as? String == "s1")
+        #expect(dict["message"] as? String == "hi")
+    }
+
+    @Test("flag-less call preserves legacy server defaults")
+    func legacyCallPreservesServerDefaults() {
+        // Critical regression guard: older iOS clients that upgrade must
+        // continue to commit everything (stage_all = true by default on
+        // the server). If we accidentally emit `stageAll: false` when the
+        // caller passed nil, the server would silently start committing
+        // only the index — a destructive behavior change.
+        let params = WorktreeCommitParams(sessionId: "s1", message: "hi")
+        let dict = encode(params)
+        // Either absent, or present as NSNull — both route to
+        // `opt_bool(...).unwrap_or(true)` on the server.
+        if let raw = dict["stageAll"] {
+            #expect(raw is NSNull, "stageAll should be absent or null, got \(raw)")
+        }
+        if let raw = dict["amend"] {
+            #expect(raw is NSNull)
+        }
+        if let raw = dict["signoff"] {
+            #expect(raw is NSNull)
+        }
+    }
+
+    @Test("all flags encoded when explicitly set")
+    func allFlagsEncoded() {
+        let params = WorktreeCommitParams(
+            sessionId: "s1",
+            message: "body",
+            amend: true,
+            signoff: true,
+            stageAll: false
+        )
+        let dict = encode(params)
+        #expect(dict["amend"] as? Bool == true)
+        #expect(dict["signoff"] as? Bool == true)
+        #expect(dict["stageAll"] as? Bool == false)
+    }
+
+    @Test("multi-line message preserved through encoding")
+    func multiLineMessageRoundTrip() {
+        let msg = "subject\n\nbody line 1\nbody line 2"
+        let params = WorktreeCommitParams(sessionId: "s1", message: msg)
+        let dict = encode(params)
+        #expect(dict["message"] as? String == msg)
+    }
+
+    @Test("message starting with dash treated as string not flag")
+    func dashPrefixedMessage() {
+        let params = WorktreeCommitParams(sessionId: "s1", message: "-x do thing")
+        let dict = encode(params)
+        #expect(dict["message"] as? String == "-x do thing")
+    }
+}
+
+@Suite("WorktreeCommitResult Tests")
+struct WorktreeCommitResultTests {
+
+    @Test("decodes full server response with stats")
+    func decodesWithStats() {
+        let json = #"""
+        {
+          "success": true,
+          "commitHash": "abc1234",
+          "filesChanged": ["a.rs", "b.rs"],
+          "insertions": 5,
+          "deletions": 2
+        }
+        """#
+        let result = try! JSONDecoder().decode(
+            WorktreeCommitResult.self,
+            from: json.data(using: .utf8)!
+        )
+        #expect(result.success == true)
+        #expect(result.commitHash == "abc1234")
+        #expect(result.filesChanged == ["a.rs", "b.rs"])
+        #expect(result.insertions == 5)
+        #expect(result.deletions == 2)
+        #expect(result.error == nil)
+    }
+
+    @Test("decodes response without stats (backwards compat)")
+    func decodesWithoutStats() {
+        // Older servers (pre-stats) omit insertions/deletions entirely.
+        // The client must still decode cleanly — treating missing stats as
+        // unknown rather than zero keeps the UI honest.
+        let json = #"""
+        {"success": true, "commitHash": "abc1234", "filesChanged": []}
+        """#
+        let result = try! JSONDecoder().decode(
+            WorktreeCommitResult.self,
+            from: json.data(using: .utf8)!
+        )
+        #expect(result.success == true)
+        #expect(result.insertions == nil)
+        #expect(result.deletions == nil)
+    }
+
+    @Test("decodes nothing-to-commit response")
+    func decodesNothingToCommit() {
+        // Server returns success=true but commitHash=null when the tree
+        // was clean and no amend was requested.
+        let json = #"""
+        {"success": true, "commitHash": null, "message": "nothing to commit"}
+        """#
+        let result = try! JSONDecoder().decode(
+            WorktreeCommitResult.self,
+            from: json.data(using: .utf8)!
+        )
+        #expect(result.success == true)
+        #expect(result.commitHash == nil)
+    }
+
+    @Test("decodes failure response")
+    func decodesFailure() {
+        let json = #"""
+        {"success": false, "error": "Cannot amend: no previous commit exists"}
+        """#
+        let result = try! JSONDecoder().decode(
+            WorktreeCommitResult.self,
+            from: json.data(using: .utf8)!
+        )
+        #expect(result.success == false)
+        #expect(result.error?.contains("amend") == true)
+    }
+}

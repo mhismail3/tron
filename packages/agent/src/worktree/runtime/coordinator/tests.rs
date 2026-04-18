@@ -3,7 +3,7 @@ use tempfile::tempdir;
 use crate::events::{ConnectionConfig, new_in_memory, run_migrations};
 use crate::worktree::git::GitExecutor;
 use crate::worktree::types::{
-    AcquireResult, DeferralReason, WorktreeConfig,
+    AcquireResult, CommitOptions, DeferralReason, WorktreeConfig,
 };
 
 fn make_store() -> Arc<EventStore> {
@@ -160,7 +160,7 @@ async fn full_lifecycle() {
     std::fs::write(info.worktree_path.join("work.txt"), "progress").unwrap();
 
     // Commit
-    let commit_result = coord.commit(sid, "wip").await.unwrap();
+    let commit_result = coord.commit(sid, "wip", CommitOptions::default_stage_all()).await.unwrap();
     assert!(commit_result.is_some());
     let cr = commit_result.unwrap();
     assert_eq!(cr.commit_hash.len(), 40);
@@ -212,14 +212,14 @@ async fn get_status_returns_enriched_info() {
     assert_eq!(status.commit_count, 0);
 
     // Commit → committed, no uncommitted
-    coord.commit(sid, "first commit").await.unwrap();
+    coord.commit(sid, "first commit", CommitOptions::default_stage_all()).await.unwrap();
     let status = coord.get_status(sid).await.unwrap().unwrap();
     assert!(!status.has_uncommitted_changes);
     assert_eq!(status.commit_count, 1);
 
     // Second commit
     std::fs::write(info.worktree_path.join("more.txt"), "more").unwrap();
-    coord.commit(sid, "second commit").await.unwrap();
+    coord.commit(sid, "second commit", CommitOptions::default_stage_all()).await.unwrap();
     let status = coord.get_status(sid).await.unwrap().unwrap();
     assert_eq!(status.commit_count, 2);
 }
@@ -259,7 +259,7 @@ async fn commit_populates_files_and_stats() {
     // Create files and commit
     std::fs::write(info.worktree_path.join("new.txt"), "hello\nworld\n").unwrap();
     std::fs::write(info.worktree_path.join("other.txt"), "line1\n").unwrap();
-    coord.commit(sid, "add files").await.unwrap();
+    coord.commit(sid, "add files", CommitOptions::default_stage_all()).await.unwrap();
 
     // Check the persisted event
     let events = store.get_events_since(sid, 0).unwrap();
@@ -421,7 +421,7 @@ async fn list_branches_with_preserved_branch() {
     };
     // Write something so there's a commit
     std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
-    coord.commit("sess-2", "wip").await.unwrap();
+    coord.commit("sess-2", "wip", CommitOptions::default_stage_all()).await.unwrap();
     coord.release("sess-2").await.unwrap();
 
     let branches = coord.list_session_branches(dir.path()).await.unwrap();
@@ -500,7 +500,7 @@ async fn committed_diff_single_commit() {
     };
 
     std::fs::write(info.worktree_path.join("new.txt"), "hello\nworld\n").unwrap();
-    coord.commit("sess-cd2", "add file").await.unwrap();
+    coord.commit("sess-cd2", "add file", CommitOptions::default_stage_all()).await.unwrap();
 
     let diff = coord.get_committed_diff("sess-cd2").await.unwrap().unwrap();
     assert_eq!(diff.commits.len(), 1);
@@ -646,7 +646,7 @@ async fn broadcasts_worktree_events() {
 
     // Commit — should broadcast WorktreeCommit
     std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
-    coord.commit(sid, "wip").await.unwrap();
+    coord.commit(sid, "wip", CommitOptions::default_stage_all()).await.unwrap();
     let event = rx.try_recv().unwrap();
     assert_eq!(event.event_type(), "worktree.commit");
 
@@ -1019,7 +1019,7 @@ async fn rename_branch_then_release_preserves_new_name() {
     };
 
     std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
-    coord.commit(sid, "wip").await.unwrap();
+    coord.commit(sid, "wip", CommitOptions::default_stage_all()).await.unwrap();
 
     coord
         .rename_branch(sid, "session/cool-branch-name")
@@ -1171,7 +1171,7 @@ async fn list_branches_after_rename_shows_correct_base_branch() {
     };
 
     std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
-    coord.commit(sid, "wip").await.unwrap();
+    coord.commit(sid, "wip", CommitOptions::default_stage_all()).await.unwrap();
 
     coord
         .rename_branch(sid, "session/pretty-new-name")
@@ -1210,7 +1210,7 @@ async fn list_branches_after_rename_and_release_shows_base_branch() {
     };
 
     std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
-    coord.commit(sid, "wip").await.unwrap();
+    coord.commit(sid, "wip", CommitOptions::default_stage_all()).await.unwrap();
 
     coord
         .rename_branch(sid, "session/released-rename")
@@ -1553,4 +1553,207 @@ async fn list_remote_branches_falls_back_to_cwd_when_session_untracked() {
         .await
         .unwrap();
     assert!(branches.is_empty());
+}
+
+// ── commit options: amend / stage_all / guards ─────────────────────
+
+/// Helper: acquire a worktree on a freshly-initialized repo.
+async fn acquire_for_commit_tests() -> (
+    tempfile::TempDir,
+    Arc<WorktreeCoordinator>,
+    String,
+    std::path::PathBuf,
+    Arc<crate::events::EventStore>,
+) {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let session = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("test"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let sid = session.session.id.clone();
+    let coord = Arc::new(WorktreeCoordinator::new(WorktreeConfig::default(), store.clone()));
+
+    let result = coord.maybe_acquire(&sid, dir.path()).await.unwrap();
+    let info = match result {
+        AcquireResult::Acquired(i) => i,
+        other => panic!("expected Acquired, got {other:?}"),
+    };
+    let wt = info.worktree_path.clone();
+    (dir, coord, sid, wt, store)
+}
+
+#[tokio::test]
+async fn coordinator_commit_no_changes_returns_none() {
+    let (_dir, coord, sid, _wt, _store) = acquire_for_commit_tests().await;
+
+    // Clean tree, no amend → None.
+    let r = coord
+        .commit(&sid, "nothing", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
+    assert!(r.is_none(), "expected None on clean tree without amend");
+}
+
+#[tokio::test]
+async fn coordinator_commit_amend_with_no_changes_still_commits() {
+    let (_dir, coord, sid, wt, _store) = acquire_for_commit_tests().await;
+
+    // First, make a commit to amend.
+    std::fs::write(wt.join("a.txt"), "a").unwrap();
+    let first = coord
+        .commit(&sid, "first", CommitOptions::default_stage_all())
+        .await
+        .unwrap()
+        .expect("first commit should succeed");
+
+    // Now amend with no working-tree changes — should still produce a new SHA
+    // (amend rewrites HEAD so SHA changes even with same tree).
+    let amended = coord
+        .commit(
+            &sid,
+            "first (amended)",
+            CommitOptions {
+                amend: true,
+                stage_all: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .expect("amend on clean tree must not return None");
+
+    assert_ne!(first.commit_hash, amended.commit_hash, "amend must produce a new SHA");
+}
+
+#[tokio::test]
+async fn coordinator_commit_amend_on_empty_repo_returns_err() {
+    // Verify the coordinator's amend-on-unborn-HEAD guard by:
+    //   1. Acquiring a normal worktree.
+    //   2. Erasing HEAD on that worktree to simulate an unborn state.
+    //   3. Calling commit(amend=true) and asserting the guard fires.
+    //
+    // This exercises the actual `!has_commits → Err` branch rather than
+    // the acquire-refuses path that an unborn root repo would take.
+    let (_dir, coord, sid, wt, _store) = acquire_for_commit_tests().await;
+
+    // Delete HEAD so the worktree has no commits. A worktree's HEAD lives
+    // under <repo>/.git/worktrees/<name>/HEAD. Simplest: point it at a
+    // non-existent ref so `git rev-parse --verify HEAD` fails.
+    run_cmd(&wt, &["git", "symbolic-ref", "HEAD", "refs/heads/nonexistent"]).await;
+
+    let err = coord
+        .commit(
+            &sid,
+            "amend on empty",
+            CommitOptions {
+                amend: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::worktree::WorktreeError::Git(ref m) if m.contains("amend")),
+        "expected Git(\"Cannot amend: no previous commit exists\"), got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn coordinator_commit_records_compaction_signal() {
+    // The handler records the signal, not the coordinator — so this is really
+    // a regression check that the event payload and path remain unchanged.
+    // Asserting the `worktree.commit` event is appended covers the compaction
+    // handler's detection surface; the handler matches on `event_type`.
+    use crate::events::EventType;
+    use crate::events::sqlite::repositories::event::ListEventsOptions;
+
+    let (_dir, coord, sid, wt, store) = acquire_for_commit_tests().await;
+    std::fs::write(wt.join("signal.txt"), "x").unwrap();
+    let _ = coord
+        .commit(&sid, "signal", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
+
+    let events = store
+        .get_events_by_session(&sid, &ListEventsOptions::default())
+        .unwrap_or_default();
+    assert!(
+        events.iter().any(|e| e.event_type == EventType::WorktreeCommit.as_str()),
+        "expected a WorktreeCommit event to be recorded"
+    );
+}
+
+#[tokio::test]
+async fn coordinator_commit_emits_event_with_stats() {
+    use crate::events::EventType;
+    use crate::events::sqlite::repositories::event::ListEventsOptions;
+    let (_dir, coord, sid, wt, store) = acquire_for_commit_tests().await;
+
+    std::fs::write(wt.join("code.rs"), "line1\nline2\nline3\n").unwrap();
+    let r = coord
+        .commit(&sid, "add code", CommitOptions::default_stage_all())
+        .await
+        .unwrap()
+        .expect("commit should succeed");
+
+    assert_eq!(r.insertions, 3, "insertions should be 3");
+    assert_eq!(r.deletions, 0);
+    assert!(r.files_changed.contains(&"code.rs".to_string()));
+
+    // Locate the emitted event and confirm the payload matches the returned
+    // CommitResult — regression guard for the compaction progress signal,
+    // totalCommitCount, and hasUncommittedChanges fields.
+    let events = store
+        .get_events_by_session(&sid, &ListEventsOptions::default())
+        .unwrap_or_default();
+    let last = events
+        .iter()
+        .rev()
+        .find(|e| e.event_type == EventType::WorktreeCommit.as_str())
+        .expect("WorktreeCommit event must be emitted");
+    let payload: serde_json::Value =
+        serde_json::from_str(&last.payload).expect("payload must be valid json");
+    assert_eq!(payload["commitHash"].as_str().unwrap(), r.commit_hash);
+    assert_eq!(payload["insertions"].as_u64().unwrap(), 3);
+    assert_eq!(payload["deletions"].as_u64().unwrap(), 0);
+    assert_eq!(payload["totalCommitCount"].as_u64().unwrap(), 1);
+    assert_eq!(payload["hasUncommittedChanges"].as_bool().unwrap(), false);
+}
+
+#[tokio::test]
+async fn coordinator_commit_stage_all_false_only_commits_index() {
+    let (_dir, coord, sid, wt, _store) = acquire_for_commit_tests().await;
+
+    std::fs::write(wt.join("indexed.txt"), "one").unwrap();
+    std::fs::write(wt.join("untracked.txt"), "two").unwrap();
+    run_cmd(&wt, &["git", "add", "indexed.txt"]).await;
+
+    let r = coord
+        .commit(
+            &sid,
+            "partial",
+            CommitOptions {
+                stage_all: false,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .expect("partial commit should succeed");
+
+    assert!(r.files_changed.contains(&"indexed.txt".to_string()));
+    assert!(
+        !r.files_changed.contains(&"untracked.txt".to_string()),
+        "untracked file must not land in the commit: {:?}",
+        r.files_changed
+    );
 }

@@ -1140,3 +1140,253 @@ async fn discard_files_deleted_file() {
     let content = std::fs::read_to_string(tmp.path().join("init.txt")).unwrap();
     assert_eq!(content, "init");
 }
+
+// ── CommitHandler flag parsing (integration tests) ──────────────────
+//
+// These exercise the real `CommitHandler` end-to-end against a real
+// `WorktreeCoordinator` and a real git repo. They lock in wire-level
+// defaults that old iOS clients depend on: `stageAll` must default to
+// `true` so clients that send only `{sessionId, message}` continue to
+// see the pre-flag "commit everything" behavior.
+
+async fn commit_test_context_async() -> (
+    tempfile::TempDir,
+    crate::server::rpc::context::RpcContext,
+    std::sync::Arc<crate::worktree::WorktreeCoordinator>,
+    String,
+    std::path::PathBuf,
+) {
+    use crate::events::EventStore;
+    use crate::runtime::orchestrator::orchestrator::Orchestrator;
+    use crate::runtime::orchestrator::session_manager::SessionManager;
+    use crate::server::rpc::context::RpcContext;
+    use crate::server::rpc::session_context::ContextArtifactsService;
+    use crate::skills::registry::SkillRegistry;
+    use crate::worktree::types::AcquireResult;
+    use crate::worktree::{WorktreeConfig, WorktreeCoordinator};
+    use std::sync::Arc;
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir = tmp.path().to_str().unwrap().to_string();
+    run_git(&["init", &dir]);
+    run_git(&["-C", &dir, "config", "user.email", "t@t.com"]);
+    run_git(&["-C", &dir, "config", "user.name", "T"]);
+    std::fs::write(tmp.path().join("seed.txt"), "seed").unwrap();
+    run_git(&["-C", &dir, "add", "-A"]);
+    run_git(&["-C", &dir, "commit", "-m", "init"]);
+
+    let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        let _ = crate::events::run_migrations(&conn).unwrap();
+    }
+    let store = Arc::new(EventStore::new(pool));
+    let mgr = Arc::new(SessionManager::new(store.clone()));
+    let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
+    let coord = Arc::new(WorktreeCoordinator::new(WorktreeConfig::default(), store.clone()));
+
+    let sid = mgr.create_session("m", &dir, Some("test"), None).unwrap();
+
+    let wt_path = match coord.maybe_acquire(&sid, tmp.path()).await.unwrap() {
+        AcquireResult::Acquired(info) => info.worktree_path,
+        other => panic!("expected Acquired, got {other:?}"),
+    };
+
+    let ctx = RpcContext {
+        orchestrator: orch,
+        session_manager: mgr,
+        event_store: store,
+        skill_registry: Arc::new(parking_lot::RwLock::new(SkillRegistry::new())),
+        settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
+        agent_deps: None,
+        server_start_time: std::time::Instant::now(),
+        transcription_engine: Arc::new(std::sync::OnceLock::new()),
+        subagent_manager: None,
+        health_tracker: Arc::new(crate::llm::ProviderHealthTracker::new()),
+        shutdown_coordinator: None,
+        origin: "localhost:9847".to_string(),
+        cron_scheduler: None,
+        worktree_coordinator: Some(coord.clone()),
+        device_request_broker: None,
+        context_artifacts: Arc::new(ContextArtifactsService::new()),
+        auth_path: std::path::PathBuf::from("/tmp/tron-test-auth.json"),
+        broadcast_manager: None,
+        oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        mcp_router: None,
+        display_stream_registry: None,
+        process_manager: None,
+        job_manager: None,
+        output_buffer_registry: None,
+        hook_abort_tracker: Arc::new(
+            crate::runtime::hooks::abort_tracker::HookAbortTracker::new(),
+        ),
+    };
+
+    (tmp, ctx, coord, sid, wt_path)
+}
+
+#[tokio::test]
+async fn commit_handler_default_stage_all_when_absent() {
+    // Backwards-compat guard: when older iOS clients send just
+    // `{sessionId, message}`, the handler must default `stageAll` to true
+    // so the untracked file is committed.
+    let (_tmp, ctx, _coord, sid, wt) = commit_test_context_async().await;
+
+    std::fs::write(wt.join("new.txt"), "new").unwrap();
+    let result = CommitHandler
+        .handle(
+            Some(json!({"sessionId": sid, "message": "default"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["success"], true);
+    assert!(result["commitHash"].is_string(), "expected a real commit hash, got {result:?}");
+    assert!(
+        result["filesChanged"].as_array().unwrap().iter().any(|v| v == "new.txt"),
+        "default stage_all should have committed the untracked file"
+    );
+}
+
+#[tokio::test]
+async fn commit_handler_stage_all_false_only_commits_index() {
+    let (_tmp, ctx, _coord, sid, wt) = commit_test_context_async().await;
+
+    std::fs::write(wt.join("indexed.txt"), "a").unwrap();
+    std::fs::write(wt.join("untracked.txt"), "b").unwrap();
+    run_git(&["-C", wt.to_str().unwrap(), "add", "indexed.txt"]);
+
+    let result = CommitHandler
+        .handle(
+            Some(json!({
+                "sessionId": sid,
+                "message": "partial",
+                "stageAll": false,
+            })),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let files: Vec<String> = result["filesChanged"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert!(files.contains(&"indexed.txt".to_string()));
+    assert!(
+        !files.contains(&"untracked.txt".to_string()),
+        "stageAll=false must not include untracked files: {files:?}"
+    );
+}
+
+#[tokio::test]
+async fn commit_handler_amend_rewrites_head() {
+    let (_tmp, ctx, _coord, sid, wt) = commit_test_context_async().await;
+
+    // Seed a first commit via the handler (stage_all default).
+    std::fs::write(wt.join("v1.txt"), "one").unwrap();
+    let first = CommitHandler
+        .handle(
+            Some(json!({"sessionId": sid, "message": "first"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let first_hash = first["commitHash"].as_str().unwrap().to_string();
+
+    // Amend: no new changes, new message — SHA must change.
+    let amended = CommitHandler
+        .handle(
+            Some(json!({
+                "sessionId": sid,
+                "message": "first (amended)",
+                "amend": true,
+            })),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let amended_hash = amended["commitHash"].as_str().unwrap().to_string();
+
+    assert_ne!(
+        first_hash, amended_hash,
+        "amend must produce a new SHA"
+    );
+
+    // Confirm only one commit since init (merge base).
+    let wt_str = wt.to_str().unwrap();
+    let out = git_output(&["-C", wt_str, "rev-list", "--count", "HEAD"]);
+    let out_str = String::from_utf8_lossy(&out.stdout);
+    let count: u32 = out_str.trim().parse().unwrap();
+    // init commit + amended = 2; if amend duplicated a commit it would be 3.
+    assert_eq!(count, 2, "amend must not add a new parent commit");
+}
+
+#[tokio::test]
+async fn commit_handler_signoff_adds_trailer() {
+    let (_tmp, ctx, _coord, sid, wt) = commit_test_context_async().await;
+
+    std::fs::write(wt.join("signed.txt"), "x").unwrap();
+    let _ = CommitHandler
+        .handle(
+            Some(json!({
+                "sessionId": sid,
+                "message": "body",
+                "signoff": true,
+            })),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let wt_str = wt.to_str().unwrap();
+    let out = git_output(&["-C", wt_str, "log", "-1", "--format=%B"]);
+    let body = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        body.lines().any(|line| line.starts_with("Signed-off-by:")),
+        "expected Signed-off-by trailer in commit body, got:\n{body}"
+    );
+}
+
+#[tokio::test]
+async fn commit_handler_rejects_non_bool_flags_gracefully() {
+    // `opt_bool` should treat a non-bool like "yes" as absent and fall
+    // back to the default — not crash or return an error. This prevents
+    // client bugs from silently corrupting commit behavior.
+    let (_tmp, ctx, _coord, sid, wt) = commit_test_context_async().await;
+
+    std::fs::write(wt.join("z.txt"), "z").unwrap();
+    let result = CommitHandler
+        .handle(
+            Some(json!({
+                "sessionId": sid,
+                "message": "invalid flag",
+                "amend": "yes",
+                "stageAll": 1,
+            })),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["success"], true);
+}
+
+#[tokio::test]
+async fn commit_handler_nothing_to_commit_returns_success_null_hash() {
+    // Clean tree, no flags → coordinator returns None → handler must
+    // respond with success=true and null commitHash. iOS surfaces this
+    // as a friendly "nothing to commit" banner.
+    let (_tmp, ctx, _coord, sid, _wt) = commit_test_context_async().await;
+
+    let result = CommitHandler
+        .handle(
+            Some(json!({"sessionId": sid, "message": "empty"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["success"], true);
+    assert!(result["commitHash"].is_null());
+}

@@ -185,6 +185,55 @@ pub struct CommitResult {
     pub deletions: usize,
 }
 
+/// Options that modify how a commit is constructed.
+///
+/// `stage_all` defaults to `true` to preserve the existing "stage everything
+/// then commit" behavior that lifecycle/recovery paths rely on. Explicit user
+/// flows (the iOS Commit sheet) may opt out.
+#[derive(Clone, Debug, Default)]
+pub struct CommitOptions {
+    /// `--amend`: rewrite the previous HEAD commit rather than adding a new one.
+    pub amend: bool,
+    /// `--signoff`: append a `Signed-off-by` trailer to the commit message.
+    pub signoff: bool,
+    /// If `true`, run `git add -A` before committing so every tracked and
+    /// untracked file is staged. If `false`, commit only the current index.
+    pub stage_all: bool,
+}
+
+impl CommitOptions {
+    /// Default behavior prior to the options parameter: stage all, no amend,
+    /// no signoff. Used by internal callers (lifecycle, recovery) to preserve
+    /// existing semantics when the new `commit_with_options` path is wired in.
+    pub fn default_stage_all() -> Self {
+        Self {
+            stage_all: true,
+            ..Default::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod commit_options_tests {
+    use super::CommitOptions;
+
+    #[test]
+    fn commit_options_default_stages_all() {
+        let opts = CommitOptions::default_stage_all();
+        assert!(opts.stage_all, "default_stage_all must set stage_all=true");
+        assert!(!opts.amend, "default_stage_all must not amend");
+        assert!(!opts.signoff, "default_stage_all must not signoff");
+    }
+
+    #[test]
+    fn commit_options_derived_default_is_noop() {
+        let opts = CommitOptions::default();
+        assert!(!opts.stage_all);
+        assert!(!opts.amend);
+        assert!(!opts.signoff);
+    }
+}
+
 /// Information returned when a worktree is released.
 #[derive(Clone, Debug)]
 pub struct ReleaseInfo {

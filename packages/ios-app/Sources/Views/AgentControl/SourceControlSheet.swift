@@ -27,8 +27,6 @@ struct SourceControlSheet: View {
     @State private var worktreeStatus: WorktreeGetStatusResult?
 
     // Git actions
-    @State private var isCommitting = false
-    @State private var showCommitConfirmation = false
     @State private var errorMessage: String?
 
     // Sub-sheets
@@ -47,7 +45,7 @@ struct SourceControlSheet: View {
     @State private var defaultAutoSetUpstream: Bool = true
 
     enum GitActionSheet: String, Identifiable {
-        case syncMain, finalize, push, repoSessions, conflictResolver
+        case commit, syncMain, finalize, push, repoSessions, conflictResolver
         var id: String { rawValue }
     }
 
@@ -59,13 +57,6 @@ struct SourceControlSheet: View {
 
     private var unstagedFiles: [DiffFileEntry] {
         diffResult?.files?.filter { $0.fileStagingArea == .unstaged } ?? []
-    }
-
-    private var canCommit: Bool {
-        SourceControlMetadata.canCommit(
-            worktreeStatus: worktreeStatus,
-            isLoading: isCommitting
-        )
     }
 
     // MARK: - Body
@@ -109,9 +100,6 @@ struct SourceControlSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    commitButton
-                }
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: "Source Control", color: .tronTeal)
                 }
@@ -184,12 +172,18 @@ struct SourceControlSheet: View {
     // MARK: - Git Actions Card
 
     /// Compact quick-action bar: one row of equal-width tiles, each a
-    /// tappable colored container. Previously rendered as stacked full-
-    /// width rows with subtitles — the subtitles reappear as captions on
-    /// the sub-sheets themselves, so the main sheet stays dense and the
-    /// four actions fit in a single line across every iPhone width.
+    /// tappable colored container opening its own sub-sheet. Previously a
+    /// mix of stacked rows and a separate toolbar commit button; the flat
+    /// Commit / Pull / Merge / Push row (+ optional Sessions) keeps the
+    /// main sheet dense and gives every git verb parity.
     private var gitActionsCard: some View {
         HStack(spacing: 8) {
+            gitActionTile(
+                icon: "square.and.pencil",
+                title: "Commit",
+                tint: .tronTeal
+            ) { activeGitAction = .commit }
+
             gitActionTile(
                 icon: "arrow.down.circle",
                 title: "Pull",
@@ -251,6 +245,14 @@ struct SourceControlSheet: View {
     @ViewBuilder
     private func gitActionSheet(for action: GitActionSheet) -> some View {
         switch action {
+        case .commit:
+            CommitSubSheet(
+                rpcClient: rpcClient,
+                sessionId: sessionId,
+                diffResult: diffResult,
+                worktreeStatus: worktreeStatus,
+                stagedFiles: stagedFiles
+            )
         case .syncMain:
             SyncMainSubSheet(
                 rpcClient: rpcClient,
@@ -324,37 +326,6 @@ struct SourceControlSheet: View {
         defaultAutoSetUpstream = settings.gitAutoSetUpstream
     }
 
-    // MARK: - Toolbar Buttons
-
-    @ViewBuilder
-    private var commitButton: some View {
-        Button { showCommitConfirmation = true } label: {
-            if isCommitting {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: "checkmark.circle")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(canCommit ? .tronTeal : .tronTextMuted.opacity(0.5))
-            }
-        }
-        .disabled(!canCommit || isCommitting)
-        .accessibilityLabel("Commit")
-        .popover(isPresented: $showCommitConfirmation, arrowEdge: .top) {
-            GlassActionSheet(
-                actions: [
-                    GlassAction(title: "Commit Changes", icon: "checkmark.circle", color: .tronTeal, role: .default) {
-                        showCommitConfirmation = false
-                        commitChanges()
-                    },
-                    GlassAction(title: "Cancel", icon: nil, color: .tronTextMuted, role: .cancel) {
-                        showCommitConfirmation = false
-                    }
-                ]
-            )
-            .presentationCompactAdaptation(.popover)
-        }
-    }
-
     // MARK: - Data Loading
 
     private func loadData() async {
@@ -365,29 +336,6 @@ struct SourceControlSheet: View {
             worktreeStatus = await status
         } catch {
             errorMessage = "Failed to load changes: \(error.localizedDescription)"
-        }
-    }
-
-    // MARK: - Git Actions
-
-    private func commitChanges() {
-        Task {
-            isCommitting = true
-            defer { isCommitting = false }
-
-            do {
-                let result = try await rpcClient.worktree.commit(
-                    sessionId: sessionId,
-                    message: "Manual commit from iOS"
-                )
-                if result.success {
-                    await loadData()
-                } else if let error = result.error {
-                    errorMessage = "Commit failed: \(error)"
-                }
-            } catch {
-                errorMessage = "Commit failed: \(error.localizedDescription)"
-            }
         }
     }
 

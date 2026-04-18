@@ -12,8 +12,9 @@ use crate::worktree::{count_diff_stats, split_diff_by_file};
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{opt_string, require_string_param};
+use crate::server::rpc::handlers::{opt_bool, opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
+use crate::worktree::types::CommitOptions;
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -142,7 +143,16 @@ impl MethodHandler for CommitHandler {
             });
         }
 
-        match coord.commit(&session_id, &message).await {
+        // Optional flag parsing. Defaults preserve pre-flag behavior so older
+        // clients that send only {sessionId, message} continue to see the
+        // "stage everything, no amend, no signoff" semantics they had.
+        let opts = CommitOptions {
+            amend: opt_bool(params.as_ref(), "amend").unwrap_or(false),
+            signoff: opt_bool(params.as_ref(), "signoff").unwrap_or(false),
+            stage_all: opt_bool(params.as_ref(), "stageAll").unwrap_or(true),
+        };
+
+        match coord.commit(&session_id, &message, opts).await {
             Ok(Some(result)) => {
                 // Record worktree.commit event for compaction progress signal detection.
                 if let Some(handler) = ctx.orchestrator.get_compaction_handler(&session_id) {

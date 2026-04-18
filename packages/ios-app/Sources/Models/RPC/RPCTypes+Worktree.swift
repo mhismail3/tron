@@ -38,16 +38,49 @@ struct WorktreeGetStatusResult: Decodable {
     let worktree: WorktreeInfo?
 }
 
-/// Commit changes in a session's worktree
+/// Commit changes in a session's worktree.
+///
+/// All flag fields are optional on the wire. When omitted, the server
+/// applies defaults: `stageAll = true` (preserves legacy behavior),
+/// `amend = false`, `signoff = false`. Older clients that send only
+/// `{sessionId, message}` continue to see pre-flag semantics.
 struct WorktreeCommitParams: Encodable {
     let sessionId: String
     let message: String
+    /// When true, pass `--amend` — rewrites HEAD instead of creating a new commit.
+    let amend: Bool?
+    /// When true, append a `Signed-off-by:` trailer (DCO projects).
+    let signoff: Bool?
+    /// When true (default), run `git add -A` before committing so every
+    /// tracked and untracked file is included. When false, only the index
+    /// is committed.
+    let stageAll: Bool?
+
+    init(
+        sessionId: String,
+        message: String,
+        amend: Bool? = nil,
+        signoff: Bool? = nil,
+        stageAll: Bool? = nil
+    ) {
+        self.sessionId = sessionId
+        self.message = message
+        self.amend = amend
+        self.signoff = signoff
+        self.stageAll = stageAll
+    }
 }
 
 struct WorktreeCommitResult: Decodable {
     let success: Bool
     let commitHash: String?
     let filesChanged: [String]?
+    /// Total lines inserted across `filesChanged`. Absent on older server
+    /// builds or when the server cannot compute the stat (e.g. amending
+    /// a root commit).
+    let insertions: Int?
+    /// Total lines deleted across `filesChanged`. Same caveats as `insertions`.
+    let deletions: Int?
     let error: String?
 }
 

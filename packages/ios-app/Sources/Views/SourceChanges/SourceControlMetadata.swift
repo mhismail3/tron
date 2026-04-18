@@ -6,15 +6,6 @@ import Foundation
 /// Extracted from view code for testability.
 enum SourceControlMetadata {
 
-    // MARK: - Action Availability
-
-    static func canCommit(
-        worktreeStatus: WorktreeGetStatusResult?,
-        isLoading: Bool
-    ) -> Bool {
-        !isLoading && (worktreeStatus?.worktree?.hasUncommittedChanges == true)
-    }
-
     // MARK: - Display Helpers
 
     /// Label shown when a file has no diff content, based on its change status.

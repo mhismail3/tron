@@ -69,7 +69,7 @@ pub mod types;
 pub use coordinator::{WorktreeCoordinator, count_diff_stats, split_diff_by_file};
 pub use errors::WorktreeError;
 pub use types::{
-    AcquireResult, CommitEntry, CommitResult, CommittedDiffResult, CommittedFileEntry,
+    AcquireResult, CommitEntry, CommitOptions, CommitResult, CommittedDiffResult, CommittedFileEntry,
     ConflictKind, ConflictResolution, ConflictedFile, DeferralReason, DeleteBranchResult,
     DiffSummary, FinalizeSessionResult, IsolationMode, MergeResult, MergeStrategy,
     PendingMergeState, PruneBranchesResult, PruneFailure, PushOutput, ReleaseInfo,

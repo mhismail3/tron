@@ -5,7 +5,7 @@ use crate::core::events::{BaseEvent, TronEvent};
 use crate::events::{AppendOptions, EventType};
 
 use crate::worktree::errors::{Result, WorktreeError};
-use crate::worktree::types::{MergeResult, MergeStrategy};
+use crate::worktree::types::{CommitOptions, MergeResult, MergeStrategy};
 
 use super::WorktreeCoordinator;
 
@@ -13,11 +13,17 @@ impl WorktreeCoordinator {
     /// Commit changes in a session's worktree.
     ///
     /// Emits `worktree.commit` event with file list and diff stats.
-    /// Returns `None` if there are no changes to commit.
+    /// Returns `None` if there are no changes to commit **and** `opts.amend`
+    /// is false (`--amend` can produce a valid commit even on a clean tree,
+    /// so we let it through).
+    ///
+    /// Errors if `opts.amend` is set but the worktree has no HEAD commit
+    /// (you can't amend what doesn't exist).
     pub async fn commit(
         &self,
         session_id: &str,
         message: &str,
+        opts: CommitOptions,
     ) -> Result<Option<crate::worktree::types::CommitResult>> {
         let info = self
             .state
@@ -25,18 +31,39 @@ impl WorktreeCoordinator {
             .active_info(session_id)
             .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
 
-        if !self.git.has_changes(&info.worktree_path).await? {
+        let has_changes = self.git.has_changes(&info.worktree_path).await?;
+        if !has_changes && !opts.amend {
             return Ok(None);
         }
 
-        // Capture pre-commit HEAD to compute diff stats after commit
-        let pre_commit = self
-            .git
-            .head_commit(&info.worktree_path)
-            .await
-            .unwrap_or_default();
+        if opts.amend && !self.git.has_commits(&info.worktree_path).await {
+            return Err(WorktreeError::Git(
+                "Cannot amend: no previous commit exists".into(),
+            ));
+        }
 
-        let sha = self.git.commit_all(&info.worktree_path, message).await?;
+        // Capture pre-commit HEAD to compute diff stats after commit.
+        // For amend, this is the parent of the amended commit (HEAD^), not
+        // HEAD itself — otherwise diff stats compare the amended commit to
+        // itself, which would always be (0,0). Fall back to empty on amend
+        // errors (e.g. amending the root commit) so the commit still goes
+        // through; stats just won't be populated.
+        let pre_commit = if opts.amend {
+            self.git
+                .run(&info.worktree_path, &["rev-parse", "HEAD^"])
+                .await
+                .unwrap_or_default()
+        } else {
+            self.git
+                .head_commit(&info.worktree_path)
+                .await
+                .unwrap_or_default()
+        };
+
+        let sha = self
+            .git
+            .commit_with_options(&info.worktree_path, message, &opts)
+            .await?;
 
         // Gather files changed and diff stats between pre-commit and new HEAD
         let files_changed = if pre_commit.is_empty() {

@@ -12,7 +12,7 @@
 //! | Module          | Contents |
 //! |-----------------|----------|
 //! | `lifecycle`     | `maybe_acquire`, `release`, `effective_working_dir`, `rename_branch` |
-//! | `transactions`  | `commit`, `merge` |
+//! | `transactions`  | `commit` (accepts `CommitOptions` for amend / signoff / stage-all), `merge` |
 //! | `queries`       | `list_active`, `list_for_repo`, `get_info`, `get_status`, `list_session_branches` |
 //! | `diff`          | `get_committed_diff`, `committed_diff_for_branch` |
 //! | `branch`        | `delete_session_branch`, `prune_session_branches` |

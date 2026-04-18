@@ -583,6 +583,7 @@
 		CA108EDBDE08C589D6EDC3D8 /* EventDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00621F6FD9BF0B51E5370E4B /* EventDatabase.swift */; };
 		CAD4C4C74EDDA0ED019E7A3E /* LibreBaskerville-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6E76F13136B67A1A1C0A409F /* LibreBaskerville-Variable.ttf */; };
 		CBF5138781289C0403BB9F09 /* ConsolidatedAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D95AFDE4D54A50F673DEB30 /* ConsolidatedAnalytics.swift */; };
+		CC360EBF0879743C5FD1A331 /* CommitSubSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25AE00A3AF420339B5CA0E6B /* CommitSubSheet.swift */; };
 		CC985A41B0265AB528FFA9BA /* CatchUpEventBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D0377E826F664EEC9E029C /* CatchUpEventBufferTests.swift */; };
 		CCE187E76E4B295AC067F0FA /* SheetCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 622D2B21CA5C0E743DA7DBA7 /* SheetCoordinator.swift */; };
 		CCE3E95A40D19B38A7EF9424 /* ProcessSpawnedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9773BD08D8941F09C5C0A45A /* ProcessSpawnedPlugin.swift */; };
@@ -885,6 +886,7 @@
 		23BAFE526BBB04BE9DF43E92 /* ChatSheetContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSheetContent.swift; sourceTree = "<group>"; };
 		2491CA1DEC97E8887AE1DF2A /* DashboardToolbarContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardToolbarContent.swift; sourceTree = "<group>"; };
 		24C19F8456129A0C2DE081A9 /* TronSegmentedControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronSegmentedControl.swift; sourceTree = "<group>"; };
+		25AE00A3AF420339B5CA0E6B /* CommitSubSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitSubSheet.swift; sourceTree = "<group>"; };
 		272CFD5FF021F314737B8249 /* WriteToolDetailSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WriteToolDetailSheetTests.swift; sourceTree = "<group>"; };
 		275A5FBFC3807DB7C8158017 /* ContextDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextDetailView.swift; sourceTree = "<group>"; };
 		277426277E34E49215DB26CE /* SettingsState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsState.swift; sourceTree = "<group>"; };
@@ -3237,6 +3239,7 @@
 			isa = PBXGroup;
 			children = (
 				3F385BEBB17484ED12310BF9 /* BranchPickerField.swift */,
+				25AE00A3AF420339B5CA0E6B /* CommitSubSheet.swift */,
 				60D2AF62C5F6CB1443251536 /* ConflictResolverSubSheet.swift */,
 				E5C27C14DBEFAFC01C3F7A4D /* DiffFileRow.swift */,
 				351971829A487361F5CE86B7 /* FileDetailSheet.swift */,
@@ -3603,6 +3606,7 @@
 				A73C32F028EC1DF7026345A1 /* CommandToolDetailSheet.swift in Sources */,
 				F7F6A50AE13A19D66E77875B /* CommandToolSections.swift in Sources */,
 				D79E68EBF4AB414FAAEF7BA1 /* CommandToolTypes.swift in Sources */,
+				CC360EBF0879743C5FD1A331 /* CommitSubSheet.swift in Sources */,
 				6E7F66F9DD6E0C9B87CF94ED /* CompactionCoordinator.swift in Sources */,
 				7E961C3B3873C524B595FAA7 /* CompactionDetailSheet.swift in Sources */,
 				2CDFC9770405CFDABEEC0011 /* CompactionPlugin.swift in Sources */,

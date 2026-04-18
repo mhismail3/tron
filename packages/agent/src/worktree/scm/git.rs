@@ -9,7 +9,7 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 use crate::worktree::errors::{Result, WorktreeError};
-use crate::worktree::types::{ConflictKind, ConflictedFile, PushOutput};
+use crate::worktree::types::{CommitOptions, ConflictKind, ConflictedFile, PushOutput};
 
 /// Parsed entry from `git worktree list --porcelain`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,9 +153,47 @@ impl GitExecutor {
     }
 
     /// Stage all and commit.
+    ///
+    /// Thin wrapper over [`commit_with_options`] that preserves the original
+    /// "stage everything, no amend, no signoff" behavior relied on by
+    /// lifecycle/recovery paths. New callers should prefer
+    /// [`commit_with_options`] and pass flags explicitly.
     pub async fn commit_all(&self, dir: &Path, message: &str) -> Result<String> {
-        let _ = self.run(dir, &["add", "-A"]).await?;
-        let _ = self.run(dir, &["commit", "-m", message]).await?;
+        self.commit_with_options(dir, message, &CommitOptions::default_stage_all())
+            .await
+    }
+
+    /// Commit with caller-chosen flags.
+    ///
+    /// Behavior:
+    /// - `opts.stage_all`: run `git add -A` before commit. Omit to commit only
+    ///   the existing index.
+    /// - `opts.amend`: append `--amend` so the previous HEAD commit is
+    ///   rewritten in place.
+    /// - `opts.signoff`: append `--signoff` so a `Signed-off-by:` trailer is
+    ///   added by git.
+    ///
+    /// Returns the new HEAD SHA. Errors propagate `WorktreeError::Git` with
+    /// the raw git stderr so the caller (and ultimately the UI) can surface
+    /// it. The `message` is passed via `-m`, so leading dashes and embedded
+    /// newlines are preserved as-is.
+    pub async fn commit_with_options(
+        &self,
+        dir: &Path,
+        message: &str,
+        opts: &CommitOptions,
+    ) -> Result<String> {
+        if opts.stage_all {
+            let _ = self.run(dir, &["add", "-A"]).await?;
+        }
+        let mut args: Vec<&str> = vec!["commit", "-m", message];
+        if opts.amend {
+            args.push("--amend");
+        }
+        if opts.signoff {
+            args.push("--signoff");
+        }
+        let _ = self.run(dir, &args).await?;
         self.run(dir, &["rev-parse", "HEAD"]).await
     }
 
@@ -1295,6 +1333,225 @@ branch refs/heads/session/x
         let sha = git.commit_all(dir.path(), "add file").await.unwrap();
         assert_eq!(sha.len(), 40);
         assert!(!git.has_changes(dir.path()).await.unwrap());
+    }
+
+    // ── commit_with_options ────────────────────────────────────────────
+
+    /// Read the full commit message (body + trailers) of HEAD.
+    async fn head_message(dir: &Path) -> String {
+        let out = tokio::process::Command::new("git")
+            .args(["log", "-1", "--format=%B"])
+            .current_dir(dir)
+            .output()
+            .await
+            .unwrap();
+        assert!(out.status.success(), "git log failed");
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    async fn head_subject(dir: &Path) -> String {
+        let out = tokio::process::Command::new("git")
+            .args(["log", "-1", "--format=%s"])
+            .current_dir(dir)
+            .output()
+            .await
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap().trim_end().to_string()
+    }
+
+    async fn rev_list_count(dir: &Path) -> u64 {
+        let out = tokio::process::Command::new("git")
+            .args(["rev-list", "--count", "HEAD"])
+            .current_dir(dir)
+            .output()
+            .await
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap().trim().parse().unwrap()
+    }
+
+    async fn files_at_head(dir: &Path) -> Vec<String> {
+        let out = tokio::process::Command::new("git")
+            .args(["log", "-1", "--name-only", "--format="])
+            .current_dir(dir)
+            .output()
+            .await
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn commit_with_options_stage_all_adds_and_commits() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+
+        std::fs::write(dir.path().join("new.txt"), "hello").unwrap();
+        let opts = CommitOptions { stage_all: true, ..Default::default() };
+        let sha = git
+            .commit_with_options(dir.path(), "add new", &opts)
+            .await
+            .unwrap();
+
+        assert_eq!(sha.len(), 40, "sha must be a 40-char hex");
+        let files = files_at_head(dir.path()).await;
+        assert!(files.iter().any(|f| f == "new.txt"), "expected new.txt in HEAD, got {files:?}");
+        assert!(!git.has_changes(dir.path()).await.unwrap(), "tree should be clean after commit");
+    }
+
+    #[tokio::test]
+    async fn commit_with_options_stage_all_false_commits_only_index() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+
+        // Two new files. Stage only the first via raw git; leave the second
+        // untracked. With stage_all=false, the commit must include only
+        // staged.txt — NOT unstaged.txt.
+        std::fs::write(dir.path().join("staged.txt"), "one").unwrap();
+        std::fs::write(dir.path().join("unstaged.txt"), "two").unwrap();
+        run_cmd(dir.path(), &["git", "add", "staged.txt"]).await;
+
+        let opts = CommitOptions { stage_all: false, ..Default::default() };
+        let sha = git
+            .commit_with_options(dir.path(), "partial", &opts)
+            .await
+            .unwrap();
+        assert_eq!(sha.len(), 40);
+
+        let files = files_at_head(dir.path()).await;
+        assert!(files.contains(&"staged.txt".to_string()), "staged.txt must be in commit: {files:?}");
+        assert!(!files.contains(&"unstaged.txt".to_string()), "unstaged.txt MUST NOT be in commit: {files:?}");
+
+        // Untracked file still present after commit
+        assert!(
+            git.has_changes(dir.path()).await.unwrap(),
+            "untracked unstaged.txt should keep tree dirty"
+        );
+    }
+
+    #[tokio::test]
+    async fn commit_with_options_amend_rewrites_head() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+
+        // init_repo already produced one commit. Make one more to amend.
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        let _ = git.commit_all(dir.path(), "first add").await.unwrap();
+        let count_before = rev_list_count(dir.path()).await;
+
+        // Modify and amend with a new message
+        std::fs::write(dir.path().join("a.txt"), "a-edited").unwrap();
+        let opts = CommitOptions { stage_all: true, amend: true, ..Default::default() };
+        let sha = git
+            .commit_with_options(dir.path(), "first add (amended)", &opts)
+            .await
+            .unwrap();
+        assert_eq!(sha.len(), 40);
+
+        assert_eq!(rev_list_count(dir.path()).await, count_before, "amend must not add a commit");
+        assert_eq!(head_subject(dir.path()).await, "first add (amended)");
+    }
+
+    #[tokio::test]
+    async fn commit_with_options_signoff_adds_trailer() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+
+        std::fs::write(dir.path().join("s.txt"), "s").unwrap();
+        let opts = CommitOptions { stage_all: true, signoff: true, ..Default::default() };
+        let _ = git
+            .commit_with_options(dir.path(), "signed change", &opts)
+            .await
+            .unwrap();
+
+        let body = head_message(dir.path()).await;
+        assert!(
+            body.lines().any(|l| l.starts_with("Signed-off-by:")),
+            "expected Signed-off-by: trailer, got {body:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn commit_with_options_amend_and_signoff_compose() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+
+        // First commit to amend
+        std::fs::write(dir.path().join("x.txt"), "x").unwrap();
+        let _ = git.commit_all(dir.path(), "x").await.unwrap();
+        let count_before = rev_list_count(dir.path()).await;
+
+        // Amend with signoff
+        std::fs::write(dir.path().join("x.txt"), "x2").unwrap();
+        let opts = CommitOptions {
+            stage_all: true,
+            amend: true,
+            signoff: true,
+        };
+        let _ = git
+            .commit_with_options(dir.path(), "x (amended)", &opts)
+            .await
+            .unwrap();
+
+        assert_eq!(rev_list_count(dir.path()).await, count_before);
+        let body = head_message(dir.path()).await;
+        assert!(body.starts_with("x (amended)"));
+        assert!(body.lines().any(|l| l.starts_with("Signed-off-by:")));
+    }
+
+    #[tokio::test]
+    async fn commit_with_options_no_changes_without_amend_returns_err() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+
+        // git commit exits non-zero when the index is clean; the "nothing to
+        // commit" text lands on stdout, not stderr, so we just assert Err
+        // rather than probing the message.
+        let opts = CommitOptions { stage_all: false, ..Default::default() };
+        let result = git
+            .commit_with_options(dir.path(), "empty", &opts)
+            .await;
+        assert!(result.is_err(), "expected Err on clean index without --allow-empty");
+    }
+
+    #[tokio::test]
+    async fn commit_with_options_message_with_newlines_preserved() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+
+        std::fs::write(dir.path().join("m.txt"), "m").unwrap();
+        let message = "subject line\n\nbody paragraph\nsecond body line";
+        let opts = CommitOptions { stage_all: true, ..Default::default() };
+        let _ = git
+            .commit_with_options(dir.path(), message, &opts)
+            .await
+            .unwrap();
+
+        let body = head_message(dir.path()).await;
+        // git may append a trailing newline; compare trimmed.
+        assert_eq!(body.trim_end(), message);
+    }
+
+    #[tokio::test]
+    async fn commit_with_options_message_starting_with_dash_not_treated_as_flag() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+
+        std::fs::write(dir.path().join("d.txt"), "d").unwrap();
+        let message = "-x do thing";
+        let opts = CommitOptions { stage_all: true, ..Default::default() };
+        let sha = git
+            .commit_with_options(dir.path(), message, &opts)
+            .await
+            .unwrap();
+        assert_eq!(sha.len(), 40);
+        assert_eq!(head_subject(dir.path()).await, "-x do thing");
     }
 
     #[tokio::test]

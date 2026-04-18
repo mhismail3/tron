@@ -143,62 +143,6 @@ struct FileDetailDataTests {
 @Suite("SourceControlMetadata")
 struct SourceControlMetadataTests {
 
-    // MARK: - canCommit
-
-    @Test("canCommit true when worktree has uncommitted changes and not loading")
-    func testCanCommitTrue() {
-        let result = SourceControlMetadata.canCommit(
-            worktreeStatus: statusWith(hasUncommittedChanges: true),
-            isLoading: false
-        )
-        #expect(result == true)
-    }
-
-    @Test("canCommit false when loading")
-    func testCanCommitFalseWhenLoading() {
-        let result = SourceControlMetadata.canCommit(
-            worktreeStatus: statusWith(hasUncommittedChanges: true),
-            isLoading: true
-        )
-        #expect(result == false)
-    }
-
-    @Test("canCommit false when no uncommitted changes")
-    func testCanCommitFalseNoChanges() {
-        let result = SourceControlMetadata.canCommit(
-            worktreeStatus: statusWith(hasUncommittedChanges: false),
-            isLoading: false
-        )
-        #expect(result == false)
-    }
-
-    @Test("canCommit false when hasUncommittedChanges is nil")
-    func testCanCommitFalseNilChanges() {
-        let result = SourceControlMetadata.canCommit(
-            worktreeStatus: statusWith(hasUncommittedChanges: nil),
-            isLoading: false
-        )
-        #expect(result == false)
-    }
-
-    @Test("canCommit false when no worktree")
-    func testCanCommitFalseNoWorktree() {
-        let result = SourceControlMetadata.canCommit(
-            worktreeStatus: WorktreeGetStatusResult(hasWorktree: false, worktree: nil),
-            isLoading: false
-        )
-        #expect(result == false)
-    }
-
-    @Test("canCommit false when worktreeStatus is nil")
-    func testCanCommitFalseNilStatus() {
-        let result = SourceControlMetadata.canCommit(
-            worktreeStatus: nil,
-            isLoading: false
-        )
-        #expect(result == false)
-    }
-
     // MARK: - noChangeLabel
 
     @Test("noChangeLabel for untracked files")
@@ -228,28 +172,6 @@ struct SourceControlMetadataTests {
         #expect(SourceControlMetadata.noChangeLabel(for: .copied) == "No diff available")
     }
 
-    // MARK: - Helpers
-
-    private func statusWith(
-        hasUncommittedChanges: Bool? = false,
-        commitCount: Int? = 0,
-        isMerged: Bool? = false
-    ) -> WorktreeGetStatusResult {
-        WorktreeGetStatusResult(
-            hasWorktree: true,
-            worktree: WorktreeInfo(
-                isolated: true,
-                branch: "session/test",
-                baseCommit: "abc123",
-                path: "/tmp/worktree",
-                baseBranch: "main",
-                repoRoot: "/tmp/repo",
-                hasUncommittedChanges: hasUncommittedChanges,
-                commitCount: commitCount,
-                isMerged: isMerged
-            )
-        )
-    }
 }
 
 // MARK: - Diff Content Extraction Tests
