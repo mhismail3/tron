@@ -34,6 +34,7 @@ struct SourceControlStatusHeader: View {
                         }
                     }
                 }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
             if let lockHolder {
                 lockBadge(lockHolder)

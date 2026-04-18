@@ -141,12 +141,16 @@ struct SourceControlSheet: View {
             }
             .tronErrorAlert(message: $errorMessage)
             .task {
-                // Pre-populate from parent's data, then refresh in background
+                // Pre-populate from parent's data, then refresh in background.
+                // Run the three loaders in parallel so late-arriving pills
+                // (divergence chips, Sessions tile) settle in a single batch
+                // rather than popping in one at a time.
                 diffResult = initialDiffResult
                 worktreeStatus = initialWorktreeStatus
-                await loadData()
-                await loadDivergence()
-                await loadGitDefaults()
+                async let data: Void = loadData()
+                async let divergenceLoad: Void = loadDivergence()
+                async let defaults: Void = loadGitDefaults()
+                _ = await (data, divergenceLoad, defaults)
             }
             // Sibling-session main advances / local finalize|sync|push all
             // bump the tick — re-pull divergence chips so they stay fresh.
@@ -210,6 +214,7 @@ struct SourceControlSheet: View {
                     title: repoSessionCount == 1 ? "1 Session" : "\(repoSessionCount) Sessions",
                     tint: .tronAmber
                 ) { activeGitAction = .repoSessions }
+                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
             }
         }
     }
@@ -295,9 +300,17 @@ struct SourceControlSheet: View {
     }
 
     private func loadDivergence() async {
-        divergence = try? await rpcClient.repo.getDivergence(sessionId: sessionId)
-        if let sessions = try? await rpcClient.repo.listSessions(sessionId: sessionId) {
-            repoSessionCount = max(0, sessions.count - 1)
+        // Resolve both RPCs in parallel, then flush to state once with a
+        // coordinated animation so chips + Sessions tile fade in together.
+        async let d = rpcClient.repo.getDivergence(sessionId: sessionId)
+        async let s = rpcClient.repo.listSessions(sessionId: sessionId)
+        let resolvedDivergence = try? await d
+        let resolvedSessions = try? await s
+        withAnimation(.easeInOut(duration: 0.25)) {
+            divergence = resolvedDivergence
+            if let resolvedSessions {
+                repoSessionCount = max(0, resolvedSessions.count - 1)
+            }
         }
     }
 
