@@ -2,6 +2,29 @@ import SwiftUI
 
 // MARK: - Context Detail View (pushed from Agent Control sheet)
 
+/// Shared layout constants that keep section headers and container rows on a
+/// single icon / label column in the Context sheet. All numeric values are in
+/// SwiftUI points and are resolution-independent, so alignment holds across
+/// every supported device (iPhone SE through iPad). `Spacer` absorbs width
+/// differences between screens.
+///
+/// Derivation: container rows sit inside a VStack with `outerPadding` horizontal
+/// inset, and each container's header HStack adds another `rowInnerPadding` —
+/// so their icons land at `outerPadding + rowInnerPadding` from the screen edge.
+/// Standalone section headers (no container background) match that x via
+/// `iconColumnLeading`.
+///
+/// Sibling section views (SystemPromptSection, ToolsSection, RulesSection,
+/// CollapsibleSkillsSection) also reference these constants so the alignment
+/// cannot drift if any single value is changed.
+enum ContextLayout {
+    static let outerPadding: CGFloat = 16
+    static let rowInnerPadding: CGFloat = 12
+    static let iconFrameWidth: CGFloat = 18
+    static let iconTextSpacing: CGFloat = 8
+    static var iconColumnLeading: CGFloat { outerPadding + rowInnerPadding }
+}
+
 @available(iOS 26.0, *)
 struct ContextDetailView: View {
     let rpcClient: RPCClient
@@ -70,11 +93,11 @@ struct ContextDetailView: View {
                         VStack(spacing: 6) {
                             if let wd = env.workingDirectory {
                                 let displayPath = wd.abbreviatingHomeDirectory
-                                HStack(spacing: 8) {
+                                HStack(spacing: ContextLayout.iconTextSpacing) {
                                     Image(systemName: "folder.fill")
                                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                                         .foregroundStyle(.tronSlate)
-                                        .frame(width: 18)
+                                        .frame(width: ContextLayout.iconFrameWidth)
                                     Text("Working Directory")
                                         .font(TronTypography.codeCaption)
                                         .foregroundStyle(.tronTextMuted)
@@ -86,15 +109,15 @@ struct ContextDetailView: View {
                                         .truncationMode(.middle)
                                 }
                                 .padding(.vertical, 8)
-                                .padding(.horizontal, 10)
+                                .padding(.horizontal, ContextLayout.rowInnerPadding)
                                 .sectionFill(.tronSlate, cornerRadius: 10, subtle: true, compact: false)
                             }
                             if let origin = env.serverOrigin {
-                                HStack(spacing: 8) {
+                                HStack(spacing: ContextLayout.iconTextSpacing) {
                                     Image(systemName: "network")
                                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                                         .foregroundStyle(.tronSlate)
-                                        .frame(width: 18)
+                                        .frame(width: ContextLayout.iconFrameWidth)
                                     Text("Server Origin")
                                         .font(TronTypography.codeCaption)
                                         .foregroundStyle(.tronTextMuted)
@@ -104,10 +127,11 @@ struct ContextDetailView: View {
                                         .foregroundStyle(.tronTextSecondary)
                                 }
                                 .padding(.vertical, 8)
-                                .padding(.horizontal, 10)
+                                .padding(.horizontal, ContextLayout.rowInnerPadding)
                                 .sectionFill(.tronSlate, cornerRadius: 10, subtle: true, compact: false)
                             }
                         }
+                        .padding(.vertical, 6)
                     }
 
                     SystemPromptSection(
@@ -120,7 +144,7 @@ struct ContextDetailView: View {
                         tokens: snapshot.breakdown.tools
                     )
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, ContextLayout.outerPadding)
 
                 // Global Context
                 if hasGlobalContent {
@@ -144,7 +168,7 @@ struct ContextDetailView: View {
                             )
                         }
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, ContextLayout.outerPadding)
                 }
 
                 // Project Context
@@ -169,7 +193,7 @@ struct ContextDetailView: View {
                             )
                         }
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, ContextLayout.outerPadding)
                 }
 
                 // Session Context
@@ -189,7 +213,7 @@ struct ContextDetailView: View {
                             )
                         }
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, ContextLayout.outerPadding)
                 }
             }
             .padding(.vertical)
@@ -217,16 +241,18 @@ struct ContextDetailView: View {
     // MARK: - Section Headers
 
     private func sectionHeader(_ title: String, icon: String) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: ContextLayout.iconTextSpacing) {
             Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronCyan)
+                .frame(width: ContextLayout.iconFrameWidth)
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronCyan)
             Spacer()
         }
-        .padding(.horizontal)
+        .padding(.leading, ContextLayout.iconColumnLeading)
+        .padding(.trailing, ContextLayout.outerPadding)
     }
 
     // MARK: - Content Checks

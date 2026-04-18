@@ -11,11 +11,11 @@ struct SystemPromptSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            HStack(spacing: 8) {
+            HStack(spacing: ContextLayout.iconTextSpacing) {
                 Image(systemName: "doc.text.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.tronSlate)
-                    .frame(width: 18)
+                    .frame(width: ContextLayout.iconFrameWidth)
                 Text("System Prompt")
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronSlate)
@@ -29,7 +29,7 @@ struct SystemPromptSection: View {
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
-            .padding(12)
+            .padding(ContextLayout.rowInnerPadding)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onTapGesture {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {

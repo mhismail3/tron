@@ -174,70 +174,61 @@ struct SourceControlSheet: View {
 
     // MARK: - Git Actions Card
 
+    /// Compact quick-action bar: one row of equal-width tiles, each a
+    /// tappable colored container. Previously rendered as stacked full-
+    /// width rows with subtitles — the subtitles reappear as captions on
+    /// the sub-sheets themselves, so the main sheet stays dense and the
+    /// four actions fit in a single line across every iPhone width.
     private var gitActionsCard: some View {
-        VStack(spacing: 8) {
-            gitActionRow(
+        HStack(spacing: 8) {
+            gitActionTile(
                 icon: "arrow.down.circle",
-                title: "Pull Remote",
-                subtitle: "Fetch all remote changes and fast-forward main",
+                title: "Pull",
                 tint: .tronEmerald
             ) { activeGitAction = .syncMain }
 
-            gitActionRow(
+            gitActionTile(
                 icon: "checkmark.seal",
-                title: "Merge Changes",
-                subtitle: "Merge session branch and rebranch",
+                title: "Merge",
                 tint: .tronCoral
             ) { activeGitAction = .finalize }
 
-            gitActionRow(
+            gitActionTile(
                 icon: "arrow.up.circle",
-                title: "Push Branch",
-                subtitle: "Push session branch to origin",
+                title: "Push",
                 tint: .tronSky
             ) { activeGitAction = .push }
 
             if repoSessionCount > 0 {
-                gitActionRow(
+                gitActionTile(
                     icon: "rectangle.stack.person.crop",
-                    title: "\(repoSessionCount) Parallel \(repoSessionCount == 1 ? "Session" : "Sessions")",
-                    subtitle: "View and jump to sibling sessions",
+                    title: repoSessionCount == 1 ? "1 Session" : "\(repoSessionCount) Sessions",
                     tint: .tronAmber
                 ) { activeGitAction = .repoSessions }
             }
         }
     }
 
-    private func gitActionRow(
+    private func gitActionTile(
         icon: String,
         title: String,
-        subtitle: String,
         tint: Color,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            VStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(tint)
-                    .frame(width: 22)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(subtitle)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.tronTextMuted)
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 8)
             .sectionFill(tint, subtle: true)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
