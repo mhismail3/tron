@@ -14,6 +14,11 @@ struct SourceControlSheet: View {
     /// divergence). Header chips and sub-sheets read peer-session signals from
     /// here; populated by `ChatViewModel+Worktree.swift`/`+Repo.swift` handlers.
     var gitWorkflowState: GitWorkflowState?
+    /// Dismisses the presenting Agent Control sheet. Invoked after the user
+    /// switches to a peer session from the Parallel Sessions sub-sheet so the
+    /// entire sheet stack tears down and the ChatView for the new session
+    /// comes into focus.
+    var onDismissParent: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
 
@@ -269,9 +274,15 @@ struct SourceControlSheet: View {
                 rpcClient: rpcClient,
                 sessionId: sessionId,
                 gitWorkflowState: gitWorkflowState,
-                onSelectSession: { _ in
+                onSelectSession: { targetSessionId in
+                    // Tear down the sheet stack and route to the peer session.
+                    // ContentView observes `.switchToSession` and updates
+                    // `selectedSessionId`, which in turn calls
+                    // `handleSessionSelection` to persist active session.
+                    NotificationCenter.default.post(name: .switchToSession, object: targetSessionId)
                     activeGitAction = nil
                     dismiss()
+                    onDismissParent()
                 }
             )
         case .conflictResolver:

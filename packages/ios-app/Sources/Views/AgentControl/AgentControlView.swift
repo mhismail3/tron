@@ -138,7 +138,8 @@ struct AgentControlView: View {
                     sessionId: sessionId,
                     initialDiffResult: diffResult,
                     initialWorktreeStatus: worktreeStatus,
-                    gitWorkflowState: gitWorkflowState
+                    gitWorkflowState: gitWorkflowState,
+                    onDismissParent: { dismiss() }
                 )
             }
             .tronErrorAlert(message: $errorMessage)
