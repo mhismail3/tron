@@ -50,35 +50,45 @@ struct ModelPickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    ForEach(providerGroups) { provider in
-                        ProviderSection(
-                            provider: provider,
-                            currentModelId: pendingModelId.isEmpty ? currentModelId : pendingModelId,
-                            readOnly: readOnly,
-                            isExpanded: expandedProviders.contains(provider.id),
-                            expandedFamilies: $expandedFamilies,
-                            expandedDetails: $expandedDetails,
-                            onToggle: {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                    if expandedProviders.contains(provider.id) {
-                                        expandedProviders.remove(provider.id)
-                                    } else {
-                                        expandedProviders.insert(provider.id)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        ForEach(providerGroups) { provider in
+                            ProviderSection(
+                                provider: provider,
+                                currentModelId: pendingModelId.isEmpty ? currentModelId : pendingModelId,
+                                readOnly: readOnly,
+                                isExpanded: expandedProviders.contains(provider.id),
+                                expandedFamilies: $expandedFamilies,
+                                expandedDetails: $expandedDetails,
+                                onToggle: {
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                        if expandedProviders.contains(provider.id) {
+                                            expandedProviders.remove(provider.id)
+                                        } else {
+                                            expandedProviders.insert(provider.id)
+                                        }
+                                    }
+                                },
+                                onSelect: { model in
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                        pendingModelId = model.id
                                     }
                                 }
-                            },
-                            onSelect: { model in
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                    pendingModelId = model.id
-                                }
-                            }
-                        )
+                            )
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical)
+                }
+                .onAppear {
+                    // Defer scroll until after expansion layout settles
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            proxy.scrollTo(currentModelId, anchor: .center)
+                        }
                     }
                 }
-                .padding(.horizontal)
-                .padding(.vertical)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -107,16 +117,19 @@ struct ModelPickerSheet: View {
         }
         .onAppear {
             pendingModelId = currentModelId
-            // Expand only the provider containing the current default model
+            // Expand the provider and family containing the currently selected
+            // model so its row is visible on open. Also keep each provider's
+            // "latest" family expanded as a helpful default for browsing.
             for provider in providerGroups {
-                let containsCurrentModel = provider.families.contains { family in
-                    family.models.contains { $0.id == currentModelId }
-                }
-                if containsCurrentModel {
-                    expandedProviders.insert(provider.id)
-                }
-                for family in provider.families where family.isLatest {
-                    expandedFamilies.insert(family.id)
+                for family in provider.families {
+                    let containsSelected = family.models.contains { $0.id == currentModelId }
+                    if containsSelected {
+                        expandedProviders.insert(provider.id)
+                        expandedFamilies.insert(family.id)
+                    }
+                    if family.isLatest {
+                        expandedFamilies.insert(family.id)
+                    }
                 }
             }
         }
@@ -317,6 +330,7 @@ private struct FamilySection: View {
                             },
                             onSelect: { onSelect(model) }
                         )
+                        .id(model.id)
                     }
                 }
                 .padding(.horizontal, 4)
