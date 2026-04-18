@@ -259,16 +259,19 @@ struct GitWorkflowSettingsPage: View {
             SettingsSectionHeader(title: "Timeouts")
 
             SettingsCard {
-                timeoutRow(
-                    icon: "network",
-                    label: "Network Op",
-                    valueMs: Binding(
-                        get: { settingsState.gitOpTimeoutNetworkMs },
-                        set: { settingsState.gitOpTimeoutNetworkMs = $0 }
-                    ),
-                    step: 15_000,
-                    range: 15_000...600_000
-                ) { newValue in
+                SettingsRow(icon: "network", label: "Network Op") {
+                    Text(formatMs(settingsState.gitOpTimeoutNetworkMs))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                        .frame(minWidth: 52, alignment: .trailing)
+                    TronStepper(
+                        value: msBinding(\.gitOpTimeoutNetworkMs),
+                        range: 15_000...600_000,
+                        step: 15_000
+                    )
+                }
+                .onChange(of: settingsState.gitOpTimeoutNetworkMs) { _, newValue in
                     updateServerSetting {
                         ServerSettingsUpdate(git: .init(opTimeoutNetworkMs: newValue))
                     }
@@ -276,16 +279,19 @@ struct GitWorkflowSettingsPage: View {
 
                 SettingsRowDivider()
 
-                timeoutRow(
-                    icon: "cpu",
-                    label: "Local Op",
-                    valueMs: Binding(
-                        get: { settingsState.gitOpTimeoutLocalMs },
-                        set: { settingsState.gitOpTimeoutLocalMs = $0 }
-                    ),
-                    step: 5_000,
-                    range: 5_000...300_000
-                ) { newValue in
+                SettingsRow(icon: "cpu", label: "Local Op") {
+                    Text(formatMs(settingsState.gitOpTimeoutLocalMs))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                        .frame(minWidth: 52, alignment: .trailing)
+                    TronStepper(
+                        value: msBinding(\.gitOpTimeoutLocalMs),
+                        range: 5_000...300_000,
+                        step: 5_000
+                    )
+                }
+                .onChange(of: settingsState.gitOpTimeoutLocalMs) { _, newValue in
                     updateServerSetting {
                         ServerSettingsUpdate(git: .init(opTimeoutLocalMs: newValue))
                     }
@@ -293,16 +299,19 @@ struct GitWorkflowSettingsPage: View {
 
                 SettingsRowDivider()
 
-                timeoutRow(
-                    icon: "exclamationmark.arrow.triangle.2.circlepath",
-                    label: "Crash Recovery",
-                    valueMs: Binding(
-                        get: { settingsState.gitCrashRecoveryAbortTimeoutMs },
-                        set: { settingsState.gitCrashRecoveryAbortTimeoutMs = $0 }
-                    ),
-                    step: 5 * 60 * 1000,
-                    range: (5 * 60 * 1000)...(4 * 60 * 60 * 1000)
-                ) { newValue in
+                SettingsRow(icon: "exclamationmark.arrow.triangle.2.circlepath", label: "Crash Recovery") {
+                    Text(formatMs(settingsState.gitCrashRecoveryAbortTimeoutMs))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                        .frame(minWidth: 52, alignment: .trailing)
+                    TronStepper(
+                        value: msBinding(\.gitCrashRecoveryAbortTimeoutMs),
+                        range: (5 * 60 * 1000)...(4 * 60 * 60 * 1000),
+                        step: 5 * 60 * 1000
+                    )
+                }
+                .onChange(of: settingsState.gitCrashRecoveryAbortTimeoutMs) { _, newValue in
                     updateServerSetting {
                         ServerSettingsUpdate(git: .init(crashRecoveryAbortTimeoutMs: newValue))
                     }
@@ -340,49 +349,13 @@ struct GitWorkflowSettingsPage: View {
         .padding(.vertical, 12)
     }
 
-    private func timeoutRow(
-        icon: String,
-        label: String,
-        valueMs: Binding<UInt64>,
-        step: UInt64,
-        range: ClosedRange<UInt64>,
-        onChange: @escaping (UInt64) -> Void
-    ) -> some View {
-        HStack {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 18)
-            Text(label)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-            Spacer()
-            Text(formatMs(valueMs.wrappedValue))
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronEmerald)
-                .monospacedDigit()
-                .frame(minWidth: 52, alignment: .trailing)
-            Button {
-                let next = valueMs.wrappedValue >= range.lowerBound + step
-                    ? valueMs.wrappedValue - step : range.lowerBound
-                valueMs.wrappedValue = max(range.lowerBound, next)
-                onChange(valueMs.wrappedValue)
-            } label: {
-                Image(systemName: "minus.circle")
-                    .foregroundStyle(.tronEmerald)
-            }
-            .buttonStyle(.plain)
-            Button {
-                let next = valueMs.wrappedValue + step
-                valueMs.wrappedValue = min(range.upperBound, next)
-                onChange(valueMs.wrappedValue)
-            } label: {
-                Image(systemName: "plus.circle")
-                    .foregroundStyle(.tronEmerald)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
+    /// Bridge a `UInt64` millisecond setting to the `Int` binding `TronStepper` expects.
+    /// All git timeout ranges fit well within `Int`.
+    private func msBinding(_ keyPath: ReferenceWritableKeyPath<SettingsState, UInt64>) -> Binding<Int> {
+        Binding(
+            get: { Int(settingsState[keyPath: keyPath]) },
+            set: { settingsState[keyPath: keyPath] = UInt64($0) }
+        )
     }
 
     private func formatMs(_ ms: UInt64) -> String {
