@@ -106,6 +106,7 @@ bytes = "1"
 indexmap = "2"
 url = "2"
 urlencoding = "2"
+unicode-normalization = "0.1"
 
 # APNS (optional)
 jsonwebtoken = { version = "9", optional = true }

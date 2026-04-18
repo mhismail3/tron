@@ -148,14 +148,14 @@ struct ChatView: View {
                 }
             }
         }
-        // Handle "Draft a Plan" request: Add plan skill to selection and activate on server
+        // Handle "Draft a Plan" request: stage the plan skill as a draft chip.
+        // Server activation is deferred to send time (see onSend below); eagerly
+        // activating here would produce misleading `skill.deactivated`
+        // notifications if the user removes the chip without sending.
         .onReceive(NotificationCenter.default.publisher(for: .draftPlanRequested)) { _ in
             guard let skillStore = skillStore else { return }
             if let planSkill = skillStore.skills.first(where: { $0.name.lowercased() == "plan" }) {
-                if !viewModel.inputBarState.selectedSkills.contains(where: { $0.id == planSkill.id }) {
-                    viewModel.inputBarState.selectedSkills.append(planSkill)
-                    Task { try? await viewModel.activateSkillOnServer(planSkill.name) }
-                }
+                viewModel.addSkillToDraft(planSkill)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pendingShareMessage)) { notification in
@@ -405,7 +405,10 @@ struct ChatView: View {
                         onContextTap: { [sheetCoordinator] in sheetCoordinator.showAgentControl() },
                         onSkillSelect: nil,
                         onSkillRemove: { [viewModel] skill in
-                            Task { try? await viewModel.deactivateSkillOnServer(skill.name) }
+                            // Draft-only: unstage the chip. Server-side deactivation is NOT
+                            // called — chip removal is a draft edit, not a "remove from
+                            // context" gesture. See MessagingCoordinator.removeSkillFromDraft.
+                            viewModel.removeSkillFromDraft(skill)
                         },
                         onSkillDetailTap: { [sheetCoordinator] skill in sheetCoordinator.showSkillDetail(skill, mode: .skill) },
                         onSpellRemove: { _ in },

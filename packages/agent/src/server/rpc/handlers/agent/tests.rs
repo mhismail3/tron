@@ -2725,3 +2725,188 @@ async fn stale_git_push_excluded_after_boundary() {
     assert!(types.contains(&"message.assistant".to_string()));
     assert!(!types.contains(&"tool.call".to_string()));
 }
+
+// ─── prompt history capture hook ───────────────────────────────────────
+
+/// Shared reload lock used by every test that mutates the global settings
+/// singleton (see `server/rpc/handlers/settings.rs` for the other user).
+fn history_capture_lock() -> &'static tokio::sync::Mutex<()> {
+    crate::server::rpc::settings_service::settings_reload_lock()
+}
+
+async fn wait_for_history_count(ctx: &RpcContext, expected: usize) -> Vec<crate::prompt_library::types::HistoryItem> {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            // Tolerate brief BUSY contention from the fire-and-forget writer.
+            if let Ok(page) = crate::prompt_library::store::list_history(
+                ctx.event_store.pool(),
+                200,
+                None,
+                None,
+            ) {
+                if page.items.len() == expected {
+                    return page.items;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {expected} history rows"))
+}
+
+async fn confirm_no_history_after_tick(ctx: &RpcContext) {
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Retry a few times to survive transient BUSY while asserting emptiness.
+    for _ in 0..20 {
+        if let Ok(page) = crate::prompt_library::store::list_history(
+            ctx.event_store.pool(),
+            200,
+            None,
+            None,
+        ) {
+            assert!(page.items.is_empty(), "expected no history, found {:?}", page.items);
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("list_history never returned Ok");
+}
+
+#[tokio::test]
+async fn prompt_records_history_on_interactive_call() {
+    let _guard = history_capture_lock().lock().await;
+    crate::settings::init_settings(crate::settings::TronSettings::default());
+    let ctx = make_text_context("Done.");
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    PromptHandler
+        .handle(
+            Some(json!({"sessionId": sid, "prompt": "remember this"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let items = wait_for_history_count(&ctx, 1).await;
+    assert_eq!(items[0].text, "remember this");
+    assert_eq!(items[0].use_count, 1);
+}
+
+#[tokio::test]
+async fn prompt_history_dedups_on_repeat() {
+    let _guard = history_capture_lock().lock().await;
+    crate::settings::init_settings(crate::settings::TronSettings::default());
+    let ctx = make_text_context("Done.");
+    let sid1 = ctx
+        .session_manager
+        .create_session("mock", "/tmp/a", Some("a"), None)
+        .unwrap();
+    let sid2 = ctx
+        .session_manager
+        .create_session("mock", "/tmp/b", Some("b"), None)
+        .unwrap();
+
+    PromptHandler
+        .handle(Some(json!({"sessionId": sid1, "prompt": "duplicate text"})), &ctx)
+        .await
+        .unwrap();
+    // Wait for the first row before sending the second to avoid racing inserts.
+    wait_for_history_count(&ctx, 1).await;
+    PromptHandler
+        .handle(Some(json!({"sessionId": sid2, "prompt": "duplicate text"})), &ctx)
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            // Tolerate brief SQLite BUSY contention from the fire-and-forget
+            // write spawned by the capture hook.
+            match crate::prompt_library::store::list_history(
+                ctx.event_store.pool(),
+                200,
+                None,
+                None,
+            ) {
+                Ok(page) if page.items.len() == 1 && page.items[0].use_count == 2 => return,
+                _ => {}
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("use_count never reached 2");
+}
+
+#[tokio::test]
+async fn prompt_with_cron_source_does_not_record_history() {
+    let _guard = history_capture_lock().lock().await;
+    crate::settings::init_settings(crate::settings::TronSettings::default());
+    let ctx = make_text_context("Done.");
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    PromptHandler
+        .handle(
+            Some(json!({
+                "sessionId": sid,
+                "prompt": "cron body",
+                "source": "cron"
+            })),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    confirm_no_history_after_tick(&ctx).await;
+}
+
+#[tokio::test]
+async fn prompt_with_history_disabled_does_not_record() {
+    let _guard = history_capture_lock().lock().await;
+    let mut disabled = crate::settings::TronSettings::default();
+    disabled.prompt_library.history_enabled = false;
+    crate::settings::init_settings(disabled);
+
+    let ctx = make_text_context("Done.");
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    PromptHandler
+        .handle(Some(json!({"sessionId": sid, "prompt": "hidden"})), &ctx)
+        .await
+        .unwrap();
+
+    confirm_no_history_after_tick(&ctx).await;
+
+    // Restore defaults so subsequent tests behave normally.
+    crate::settings::init_settings(crate::settings::TronSettings::default());
+}
+
+#[tokio::test]
+async fn prompt_validation_failure_does_not_record_history() {
+    let _guard = history_capture_lock().lock().await;
+    crate::settings::init_settings(crate::settings::TronSettings::default());
+    let ctx = make_text_context("Done.");
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    let oversized =
+        "x".repeat(crate::server::rpc::validation::MAX_PROMPT_LENGTH.saturating_add(1));
+    let err = PromptHandler
+        .handle(Some(json!({"sessionId": sid, "prompt": oversized})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+
+    confirm_no_history_after_tick(&ctx).await;
+}

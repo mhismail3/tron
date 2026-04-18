@@ -19,6 +19,7 @@ pub mod llm;
 pub mod mcp;
 pub mod tools;
 pub mod cron;
+pub mod prompt_library;
 pub mod worktree;
 
 // Orchestration (depends on services)

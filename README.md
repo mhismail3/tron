@@ -114,6 +114,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   +-- mcp              Model Context Protocol client/server bridge
   +-- tools            Tool trait, registry, tool implementations
   +-- cron             Scheduled job runner (automations)
+  +-- prompt_library   Persistent prompt history + user-authored snippets
   +-- worktree         Git worktree management for isolated subagent runs
   |
   +-- runtime          Agent loop, context, hooks, orchestrator, tasks
@@ -135,6 +136,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `mcp` | Model Context Protocol integration | MCP client/server types |
 | `tools` | Tool implementations | `TronTool` trait, `ToolRegistry`, per-tool structs |
 | `cron` | Automation scheduler | Cron job runner, schedule parser |
+| `prompt_library` | Prompt history + snippets (SQLite-backed) | `store::record_prompt`, `store::list_history`, `Snippet` |
 | `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
 | `server` | HTTP/WS + RPC dispatch | `TronServer`, `MethodRegistry`, `RpcContext`, `EventBridge` |
@@ -270,7 +272,7 @@ Source-control operations (sync main, push, switch branches, finalize a session 
 
 ## RPC API
 
-JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **148 methods** across three groups.
+JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **156 methods** across three groups.
 
 ### Connection
 
@@ -316,7 +318,7 @@ All messages use JSON-RPC 2.0 framing:
 | `import` | 4 | `import.listSources`, `import.listSessions`, `import.previewSession`, `import.execute` |
 | `tree` | 5 | `tree.getVisualization`, `tree.getBranches`, `tree.getSubtree`, `tree.getAncestors`, `tree.compareBranches` |
 
-### Platform (65)
+### Platform (73)
 
 | Group | Count | Methods |
 |-------|------:|---------|
@@ -332,6 +334,8 @@ All messages use JSON-RPC 2.0 framing:
 | `repo` | 2 | `repo.listSessions`, `repo.getDivergence` |
 | `sandbox` | 5 | `sandbox.listContainers`, `sandbox.startContainer`, `sandbox.stopContainer`, `sandbox.killContainer`, `sandbox.removeContainer` |
 | `notifications` | 3 | `notifications.list`, `notifications.markRead`, `notifications.markAllRead` |
+| `promptHistory` | 3 | `promptHistory.list`, `promptHistory.delete`, `promptHistory.clear` |
+| `promptSnippet` | 5 | `promptSnippet.list`, `promptSnippet.get`, `promptSnippet.create`, `promptSnippet.update`, `promptSnippet.delete` |
 | `cron` | 8 | `cron.list`, `cron.get`, `cron.create`, `cron.update`, `cron.delete`, `cron.run`, `cron.status`, `cron.getRuns` |
 
 ---
@@ -447,6 +451,13 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
   "retry":  { "maxRetries": 1 },
   "hooks":  { "defaultTimeoutMs": 5000, "discoveryTimeoutMs": 10000, "extensions": [".ts", ".js", ".mjs", ".sh"] },
 
+  "promptLibrary": {
+    "historyEnabled": true,         // Auto-save interactive prompts to history
+    "historyMaxEntries": 10000,     // 0 = unlimited
+    "historyMaxAgeDays": 0,         // 0 = unlimited
+    "historyAutoPrune": true        // Opportunistic pruning on record + startup
+  },
+
   "git": {
     "targetBranch": null,                       // null → auto-detect via init.defaultBranch / main / master
     "protectedBranches": ["main", "master", "develop"],
@@ -545,7 +556,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 ## Database Schema
 
-All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. The schema is a single consolidated migration at `packages/agent/src/events/sqlite/migrations/v001_schema.sql` — that file is the source of truth.
+All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Migrations live under `packages/agent/src/events/sqlite/migrations/` (`v001_schema.sql` — the core event store; `v002_schema.sql` — the prompt library tables) and are registered in `migrations/mod.rs`, which is the source of truth for schema versioning.
 
 ### Tables
 
@@ -562,6 +573,8 @@ All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mo
 | `notification_read_state` | Per-event read receipts for client notifications |
 | `cron_jobs` | Cron job definitions: schedule, payload, delivery, overlap/misfire policies, runtime state (next/last run, consecutive failures) |
 | `cron_runs` | Per-run history for cron jobs (status, started/completed timestamps, output, exit code) |
+| `prompt_history` | Deduplicated interactive-prompt history keyed by normalized text hash (use_count, first/last_used_at, char_count). Added in v002 migration. |
+| `prompt_snippets` | User-authored reusable prompt snippets (`name`, `text`, timestamps). Added in v002 migration. |
 
 The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. There are no FTS5 virtual tables, and there is no PARA-style task table — task management is overlaid on the event log via tools.
 

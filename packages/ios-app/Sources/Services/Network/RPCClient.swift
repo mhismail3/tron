@@ -81,6 +81,10 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var cron: CronClient = CronClient(transport: self)
 
+    /// Prompt Library operations client (history + snippets)
+    @ObservationIgnored
+    lazy var promptLibrary: PromptLibraryClient = PromptLibraryClient(transport: self)
+
     /// Notification inbox operations client
     @ObservationIgnored
     lazy var notifications: NotificationClient = NotificationClient(transport: self)

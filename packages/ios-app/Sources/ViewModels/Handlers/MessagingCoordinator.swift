@@ -21,6 +21,10 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// The current attachments pending to send
     var attachments: [Attachment] { get set }
 
+    /// Skills currently staged as chips on the input bar. Purely local draft
+    /// state — server activation is deferred until `sendMessage`.
+    var selectedSkills: [Skill] { get set }
+
     /// Selected images from photo picker
     var selectedImages: [PhotosPickerItem] { get set }
 
@@ -226,5 +230,41 @@ final class MessagingCoordinator {
     ///   - context: The context providing access to state
     func removeAttachment(_ attachment: Attachment, context: MessagingContext) {
         context.attachments.removeAll { $0.id == attachment.id }
+    }
+
+    // MARK: - Draft Skill Management
+
+    /// Stage a skill as a chip on the input bar.
+    ///
+    /// This is purely a local draft operation — it does NOT activate the skill
+    /// on the server. Server activation is deferred to `sendMessage`, which is
+    /// the only point at which a skill genuinely enters the agent's running
+    /// context. Eagerly activating here would produce misleading
+    /// `skill.deactivated` notifications if the user removes the chip without
+    /// ever sending.
+    ///
+    /// Idempotent: adding a skill that is already staged is a no-op.
+    ///
+    /// - Parameters:
+    ///   - skill: The skill to stage
+    ///   - context: The context providing access to state
+    func addSkillToDraft(_ skill: Skill, context: MessagingContext) {
+        guard !context.selectedSkills.contains(where: { $0.id == skill.id }) else { return }
+        context.selectedSkills.append(skill)
+    }
+
+    /// Unstage a skill chip from the input bar.
+    ///
+    /// This is purely a local draft operation — it does NOT deactivate the
+    /// skill on the server. Removing a chip means "unstage for the next
+    /// prompt", not "remove from the agent's running context". Server
+    /// deactivation belongs to an explicit "remove from context" gesture
+    /// (future UI), not to chip X-tap.
+    ///
+    /// - Parameters:
+    ///   - skill: The skill to unstage
+    ///   - context: The context providing access to state
+    func removeSkillFromDraft(_ skill: Skill, context: MessagingContext) {
+        context.selectedSkills.removeAll { $0.id == skill.id }
     }
 }

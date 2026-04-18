@@ -10,6 +10,7 @@ mod context;
 mod git;
 mod guardrails;
 mod memory;
+mod prompt_library;
 mod server;
 mod skills;
 mod tools;
@@ -20,6 +21,7 @@ pub use context::*;
 pub use git::*;
 pub use guardrails::*;
 pub use memory::*;
+pub use prompt_library::*;
 pub use server::*;
 pub use skills::*;
 pub use tools::*;
@@ -79,6 +81,8 @@ pub struct TronSettings {
     pub memory: MemorySettings,
     /// Git workflow settings (sync, push, switch, finalize, conflict resolution).
     pub git: GitWorkflowSettings,
+    /// Prompt Library settings (history capture + retention).
+    pub prompt_library: PromptLibrarySettings,
     /// Optional guardrail safety rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guardrails: Option<GuardrailSettings>,
@@ -106,6 +110,7 @@ impl Default for TronSettings {
             skills: SkillsSettings::default(),
             memory: MemorySettings::default(),
             git: GitWorkflowSettings::default(),
+            prompt_library: PromptLibrarySettings::default(),
             guardrails: None,
             mcp: crate::mcp::types::McpSettings::default(),
         }
@@ -401,6 +406,31 @@ mod tests {
         assert!((s.context.compactor.compaction_threshold - before_threshold).abs() < f64::EPSILON);
         assert!((s.retry.jitter_factor - before_jitter).abs() < f64::EPSILON);
         assert_eq!(s.tools.bash.max_timeout_ms, before_max);
+    }
+
+    #[test]
+    fn prompt_library_defaults_are_applied() {
+        let s = TronSettings::default();
+        assert!(s.prompt_library.history_enabled);
+        assert_eq!(s.prompt_library.history_max_entries, 10_000);
+    }
+
+    #[test]
+    fn prompt_library_partial_override() {
+        let json = serde_json::json!({
+            "promptLibrary": { "historyEnabled": false }
+        });
+        let s: TronSettings = serde_json::from_value(json).unwrap();
+        assert!(!s.prompt_library.history_enabled);
+        assert_eq!(s.prompt_library.history_max_entries, 10_000);
+    }
+
+    #[test]
+    fn prompt_library_camel_case_field_in_root() {
+        let s = TronSettings::default();
+        let json = serde_json::to_value(&s).unwrap();
+        assert!(json.get("promptLibrary").is_some());
+        assert!(json.get("prompt_library").is_none());
     }
 
     #[test]

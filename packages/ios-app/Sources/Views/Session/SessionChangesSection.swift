@@ -26,7 +26,7 @@ struct SessionChangesSection: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(.tronAmberLight)
+                        .tint(.tronTeal)
                     Text("Loading changes...")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextMuted)
@@ -75,22 +75,25 @@ struct SessionChangesSection: View {
 
     @ViewBuilder
     private func changesContent(diffResult: WorktreeGetDiffResult) -> some View {
-        // Staged Changes
+        // Both staged and unstaged share the Source Control theme (`tronTeal`).
+        // Staged uses the full fill to emphasize "ready to commit"; Unstaged
+        // uses the subtle fill to recede visually while staying distinguishable.
         if !stagedFiles.isEmpty {
             fileContainer(
                 title: "Staged",
                 files: stagedFiles,
-                accentColor: .tronAmberLight,
+                accentColor: .tronTeal,
+                subtle: false,
                 stagingArea: .staged
             )
         }
 
-        // Unstaged Changes
         if !unstagedFiles.isEmpty {
             fileContainer(
                 title: "Unstaged",
                 files: unstagedFiles,
-                accentColor: .tronAmber,
+                accentColor: .tronTeal,
+                subtle: true,
                 stagingArea: .unstaged
             )
         }
@@ -107,6 +110,7 @@ struct SessionChangesSection: View {
         title: String,
         files: [DiffFileEntry],
         accentColor: Color,
+        subtle: Bool,
         stagingArea: StagingArea
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -141,7 +145,7 @@ struct SessionChangesSection: View {
             }
             .padding(.bottom, 8)
         }
-        .sectionFill(accentColor)
+        .sectionFill(accentColor, subtle: subtle)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 

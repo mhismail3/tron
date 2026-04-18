@@ -402,6 +402,90 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.attachments.first?.id, attachment2.id)
     }
 
+    // MARK: - Draft Skill Management Tests
+    //
+    // Invariant: chip add/remove in the input bar is purely LOCAL draft state.
+    // It must never trigger skill.activate / skill.deactivate RPCs.
+    //
+    // Regression guard: eagerly activating a skill on chip-add (e.g. via the
+    // "Draft a Plan" menu item) caused a subsequent chip-removal to emit a
+    // real skill.deactivated event, which surfaced in the chat transcript as
+    // a misleading "plan deactivated from context" pill even though no turn
+    // ever ran with the skill. Server activation must happen only at send time.
+
+    func testAddSkillToDraftAppendsToSelectedSkills() {
+        // Given: No selected skills
+        XCTAssertTrue(mockContext.selectedSkills.isEmpty)
+
+        // When: Adding a skill to the draft
+        coordinator.addSkillToDraft(createTestSkill(name: "plan"), context: mockContext)
+
+        // Then: Skill should be in selectedSkills
+        XCTAssertEqual(mockContext.selectedSkills.count, 1)
+        XCTAssertEqual(mockContext.selectedSkills.first?.name, "plan")
+    }
+
+    func testAddSkillToDraftDoesNotActivateOnServer() async {
+        // When: Adding a skill to the draft
+        coordinator.addSkillToDraft(createTestSkill(name: "plan"), context: mockContext)
+
+        // Then: Server-side activation must NOT be called — activation happens
+        // only at send time in MessagingCoordinator.sendMessage / ChatView.onSend.
+        XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 0)
+    }
+
+    func testAddSkillToDraftIsIdempotent() {
+        // Given: A skill already in the draft
+        let skill = createTestSkill(name: "plan")
+        coordinator.addSkillToDraft(skill, context: mockContext)
+
+        // When: Adding the same skill again
+        coordinator.addSkillToDraft(skill, context: mockContext)
+
+        // Then: No duplicate entry
+        XCTAssertEqual(mockContext.selectedSkills.count, 1)
+        XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 0)
+    }
+
+    func testRemoveSkillFromDraftRemovesMatchingSkill() {
+        // Given: A skill in the draft
+        let skill = createTestSkill(name: "plan")
+        mockContext.selectedSkills = [skill]
+
+        // When: Removing the skill from the draft
+        coordinator.removeSkillFromDraft(skill, context: mockContext)
+
+        // Then: Skill should be gone
+        XCTAssertTrue(mockContext.selectedSkills.isEmpty)
+    }
+
+    func testRemoveSkillFromDraftDoesNotDeactivateOnServer() async {
+        // Given: A skill in the draft
+        let skill = createTestSkill(name: "plan")
+        mockContext.selectedSkills = [skill]
+
+        // When: Removing the skill from the draft
+        coordinator.removeSkillFromDraft(skill, context: mockContext)
+
+        // Then: Server-side deactivation must NOT be called — chip removal is a
+        // draft-state edit, not a "remove from context" action. An explicit
+        // remove-from-context gesture (e.g. on SkillDetailSheet) would deactivate,
+        // not chip X-tap.
+        XCTAssertEqual(mockContext.deactivateSkillOnServerCallCount, 0)
+    }
+
+    func testRemoveSkillFromDraftMissingSkillIsNoop() {
+        // Given: Empty draft
+        XCTAssertTrue(mockContext.selectedSkills.isEmpty)
+
+        // When: Removing a skill that isn't there
+        coordinator.removeSkillFromDraft(createTestSkill(name: "plan"), context: mockContext)
+
+        // Then: No crash, no server call, state still empty
+        XCTAssertTrue(mockContext.selectedSkills.isEmpty)
+        XCTAssertEqual(mockContext.deactivateSkillOnServerCallCount, 0)
+    }
+
     // MARK: - Helpers
 
     private func createTestAttachment() -> Attachment {
@@ -411,6 +495,17 @@ final class MessagingCoordinatorTests: XCTestCase {
             mimeType: "image/jpeg",
             fileName: "test.jpg",
             originalSize: 100
+        )
+    }
+
+    private func createTestSkill(name: String) -> Skill {
+        return Skill(
+            name: name,
+            displayName: name,
+            description: "\(name) skill",
+            source: .global,
+            tags: nil,
+            scopeDir: nil
         )
     }
 }
@@ -424,6 +519,7 @@ final class MockMessagingContext: MessagingContext {
     var inputText: String = ""
     var attachments: [Attachment] = []
     var selectedImages: [PhotosPickerItem] = []
+    var selectedSkills: [Skill] = []
     var agentPhase: AgentPhase = .idle
     var draftStore: DraftStore?
     var currentTurn: Int = 0
@@ -470,8 +566,15 @@ final class MockMessagingContext: MessagingContext {
         }
     }
 
-    func activateSkillOnServer(_ skillName: String) async throws {}
-    func deactivateSkillOnServer(_ skillName: String) async throws {}
+    var activateSkillOnServerCallCount = 0
+    var deactivateSkillOnServerCallCount = 0
+
+    func activateSkillOnServer(_ skillName: String) async throws {
+        activateSkillOnServerCallCount += 1
+    }
+    func deactivateSkillOnServer(_ skillName: String) async throws {
+        deactivateSkillOnServerCallCount += 1
+    }
     func castSpellOnServer(_ spellName: String) async throws {}
 
     func abortAgentOnServer() async throws {

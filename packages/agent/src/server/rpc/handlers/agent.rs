@@ -80,6 +80,49 @@ impl MethodHandler for PromptHandler {
                 message: e.to_string(),
                 details: None,
             })?;
+
+        // Record prompt to history. Interactive prompts only — skip when caller
+        // passed `"source": "cron"` (or anything starting with `"cron"`).
+        // Failures are logged but never propagated: the user's prompt must not
+        // fail because history couldn't be written. Prompt text is never logged.
+        let source = opt_string(params.as_ref(), "source");
+        let is_cron = source.as_deref().map(|s| s.starts_with("cron")).unwrap_or(false);
+        let prompt_library_settings = crate::settings::get_settings().prompt_library.clone();
+        if !is_cron && prompt_library_settings.history_enabled {
+            let pool = ctx.event_store.pool().clone();
+            let text_for_history = prompt.clone();
+            let auto_prune = prompt_library_settings.history_auto_prune;
+            let max_entries = prompt_library_settings.history_max_entries;
+            let max_age_days = prompt_library_settings.history_max_age_days;
+            // Fire-and-forget: the user's prompt must never fail because history
+            // couldn't be written. Errors are logged and dropped.
+            let _handle = tokio::task::spawn_blocking(move || {
+                match crate::prompt_library::store::record_prompt(&pool, &text_for_history) {
+                    Ok(outcome) => {
+                        let char_count = text_for_history.chars().count();
+                        tracing::debug!(char_count, ?outcome, "recorded prompt history");
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "failed to record prompt history");
+                    }
+                }
+                // Opportunistic prune (cheap when retention caps are disabled).
+                if auto_prune && (max_entries > 0 || max_age_days > 0) {
+                    let age = (max_age_days > 0).then_some(max_age_days);
+                    let cap = (max_entries > 0).then_some(max_entries);
+                    match crate::prompt_library::store::prune_history(&pool, age, cap) {
+                        Ok(n) if n > 0 => {
+                            tracing::debug!(deleted = n, "pruned prompt history");
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(error = %e, "failed to prune prompt history");
+                        }
+                    }
+                }
+            });
+        }
+
         spawn_prompt_run(
             ctx,
             deps,

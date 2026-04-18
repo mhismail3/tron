@@ -45,7 +45,7 @@ struct FileDetailSheet: View {
         ToolDetailSheetContainer(
             toolName: file.fileName,
             iconName: fileIcon,
-            accent: .tronAmber,
+            accent: .tronTeal,
             iconColor: langColor
         ) {
             VStack(spacing: 0) {

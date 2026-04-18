@@ -29,6 +29,7 @@ RPCClient (WebSocket transport)
     ├── SkillClient      - skill listing, getting, refreshing, removing
     ├── SandboxClient    - container lifecycle (list, start, stop, kill, remove)
     ├── ImportClient     - Claude Code session import (discover, preview, execute)
+    ├── PromptLibraryClient - Prompt history + snippets (list, create, update, delete, clear)
     └── MiscClient       - system, device tokens, memory, messages, logs
 ```
 

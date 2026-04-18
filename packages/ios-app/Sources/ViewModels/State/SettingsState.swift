@@ -51,6 +51,17 @@ final class SettingsState {
     var gitOpTimeoutLocalMs: UInt64 = 30_000
     var gitSubagentConflictResolutionEnabled: Bool = true
 
+    // MARK: - Prompt Library
+
+    /// Whether the server auto-captures interactive prompts into history.
+    var promptHistoryEnabled: Bool = true
+    /// Maximum retained history rows. `0` = unlimited.
+    var promptHistoryMaxEntries: Int = 10_000
+    /// Maximum history age in days. `0` = no age limit.
+    var promptHistoryMaxAgeDays: Int = 0
+    /// Opportunistically prune on server startup.
+    var promptHistoryAutoPrune: Bool = true
+
     // MARK: - Connection Presets
 
     var connectionPresets: [ConnectionPreset] = []
@@ -157,5 +168,10 @@ final class SettingsState {
         gitOpTimeoutNetworkMs = settings.gitOpTimeoutNetworkMs
         gitOpTimeoutLocalMs = settings.gitOpTimeoutLocalMs
         gitSubagentConflictResolutionEnabled = settings.gitSubagentConflictResolutionEnabled
+
+        promptHistoryEnabled = settings.promptHistoryEnabled
+        promptHistoryMaxEntries = settings.promptHistoryMaxEntries
+        promptHistoryMaxAgeDays = settings.promptHistoryMaxAgeDays
+        promptHistoryAutoPrune = settings.promptHistoryAutoPrune
     }
 }

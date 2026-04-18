@@ -63,6 +63,12 @@ final class ChatViewModel {
         set { inputBarState.attachments = newValue }
     }
 
+    /// Skills staged as chips on the input bar - delegated to inputBarState
+    var selectedSkills: [Skill] {
+        get { inputBarState.selectedSkills }
+        set { inputBarState.selectedSkills = newValue }
+    }
+
     // MARK: - Extracted State Objects
 
     /// AskUserQuestion state (sheet, current data, answers)

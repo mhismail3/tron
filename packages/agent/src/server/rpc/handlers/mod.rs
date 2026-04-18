@@ -46,6 +46,7 @@ pub mod message;
 pub mod model;
 pub mod notifications;
 pub mod plan;
+pub mod prompt_library;
 pub mod sandbox;
 pub mod session;
 pub mod settings;
@@ -334,6 +335,16 @@ fn register_platform(registry: &mut MethodRegistry) {
         notifications::MarkAllReadHandler,
     );
 
+    // Prompt Library
+    registry.register("promptHistory.list", prompt_library::ListHistoryHandler);
+    registry.register("promptHistory.delete", prompt_library::DeleteHistoryHandler);
+    registry.register("promptHistory.clear", prompt_library::ClearHistoryHandler);
+    registry.register("promptSnippet.list", prompt_library::ListSnippetsHandler);
+    registry.register("promptSnippet.get", prompt_library::GetSnippetHandler);
+    registry.register("promptSnippet.create", prompt_library::CreateSnippetHandler);
+    registry.register("promptSnippet.update", prompt_library::UpdateSnippetHandler);
+    registry.register("promptSnippet.delete", prompt_library::DeleteSnippetHandler);
+
     // Cron
     registry.register("cron.list", cron::ListHandler);
     registry.register("cron.get", cron::GetHandler);
@@ -581,8 +592,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            148,
-            "expected 148 methods, got {}",
+            156,
+            "expected 156 methods, got {}",
             reg.methods().len()
         );
     }

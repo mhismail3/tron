@@ -20,11 +20,18 @@ struct Migration {
 }
 
 /// All migrations in version order.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    description: "Complete schema — core tables, FTS, indexes, triggers",
-    sql: include_str!("v001_schema.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        description: "Complete schema — core tables, FTS, indexes, triggers",
+        sql: include_str!("v001_schema.sql"),
+    },
+    Migration {
+        version: 2,
+        description: "Prompt Library — history and snippets",
+        sql: include_str!("v002_schema.sql"),
+    },
+];
 
 /// Result of running migrations.
 #[derive(Debug)]
@@ -175,8 +182,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 1);
+        assert_eq!(result.applied, 2);
+        assert_eq!(result.max_version_applied, 2);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -196,6 +203,8 @@ mod tests {
             "events",
             "logs",
             "notification_read_state",
+            "prompt_history",
+            "prompt_snippets",
             "schema_version",
             "sessions",
             "workspaces",
@@ -243,7 +252,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 1);
+        assert_eq!(first.applied, 2);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -261,12 +270,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 1);
+        assert_eq!(current_version(&conn).unwrap(), 2);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 1);
+        assert_eq!(latest_version(), 2);
     }
 
     #[test]
@@ -284,6 +293,16 @@ mod tests {
 
         assert_eq!(version, 1);
         assert!(desc.contains("Complete schema"));
+
+        let (v2, desc2): (u32, String) = conn
+            .query_row(
+                "SELECT version, description FROM schema_version WHERE version = 2",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(v2, 2);
+        assert!(desc2.contains("Prompt Library"));
     }
 
     #[test]
@@ -747,6 +766,186 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    // ── v002 prompt_library tests ─────────────────────────────────────
+
+    #[test]
+    fn v002_upgrade_from_v1_preserves_existing_data() {
+        // Simulate an existing v1 database: run only v1 and insert a row.
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        let v1 = &MIGRATIONS[0];
+        apply_migration(&conn, v1).unwrap();
+        assert_eq!(current_version(&conn).unwrap(), 1);
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp/v1', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        // Now run the full migrator — only v2 should apply.
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 2);
+
+        // v1 data is intact.
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM workspaces WHERE id = 'ws_1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // v2 tables exist.
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+        assert!(tables.contains(&"prompt_history".to_string()));
+        assert!(tables.contains(&"prompt_snippets".to_string()));
+    }
+
+    #[test]
+    fn v002_prompt_history_use_count_check_rejects_zero() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let err = conn.execute(
+            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at, use_count, char_count)
+             VALUES ('p1', 'hello', 'h1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, 5)",
+            [],
+        );
+        assert!(err.is_err(), "use_count = 0 should be rejected by CHECK");
+    }
+
+    #[test]
+    fn v002_prompt_history_char_count_check_rejects_zero() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let err = conn.execute(
+            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at, use_count, char_count)
+             VALUES ('p1', 'hello', 'h1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 0)",
+            [],
+        );
+        assert!(err.is_err(), "char_count = 0 should be rejected by CHECK");
+    }
+
+    #[test]
+    fn v002_prompt_history_text_hash_unique_enforced() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at, use_count, char_count)
+             VALUES ('p1', 'hello', 'hash1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 5)",
+            [],
+        )
+        .unwrap();
+
+        let dup = conn.execute(
+            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at, use_count, char_count)
+             VALUES ('p2', 'hello again', 'hash1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 11)",
+            [],
+        );
+        assert!(dup.is_err(), "duplicate text_hash should be rejected");
+    }
+
+    #[test]
+    fn v002_prompt_snippets_name_length_check() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        // Empty name rejected
+        let err_empty = conn.execute(
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s1', '', 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(err_empty.is_err(), "empty snippet name should be rejected");
+
+        // 101-char name rejected
+        let long = "a".repeat(101);
+        let err_long = conn.execute(
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s2', ?1, 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [&long],
+        );
+        assert!(err_long.is_err(), "101-char snippet name should be rejected");
+
+        // 100-char name accepted
+        let max = "a".repeat(100);
+        conn.execute(
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s3', ?1, 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [&max],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn v002_prompt_snippets_text_non_empty_check() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let err = conn.execute(
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s1', 'n', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(err.is_err(), "empty snippet text should be rejected");
+    }
+
+    #[test]
+    fn v002_prompt_snippets_duplicate_names_allowed() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s1', 'Shared', 'a', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s2', 'Shared', 'b', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM prompt_snippets WHERE name = 'Shared'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn v002_prompt_library_indexes_exist() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_prompt_%'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        for idx in &[
+            "idx_prompt_history_last_used",
+            "idx_prompt_history_use_count",
+            "idx_prompt_snippets_updated",
+        ] {
+            assert!(
+                indexes.contains(&idx.to_string()),
+                "missing index: {idx}"
+            );
+        }
     }
 
     #[test]

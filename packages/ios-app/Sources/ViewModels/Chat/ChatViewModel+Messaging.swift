@@ -220,4 +220,18 @@ extension ChatViewModel {
     func removeAttachment(_ attachment: Attachment) {
         messagingCoordinator.removeAttachment(attachment, context: self)
     }
+
+    // MARK: - Draft Skill Management
+
+    /// Stage a skill chip on the input bar. Local-only; server activation is
+    /// deferred to the send path.
+    func addSkillToDraft(_ skill: Skill) {
+        messagingCoordinator.addSkillToDraft(skill, context: self)
+    }
+
+    /// Unstage a skill chip from the input bar. Local-only; does not
+    /// deactivate the skill on the server.
+    func removeSkillFromDraft(_ skill: Skill) {
+        messagingCoordinator.removeSkillFromDraft(skill, context: self)
+    }
 }

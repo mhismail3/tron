@@ -23,6 +23,7 @@ struct InputBar: View {
     // MARK: - Private State
 
     @FocusState private var isFocused: Bool
+    @Environment(\.dependencies) private var dependencies
     private let audioMonitor = AudioAvailabilityMonitor.shared
     @State private var showingImagePicker = false
     @State private var showCamera = false
@@ -31,6 +32,7 @@ struct InputBar: View {
     @State private var skillMentionQuery = ""
     @State private var showSpellMentionPopup = false
     @State private var spellMentionQuery = ""
+    @State private var showPromptLibrary = false
     @State private var hasAppeared = false
     @State private var showAttachmentButton = false
     @State private var showMicButton = false
@@ -152,7 +154,8 @@ struct InputBar: View {
                         showSkillMentionPopup: $showSkillMentionPopup,
                         skillMentionQuery: $skillMentionQuery,
                         showSpellMentionPopup: $showSpellMentionPopup,
-                        spellMentionQuery: $spellMentionQuery
+                        spellMentionQuery: $spellMentionQuery,
+                        showPromptLibrary: $showPromptLibrary
                     )
                     .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
@@ -322,6 +325,11 @@ struct InputBar: View {
             maxSelectionCount: 5,
             matching: .images
         )
+        .sheet(isPresented: $showPromptLibrary) {
+            PromptLibrarySheet(rpcClient: dependencies.rpcClient) { selected in
+                state.text = selected
+            }
+        }
         // Entrance animation
         .onAppear {
             showAttachmentButton = false

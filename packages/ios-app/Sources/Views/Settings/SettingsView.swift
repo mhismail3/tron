@@ -34,7 +34,7 @@ struct SettingsView: View {
 
     /// Settings sub-pages, driven by a single `.sheet(item:)`.
     enum SettingsPage: String, Identifiable {
-        case server, session, agent, providers, app, mcpServers, hooks, gitWorkflow
+        case server, session, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary
         var id: String { rawValue }
     }
 
@@ -67,9 +67,9 @@ struct SettingsView: View {
         } content: {
             categoriesCard
             dangerZoneCard
-                .cardEntrance(visible: cardsVisible, index: 8)
-            footerView
                 .cardEntrance(visible: cardsVisible, index: 9)
+            footerView
+                .cardEntrance(visible: cardsVisible, index: 10)
         }
         #if DEBUG || BETA
         .sheet(isPresented: $showLogViewer) {
@@ -117,6 +117,12 @@ struct SettingsView: View {
                     HooksSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
                 case .gitWorkflow:
                     GitWorkflowSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
+                case .promptLibrary:
+                    PromptLibrarySettingsPage(
+                        settingsState: settingsState,
+                        updateServerSetting: updateServerSetting,
+                        rpcClient: rpcClient
+                    )
                 }
             }
             .adaptivePresentationDetents([.medium, .large])
@@ -205,13 +211,20 @@ struct SettingsView: View {
             }
             .cardEntrance(visible: cardsVisible, index: 6)
 
+            SettingsCard {
+                categoryRow(icon: "text.book.closed", label: "Prompt Library", subtitle: "Configure prompt history and quick-prompt snippets") {
+                    activePage = .promptLibrary
+                }
+            }
+            .cardEntrance(visible: cardsVisible, index: 7)
+
             if #available(iOS 26.0, *) {
                 SettingsCard {
                     categoryRow(icon: "paintbrush", label: "App", subtitle: "Change how the iOS app looks and behaves") {
                         activePage = .app
                     }
                 }
-                .cardEntrance(visible: cardsVisible, index: 7)
+                .cardEntrance(visible: cardsVisible, index: 8)
             }
         }
     }

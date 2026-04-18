@@ -37,14 +37,25 @@ struct ServerSettings: Decodable {
     let gitOpTimeoutLocalMs: UInt64
     let gitSubagentConflictResolutionEnabled: Bool
 
+    // MARK: - Prompt Library
+
+    let promptHistoryEnabled: Bool
+    let promptHistoryMaxEntries: Int
+    let promptHistoryMaxAgeDays: Int
+    let promptHistoryAutoPrune: Bool
+
     private enum CodingKeys: String, CodingKey {
-        case models, server, context, session, hooks, skills, memory, git
+        case models, server, context, session, hooks, skills, memory, git, promptLibrary
     }
 
     private enum GitKeys: String, CodingKey {
         case targetBranch, protectedBranches, sessionBranchPolicy, mergeStrategy
         case autoSetUpstream, crashRecoveryAbortTimeoutMs, opTimeoutNetworkMs
         case opTimeoutLocalMs, subagentConflictResolutionEnabled
+    }
+
+    private enum PromptLibraryKeys: String, CodingKey {
+        case historyEnabled, historyMaxEntries, historyMaxAgeDays, historyAutoPrune
     }
 
     private enum SkillsKeys: String, CodingKey {
@@ -173,6 +184,19 @@ struct ServerSettings: Decodable {
             gitOpTimeoutLocalMs = 30_000
             gitSubagentConflictResolutionEnabled = true
         }
+
+        // promptLibrary.*
+        if let plContainer = try? container.nestedContainer(keyedBy: PromptLibraryKeys.self, forKey: .promptLibrary) {
+            promptHistoryEnabled = (try? plContainer.decodeIfPresent(Bool.self, forKey: .historyEnabled)) ?? true
+            promptHistoryMaxEntries = (try? plContainer.decodeIfPresent(Int.self, forKey: .historyMaxEntries)) ?? 10_000
+            promptHistoryMaxAgeDays = (try? plContainer.decodeIfPresent(Int.self, forKey: .historyMaxAgeDays)) ?? 0
+            promptHistoryAutoPrune = (try? plContainer.decodeIfPresent(Bool.self, forKey: .historyAutoPrune)) ?? true
+        } else {
+            promptHistoryEnabled = true
+            promptHistoryMaxEntries = 10_000
+            promptHistoryMaxAgeDays = 0
+            promptHistoryAutoPrune = true
+        }
     }
 
     struct CompactionSettings: Decodable {
@@ -288,6 +312,15 @@ struct ServerSettingsUpdate: Encodable {
     }
 
     var git: GitUpdate?
+
+    struct PromptLibraryUpdate: Encodable {
+        var historyEnabled: Bool?
+        var historyMaxEntries: Int?
+        var historyMaxAgeDays: Int?
+        var historyAutoPrune: Bool?
+    }
+
+    var promptLibrary: PromptLibraryUpdate?
 }
 
 /// Enable/disable toggle for a built-in hook.

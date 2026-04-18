@@ -1,0 +1,384 @@
+//! SQLite-backed store for prompt history and snippets.
+//!
+//! All functions take a `&ConnectionPool` and are safe to call from sync
+//! contexts (inside `tokio::task::spawn_blocking` for async callers).
+
+use base64::Engine;
+use chrono::Utc;
+use rusqlite::{OptionalExtension, params};
+
+use crate::events::sqlite::contention::{
+    BusyRetryPolicy, RetryError, is_rusqlite_busy, retry_on_busy,
+};
+use crate::events::{ConnectionPool, EventStoreError, Result};
+use crate::prompt_library::normalize::{hash_hex, is_blank, normalize_for_hash};
+use crate::prompt_library::types::{HistoryItem, HistoryPage, RecordOutcome, Snippet};
+
+/// Maximum rows returned by `list_history` in a single page.
+pub const MAX_LIST_LIMIT: u32 = 200;
+/// Default page size when caller doesn't specify.
+pub const DEFAULT_LIST_LIMIT: u32 = 50;
+/// Maximum `name` length for a snippet (matches DB CHECK).
+pub const SNIPPET_NAME_MAX: usize = 100;
+
+// ─── history: record ────────────────────────────────────────────────────────
+
+/// Record a prompt send. Inserts a new row if unseen, otherwise bumps
+/// `last_used_at` and `use_count`. Blank/whitespace input is skipped.
+pub fn record_prompt(pool: &ConnectionPool, text: &str) -> Result<RecordOutcome> {
+    if is_blank(text) {
+        return Ok(RecordOutcome::Skipped);
+    }
+
+    let trimmed_display = text.trim().to_string();
+    let normalized = normalize_for_hash(text);
+    let text_hash = hash_hex(normalized.as_bytes());
+    let now = Utc::now().to_rfc3339();
+    let char_count = trimmed_display.chars().count() as i64;
+    let new_id = uuid::Uuid::now_v7().to_string();
+
+    // Retry on SQLite BUSY/LOCKED — record_prompt is called fire-and-forget
+    // from spawn_blocking and must tolerate brief contention.
+    let (id, use_count, inserted): (String, i64, bool) = match retry_on_busy(
+        "prompt_library.record_prompt",
+        BusyRetryPolicy::sqlite_write(),
+        || -> std::result::Result<(String, i64, bool), rusqlite::Error> {
+            let conn = pool.get().map_err(|_| {
+                rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                    Some("pool exhausted".into()),
+                )
+            })?;
+            conn.query_row(
+                "INSERT INTO prompt_history
+                    (id, text, text_hash, first_used_at, last_used_at, use_count, char_count)
+                 VALUES (?1, ?2, ?3, ?4, ?4, 1, ?5)
+                 ON CONFLICT(text_hash) DO UPDATE SET
+                    last_used_at = excluded.last_used_at,
+                    use_count    = prompt_history.use_count + 1
+                 RETURNING id, use_count, (first_used_at = last_used_at) AS is_new",
+                params![new_id, trimmed_display, text_hash, now, char_count],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, bool>(2)?,
+                    ))
+                },
+            )
+        },
+        is_rusqlite_busy,
+    ) {
+        Ok(v) => v,
+        Err(RetryError::Inner(e)) => return Err(EventStoreError::Sqlite(e)),
+        Err(RetryError::BusyTimeout(bt)) => {
+            return Err(EventStoreError::Busy {
+                operation: "prompt_library.record_prompt",
+                attempts: bt.attempts,
+            });
+        }
+    };
+
+    Ok(if inserted {
+        RecordOutcome::Inserted { id }
+    } else {
+        RecordOutcome::Updated { id, use_count }
+    })
+}
+
+// ─── history: list ──────────────────────────────────────────────────────────
+
+/// Paginated list of history items, newest first. Optional case-sensitive
+/// substring search over `text`.
+pub fn list_history(
+    pool: &ConnectionPool,
+    limit: u32,
+    cursor: Option<String>,
+    query: Option<String>,
+) -> Result<HistoryPage> {
+    let effective_limit = limit.clamp(1, MAX_LIST_LIMIT);
+    let query_trimmed = query.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+    let cursor_pair = cursor.map(decode_cursor).transpose()?;
+
+    let conn = pool.get()?;
+
+    // Build SQL dynamically based on whether cursor / query are present.
+    let mut sql = String::from(
+        "SELECT id, text, first_used_at, last_used_at, use_count, char_count
+         FROM prompt_history
+         WHERE 1=1",
+    );
+    let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some((ts, id)) = &cursor_pair {
+        sql.push_str(" AND (last_used_at < ?1 OR (last_used_at = ?1 AND id < ?2))");
+        args.push(Box::new(ts.clone()));
+        args.push(Box::new(id.clone()));
+    }
+
+    if let Some(q) = query_trimmed {
+        let placeholder = format!("?{}", args.len() + 1);
+        sql.push_str(&format!(" AND text LIKE {placeholder} ESCAPE '\\'"));
+        args.push(Box::new(format!("%{}%", escape_like(q))));
+    }
+
+    sql.push_str(" ORDER BY last_used_at DESC, id DESC LIMIT ?");
+    args.push(Box::new((effective_limit as i64) + 1)); // +1 to detect next page
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params_from_iter(args.iter().map(|b| b.as_ref())),
+            |row| {
+                Ok(HistoryItem {
+                    id: row.get(0)?,
+                    text: row.get(1)?,
+                    first_used_at: row.get(2)?,
+                    last_used_at: row.get(3)?,
+                    use_count: row.get(4)?,
+                    char_count: row.get(5)?,
+                })
+            },
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    let (items, next_cursor) = if rows.len() > effective_limit as usize {
+        let mut trimmed = rows;
+        trimmed.truncate(effective_limit as usize);
+        let last = trimmed.last().expect("non-empty");
+        let cursor = encode_cursor(&last.last_used_at, &last.id);
+        (trimmed, Some(cursor))
+    } else {
+        (rows, None)
+    };
+
+    Ok(HistoryPage { items, next_cursor })
+}
+
+fn encode_cursor(last_used_at: &str, id: &str) -> String {
+    let joined = format!("{last_used_at}|{id}");
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(joined.as_bytes())
+}
+
+fn decode_cursor(encoded: String) -> Result<(String, String)> {
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded.as_bytes())
+        .map_err(|e| EventStoreError::InvalidOperation(format!("bad cursor: {e}")))?;
+    let s = String::from_utf8(raw)
+        .map_err(|e| EventStoreError::InvalidOperation(format!("bad cursor utf8: {e}")))?;
+    let (ts, id) = s
+        .split_once('|')
+        .ok_or_else(|| EventStoreError::InvalidOperation("bad cursor format".into()))?;
+    if ts.is_empty() || id.is_empty() {
+        return Err(EventStoreError::InvalidOperation("empty cursor field".into()));
+    }
+    Ok((ts.to_string(), id.to_string()))
+}
+
+fn escape_like(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\\' | '%' | '_' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+// ─── history: delete / clear / prune ───────────────────────────────────────
+
+/// Delete a single history row. Returns `true` if the row existed.
+pub fn delete_history(pool: &ConnectionPool, id: &str) -> Result<bool> {
+    let conn = pool.get()?;
+    let affected = conn.execute("DELETE FROM prompt_history WHERE id = ?1", params![id])?;
+    Ok(affected > 0)
+}
+
+/// Delete every history row. Returns the count of rows removed.
+pub fn clear_history(pool: &ConnectionPool) -> Result<u64> {
+    let conn = pool.get()?;
+    let affected = conn.execute("DELETE FROM prompt_history", [])?;
+    Ok(affected as u64)
+}
+
+/// Prune history. `max_age_days = Some(n > 0)` deletes rows older than N days.
+/// `max_entries = Some(n > 0)` keeps only the N most recent rows (by `last_used_at`).
+/// A value of `Some(0)` or `None` disables that pruning axis.
+pub fn prune_history(
+    pool: &ConnectionPool,
+    max_age_days: Option<u32>,
+    max_entries: Option<u32>,
+) -> Result<u64> {
+    let conn = pool.get()?;
+    let mut total = 0u64;
+
+    if let Some(days) = max_age_days {
+        if days > 0 {
+            let cutoff = Utc::now() - chrono::Duration::days(days as i64);
+            let n = conn.execute(
+                "DELETE FROM prompt_history WHERE last_used_at < ?1",
+                params![cutoff.to_rfc3339()],
+            )?;
+            total += n as u64;
+        }
+    }
+
+    if let Some(max) = max_entries {
+        if max > 0 {
+            let n = conn.execute(
+                "DELETE FROM prompt_history
+                 WHERE id IN (
+                    SELECT id FROM prompt_history
+                    ORDER BY last_used_at DESC, id DESC
+                    LIMIT -1 OFFSET ?1
+                 )",
+                params![max as i64],
+            )?;
+            total += n as u64;
+        }
+    }
+
+    Ok(total)
+}
+
+// ─── snippets ──────────────────────────────────────────────────────────────
+
+fn validate_snippet_name(name: &str) -> Result<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(EventStoreError::InvalidOperation(
+            "snippet name must be non-empty".into(),
+        ));
+    }
+    if trimmed.chars().count() > SNIPPET_NAME_MAX {
+        return Err(EventStoreError::InvalidOperation(format!(
+            "snippet name must be ≤ {SNIPPET_NAME_MAX} characters"
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_snippet_text(text: &str) -> Result<String> {
+    if text.is_empty() {
+        return Err(EventStoreError::InvalidOperation(
+            "snippet text must be non-empty".into(),
+        ));
+    }
+    Ok(text.to_string())
+}
+
+/// Insert a new snippet with a freshly generated UUID v7 and return it.
+pub fn create_snippet(pool: &ConnectionPool, name: &str, text: &str) -> Result<Snippet> {
+    let name_clean = validate_snippet_name(name)?;
+    let text_clean = validate_snippet_text(text)?;
+    let id = uuid::Uuid::now_v7().to_string();
+    let now = Utc::now().to_rfc3339();
+
+    let conn = pool.get()?;
+    let _ = conn.execute(
+        "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?4)",
+        params![id, name_clean, text_clean, now],
+    )?;
+
+    Ok(Snippet {
+        id,
+        name: name_clean,
+        text: text_clean,
+        created_at: now.clone(),
+        updated_at: now,
+    })
+}
+
+/// Update a snippet's `name`, `text`, or both. Returns `Ok(None)` when the id
+/// doesn't exist. At least one of `name`/`text` must be `Some`.
+pub fn update_snippet(
+    pool: &ConnectionPool,
+    id: &str,
+    name: Option<String>,
+    text: Option<String>,
+) -> Result<Option<Snippet>> {
+    let name_clean = name.map(|n| validate_snippet_name(&n)).transpose()?;
+    let text_clean = text.map(|t| validate_snippet_text(&t)).transpose()?;
+
+    if name_clean.is_none() && text_clean.is_none() {
+        return Err(EventStoreError::InvalidOperation(
+            "update_snippet requires at least one of name or text".into(),
+        ));
+    }
+
+    let now = Utc::now().to_rfc3339();
+    let conn = pool.get()?;
+
+    // COALESCE preserves the existing value when the parameter is NULL.
+    let affected = conn.execute(
+        "UPDATE prompt_snippets
+         SET name = COALESCE(?2, name),
+             text = COALESCE(?3, text),
+             updated_at = ?4
+         WHERE id = ?1",
+        params![id, name_clean, text_clean, now],
+    )?;
+
+    if affected == 0 {
+        return Ok(None);
+    }
+    get_snippet(pool, id)
+}
+
+/// Delete a snippet. Returns `true` if the row existed.
+pub fn delete_snippet(pool: &ConnectionPool, id: &str) -> Result<bool> {
+    let conn = pool.get()?;
+    let affected = conn.execute("DELETE FROM prompt_snippets WHERE id = ?1", params![id])?;
+    Ok(affected > 0)
+}
+
+/// List all snippets ordered by `updated_at DESC`.
+pub fn list_snippets(pool: &ConnectionPool) -> Result<Vec<Snippet>> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name, text, created_at, updated_at
+         FROM prompt_snippets
+         ORDER BY updated_at DESC, id DESC",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Snippet {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                text: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Look up a single snippet by id.
+pub fn get_snippet(pool: &ConnectionPool, id: &str) -> Result<Option<Snippet>> {
+    let conn = pool.get()?;
+    let row = conn
+        .query_row(
+            "SELECT id, name, text, created_at, updated_at
+             FROM prompt_snippets
+             WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(Snippet {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    text: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(row)
+}

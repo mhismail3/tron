@@ -209,6 +209,7 @@ struct GlassAttachmentButton: View {
     @Binding var skillMentionQuery: String
     @Binding var showSpellMentionPopup: Bool
     @Binding var spellMentionQuery: String
+    @Binding var showPromptLibrary: Bool
 
     // Keyboard observer to prevent Menu opening during keyboard animation
     private let keyboardObserver = KeyboardObserver.shared
@@ -260,6 +261,12 @@ struct GlassAttachmentButton: View {
                             Label("Draft a Plan", systemImage: "list.clipboard")
                         }
                     }
+
+                    Divider()
+
+                    Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "promptLibrary") } label: {
+                        Label("Prompt Library", systemImage: "text.book.closed")
+                    }
                 } label: {
                     Color.clear
                         .frame(width: buttonSize, height: buttonSize)
@@ -292,6 +299,8 @@ struct GlassAttachmentButton: View {
             case "draftPlan":
                 // Post notification for ChatView to handle plan skill selection
                 NotificationCenter.default.post(name: .draftPlanRequested, object: nil)
+            case "promptLibrary":
+                showPromptLibrary = true
             default: break
             }
         }
