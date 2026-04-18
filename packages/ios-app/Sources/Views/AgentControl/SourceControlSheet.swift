@@ -19,6 +19,11 @@ struct SourceControlSheet: View {
     /// entire sheet stack tears down and the ChatView for the new session
     /// comes into focus.
     var onDismissParent: () -> Void = {}
+    /// Invoked after every git sub-sheet (Commit/Pull/Merge/Push) is
+    /// dismissed. Callers thread this up to `ChatViewModel.requestWorktreeStatus()`
+    /// and `AgentControlView.loadChanges()` so user-initiated actions refresh
+    /// every copy of `worktreeStatus` regardless of WebSocket event delivery.
+    var onWorktreeStatusShouldRefresh: (() async -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -163,7 +168,11 @@ struct SourceControlSheet: View {
             .adaptivePresentationDetents([.medium, .large])
         }
         .sheet(item: $activeGitAction, onDismiss: {
-            Task { await loadData(); await loadDivergence() }
+            Task {
+                await loadData()
+                await loadDivergence()
+                await onWorktreeStatusShouldRefresh?()
+            }
         }) { action in
             gitActionSheet(for: action)
         }

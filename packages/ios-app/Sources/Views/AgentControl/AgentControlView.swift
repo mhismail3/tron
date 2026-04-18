@@ -24,6 +24,13 @@ struct AgentControlView: View {
     /// When provided, propagated into `SourceControlSheet` so header chips
     /// and sub-sheets render peer-session state.
     var gitWorkflowState: GitWorkflowState?
+    /// Invoked when a source-control sub-sheet dismisses so the parent (the
+    /// chat's ChatViewModel) can refresh its own `worktreeState`. We chain
+    /// this alongside the local `loadChanges()` so the Agent Control card,
+    /// the Source Control sheet, and the chat toolbar all see the same
+    /// post-action state deterministically, without waiting on a server
+    /// event that may arrive late or be dropped.
+    var onWorktreeStatusShouldRefresh: (() async -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
@@ -139,7 +146,11 @@ struct AgentControlView: View {
                     initialDiffResult: diffResult,
                     initialWorktreeStatus: worktreeStatus,
                     gitWorkflowState: gitWorkflowState,
-                    onDismissParent: { dismiss() }
+                    onDismissParent: { dismiss() },
+                    onWorktreeStatusShouldRefresh: {
+                        await loadChanges()
+                        await onWorktreeStatusShouldRefresh?()
+                    }
                 )
             }
             .tronErrorAlert(message: $errorMessage)

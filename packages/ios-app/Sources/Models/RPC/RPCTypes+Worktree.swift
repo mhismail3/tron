@@ -26,6 +26,27 @@ struct WorktreeInfo: Decodable, Equatable {
         }
         return name
     }
+
+    /// True when there is no session-specific branch worth chipping in
+    /// UI chrome. Covers two cases:
+    ///
+    /// 1. **Passthrough mode** (`isolated == false`) — the session uses the
+    ///    repo root directly rather than its own worktree. This is the state
+    ///    a session enters after `worktree.finalizeSession` releases its
+    ///    worktree, or when a fresh session starts on `main` without
+    ///    isolation. The server returns `baseBranch: null` here; there's no
+    ///    distinct branch to highlight even though `branch` is populated.
+    /// 2. **Isolated-on-base** (`branch == baseBranch`) — a less common
+    ///    state where the isolated worktree happens to sit on the recorded
+    ///    base branch.
+    ///
+    /// Returns false when `isolated == true && baseBranch == nil` — we
+    /// cannot prove equality and default to showing the chip conservatively.
+    var isOnBaseBranch: Bool {
+        if !isolated { return true }
+        guard let baseBranch else { return false }
+        return branch == baseBranch
+    }
 }
 
 /// Get worktree status for a session

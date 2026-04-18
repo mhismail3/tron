@@ -56,6 +56,96 @@ struct WorktreeInfoTests {
         )
         #expect(info.shortBranch == "abc")
     }
+
+    // MARK: - isOnBaseBranch
+
+    /// Helper that constructs a `WorktreeInfo` with the fields relevant to
+    /// `isOnBaseBranch` and sensible defaults for everything else.
+    private func worktree(
+        branch: String,
+        baseBranch: String?,
+        isolated: Bool = true
+    ) -> WorktreeInfo {
+        WorktreeInfo(
+            isolated: isolated, branch: branch,
+            baseCommit: "abc", path: "/tmp", baseBranch: baseBranch,
+            repoRoot: nil, hasUncommittedChanges: nil, commitCount: nil, isMerged: nil
+        )
+    }
+
+    @Test("isOnBaseBranch true when isolated on main and base is main")
+    func isOnBaseBranchIsolatedOnBase() {
+        #expect(worktree(branch: "main", baseBranch: "main").isOnBaseBranch == true)
+    }
+
+    @Test("isOnBaseBranch false when on a session branch")
+    func isOnBaseBranchSessionBranch() {
+        #expect(worktree(branch: "session/sess_abc12345", baseBranch: "main").isOnBaseBranch == false)
+    }
+
+    @Test("isOnBaseBranch false when isolated and baseBranch is nil (conservative)")
+    func isOnBaseBranchIsolatedNilBase() {
+        // We cannot prove the current branch is the base branch when the
+        // server didn't record one — default to showing the icon.
+        #expect(worktree(branch: "main", baseBranch: nil).isOnBaseBranch == false)
+    }
+
+    @Test("isOnBaseBranch false on follow-up branch after finalize")
+    func isOnBaseBranchFollowUp() {
+        // Post-finalize with rebranch=true — the session moves to a new
+        // `<old>-follow-up` branch on an isolated worktree, which IS a
+        // distinct session branch. The toolbar icon must keep showing.
+        let info = worktree(branch: "session/sess_abc12345-follow-up", baseBranch: "main")
+        #expect(info.isOnBaseBranch == false)
+    }
+
+    @Test("isOnBaseBranch true for isolated non-main base branch (e.g. develop)")
+    func isOnBaseBranchNonMainBase() {
+        #expect(worktree(branch: "develop", baseBranch: "develop").isOnBaseBranch == true)
+    }
+
+    @Test("isOnBaseBranch is case sensitive (git refs are case sensitive)")
+    func isOnBaseBranchCaseSensitive() {
+        #expect(worktree(branch: "Main", baseBranch: "main").isOnBaseBranch == false)
+    }
+
+    // MARK: - Passthrough mode (isolated == false)
+
+    @Test("isOnBaseBranch true for passthrough session (post-finalize server state)")
+    func isOnBaseBranchPassthroughPostFinalize() {
+        // After worktree.finalizeSession releases the worktree, the server's
+        // passthrough_status hardcodes base_branch=None and returns
+        // isolated=false. No session-specific branch exists — toolbar chip
+        // must hide. This is the bug the user reported: icon lingered on
+        // merged sessions despite the sheet showing "main".
+        let info = worktree(branch: "main", baseBranch: nil, isolated: false)
+        #expect(info.isOnBaseBranch == true)
+    }
+
+    @Test("isOnBaseBranch true for fresh passthrough session on main")
+    func isOnBaseBranchPassthroughFresh() {
+        // A fresh session that never acquired isolation also arrives as
+        // isolated=false, baseBranch=nil. Same UI treatment.
+        let info = worktree(branch: "main", baseBranch: nil, isolated: false)
+        #expect(info.isOnBaseBranch == true)
+    }
+
+    @Test("isOnBaseBranch true for passthrough on non-main branch")
+    func isOnBaseBranchPassthroughNonMain() {
+        // Even if the user's repo is checked out on a feature branch when
+        // a passthrough session starts, passthrough sessions have no notion
+        // of a session-specific branch. Chip should hide regardless of name.
+        let info = worktree(branch: "feature-x", baseBranch: nil, isolated: false)
+        #expect(info.isOnBaseBranch == true)
+    }
+
+    @Test("isOnBaseBranch true for passthrough on detached HEAD")
+    func isOnBaseBranchPassthroughDetached() {
+        // Server's passthrough_status falls back to short commit hash when
+        // current_branch fails (detached HEAD). Still no session branch.
+        let info = worktree(branch: "abc1234", baseBranch: nil, isolated: false)
+        #expect(info.isOnBaseBranch == true)
+    }
 }
 
 @Suite("SessionBranchInfo Tests")

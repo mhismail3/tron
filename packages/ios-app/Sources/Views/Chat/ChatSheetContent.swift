@@ -47,7 +47,10 @@ struct ChatSheetContent: View {
                     viewModel.pendingSourceChangesPrompt = message
                     sheetCoordinator?.dismiss()
                 },
-                gitWorkflowState: viewModel.gitWorkflowState
+                gitWorkflowState: viewModel.gitWorkflowState,
+                onWorktreeStatusShouldRefresh: { [weak viewModel] in
+                    await viewModel?.requestWorktreeStatus()
+                }
             )
 
         case .skillDetail(let skill, let mode):

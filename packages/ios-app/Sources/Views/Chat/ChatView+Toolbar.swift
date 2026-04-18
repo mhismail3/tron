@@ -41,7 +41,8 @@ extension ChatView {
                         .foregroundStyle(.tronPurple)
                         .transition(.opacity)
                 }
-                if let worktree = viewModel.worktreeState.worktree {
+                if let worktree = viewModel.worktreeState.worktree,
+                   !worktree.isOnBaseBranch {
                     HStack(spacing: 2) {
                         Image(systemName: "arrow.triangle.branch")
                             .resizable()
@@ -74,7 +75,10 @@ extension ChatView {
                 }
             }
             .animation(.smooth(duration: 0.25), value: eventStoreManager.activeSession?.isFork)
-            .animation(.smooth(duration: 0.25), value: viewModel.worktreeState.worktree != nil)
+            .animation(
+                .smooth(duration: 0.25),
+                value: viewModel.worktreeState.worktree.map { !$0.isOnBaseBranch } ?? false
+            )
         }
     }
 
