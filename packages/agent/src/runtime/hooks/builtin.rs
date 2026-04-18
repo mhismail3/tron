@@ -24,7 +24,7 @@ pub const BRANCH_NAME_GEN_ID: &str = "builtin:branch-name-gen";
 pub const SUGGEST_PROMPTS_ID: &str = "builtin:suggest-prompts";
 
 const TITLE_GEN_PROMPT: &str =
-    "Generate a concise 3-6 word title for this session based on the user's prompt (in the 'prompt' field of the event context). Return ONLY the title text, nothing else.";
+    "Generate a 3-5 word title describing what the agent is doing in this session, from the agent's perspective, in present continuous tense (e.g. \"Looking up gold prices\", \"Fixing login bug\", \"Drafting release notes\"). Prefer short, common words. Base it on the user's prompt (in the 'prompt' field of the event context). Return ONLY the title text, nothing else.";
 
 const BRANCH_NAME_GEN_PROMPT: &str =
     "Generate a random memorable 3-word branch name in the format word-word-word (lowercase, hyphen-separated). \
