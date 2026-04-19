@@ -190,12 +190,12 @@ struct GitPushParams: Encodable {
 }
 
 struct GitPushResult: Decodable {
-    let success: Bool
     let branch: String
     let remote: String
     let setUpstream: Bool
     let dryRun: Bool
-    /// Raw `git` stderr for display when server-side decisions aren't
-    /// machine-readable (auth errors, non-FF rejections, hook output).
+    /// Raw `git` stderr for display — `git push` writes progress
+    /// ("To <url>", per-ref update lines) even on success, so callers
+    /// may surface it in a result banner for transparency.
     let stderr: String?
 }

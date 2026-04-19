@@ -24,18 +24,16 @@ extension ChatViewModel {
         defer { worktreeState.isLoading = false }
 
         do {
-            let result = try await rpcClient.worktree.commit(
+            _ = try await rpcClient.worktree.commit(
                 sessionId: sessionId,
                 message: message
             )
-            if result.success {
-                // Refresh status to reflect new commit count and cleared uncommitted changes
-                await requestWorktreeStatus()
-            } else if let error = result.error {
-                showErrorAlert(error)
-            }
+            // Failures now throw typed RPC errors; reaching here means
+            // the commit ran. Refresh status so the UI reflects the new
+            // commit count and cleared uncommitted-changes flag.
+            await requestWorktreeStatus()
         } catch {
-            showErrorAlert("Commit failed: \(error.localizedDescription)")
+            showErrorAlert(friendlyGitError(error, action: "Commit"))
         }
     }
 

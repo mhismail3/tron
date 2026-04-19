@@ -13,6 +13,13 @@
 //! (`WorktreeMainSynced`, `RepoMainAdvanced`, lock acquire/release, …) is
 //! owned by the coordinator layer so it fires for every caller (tool,
 //! RPC, subagent).
+//!
+//! Error mapping: every coordinator error is routed through
+//! `super::map_worktree_error`, which classifies `WorktreeError`
+//! variants into typed RPC error codes (`PROTECTED_BRANCH`,
+//! `NON_FAST_FORWARD`, `NO_REMOTE`, `GIT_AUTH_FAILED`, …). No handler
+//! should produce `RpcError::Internal` for a predictable git failure —
+//! use the helper instead.
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -21,7 +28,7 @@ use tracing::instrument;
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{
-    opt_bool, opt_string, opt_u64, require_string_param,
+    map_worktree_error, opt_bool, opt_string, opt_u64, require_string_param,
 };
 use std::path::PathBuf;
 use crate::server::rpc::registry::MethodHandler;
@@ -175,12 +182,6 @@ fn sync_outcome_json(o: &SyncOutcome) -> Value {
     }
 }
 
-fn internal(e: impl std::fmt::Display) -> RpcError {
-    RpcError::Internal {
-        message: e.to_string(),
-    }
-}
-
 // ── git.syncMain ─────────────────────────────────────────────────────
 
 /// Handler for `git.syncMain` — fast-forward local main from its upstream.
@@ -210,7 +211,7 @@ impl MethodHandler for SyncMainHandler {
                 fallback.as_deref(),
             )
             .await
-            .map_err(internal)?;
+            .map_err(|e| map_worktree_error(e, &session_id))?;
         Ok(sync_outcome_json(&outcome))
     }
 }
@@ -261,10 +262,11 @@ impl MethodHandler for PushHandler {
                 fallback.as_deref(),
             )
             .await
-            .map_err(internal)?;
+            .map_err(|e| map_worktree_error(e, &session_id))?;
 
+        // `success` is elided — on this wire path a successful push is
+        // the only shape that reaches here (failures throw typed errors).
         Ok(json!({
-            "success": out.success,
             "branch": out.branch,
             "remote": out.remote,
             "setUpstream": out.set_upstream,
@@ -290,7 +292,7 @@ impl MethodHandler for ListLocalBranchesHandler {
         let branches = coord
             .list_local_branches(&session_id, fallback.as_deref())
             .await
-            .map_err(internal)?;
+            .map_err(|e| map_worktree_error(e, &session_id))?;
         // `current` is best-effort: isolated sessions read it from the
         // coordinator's in-memory info, passthrough sessions read it from
         // git HEAD of the session's working dir.
@@ -331,7 +333,7 @@ impl MethodHandler for ListRemoteBranchesHandler {
         let branches = coord
             .list_remote_branches(&session_id, remote.as_deref(), fallback.as_deref())
             .await
-            .map_err(internal)?;
+            .map_err(|e| map_worktree_error(e, &session_id))?;
         Ok(json!({
             "branches": branches,
             "remote": remote.unwrap_or_else(|| "origin".into()),
@@ -355,7 +357,7 @@ impl MethodHandler for FinalizeSessionHandler {
         let info = coord
             .get_info(&session_id)
             .ok_or_else(|| RpcError::NotFound {
-                code: "WORKTREE_NOT_FOUND".into(),
+                code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             })?;
         let source_branch = opt_string(params.as_ref(), "sourceBranch")
@@ -402,7 +404,7 @@ impl MethodHandler for FinalizeSessionHandler {
                 "error": format!("merge has conflicts ({} file(s)); resolve first", count),
                 "hint": "call worktree.startMerge, resolve, then worktree.continueMerge",
             })),
-            Err(e) => Err(internal(e)),
+            Err(e) => Err(map_worktree_error(e, &session_id)),
         }
     }
 }
@@ -453,24 +455,7 @@ impl MethodHandler for RebaseOnMainHandler {
                 "type": "noOp",
                 "ahead": ahead as u64,
             })),
-            Err(WorktreeError::NotFound(_)) => Err(RpcError::NotFound {
-                code: "WORKTREE_NOT_FOUND".into(),
-                message: format!("No worktree found for session '{session_id}'"),
-            }),
-            Err(WorktreeError::PendingMergeExists) => Err(RpcError::InvalidParams {
-                message:
-                    "session already has a pending merge; resolve or abort it first".into(),
-            }),
-            Err(WorktreeError::MissingBaseBranch) => Err(RpcError::InvalidParams {
-                message: "session has no base branch; pass `mainBranch` explicitly".into(),
-            }),
-            Err(WorktreeError::RefNotFound(r)) => Err(RpcError::InvalidParams {
-                message: format!("ref not found: {r}"),
-            }),
-            Err(WorktreeError::InvalidSessionState(m)) => Err(RpcError::InvalidParams {
-                message: m,
-            }),
-            Err(e) => Err(internal(e)),
+            Err(e) => Err(map_worktree_error(e, &session_id)),
         }
     }
 }
@@ -493,7 +478,7 @@ impl MethodHandler for StartMergeHandler {
         let pending = coord
             .start_merge_keep_conflicts(&session_id, &source, &target, strategy)
             .await
-            .map_err(internal)?;
+            .map_err(|e| map_worktree_error(e, &session_id))?;
 
         // Probe conflicts so the caller gets the file list up front.
         let conflicts = coord
@@ -525,7 +510,7 @@ impl MethodHandler for ListConflictsHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
-        let conflicts = coord.list_conflicts(&session_id).await.map_err(internal)?;
+        let conflicts = coord.list_conflicts(&session_id).await.map_err(|e| map_worktree_error(e, &session_id))?;
         Ok(json!({
             "conflicts": conflicts.iter().map(conflicted_file_json).collect::<Vec<_>>(),
         }))
@@ -550,7 +535,7 @@ impl MethodHandler for ResolveConflictHandler {
         coord
             .resolve_conflict(&session_id, &path, resolution)
             .await
-            .map_err(internal)?;
+            .map_err(|e| map_worktree_error(e, &session_id))?;
         let remaining = coord
             .list_conflicts(&session_id)
             .await
@@ -578,7 +563,7 @@ impl MethodHandler for ContinueMergeHandler {
         let sha = coord
             .continue_merge(&session_id, message.as_deref())
             .await
-            .map_err(internal)?;
+            .map_err(|e| map_worktree_error(e, &session_id))?;
         Ok(json!({ "mergeCommit": sha }))
     }
 }
@@ -598,7 +583,7 @@ impl MethodHandler for AbortMergeHandler {
         coord
             .abort_merge_with_reason(&session_id, &reason)
             .await
-            .map_err(internal)?;
+            .map_err(|e| map_worktree_error(e, &session_id))?;
         Ok(json!({ "aborted": true }))
     }
 }
@@ -669,7 +654,7 @@ impl MethodHandler for ListRepoSessionsHandler {
         let caller_info = coord
             .get_info(&session_id)
             .ok_or_else(|| RpcError::NotFound {
-                code: "WORKTREE_NOT_FOUND".into(),
+                code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             })?;
         let caller_repo = caller_info.repo_root.clone();
@@ -731,7 +716,7 @@ impl MethodHandler for GetDivergenceHandler {
         let info = coord
             .get_info(&session_id)
             .ok_or_else(|| RpcError::NotFound {
-                code: "WORKTREE_NOT_FOUND".into(),
+                code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             })?;
         let main_branch = info
@@ -971,6 +956,179 @@ mod tests {
             ConflictResolution::MarkResolved
         );
         assert!(parse_resolution("???").is_err());
+    }
+
+    // ── PushHandler integration tests for typed-error mapping ─────
+    //
+    // These prove the handler routes through `map_worktree_error`
+    // rather than swallowing WorktreeError variants into
+    // INTERNAL_ERROR (the bug that shipped as a user-visible
+    // "internal error" popup). Every assertion here is a regression
+    // guard: if a future refactor re-introduces the generic
+    // `.map_err(|e| RpcError::Internal{...})?` pattern, these fail.
+
+    async fn push_test_context()
+    -> (tempfile::TempDir, crate::server::rpc::context::RpcContext, String) {
+        use crate::events::EventStore;
+        use crate::runtime::orchestrator::orchestrator::Orchestrator;
+        use crate::runtime::orchestrator::session_manager::SessionManager;
+        use crate::server::rpc::context::RpcContext;
+        use crate::server::rpc::session_context::ContextArtifactsService;
+        use crate::skills::registry::SkillRegistry;
+        use crate::worktree::types::AcquireResult;
+        use crate::worktree::{WorktreeConfig, WorktreeCoordinator};
+        use std::sync::Arc;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().to_str().unwrap().to_string();
+        // Seed a real repo (no origin — push will hit NoRemoteConfigured
+        // when we pick a non-protected branch name).
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .output()
+                .unwrap();
+        };
+        run(&["init", &dir]);
+        run(&["-C", &dir, "config", "user.email", "t@t.com"]);
+        run(&["-C", &dir, "config", "user.name", "T"]);
+        run(&["-C", &dir, "config", "commit.gpgsign", "false"]);
+        run(&["-C", &dir, "symbolic-ref", "HEAD", "refs/heads/main"]);
+        std::fs::write(tmp.path().join("seed.txt"), "seed").unwrap();
+        run(&["-C", &dir, "add", "-A"]);
+        run(&["-C", &dir, "commit", "-m", "init"]);
+
+        let pool = crate::events::new_in_memory(
+            &crate::events::ConnectionConfig::default(),
+        )
+        .unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = Arc::new(SessionManager::new(store.clone()));
+        let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
+        let coord = Arc::new(WorktreeCoordinator::new(
+            WorktreeConfig::default(),
+            store.clone(),
+        ));
+
+        let sid = mgr.create_session("m", &dir, Some("push-test"), None).unwrap();
+        // Acquire a session worktree so active_info resolves.
+        match coord.maybe_acquire(&sid, tmp.path()).await.unwrap() {
+            AcquireResult::Acquired(_) => {}
+            other => panic!("expected Acquired, got {other:?}"),
+        };
+
+        let ctx = RpcContext {
+            orchestrator: orch,
+            session_manager: mgr,
+            event_store: store,
+            skill_registry: Arc::new(parking_lot::RwLock::new(SkillRegistry::new())),
+            settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
+            agent_deps: None,
+            server_start_time: std::time::Instant::now(),
+            transcription_engine: Arc::new(std::sync::OnceLock::new()),
+            subagent_manager: None,
+            health_tracker: Arc::new(crate::llm::ProviderHealthTracker::new()),
+            shutdown_coordinator: None,
+            origin: "localhost:9847".to_string(),
+            cron_scheduler: None,
+            worktree_coordinator: Some(coord.clone()),
+            device_request_broker: None,
+            context_artifacts: Arc::new(ContextArtifactsService::new()),
+            auth_path: std::path::PathBuf::from("/tmp/tron-test-auth.json"),
+            broadcast_manager: None,
+            oauth_flows: Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            mcp_router: None,
+            display_stream_registry: None,
+            process_manager: None,
+            job_manager: None,
+            output_buffer_registry: None,
+            hook_abort_tracker: Arc::new(
+                crate::runtime::hooks::abort_tracker::HookAbortTracker::new(),
+            ),
+        };
+
+        (tmp, ctx, sid)
+    }
+
+    #[tokio::test]
+    async fn push_handler_protected_branch_returns_typed_code() {
+        // The user-reported bug. Was `INTERNAL_ERROR`; now `PROTECTED_BRANCH`.
+        let (_tmp, ctx, sid) = push_test_context().await;
+        let err = PushHandler
+            .handle(
+                Some(json!({"sessionId": sid, "branch": "main"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code(),
+            "PROTECTED_BRANCH",
+            "protected-branch push must surface typed code, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("main"),
+            "message should carry the branch name; got {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn push_handler_no_remote_returns_typed_code() {
+        // Session has a worktree but no origin remote configured. scm::push
+        // classifies this as NoRemoteConfigured; the handler must expose it
+        // as NO_REMOTE, not INTERNAL_ERROR.
+        let (_tmp, ctx, sid) = push_test_context().await;
+        let err = PushHandler
+            .handle(
+                Some(json!({"sessionId": sid, "branch": "feature/x"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code(),
+            "NO_REMOTE",
+            "missing-origin push must surface typed code, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn push_handler_no_session_returns_worktree_not_found() {
+        // Coordinator is present but the session is unknown. Must surface
+        // WORKTREE_NOT_FOUND (was INTERNAL_ERROR with a raw Rust message).
+        let (_tmp, ctx, _sid) = push_test_context().await;
+        let err = PushHandler
+            .handle(
+                Some(json!({
+                    "sessionId": "session-that-does-not-exist",
+                    "branch": "feature/x",
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.code(),
+            "WORKTREE_NOT_FOUND",
+            "unknown session must surface typed NotFound code, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn push_handler_missing_session_id_is_invalid_params() {
+        // Preserves existing param-validation behavior across the refactor.
+        let (_tmp, ctx, _sid) = push_test_context().await;
+        let err = PushHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
     #[test]

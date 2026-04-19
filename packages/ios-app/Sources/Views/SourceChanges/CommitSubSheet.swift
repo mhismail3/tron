@@ -339,40 +339,36 @@ struct CommitSubSheet: View {
 
     @ViewBuilder
     private func resultBanner(_ r: WorktreeCommitResult) -> some View {
-        if r.success {
-            if let hash = r.commitHash {
-                let short = String(hash.prefix(7))
-                let files = r.filesChanged?.count ?? 0
-                let ins = r.insertions ?? 0
-                let del = r.deletions ?? 0
-                let detail: String? = {
-                    if files == 0 && ins == 0 && del == 0 { return nil }
-                    var parts: [String] = []
-                    if files > 0 {
-                        parts.append(files == 1 ? "1 file" : "\(files) files")
-                    }
-                    if ins > 0 || del > 0 {
-                        parts.append("+\(ins) -\(del)")
-                    }
-                    return parts.joined(separator: " · ")
-                }()
-                GitResultBanner(
-                    kind: .success,
-                    title: amendPrevious ? "Amended \(short)" : "Committed \(short)",
-                    detail: detail
-                )
-            } else {
-                GitResultBanner(
-                    kind: .warning,
-                    title: "Nothing to commit",
-                    detail: "The working tree had no changes."
-                )
-            }
+        // Server-side failures throw typed RPC errors (rendered in the
+        // alert via `friendlyGitError`). Reaching the banner path means
+        // the commit ran — either as a real commit (`commitHash` set)
+        // or as a no-op (`commitHash == nil`).
+        if let hash = r.commitHash {
+            let short = String(hash.prefix(7))
+            let files = r.filesChanged?.count ?? 0
+            let ins = r.insertions ?? 0
+            let del = r.deletions ?? 0
+            let detail: String? = {
+                if files == 0 && ins == 0 && del == 0 { return nil }
+                var parts: [String] = []
+                if files > 0 {
+                    parts.append(files == 1 ? "1 file" : "\(files) files")
+                }
+                if ins > 0 || del > 0 {
+                    parts.append("+\(ins) -\(del)")
+                }
+                return parts.joined(separator: " · ")
+            }()
+            GitResultBanner(
+                kind: .success,
+                title: amendPrevious ? "Amended \(short)" : "Committed \(short)",
+                detail: detail
+            )
         } else {
             GitResultBanner(
-                kind: .failure,
-                title: "Commit failed",
-                detail: r.error
+                kind: .warning,
+                title: "Nothing to commit",
+                detail: "The working tree had no changes."
             )
         }
     }
@@ -394,11 +390,8 @@ struct CommitSubSheet: View {
                     stageAll: stageAll ? nil : false
                 )
                 result = r
-                if !r.success, let err = r.error {
-                    errorMessage = "Commit failed: \(err)"
-                }
             } catch {
-                errorMessage = "Commit failed: \(error.localizedDescription)"
+                errorMessage = friendlyGitError(error, action: "Commit")
             }
         }
     }

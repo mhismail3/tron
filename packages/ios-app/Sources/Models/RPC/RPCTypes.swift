@@ -23,7 +23,12 @@ struct RPCResponse<R: Decodable>: Decodable {
     let error: RPCError?
 }
 
-/// Known RPC error codes from the server
+/// Known RPC error codes from the server.
+///
+/// Adding a case here forces every exhaustive switch on
+/// `RPCErrorCode` — including `friendlyGitError` — to handle the new
+/// case at compile time. Unknown server codes decode to `nil` via
+/// `RPCError.errorCode` and callers fall back to the raw message.
 enum RPCErrorCode: String, Sendable {
     case sessionNotFound = "SESSION_NOT_FOUND"
     case agentNotRunning = "AGENT_NOT_RUNNING"
@@ -31,6 +36,22 @@ enum RPCErrorCode: String, Sendable {
     case methodNotFound = "METHOD_NOT_FOUND"
     case internalError = "INTERNAL_ERROR"
     case maxSessionsReached = "MAX_SESSIONS_REACHED"
+
+    // Typed git workflow errors — mirror the constants in
+    // `packages/agent/src/server/rpc/errors.rs`.
+    case protectedBranch = "PROTECTED_BRANCH"
+    case noRemote = "NO_REMOTE"
+    case nonFastForward = "NON_FAST_FORWARD"
+    case gitAuthFailed = "GIT_AUTH_FAILED"
+    case gitNetworkError = "GIT_NETWORK_ERROR"
+    case worktreeNotFound = "WORKTREE_NOT_FOUND"
+    case dirtyWorkingTree = "DIRTY_WORKING_TREE"
+    case missingBaseBranch = "MISSING_BASE_BRANCH"
+    case refNotFound = "REF_NOT_FOUND"
+    case branchExists = "BRANCH_EXISTS"
+    case branchActive = "BRANCH_ACTIVE"
+    case notGitRepo = "NOT_GIT_REPO"
+    case gitError = "GIT_ERROR"
 }
 
 /// RPC error details

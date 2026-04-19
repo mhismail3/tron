@@ -29,6 +29,43 @@ pub const GIT_ERROR: &str = "GIT_ERROR";
 /// Session is currently processing a prompt from another connection.
 pub const SESSION_BUSY: &str = "SESSION_BUSY";
 
+// ── Typed git workflow errors ───────────────────────────────────────
+//
+// Every git workflow handler (`git.push`, `git.syncMain`,
+// `worktree.commit`, `worktree.finalizeSession`, etc.) maps its
+// `WorktreeError` variants to these codes via `map_worktree_error` in
+// `handlers/mod.rs`. Clients switch on the code to show a friendly
+// message instead of a generic "internal error".
+
+/// Push/finalize refused because the target branch is in the user's
+/// protected-branches list and `overrideProtected` was not set.
+pub const PROTECTED_BRANCH: &str = "PROTECTED_BRANCH";
+/// The requested remote isn't configured for this repository
+/// (e.g. `git push` with no `origin`).
+pub const NO_REMOTE: &str = "NO_REMOTE";
+/// Push rejected because the upstream ref moved since the last fetch.
+pub const NON_FAST_FORWARD: &str = "NON_FAST_FORWARD";
+/// Remote authentication failed (SSH key rejected, HTTPS 401, etc.).
+pub const GIT_AUTH_FAILED: &str = "GIT_AUTH_FAILED";
+/// Remote network operation timed out or host was unreachable.
+pub const GIT_NETWORK_ERROR: &str = "GIT_NETWORK_ERROR";
+/// Session has no worktree AND no resolvable fallback working directory.
+pub const WORKTREE_NOT_FOUND: &str = "WORKTREE_NOT_FOUND";
+/// Operation refused because the working tree has uncommitted changes.
+pub const DIRTY_WORKING_TREE: &str = "DIRTY_WORKING_TREE";
+/// `rebaseOnMain` called without a `mainBranch` override and the
+/// session has no recorded base branch.
+pub const MISSING_BASE_BRANCH: &str = "MISSING_BASE_BRANCH";
+/// A git ref the caller named could not be resolved to a commit.
+pub const REF_NOT_FOUND: &str = "REF_NOT_FOUND";
+/// Create-branch refused because the branch already exists.
+pub const BRANCH_EXISTS: &str = "BRANCH_EXISTS";
+/// Delete/rename refused because the branch is currently checked out
+/// in another worktree.
+pub const BRANCH_ACTIVE: &str = "BRANCH_ACTIVE";
+/// The target directory isn't a git repository.
+pub const NOT_GIT_REPO: &str = "NOT_GIT_REPO";
+
 /// RPC error type returned by handlers.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {
@@ -159,6 +196,27 @@ mod tests {
         let body = err.to_error_body();
         assert_eq!(body.code, "SESSION_BUSY");
         assert!(body.message.contains("processing"));
+    }
+
+    #[test]
+    fn new_git_error_codes_have_distinct_values() {
+        let codes = [
+            PROTECTED_BRANCH,
+            NO_REMOTE,
+            NON_FAST_FORWARD,
+            GIT_AUTH_FAILED,
+            GIT_NETWORK_ERROR,
+            WORKTREE_NOT_FOUND,
+            DIRTY_WORKING_TREE,
+            MISSING_BASE_BRANCH,
+            REF_NOT_FOUND,
+            BRANCH_EXISTS,
+            BRANCH_ACTIVE,
+            NOT_GIT_REPO,
+            GIT_ERROR,
+        ];
+        let unique: std::collections::HashSet<_> = codes.iter().collect();
+        assert_eq!(unique.len(), codes.len(), "error codes must be distinct");
     }
 
     #[test]

@@ -318,7 +318,7 @@ struct RepoSessionsSubSheet: View {
                 _ = try await rpcClient.worktree.pruneBranches(sessionId: sessionId)
                 await loadAll()
             } catch {
-                errorMessage = "Prune failed: \(error.localizedDescription)"
+                errorMessage = friendlyGitError(error, action: "Prune")
             }
         }
     }

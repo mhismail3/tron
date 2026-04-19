@@ -180,7 +180,7 @@ struct SyncMainSubSheet: View {
                     dryRun: dryRun ? true : nil
                 )
             } catch {
-                errorMessage = "Sync failed: \(error.localizedDescription)"
+                errorMessage = friendlyGitError(error, action: "Sync")
             }
         }
     }

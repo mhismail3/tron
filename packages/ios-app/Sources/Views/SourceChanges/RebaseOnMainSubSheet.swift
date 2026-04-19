@@ -229,7 +229,7 @@ struct RebaseOnMainSubSheet: View {
                 )
                 result = r
             } catch {
-                errorMessage = "Rebase failed: \(error.localizedDescription)"
+                errorMessage = friendlyGitError(error, action: "Rebase")
             }
         }
     }

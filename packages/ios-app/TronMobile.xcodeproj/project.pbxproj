@@ -741,6 +741,7 @@
 		FD1390D745F24A8E71922902 /* ChatViewModel+DeepLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B69823DCE8B26E8CA4F96CCB /* ChatViewModel+DeepLinks.swift */; };
 		FD72499B130BAAFC4D76591D /* SessionUpdatedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDF4DD3D3F1D425D20483C7 /* SessionUpdatedPlugin.swift */; };
 		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
+		FE566EB0CDD9F0B942247D8F /* GitErrorMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87F0FEAA3F9664F7CA3D73C7 /* GitErrorMessage.swift */; };
 		FEF77052D6956E5B6AE05BDB /* RPCTypes+Task.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C5F4C1CCA13C7C459D7D82 /* RPCTypes+Task.swift */; };
 		FEFEB6F2F6B479F5D422E56A /* EventIconProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0B23C91EE877275B8030EE0 /* EventIconProvider.swift */; };
 		FFE8EE699BA7BFD96512E197 /* TranscriptionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75CF368F59582F88B6B81D59 /* TranscriptionCoordinatorTests.swift */; };
@@ -1166,6 +1167,7 @@
 		87370A5D814F48375236F358 /* Prod.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Prod.xcconfig; sourceTree = "<group>"; };
 		876D3BCA467E57145E1062AC /* SystemEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemEvent.swift; sourceTree = "<group>"; };
 		879251B0CFAE32083926A18E /* foreground-emerald.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "foreground-emerald.png"; sourceTree = "<group>"; };
+		87F0FEAA3F9664F7CA3D73C7 /* GitErrorMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitErrorMessage.swift; sourceTree = "<group>"; };
 		88293D1A0C4FA7A91F04D7F5 /* FallbackViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallbackViews.swift; sourceTree = "<group>"; };
 		88756EFFE19EE26ED65B3283 /* BlobClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlobClientTests.swift; sourceTree = "<group>"; };
 		8878C9A16390B62C79B0C2A3 /* TypewriterAnimationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypewriterAnimationState.swift; sourceTree = "<group>"; };
@@ -3249,6 +3251,7 @@
 				E5C27C14DBEFAFC01C3F7A4D /* DiffFileRow.swift */,
 				351971829A487361F5CE86B7 /* FileDetailSheet.swift */,
 				65B7329A472986EA2DA642C0 /* FinalizeSessionSubSheet.swift */,
+				87F0FEAA3F9664F7CA3D73C7 /* GitErrorMessage.swift */,
 				63A6369AB396D31633B7E405 /* GitSubSheetContainer.swift */,
 				0604F301E3DA9434F917F620 /* PushSubSheet.swift */,
 				263F801459AE9F380FD15054 /* RebaseOnMainSubSheet.swift */,
@@ -3719,6 +3722,7 @@
 				5B971B542D047F348B92C712 /* GetConfirmationTransformer.swift in Sources */,
 				B5B120E6C45CCBAF8C76572F /* GetConfirmationTypes.swift in Sources */,
 				32E90EEEED68C66D0AE05C31 /* GitClient.swift in Sources */,
+				FE566EB0CDD9F0B942247D8F /* GitErrorMessage.swift in Sources */,
 				3AFA79F688F367716E2D157E /* GitHubURLParser.swift in Sources */,
 				EC1E9D627E408B791C2D66CA /* GitNotificationRouter.swift in Sources */,
 				F8665A89282F4E73E9B08F53 /* GitSubSheetContainer.swift in Sources */,

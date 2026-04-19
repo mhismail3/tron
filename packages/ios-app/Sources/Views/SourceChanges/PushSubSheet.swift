@@ -174,6 +174,9 @@ struct PushSubSheet: View {
     }
 
     private func resultBanner(_ r: GitPushResult) -> some View {
+        // Reaching here means the server returned success — any failure
+        // throws a typed RPC error that the catch block renders as an
+        // alert, not a banner.
         let detail: String = {
             var parts: [String] = []
             if r.dryRun { parts.append("Dry run — no remote state changed.") }
@@ -184,8 +187,8 @@ struct PushSubSheet: View {
             return parts.joined(separator: "\n")
         }()
         return GitResultBanner(
-            kind: r.success ? .success : .failure,
-            title: r.success ? "Pushed \(r.branch) → \(r.remote)" : "Push rejected",
+            kind: .success,
+            title: "Pushed \(r.branch) → \(r.remote)",
             detail: detail.isEmpty ? nil : detail
         )
     }
@@ -209,7 +212,7 @@ struct PushSubSheet: View {
                     protectedBranches: nil
                 )
             } catch {
-                errorMessage = "Push failed: \(error.localizedDescription)"
+                errorMessage = friendlyGitError(error, action: "Push")
             }
         }
     }

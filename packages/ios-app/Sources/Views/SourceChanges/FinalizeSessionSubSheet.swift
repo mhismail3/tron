@@ -290,7 +290,7 @@ struct FinalizeSessionSubSheet: View {
                 )
                 result = r
             } catch {
-                errorMessage = "Merge failed: \(error.localizedDescription)"
+                errorMessage = friendlyGitError(error, action: "Merge")
             }
         }
     }

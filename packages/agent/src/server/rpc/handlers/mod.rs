@@ -416,6 +416,111 @@ pub(crate) fn opt_array<'a>(
     params.and_then(|p| p.get(key)).and_then(|v| v.as_array())
 }
 
+/// Map a `WorktreeError` to the most specific `RpcError` variant
+/// available. Every git workflow handler routes its coordinator
+/// errors through this one function so iOS clients see typed,
+/// actionable codes (`PROTECTED_BRANCH`, `NON_FAST_FORWARD`, …)
+/// instead of a blanket `INTERNAL_ERROR`.
+///
+/// INVARIANT: the `match` is exhaustive over `WorktreeError` —
+/// adding a new variant forces a compile error here. Do NOT add
+/// a `_` arm; every variant must be classified by hand.
+pub(crate) fn map_worktree_error(
+    e: crate::worktree::WorktreeError,
+    session_id: &str,
+) -> crate::server::rpc::errors::RpcError {
+    use crate::server::rpc::errors as codes;
+    use crate::server::rpc::errors::RpcError;
+    use crate::worktree::WorktreeError as W;
+    match e {
+        W::NotFound(_) => RpcError::NotFound {
+            code: codes::WORKTREE_NOT_FOUND.into(),
+            message: format!(
+                "No worktree or working directory for session '{session_id}'"
+            ),
+        },
+        W::NotGitRepo(p) => RpcError::Custom {
+            code: codes::NOT_GIT_REPO.into(),
+            message: format!("Not a git repository: {p}"),
+            details: None,
+        },
+        W::ProtectedBranch(m) => RpcError::Custom {
+            code: codes::PROTECTED_BRANCH.into(),
+            message: m,
+            details: None,
+        },
+        W::NoRemoteConfigured(m) => RpcError::Custom {
+            code: codes::NO_REMOTE.into(),
+            message: m,
+            details: None,
+        },
+        W::NonFastForward(m) => RpcError::Custom {
+            code: codes::NON_FAST_FORWARD.into(),
+            message: m,
+            details: None,
+        },
+        W::AuthFailure(m) => RpcError::Custom {
+            code: codes::GIT_AUTH_FAILED.into(),
+            message: m,
+            details: None,
+        },
+        W::NetworkTimeout(m) => RpcError::Custom {
+            code: codes::GIT_NETWORK_ERROR.into(),
+            message: m,
+            details: None,
+        },
+        W::DirtyWorkingTree(m) => RpcError::Custom {
+            code: codes::DIRTY_WORKING_TREE.into(),
+            message: m,
+            details: None,
+        },
+        W::PendingMergeExists => RpcError::InvalidParams {
+            message: "session already has a pending merge; resolve or abort it first"
+                .into(),
+        },
+        W::NoPendingMerge => RpcError::InvalidParams {
+            message: "session has no pending merge".into(),
+        },
+        W::MissingBaseBranch => RpcError::Custom {
+            code: codes::MISSING_BASE_BRANCH.into(),
+            message: "session has no base branch; pass `mainBranch` explicitly".into(),
+            details: None,
+        },
+        W::RefNotFound(r) => RpcError::Custom {
+            code: codes::REF_NOT_FOUND.into(),
+            message: format!("ref not found: {r}"),
+            details: None,
+        },
+        W::BranchExists(b) => RpcError::Custom {
+            code: codes::BRANCH_EXISTS.into(),
+            message: format!("branch already exists: {b}"),
+            details: None,
+        },
+        W::BranchActive(b) => RpcError::Custom {
+            code: codes::BRANCH_ACTIVE.into(),
+            message: format!("branch is active: {b}"),
+            details: None,
+        },
+        W::InvalidSessionState(m) => RpcError::InvalidParams { message: m },
+        W::Git(m) => RpcError::Custom {
+            code: codes::GIT_ERROR.into(),
+            message: m,
+            details: None,
+        },
+        // MergeConflicts is special-cased by individual handlers
+        // (they return Ok({"conflicts": true, …}) rather than erroring)
+        // — reaching this boundary indicates a handler bug.
+        W::MergeConflicts(n) => RpcError::Internal {
+            message: format!("unexpected MergeConflicts({n}) at error boundary"),
+        },
+        // Genuinely internal — not user-actionable. The Display
+        // impl preserves the underlying detail for logs.
+        W::Timeout(_) | W::Io(_) | W::EventStore(_) => {
+            RpcError::Internal { message: e.to_string() }
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test_helpers {
     use std::path::PathBuf;
@@ -762,5 +867,167 @@ mod tests {
         let params = Some(serde_json::json!({"id": 42}));
         let err = require_string_param(params.as_ref(), "id").unwrap_err();
         assert!(err.to_string().contains("must be a string"));
+    }
+
+    // ── map_worktree_error ──
+    //
+    // One assertion per variant. If `WorktreeError` grows a new
+    // variant, both the helper's exhaustive `match` AND these tests
+    // must be updated — the compile error in the helper surfaces
+    // the need; adding the test here keeps coverage at 100%.
+
+    mod map_worktree_error_tests {
+        use super::super::map_worktree_error;
+        use crate::worktree::WorktreeError as W;
+
+        #[test]
+        fn not_found_uses_session_id_not_inner_message() {
+            let rpc = map_worktree_error(W::NotFound("inner".into()), "sid-42");
+            assert_eq!(rpc.code(), "WORKTREE_NOT_FOUND");
+            let msg = rpc.to_string();
+            assert!(msg.contains("sid-42"), "message should carry session id; got {msg}");
+            assert!(!msg.contains("inner"), "inner session id must not leak; got {msg}");
+        }
+
+        #[test]
+        fn not_git_repo_is_typed() {
+            let rpc = map_worktree_error(W::NotGitRepo("/tmp/x".into()), "sid");
+            assert_eq!(rpc.code(), "NOT_GIT_REPO");
+            assert!(rpc.to_string().contains("/tmp/x"));
+        }
+
+        #[test]
+        fn protected_branch_preserves_message() {
+            let rpc = map_worktree_error(
+                W::ProtectedBranch("refusing to push 'main'".into()),
+                "sid",
+            );
+            assert_eq!(rpc.code(), "PROTECTED_BRANCH");
+            assert!(rpc.to_string().contains("'main'"));
+        }
+
+        #[test]
+        fn no_remote_is_typed() {
+            let rpc = map_worktree_error(
+                W::NoRemoteConfigured("origin missing".into()),
+                "sid",
+            );
+            assert_eq!(rpc.code(), "NO_REMOTE");
+        }
+
+        #[test]
+        fn non_fast_forward_is_typed() {
+            let rpc = map_worktree_error(
+                W::NonFastForward("rejected".into()),
+                "sid",
+            );
+            assert_eq!(rpc.code(), "NON_FAST_FORWARD");
+        }
+
+        #[test]
+        fn auth_failure_is_typed() {
+            let rpc = map_worktree_error(W::AuthFailure("401".into()), "sid");
+            assert_eq!(rpc.code(), "GIT_AUTH_FAILED");
+        }
+
+        #[test]
+        fn network_timeout_is_typed() {
+            let rpc = map_worktree_error(W::NetworkTimeout("timeout".into()), "sid");
+            assert_eq!(rpc.code(), "GIT_NETWORK_ERROR");
+        }
+
+        #[test]
+        fn dirty_working_tree_is_typed() {
+            let rpc = map_worktree_error(W::DirtyWorkingTree("dirty".into()), "sid");
+            assert_eq!(rpc.code(), "DIRTY_WORKING_TREE");
+        }
+
+        #[test]
+        fn pending_merge_exists_is_invalid_params() {
+            let rpc = map_worktree_error(W::PendingMergeExists, "sid");
+            assert_eq!(rpc.code(), "INVALID_PARAMS");
+            assert!(rpc.to_string().contains("pending merge"));
+        }
+
+        #[test]
+        fn no_pending_merge_is_invalid_params() {
+            let rpc = map_worktree_error(W::NoPendingMerge, "sid");
+            assert_eq!(rpc.code(), "INVALID_PARAMS");
+        }
+
+        #[test]
+        fn missing_base_branch_is_typed() {
+            let rpc = map_worktree_error(W::MissingBaseBranch, "sid");
+            assert_eq!(rpc.code(), "MISSING_BASE_BRANCH");
+        }
+
+        #[test]
+        fn ref_not_found_is_typed() {
+            let rpc = map_worktree_error(W::RefNotFound("refs/heads/x".into()), "sid");
+            assert_eq!(rpc.code(), "REF_NOT_FOUND");
+            assert!(rpc.to_string().contains("refs/heads/x"));
+        }
+
+        #[test]
+        fn branch_exists_is_typed() {
+            let rpc = map_worktree_error(W::BranchExists("feature/x".into()), "sid");
+            assert_eq!(rpc.code(), "BRANCH_EXISTS");
+            assert!(rpc.to_string().contains("feature/x"));
+        }
+
+        #[test]
+        fn branch_active_is_typed() {
+            let rpc = map_worktree_error(W::BranchActive("feature/x".into()), "sid");
+            assert_eq!(rpc.code(), "BRANCH_ACTIVE");
+        }
+
+        #[test]
+        fn invalid_session_state_is_invalid_params() {
+            let rpc = map_worktree_error(
+                W::InvalidSessionState("detached HEAD".into()),
+                "sid",
+            );
+            assert_eq!(rpc.code(), "INVALID_PARAMS");
+            assert!(rpc.to_string().contains("detached HEAD"));
+        }
+
+        #[test]
+        fn git_error_is_typed() {
+            let rpc = map_worktree_error(W::Git("fatal: …".into()), "sid");
+            assert_eq!(rpc.code(), "GIT_ERROR");
+        }
+
+        #[test]
+        fn merge_conflicts_should_not_reach_boundary_but_is_internal() {
+            // Handlers must special-case this; if one doesn't,
+            // falling through to internal is the safe fallback.
+            let rpc = map_worktree_error(W::MergeConflicts(3), "sid");
+            assert_eq!(rpc.code(), "INTERNAL_ERROR");
+            assert!(rpc.to_string().contains("MergeConflicts(3)"));
+        }
+
+        #[test]
+        fn timeout_is_internal() {
+            let rpc = map_worktree_error(W::Timeout(5000), "sid");
+            assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        }
+
+        #[test]
+        fn io_error_is_internal() {
+            let rpc = map_worktree_error(
+                W::Io(std::io::Error::new(std::io::ErrorKind::Other, "disk full")),
+                "sid",
+            );
+            assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        }
+
+        #[test]
+        fn event_store_error_is_internal() {
+            let rpc = map_worktree_error(
+                W::EventStore("sqlite locked".into()),
+                "sid",
+            );
+            assert_eq!(rpc.code(), "INTERNAL_ERROR");
+        }
     }
 }

@@ -284,7 +284,7 @@ struct ConflictResolverSubSheet: View {
                     errorMessage = result.reason ?? "Subagent could not be spawned"
                 }
             } catch {
-                errorMessage = "Spawn failed: \(error.localizedDescription)"
+                errorMessage = friendlyGitError(error, action: "Spawn")
             }
         }
     }
@@ -302,7 +302,7 @@ struct ConflictResolverSubSheet: View {
             stage = .failed
             onCompleted?()
         } catch {
-            errorMessage = "Abort failed: \(error.localizedDescription)"
+            errorMessage = friendlyGitError(error, action: "Abort")
         }
     }
 }

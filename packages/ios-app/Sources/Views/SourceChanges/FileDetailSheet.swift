@@ -371,7 +371,7 @@ struct FileDetailSheet: View {
                 dismiss()
             }
         } catch {
-            actionError = "Failed to stage: \(error.localizedDescription)"
+            actionError = friendlyGitError(error, action: "Stage")
         }
     }
 
@@ -386,7 +386,7 @@ struct FileDetailSheet: View {
                 dismiss()
             }
         } catch {
-            actionError = "Failed to unstage: \(error.localizedDescription)"
+            actionError = friendlyGitError(error, action: "Unstage")
         }
     }
 
@@ -401,7 +401,7 @@ struct FileDetailSheet: View {
                 dismiss()
             }
         } catch {
-            actionError = "Failed to discard: \(error.localizedDescription)"
+            actionError = friendlyGitError(error, action: "Discard")
         }
     }
 

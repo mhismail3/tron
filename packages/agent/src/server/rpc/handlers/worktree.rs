@@ -12,7 +12,9 @@ use crate::worktree::{count_diff_stats, split_diff_by_file};
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{opt_bool, opt_string, require_string_param};
+use crate::server::rpc::handlers::{
+    map_worktree_error, opt_bool, opt_string, require_string_param,
+};
 use crate::server::rpc::registry::MethodHandler;
 use crate::worktree::types::CommitOptions;
 
@@ -89,14 +91,10 @@ impl MethodHandler for GetStatusHandler {
                 coord
                     .passthrough_status(path)
                     .await
-                    .map_err(|e| RpcError::Internal {
-                        message: format!("Failed to get passthrough status: {e}"),
-                    })?
+                    .map_err(|e| map_worktree_error(e, &session_id))?
             }
             Err(e) => {
-                return Err(RpcError::Internal {
-                    message: format!("Failed to get worktree status: {e}"),
-                });
+                return Err(map_worktree_error(e, &session_id));
             }
         };
 
@@ -156,7 +154,7 @@ impl MethodHandler for CommitHandler {
 
         if coord.get_info(&session_id).is_none() {
             return Err(RpcError::NotFound {
-                code: "WORKTREE_NOT_FOUND".into(),
+                code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             });
         }
@@ -190,9 +188,7 @@ impl MethodHandler for CommitHandler {
                 "commitHash": null,
                 "message": "nothing to commit",
             })),
-            Err(e) => Err(RpcError::Internal {
-                message: format!("Commit failed: {e}"),
-            }),
+            Err(e) => Err(map_worktree_error(e, &session_id)),
         }
     }
 }
@@ -214,7 +210,7 @@ impl MethodHandler for MergeHandler {
 
         if coord.get_info(&session_id).is_none() {
             return Err(RpcError::NotFound {
-                code: "WORKTREE_NOT_FOUND".into(),
+                code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             });
         }
@@ -238,9 +234,7 @@ impl MethodHandler for MergeHandler {
                     "conflicts": conflicts,
                 }))
             }
-            Err(e) => Err(RpcError::Internal {
-                message: format!("Merge failed: {e}"),
-            }),
+            Err(e) => Err(map_worktree_error(e, &session_id)),
         }
     }
 }
@@ -306,9 +300,7 @@ impl MethodHandler for AcquireHandler {
                 "acquired": false,
                 "reason": "not a git repo or isolation disabled",
             })),
-            Err(e) => Err(RpcError::Internal {
-                message: format!("Worktree acquisition failed: {e}"),
-            }),
+            Err(e) => Err(map_worktree_error(e, &session_id)),
         }
     }
 }
@@ -328,9 +320,7 @@ impl MethodHandler for ReleaseHandler {
         coord
             .release(&session_id)
             .await
-            .map_err(|e| RpcError::Internal {
-                message: format!("Worktree release failed: {e}"),
-            })?;
+            .map_err(|e| map_worktree_error(e, &session_id))?;
 
         Ok(serde_json::json!({
             "released": true,
@@ -360,9 +350,7 @@ impl MethodHandler for ListSessionBranchesHandler {
         let repo_root = std::path::Path::new(&repo_root_str);
         match coord.list_session_branches(repo_root).await {
             Ok(branches) => Ok(serde_json::json!({ "branches": branches })),
-            Err(e) => Err(RpcError::Internal {
-                message: format!("Failed to list session branches: {e}"),
-            }),
+            Err(e) => Err(map_worktree_error(e, &session_id)),
         }
     }
 }
@@ -393,9 +381,7 @@ impl MethodHandler for GetCommittedDiffHandler {
                 },
                 "truncated": false,
             })),
-            Err(e) => Err(RpcError::Internal {
-                message: format!("Failed to get committed diff: {e}"),
-            }),
+            Err(e) => Err(map_worktree_error(e, &session_id)),
         }
     }
 }
@@ -415,23 +401,17 @@ impl MethodHandler for DeleteBranchHandler {
 
         let dir = resolve_diff_dir(ctx, &session_id)?;
         let dir_path = std::path::Path::new(&dir);
-        let repo_root_str = coord.resolve_repo_root(dir_path).await.map_err(|e| {
-            RpcError::Internal {
-                message: format!("Failed to resolve repo root: {e}"),
-            }
-        })?;
+        let repo_root_str = coord
+            .resolve_repo_root(dir_path)
+            .await
+            .map_err(|e| map_worktree_error(e, &session_id))?;
         let repo_root = std::path::Path::new(&repo_root_str);
 
         match coord.delete_session_branch(repo_root, &branch).await {
             Ok(result) => serde_json::to_value(&result).map_err(|e| RpcError::Internal {
                 message: format!("Serialization failed: {e}"),
             }),
-            Err(crate::worktree::WorktreeError::BranchActive(_)) => Err(RpcError::InvalidParams {
-                message: format!("Branch '{branch}' is active and cannot be deleted"),
-            }),
-            Err(e) => Err(RpcError::Internal {
-                message: format!("Failed to delete branch: {e}"),
-            }),
+            Err(e) => Err(map_worktree_error(e, &session_id)),
         }
     }
 }
@@ -450,20 +430,17 @@ impl MethodHandler for PruneBranchesHandler {
 
         let dir = resolve_diff_dir(ctx, &session_id)?;
         let dir_path = std::path::Path::new(&dir);
-        let repo_root_str = coord.resolve_repo_root(dir_path).await.map_err(|e| {
-            RpcError::Internal {
-                message: format!("Failed to resolve repo root: {e}"),
-            }
-        })?;
+        let repo_root_str = coord
+            .resolve_repo_root(dir_path)
+            .await
+            .map_err(|e| map_worktree_error(e, &session_id))?;
         let repo_root = std::path::Path::new(&repo_root_str);
 
         match coord.prune_session_branches(repo_root).await {
             Ok(result) => serde_json::to_value(&result).map_err(|e| RpcError::Internal {
                 message: format!("Serialization failed: {e}"),
             }),
-            Err(e) => Err(RpcError::Internal {
-                message: format!("Failed to prune branches: {e}"),
-            }),
+            Err(e) => Err(map_worktree_error(e, &session_id)),
         }
     }
 }

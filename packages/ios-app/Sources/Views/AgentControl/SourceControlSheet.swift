@@ -53,6 +53,11 @@ struct SourceControlSheet: View {
     @State private var defaultMergeStrategy: String = "merge"
     @State private var defaultSessionBranchPolicy: String = "keep"
     @State private var defaultAutoSetUpstream: Bool = true
+    /// Protected branches from server settings — drives the Push tile's
+    /// enabled state so users can't even tap into the push sheet for
+    /// `main`/`master`/`develop`. Seeded with the server's default list
+    /// so the UI gates sensibly before `loadGitDefaults()` returns.
+    @State private var protectedBranches: [String] = ["main", "master", "develop"]
 
     enum GitActionSheet: String, Identifiable {
         case commit, syncMain, finalize, push, repoSessions, conflictResolver, rebaseOnMain
@@ -232,24 +237,28 @@ struct SourceControlSheet: View {
     // MARK: - Git Actions Card
 
     /// Two rows of three tiles each. Row 1 — Commit · Merge · Sessions.
-    /// Row 2 — Rebase · Pull · Push. Disabled tiles fade to 40% opacity.
-    /// The Rebase tile disables when the session is already up-to-date
-    /// with main, when a conflict banner is active, when a pending merge
-    /// exists, or when another session holds the repo lock — preconditions
-    /// that `rebaseOnMain` would reject server-side.
+    /// Row 2 — Rebase · Pull · Push. Every tile mirrors a server-side
+    /// precondition for its action, so taps that would inevitably reject
+    /// fade to 40% opacity and become non-interactive. The shared
+    /// `isWorkflowFree` gate disables every mutation while the repo lock
+    /// is held, a conflict banner is active, or a pending merge needs
+    /// resolution — the conflict resolver, not this grid, is the way out
+    /// of those states.
     private var gitActionsCard: some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 gitActionTile(
                     icon: "square.and.pencil",
                     title: "Commit",
-                    tint: .tronTeal
+                    tint: .tronTeal,
+                    isEnabled: isCommitEnabled
                 ) { activeGitAction = .commit }
 
                 gitActionTile(
                     icon: "checkmark.seal",
                     title: "Merge",
-                    tint: .tronCoral
+                    tint: .tronCoral,
+                    isEnabled: isMergeEnabled
                 ) { activeGitAction = .finalize }
 
                 gitActionTile(
@@ -257,7 +266,8 @@ struct SourceControlSheet: View {
                     title: repoSessionCount == 0
                         ? "Sessions"
                         : (repoSessionCount == 1 ? "1 Session" : "\(repoSessionCount) Sessions"),
-                    tint: .tronAmber
+                    tint: .tronAmber,
+                    isEnabled: isSessionsEnabled
                 ) { activeGitAction = .repoSessions }
             }
             HStack(spacing: 8) {
@@ -271,16 +281,59 @@ struct SourceControlSheet: View {
                 gitActionTile(
                     icon: "arrow.down.circle",
                     title: "Pull",
-                    tint: .tronEmerald
+                    tint: .tronEmerald,
+                    isEnabled: isPullEnabled
                 ) { activeGitAction = .syncMain }
 
                 gitActionTile(
                     icon: "arrow.up.circle",
                     title: "Push",
-                    tint: .tronSky
+                    tint: .tronSky,
+                    isEnabled: isPushEnabled
                 ) { activeGitAction = .push }
             }
         }
+    }
+
+    /// Shared mutation gate: every git workflow that mutates the repo
+    /// is blocked while another session holds the repo-wide lock, while
+    /// this session has an active conflict banner, or while a crash-
+    /// recovered pending merge still needs to be resolved or aborted.
+    /// The coordinator rejects the same cases server-side — gating here
+    /// avoids the round trip and an error popup.
+    private var isWorkflowFree: Bool {
+        gitWorkflowState?.lockHolder == nil
+            && gitWorkflowState?.conflictBanner == nil
+            && gitWorkflowState?.pendingMerge == nil
+    }
+
+    /// Commit tile needs uncommitted changes AND a workflow-free
+    /// session. Conflict resolution goes through the dedicated
+    /// conflict resolver, not this sheet.
+    private var isCommitEnabled: Bool {
+        guard isWorkflowFree else { return false }
+        return worktreeStatus?.worktree?.hasUncommittedChanges == true
+    }
+
+    /// Merge (finalize) tile needs commits to integrate, a clean tree,
+    /// and the session NOT sitting on its own base branch (nothing to
+    /// merge into anything). Each condition mirrors a server-side
+    /// `finalizeSession` precondition.
+    private var isMergeEnabled: Bool {
+        guard isWorkflowFree else { return false }
+        guard let info = worktreeStatus?.worktree else { return false }
+        guard !info.isOnBaseBranch else { return false }
+        guard (info.commitCount ?? 0) > 0 else { return false }
+        guard info.hasUncommittedChanges != true else { return false }
+        return true
+    }
+
+    /// Sessions tile is purely informational — disable when there are
+    /// no peer sessions to switch to (the sub-sheet would just show an
+    /// empty list). `repoSessionCount` is already
+    /// `max(0, listSessions.count - 1)` i.e. excludes self.
+    private var isSessionsEnabled: Bool {
+        repoSessionCount > 0
     }
 
     /// Rebase tile is enabled when the session is demonstrably behind
@@ -288,10 +341,32 @@ struct SourceControlSheet: View {
     /// mirrors a server-side `rebaseOnMain` precondition so the UI fails
     /// gracefully without a round trip.
     private var isRebaseEnabled: Bool {
+        guard isWorkflowFree else { return false }
         guard (divergence?.behindMain ?? 0) > 0 else { return false }
-        guard gitWorkflowState?.conflictBanner == nil else { return false }
-        guard gitWorkflowState?.pendingMerge == nil else { return false }
-        guard gitWorkflowState?.lockHolder == nil else { return false }
+        return true
+    }
+
+    /// Pull (syncMain) tile is enabled when local main is behind origin
+    /// main AND a remote is configured AND no blocking workflow state.
+    /// Strict gating: if there's nothing to pull, the tile is off —
+    /// avoids no-op fetch round-trips.
+    private var isPullEnabled: Bool {
+        guard isWorkflowFree else { return false }
+        guard divergence?.hasOrigin == true else { return false }
+        guard (divergence?.behindOrigin ?? 0) > 0 else { return false }
+        return true
+    }
+
+    /// Push tile is enabled when a remote is configured, the current
+    /// branch is NOT in the user's protected list, and the session is
+    /// workflow-free. We don't gate on commit count — pushing a zero-
+    /// commit branch to set upstream is still legitimate.
+    private var isPushEnabled: Bool {
+        guard isWorkflowFree else { return false }
+        guard divergence?.hasOrigin == true else { return false }
+        guard let branch = worktreeStatus?.worktree?.branch, !branch.isEmpty
+        else { return false }
+        guard !protectedBranches.contains(branch) else { return false }
         return true
     }
 
@@ -429,7 +504,7 @@ struct SourceControlSheet: View {
             await loadDivergence()
             await onWorktreeStatusShouldRefresh?()
         } catch {
-            errorMessage = "Abort failed: \(error.localizedDescription)"
+            errorMessage = friendlyGitError(error, action: "Abort")
             pendingAbortOrigin = nil
         }
     }
@@ -442,6 +517,7 @@ struct SourceControlSheet: View {
         defaultMergeStrategy = settings.gitMergeStrategy
         defaultSessionBranchPolicy = settings.gitSessionBranchPolicy
         defaultAutoSetUpstream = settings.gitAutoSetUpstream
+        protectedBranches = settings.gitProtectedBranches
     }
 
     // MARK: - Data Loading
