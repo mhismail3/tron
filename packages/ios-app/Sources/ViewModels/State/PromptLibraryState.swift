@@ -13,7 +13,7 @@ final class PromptLibraryState {
     /// Library sheet tabs.
     enum Tab: Hashable { case history, snippets }
 
-    var activeTab: Tab = .history
+    var activeTab: Tab = .snippets
 
     // MARK: - History
 

@@ -20,8 +20,8 @@ struct PromptLibrarySheet: View {
             VStack(spacing: 12) {
                 TronSegmentedControl(
                     options: [
-                        (label: "History", value: PromptLibraryState.Tab.history),
-                        (label: "Snippets", value: PromptLibraryState.Tab.snippets)
+                        (label: "Snippets", value: PromptLibraryState.Tab.snippets),
+                        (label: "History", value: PromptLibraryState.Tab.history)
                     ],
                     selection: $state.activeTab
                 )
@@ -152,8 +152,8 @@ struct PromptLibrarySheet: View {
             }
         }
         .task {
-            await state.loadHistory(rpc: rpcClient, reset: true)
             await state.loadSnippets(rpc: rpcClient)
+            await state.loadHistory(rpc: rpcClient, reset: true)
         }
     }
 }

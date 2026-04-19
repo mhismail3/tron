@@ -46,9 +46,6 @@ struct PromptSnippetListView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .refreshable {
-            await state.loadSnippets(rpc: rpcClient)
-        }
     }
 
     private var emptyState: some View {
