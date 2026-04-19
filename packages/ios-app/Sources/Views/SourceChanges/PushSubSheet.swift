@@ -20,13 +20,7 @@ struct PushSubSheet: View {
     @State private var setUpstream: Bool = true
     @State private var forceWithLease: Bool = false
     @State private var dryRun: Bool = false
-    @State private var isPushing = false
-    @State private var result: GitPushResult?
-    @State private var errorMessage: String?
-    /// True between a successful real push and the auto-dismiss firing.
-    /// Dry-runs intentionally don't set this — the user may want to toggle
-    /// off dry-run and push for real without dismissing.
-    @State private var isDismissingAfterSuccess: Bool = false
+    @State private var runner = GitActionRunner<GitPushResult>()
     @Environment(\.dismiss) private var dismiss
 
     private let accent: Color = .tronSky
@@ -39,8 +33,8 @@ struct PushSubSheet: View {
                 SheetPrimaryActionButton(
                     icon: dryRun ? "eye" : "arrow.up",
                     accent: accent,
-                    isBusy: isPushing,
-                    isEnabled: !isPushing && hasBranch && !isDismissingAfterSuccess,
+                    isBusy: runner.isRunning,
+                    isEnabled: runner.isEnabled && hasBranch,
                     accessibilityLabel: dryRun ? "Dry Run Push" : "Push"
                 ) { performPush() }
             },
@@ -57,12 +51,12 @@ struct PushSubSheet: View {
                 forceWithLeaseCard
                 dryRunCard
 
-                if let result {
+                if let result = runner.result {
                     resultBanner(result)
                 }
             }
         )
-        .tronErrorAlert(message: $errorMessage)
+        .tronErrorAlert(message: $runner.errorMessage)
         .task {
             branch = currentBranch
             setUpstream = defaultAutoSetUpstream
@@ -201,12 +195,11 @@ struct PushSubSheet: View {
     // MARK: Actions
 
     private func performPush() {
+        // Real pushes auto-dismiss; dry-runs stay open. The contract is
+        // captured by GitPushResult.isCleanSuccess.
         Task {
-            isPushing = true
-            defer { isPushing = false }
-            result = nil
-            do {
-                let r = try await rpcClient.git.push(
+            await runner.run(action: .push, dismiss: { dismiss() }) {
+                try await rpcClient.git.push(
                     sessionId: sessionId,
                     branch: pushBranch,
                     remote: nil,
@@ -216,17 +209,6 @@ struct PushSubSheet: View {
                     overrideProtected: nil,
                     protectedBranches: nil
                 )
-                result = r
-                // Auto-dismiss after a real push only. Dry-runs stay open so
-                // the user can review the preview banner and optionally
-                // toggle off dry-run + re-push without re-opening the sheet.
-                if !r.dryRun {
-                    isDismissingAfterSuccess = true
-                    try? await Task.sleep(for: .milliseconds(700))
-                    dismiss()
-                }
-            } catch {
-                errorMessage = friendlyGitError(error, action: .push)
             }
         }
     }

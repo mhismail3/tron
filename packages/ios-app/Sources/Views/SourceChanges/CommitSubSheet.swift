@@ -28,13 +28,7 @@ struct CommitSubSheet: View {
     @State private var stageAll: Bool = true
     @State private var amendPrevious: Bool = false
     @State private var signOff: Bool = false
-    @State private var isCommitting: Bool = false
-    @State private var result: WorktreeCommitResult?
-    @State private var errorMessage: String?
-    /// True between a successful commit and the auto-dismiss firing.
-    /// Gates the primary action button so a double-tap during the 700ms
-    /// confirmation window can't fire a second commit.
-    @State private var isDismissingAfterSuccess: Bool = false
+    @State private var runner = GitActionRunner<WorktreeCommitResult>()
     @FocusState private var messageFocused: Bool
     @Environment(\.dismiss) private var dismiss
 
@@ -98,10 +92,8 @@ struct CommitSubSheet: View {
     }
 
     private var isActionable: Bool {
-        guard !isDismissingAfterSuccess else { return false }
-        guard hasWorktree, !isCommitting, !trimmedMessage.isEmpty else {
-            return false
-        }
+        guard runner.isEnabled else { return false }
+        guard hasWorktree, !trimmedMessage.isEmpty else { return false }
         // Amend can succeed on a clean tree (rewrites HEAD).
         // Stage-all with no changes at all cannot.
         return hasChanges || amendPrevious
@@ -157,7 +149,7 @@ struct CommitSubSheet: View {
                 SheetPrimaryActionButton(
                     icon: amendPrevious ? "pencil" : "checkmark",
                     accent: accent,
-                    isBusy: isCommitting,
+                    isBusy: runner.isRunning,
                     isEnabled: isActionable,
                     accessibilityLabel: amendPrevious ? "Amend Commit" : "Commit"
                 ) { performCommit() }
@@ -176,12 +168,12 @@ struct CommitSubSheet: View {
                 amendCard
                 signOffCard
 
-                if let result {
+                if let result = runner.result {
                     resultBanner(result)
                 }
             }
         )
-        .tronErrorAlert(message: $errorMessage)
+        .tronErrorAlert(message: $runner.errorMessage)
         .scrollDismissesKeyboard(.interactively)
         .onAppear {
             // Focus the editor after the sheet slides up so the keyboard
@@ -385,31 +377,19 @@ struct CommitSubSheet: View {
 
     private func performCommit() {
         guard isActionable else { return }
+        // Auto-dismiss kicks in only when `commitHash != nil` —
+        // WorktreeCommitResult.isCleanSuccess captures that contract.
+        // "Nothing to commit" stays on screen because the warning banner
+        // IS the feedback the user needs.
         Task {
-            isCommitting = true
-            defer { isCommitting = false }
-            result = nil
-            do {
-                let r = try await rpcClient.worktree.commit(
+            await runner.run(action: .commit, dismiss: { dismiss() }) {
+                try await rpcClient.worktree.commit(
                     sessionId: sessionId,
                     message: trimmedMessage,
                     amend: amendPrevious ? true : nil,
                     signoff: signOff ? true : nil,
                     stageAll: stageAll ? nil : false
                 )
-                result = r
-                // Auto-dismiss after a real commit so the user sees the
-                // success banner briefly and then lands back on the Source
-                // Control sheet with the updated diff. "Nothing to commit"
-                // (hash == nil) stays on-screen because the warning banner
-                // IS the feedback the user needs.
-                if r.commitHash != nil {
-                    isDismissingAfterSuccess = true
-                    try? await Task.sleep(for: .milliseconds(700))
-                    dismiss()
-                }
-            } catch {
-                errorMessage = friendlyGitError(error, action: .commit)
             }
         }
     }

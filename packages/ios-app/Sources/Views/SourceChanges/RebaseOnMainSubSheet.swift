@@ -21,14 +21,7 @@ struct RebaseOnMainSubSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var strategy: Strategy = .rebase
-    @State private var isRunning = false
-    @State private var result: WorktreeRebaseOnMainResult?
-    @State private var errorMessage: String?
-    /// True between a successful rebase and the auto-dismiss firing.
-    /// `.conflicts` and `.noOp` outcomes don't flip this — conflicts need
-    /// an explicit resolver tap; no-op carries info (ahead count) that
-    /// the user should read before leaving.
-    @State private var isDismissingAfterSuccess: Bool = false
+    @State private var runner = GitActionRunner<WorktreeRebaseOnMainResult>()
 
     private let accent: Color = .tronPurple
 
@@ -67,8 +60,8 @@ struct RebaseOnMainSubSheet: View {
                 SheetPrimaryActionButton(
                     icon: "arrow.triangle.2.circlepath",
                     accent: accent,
-                    isBusy: isRunning,
-                    isEnabled: !isRunning && result == nil && !isDismissingAfterSuccess,
+                    isBusy: runner.isRunning,
+                    isEnabled: runner.isEnabled,
                     accessibilityLabel: "Rebase"
                 ) { performRebase() }
             },
@@ -90,12 +83,12 @@ struct RebaseOnMainSubSheet: View {
                     mainStaleWarningCard(behind: divergence.behindOrigin ?? 0)
                 }
 
-                if let result {
+                if let result = runner.result {
                     resultBanner(result)
                 }
             }
         )
-        .tronErrorAlert(message: $errorMessage)
+        .tronErrorAlert(message: $runner.errorMessage)
     }
 
     private var displayMain: String {
@@ -184,26 +177,14 @@ struct RebaseOnMainSubSheet: View {
     // MARK: Actions
 
     private func performRebase() {
+        // Only `.success` auto-dismisses; `.conflicts` and `.noOp` stay
+        // open. Contract captured by WorktreeRebaseOnMainResult.isCleanSuccess.
         Task {
-            isRunning = true
-            defer { isRunning = false }
-            result = nil
-            do {
-                let r = try await rpcClient.worktree.rebaseOnMain(
+            await runner.run(action: .rebase, dismiss: { dismiss() }) {
+                try await rpcClient.worktree.rebaseOnMain(
                     sessionId: sessionId,
                     strategy: strategy.rawValue
                 )
-                result = r
-                // Only clean `.success` auto-dismisses. `.conflicts` gives
-                // the user an explicit resolver CTA to tap; `.noOp` shows
-                // "already up to date" info worth reading.
-                if case .success = r {
-                    isDismissingAfterSuccess = true
-                    try? await Task.sleep(for: .milliseconds(700))
-                    dismiss()
-                }
-            } catch {
-                errorMessage = friendlyGitError(error, action: .rebase)
             }
         }
     }

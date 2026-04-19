@@ -14,10 +14,21 @@ struct SettingsCycleToggle: View {
     let onCycle: (String) -> Void
 
     var body: some View {
+        // Empty `options` would index-trap `options[idx]` and divide by
+        // zero on `% options.count`. Render an empty view defensively;
+        // every production caller passes ≥2 options.
+        if options.isEmpty {
+            EmptyView()
+        } else {
+            cycleButton
+        }
+    }
+
+    private var cycleButton: some View {
         let idx = options.firstIndex(where: { $0.value == current }) ?? 0
         let label = options[idx].label
 
-        Button {
+        return Button {
             let next = options[(idx + 1) % options.count].value
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 onCycle(next)

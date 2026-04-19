@@ -28,13 +28,7 @@ struct MergeChangesSubSheet: View {
     @State private var strategy: MergeStrategy = .merge
     @State private var deleteOldBranch: Bool = false
     @State private var rebranch: Bool = true
-    @State private var isFinalizing = false
-    @State private var result: WorktreeFinalizeSessionResult?
-    @State private var errorMessage: String?
-    /// True between a successful clean merge and the auto-dismiss firing.
-    /// Conflict outcomes don't flip this — the user needs to tap
-    /// "Open Conflict Resolver" explicitly.
-    @State private var isDismissingAfterSuccess: Bool = false
+    @State private var runner = GitActionRunner<WorktreeFinalizeSessionResult>()
 
     private let accent: Color = .tronCoral
 
@@ -77,8 +71,8 @@ struct MergeChangesSubSheet: View {
                 SheetPrimaryActionButton(
                     icon: "checkmark.seal",
                     accent: accent,
-                    isBusy: isFinalizing,
-                    isEnabled: !isFinalizing && result == nil && !isDismissingAfterSuccess,
+                    isBusy: runner.isRunning,
+                    isEnabled: runner.isEnabled,
                     accessibilityLabel: "Merge"
                 ) { performFinalize() }
             },
@@ -97,7 +91,7 @@ struct MergeChangesSubSheet: View {
                     deleteOldCard
                 }
 
-                if let result {
+                if let result = runner.result {
                     if result.conflicts == true {
                         GitResultBanner(
                             kind: .warning,
@@ -114,7 +108,7 @@ struct MergeChangesSubSheet: View {
                 }
             }
         )
-        .tronErrorAlert(message: $errorMessage)
+        .tronErrorAlert(message: $runner.errorMessage)
         .task {
             targetBranch = suggestedTargetBranch ?? "main"
             strategy = MergeStrategy(rawValue: defaultStrategy) ?? .merge
@@ -240,30 +234,19 @@ struct MergeChangesSubSheet: View {
     // MARK: Actions
 
     private func performFinalize() {
+        // Clean merge → auto-dismiss; conflicts → stay open with the
+        // "Open Conflict Resolver" CTA. Contract captured by
+        // WorktreeFinalizeSessionResult.isCleanSuccess.
         Task {
-            isFinalizing = true
-            defer { isFinalizing = false }
-            result = nil
-            do {
+            await runner.run(action: .merge, dismiss: { dismiss() }) {
                 let trimmed = targetBranch.trimmingCharacters(in: .whitespaces)
-                let r = try await rpcClient.worktree.finalizeSession(
+                return try await rpcClient.worktree.finalizeSession(
                     sessionId: sessionId,
                     targetBranch: trimmed.isEmpty ? nil : trimmed,
                     strategy: strategy.rawValue,
                     preserveOld: !deleteOldBranch,
                     rebranch: rebranch
                 )
-                result = r
-                // Clean merge → auto-dismiss after the success banner flashes.
-                // Conflicts stay visible: the user taps "Open Conflict
-                // Resolver" which swaps the active sheet via `onConflicts`.
-                if r.conflicts != true {
-                    isDismissingAfterSuccess = true
-                    try? await Task.sleep(for: .milliseconds(700))
-                    dismiss()
-                }
-            } catch {
-                errorMessage = friendlyGitError(error, action: .merge)
             }
         }
     }

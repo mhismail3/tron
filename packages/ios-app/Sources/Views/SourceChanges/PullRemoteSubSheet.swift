@@ -22,13 +22,7 @@ struct PullRemoteSubSheet: View {
 
     @State private var prune: Bool = false
     @State private var dryRun: Bool = false
-    @State private var isSyncing = false
-    @State private var outcome: GitSyncOutcome?
-    @State private var errorMessage: String?
-    /// True between a successful real sync (upToDate / fastForwarded) and
-    /// the auto-dismiss firing. Dry-runs and blocked outcomes don't flip
-    /// this — they carry information the user needs to read before leaving.
-    @State private var isDismissingAfterSuccess: Bool = false
+    @State private var runner = GitActionRunner<GitSyncOutcome>()
     @Environment(\.dismiss) private var dismiss
 
     private let accent: Color = .tronEmerald
@@ -41,8 +35,8 @@ struct PullRemoteSubSheet: View {
                 SheetPrimaryActionButton(
                     icon: dryRun ? "eye" : "arrow.down",
                     accent: accent,
-                    isBusy: isSyncing,
-                    isEnabled: !isSyncing && !isDismissingAfterSuccess,
+                    isBusy: runner.isRunning,
+                    isEnabled: runner.isEnabled,
                     accessibilityLabel: dryRun ? "Dry Run Pull" : "Pull"
                 ) { performSync() }
             },
@@ -57,12 +51,12 @@ struct PullRemoteSubSheet: View {
                 pruneCard
                 dryRunCard
 
-                if let outcome {
+                if let outcome = runner.result {
                     outcomeBanner(outcome)
                 }
             }
         )
-        .tronErrorAlert(message: $errorMessage)
+        .tronErrorAlert(message: $runner.errorMessage)
     }
 
     // MARK: Dynamic Hero Summary
@@ -172,32 +166,17 @@ struct PullRemoteSubSheet: View {
     // MARK: Actions
 
     private func performSync() {
+        // upToDate / fastForwarded auto-dismiss; dryRunPreview / blocked
+        // stay open. Contract captured by GitSyncOutcome.isCleanSuccess.
         Task {
-            isSyncing = true
-            defer { isSyncing = false }
-            outcome = nil
-            do {
+            await runner.run(action: .sync, dismiss: { dismiss() }) {
                 // No targetBranch — server auto-detects the repo's default.
-                let o = try await rpcClient.git.syncMain(
+                try await rpcClient.git.syncMain(
                     sessionId: sessionId,
                     targetBranch: nil,
                     prune: prune ? true : nil,
                     dryRun: dryRun ? true : nil
                 )
-                outcome = o
-                // Auto-dismiss on real success only. Dry-runs surface a
-                // preview the user needs to read; `blocked` surfaces a
-                // reason the user needs to act on. Both stay open.
-                switch o {
-                case .upToDate, .fastForwarded:
-                    isDismissingAfterSuccess = true
-                    try? await Task.sleep(for: .milliseconds(700))
-                    dismiss()
-                case .dryRunPreview, .blocked:
-                    break
-                }
-            } catch {
-                errorMessage = friendlyGitError(error, action: .sync)
             }
         }
     }
