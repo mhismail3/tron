@@ -98,23 +98,16 @@ struct SourceControlSheet: View {
                                     // origin-aware abort. The resolver itself
                                     // drives `continueMerge` via the subagent
                                     // path once spawned.
-                                    onContinueSubagent: {
+                                    onResolve: {
                                         activeGitAction = .conflictResolver
                                     },
-                                    onAbortPending: {
-                                        // Fall back to `.finalize` when we
-                                        // don't know the origin (pending_merge
-                                        // events don't yet carry it). Server
-                                        // dispatches abort by actual origin
-                                        // from `pending_merges[sid].origin`.
-                                        pendingAbortOrigin =
-                                            gitWorkflowState?.conflictBanner?.origin ?? .finalize
-                                    },
-                                    onResolveConflicts: {
-                                        activeGitAction = .conflictResolver
-                                    },
-                                    onAbortConflicts: {
-                                        pendingAbortOrigin = gitWorkflowState?.conflictBanner?.origin
+                                    onAbort: { origin in
+                                        // `nil` ⇒ pending-merge banner (server's
+                                        // `pending_merge_detected` event has no
+                                        // origin field yet — fall back to
+                                        // `.finalize`). Live conflict banners
+                                        // pass the actual origin.
+                                        pendingAbortOrigin = origin ?? .finalize
                                     }
                                 )
                                 .sheetSection()
@@ -246,20 +239,21 @@ struct SourceControlSheet: View {
     /// resolution — the conflict resolver, not this grid, is the way out
     /// of those states.
     private var gitActionsCard: some View {
-        VStack(spacing: 8) {
+        let g = gating
+        return VStack(spacing: 8) {
             HStack(spacing: 8) {
                 gitActionTile(
                     icon: "square.and.pencil",
                     title: "Commit",
                     tint: .tronTeal,
-                    isEnabled: isCommitEnabled
+                    isEnabled: g.isCommitEnabled
                 ) { activeGitAction = .commit }
 
                 gitActionTile(
                     icon: "checkmark.seal",
                     title: "Merge",
                     tint: .tronCoral,
-                    isEnabled: isMergeEnabled
+                    isEnabled: g.isMergeEnabled
                 ) { activeGitAction = .finalize }
 
                 gitActionTile(
@@ -268,7 +262,7 @@ struct SourceControlSheet: View {
                         ? "Sessions"
                         : (repoSessionCount == 1 ? "1 Session" : "\(repoSessionCount) Sessions"),
                     tint: .tronAmber,
-                    isEnabled: isSessionsEnabled
+                    isEnabled: g.isSessionsEnabled
                 ) { activeGitAction = .repoSessions }
             }
             HStack(spacing: 8) {
@@ -276,102 +270,40 @@ struct SourceControlSheet: View {
                     icon: "arrow.triangle.2.circlepath",
                     title: "Rebase",
                     tint: .tronPurple,
-                    isEnabled: isRebaseEnabled
+                    isEnabled: g.isRebaseEnabled
                 ) { activeGitAction = .rebaseOnMain }
 
                 gitActionTile(
                     icon: "arrow.down.circle",
                     title: "Pull",
                     tint: .tronEmerald,
-                    isEnabled: isPullEnabled
+                    isEnabled: g.isPullEnabled
                 ) { activeGitAction = .syncMain }
 
                 gitActionTile(
                     icon: "arrow.up.circle",
                     title: "Push",
                     tint: .tronSky,
-                    isEnabled: isPushEnabled
+                    isEnabled: g.isPushEnabled
                 ) { activeGitAction = .push }
             }
         }
     }
 
-    /// Shared mutation gate: every git workflow that mutates the repo
-    /// is blocked while another session holds the repo-wide lock, while
-    /// this session has an active conflict banner, or while a crash-
-    /// recovered pending merge still needs to be resolved or aborted.
-    /// The coordinator rejects the same cases server-side — gating here
-    /// avoids the round trip and an error popup.
-    private var isWorkflowFree: Bool {
-        gitWorkflowState?.lockHolder == nil
-            && gitWorkflowState?.conflictBanner == nil
-            && gitWorkflowState?.pendingMerge == nil
-    }
-
-    /// Commit tile needs uncommitted changes AND a workflow-free
-    /// session. Conflict resolution goes through the dedicated
-    /// conflict resolver, not this sheet.
-    private var isCommitEnabled: Bool {
-        guard isWorkflowFree else { return false }
-        return worktreeStatus?.worktree?.hasUncommittedChanges == true
-    }
-
-    /// Merge (finalize) tile needs commits to integrate, a clean tree,
-    /// and the session NOT sitting on its own base branch (nothing to
-    /// merge into anything). Each condition mirrors a server-side
-    /// `finalizeSession` precondition.
-    private var isMergeEnabled: Bool {
-        guard isWorkflowFree else { return false }
-        guard let info = worktreeStatus?.worktree else { return false }
-        guard !info.isOnBaseBranch else { return false }
-        guard (info.commitCount ?? 0) > 0 else { return false }
-        guard info.hasUncommittedChanges != true else { return false }
-        return true
-    }
-
-    /// Sessions tile is purely informational — disable when there are
-    /// no peer sessions to switch to (the sub-sheet would just show an
-    /// empty list). `repoSessionCount` is already
-    /// `max(0, listSessions.count - 1)` i.e. excludes self.
-    private var isSessionsEnabled: Bool {
-        repoSessionCount > 0
-    }
-
-    /// Rebase tile is enabled when the session is demonstrably behind
-    /// main AND no blocking workflow state is present. Each condition
-    /// mirrors a server-side `rebaseOnMain` precondition so the UI fails
-    /// gracefully without a round trip.
-    private var isRebaseEnabled: Bool {
-        guard isWorkflowFree else { return false }
-        guard (divergence?.behindMain ?? 0) > 0 else { return false }
-        return true
-    }
-
-    /// Pull (syncMain) tile is enabled when local main is behind origin
-    /// main AND a remote is configured AND no blocking workflow state.
-    /// Strict gating: if there's nothing to pull, the tile is off —
-    /// avoids no-op fetch round-trips.
-    private var isPullEnabled: Bool {
-        guard isWorkflowFree else { return false }
-        guard divergence?.hasOrigin == true else { return false }
-        guard (divergence?.behindOrigin ?? 0) > 0 else { return false }
-        return true
-    }
-
-    /// Push tile is enabled when a remote is configured, the current
-    /// branch is NOT in the user's protected list, and the session is
-    /// workflow-free. We don't gate on commit count — pushing a zero-
-    /// commit branch to set upstream is still legitimate. Until the
-    /// `gitProtectedBranches` setting has loaded, Push stays disabled
-    /// (we won't authorize a push without knowing the user's policy).
-    private var isPushEnabled: Bool {
-        guard isWorkflowFree else { return false }
-        guard divergence?.hasOrigin == true else { return false }
-        guard let branch = worktreeStatus?.worktree?.branch, !branch.isEmpty
-        else { return false }
-        guard let protected = protectedBranches else { return false }
-        guard !protected.contains(branch) else { return false }
-        return true
+    /// Tile-enabled matrix derived from current workflow + repo state.
+    /// Centralized in `GitTileGating` so the rules can be unit-tested
+    /// independent of SwiftUI. Mirror of server-side preconditions —
+    /// drift between server and client is the bug this exists to catch.
+    private var gating: GitTileGating {
+        GitTileGating(
+            hasLockHolder: gitWorkflowState?.lockHolder != nil,
+            hasPendingMerge: gitWorkflowState?.pendingMerge != nil,
+            hasConflictBanner: gitWorkflowState?.conflictBanner != nil,
+            worktree: worktreeStatus?.worktree,
+            divergence: divergence,
+            protectedBranches: protectedBranches,
+            repoSessionCount: repoSessionCount
+        )
     }
 
     private func gitActionTile(
@@ -508,7 +440,7 @@ struct SourceControlSheet: View {
             await loadDivergence()
             await onWorktreeStatusShouldRefresh?()
         } catch {
-            errorMessage = friendlyGitError(error, action: "Abort")
+            errorMessage = friendlyGitError(error, action: .abort)
             pendingAbortOrigin = nil
         }
     }
@@ -533,7 +465,7 @@ struct SourceControlSheet: View {
             diffResult = try await diff
             worktreeStatus = await status
         } catch {
-            errorMessage = "Failed to load changes: \(error.localizedDescription)"
+            errorMessage = friendlyGitError(error, action: .load)
         }
     }
 

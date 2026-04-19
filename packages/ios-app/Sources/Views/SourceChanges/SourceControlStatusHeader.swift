@@ -26,11 +26,16 @@ struct SourceControlStatusHeader: View {
     let pendingMerge: PendingMergeBanner?
     let conflictBanner: ConflictBanner?
 
-    // Callbacks
-    var onContinueSubagent: (() -> Void)?
-    var onAbortPending: (() -> Void)?
-    var onResolveConflicts: (() -> Void)?
-    var onAbortConflicts: (() -> Void)?
+    /// Open the conflict resolver. Fires from either banner — the
+    /// resolver itself reads the active conflict state to figure out
+    /// what to display.
+    var onResolve: (() -> Void)?
+
+    /// Abort the in-progress operation. Carries the origin where the
+    /// header knows it (live conflict banner); pending-merge banners
+    /// pass `nil` because the server's `pending_merge_detected` event
+    /// doesn't yet include origin — the parent maps `nil` to `.finalize`.
+    var onAbort: ((ConflictOrigin?) -> Void)?
 
     @State private var didCopy = false
 
@@ -204,7 +209,7 @@ struct SourceControlStatusHeader: View {
             }
             HStack(spacing: 8) {
                 Button {
-                    onContinueSubagent?()
+                    onResolve?()
                 } label: {
                     Text("Continue Subagent")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
@@ -215,7 +220,7 @@ struct SourceControlStatusHeader: View {
                 }
                 .buttonStyle(.plain)
                 Button {
-                    onAbortPending?()
+                    onAbort?(nil)
                 } label: {
                     Text("Abort Now")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
@@ -259,7 +264,7 @@ struct SourceControlStatusHeader: View {
             }
             HStack(spacing: 8) {
                 Button {
-                    onResolveConflicts?()
+                    onResolve?()
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "wand.and.stars")
@@ -274,7 +279,7 @@ struct SourceControlStatusHeader: View {
                 }
                 .buttonStyle(.plain)
                 Button {
-                    onAbortConflicts?()
+                    onAbort?(banner.origin)
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "xmark.circle")
