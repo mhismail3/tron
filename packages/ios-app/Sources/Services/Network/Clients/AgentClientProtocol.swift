@@ -18,7 +18,6 @@ protocol AgentClientProtocol {
     // Session-scoped skill methods
     func activateSkill(_ skillName: String) async throws -> SkillActivateResult
     func deactivateSkill(_ skillName: String) async throws -> SkillDeactivateResult
-    func castSpell(_ spellName: String) async throws -> SpellCastResult
     func activeSkills() async throws -> SkillActiveResult
 }
 

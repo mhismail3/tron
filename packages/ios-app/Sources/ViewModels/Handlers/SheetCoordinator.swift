@@ -59,9 +59,9 @@ final class SheetCoordinator {
         present(.agentControl)
     }
 
-    /// Show skill/spell detail sheet
-    func showSkillDetail(_ skill: Skill, mode: ChipMode) {
-        present(.skillDetail(skill, mode))
+    /// Show skill detail sheet
+    func showSkillDetail(_ skill: Skill) {
+        present(.skillDetail(skill))
     }
 
     /// Show compaction detail sheet

@@ -1,15 +1,14 @@
-//! Session-scoped skill activation/deactivation and spell casting RPCs.
+//! Session-scoped skill activation/deactivation RPCs.
 //!
 //! These handlers manage per-session skill state via the event store.
-//! State is event-sourced: `skill.activated` / `skill.deactivated` /
-//! `spell.cast` events are appended, and [`SkillTracker::from_events`]
-//! reconstructs the current state on read.
+//! State is event-sourced: `skill.activated` / `skill.deactivated` events
+//! are appended, and [`SkillTracker::from_events`] reconstructs the current
+//! state on read.
 //!
 //! ## Handlers
 //!
 //! - [`ActivateHandler`] — `skill.activate` — add a skill to the session
 //! - [`DeactivateHandler`] — `skill.deactivate` — remove a skill from the session
-//! - [`CastSpellHandler`] — `spell.cast` — queue an ephemeral spell for the next prompt
 //! - [`ActiveHandler`] — `skill.active` — query currently active skills
 
 use async_trait::async_trait;
@@ -210,62 +209,6 @@ impl MethodHandler for DeactivateHandler {
     }
 }
 
-/// Cast an ephemeral spell for the next prompt only.
-///
-/// Writes a `spell.cast` event. The spell content will be injected into
-/// the system prompt for exactly one prompt, then consumed.
-pub struct CastSpellHandler;
-
-#[async_trait]
-impl MethodHandler for CastSpellHandler {
-    #[instrument(skip(self, ctx), fields(method = "spell.cast"))]
-    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let spell_name = require_string_param(params.as_ref(), "spellName")?;
-
-        // Verify session exists
-        let _ = ctx.session_manager
-            .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| RpcError::NotFound {
-                code: errors::NOT_FOUND.into(),
-                message: format!("Session '{session_id}' not found"),
-            })?;
-
-        // Look up spell in registry (spells use the same registry as skills)
-        let source = {
-            let registry = ctx.skill_registry.read();
-            let skill = registry.get(&spell_name).ok_or_else(|| RpcError::NotFound {
-                code: errors::NOT_FOUND.into(),
-                message: format!("Spell '{spell_name}' not found"),
-            })?;
-            skill.source.to_string()
-        };
-
-        // Write spell.cast event
-        let _ = ctx.event_store.append(&crate::events::AppendOptions {
-            session_id: &session_id,
-            event_type: crate::events::EventType::SpellCast,
-            payload: serde_json::json!({
-                "spellName": spell_name,
-                "source": source,
-            }),
-            parent_id: None,
-            sequence: None,
-        });
-
-        Ok(serde_json::json!({
-            "success": true,
-            "spell": {
-                "name": spell_name,
-                "source": source,
-            }
-        }))
-    }
-}
-
 /// Query currently active skills in a session.
 ///
 /// Reconstructs skill state from events and returns the list of
@@ -296,8 +239,6 @@ impl MethodHandler for ActiveHandler {
                 &[
                     "skill.activated",
                     "skill.deactivated",
-                    "spell.cast",
-                    "spell.consumed",
                     "context.cleared",
                     "compact.boundary",
                 ],
@@ -335,21 +276,8 @@ impl MethodHandler for ActiveHandler {
             })
             .collect();
 
-        let pending_spells: Vec<Value> = tracker
-            .unconsumed_spells()
-            .iter()
-            .map(|s| {
-                serde_json::json!({
-                    "name": s.name,
-                    "source": s.source.to_string(),
-                    "eventId": s.event_id,
-                })
-            })
-            .collect();
-
         Ok(serde_json::json!({
             "skills": skills,
-            "pendingSpells": pending_spells,
         }))
     }
 }
@@ -360,7 +288,7 @@ impl MethodHandler for ActiveHandler {
 
 /// Reconstruct a SkillTracker from the event store for a given session.
 ///
-/// Queries all skill/spell-related events and builds the tracker.
+/// Queries all skill-related events and builds the tracker.
 pub fn reconstruct_tracker(
     event_store: &crate::events::EventStore,
     session_id: &str,
@@ -372,8 +300,6 @@ pub fn reconstruct_tracker(
             &[
                 "skill.activated",
                 "skill.deactivated",
-                "spell.cast",
-                "spell.consumed",
                 "context.cleared",
                 "compact.boundary",
                 "skills.cleared",
@@ -576,47 +502,6 @@ mod tests {
         assert!(events.is_empty());
     }
 
-    // ── spell.cast ──────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_spell_cast_success() {
-        let ctx = make_test_context();
-        ctx.skill_registry.write().insert(make_skill("commit"));
-        let session_id = create_test_session(&ctx);
-
-        let result = CastSpellHandler
-            .handle(
-                Some(json!({"sessionId": session_id, "spellName": "commit"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
-        assert_eq!(result["success"], true);
-        assert_eq!(result["spell"]["name"], "commit");
-
-        // Verify event was written
-        let events = ctx
-            .event_store
-            .get_events_by_type(&session_id, &["spell.cast"], None)
-            .unwrap();
-        assert_eq!(events.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_spell_cast_not_found() {
-        let ctx = make_test_context();
-        let session_id = create_test_session(&ctx);
-
-        let err = CastSpellHandler
-            .handle(
-                Some(json!({"sessionId": session_id, "spellName": "nonexistent"})),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), "NOT_FOUND");
-    }
-
     // ── skill.active ────────────────────────────────────────────────
 
     #[tokio::test]
@@ -669,32 +554,6 @@ mod tests {
 
         let skills = result["skills"].as_array().unwrap();
         assert!(skills.is_empty());
-        let spells = result["pendingSpells"].as_array().unwrap();
-        assert!(spells.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_skill_active_includes_pending_spells() {
-        let ctx = make_test_context();
-        ctx.skill_registry.write().insert(make_skill("commit"));
-        let session_id = create_test_session(&ctx);
-
-        let _ = CastSpellHandler
-            .handle(
-                Some(json!({"sessionId": session_id, "spellName": "commit"})),
-                &ctx,
-            )
-            .await
-            .unwrap();
-
-        let result = ActiveHandler
-            .handle(Some(json!({"sessionId": session_id})), &ctx)
-            .await
-            .unwrap();
-
-        let spells = result["pendingSpells"].as_array().unwrap();
-        assert_eq!(spells.len(), 1);
-        assert_eq!(spells[0]["name"], "commit");
     }
 
     // ── reconstruct_tracker helper ──────────────────────────────────

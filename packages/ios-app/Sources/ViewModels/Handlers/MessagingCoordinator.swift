@@ -44,9 +44,6 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Deactivate a skill from the current session
     func deactivateSkillOnServer(_ skillName: String) async throws
 
-    /// Cast an ephemeral spell for the next prompt only
-    func castSpellOnServer(_ spellName: String) async throws
-
     /// Abort the agent on the server
     func abortAgentOnServer() async throws
 
@@ -105,18 +102,16 @@ final class MessagingCoordinator {
 
     /// Send a message to the agent.
     ///
-    /// Skills and spells are managed via separate RPCs (skill.activate, spell.cast),
-    /// not sent with the prompt. The server reads active skills from session state.
+    /// Skills are managed via separate RPCs (skill.activate), not sent with the prompt.
+    /// The server reads active skills from session state.
     ///
     /// - Parameters:
     ///   - reasoningLevel: Optional reasoning level for extended thinking
     ///   - skills: Skills to display as chips on the user message (already activated server-side)
-    ///   - spells: Spells to display as chips on the user message (already cast server-side)
     ///   - context: The context providing access to state and dependencies
     func sendMessage(
         reasoningLevel: String? = nil,
         skills: [Skill]? = nil,
-        spells: [Skill]? = nil,
         context: MessagingContext
     ) async {
         let text = context.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -136,19 +131,18 @@ final class MessagingCoordinator {
 
         // Reset browser dismissal for new prompt - browser can auto-open again
 
-        // Create user message with attachments, skills, and spells displayed above text
+        // Create user message with attachments and skills displayed above text
         let attachmentsToShow = context.attachments.isEmpty ? nil : context.attachments
         let skillsToShow = skills?.isEmpty == false ? skills : nil
-        let spellsToShow = spells?.isEmpty == false ? spells : nil
 
         if !text.isEmpty {
-            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow, spells: spellsToShow)
+            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow)
             context.appendMessage(userMessage)
             context.logDebug("Added user text message with \(context.attachments.count) attachments")
             context.currentTurn += 1
         } else if !context.attachments.isEmpty {
             // If only attachments (no text), still show them in chat
-            let attachmentMessage = ChatMessage(role: .user, content: .attachments(context.attachments), attachments: context.attachments, skills: skillsToShow, spells: spellsToShow)
+            let attachmentMessage = ChatMessage(role: .user, content: .attachments(context.attachments), attachments: context.attachments, skills: skillsToShow)
             context.appendMessage(attachmentMessage)
             context.logDebug("Added attachment-only message with \(context.attachments.count) attachments")
         }

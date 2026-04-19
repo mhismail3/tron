@@ -1,17 +1,15 @@
 //! Per-session skill tracker.
 //!
-//! Tracks which skills are active in a session, which have been deactivated
-//! (for removal notice generation), and which spells are pending consumption.
-//! State is reconstructed from events via [`SkillTracker::from_events`] (always
-//! uses `ClearAll` semantics) or [`SkillTracker::from_events_with_policy`]
-//! (respects the configured [`CompactionPolicy`](crate::settings::types::CompactionPolicy)).
+//! Tracks which skills are active in a session and which have been deactivated
+//! (for removal notice generation). State is reconstructed from events via
+//! [`SkillTracker::from_events`] (always uses `ClearAll` semantics) or
+//! [`SkillTracker::from_events_with_policy`] (respects the configured
+//! [`CompactionPolicy`](crate::settings::types::CompactionPolicy)).
 //!
 //! ## Event types handled
 //!
 //! - `skill.activated` — adds skill to active set
 //! - `skill.deactivated` — removes skill, adds to pending removal notices
-//! - `spell.cast` — queues spell for next prompt
-//! - `spell.consumed` — marks a queued spell as consumed
 //! - `compact.boundary` — behavior depends on `CompactionPolicy`:
 //!   - `ClearAll` (default): clears all state, sets `skills_cleared_by_compaction`
 //!     if skills were active at boundary time
@@ -35,21 +33,10 @@ struct TrackedSkill {
     content_length: Option<usize>,
 }
 
-/// A pending spell awaiting consumption by the next prompt.
-#[derive(Debug, Clone)]
-pub struct PendingSpell {
-    /// Event ID of the `spell.cast` event.
-    pub event_id: String,
-    /// Spell name.
-    pub name: String,
-    /// Source: global or project.
-    pub source: SkillSource,
-}
-
-/// Per-session tracker of active skills, pending spells, and removal notices.
+/// Per-session tracker of active skills and removal notices.
 ///
-/// Maintains the set of currently active skills, skills pending removal notice,
-/// and spells awaiting consumption. Supports event-sourced reconstruction.
+/// Maintains the set of currently active skills and skills pending removal
+/// notice. Supports event-sourced reconstruction.
 #[derive(Debug)]
 pub struct SkillTracker {
     /// Currently active skills.
@@ -59,8 +46,6 @@ pub struct SkillTracker {
     pending_removal_notices: HashSet<String>,
     /// Skills that were explicitly removed during this session (superset of pending).
     removed_skill_names: HashSet<String>,
-    /// Spells cast but not yet consumed by a prompt.
-    pending_spells: Vec<PendingSpell>,
     /// Names of skills that were active when cleared by a `compact.boundary`
     /// under `AskUser` policy. Empty for other policies. Reset on each boundary.
     cleared_at_boundary: Vec<String>,
@@ -78,7 +63,6 @@ impl SkillTracker {
             added_skills: HashMap::new(),
             pending_removal_notices: HashSet::new(),
             removed_skill_names: HashSet::new(),
-            pending_spells: Vec::new(),
             cleared_at_boundary: Vec::new(),
             skills_cleared_by_compaction: false,
         }
@@ -177,35 +161,6 @@ impl SkillTracker {
         self.pending_removal_notices.clear();
     }
 
-    /// Record that an ephemeral spell was cast.
-    pub fn add_spell(&mut self, event_id: String, name: String, source: SkillSource) {
-        // Avoid duplicates by event_id
-        if !self.pending_spells.iter().any(|s| s.event_id == event_id) {
-            self.pending_spells.push(PendingSpell {
-                event_id,
-                name,
-                source,
-            });
-        }
-    }
-
-    /// Mark a spell as consumed by a prompt.
-    ///
-    /// Adds the spell name to pending removal notices so the next turn
-    /// gets a "stop following" directive to counteract in-context learning.
-    pub fn consume_spell(&mut self, cast_event_id: &str) {
-        if let Some(spell) = self.pending_spells.iter().find(|s| s.event_id == cast_event_id) {
-            let _ = self.pending_removal_notices.insert(spell.name.clone());
-        }
-        self.pending_spells
-            .retain(|s| s.event_id != cast_event_id);
-    }
-
-    /// Get spells that have been cast but not yet consumed.
-    pub fn unconsumed_spells(&self) -> &[PendingSpell] {
-        &self.pending_spells
-    }
-
     /// Estimate the total token count for all active skills.
     pub fn estimate_active_tokens(&self) -> u64 {
         self.added_skills
@@ -219,19 +174,17 @@ impl SkillTracker {
         self.added_skills.clear();
         self.removed_skill_names.clear();
         self.pending_removal_notices.clear();
-        self.pending_spells.clear();
         self.cleared_at_boundary.clear();
         self.skills_cleared_by_compaction = false;
     }
 
     /// Clear ephemeral state but keep active skills (for `AutoRestore` compaction).
     ///
-    /// Clears removed names, pending removal notices, spells, and boundary records
+    /// Clears removed names, pending removal notices, and boundary records
     /// but leaves `added_skills` intact so they survive compaction.
     pub fn clear_ephemeral(&mut self) {
         self.removed_skill_names.clear();
         self.pending_removal_notices.clear();
-        self.pending_spells.clear();
         self.cleared_at_boundary.clear();
         self.skills_cleared_by_compaction = false;
     }
@@ -306,41 +259,6 @@ impl SkillTracker {
                             .unwrap_or_default();
                         if !name.is_empty() {
                             let _ = tracker.remove_skill(name);
-                        }
-                    }
-                }
-                // Spell cast: queue for next prompt
-                "spell.cast" => {
-                    if let Some(payload) = event.get("payload") {
-                        let name = payload
-                            .get("spellName")
-                            .and_then(|n| n.as_str())
-                            .unwrap_or_default()
-                            .to_string();
-                        let source = match payload
-                            .get("source")
-                            .and_then(|s| s.as_str())
-                            .unwrap_or("global")
-                        {
-                            "project" => SkillSource::Project,
-                            _ => SkillSource::Global,
-                        };
-                        if !name.is_empty() {
-                            if let Some(eid) = &event_id {
-                                tracker.add_spell(eid.clone(), name, source);
-                            }
-                        }
-                    }
-                }
-                // Spell consumed: remove from pending
-                "spell.consumed" => {
-                    if let Some(payload) = event.get("payload") {
-                        let cast_id = payload
-                            .get("castEventId")
-                            .and_then(|id| id.as_str())
-                            .unwrap_or_default();
-                        if !cast_id.is_empty() {
-                            tracker.consume_spell(cast_id);
                         }
                     }
                 }
@@ -424,39 +342,6 @@ impl SkillTracker {
                             .unwrap_or_default();
                         if !name.is_empty() {
                             let _ = tracker.remove_skill(name);
-                        }
-                    }
-                }
-                "spell.cast" => {
-                    if let Some(payload) = event.get("payload") {
-                        let name = payload
-                            .get("spellName")
-                            .and_then(|n| n.as_str())
-                            .unwrap_or_default()
-                            .to_string();
-                        let source = match payload
-                            .get("source")
-                            .and_then(|s| s.as_str())
-                            .unwrap_or("global")
-                        {
-                            "project" => SkillSource::Project,
-                            _ => SkillSource::Global,
-                        };
-                        if !name.is_empty() {
-                            if let Some(eid) = &event_id {
-                                tracker.add_spell(eid.clone(), name, source);
-                            }
-                        }
-                    }
-                }
-                "spell.consumed" => {
-                    if let Some(payload) = event.get("payload") {
-                        let cast_id = payload
-                            .get("castEventId")
-                            .and_then(|id| id.as_str())
-                            .unwrap_or_default();
-                        if !cast_id.is_empty() {
-                            tracker.consume_spell(cast_id);
                         }
                     }
                 }
@@ -577,15 +462,9 @@ mod tests {
             SkillAddMethod::Mention,
             None,
         );
-        tracker.add_spell(
-            "evt-1".to_string(),
-            "spell1".to_string(),
-            SkillSource::Global,
-        );
         tracker.clear();
         assert_eq!(tracker.count(), 0);
         assert!(tracker.removed_skill_names().is_empty());
-        assert!(tracker.unconsumed_spells().is_empty());
         assert!(tracker.pending_removal_notices().is_empty());
     }
 
@@ -711,77 +590,50 @@ mod tests {
         assert!(tracker.removed_skill_names().contains("a"));
     }
 
-    // ── Spell tracking ──────────────────────────────────────────────
+    // ── Legacy spell-event tolerance ────────────────────────────────
 
     #[test]
-    fn test_add_spell() {
-        let mut tracker = SkillTracker::new();
-        tracker.add_spell(
-            "evt-1".to_string(),
-            "commit".to_string(),
-            SkillSource::Global,
-        );
-        assert_eq!(tracker.unconsumed_spells().len(), 1);
-        assert_eq!(tracker.unconsumed_spells()[0].name, "commit");
-    }
-
-    #[test]
-    fn test_add_spell_dedup_by_event_id() {
-        let mut tracker = SkillTracker::new();
-        tracker.add_spell(
-            "evt-1".to_string(),
-            "commit".to_string(),
-            SkillSource::Global,
-        );
-        tracker.add_spell(
-            "evt-1".to_string(),
-            "commit".to_string(),
-            SkillSource::Global,
-        );
-        assert_eq!(tracker.unconsumed_spells().len(), 1);
-    }
-
-    #[test]
-    fn test_consume_spell() {
-        let mut tracker = SkillTracker::new();
-        tracker.add_spell(
-            "evt-1".to_string(),
-            "commit".to_string(),
-            SkillSource::Global,
-        );
-        tracker.add_spell(
-            "evt-2".to_string(),
-            "review".to_string(),
-            SkillSource::Global,
-        );
-        tracker.consume_spell("evt-1");
-        assert_eq!(tracker.unconsumed_spells().len(), 1);
-        assert_eq!(tracker.unconsumed_spells()[0].name, "review");
-    }
-
-    #[test]
-    fn test_consume_spell_adds_removal_notice() {
-        let mut tracker = SkillTracker::new();
-        tracker.add_spell(
-            "evt-1".to_string(),
-            "old-english".to_string(),
-            SkillSource::Global,
-        );
+    fn test_from_events_ignores_legacy_spell_events() {
+        // Post-removal invariant: legacy spell.cast / spell.consumed rows in
+        // existing session DBs must not affect any tracker state.
+        let events = vec![
+            serde_json::json!({
+                "type": "spell.cast",
+                "id": "e1",
+                "payload": { "spellName": "commit", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "spell.consumed",
+                "id": "e2",
+                "payload": { "spellName": "commit", "castEventId": "e1" }
+            }),
+        ];
+        let tracker = SkillTracker::from_events(&events);
+        assert_eq!(tracker.count(), 0);
         assert!(tracker.pending_removal_notices().is_empty());
-        tracker.consume_spell("evt-1");
-        assert!(tracker.pending_removal_notices().contains("old-english"));
+        assert!(tracker.active_skill_names().is_empty());
     }
 
     #[test]
-    fn test_consume_spell_nonexistent_noop() {
-        let mut tracker = SkillTracker::new();
-        tracker.add_spell(
-            "evt-1".to_string(),
-            "commit".to_string(),
-            SkillSource::Global,
-        );
-        tracker.consume_spell("evt-999");
-        assert_eq!(tracker.unconsumed_spells().len(), 1);
+    fn test_legacy_spell_before_compact_boundary_preserves_flags() {
+        use crate::settings::types::CompactionPolicy;
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "sa1",
+                "payload": { "skillName": "browser", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "spell.cast",
+                "id": "sc1",
+                "payload": { "spellName": "commit", "source": "global" }
+            }),
+            serde_json::json!({ "type": "compact.boundary", "id": "cb1", "payload": {} }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
+        // Compaction clears `browser`; legacy spell never mattered.
+        assert!(tracker.active_skill_names().is_empty());
+        assert!(tracker.skills_cleared_by_compaction());
     }
 
     // ── Activate idempotency ────────────────────────────────────────
@@ -852,68 +704,6 @@ mod tests {
         assert!(!tracker.has_skill("browser"));
         assert!(tracker.removed_skill_names().contains("browser"));
         assert!(tracker.pending_removal_notices().contains("browser"));
-    }
-
-    #[test]
-    fn test_from_events_spell_cast_tracked() {
-        let events = vec![serde_json::json!({
-            "type": "spell.cast",
-            "id": "evt-1",
-            "payload": {
-                "spellName": "commit",
-                "source": "global"
-            }
-        })];
-        let tracker = SkillTracker::from_events(&events);
-        assert_eq!(tracker.unconsumed_spells().len(), 1);
-        assert_eq!(tracker.unconsumed_spells()[0].name, "commit");
-        assert_eq!(tracker.unconsumed_spells()[0].event_id, "evt-1");
-    }
-
-    #[test]
-    fn test_from_events_spell_consumed_tracking() {
-        let events = vec![
-            serde_json::json!({
-                "type": "spell.cast",
-                "id": "evt-1",
-                "payload": { "spellName": "commit", "source": "global" }
-            }),
-            serde_json::json!({
-                "type": "spell.consumed",
-                "id": "evt-2",
-                "payload": { "spellName": "commit", "castEventId": "evt-1" }
-            }),
-        ];
-        let tracker = SkillTracker::from_events(&events);
-        assert!(tracker.unconsumed_spells().is_empty());
-        // Consumed spell generates a removal notice
-        assert!(tracker.pending_removal_notices().contains("commit"));
-    }
-
-    #[test]
-    fn test_from_events_unconsumed_spells() {
-        let events = vec![
-            serde_json::json!({
-                "type": "spell.cast",
-                "id": "evt-1",
-                "payload": { "spellName": "commit", "source": "global" }
-            }),
-            serde_json::json!({
-                "type": "spell.cast",
-                "id": "evt-2",
-                "payload": { "spellName": "review", "source": "project" }
-            }),
-            serde_json::json!({
-                "type": "spell.consumed",
-                "id": "evt-3",
-                "payload": { "spellName": "commit", "castEventId": "evt-1" }
-            }),
-        ];
-        let tracker = SkillTracker::from_events(&events);
-        let unconsumed = tracker.unconsumed_spells();
-        assert_eq!(unconsumed.len(), 1);
-        assert_eq!(unconsumed[0].name, "review");
-        assert_eq!(unconsumed[0].source, SkillSource::Project);
     }
 
     // ── from_events: compaction ─────────────────────────────────────
@@ -1005,24 +795,6 @@ mod tests {
     }
 
     #[test]
-    fn test_from_events_compaction_clears_spells() {
-        let events = vec![
-            serde_json::json!({
-                "type": "spell.cast",
-                "id": "evt-1",
-                "payload": { "spellName": "commit", "source": "global" }
-            }),
-            serde_json::json!({
-                "type": "compact.boundary",
-                "id": "evt-2",
-                "payload": {}
-            }),
-        ];
-        let tracker = SkillTracker::from_events(&events);
-        assert!(tracker.unconsumed_spells().is_empty());
-    }
-
-    #[test]
     fn test_from_events_compaction_clears_pending_removals() {
         let events = vec![
             serde_json::json!({
@@ -1101,27 +873,6 @@ mod tests {
         );
         assert_eq!(tracker.count(), 0);
         assert!(!tracker.has_skill("browser"));
-    }
-
-    #[test]
-    fn test_policy_clear_all_clears_spells_on_boundary() {
-        let events = vec![
-            serde_json::json!({
-                "type": "spell.cast",
-                "id": "evt-1",
-                "payload": { "spellName": "commit", "source": "global" }
-            }),
-            serde_json::json!({
-                "type": "compact.boundary",
-                "id": "evt-2",
-                "payload": {}
-            }),
-        ];
-        let tracker = SkillTracker::from_events_with_policy(
-            &events,
-            &crate::settings::types::CompactionPolicy::ClearAll,
-        );
-        assert!(tracker.unconsumed_spells().is_empty());
     }
 
     #[test]
@@ -1228,27 +979,6 @@ mod tests {
         assert!(tracker.has_skill("browser"));
         assert!(tracker.has_skill("code"));
         assert_eq!(tracker.count(), 2);
-    }
-
-    #[test]
-    fn test_policy_auto_restore_clears_spells_on_boundary() {
-        let events = vec![
-            serde_json::json!({
-                "type": "spell.cast",
-                "id": "evt-1",
-                "payload": { "spellName": "commit", "source": "global" }
-            }),
-            serde_json::json!({
-                "type": "compact.boundary",
-                "id": "evt-2",
-                "payload": {}
-            }),
-        ];
-        let tracker = SkillTracker::from_events_with_policy(
-            &events,
-            &crate::settings::types::CompactionPolicy::AutoRestore,
-        );
-        assert!(tracker.unconsumed_spells().is_empty());
     }
 
     #[test]

@@ -30,7 +30,6 @@ import Foundation
     func handleMessageDeleted(_ result: MessageDeletedPlugin.Result)
     func handleSkillActivated(_ result: SkillActivatedPlugin.Result)
     func handleSkillDeactivated(_ result: SkillDeactivatedPlugin.Result)
-    func handleSpellCast(_ result: SpellCastPlugin.Result)
     func handleRulesActivated(_ result: RulesActivatedPlugin.Result)
 }
 

@@ -53,8 +53,8 @@ struct ChatSheetContent: View {
                 }
             )
 
-        case .skillDetail(let skill, let mode):
-            skillDetailSheet(skill: skill, mode: mode)
+        case .skillDetail(let skill):
+            skillDetailSheet(skill: skill)
 
         case .compactionDetail(let data):
             CompactionDetailSheet(
@@ -151,9 +151,9 @@ struct ChatSheetContent: View {
     }
 
     @ViewBuilder
-    private func skillDetailSheet(skill: Skill, mode: ChipMode) -> some View {
+    private func skillDetailSheet(skill: Skill) -> some View {
         if let store = skillStore {
-            SkillDetailSheet(skill: skill, skillStore: store, mode: mode)
+            SkillDetailSheet(skill: skill, skillStore: store)
         } else {
             EmptyView()
         }

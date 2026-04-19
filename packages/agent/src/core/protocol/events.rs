@@ -830,13 +830,6 @@ tron_events! {
         skill_name: String,
     } => "skill_deactivated",
 
-    /// Ephemeral spell cast.
-    SpellCast {
-        #[serde(rename = "spellName")]
-        spell_name: String,
-        source: String,
-    } => "spell_cast",
-
     // -- Subagents --
 
     /// Subagent spawned.
@@ -2004,11 +1997,6 @@ mod tests {
             TronEvent::SkillDeactivated {
                 base: base.clone(),
                 skill_name: "browser".into(),
-            },
-            TronEvent::SpellCast {
-                base: base.clone(),
-                spell_name: "commit".into(),
-                source: "global".into(),
             },
             TronEvent::SubagentSpawned {
                 base: base.clone(),

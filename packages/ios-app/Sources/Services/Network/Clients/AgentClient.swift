@@ -46,12 +46,6 @@ final class AgentClient: RPCDomainClient {
         return try await ws.send(method: "skill.deactivate", params: params)
     }
 
-    func castSpell(_ spellName: String) async throws -> SpellCastResult {
-        let (ws, sessionId) = try requireTransport().requireSession()
-        let params = SpellCastParams(sessionId: sessionId, spellName: spellName)
-        return try await ws.send(method: "spell.cast", params: params)
-    }
-
     func activeSkills() async throws -> SkillActiveResult {
         let (ws, sessionId) = try requireTransport().requireSession()
         let params = SkillActiveParams(sessionId: sessionId)

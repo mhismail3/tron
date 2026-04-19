@@ -61,10 +61,6 @@ define_events! {
         SkillActivated => "skill.activated" => payloads::skill::SkillActivatedPayload,
         /// Skill deactivated from session.
         SkillDeactivated => "skill.deactivated" => payloads::skill::SkillDeactivatedPayload,
-        /// Ephemeral spell cast (one-shot, next prompt only).
-        SpellCast => "spell.cast" => payloads::skill::SpellCastPayload,
-        /// Spell consumed by a prompt (marks spell.cast as used).
-        SpellConsumed => "spell.consumed" => payloads::skill::SpellConsumedPayload,
         /// Skills cleared (emitted on compaction with `askUser` policy).
         SkillsCleared => "skills.cleared" => payloads::skill::SkillsClearedPayload,
         /// Rules files loaded.
@@ -190,8 +186,8 @@ define_events! {
         is_subagent_type => [SubagentSpawned, SubagentStatusUpdate, SubagentCompleted, SubagentFailed, SubagentResultsConsumed],
         /// Whether this is a hook event (`hook.*`).
         is_hook_type => [HookTriggered, HookCompleted, HookBackgroundStarted, HookBackgroundCompleted, LlmHookResult],
-        /// Whether this is a skill event (`skill.*` or `spell.*`).
-        is_skill_type => [SkillActivated, SkillDeactivated, SpellCast, SpellConsumed, SkillsCleared],
+        /// Whether this is a skill event (`skill.*`).
+        is_skill_type => [SkillActivated, SkillDeactivated, SkillsCleared],
         /// Whether this is a rules event (`rules.*`).
         is_rules_type => [RulesLoaded, RulesIndexed, RulesActivated],
         /// Whether this is a queue event (`message.queued|dequeued`).
@@ -205,7 +201,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 75] = [
+    const EXPECTED: [(EventType, &str); 73] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -237,8 +233,6 @@ mod tests {
         (EventType::ContextCleared, "context.cleared"),
         (EventType::SkillActivated, "skill.activated"),
         (EventType::SkillDeactivated, "skill.deactivated"),
-        (EventType::SpellCast, "spell.cast"),
-        (EventType::SpellConsumed, "spell.consumed"),
         (EventType::SkillsCleared, "skills.cleared"),
         (EventType::RulesLoaded, "rules.loaded"),
         (EventType::RulesIndexed, "rules.indexed"),
@@ -330,7 +324,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 75);
+        assert_eq!(ALL_EVENT_TYPES.len(), 73);
     }
 
     #[test]
@@ -403,6 +397,16 @@ mod tests {
     #[test]
     fn from_str_rejects_empty() {
         assert!("".parse::<EventType>().is_err());
+    }
+
+    #[test]
+    fn from_str_rejects_legacy_spell_types() {
+        // Post-removal invariant: the removed spell event-type strings must
+        // fail to parse. Legacy rows in existing DBs are filtered out by the
+        // v003 migration, so this guards against regressions that reintroduce
+        // the variants.
+        assert!("spell.cast".parse::<EventType>().is_err());
+        assert!("spell.consumed".parse::<EventType>().is_err());
     }
 
     #[test]

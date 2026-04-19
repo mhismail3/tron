@@ -47,16 +47,6 @@ final class InputBarStateTests: XCTestCase {
         XCTAssertNotEqual(fp1, fp2)
     }
 
-    func testDraftFingerprint_changesWithSpells() {
-        let state = InputBarState()
-        let fp1 = state.draftFingerprint
-
-        state.selectedSpells = [makeSkill(name: "formal")]
-        let fp2 = state.draftFingerprint
-
-        XCTAssertNotEqual(fp1, fp2)
-    }
-
     func testDraftFingerprint_stableForSameState() {
         let state = InputBarState()
         state.text = "hello"
@@ -90,12 +80,6 @@ final class InputBarStateTests: XCTestCase {
     func testHasDraftContent_skillsOnly_returnsTrue() {
         let state = InputBarState()
         state.selectedSkills = [makeSkill(name: "review")]
-        XCTAssertTrue(state.hasDraftContent)
-    }
-
-    func testHasDraftContent_spellsOnly_returnsTrue() {
-        let state = InputBarState()
-        state.selectedSpells = [makeSkill(name: "formal")]
         XCTAssertTrue(state.hasDraftContent)
     }
 

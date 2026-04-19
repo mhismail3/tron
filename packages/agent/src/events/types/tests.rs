@@ -397,14 +397,6 @@ mod session_event_tests {
                 json!({"skillName": "s"}),
             ),
             (
-                EventType::SpellCast,
-                json!({"spellName": "commit", "source": "global"}),
-            ),
-            (
-                EventType::SpellConsumed,
-                json!({"spellName": "commit", "castEventId": "evt-1"}),
-            ),
-            (
                 EventType::SkillsCleared,
                 json!({"clearedSkills": ["s"], "reason": "compaction"}),
             ),
@@ -520,7 +512,7 @@ mod session_event_tests {
             ),
         ];
 
-        assert_eq!(cases.len(), 55, "must cover all 55 event types");
+        assert_eq!(cases.len(), 53, "must cover all 53 event types");
 
         for (event_type, payload) in &cases {
             let event = make_event(*event_type, payload.clone());
@@ -628,8 +620,6 @@ mod type_guard_tests {
     fn skill_guards() {
         assert!(EventType::SkillActivated.is_skill_type());
         assert!(EventType::SkillDeactivated.is_skill_type());
-        assert!(EventType::SpellCast.is_skill_type());
-        assert!(EventType::SpellConsumed.is_skill_type());
         assert!(EventType::SkillsCleared.is_skill_type());
     }
 

@@ -37,8 +37,6 @@ struct AgentClientTests {
         var lastActivatedSkill: String?
         var deactivateSkillCallCount = 0
         var lastDeactivatedSkill: String?
-        var castSpellCallCount = 0
-        var lastCastSpell: String?
         var activeSkillsCallCount = 0
 
         func sendPrompt(
@@ -85,19 +83,10 @@ struct AgentClientTests {
             return try! JSONDecoder().decode(SkillDeactivateResult.self, from: json.data(using: .utf8)!)
         }
 
-        func castSpell(_ spellName: String) async throws -> SpellCastResult {
-            castSpellCallCount += 1
-            lastCastSpell = spellName
-            let json = """
-            {"success": true, "spell": {"name": "\(spellName)", "source": "global"}}
-            """
-            return try! JSONDecoder().decode(SpellCastResult.self, from: json.data(using: .utf8)!)
-        }
-
         func activeSkills() async throws -> SkillActiveResult {
             activeSkillsCallCount += 1
             let json = """
-            {"skills": [], "pendingSpells": []}
+            {"skills": []}
             """
             return try! JSONDecoder().decode(SkillActiveResult.self, from: json.data(using: .utf8)!)
         }
@@ -184,18 +173,6 @@ struct AgentClientTests {
         #expect(result.deactivatedSkill == "browser")
     }
 
-    @Test("Cast spell calls correctly")
-    func testCastSpell_calls() async throws {
-        let mock = MockAgentClient()
-
-        let result = try await mock.castSpell("commit")
-
-        #expect(mock.castSpellCallCount == 1)
-        #expect(mock.lastCastSpell == "commit")
-        #expect(result.success == true)
-        #expect(result.spell?.name == "commit")
-    }
-
     @Test("Active skills returns list")
     func testActiveSkills_returns() async throws {
         let mock = MockAgentClient()
@@ -204,7 +181,6 @@ struct AgentClientTests {
 
         #expect(mock.activeSkillsCallCount == 1)
         #expect(result.skills.isEmpty)
-        #expect(result.pendingSpells.isEmpty)
     }
 
     // MARK: - Abort Tests

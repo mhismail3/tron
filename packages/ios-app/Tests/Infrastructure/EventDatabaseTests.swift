@@ -943,8 +943,8 @@ final class EventDatabaseTests: XCTestCase {
     func testSessionDraftsTable_basicCRUD() async throws {
         // Insert via withDB
         let insertSQL = """
-            INSERT INTO session_drafts (session_id, text, skills_json, spells_json, attachment_metadata_json, updated_at)
-            VALUES ('test-session', 'hello world', '[]', '[]', '[]', '2026-04-03T00:00:00Z')
+            INSERT INTO session_drafts (session_id, text, skills_json, attachment_metadata_json, updated_at)
+            VALUES ('test-session', 'hello world', '[]', '[]', '2026-04-03T00:00:00Z')
         """
         try await database.withDB { db in
             guard sqlite3_exec(db, insertSQL, nil, nil, nil) == SQLITE_OK else {
@@ -969,8 +969,8 @@ final class EventDatabaseTests: XCTestCase {
         // Insert a draft via withDB
         try await database.withDB { db in
             let sql = """
-                INSERT INTO session_drafts (session_id, text, skills_json, spells_json, attachment_metadata_json, updated_at)
-                VALUES ('test-session', 'draft text', '[]', '[]', '[]', '2026-04-03T00:00:00Z')
+                INSERT INTO session_drafts (session_id, text, skills_json, attachment_metadata_json, updated_at)
+                VALUES ('test-session', 'draft text', '[]', '[]', '2026-04-03T00:00:00Z')
             """
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
                 throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))

@@ -40,27 +40,10 @@ struct ChatSheetTests {
             tags: nil
         )
 
-        let sheet1 = ChatSheet.skillDetail(skill1, .skill)
-        let sheet2 = ChatSheet.skillDetail(skill2, .skill)
+        let sheet1 = ChatSheet.skillDetail(skill1)
+        let sheet2 = ChatSheet.skillDetail(skill2)
 
         #expect(sheet1.id != sheet2.id)
-    }
-
-    @Test("Skill detail same skill different modes have same id")
-    func testSkillDetailSameSkillDifferentModes() {
-        let skill = Skill(
-            name: "test",
-            displayName: "Test",
-            description: "Test",
-            source: .global,
-            tags: nil
-        )
-
-        let sheet1 = ChatSheet.skillDetail(skill, .skill)
-        let sheet2 = ChatSheet.skillDetail(skill, .spell)
-
-        // Same skill = same id (mode doesn't affect identity)
-        #expect(sheet1.id == sheet2.id)
     }
 
     @Test("Compaction detail has consistent id")
@@ -167,7 +150,7 @@ struct ChatSheetTests {
         let sheets: [ChatSheet] = [
             .settings,
             .agentControl,
-            .skillDetail(skill, .skill),
+            .skillDetail(skill),
             .compactionDetail(compactionData),
             .askUserQuestion,
             .subagentDetail,
@@ -370,11 +353,10 @@ struct SheetCoordinatorTests {
             tags: nil
         )
 
-        coordinator.showSkillDetail(skill, mode: .spell)
+        coordinator.showSkillDetail(skill)
 
-        if case .skillDetail(let sheetSkill, let mode) = coordinator.activeSheet {
+        if case .skillDetail(let sheetSkill) = coordinator.activeSheet {
             #expect(sheetSkill.name == "test")
-            #expect(mode == .spell)
         } else {
             Issue.record("Expected skillDetail sheet")
         }

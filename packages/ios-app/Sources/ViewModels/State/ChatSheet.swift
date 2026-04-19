@@ -45,8 +45,8 @@ enum ChatSheet: Identifiable, Equatable {
     case settings
     case agentControl
 
-    // Skill/Spell details
-    case skillDetail(Skill, ChipMode)
+    // Skill details
+    case skillDetail(Skill)
     case compactionDetail(CompactionDetailData)
     case memoryRetainDetail(MemoryRetainDetailData)
 
@@ -71,7 +71,7 @@ enum ChatSheet: Identifiable, Equatable {
             return "settings"
         case .agentControl:
             return "agentControl"
-        case .skillDetail(let skill, _):
+        case .skillDetail(let skill):
             return "skillDetail-\(skill.id)"
         case .compactionDetail:
             return "compaction"
@@ -104,8 +104,8 @@ enum ChatSheet: Identifiable, Equatable {
             return true
         case (.agentControl, .agentControl):
             return true
-        case (.skillDetail(let skill1, let mode1), .skillDetail(let skill2, let mode2)):
-            return skill1.id == skill2.id && mode1 == mode2
+        case (.skillDetail(let skill1), .skillDetail(let skill2)):
+            return skill1.id == skill2.id
         case (.compactionDetail(let data1), .compactionDetail(let data2)):
             return data1 == data2
         case (.memoryRetainDetail(let data1), .memoryRetainDetail(let data2)):

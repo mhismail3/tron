@@ -2,17 +2,14 @@ import SwiftUI
 
 // MARK: - Content Area View (Attachments + Skills)
 
-/// Main content area showing skills, spells, attachments (with wrapping), and status pills
-/// All items in one wrapping container - skills and spells at bottom, attachments wrap above
+/// Main content area showing skills, attachments (with wrapping), and status pills.
+/// All items in one wrapping container - skills at bottom, attachments wrap above.
 struct ContentAreaView: View {
     let selectedSkills: [Skill]
-    let selectedSpells: [Skill]
     let attachments: [Attachment]
     let attachmentCapability: AttachmentCapability
     let onSkillRemove: ((Skill) -> Void)?
     let onSkillDetailTap: ((Skill) -> Void)?
-    let onSpellRemove: ((Skill) -> Void)?
-    let onSpellDetailTap: ((Skill) -> Void)?
     let onRemoveAttachment: (Attachment) -> Void
 
     var body: some View {
@@ -31,27 +28,12 @@ struct ContentAreaView: View {
                 ))
             }
 
-            // Spells (ephemeral skills) with pink styling
-            ForEach(selectedSpells, id: \.name) { skill in
-                SkillChip(
-                    skill: skill,
-                    mode: .spell,
-                    showRemoveButton: true,
-                    onRemove: { onSpellRemove?(skill) },
-                    onTap: { onSpellDetailTap?(skill) }
-                )
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.8).combined(with: .opacity),
-                    removal: .scale(scale: 0.6).combined(with: .opacity)
-                ))
-            }
-
-            // Line break to ensure attachments always start on new row above skills/spells
-            if (!selectedSkills.isEmpty || !selectedSpells.isEmpty) && !attachments.isEmpty {
+            // Line break to ensure attachments always start on new row above skills
+            if !selectedSkills.isEmpty && !attachments.isEmpty {
                 LineBreak()
             }
 
-            // Attachments after (will wrap to rows above skills/spells)
+            // Attachments after (will wrap to rows above skills)
             ForEach(attachments) { attachment in
                 AttachmentBubble(attachment: attachment, capability: attachmentCapability) {
                     onRemoveAttachment(attachment)
@@ -64,7 +46,6 @@ struct ContentAreaView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selectedSkills.count)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selectedSpells.count)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: attachments.count)
     }
 }

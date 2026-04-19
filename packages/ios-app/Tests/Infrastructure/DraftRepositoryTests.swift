@@ -49,7 +49,6 @@ final class DraftRepositoryTests: XCTestCase {
             sessionId: "s1",
             text: "Hello, world!",
             skills: [],
-            spells: [],
             attachmentMetadata: []
         )
 
@@ -57,7 +56,6 @@ final class DraftRepositoryTests: XCTestCase {
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.text, "Hello, world!")
         XCTAssertTrue(result?.skills.isEmpty ?? false)
-        XCTAssertTrue(result?.spells.isEmpty ?? false)
         XCTAssertTrue(result?.attachmentMetadata.isEmpty ?? false)
     }
 
@@ -68,7 +66,6 @@ final class DraftRepositoryTests: XCTestCase {
             sessionId: "s1",
             text: "",
             skills: skills,
-            spells: [],
             attachmentMetadata: []
         )
 
@@ -79,23 +76,6 @@ final class DraftRepositoryTests: XCTestCase {
         XCTAssertEqual(result?.skills[0].source, .global)
         XCTAssertEqual(result?.skills[1].name, "testing")
         XCTAssertEqual(result?.skills[1].source, .project)
-    }
-
-    func testSaveAndLoadDraft_withSpells() async throws {
-        let spells = [makeSkill(name: "old-english")]
-
-        try await database.drafts.save(
-            sessionId: "s1",
-            text: "test",
-            skills: [],
-            spells: spells,
-            attachmentMetadata: []
-        )
-
-        let result = try await database.drafts.load(sessionId: "s1")
-        XCTAssertNotNil(result)
-        XCTAssertEqual(result?.spells.count, 1)
-        XCTAssertEqual(result?.spells[0].name, "old-english")
     }
 
     func testSaveAndLoadDraft_withAttachmentMetadata() async throws {
@@ -116,7 +96,6 @@ final class DraftRepositoryTests: XCTestCase {
             sessionId: "s1",
             text: "",
             skills: [],
-            spells: [],
             attachmentMetadata: metadata
         )
 
@@ -136,14 +115,12 @@ final class DraftRepositoryTests: XCTestCase {
 
     func testSaveAndLoadDraft_fullDraft() async throws {
         let skills = [makeSkill(name: "review")]
-        let spells = [makeSkill(name: "formal")]
         let attachments = [makeAttachmentMetadata(), makeAttachmentMetadata(type: .pdf, mimeType: "application/pdf", fileName: "doc.pdf")]
 
         try await database.drafts.save(
             sessionId: "s1",
             text: "Please review this",
             skills: skills,
-            spells: spells,
             attachmentMetadata: attachments
         )
 
@@ -151,7 +128,6 @@ final class DraftRepositoryTests: XCTestCase {
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.text, "Please review this")
         XCTAssertEqual(result?.skills.count, 1)
-        XCTAssertEqual(result?.spells.count, 1)
         XCTAssertEqual(result?.attachmentMetadata.count, 2)
     }
 
@@ -160,7 +136,6 @@ final class DraftRepositoryTests: XCTestCase {
             sessionId: "s1",
             text: "",
             skills: [],
-            spells: [],
             attachmentMetadata: []
         )
 
@@ -168,7 +143,6 @@ final class DraftRepositoryTests: XCTestCase {
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.text, "")
         XCTAssertTrue(result?.skills.isEmpty ?? false)
-        XCTAssertTrue(result?.spells.isEmpty ?? false)
         XCTAssertTrue(result?.attachmentMetadata.isEmpty ?? false)
     }
 
@@ -186,7 +160,6 @@ final class DraftRepositoryTests: XCTestCase {
             sessionId: "s1",
             text: "first version",
             skills: [],
-            spells: [],
             attachmentMetadata: []
         )
 
@@ -194,7 +167,6 @@ final class DraftRepositoryTests: XCTestCase {
             sessionId: "s1",
             text: "second version",
             skills: [makeSkill(name: "added-later")],
-            spells: [],
             attachmentMetadata: []
         )
 
@@ -211,7 +183,6 @@ final class DraftRepositoryTests: XCTestCase {
             sessionId: "s1",
             text: "will be deleted",
             skills: [],
-            spells: [],
             attachmentMetadata: []
         )
 
@@ -227,9 +198,9 @@ final class DraftRepositoryTests: XCTestCase {
     }
 
     func testDeleteAll() async throws {
-        try await database.drafts.save(sessionId: "s1", text: "a", skills: [], spells: [], attachmentMetadata: [])
-        try await database.drafts.save(sessionId: "s2", text: "b", skills: [], spells: [], attachmentMetadata: [])
-        try await database.drafts.save(sessionId: "s3", text: "c", skills: [], spells: [], attachmentMetadata: [])
+        try await database.drafts.save(sessionId: "s1", text: "a", skills: [], attachmentMetadata: [])
+        try await database.drafts.save(sessionId: "s2", text: "b", skills: [], attachmentMetadata: [])
+        try await database.drafts.save(sessionId: "s3", text: "c", skills: [], attachmentMetadata: [])
 
         try await database.drafts.deleteAll()
 
@@ -250,7 +221,6 @@ final class DraftRepositoryTests: XCTestCase {
             sessionId: "s1",
             text: text,
             skills: [],
-            spells: [],
             attachmentMetadata: []
         )
 
@@ -265,7 +235,6 @@ final class DraftRepositoryTests: XCTestCase {
             sessionId: "s1",
             text: text,
             skills: [],
-            spells: [],
             attachmentMetadata: []
         )
 
@@ -278,8 +247,8 @@ final class DraftRepositoryTests: XCTestCase {
     func testLoadDraft_corruptSkillsJson_returnsNil() async throws {
         // Manually insert a row with corrupt JSON
         let sql = """
-            INSERT INTO session_drafts (session_id, text, skills_json, spells_json, attachment_metadata_json, updated_at)
-            VALUES ('corrupt', 'text', '{NOT VALID JSON}', '[]', '[]', '2026-04-03T00:00:00Z')
+            INSERT INTO session_drafts (session_id, text, skills_json, attachment_metadata_json, updated_at)
+            VALUES ('corrupt', 'text', '{NOT VALID JSON}', '[]', '2026-04-03T00:00:00Z')
         """
         try await database.withDB { db in
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
@@ -289,5 +258,24 @@ final class DraftRepositoryTests: XCTestCase {
 
         let result = try await database.drafts.load(sessionId: "corrupt")
         XCTAssertNil(result)
+    }
+
+    // MARK: - Schema migration regression guards
+
+    func testFreshDatabase_noSpellsJsonColumn() async throws {
+        let exists = try await database.withDB { db in
+            try DatabaseSchema.columnExists(table: "session_drafts", column: "spells_json", db: db)
+        }
+        XCTAssertFalse(exists)
+    }
+
+    func testMigration_idempotent_runsTwiceWithoutError() async throws {
+        try await database.withDB { db in
+            try DatabaseSchema.createTables(db: db)
+        }
+        let exists = try await database.withDB { db in
+            try DatabaseSchema.columnExists(table: "session_drafts", column: "spells_json", db: db)
+        }
+        XCTAssertFalse(exists)
     }
 }

@@ -550,7 +550,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleSkillActivated(_ result: SkillActivatedPlugin.Result) {}
     func handleSkillDeactivated(_ result: SkillDeactivatedPlugin.Result) {}
-    func handleSpellCast(_ result: SpellCastPlugin.Result) {}
 
     func handleRulesActivated(_ result: RulesActivatedPlugin.Result) {
         handleRulesActivatedCalledWith = result
@@ -627,6 +626,8 @@ final class MockEventDispatchContext: EventDispatchTarget {
     func handleWorktreeMergeAborted(_ result: WorktreeMergeAbortedPlugin.Result) {}
     func handleWorktreePushed(_ result: WorktreePushedPlugin.Result) {}
     func handleWorktreePendingMergeDetected(_ result: WorktreePendingMergeDetectedPlugin.Result) {}
+    func handleWorktreeRebasedOnMain(_ result: WorktreeRebasedOnMainPlugin.Result) {}
+    func handleWorktreePostRebaseStashConflict(_ result: WorktreePostRebaseStashConflictPlugin.Result) {}
 
     // Repo events
     func handleRepoLockAcquired(_ result: RepoLockAcquiredPlugin.Result) {}

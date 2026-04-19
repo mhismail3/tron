@@ -464,10 +464,6 @@ struct TintedColors {
         }
     }
 
-    /// Convenience: create from ChipMode
-    init(mode: ChipMode, colorScheme: ColorScheme) {
-        self.init(accent: mode == .skill ? .tronCyan : .tronPink, colorScheme: colorScheme)
-    }
 }
 
 // MARK: - Reasoning Level Colors

@@ -13,9 +13,8 @@ final class InputBarState {
     var selectedImages: [PhotosPickerItem] = []
     var attachments: [Attachment] = []
 
-    // MARK: - Skills and Spells
+    // MARK: - Skills
     var selectedSkills: [Skill] = []
-    var selectedSpells: [Skill] = []
 
     // MARK: - Mention Popups
     var isMentionPopupVisible: Bool = false
@@ -30,16 +29,15 @@ final class InputBarState {
         text = ""
         selectedImages = []
         attachments = []
-        // Note: skills and spells are NOT cleared - they persist across messages
+        // Note: skills are NOT cleared - they persist across messages
     }
 
-    /// Clear everything including skills and spells
+    /// Clear everything including skills
     func clearAll() {
         text = ""
         selectedImages = []
         attachments = []
         selectedSkills = []
-        selectedSpells = []
     }
 
     /// Remove attachments incompatible with the given capability.
@@ -60,7 +58,6 @@ final class InputBarState {
         hasher.combine(text)
         hasher.combine(attachments.map(\.id))
         hasher.combine(selectedSkills.map(\.name))
-        hasher.combine(selectedSpells.map(\.name))
         return hasher.finalize()
     }
 
@@ -69,7 +66,6 @@ final class InputBarState {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !attachments.isEmpty
             || !selectedSkills.isEmpty
-            || !selectedSpells.isEmpty
     }
 
     // MARK: - Computed Properties
@@ -195,10 +191,6 @@ struct InputBarActions {
     let onSkillRemove: ((Skill) -> Void)?
     let onSkillDetailTap: ((Skill) -> Void)?
 
-    // MARK: - Spells
-    let onSpellRemove: ((Skill) -> Void)?
-    let onSpellDetailTap: ((Skill) -> Void)?
-
     // MARK: - Message Queue (Server-Driven)
     let onQueueRemove: ((String) -> Void)?
 
@@ -213,8 +205,6 @@ struct InputBarActions {
         onSkillSelect: ((Skill) -> Void)? = nil,
         onSkillRemove: ((Skill) -> Void)? = nil,
         onSkillDetailTap: ((Skill) -> Void)? = nil,
-        onSpellRemove: ((Skill) -> Void)? = nil,
-        onSpellDetailTap: ((Skill) -> Void)? = nil,
         onQueueRemove: ((String) -> Void)? = nil
     ) {
         self.onSend = onSend
@@ -227,8 +217,6 @@ struct InputBarActions {
         self.onSkillSelect = onSkillSelect
         self.onSkillRemove = onSkillRemove
         self.onSkillDetailTap = onSkillDetailTap
-        self.onSpellRemove = onSpellRemove
-        self.onSpellDetailTap = onSpellDetailTap
         self.onQueueRemove = onQueueRemove
     }
 }

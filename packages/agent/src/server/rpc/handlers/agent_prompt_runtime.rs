@@ -30,7 +30,6 @@ pub fn build_user_event_payload(
     attachments: Option<&[Value]>,
     extra_metadata: Option<&Value>,
     skills: Option<&Value>,
-    spells: Option<&Value>,
 ) -> Value {
     let has_images = images.is_some_and(|v| !v.is_empty());
     let has_attachments = attachments.is_some_and(|v| !v.is_empty());
@@ -108,24 +107,21 @@ pub fn build_user_event_payload(
     if let Some(s) = skills {
         payload["skills"] = s.clone();
     }
-    if let Some(s) = spells {
-        payload["spells"] = s.clone();
-    }
     payload
 }
 
-/// Collect skills/spells activated since the last `message.user` event.
+/// Collect skills activated since the last `message.user` event.
 ///
-/// Returns `(skills_json, spells_json)` in the format expected by iOS:
+/// Returns `skills_json` in the format expected by iOS:
 /// `[{"name": "...", "source": "global"|"project", "displayName": "..."}]`
 ///
-/// Uses the event store sequence ordering to find only the skill/spell events
+/// Uses the event store sequence ordering to find only the skill events
 /// that belong to the current prompt (between last message.user and now).
 pub fn collect_pending_skill_payloads(
     event_store: &crate::events::EventStore,
     session_id: &str,
     skill_registry: Option<&crate::skills::registry::SkillRegistry>,
-) -> (Option<Value>, Option<Value>) {
+) -> Option<Value> {
     let last_user_seq = event_store
         .get_latest_event_by_type(session_id, "message.user")
         .ok()
@@ -138,63 +134,36 @@ pub fn collect_pending_skill_payloads(
         .unwrap_or_default();
 
     let mut skills: Vec<Value> = Vec::new();
-    let mut spells: Vec<Value> = Vec::new();
 
     for event in &recent_events {
         let payload: Value = match serde_json::from_str(&event.payload) {
             Ok(v) => v,
             Err(_) => continue,
         };
-        match event.event_type.as_str() {
-            "skill.activated" => {
-                if let Some(name) = payload.get("skillName").and_then(|v| v.as_str()) {
-                    let source = payload
-                        .get("source")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("project");
-                    let display_name = skill_registry
-                        .and_then(|r| r.get(name))
-                        .map(|m| m.display_name.as_str())
-                        .unwrap_or(name);
-                    skills.push(serde_json::json!({
-                        "name": name,
-                        "source": source,
-                        "displayName": display_name,
-                    }));
-                }
+        if event.event_type.as_str() == "skill.activated" {
+            if let Some(name) = payload.get("skillName").and_then(|v| v.as_str()) {
+                let source = payload
+                    .get("source")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("project");
+                let display_name = skill_registry
+                    .and_then(|r| r.get(name))
+                    .map(|m| m.display_name.as_str())
+                    .unwrap_or(name);
+                skills.push(serde_json::json!({
+                    "name": name,
+                    "source": source,
+                    "displayName": display_name,
+                }));
             }
-            "spell.cast" => {
-                if let Some(name) = payload.get("spellName").and_then(|v| v.as_str()) {
-                    let source = payload
-                        .get("source")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("project");
-                    let display_name = skill_registry
-                        .and_then(|r| r.get(name))
-                        .map(|m| m.display_name.as_str())
-                        .unwrap_or(name);
-                    spells.push(serde_json::json!({
-                        "name": name,
-                        "source": source,
-                        "displayName": display_name,
-                    }));
-                }
-            }
-            _ => {}
         }
     }
 
-    let skills_val = if skills.is_empty() {
+    if skills.is_empty() {
         None
     } else {
         Some(Value::Array(skills))
-    };
-    let spells_val = if spells.is_empty() {
-        None
-    } else {
-        Some(Value::Array(spells))
-    };
-    (skills_val, spells_val)
+    }
 }
 
 pub fn build_user_content_override(
@@ -812,10 +781,8 @@ pub async fn persist_user_message_event(
 /// Build skill context from server-owned session state.
 ///
 /// Reconstructs the [`SkillTracker`] from events, looks up active skills
-/// and unconsumed spells in the registry, and builds the `<skills>` XML block.
-///
-/// Also writes `spell.consumed` events for any spells that are consumed, and
-/// returns the removal notice for recently deactivated skills.
+/// in the registry, and builds the `<skills>` XML block. Returns the removal
+/// notice for recently deactivated skills.
 pub async fn build_skill_context_from_session(
     skill_registry: Arc<RwLock<SkillRegistry>>,
     event_store: Arc<EventStore>,
@@ -850,35 +817,21 @@ pub async fn build_skill_context_from_session(
             }
         }
 
-        // Collect active skill names + unconsumed spell names
+        // Collect active skill names
         let active_names = tracker.active_skill_names();
-        let unconsumed_spells = tracker.unconsumed_spells().to_vec();
-        let spell_names: Vec<String> = unconsumed_spells.iter().map(|s| s.name.clone()).collect();
 
         tracing::info!(
             active_count = tracker.count(),
             active_skills = ?active_names,
-            pending_spells = ?spell_names,
             "[skills] reconstructed tracker for session {session_id}"
         );
 
-        // Save skill-only names for the activation directive (before merge)
-        let skill_only_names = active_names.clone();
-
-        // Merge active skills + spell names (dedup)
-        let mut all_names: Vec<String> = active_names;
-        for name in &spell_names {
-            if !all_names.contains(name) {
-                all_names.push(name.clone());
-            }
-        }
-
         // Look up metadata from registry
-        let found: Vec<SkillMetadata> = if all_names.is_empty() {
+        let found: Vec<SkillMetadata> = if active_names.is_empty() {
             Vec::new()
         } else {
             let registry = skill_registry.read();
-            let name_refs: Vec<&str> = all_names.iter().map(String::as_str).collect();
+            let name_refs: Vec<&str> = active_names.iter().map(String::as_str).collect();
             let (found, _not_found) = registry.get_many(&name_refs);
             found.into_iter().cloned().collect()
         };
@@ -903,23 +856,9 @@ pub async fn build_skill_context_from_session(
             (!context.is_empty()).then_some(context)
         };
 
-        // Write spell.consumed events for consumed spells
-        for spell in &unconsumed_spells {
-            let _ = event_store.append(&crate::events::AppendOptions {
-                session_id: &session_id,
-                event_type: crate::events::EventType::SpellConsumed,
-                payload: serde_json::json!({
-                    "spellName": spell.name,
-                    "castEventId": spell.event_id,
-                }),
-                parent_id: None,
-                sequence: None,
-            });
-        }
-
-        // Build activation directive for active skills + spells
+        // Build activation directive for active skills
         let skill_activation_context =
-            crate::skills::injector::build_activation_directive(&skill_only_names, &spell_names);
+            crate::skills::injector::build_activation_directive(&active_names);
 
         // Build removal notice for deactivated skills + post-compaction guidance
         let removal_notice = {
@@ -967,9 +906,9 @@ pub async fn build_skill_context_from_session(
 
 /// Result of building skill context from session state.
 pub struct SkillContextResult {
-    /// Activation directive ("follow these active skills/spells").
+    /// Activation directive ("follow these active skills").
     pub skill_activation_context: Option<String>,
-    /// The `<skills>` XML block for active skills + consumed spells.
+    /// The `<skills>` XML block for active skills.
     pub skill_context: Option<String>,
     /// One-turn removal notice for recently deactivated skills.
     pub skill_removal_context: Option<String>,

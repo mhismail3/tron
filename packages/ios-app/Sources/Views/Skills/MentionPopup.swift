@@ -1,52 +1,5 @@
 import SwiftUI
 
-// MARK: - Mention Style
-
-/// Configuration that captures the visual differences between Skill (@) and Spell (%) popups.
-struct MentionStyle: Sendable {
-    let title: String
-    let icon: String
-    let tintColor: Color
-    let prefix: String
-    let rowIcon: @Sendable (Skill) -> (name: String, color: Color)
-    let badges: @Sendable (Skill) -> [MentionBadge]
-
-    static let skill = MentionStyle(
-        title: "Skills",
-        icon: "sparkles",
-        tintColor: .tronCyan,
-        prefix: "@",
-        rowIcon: { skill in
-            (name: "sparkles", color: .tronCyan)
-        },
-        badges: { skill in
-            var badges: [MentionBadge] = []
-            if skill.source == .project {
-                badges.append(MentionBadge(text: "project", color: .tronEmerald))
-            }
-            return badges
-        }
-    )
-
-    static let spell = MentionStyle(
-        title: "Spells",
-        icon: "wand.and.stars",
-        tintColor: .tronPink,
-        prefix: "%",
-        rowIcon: { _ in
-            (name: "wand.and.stars", color: .tronPink)
-        },
-        badges: { skill in
-            var badges: [MentionBadge] = []
-            if skill.source == .project {
-                badges.append(MentionBadge(text: "project", color: .tronEmerald))
-            }
-            badges.append(MentionBadge(text: "one-time", color: .tronPink))
-            return badges
-        }
-    )
-}
-
 // MARK: - Mention Badge
 
 struct MentionBadge {
@@ -60,7 +13,6 @@ struct MentionBadge {
 struct MentionPopup: View {
     let skills: [Skill]
     let query: String
-    let style: MentionStyle
     let skillStore: SkillStore?
     let onSelect: (Skill) -> Void
     let onDismiss: () -> Void
@@ -69,7 +21,7 @@ struct MentionPopup: View {
     @State private var detailSkill: Skill?
 
     private var tint: TintedColors {
-        TintedColors(accent: style.tintColor, colorScheme: colorScheme)
+        TintedColors(accent: .tronCyan, colorScheme: colorScheme)
     }
 
     private var filteredSkills: [Skill] {
@@ -81,13 +33,13 @@ struct MentionPopup: View {
             // Header with dismiss button
             HStack {
                 HStack(spacing: 5) {
-                    Image(systemName: style.icon)
+                    Image(systemName: "sparkles")
                         .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
-                        .foregroundStyle(style.tintColor)
+                        .foregroundStyle(Color.tronCyan)
 
-                    Text(style.title)
+                    Text("Skills")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(style.tintColor)
+                        .foregroundStyle(Color.tronCyan)
 
                     if !query.isEmpty {
                         Text("· \"\(query)\"")
@@ -130,7 +82,7 @@ struct MentionPopup: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(filteredSkills) { skill in
-                            MentionRow(skill: skill, style: style, tint: tint, onTap: {
+                            MentionRow(skill: skill, tint: tint, onTap: {
                                 onSelect(skill)
                             }, onInfo: {
                                 detailSkill = skill
@@ -146,17 +98,13 @@ struct MentionPopup: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.clear)
                 .glassEffect(
-                    .regular.tint(style.tintColor.opacity(0.15)),
+                    .regular.tint(Color.tronCyan.opacity(0.15)),
                     in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                 )
         }
         .sheet(item: $detailSkill) { skill in
             if let store = skillStore {
-                SkillDetailSheet(
-                    skill: skill,
-                    skillStore: store,
-                    mode: style.tintColor == .tronPink ? .spell : .skill
-                )
+                SkillDetailSheet(skill: skill, skillStore: store)
             }
         }
     }
@@ -167,15 +115,19 @@ struct MentionPopup: View {
 @available(iOS 26.0, *)
 private struct MentionRow: View {
     let skill: Skill
-    let style: MentionStyle
     let tint: TintedColors
     let onTap: () -> Void
     let onInfo: () -> Void
 
-    var body: some View {
-        let icon = style.rowIcon(skill)
-        let badges = style.badges(skill)
+    private var badges: [MentionBadge] {
+        var badges: [MentionBadge] = []
+        if skill.source == .project {
+            badges.append(MentionBadge(text: "project", color: .tronEmerald))
+        }
+        return badges
+    }
 
+    var body: some View {
         Button {
             onTap()
         } label: {
@@ -183,18 +135,18 @@ private struct MentionRow: View {
                 // Icon
                 ZStack {
                     Circle()
-                        .fill(icon.color.opacity(0.15))
+                        .fill(Color.tronCyan.opacity(0.15))
                         .frame(width: 32, height: 32)
 
-                    Image(systemName: icon.name)
+                    Image(systemName: "sparkles")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(icon.color)
+                        .foregroundStyle(Color.tronCyan)
                 }
 
                 // Skill info
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
-                        Text("\(style.prefix)\(skill.name)")
+                        Text("@\(skill.name)")
                             .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(tint.name)
 
@@ -223,7 +175,7 @@ private struct MentionRow: View {
                 } label: {
                     Image(systemName: "info.circle.fill")
                         .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
-                        .foregroundStyle(style.tintColor)
+                        .foregroundStyle(Color.tronCyan)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

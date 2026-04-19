@@ -30,8 +30,6 @@ struct InputBar: View {
     @State private var showFilePicker = false
     @State private var showSkillMentionPopup = false
     @State private var skillMentionQuery = ""
-    @State private var showSpellMentionPopup = false
-    @State private var spellMentionQuery = ""
     @State private var showPromptLibrary = false
     @State private var hasAppeared = false
     @State private var showAttachmentButton = false
@@ -107,31 +105,12 @@ struct InputBar: View {
                 MentionPopup(
                     skills: store.skills,
                     query: skillMentionQuery,
-                    style: .skill,
                     skillStore: store,
                     onSelect: { skill in
-                        selectFromMention(skill, style: .skill)
+                        selectFromMention(skill)
                     },
                     onDismiss: {
-                        dismissMentionPopup(.skill)
-                    }
-                )
-                .padding(.horizontal, 16)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            // Spell mention popup (ephemeral skills)
-            if showSpellMentionPopup, let store = config.skillStore {
-                MentionPopup(
-                    skills: store.skills,
-                    query: spellMentionQuery,
-                    style: .spell,
-                    skillStore: store,
-                    onSelect: { skill in
-                        selectFromMention(skill, style: .spell)
-                    },
-                    onDismiss: {
-                        dismissMentionPopup(.spell)
+                        dismissMentionPopup()
                     }
                 )
                 .padding(.horizontal, 16)
@@ -153,8 +132,6 @@ struct InputBar: View {
                         showFilePicker: $showFilePicker,
                         showSkillMentionPopup: $showSkillMentionPopup,
                         skillMentionQuery: $skillMentionQuery,
-                        showSpellMentionPopup: $showSpellMentionPopup,
-                        spellMentionQuery: $spellMentionQuery,
                         showPromptLibrary: $showPromptLibrary
                     )
                     .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
@@ -248,23 +225,18 @@ struct InputBar: View {
                 )
             }
         }
-        // Skill and spell mention detection
+        // Skill mention detection
         .onChange(of: state.text) { _, newText in
             detectSkillMention(in: newText)
-            detectSpellMention(in: newText)
         }
         // Sync mention popup visibility to shared state
         .onChange(of: showSkillMentionPopup) { _, _ in
-            state.isMentionPopupVisible = showSkillMentionPopup || showSpellMentionPopup
-        }
-        .onChange(of: showSpellMentionPopup) { _, _ in
-            state.isMentionPopupVisible = showSkillMentionPopup || showSpellMentionPopup
+            state.isMentionPopupVisible = showSkillMentionPopup
         }
         // External dismiss (tap outside)
         .onChange(of: state.isMentionPopupVisible) { _, visible in
-            if !visible {
-                if showSkillMentionPopup { dismissMentionPopup(.skill) }
-                if showSpellMentionPopup { dismissMentionPopup(.spell) }
+            if !visible && showSkillMentionPopup {
+                dismissMentionPopup()
             }
         }
         // Sheets
@@ -366,20 +338,15 @@ struct InputBar: View {
     @ViewBuilder
     private var contentArea: some View {
         HStack(alignment: .bottom, spacing: 12) {
-            if !state.selectedSkills.isEmpty || !state.selectedSpells.isEmpty || !state.attachments.isEmpty {
+            if !state.selectedSkills.isEmpty || !state.attachments.isEmpty {
                 ContentAreaView(
                     selectedSkills: state.selectedSkills,
-                    selectedSpells: state.selectedSpells,
                     attachments: state.attachments,
                     attachmentCapability: config.attachmentCapability,
                     onSkillRemove: { skill in
-                        removeSelectedMention(skill, style: .skill)
+                        removeSelectedMention(skill)
                     },
                     onSkillDetailTap: actions.onSkillDetailTap,
-                    onSpellRemove: { skill in
-                        removeSelectedMention(skill, style: .spell)
-                    },
-                    onSpellDetailTap: actions.onSpellDetailTap,
                     onRemoveAttachment: actions.onRemoveAttachment
                 )
             }
@@ -432,115 +399,61 @@ struct InputBar: View {
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMicButton)
     }
 
-    // MARK: - Mention Detection (shared for skills and spells)
+    // MARK: - Mention Detection
 
     private func detectSkillMention(in newText: String) {
-        detectMention(
-            in: newText,
-            detector: .skill,
-            selected: state.selectedSkills,
-            showPopup: $showSkillMentionPopup,
-            query: $skillMentionQuery,
-            dismissOther: { dismissMentionPopup(.spell) },
-            onCompleted: { skill in
-                if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
-                    state.selectedSkills.append(skill)
-                }
-                actions.onSkillSelect?(skill)
-            }
-        )
-    }
-
-    private func detectSpellMention(in newText: String) {
-        detectMention(
-            in: newText,
-            detector: .spell,
-            selected: state.selectedSpells,
-            showPopup: $showSpellMentionPopup,
-            query: $spellMentionQuery,
-            dismissOther: { dismissMentionPopup(.skill) },
-            onCompleted: { skill in
-                if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
-                    state.selectedSpells.append(skill)
-                }
-            }
-        )
-    }
-
-    private func detectMention(
-        in newText: String,
-        detector: MentionDetector,
-        selected: [Skill],
-        showPopup: Binding<Bool>,
-        query: Binding<String>,
-        dismissOther: () -> Void,
-        onCompleted: (Skill) -> Void
-    ) {
         guard let store = config.skillStore else { return }
+        let detector = MentionDetector.skill
 
-        if let completed = detector.detectCompletedMention(in: newText, skills: store.skills, alreadySelected: selected) {
-            onCompleted(completed)
+        if let completed = detector.detectCompletedMention(in: newText, skills: store.skills, alreadySelected: state.selectedSkills) {
+            if !state.selectedSkills.contains(where: { $0.name == completed.name }) {
+                state.selectedSkills.append(completed)
+            }
+            actions.onSkillSelect?(completed)
             withAnimation(.tronStandard) {
-                showPopup.wrappedValue = false
-                query.wrappedValue = ""
+                showSkillMentionPopup = false
+                skillMentionQuery = ""
             }
             return
         }
 
         if let q = detector.detectMention(in: newText) {
-            query.wrappedValue = q
-            if !showPopup.wrappedValue {
+            skillMentionQuery = q
+            if !showSkillMentionPopup {
                 withAnimation(.tronStandard) {
-                    dismissOther()
-                    showPopup.wrappedValue = true
+                    showSkillMentionPopup = true
                 }
             }
-        } else if showPopup.wrappedValue {
+        } else if showSkillMentionPopup {
             withAnimation(.tronStandard) {
-                showPopup.wrappedValue = false
-                query.wrappedValue = ""
+                showSkillMentionPopup = false
+                skillMentionQuery = ""
             }
         }
     }
 
-    private func selectFromMention(_ skill: Skill, style: MentionDetector) {
-        let trigger = style.trigger
+    private func selectFromMention(_ skill: Skill) {
+        let trigger = MentionDetector.skill.trigger
         if let triggerIndex = state.text.lastIndex(of: trigger) {
             state.text = String(state.text[..<triggerIndex]) + String(trigger) + skill.name + " "
         }
-        if style.trigger == MentionDetector.skill.trigger {
-            if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
-                state.selectedSkills.append(skill)
-            }
-            actions.onSkillSelect?(skill)
-        } else {
-            if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
-                state.selectedSpells.append(skill)
-            }
+        if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
+            state.selectedSkills.append(skill)
         }
-        dismissMentionPopup(style)
+        actions.onSkillSelect?(skill)
+        dismissMentionPopup()
     }
 
-    private func dismissMentionPopup(_ style: MentionDetector) {
+    private func dismissMentionPopup() {
         withAnimation(.tronStandard) {
-            if style.trigger == MentionDetector.skill.trigger {
-                showSkillMentionPopup = false
-                skillMentionQuery = ""
-            } else {
-                showSpellMentionPopup = false
-                spellMentionQuery = ""
-            }
+            showSkillMentionPopup = false
+            skillMentionQuery = ""
         }
     }
 
-    private func removeSelectedMention(_ skill: Skill, style: MentionDetector) {
-        if style.trigger == MentionDetector.skill.trigger {
-            state.selectedSkills.removeAll { $0.name == skill.name }
-            actions.onSkillRemove?(skill)
-        } else {
-            state.selectedSpells.removeAll { $0.name == skill.name }
-            actions.onSpellRemove?(skill)
-        }
+    private func removeSelectedMention(_ skill: Skill) {
+        state.selectedSkills.removeAll { $0.name == skill.name }
+        actions.onSkillRemove?(skill)
     }
 
 }

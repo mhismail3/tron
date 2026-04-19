@@ -12,7 +12,7 @@
 //! ## `register_capabilities` — Domain features
 //!
 //! `skills` (list, get, refresh), `skill_session` (activate, deactivate,
-//! spell.cast, active — session-scoped skill state), `filesystem` (list, read, mkdir),
+//! active — session-scoped skill state), `filesystem` (list, read, mkdir),
 //! `task`/`projects`/`areas` (CRUD), `tree` (visualization, branches),
 //! `import` (listSources, listSessions, previewSession, execute)
 //!
@@ -188,7 +188,6 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     // Session-scoped skill state
     registry.register("skill.activate", skill_session::ActivateHandler);
     registry.register("skill.deactivate", skill_session::DeactivateHandler);
-    registry.register("spell.cast", skill_session::CastSpellHandler);
     registry.register("skill.active", skill_session::ActiveHandler);
 
     // Filesystem
@@ -596,8 +595,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            157,
-            "expected 157 methods, got {}",
+            156,
+            "expected 156 methods, got {}",
             reg.methods().len()
         );
     }

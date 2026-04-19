@@ -31,13 +31,6 @@ struct MessageBubble: View {
                 }
             }
 
-            // Show spells above text for user messages (pink chips for ephemeral skills)
-            if let spells = message.spells, !spells.isEmpty {
-                MessageSpellChips(spells: spells) { spell in
-                    onTap?(.spell(spell))
-                }
-            }
-
             contentView
 
             // Show enriched metadata badge for assistant messages with metadata

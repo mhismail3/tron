@@ -234,13 +234,6 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             "agent.skill_deactivated",
             Some(json!({ "skillName": skill_name })),
         )),
-        TronEvent::SpellCast {
-            spell_name, source, ..
-        } => Some(session_scoped(
-            event,
-            "agent.spell_cast",
-            Some(json!({ "spellName": spell_name, "source": source })),
-        )),
         TronEvent::SubagentSpawned {
             subagent_session_id,
             task,

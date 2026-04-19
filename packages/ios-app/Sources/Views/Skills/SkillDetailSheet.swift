@@ -2,14 +2,12 @@ import SwiftUI
 
 // MARK: - Skill Detail Sheet (iOS 26 Liquid Glass)
 
-/// Full-screen sheet for reading skill content when a skill chip is tapped
-/// Displays the SKILL.md content in a beautiful, readable format
-/// Supports both skill (cyan) and spell (pink) modes
+/// Full-screen sheet for reading skill content when a skill chip is tapped.
+/// Displays the SKILL.md content in a beautiful, readable format.
 @available(iOS 26.0, *)
 struct SkillDetailSheet: View {
     let skill: Skill
     let skillStore: SkillStore
-    var mode: ChipMode = .skill
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
@@ -18,10 +16,9 @@ struct SkillDetailSheet: View {
     @State private var error: String?
 
     private var tint: TintedColors {
-        TintedColors(mode: mode, colorScheme: colorScheme)
+        TintedColors(accent: .tronCyan, colorScheme: colorScheme)
     }
 
-    /// Accent color based on mode: cyan for skills, pink for spells
     private var accentColor: Color { tint.accent }
 
     var body: some View {
@@ -171,17 +168,6 @@ struct SkillDetailSheet: View {
                     }
                 }
 
-                // Ephemeral spell caption (only for spells)
-                if mode == .spell {
-                    HStack(spacing: 6) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        Text("Spells are ephemeral one-time skills that apply only to a single prompt.")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    }
-                    .foregroundStyle(accentColor.opacity(0.8))
-                    .padding(.top, 4)
-                }
             }
             .padding(14)
             .background {

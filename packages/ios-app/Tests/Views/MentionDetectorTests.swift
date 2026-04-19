@@ -4,7 +4,6 @@ import XCTest
 final class MentionDetectorTests: XCTestCase {
 
     private let skillDetector = MentionDetector.skill
-    private let spellDetector = MentionDetector.spell
 
     // MARK: - Helper
 
@@ -16,10 +15,6 @@ final class MentionDetectorTests: XCTestCase {
 
     func testDetectMention_atTrigger_returnsQuery() {
         XCTAssertEqual(skillDetector.detectMention(in: "hello @foo"), "foo")
-    }
-
-    func testDetectMention_percentTrigger_returnsQuery() {
-        XCTAssertEqual(spellDetector.detectMention(in: "hello %foo"), "foo")
     }
 
     func testDetectMention_atStartOfString() {
@@ -122,14 +117,6 @@ final class MentionDetectorTests: XCTestCase {
         let skills = [makeSkill("bar")]
         let result = skillDetector.detectCompletedMention(in: "foo@bar ", skills: skills, alreadySelected: [])
         XCTAssertNil(result)
-    }
-
-    // MARK: - Spell Detection (%trigger)
-
-    func testDetectCompletedMention_percentTrigger() {
-        let skills = [makeSkill("typescript-rules")]
-        let result = spellDetector.detectCompletedMention(in: "%typescript-rules ", skills: skills, alreadySelected: [])
-        XCTAssertEqual(result?.name, "typescript-rules")
     }
 
     // MARK: - Filtering

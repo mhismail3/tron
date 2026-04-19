@@ -26,10 +26,6 @@ extension ChatViewModel: MessagingContext {
         _ = try await rpcClient.agent.deactivateSkill(skillName)
     }
 
-    func castSpellOnServer(_ spellName: String) async throws {
-        _ = try await rpcClient.agent.castSpell(spellName)
-    }
-
     func abortAgentOnServer() async throws {
         try await rpcClient.agent.abort()
     }
@@ -104,12 +100,11 @@ extension ChatViewModel {
     }
 
     /// Send a message to the agent
-    func sendMessage(reasoningLevel: String? = nil, skills: [Skill]? = nil, spells: [Skill]? = nil) {
+    func sendMessage(reasoningLevel: String? = nil, skills: [Skill]? = nil) {
         Task {
             await messagingCoordinator.sendMessage(
                 reasoningLevel: reasoningLevel,
                 skills: skills,
-                spells: spells,
                 context: self
             )
         }

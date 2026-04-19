@@ -373,23 +373,17 @@ struct ChatView: View {
                             )
                             if viewModel.agentPhase.isIdle {
                                 let skillsToSend = viewModel.inputBarState.selectedSkills
-                                let spellsToSend = viewModel.inputBarState.selectedSpells
                                 viewModel.inputBarState.selectedSkills = []
-                                viewModel.inputBarState.selectedSpells = []
 
-                                // Activate skills and cast spells on server before sending prompt
+                                // Activate skills on server before sending prompt
                                 Task {
                                     for skill in skillsToSend {
                                         try? await viewModel.activateSkillOnServer(skill.name)
                                     }
-                                    for spell in spellsToSend {
-                                        try? await viewModel.castSpellOnServer(spell.name)
-                                    }
                                     await MainActor.run {
                                         viewModel.sendMessage(
                                             reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
-                                            skills: skillsToSend.isEmpty ? nil : skillsToSend,
-                                            spells: spellsToSend.isEmpty ? nil : spellsToSend
+                                            skills: skillsToSend.isEmpty ? nil : skillsToSend
                                         )
                                     }
                                 }
@@ -410,9 +404,7 @@ struct ChatView: View {
                             // context" gesture. See MessagingCoordinator.removeSkillFromDraft.
                             viewModel.removeSkillFromDraft(skill)
                         },
-                        onSkillDetailTap: { [sheetCoordinator] skill in sheetCoordinator.showSkillDetail(skill, mode: .skill) },
-                        onSpellRemove: { _ in },
-                        onSpellDetailTap: { [sheetCoordinator] spell in sheetCoordinator.showSkillDetail(spell, mode: .spell) },
+                        onSkillDetailTap: { [sheetCoordinator] skill in sheetCoordinator.showSkillDetail(skill) },
                         onQueueRemove: { [viewModel] queueId in
                             Task { try? await viewModel.rpcClient.agent.dequeuePrompt(queueId) }
                         }
@@ -474,9 +466,7 @@ struct ChatView: View {
     private func handleBubbleTap(_ action: MessageBubbleTapAction) {
         switch action {
         case .skill(let skill):
-            sheetCoordinator.showSkillDetail(skill, mode: .skill)
-        case .spell(let spell):
-            sheetCoordinator.showSkillDetail(spell, mode: .spell)
+            sheetCoordinator.showSkillDetail(skill)
         case .askUserQuestion(let data):
             viewModel.openAskUserQuestionSheet(for: data)
         case .getConfirmation(let data):

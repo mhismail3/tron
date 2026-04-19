@@ -1,13 +1,10 @@
 import Foundation
 
 /// Generic mention detector parameterized by trigger character.
-/// Replaces duplicated SkillMentionDetector and SpellMentionDetector.
 struct MentionDetector {
     let trigger: Character
 
-    /// Static instances for the two mention types
     static let skill = MentionDetector(trigger: "@")
-    static let spell = MentionDetector(trigger: "%")
 
     /// Detect an in-progress mention in text.
     /// Returns the query string after the trigger if in mention mode, nil otherwise.
@@ -74,7 +71,7 @@ struct MentionDetector {
         return nil
     }
 
-    /// Filter and sort skills by query. Shared by both skill and spell popups.
+    /// Filter and sort skills by query.
     static func filterSkills(_ skills: [Skill], query: String) -> [Skill] {
         guard !query.isEmpty else { return skills }
 

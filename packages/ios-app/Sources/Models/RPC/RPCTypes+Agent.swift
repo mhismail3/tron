@@ -36,11 +36,6 @@ struct SkillDeactivateParams: Encodable {
     let skillName: String
 }
 
-struct SpellCastParams: Encodable {
-    let sessionId: String
-    let spellName: String
-}
-
 struct SkillActiveParams: Encodable {
     let sessionId: String
 }
@@ -60,29 +55,12 @@ struct SkillDeactivateResult: Decodable {
     let deactivatedSkill: String?
 }
 
-struct SpellCastResult: Decodable {
-    let success: Bool
-    let spell: SpellInfo?
-
-    struct SpellInfo: Decodable {
-        let name: String
-        let source: String
-    }
-}
-
 struct SkillActiveResult: Decodable {
     let skills: [ActiveSkillInfo]
-    let pendingSpells: [PendingSpellInfo]
 
     struct ActiveSkillInfo: Decodable {
         let name: String
         let source: String
-    }
-
-    struct PendingSpellInfo: Decodable {
-        let name: String
-        let source: String
-        let eventId: String
     }
 }
 

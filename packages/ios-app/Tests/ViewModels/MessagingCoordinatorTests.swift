@@ -575,7 +575,6 @@ final class MockMessagingContext: MessagingContext {
     func deactivateSkillOnServer(_ skillName: String) async throws {
         deactivateSkillOnServerCallCount += 1
     }
-    func castSpellOnServer(_ spellName: String) async throws {}
 
     func abortAgentOnServer() async throws {
         abortAgentCalled = true

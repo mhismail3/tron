@@ -20,9 +20,9 @@ extension ChatMessage {
         }
     }
 
-    /// Create a user message with optional attachments, skills, and spells
-    static func user(_ text: String, attachments: [Attachment]? = nil, skills: [Skill]? = nil, spells: [Skill]? = nil) -> ChatMessage {
-        ChatMessage(role: .user, content: .text(text), attachments: attachments, skills: skills, spells: spells)
+    /// Create a user message with optional attachments and skills
+    static func user(_ text: String, attachments: [Attachment]? = nil, skills: [Skill]? = nil) -> ChatMessage {
+        ChatMessage(role: .user, content: .text(text), attachments: attachments, skills: skills)
     }
 
     static func assistant(_ text: String) -> ChatMessage {

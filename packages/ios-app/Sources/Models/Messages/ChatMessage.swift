@@ -16,8 +16,6 @@ struct ChatMessage: Identifiable, Equatable {
     var attachments: [Attachment]?
     /// Skills referenced in this message (rendered as chips above the message)
     var skills: [Skill]?
-    /// Spells referenced in this message (ephemeral skills, rendered as pink chips)
-    var spells: [Skill]?
 
     // MARK: - Enriched Metadata (Phase 1)
     // These fields come from server-side event store enhancements
@@ -50,7 +48,6 @@ struct ChatMessage: Identifiable, Equatable {
         tokenRecord: TokenRecord? = nil,
         attachments: [Attachment]? = nil,
         skills: [Skill]? = nil,
-        spells: [Skill]? = nil,
         model: String? = nil,
         latencyMs: Int? = nil,
         turnNumber: Int? = nil,
@@ -67,7 +64,6 @@ struct ChatMessage: Identifiable, Equatable {
         self.tokenRecord = tokenRecord
         self.attachments = attachments
         self.skills = skills
-        self.spells = spells
         self.model = model
         self.latencyMs = latencyMs
         self.turnNumber = turnNumber

@@ -4,7 +4,6 @@ import Foundation
 /// Replaces 15 individual closure properties with a single `onTap` handler.
 enum MessageBubbleTapAction {
     case skill(Skill)
-    case spell(Skill)
     case askUserQuestion(AskUserQuestionToolData)
     case getConfirmation(GetConfirmationToolData)
     case thinking(String)

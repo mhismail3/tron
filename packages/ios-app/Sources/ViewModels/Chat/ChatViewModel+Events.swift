@@ -268,10 +268,6 @@ extension ChatViewModel {
         }
     }
 
-    func handleSpellCast(_ pluginResult: SpellCastPlugin.Result) {
-        logger.info("Spell cast: \(pluginResult.spellName) (\(pluginResult.source))", category: .events)
-    }
-
     func handleRulesActivated(_ pluginResult: RulesActivatedPlugin.Result) {
         let dirs = pluginResult.rules.map(\.scopeDir).joined(separator: ", ")
         logger.info("Rules activated for: \(dirs)", category: .events)

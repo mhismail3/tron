@@ -31,6 +31,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Prompt Library — history and snippets",
         sql: include_str!("v002_schema.sql"),
     },
+    Migration {
+        version: 3,
+        description: "Remove legacy spell.cast / spell.consumed events",
+        sql: include_str!("v003_remove_spells.sql"),
+    },
 ];
 
 /// Result of running migrations.
@@ -182,8 +187,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 2);
-        assert_eq!(result.max_version_applied, 2);
+        assert_eq!(result.applied, 3);
+        assert_eq!(result.max_version_applied, 3);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -252,7 +257,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 2);
+        assert_eq!(first.applied, 3);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -270,12 +275,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 2);
+        assert_eq!(current_version(&conn).unwrap(), 3);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 2);
+        assert_eq!(latest_version(), 3);
     }
 
     #[test]
@@ -786,10 +791,10 @@ mod tests {
         )
         .unwrap();
 
-        // Now run the full migrator — only v2 should apply.
+        // Now run the full migrator — v2 and v3 should apply.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 2);
+        assert_eq!(result.applied, 2);
+        assert_eq!(result.max_version_applied, 3);
 
         // v1 data is intact.
         let count: i64 = conn
@@ -946,6 +951,70 @@ mod tests {
                 "missing index: {idx}"
             );
         }
+    }
+
+    // ── v003 spell cleanup tests ──────────────────────────────────────
+
+    #[test]
+    fn v003_deletes_legacy_spell_events() {
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        apply_migration(&conn, &MIGRATIONS[0]).unwrap();
+        apply_migration(&conn, &MIGRATIONS[1]).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
+             VALUES ('s1', 'ws1', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('sc1','s1',1,'spell.cast','2025-01-01T00:00:00Z','{}','ws1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('sc2','s1',2,'spell.consumed','2025-01-01T00:00:00Z','{}','ws1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('mu1','s1',3,'message.user','2025-01-01T00:00:00Z','{}','ws1')",
+            [],
+        )
+        .unwrap();
+
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 3);
+
+        let spell_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE type LIKE 'spell.%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(spell_count, 0);
+
+        let preserved: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE id = 'mu1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved, 1);
     }
 
     #[test]
