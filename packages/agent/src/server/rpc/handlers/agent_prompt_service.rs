@@ -209,7 +209,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         request,
     } = plan;
 
-    let is_chat = source.as_deref() == Some("chat");
+    let is_chat = !should_acquire_worktree_for_source(source.as_deref());
 
     let PromptRequest {
         session_id,
@@ -318,69 +318,74 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     };
 
     let mut freshly_acquired_worktree = false;
-    let worktree_info: Option<crate::worktree::WorktreeInfo> =
-        if let Some(wt_path) = &state.worktree_path {
-            worktree_coordinator
-                .as_ref()
-                .and_then(|coordinator| coordinator.get_info(&session_id))
-                .or_else(|| {
-                    Some(crate::worktree::WorktreeInfo {
-                        session_id: session_id.clone(),
-                        worktree_path: std::path::PathBuf::from(wt_path),
-                        branch: String::new(),
-                        base_commit: String::new(),
-                        base_branch: None,
-                        original_working_dir: std::path::PathBuf::from(&working_dir),
-                        repo_root: std::path::PathBuf::from(&working_dir),
-                    })
+    let worktree_info: Option<crate::worktree::WorktreeInfo> = if is_chat {
+        // Chat sessions are conversational and never use worktrees — server-
+        // enforced invariant, independent of global IsolationMode, per-session
+        // `useWorktree` override, and any stale `state.worktree_path` from
+        // legacy rows predating this rule. See `should_acquire_worktree_for_source`.
+        None
+    } else if let Some(wt_path) = &state.worktree_path {
+        worktree_coordinator
+            .as_ref()
+            .and_then(|coordinator| coordinator.get_info(&session_id))
+            .or_else(|| {
+                Some(crate::worktree::WorktreeInfo {
+                    session_id: session_id.clone(),
+                    worktree_path: std::path::PathBuf::from(wt_path),
+                    branch: String::new(),
+                    base_commit: String::new(),
+                    base_branch: None,
+                    original_working_dir: std::path::PathBuf::from(&working_dir),
+                    repo_root: std::path::PathBuf::from(&working_dir),
                 })
-        } else if let Some(ref coordinator) = worktree_coordinator {
-            // Look up the session's optional per-session worktree override.
-            // None defers to the global IsolationMode setting.
-            let use_worktree_override = event_store
-                .get_session(&session_id)
-                .ok()
-                .flatten()
-                .and_then(|row| row.use_worktree);
-            match coordinator
-                .maybe_acquire_with_override(
-                    &session_id,
-                    std::path::Path::new(&working_dir),
-                    use_worktree_override,
-                )
-                .await
-            {
-                Ok(crate::worktree::AcquireResult::Acquired(info)) => {
-                    freshly_acquired_worktree = true;
-                    debug!(
-                        session_id = %session_id,
-                        worktree = %info.worktree_path.display(),
-                        branch = %info.branch,
-                        "worktree acquired for session"
-                    );
-                    Some(info)
-                }
-                Ok(crate::worktree::AcquireResult::Deferred(reason)) => {
-                    debug!(
-                        session_id = %session_id,
-                        reason = ?reason,
-                        "worktree deferred, using original directory"
-                    );
-                    None
-                }
-                Ok(crate::worktree::AcquireResult::Passthrough) => None,
-                Err(error) => {
-                    warn!(
-                        session_id = %session_id,
-                        error = %error,
-                        "worktree acquisition failed, using original directory"
-                    );
-                    None
-                }
+            })
+    } else if let Some(ref coordinator) = worktree_coordinator {
+        // Look up the session's optional per-session worktree override.
+        // None defers to the global IsolationMode setting.
+        let use_worktree_override = event_store
+            .get_session(&session_id)
+            .ok()
+            .flatten()
+            .and_then(|row| row.use_worktree);
+        match coordinator
+            .maybe_acquire_with_override(
+                &session_id,
+                std::path::Path::new(&working_dir),
+                use_worktree_override,
+            )
+            .await
+        {
+            Ok(crate::worktree::AcquireResult::Acquired(info)) => {
+                freshly_acquired_worktree = true;
+                debug!(
+                    session_id = %session_id,
+                    worktree = %info.worktree_path.display(),
+                    branch = %info.branch,
+                    "worktree acquired for session"
+                );
+                Some(info)
             }
-        } else {
-            None
-        };
+            Ok(crate::worktree::AcquireResult::Deferred(reason)) => {
+                debug!(
+                    session_id = %session_id,
+                    reason = ?reason,
+                    "worktree deferred, using original directory"
+                );
+                None
+            }
+            Ok(crate::worktree::AcquireResult::Passthrough) => None,
+            Err(error) => {
+                warn!(
+                    session_id = %session_id,
+                    error = %error,
+                    "worktree acquisition failed, using original directory"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let working_dir = worktree_info
         .as_ref()
@@ -997,4 +1002,53 @@ fn drain_prompt_queue(
     let _handle = tokio::spawn(async move {
         execute_prompt_run(plan).await;
     });
+}
+
+/// Returns true if a new prompt run for this session should attempt worktree
+/// acquisition. Chat sessions (`source == Some("chat")`) are conversational and
+/// never get worktrees regardless of global isolation mode or per-session
+/// `useWorktree` override — the server is authoritative on this invariant, so
+/// callers don't need to pass `useWorktree: false` explicitly.
+fn should_acquire_worktree_for_source(source: Option<&str>) -> bool {
+    source != Some("chat")
+}
+
+#[cfg(test)]
+mod should_acquire_worktree_tests {
+    use super::should_acquire_worktree_for_source;
+
+    #[test]
+    fn chat_source_never_acquires_worktree() {
+        assert!(!should_acquire_worktree_for_source(Some("chat")));
+    }
+
+    #[test]
+    fn project_source_may_acquire_worktree() {
+        assert!(should_acquire_worktree_for_source(Some("project")));
+    }
+
+    #[test]
+    fn missing_source_may_acquire_worktree() {
+        // Legacy sessions predating the source column default to project behavior.
+        assert!(should_acquire_worktree_for_source(None));
+    }
+
+    #[test]
+    fn unknown_source_may_acquire_worktree() {
+        // Forward compat: unknown sources get default (non-chat) behavior.
+        assert!(should_acquire_worktree_for_source(Some("future_source")));
+    }
+
+    #[test]
+    fn empty_string_source_may_acquire_worktree() {
+        // Edge case: empty string is not "chat".
+        assert!(should_acquire_worktree_for_source(Some("")));
+    }
+
+    #[test]
+    fn uppercase_chat_does_not_match() {
+        // Case-sensitive match — only exact "chat" skips.
+        assert!(should_acquire_worktree_for_source(Some("Chat")));
+        assert!(should_acquire_worktree_for_source(Some("CHAT")));
+    }
 }
