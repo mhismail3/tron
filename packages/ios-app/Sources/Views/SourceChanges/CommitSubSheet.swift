@@ -11,9 +11,11 @@ import SwiftUI
 ///   GitSubSheetContainer → GitHeroCard → Summary card → Message card →
 ///   toggle cards → GitResultBanner.
 ///
-/// The primary action lives in the trailing toolbar slot. The sheet does NOT
-/// auto-dismiss on success — the banner stays visible so the user can verify
-/// the commit hash. Parent `SourceControlSheet` reloads its data on dismiss.
+/// The primary action lives in the trailing toolbar slot. On a real commit
+/// (hash assigned) the sheet auto-dismisses after a brief banner flash so
+/// the user can confirm the action landed; on "nothing to commit" it stays
+/// open because the warning banner is the actionable signal. Parent
+/// `SourceControlSheet` reloads its data on dismiss.
 @available(iOS 26.0, *)
 struct CommitSubSheet: View {
     let rpcClient: RPCClient
@@ -29,7 +31,12 @@ struct CommitSubSheet: View {
     @State private var isCommitting: Bool = false
     @State private var result: WorktreeCommitResult?
     @State private var errorMessage: String?
+    /// True between a successful commit and the auto-dismiss firing.
+    /// Gates the primary action button so a double-tap during the 700ms
+    /// confirmation window can't fire a second commit.
+    @State private var isDismissingAfterSuccess: Bool = false
     @FocusState private var messageFocused: Bool
+    @Environment(\.dismiss) private var dismiss
 
     private let accent: Color = .tronTeal
 
@@ -91,6 +98,7 @@ struct CommitSubSheet: View {
     }
 
     private var isActionable: Bool {
+        guard !isDismissingAfterSuccess else { return false }
         guard hasWorktree, !isCommitting, !trimmedMessage.isEmpty else {
             return false
         }
@@ -390,6 +398,16 @@ struct CommitSubSheet: View {
                     stageAll: stageAll ? nil : false
                 )
                 result = r
+                // Auto-dismiss after a real commit so the user sees the
+                // success banner briefly and then lands back on the Source
+                // Control sheet with the updated diff. "Nothing to commit"
+                // (hash == nil) stays on-screen because the warning banner
+                // IS the feedback the user needs.
+                if r.commitHash != nil {
+                    isDismissingAfterSuccess = true
+                    try? await Task.sleep(for: .milliseconds(700))
+                    dismiss()
+                }
             } catch {
                 errorMessage = friendlyGitError(error, action: "Commit")
             }

@@ -25,6 +25,11 @@ struct SyncMainSubSheet: View {
     @State private var isSyncing = false
     @State private var outcome: GitSyncOutcome?
     @State private var errorMessage: String?
+    /// True between a successful real sync (upToDate / fastForwarded) and
+    /// the auto-dismiss firing. Dry-runs and blocked outcomes don't flip
+    /// this — they carry information the user needs to read before leaving.
+    @State private var isDismissingAfterSuccess: Bool = false
+    @Environment(\.dismiss) private var dismiss
 
     private let accent: Color = .tronEmerald
 
@@ -37,7 +42,7 @@ struct SyncMainSubSheet: View {
                     icon: dryRun ? "eye" : "arrow.down",
                     accent: accent,
                     isBusy: isSyncing,
-                    isEnabled: !isSyncing,
+                    isEnabled: !isSyncing && !isDismissingAfterSuccess,
                     accessibilityLabel: dryRun ? "Dry Run Pull" : "Pull"
                 ) { performSync() }
             },
@@ -173,12 +178,24 @@ struct SyncMainSubSheet: View {
             outcome = nil
             do {
                 // No targetBranch — server auto-detects the repo's default.
-                outcome = try await rpcClient.git.syncMain(
+                let o = try await rpcClient.git.syncMain(
                     sessionId: sessionId,
                     targetBranch: nil,
                     prune: prune ? true : nil,
                     dryRun: dryRun ? true : nil
                 )
+                outcome = o
+                // Auto-dismiss on real success only. Dry-runs surface a
+                // preview the user needs to read; `blocked` surfaces a
+                // reason the user needs to act on. Both stay open.
+                switch o {
+                case .upToDate, .fastForwarded:
+                    isDismissingAfterSuccess = true
+                    try? await Task.sleep(for: .milliseconds(700))
+                    dismiss()
+                case .dryRunPreview, .blocked:
+                    break
+                }
             } catch {
                 errorMessage = friendlyGitError(error, action: "Sync")
             }

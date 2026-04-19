@@ -31,6 +31,10 @@ struct FinalizeSessionSubSheet: View {
     @State private var isFinalizing = false
     @State private var result: WorktreeFinalizeSessionResult?
     @State private var errorMessage: String?
+    /// True between a successful clean merge and the auto-dismiss firing.
+    /// Conflict outcomes don't flip this — the user needs to tap
+    /// "Open Conflict Resolver" explicitly.
+    @State private var isDismissingAfterSuccess: Bool = false
 
     private let accent: Color = .tronCoral
 
@@ -74,7 +78,7 @@ struct FinalizeSessionSubSheet: View {
                     icon: "checkmark.seal",
                     accent: accent,
                     isBusy: isFinalizing,
-                    isEnabled: !isFinalizing && result == nil,
+                    isEnabled: !isFinalizing && result == nil && !isDismissingAfterSuccess,
                     accessibilityLabel: "Merge"
                 ) { performFinalize() }
             },
@@ -289,6 +293,14 @@ struct FinalizeSessionSubSheet: View {
                     rebranch: rebranch
                 )
                 result = r
+                // Clean merge → auto-dismiss after the success banner flashes.
+                // Conflicts stay visible: the user taps "Open Conflict
+                // Resolver" which swaps the active sheet via `onConflicts`.
+                if r.conflicts != true {
+                    isDismissingAfterSuccess = true
+                    try? await Task.sleep(for: .milliseconds(700))
+                    dismiss()
+                }
             } catch {
                 errorMessage = friendlyGitError(error, action: "Merge")
             }

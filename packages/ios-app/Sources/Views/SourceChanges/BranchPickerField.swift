@@ -219,6 +219,7 @@ struct BranchPickerSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .sectionFill(accent, subtle: true)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }

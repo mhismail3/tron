@@ -24,6 +24,11 @@ struct RebaseOnMainSubSheet: View {
     @State private var isRunning = false
     @State private var result: WorktreeRebaseOnMainResult?
     @State private var errorMessage: String?
+    /// True between a successful rebase and the auto-dismiss firing.
+    /// `.conflicts` and `.noOp` outcomes don't flip this — conflicts need
+    /// an explicit resolver tap; no-op carries info (ahead count) that
+    /// the user should read before leaving.
+    @State private var isDismissingAfterSuccess: Bool = false
 
     private let accent: Color = .tronPurple
 
@@ -63,7 +68,7 @@ struct RebaseOnMainSubSheet: View {
                     icon: "arrow.triangle.2.circlepath",
                     accent: accent,
                     isBusy: isRunning,
-                    isEnabled: !isRunning && result == nil,
+                    isEnabled: !isRunning && result == nil && !isDismissingAfterSuccess,
                     accessibilityLabel: "Rebase"
                 ) { performRebase() }
             },
@@ -228,6 +233,14 @@ struct RebaseOnMainSubSheet: View {
                     strategy: strategy.rawValue
                 )
                 result = r
+                // Only clean `.success` auto-dismisses. `.conflicts` gives
+                // the user an explicit resolver CTA to tap; `.noOp` shows
+                // "already up to date" info worth reading.
+                if case .success = r {
+                    isDismissingAfterSuccess = true
+                    try? await Task.sleep(for: .milliseconds(700))
+                    dismiss()
+                }
             } catch {
                 errorMessage = friendlyGitError(error, action: "Rebase")
             }

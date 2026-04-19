@@ -23,6 +23,11 @@ struct PushSubSheet: View {
     @State private var isPushing = false
     @State private var result: GitPushResult?
     @State private var errorMessage: String?
+    /// True between a successful real push and the auto-dismiss firing.
+    /// Dry-runs intentionally don't set this — the user may want to toggle
+    /// off dry-run and push for real without dismissing.
+    @State private var isDismissingAfterSuccess: Bool = false
+    @Environment(\.dismiss) private var dismiss
 
     private let accent: Color = .tronSky
 
@@ -35,7 +40,7 @@ struct PushSubSheet: View {
                     icon: dryRun ? "eye" : "arrow.up",
                     accent: accent,
                     isBusy: isPushing,
-                    isEnabled: !isPushing && hasBranch,
+                    isEnabled: !isPushing && hasBranch && !isDismissingAfterSuccess,
                     accessibilityLabel: dryRun ? "Dry Run Push" : "Push"
                 ) { performPush() }
             },
@@ -201,7 +206,7 @@ struct PushSubSheet: View {
             defer { isPushing = false }
             result = nil
             do {
-                result = try await rpcClient.git.push(
+                let r = try await rpcClient.git.push(
                     sessionId: sessionId,
                     branch: pushBranch,
                     remote: nil,
@@ -211,6 +216,15 @@ struct PushSubSheet: View {
                     overrideProtected: nil,
                     protectedBranches: nil
                 )
+                result = r
+                // Auto-dismiss after a real push only. Dry-runs stay open so
+                // the user can review the preview banner and optionally
+                // toggle off dry-run + re-push without re-opening the sheet.
+                if !r.dryRun {
+                    isDismissingAfterSuccess = true
+                    try? await Task.sleep(for: .milliseconds(700))
+                    dismiss()
+                }
             } catch {
                 errorMessage = friendlyGitError(error, action: "Push")
             }
