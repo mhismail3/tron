@@ -56,6 +56,25 @@ enum RPCErrorCode: String, CaseIterable, Sendable {
     case eventNotFound = "EVENT_NOT_FOUND"
     case workspaceNotFound = "WORKSPACE_NOT_FOUND"
     case blobNotFound = "BLOB_NOT_FOUND"
+
+    // Typed cron errors — mirror `map_cron_error`.
+    case cronNotFound = "CRON_NOT_FOUND"
+    case cronDuplicateName = "CRON_DUPLICATE_NAME"
+    case cronInvalidExpression = "CRON_INVALID_EXPRESSION"
+    case cronInvalidTimezone = "CRON_INVALID_TIMEZONE"
+    case cronTimedOut = "CRON_TIMED_OUT"
+    case cronCancelled = "CRON_CANCELLED"
+
+    // Typed auth errors — mirror `map_auth_error`.
+    case authNotConfigured = "AUTH_NOT_CONFIGURED"
+    case authTokenExpired = "AUTH_TOKEN_EXPIRED"
+    case authOauthError = "AUTH_OAUTH_ERROR"
+
+    // Typed import errors — mirror `map_import_error`.
+    case importSessionNotFound = "IMPORT_SESSION_NOT_FOUND"
+    case importAlreadyImported = "IMPORT_ALREADY_IMPORTED"
+    case importEmptySession = "IMPORT_EMPTY_SESSION"
+    case importNoClaudeDirectory = "IMPORT_NO_CLAUDE_DIRECTORY"
 }
 
 /// RPC error details

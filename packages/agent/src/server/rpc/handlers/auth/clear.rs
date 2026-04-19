@@ -27,17 +27,9 @@ impl MethodHandler for ClearAuthHandler {
                 })?;
 
                 if let Some(ref provider) = provider {
-                    clear_provider_auth(&auth_path, provider).map_err(|e| {
-                        RpcError::Internal {
-                            message: format!("Failed to clear provider auth: {e}"),
-                        }
-                    })?;
+                    clear_provider_auth(&auth_path, provider).map_err(map_auth_error)?;
                 } else if let Some(ref service) = service {
-                    clear_service_auth(&auth_path, service).map_err(|e| {
-                        RpcError::Internal {
-                            message: format!("Failed to clear service auth: {e}"),
-                        }
-                    })?;
+                    clear_service_auth(&auth_path, service).map_err(map_auth_error)?;
                 }
 
                 Ok(build_masked_state(&auth_path))

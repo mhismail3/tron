@@ -17,7 +17,9 @@ use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{RpcError, to_json_value};
-use crate::server::rpc::handlers::{opt_array, opt_bool, opt_u64, require_param, require_string_param};
+use crate::server::rpc::handlers::{
+    map_cron_error, opt_array, opt_bool, opt_u64, require_param, require_string_param,
+};
 use crate::server::rpc::registry::MethodHandler;
 
 fn scheduler(ctx: &RpcContext) -> Result<&std::sync::Arc<crate::cron::CronScheduler>, RpcError> {
@@ -115,11 +117,7 @@ impl MethodHandler for GetHandler {
 
         let runtime_state = sched.get_runtime_state(&job_id);
         let (recent_runs, _total) =
-            crate::cron::store::get_runs(sched.pool(), Some(&job_id), None, 10, 0).map_err(|e| {
-                RpcError::Internal {
-                    message: e.to_string(),
-                }
-            })?;
+            crate::cron::store::get_runs(sched.pool(), Some(&job_id), None, 10, 0).map_err(map_cron_error)?;
 
         Ok(serde_json::json!({
             "job": to_json_value(&job)?,
@@ -265,11 +263,9 @@ impl MethodHandler for CreateHandler {
         let _guard = sched.config_lock().lock().await;
 
         // Check name uniqueness
-        if crate::cron::store::name_exists(sched.pool(), &job.name, None).map_err(|e| {
-            RpcError::Internal {
-                message: e.to_string(),
-            }
-        })? {
+        if crate::cron::store::name_exists(sched.pool(), &job.name, None)
+            .map_err(map_cron_error)?
+        {
             return Err(RpcError::Custom {
                 code: "ALREADY_EXISTS".into(),
                 message: format!("Job with name '{}' already exists", job.name),
@@ -278,22 +274,14 @@ impl MethodHandler for CreateHandler {
         }
 
         let mut config = crate::cron::config::load_config(sched.config_path(), sched.backup_path())
-            .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+            .map_err(map_cron_error)?;
 
         config.jobs.push(job.clone());
 
-        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(
-            |e| RpcError::Internal {
-                message: e.to_string(),
-            },
-        )?;
+        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(map_cron_error)?;
 
         // Sync to SQLite
-        crate::cron::store::upsert_job(sched.pool(), &job).map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        crate::cron::store::upsert_job(sched.pool(), &job).map_err(map_cron_error)?;
 
         // Compute and set next_run_at
         let next = crate::cron::schedule::compute_next_run(&job.schedule, now);
@@ -336,9 +324,7 @@ impl MethodHandler for UpdateHandler {
         let _guard = sched.config_lock().lock().await;
 
         let mut config = crate::cron::config::load_config(sched.config_path(), sched.backup_path())
-            .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+            .map_err(map_cron_error)?;
 
         let job = config
             .jobs
@@ -352,11 +338,7 @@ impl MethodHandler for UpdateHandler {
         // Apply partial updates
         if let Some(name) = params.get("name").and_then(|v| v.as_str()) {
             // Check uniqueness (excluding self)
-            if crate::cron::store::name_exists(sched.pool(), name, Some(&job_id)).map_err(|e| {
-                RpcError::Internal {
-                    message: e.to_string(),
-                }
-            })? {
+            if crate::cron::store::name_exists(sched.pool(), name, Some(&job_id)).map_err(map_cron_error)? {
                 return Err(RpcError::Custom {
                     code: "ALREADY_EXISTS".into(),
                     message: format!("Job with name '{name}' already exists"),
@@ -450,17 +432,9 @@ impl MethodHandler for UpdateHandler {
         let updated_job = job.clone();
 
         // Save and sync
-        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(
-            |e| RpcError::Internal {
-                message: e.to_string(),
-            },
-        )?;
+        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(map_cron_error)?;
 
-        crate::cron::store::upsert_job(sched.pool(), &updated_job).map_err(|e| {
-            RpcError::Internal {
-                message: e.to_string(),
-            }
-        })?;
+        crate::cron::store::upsert_job(sched.pool(), &updated_job).map_err(map_cron_error)?;
 
         // Recompute next_run_at
         let now = chrono::Utc::now();
@@ -497,9 +471,7 @@ impl MethodHandler for DeleteHandler {
         let _guard = sched.config_lock().lock().await;
 
         let mut config = crate::cron::config::load_config(sched.config_path(), sched.backup_path())
-            .map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+            .map_err(map_cron_error)?;
 
         let before_len = config.jobs.len();
         config.jobs.retain(|j| j.id != job_id);
@@ -510,18 +482,10 @@ impl MethodHandler for DeleteHandler {
             });
         }
 
-        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(
-            |e| RpcError::Internal {
-                message: e.to_string(),
-            },
-        )?;
+        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(map_cron_error)?;
 
         // Delete from SQLite (runs preserved via ON DELETE SET NULL)
-        let _ = crate::cron::store::delete_job(sched.pool(), &job_id).map_err(|e| {
-            RpcError::Internal {
-                message: e.to_string(),
-            }
-        })?;
+        let _ = crate::cron::store::delete_job(sched.pool(), &job_id).map_err(map_cron_error)?;
 
         // Remove from in-memory state
         sched.remove_job(&job_id);
@@ -611,9 +575,7 @@ impl MethodHandler for GetRunsHandler {
 
         let (runs, total) =
             crate::cron::store::get_runs(sched.pool(), Some(&job_id), status_filter, limit, offset)
-                .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+                .map_err(map_cron_error)?;
 
         Ok(serde_json::json!({
             "runs": to_json_value(&runs)?,

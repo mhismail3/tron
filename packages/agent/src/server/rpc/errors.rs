@@ -80,6 +80,49 @@ pub const WORKSPACE_NOT_FOUND: &str = "WORKSPACE_NOT_FOUND";
 /// Requested blob was not found.
 pub const BLOB_NOT_FOUND: &str = "BLOB_NOT_FOUND";
 
+// ── Typed cron errors ────────────────────────────────────────────────
+//
+// `CronError` variants get mapped to these codes via
+// `map_cron_error`. Most callers in the cron handler should use it
+// rather than wrapping into `RpcError::Internal`.
+
+/// Cron job not found.
+pub const CRON_NOT_FOUND: &str = "CRON_NOT_FOUND";
+/// Duplicate cron job name.
+pub const CRON_DUPLICATE_NAME: &str = "CRON_DUPLICATE_NAME";
+/// Invalid cron expression syntax.
+pub const CRON_INVALID_EXPRESSION: &str = "CRON_INVALID_EXPRESSION";
+/// Invalid IANA timezone.
+pub const CRON_INVALID_TIMEZONE: &str = "CRON_INVALID_TIMEZONE";
+/// Cron job execution timed out.
+pub const CRON_TIMED_OUT: &str = "CRON_TIMED_OUT";
+/// Cron job execution was cancelled (shutdown or job disabled).
+pub const CRON_CANCELLED: &str = "CRON_CANCELLED";
+
+// ── Typed auth errors ────────────────────────────────────────────────
+//
+// `AuthError` variants get mapped to these codes via `map_auth_error`.
+
+/// No authentication configured for the requested provider.
+pub const AUTH_NOT_CONFIGURED: &str = "AUTH_NOT_CONFIGURED";
+/// OAuth token has expired and refresh failed.
+pub const AUTH_TOKEN_EXPIRED: &str = "AUTH_TOKEN_EXPIRED";
+/// OAuth flow returned an error from the upstream provider.
+pub const AUTH_OAUTH_ERROR: &str = "AUTH_OAUTH_ERROR";
+
+// ── Typed import errors ──────────────────────────────────────────────
+//
+// `ImportError` variants get mapped to these codes via `map_import_error`.
+
+/// Source session file was not found at the requested path.
+pub const IMPORT_SESSION_NOT_FOUND: &str = "IMPORT_SESSION_NOT_FOUND";
+/// Source session was already imported (idempotent guard).
+pub const IMPORT_ALREADY_IMPORTED: &str = "IMPORT_ALREADY_IMPORTED";
+/// Source session had no importable records after parsing.
+pub const IMPORT_EMPTY_SESSION: &str = "IMPORT_EMPTY_SESSION";
+/// No Claude Code projects directory found.
+pub const IMPORT_NO_CLAUDE_DIRECTORY: &str = "IMPORT_NO_CLAUDE_DIRECTORY";
+
 /// RPC error type returned by handlers.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {
@@ -243,6 +286,43 @@ mod tests {
         ];
         let unique: std::collections::HashSet<_> = codes.iter().collect();
         assert_eq!(unique.len(), codes.len(), "event-store error codes must be distinct");
+    }
+
+    #[test]
+    fn cron_codes_are_distinct() {
+        let codes = [
+            CRON_NOT_FOUND,
+            CRON_DUPLICATE_NAME,
+            CRON_INVALID_EXPRESSION,
+            CRON_INVALID_TIMEZONE,
+            CRON_TIMED_OUT,
+            CRON_CANCELLED,
+        ];
+        let unique: std::collections::HashSet<_> = codes.iter().collect();
+        assert_eq!(unique.len(), codes.len(), "cron error codes must be distinct");
+    }
+
+    #[test]
+    fn auth_codes_are_distinct() {
+        let codes = [
+            AUTH_NOT_CONFIGURED,
+            AUTH_TOKEN_EXPIRED,
+            AUTH_OAUTH_ERROR,
+        ];
+        let unique: std::collections::HashSet<_> = codes.iter().collect();
+        assert_eq!(unique.len(), codes.len(), "auth error codes must be distinct");
+    }
+
+    #[test]
+    fn import_codes_are_distinct() {
+        let codes = [
+            IMPORT_SESSION_NOT_FOUND,
+            IMPORT_ALREADY_IMPORTED,
+            IMPORT_EMPTY_SESSION,
+            IMPORT_NO_CLAUDE_DIRECTORY,
+        ];
+        let unique: std::collections::HashSet<_> = codes.iter().collect();
+        assert_eq!(unique.len(), codes.len(), "import error codes must be distinct");
     }
 
     #[test]

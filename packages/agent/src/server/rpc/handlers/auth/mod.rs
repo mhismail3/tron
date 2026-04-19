@@ -29,7 +29,7 @@ use crate::llm::auth::types::{
 };
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{opt_string, require_string_param};
+use crate::server::rpc::handlers::{map_auth_error, opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 use crate::server::rpc::types::RpcEvent;
 

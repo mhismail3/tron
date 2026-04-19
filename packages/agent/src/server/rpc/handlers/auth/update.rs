@@ -76,9 +76,7 @@ fn update_standard_provider(
                     pa.active_credential = None;
                 }
                 storage.set_provider_auth(provider, &pa);
-                save_auth_storage(auth_path, &mut storage).map_err(|e| RpcError::Internal {
-                    message: format!("Failed to save auth: {e}"),
-                })?;
+                save_auth_storage(auth_path, &mut storage).map_err(map_auth_error)?;
             }
         } else if let Some(key) = api_key_val.as_str() {
             // Use provided label, or generate a default
@@ -86,11 +84,7 @@ fn update_standard_provider(
                 .get("apiKeyLabel")
                 .and_then(|v| v.as_str())
                 .unwrap_or("(default)");
-            save_named_api_key(auth_path, provider, label, key).map_err(|e| {
-                RpcError::Internal {
-                    message: format!("Failed to save API key: {e}"),
-                }
-            })?;
+            save_named_api_key(auth_path, provider, label, key).map_err(map_auth_error)?;
         }
     }
 
@@ -105,9 +99,7 @@ fn update_standard_provider(
                     pa.active_credential = None;
                 }
                 storage.set_provider_auth(provider, &pa);
-                save_auth_storage(auth_path, &mut storage).map_err(|e| RpcError::Internal {
-                    message: format!("Failed to save auth: {e}"),
-                })?;
+                save_auth_storage(auth_path, &mut storage).map_err(map_auth_error)?;
             }
         } else {
             // Save as account with default label
@@ -115,9 +107,7 @@ fn update_standard_provider(
             crate::llm::auth::storage::save_account_oauth_tokens(
                 auth_path, provider, "(default)", &tokens,
             )
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to save OAuth tokens: {e}"),
-            })?;
+            .map_err(map_auth_error)?;
         }
     }
 
@@ -189,9 +179,7 @@ fn update_google_provider(
     }
 
     storage.set_google_auth(&google);
-    save_auth_storage(auth_path, &mut storage).map_err(|e| RpcError::Internal {
-        message: format!("Failed to save auth: {e}"),
-    })?;
+    save_auth_storage(auth_path, &mut storage).map_err(map_auth_error)?;
 
     Ok(())
 }
@@ -223,9 +211,7 @@ fn update_service(
         }
     }
 
-    save_auth_storage(auth_path, &mut storage).map_err(|e| RpcError::Internal {
-        message: format!("Failed to save auth: {e}"),
-    })?;
+    save_auth_storage(auth_path, &mut storage).map_err(map_auth_error)?;
 
     Ok(())
 }

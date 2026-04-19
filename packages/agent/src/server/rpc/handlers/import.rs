@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use tracing::instrument;
 
-use super::{opt_string, require_string_param};
+use super::{map_import_error, opt_string, require_string_param};
 use crate::core::paths::home_dir;
 use crate::import;
 use crate::server::rpc::context::RpcContext;
@@ -75,7 +75,7 @@ impl MethodHandler for ListSessionsHandler {
             let project_dir = claude_projects.join(&encoded_dir);
 
             let sessions = import::discover_sessions(&project_dir)
-                .map_err(|e| RpcError::Internal { message: e.to_string() })?;
+                .map_err(map_import_error)?;
 
             let result: Vec<Value> = sessions
                 .into_iter()
@@ -119,7 +119,7 @@ impl MethodHandler for PreviewSessionHandler {
         ctx.run_blocking("import.previewSession", move || {
             let path = PathBuf::from(&session_path);
             let records = import::parser::parse_session(&path)
-                .map_err(|e| RpcError::Internal { message: e.to_string() })?;
+                .map_err(map_import_error)?;
 
             let linear = import::tree::linearize(records);
             let assembled = import::assembler::assemble(linear);
@@ -231,8 +231,8 @@ impl MethodHandler for ExecuteImportHandler {
                     .and_then(|p| p.file_name())
                     .and_then(|n| n.to_str())
                     .map(import::parser::decode_project_dir)
-                    .ok_or_else(|| RpcError::Internal {
-                        message: "Could not derive working directory from session path".to_string(),
+                    .ok_or_else(|| RpcError::InvalidParams {
+                        message: "Could not derive working directory from session path; pass `workingDirectory` explicitly".to_string(),
                     })?
             } else {
                 working_directory
@@ -253,7 +253,7 @@ impl MethodHandler for ExecuteImportHandler {
                     "alreadyImported": true,
                     "existingSessionId": tron_session_id,
                 })),
-                Err(e) => Err(RpcError::Internal { message: e.to_string() }),
+                Err(e) => Err(map_import_error(e)),
             }
         })
         .await
@@ -267,7 +267,7 @@ fn check_already_imported(
 ) -> Result<(bool, Option<String>), RpcError> {
     let tag = format!("claude_code_import:{session_uuid}");
     let result = import::writer::find_session_with_tag(event_store, &tag)
-        .map_err(|e| RpcError::Internal { message: e.to_string() })?;
+        .map_err(map_import_error)?;
     Ok(match result {
         Some(id) => (true, Some(id)),
         None => (false, None),

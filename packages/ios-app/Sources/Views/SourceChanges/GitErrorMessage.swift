@@ -82,6 +82,16 @@ func friendlyGitError(_ error: Error, action: GitActionVerb) -> String {
         return "Couldn't find that workspace."
     case .blobNotFound:
         return "Couldn't find that file."
+    // Cron / auth / import codes pass through to the standard
+    // "{verb} failed: {message}" — these RPCs aren't called from git
+    // sub-sheets, but the case-iterable contract requires every code to
+    // produce a message so we route them to the same fallback.
+    case .cronNotFound, .cronDuplicateName, .cronInvalidExpression,
+         .cronInvalidTimezone, .cronTimedOut, .cronCancelled,
+         .authNotConfigured, .authTokenExpired, .authOauthError,
+         .importSessionNotFound, .importAlreadyImported,
+         .importEmptySession, .importNoClaudeDirectory:
+        return "\(verb) failed: \(rpc.message)"
     case .sessionNotFound, .agentNotRunning, .methodNotFound, .internalError:
         return "\(verb) failed: \(rpc.message)"
     }

@@ -21,9 +21,7 @@ impl MethodHandler for RenameAccountHandler {
                 crate::llm::auth::storage::rename_account(
                     &auth_path, &provider, &old_label, &new_label,
                 )
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Failed to rename account: {e}"),
-                })?;
+                .map_err(map_auth_error)?;
 
                 Ok(build_masked_state(&auth_path))
             })
@@ -64,6 +62,13 @@ impl MethodHandler for SetActiveCredentialHandler {
                     message: format!("Failed to acquire auth lock: {e}"),
                 })?;
 
+                // set_active_credential validates that the named
+                // account/key actually exists for this provider; treat
+                // failure as bad params, not an internal error. The
+                // storage layer expresses "label not found" as
+                // AuthError::Io with ErrorKind::NotFound which would
+                // otherwise route through map_auth_error to
+                // INTERNAL_ERROR.
                 crate::llm::auth::storage::set_active_credential(&auth_path, &provider, &credential)
                     .map_err(|e| RpcError::InvalidParams {
                         message: format!("Failed to set active credential: {e}"),
@@ -98,9 +103,7 @@ impl MethodHandler for RemoveAccountHandler {
                 })?;
 
                 crate::llm::auth::storage::remove_account(&auth_path, &provider, &label)
-                    .map_err(|e| RpcError::Internal {
-                        message: format!("Failed to remove account: {e}"),
-                    })?;
+                    .map_err(map_auth_error)?;
 
                 Ok(build_masked_state(&auth_path))
             })
@@ -131,9 +134,7 @@ impl MethodHandler for RemoveApiKeyHandler {
                 })?;
 
                 crate::llm::auth::storage::remove_named_api_key(&auth_path, &provider, &label)
-                    .map_err(|e| RpcError::Internal {
-                        message: format!("Failed to remove API key: {e}"),
-                    })?;
+                    .map_err(map_auth_error)?;
 
                 Ok(build_masked_state(&auth_path))
             })

@@ -170,9 +170,7 @@ impl MethodHandler for OAuthCompleteHandler {
                 });
             }
         }
-        .map_err(|e| RpcError::Internal {
-            message: format!("Token exchange failed: {e}"),
-        })?;
+        .map_err(map_auth_error)?;
 
         // Save tokens to auth.json (under the correct provider key)
         let auth_path = ctx.auth_path.clone();
@@ -191,9 +189,7 @@ impl MethodHandler for OAuthCompleteHandler {
                     &label_clone,
                     &tokens_clone,
                 )
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Failed to save OAuth tokens: {e}"),
-                })?;
+                .map_err(map_auth_error)?;
 
                 Ok(build_masked_state(&auth_path))
             })
