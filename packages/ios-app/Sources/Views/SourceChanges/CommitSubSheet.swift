@@ -409,7 +409,7 @@ struct CommitSubSheet: View {
                     dismiss()
                 }
             } catch {
-                errorMessage = friendlyGitError(error, action: "Commit")
+                errorMessage = friendlyGitError(error, action: .commit)
             }
         }
     }

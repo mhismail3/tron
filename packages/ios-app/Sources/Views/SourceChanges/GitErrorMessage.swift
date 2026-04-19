@@ -1,5 +1,19 @@
 import Foundation
 
+/// Action verb used in friendly git error messages. Replaces free-form
+/// strings so a typo can't reach `tronErrorAlert`. Each variant carries
+/// both the title-case form (used in "{Push} failed") and the lower-
+/// case imperative (used in "Cannot {push} a protected branch").
+enum GitActionVerb: String {
+    case push, commit, merge, rebase, sync, spawn, abort, stage, unstage, discard, prune, load
+
+    /// Title-case form for "{Verb} failed" sentences.
+    var titleCase: String { rawValue.capitalized }
+
+    /// Lower-case imperative for "Cannot {verb}" sentences.
+    var imperativeLower: String { rawValue }
+}
+
 /// Shared friendly-error formatter for git workflow sub-sheets.
 ///
 /// Maps typed `RPCErrorCode` cases (from the Rust handlers' new
@@ -11,26 +25,30 @@ import Foundation
 /// `default` branch; route the new case through an explicit arm so
 /// it gets phrased for a human.
 ///
+/// Convention: do NOT pass `error.localizedDescription` directly to
+/// user-visible alerts for an RPC error. Always route through this
+/// function so typed codes get human copy.
+///
 /// - Parameters:
 ///   - error: The error caught from an `rpcClient.*` call.
-///   - action: A past-tense verb naming the attempted action ("Push",
-///     "Pull", "Commit", "Merge", "Rebase", "Sync", "Resolve"). Used
-///     in the fallback "{action} failed: …" phrasing for codes that
-///     don't have specific copy.
+///   - action: Typed verb naming the attempted action. Used in the
+///     "{Action} failed: …" fallback for codes without specific copy
+///     and in the "Cannot {action} ..." protected-branch arm.
 /// - Returns: A single-line message suitable for display in
 ///   `tronErrorAlert`. Never an empty string.
-func friendlyGitError(_ error: Error, action: String) -> String {
+func friendlyGitError(_ error: Error, action: GitActionVerb) -> String {
+    let verb = action.titleCase
     guard let rpc = error as? RPCError else {
-        return "\(action) failed: \(error.localizedDescription)"
+        return "\(verb) failed: \(error.localizedDescription)"
     }
     guard let code = rpc.errorCode else {
         // Unknown code from a newer server — pass through the raw
         // message. Better than pretending we understand.
-        return "\(action) failed: \(rpc.message)"
+        return "\(verb) failed: \(rpc.message)"
     }
     switch code {
     case .protectedBranch:
-        return "Cannot \(action.lowercased()) a protected branch. \(rpc.message)"
+        return "Cannot \(action.imperativeLower) a protected branch. \(rpc.message)"
     case .noRemote:
         return "No remote is configured. Add an `origin` first."
     case .nonFastForward:
@@ -55,10 +73,16 @@ func friendlyGitError(_ error: Error, action: String) -> String {
     case .notGitRepo:
         return "This directory isn't a git repository."
     case .gitError:
-        return "\(action) failed: \(rpc.message)"
+        return "\(verb) failed: \(rpc.message)"
     case .invalidParams:
         return rpc.message
+    case .eventNotFound:
+        return "Couldn't find that event."
+    case .workspaceNotFound:
+        return "Couldn't find that workspace."
+    case .blobNotFound:
+        return "Couldn't find that file."
     case .sessionNotFound, .agentNotRunning, .methodNotFound, .internalError:
-        return "\(action) failed: \(rpc.message)"
+        return "\(verb) failed: \(rpc.message)"
     }
 }

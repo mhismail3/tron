@@ -8,6 +8,7 @@ struct ContextSettingsPage: View {
 
     @State private var showQuickSessionWorkspaceSelector = false
     @State private var showModelPicker = false
+    @State private var showRetainModelPicker = false
 
     private var rpcClient: RPCClient { dependencies.rpcClient }
     private var defaultModelValue: String { dependencies.defaultModel }
@@ -57,6 +58,27 @@ struct ContextSettingsPage: View {
                 )
             }
         }
+        .sheet(isPresented: $showRetainModelPicker) {
+            if #available(iOS 26.0, *) {
+                ModelPickerSheet(
+                    models: settingsState.availableModels,
+                    currentModelId: settingsState.retainModel,
+                    onSelect: { model in
+                        settingsState.retainModel = model.id
+                        updateServerSetting {
+                            ServerSettingsUpdate(memory: .init(retainModel: model.id))
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    private var retainModelDisplayName: String {
+        if let model = settingsState.availableModels.first(where: { $0.id == settingsState.retainModel }) {
+            return model.formattedModelName
+        }
+        return settingsState.retainModel.shortModelName
     }
 
     // MARK: - Quick Session Card
@@ -123,33 +145,15 @@ struct ContextSettingsPage: View {
     }
 
     private var queueDrainModeToggle: some View {
-        let modes = ["sequential", "batched"]
-        let labels = ["Sequential", "Batched"]
-        let currentIndex = modes.firstIndex(of: settingsState.queueDrainMode) ?? 0
-
-        return Button {
-            let nextIndex = (currentIndex + 1) % modes.count
-            let newValue = modes[nextIndex]
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                settingsState.queueDrainMode = newValue
-            }
+        SettingsCycleToggle(
+            options: [("sequential", "Sequential"), ("batched", "Batched")],
+            current: settingsState.queueDrainMode
+        ) { newValue in
+            settingsState.queueDrainMode = newValue
             updateServerSetting {
                 ServerSettingsUpdate(session: .init(queueDrainMode: newValue))
             }
-        } label: {
-            HStack(spacing: 4) {
-                Text(labels[currentIndex])
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-            }
-            .foregroundStyle(.tronEmerald)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.tronEmerald.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Compaction Card
@@ -237,40 +241,70 @@ struct ContextSettingsPage: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 14)
+
+                SettingsRowDivider()
+
+                // Skill index visibility in system prompt
+                HStack {
+                    Image(systemName: "list.bullet.rectangle")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    Text("Skill Index")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                    Spacer()
+                    skillsShowIndexToggle
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 14)
             }
 
             SettingsCaption(text: skillsCompactionCaption)
+            SettingsCaption(text: skillsShowIndexCaption)
+        }
+    }
+
+    private var skillsShowIndexCaption: String {
+        switch settingsState.skillsShowIndex {
+        case "never":
+            return "Skill index is omitted from the system prompt — the agent must remember which skills exist."
+        case "whenNoActiveSkills":
+            return "Index is included only when no skills are currently active."
+        default:
+            return "Always include the lightweight skill index in the system prompt so the agent can discover skills on demand."
+        }
+    }
+
+    private var skillsShowIndexToggle: some View {
+        SettingsCycleToggle(
+            options: [
+                ("always", "Always"),
+                ("whenNoActiveSkills", "When Idle"),
+                ("never", "Never"),
+            ],
+            current: settingsState.skillsShowIndex
+        ) { newValue in
+            settingsState.skillsShowIndex = newValue
+            updateServerSetting {
+                ServerSettingsUpdate(skills: .init(showIndex: newValue))
+            }
         }
     }
 
     private var skillsCompactionToggle: some View {
-        let modes = ["clearAll", "autoRestore", "askUser"]
-        let labels = ["Clear All", "Auto-Restore", "Ask User"]
-        let currentIndex = modes.firstIndex(of: settingsState.skillsCompactionPolicy) ?? 0
-
-        return Button {
-            let nextIndex = (currentIndex + 1) % modes.count
-            let newValue = modes[nextIndex]
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                settingsState.skillsCompactionPolicy = newValue
-            }
+        SettingsCycleToggle(
+            options: [
+                ("clearAll", "Clear All"),
+                ("autoRestore", "Auto-Restore"),
+                ("askUser", "Ask User"),
+            ],
+            current: settingsState.skillsCompactionPolicy
+        ) { newValue in
+            settingsState.skillsCompactionPolicy = newValue
             updateServerSetting {
                 ServerSettingsUpdate(skills: .init(compactionPolicy: newValue))
             }
-        } label: {
-            HStack(spacing: 4) {
-                Text(labels[currentIndex])
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-            }
-            .foregroundStyle(.tronEmerald)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.tronEmerald.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Memory Card
@@ -305,9 +339,18 @@ struct ContextSettingsPage: View {
                         ServerSettingsUpdate(memory: .init(autoRetainInterval: newValue))
                     }
                 }
+
+                SettingsRowDivider()
+
+                navigationRow(
+                    icon: "cpu",
+                    label: "Retain Model",
+                    value: retainModelDisplayName,
+                    action: { showRetainModelPicker = true }
+                )
             }
 
-            SettingsCaption(text: "Turns between automatic memory retention. 0 to disable.")
+            SettingsCaption(text: "Turns between automatic memory retention (0 to disable). Retain Model is the LLM that condenses retained turns.")
         }
     }
 

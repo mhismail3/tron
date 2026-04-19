@@ -371,7 +371,7 @@ struct FileDetailSheet: View {
                 dismiss()
             }
         } catch {
-            actionError = friendlyGitError(error, action: "Stage")
+            actionError = friendlyGitError(error, action: .stage)
         }
     }
 
@@ -386,7 +386,7 @@ struct FileDetailSheet: View {
                 dismiss()
             }
         } catch {
-            actionError = friendlyGitError(error, action: "Unstage")
+            actionError = friendlyGitError(error, action: .unstage)
         }
     }
 
@@ -401,7 +401,7 @@ struct FileDetailSheet: View {
                 dismiss()
             }
         } catch {
-            actionError = friendlyGitError(error, action: "Discard")
+            actionError = friendlyGitError(error, action: .discard)
         }
     }
 

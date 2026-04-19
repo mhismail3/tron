@@ -5,20 +5,30 @@ import SQLite3
 /// Extracted from EventDatabase for single responsibility.
 enum DatabaseSchema {
 
-    /// Current schema version for tracking migrations.
-    static let version = 10
+    /// Current schema version. Stored as `PRAGMA user_version` after a
+    /// successful migration so subsequent app launches can short-circuit
+    /// the create-table / column-add IF-NOT-EXISTS dance.
+    static let version: Int32 = 10
 
     // MARK: - Public API
 
-    /// Create all tables and run migrations.
+    /// Create all tables and run migrations. Skips work if `PRAGMA
+    /// user_version` is already at the current `version`. Brand-new
+    /// databases (PRAGMA = 0) and older databases both run the full
+    /// idempotent CREATE/ALTER chain once, then bump the PRAGMA.
     /// - Parameter db: SQLite database pointer
     static func createTables(db: OpaquePointer?) throws {
+        let current = try readUserVersion(db: db)
+        guard current < version else { return }
+
         try createEventsTable(db: db)
         try createSessionsTable(db: db)
         try runSessionsMigrations(db: db)
         try createSyncStateTable(db: db)
         try createDraftsTable(db: db)
         try runDraftsMigrations(db: db)
+
+        try setUserVersion(db: db, version)
     }
 
     /// Check if a column exists in a table.
@@ -234,6 +244,27 @@ enum DatabaseSchema {
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw EventDatabaseError.executeFailed(errorMessage(db: db))
         }
+    }
+
+    /// Read SQLite's per-database `PRAGMA user_version`. Defaults to `0`
+    /// for fresh databases (which then run the full migration chain).
+    private static func readUserVersion(db: OpaquePointer?) throws -> Int32 {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &stmt, nil) == SQLITE_OK else {
+            throw EventDatabaseError.prepareFailed(errorMessage(db: db))
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            throw EventDatabaseError.executeFailed("PRAGMA user_version returned no row")
+        }
+        return sqlite3_column_int(stmt, 0)
+    }
+
+    /// Write SQLite's per-database `PRAGMA user_version`. Inlined into
+    /// the SQL statement because PRAGMA values can't be parameterized.
+    /// `version` is a hard-coded `Int32` literal so injection is moot.
+    private static func setUserVersion(db: OpaquePointer?, _ version: Int32) throws {
+        try execute(db: db, "PRAGMA user_version = \(version)")
     }
 
     private static func errorMessage(db: OpaquePointer?) -> String {

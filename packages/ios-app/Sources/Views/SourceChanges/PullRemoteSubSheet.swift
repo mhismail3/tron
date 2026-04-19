@@ -197,7 +197,7 @@ struct PullRemoteSubSheet: View {
                     break
                 }
             } catch {
-                errorMessage = friendlyGitError(error, action: "Sync")
+                errorMessage = friendlyGitError(error, action: .sync)
             }
         }
     }

@@ -19,7 +19,7 @@ struct GitErrorMessageTests {
                 message: "stub",
                 details: nil
             )
-            let message = friendlyGitError(rpc, action: "Push")
+            let message = friendlyGitError(rpc, action: .push)
             #expect(!message.isEmpty, "no message for code \(code.rawValue)")
         }
     }
@@ -35,7 +35,7 @@ struct GitErrorMessageTests {
             message: "the server speaks newer dialect",
             details: nil
         )
-        let message = friendlyGitError(rpc, action: "Push")
+        let message = friendlyGitError(rpc, action: .push)
         #expect(message.contains("Push failed"))
         #expect(message.contains("newer dialect"))
     }
@@ -47,22 +47,22 @@ struct GitErrorMessageTests {
         struct StubError: LocalizedError {
             var errorDescription: String? { "the network is on fire" }
         }
-        let message = friendlyGitError(StubError(), action: "Pull")
-        #expect(message.contains("Pull failed"))
+        let message = friendlyGitError(StubError(), action: .sync)
+        #expect(message.contains("Sync failed"))
         #expect(message.contains("on fire"))
     }
 
-    /// The `protectedBranch` arm lowercases the action verb to compose
-    /// "Cannot push a protected branch." — verify the lowercasing works
-    /// for every verb used in production.
-    @Test("protectedBranch arm lowercases verb consistently")
+    /// The `protectedBranch` arm composes "Cannot {verb} a protected
+    /// branch." using `verb.imperativeLower` — verify the formatting for
+    /// every verb used in production.
+    @Test("protectedBranch arm renders imperative-lower verb")
     func protectedBranchLowercasing() {
         let rpc = RPCError(code: "PROTECTED_BRANCH", message: "main", details: nil)
-        for verb in ["Push", "Commit", "Merge", "Rebase"] {
+        for verb in [GitActionVerb.push, .commit, .merge, .rebase] {
             let message = friendlyGitError(rpc, action: verb)
             #expect(
-                message.contains("Cannot \(verb.lowercased())"),
-                "expected lowercase verb in: \(message)"
+                message.contains("Cannot \(verb.imperativeLower)"),
+                "expected imperative-lower verb in: \(message)"
             )
         }
     }

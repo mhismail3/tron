@@ -31,6 +31,8 @@ final class SettingsState {
     // MARK: - Memory
 
     var autoRetainInterval: Int = 10
+    /// Model used for the retainer LLM. Server default is `claude-sonnet-4-6`.
+    var retainModel: String = "claude-sonnet-4-6"
 
     // MARK: - Git Workflow
 
@@ -154,6 +156,7 @@ final class SettingsState {
         skillsCompactionPolicy = settings.skillsCompactionPolicy
         skillsShowIndex = settings.skillsShowIndex
         autoRetainInterval = settings.autoRetainInterval
+        retainModel = settings.retainModel
 
         gitTargetBranch = settings.gitTargetBranch ?? ""
         gitProtectedBranches = settings.gitProtectedBranches

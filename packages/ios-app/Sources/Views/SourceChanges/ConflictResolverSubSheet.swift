@@ -266,7 +266,7 @@ struct ConflictResolverSubSheet: View {
         do {
             conflicts = try await rpcClient.worktree.listConflicts(sessionId: sessionId)
         } catch {
-            errorMessage = "Failed to load conflicts: \(error.localizedDescription)"
+            errorMessage = friendlyGitError(error, action: .load)
         }
     }
 
@@ -284,7 +284,7 @@ struct ConflictResolverSubSheet: View {
                     errorMessage = result.reason ?? "Subagent could not be spawned"
                 }
             } catch {
-                errorMessage = friendlyGitError(error, action: "Spawn")
+                errorMessage = friendlyGitError(error, action: .spawn)
             }
         }
     }
@@ -302,7 +302,7 @@ struct ConflictResolverSubSheet: View {
             stage = .failed
             onCompleted?()
         } catch {
-            errorMessage = friendlyGitError(error, action: "Abort")
+            errorMessage = friendlyGitError(error, action: .abort)
         }
     }
 }

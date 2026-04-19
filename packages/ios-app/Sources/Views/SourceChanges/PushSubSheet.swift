@@ -226,7 +226,7 @@ struct PushSubSheet: View {
                     dismiss()
                 }
             } catch {
-                errorMessage = friendlyGitError(error, action: "Push")
+                errorMessage = friendlyGitError(error, action: .push)
             }
         }
     }

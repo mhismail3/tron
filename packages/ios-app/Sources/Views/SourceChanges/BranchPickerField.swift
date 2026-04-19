@@ -105,7 +105,7 @@ struct BranchPickerField: View {
                 errorMessage = nil
             }
         } catch {
-            errorMessage = "Couldn't load branches: \(error.localizedDescription)"
+            errorMessage = friendlyGitError(error, action: .load)
         }
     }
 }

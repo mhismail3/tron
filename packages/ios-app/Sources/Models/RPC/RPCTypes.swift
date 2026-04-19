@@ -51,6 +51,11 @@ enum RPCErrorCode: String, CaseIterable, Sendable {
     case branchActive = "BRANCH_ACTIVE"
     case notGitRepo = "NOT_GIT_REPO"
     case gitError = "GIT_ERROR"
+
+    // Typed event-store errors — mirror `map_event_store_error`.
+    case eventNotFound = "EVENT_NOT_FOUND"
+    case workspaceNotFound = "WORKSPACE_NOT_FOUND"
+    case blobNotFound = "BLOB_NOT_FOUND"
 }
 
 /// RPC error details
