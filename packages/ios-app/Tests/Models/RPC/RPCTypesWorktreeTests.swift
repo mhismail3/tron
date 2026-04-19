@@ -294,7 +294,6 @@ struct WorktreeCommitResultTests {
     func decodesWithStats() {
         let json = #"""
         {
-          "success": true,
           "commitHash": "abc1234",
           "filesChanged": ["a.rs", "b.rs"],
           "insertions": 5,
@@ -305,56 +304,41 @@ struct WorktreeCommitResultTests {
             WorktreeCommitResult.self,
             from: json.data(using: .utf8)!
         )
-        #expect(result.success == true)
         #expect(result.commitHash == "abc1234")
         #expect(result.filesChanged == ["a.rs", "b.rs"])
         #expect(result.insertions == 5)
         #expect(result.deletions == 2)
-        #expect(result.error == nil)
     }
 
-    @Test("decodes response without stats (backwards compat)")
+    @Test("decodes response without stats (older servers without stats)")
     func decodesWithoutStats() {
-        // Older servers (pre-stats) omit insertions/deletions entirely.
-        // The client must still decode cleanly — treating missing stats as
-        // unknown rather than zero keeps the UI honest.
+        // Some server paths (e.g. amending a root commit) cannot compute
+        // line stats and omit insertions/deletions entirely. The client
+        // must still decode cleanly — treating missing stats as unknown
+        // rather than zero keeps the UI honest.
         let json = #"""
-        {"success": true, "commitHash": "abc1234", "filesChanged": []}
+        {"commitHash": "abc1234", "filesChanged": []}
         """#
         let result = try! JSONDecoder().decode(
             WorktreeCommitResult.self,
             from: json.data(using: .utf8)!
         )
-        #expect(result.success == true)
+        #expect(result.commitHash == "abc1234")
         #expect(result.insertions == nil)
         #expect(result.deletions == nil)
     }
 
     @Test("decodes nothing-to-commit response")
     func decodesNothingToCommit() {
-        // Server returns success=true but commitHash=null when the tree
-        // was clean and no amend was requested.
+        // Server returns commitHash=null when the tree was clean and no
+        // amend was requested. Failures throw a typed RPCError instead.
         let json = #"""
-        {"success": true, "commitHash": null, "message": "nothing to commit"}
+        {"commitHash": null, "message": "nothing to commit"}
         """#
         let result = try! JSONDecoder().decode(
             WorktreeCommitResult.self,
             from: json.data(using: .utf8)!
         )
-        #expect(result.success == true)
         #expect(result.commitHash == nil)
-    }
-
-    @Test("decodes failure response")
-    func decodesFailure() {
-        let json = #"""
-        {"success": false, "error": "Cannot amend: no previous commit exists"}
-        """#
-        let result = try! JSONDecoder().decode(
-            WorktreeCommitResult.self,
-            from: json.data(using: .utf8)!
-        )
-        #expect(result.success == false)
-        #expect(result.error?.contains("amend") == true)
     }
 }

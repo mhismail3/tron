@@ -175,7 +175,6 @@ impl MethodHandler for CommitHandler {
                     handler.record_event_type("worktree.commit");
                 }
                 Ok(serde_json::json!({
-                    "success": true,
                     "commitHash": result.commit_hash,
                     "message": message,
                     "filesChanged": result.files_changed,
@@ -184,7 +183,6 @@ impl MethodHandler for CommitHandler {
                 }))
             }
             Ok(None) => Ok(serde_json::json!({
-                "success": true,
                 "commitHash": null,
                 "message": "nothing to commit",
             })),

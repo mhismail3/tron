@@ -101,17 +101,17 @@ struct WorktreeCommitParams: Encodable {
     }
 }
 
+/// Result of a successful `worktree.commit` call. Failures throw a typed
+/// `RPCError` (see `friendlyGitError`) — there is no `success: false` path.
+/// `commitHash == nil` means "nothing to commit" (the working tree was clean).
 struct WorktreeCommitResult: Decodable {
-    let success: Bool
     let commitHash: String?
     let filesChanged: [String]?
-    /// Total lines inserted across `filesChanged`. Absent on older server
-    /// builds or when the server cannot compute the stat (e.g. amending
-    /// a root commit).
+    /// Total lines inserted across `filesChanged`. Absent when the server
+    /// cannot compute the stat (e.g. amending a root commit).
     let insertions: Int?
     /// Total lines deleted across `filesChanged`. Same caveats as `insertions`.
     let deletions: Int?
-    let error: String?
 }
 
 // MARK: - Session Branches

@@ -1262,7 +1262,6 @@ async fn commit_handler_default_stage_all_when_absent() {
         )
         .await
         .unwrap();
-    assert_eq!(result["success"], true);
     assert!(result["commitHash"].is_string(), "expected a real commit hash, got {result:?}");
     assert!(
         result["filesChanged"].as_array().unwrap().iter().any(|v| v == "new.txt"),
@@ -1392,14 +1391,16 @@ async fn commit_handler_rejects_non_bool_flags_gracefully() {
         )
         .await
         .unwrap();
-    assert_eq!(result["success"], true);
+    // Non-bool flags are coerced to default false — handler still returns
+    // a successful response (with a real commit hash if there were changes).
+    assert!(result.is_object(), "expected an object response, got {result:?}");
 }
 
 #[tokio::test]
-async fn commit_handler_nothing_to_commit_returns_success_null_hash() {
-    // Clean tree, no flags → coordinator returns None → handler must
-    // respond with success=true and null commitHash. iOS surfaces this
-    // as a friendly "nothing to commit" banner.
+async fn commit_handler_nothing_to_commit_returns_null_hash() {
+    // Clean tree, no flags → coordinator returns None → handler responds
+    // with null commitHash. iOS surfaces this as a friendly "nothing to
+    // commit" banner. Failures throw typed RPC errors instead.
     let (_tmp, ctx, _coord, sid, _wt) = commit_test_context_async().await;
 
     let result = CommitHandler
@@ -1409,6 +1410,6 @@ async fn commit_handler_nothing_to_commit_returns_success_null_hash() {
         )
         .await
         .unwrap();
-    assert_eq!(result["success"], true);
     assert!(result["commitHash"].is_null());
+    assert_eq!(result["message"], "nothing to commit");
 }

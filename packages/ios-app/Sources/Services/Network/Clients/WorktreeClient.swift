@@ -53,11 +53,7 @@ final class WorktreeClient: RPCDomainClient {
             stageAll: stageAll
         )
         let result: WorktreeCommitResult = try await ws.send(method: "worktree.commit", params: params)
-
-        if result.success {
-            logger.info("Committed worktree changes: \(result.commitHash ?? "unknown")", category: .session)
-        }
-
+        logger.info("Committed worktree changes: \(result.commitHash ?? "nothing-to-commit")", category: .session)
         return result
     }
 
