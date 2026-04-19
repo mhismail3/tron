@@ -286,8 +286,12 @@ struct ConsolidatedAnalytics {
         // Sequential array — each message.assistant appends a new entry (no collisions).
         // turnNumberToLatestIndex maps turn number → latest array index so that
         // stream.turn_end / tool.call / errors route to the correct entry.
+        // Cleared on detected "turn reset" so multi-model conversations (where
+        // each model restarts turn numbering at 1) get distinct entries.
         var turnEntries: [TurnAccumulator] = []
         var turnNumberToLatestIndex: [Int: Int] = [:]
+        var previousTurn: Int? = nil
+        var previousModel: String? = nil
         var latencySum = 0
         var latencyCount = 0
         var totalTools = 0
@@ -297,6 +301,34 @@ struct ConsolidatedAnalytics {
             switch event.eventType {
             case .messageAssistant:
                 guard let turn = Self.extractInt(event.payload["turn"]?.value) else { continue }
+                let newModel = event.payload["model"]?.value as? String
+
+                // Detect "turn reset" — start of a new conversation segment with
+                // overlapping turn numbers:
+                //   1. turn number LOWER than the previous turn (numbering restarts)
+                //   2. turn number EQUAL to previous and model has changed
+                // Same turn number with same model continues to accumulate (the
+                // imported-session case where one logical turn has multiple
+                // message.assistant events).
+                let isReset: Bool = {
+                    guard let prevTurn = previousTurn else { return false }
+                    if turn < prevTurn { return true }
+                    if turn == prevTurn,
+                       let prev = previousModel,
+                       let new = newModel,
+                       prev != new {
+                        return true
+                    }
+                    return false
+                }()
+
+                if isReset {
+                    turnNumberToLatestIndex.removeAll()
+                }
+                previousTurn = turn
+                if let newModel = newModel {
+                    previousModel = newModel
+                }
 
                 // If this turn already has an entry (multiple assistant messages per turn,
                 // common in imported sessions), accumulate into the existing entry.
@@ -314,9 +346,8 @@ struct ConsolidatedAnalytics {
                         latencySum += latency
                         latencyCount += 1
                     }
-                    if turnEntries[existingIndex].model == nil,
-                       let model = event.payload["model"]?.value as? String {
-                        turnEntries[existingIndex].model = model
+                    if turnEntries[existingIndex].model == nil, let newModel = newModel {
+                        turnEntries[existingIndex].model = newModel
                     }
                 } else {
                     var acc = TurnAccumulator()
@@ -336,8 +367,8 @@ struct ConsolidatedAnalytics {
                         latencyCount += 1
                     }
 
-                    if let model = event.payload["model"]?.value as? String {
-                        acc.model = model
+                    if let newModel = newModel {
+                        acc.model = newModel
                     }
 
                     let index = turnEntries.count
@@ -383,6 +414,16 @@ struct ConsolidatedAnalytics {
                     turnEntries[index].errors.append(errorMsg)
                 }
                 totalErrs += 1
+
+            case .messageUser:
+                // A new user message signals the start of a new prompt cycle. In
+                // live sessions subsequent assistants may reuse prior turn numbers
+                // (e.g. the server restarting turn numbering per cycle), so clear
+                // the lookup to prevent collapsing into the previous cycle's entry.
+                // Imported sessions do not interleave user messages between
+                // multiple assistants for the same turn, so this does not affect
+                // the import-accumulation path.
+                turnNumberToLatestIndex.removeAll()
 
             default:
                 break
