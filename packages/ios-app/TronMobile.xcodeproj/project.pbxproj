@@ -572,6 +572,7 @@
 		C727C48CD26E2D92D55D93D4 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139D63473EA8D93898D46617 /* DeepLinkRouter.swift */; };
 		C72BF007EBBE3AA681FC47DB /* ServerRestartingPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD99C83E3D861FDAB93AC92B /* ServerRestartingPlugin.swift */; };
 		C7BA435955B6199C0A2B487C /* ChipStyleModifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FDDA3A3703ECEFA8C90E045 /* ChipStyleModifierTests.swift */; };
+		C7DCF92FD844A75DFE5FCCAE /* GitErrorMessageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC62EF4B5169FA56837D2F5 /* GitErrorMessageTests.swift */; };
 		C8555FF29092C7D9005E4114 /* BashDetailsHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDE9EDE373769E4143EE2948 /* BashDetailsHelper.swift */; };
 		C871B7FA521EDE7B434C831A /* ToolErrorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1675D6A6F5BE8851558EC5E /* ToolErrorView.swift */; };
 		C87A39DFF499F040CED85BF7 /* NotificationListSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1817538DD89B8E55A2A987C7 /* NotificationListSheet.swift */; };
@@ -1516,6 +1517,7 @@
 		FD4579B18A126F09229C08BA /* AutomationDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationDetailSheet.swift; sourceTree = "<group>"; };
 		FD99C83E3D861FDAB93AC92B /* ServerRestartingPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRestartingPlugin.swift; sourceTree = "<group>"; };
 		FDA1991FA3B154D4147D8650 /* ChatViewModel+ProcessEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+ProcessEvents.swift"; sourceTree = "<group>"; };
+		FDC62EF4B5169FA56837D2F5 /* GitErrorMessageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitErrorMessageTests.swift; sourceTree = "<group>"; };
 		FDE9A0978D5561D8DF70C5BD /* DocumentPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPicker.swift; sourceTree = "<group>"; };
 		FE01E3E153B74455EDFFEA79 /* OAuthLoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthLoginSheet.swift; sourceTree = "<group>"; };
 		FE083467BD3FC013AF685716 /* ModelRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRepository.swift; sourceTree = "<group>"; };
@@ -2936,6 +2938,7 @@
 				FA626C705B9052B66955CC18 /* DecodedImageViewTests.swift */,
 				BD79522B85677C1B75E0C631 /* EventIconProviderTests.swift */,
 				D8CAAD30176960052D589E37 /* ForkButtonTests.swift */,
+				FDC62EF4B5169FA56837D2F5 /* GitErrorMessageTests.swift */,
 				BCCD837755AD3FE664F47369 /* InitializationErrorViewTests.swift */,
 				563A3691884D40E5328B6DD3 /* MarkdownBlockParserTests.swift */,
 				FEA3C78E118EF1447D6EFEC0 /* MentionDetectorTests.swift */,
@@ -4137,6 +4140,7 @@
 				CF8F9BB2BFEAC212557A8BD2 /* GetConfirmationCoordinatorTests.swift in Sources */,
 				C5FFC6262938EF8DD2F552DB /* GetConfirmationStateTests.swift in Sources */,
 				ACE678332474F3F7920D5CCF /* GetConfirmationTests.swift in Sources */,
+				C7DCF92FD844A75DFE5FCCAE /* GitErrorMessageTests.swift in Sources */,
 				6BA484424BB8B29ADBFFF605 /* GlobToolDetailSheetTests.swift in Sources */,
 				EA6FB901525D1A6905FB5E1C /* InitializationErrorViewTests.swift in Sources */,
 				1C3665C9D7CBAAE722B229E0 /* InputBarStateTests.swift in Sources */,

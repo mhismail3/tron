@@ -318,9 +318,14 @@ struct SettingsView: View {
     // MARK: - Actions
 
     private func resetToDefaults() {
+        // Reset every @AppStorage value the page binds, not just the
+        // server connection ones — partial reset would leave a state
+        // mismatch (e.g. autoMarkRead surviving while everything else
+        // clears) that confuses the user.
         serverHost = AppConstants.defaultHost
         serverPort = ""
         confirmArchive = true
+        autoMarkRead = true
         dependencies.updateServerSettings(host: AppConstants.defaultHost, port: Self.defaultPort)
         Task {
             do {

@@ -29,7 +29,7 @@ struct RPCResponse<R: Decodable>: Decodable {
 /// `RPCErrorCode` — including `friendlyGitError` — to handle the new
 /// case at compile time. Unknown server codes decode to `nil` via
 /// `RPCError.errorCode` and callers fall back to the raw message.
-enum RPCErrorCode: String, Sendable {
+enum RPCErrorCode: String, CaseIterable, Sendable {
     case sessionNotFound = "SESSION_NOT_FOUND"
     case agentNotRunning = "AGENT_NOT_RUNNING"
     case invalidParams = "INVALID_PARAMS"
