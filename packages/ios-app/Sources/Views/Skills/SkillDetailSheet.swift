@@ -15,9 +15,7 @@ struct SkillDetailSheet: View {
     @State private var isLoading = true
     @State private var error: String?
 
-    private var tint: TintedColors {
-        TintedColors(accent: .tronCyan, colorScheme: colorScheme)
-    }
+    private var tint: TintedColors { .skill(colorScheme) }
 
     private var accentColor: Color { tint.accent }
 

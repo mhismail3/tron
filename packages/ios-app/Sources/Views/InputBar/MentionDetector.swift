@@ -1,14 +1,19 @@
 import Foundation
 
-/// Generic mention detector parameterized by trigger character.
-struct MentionDetector {
-    let trigger: Character
+/// Detector for `@skill` mentions in the input bar. The trigger is
+/// hardcoded — when other mention types existed (`%spell`) we generalised
+/// over the trigger character; the post-Spells codebase only mentions
+/// skills via `@`, so the abstraction is collapsed to a free-function
+/// namespace. Tests cover detection, completion, and filtering.
+enum SkillMentions {
+    /// Trigger character used for skill mentions.
+    static let trigger: Character = "@"
 
-    static let skill = MentionDetector(trigger: "@")
-
-    /// Detect an in-progress mention in text.
-    /// Returns the query string after the trigger if in mention mode, nil otherwise.
-    func detectMention(in text: String) -> String? {
+    /// Detect an in-progress mention in `text`. Returns the query string
+    /// after the `@` if the user is currently typing a mention, `nil`
+    /// otherwise (no `@`, `@` followed by a space, `@` inside a code
+    /// span, …).
+    static func detectMention(in text: String) -> String? {
         guard let triggerIndex = text.lastIndex(of: trigger) else { return nil }
 
         // Trigger must be at start or preceded by whitespace
@@ -17,25 +22,29 @@ struct MentionDetector {
             guard prevChar.isWhitespace || prevChar.isNewline else { return nil }
         }
 
-        // Check if trigger is inside backticks (code)
+        // Trigger inside an open code span — skip
         let beforeTrigger = text[..<triggerIndex]
         let backtickCount = beforeTrigger.filter { $0 == "`" }.count
         if backtickCount % 2 != 0 { return nil }
 
-        // Extract query after trigger
         let afterTrigger = text[text.index(after: triggerIndex)...]
 
-        // If there's a space/newline after the query, mention is complete (not in-progress)
+        // Whitespace after the query means the mention is finished, not in-progress.
         if afterTrigger.contains(" ") || afterTrigger.contains("\n") { return nil }
 
         return String(afterTrigger)
     }
 
-    /// Detect a completed mention (trigger + skillname + space/end-of-string).
-    /// Returns the matched skill if found and not already selected.
-    func detectCompletedMention(in text: String, skills: [Skill], alreadySelected: [Skill]) -> Skill? {
-        let triggerString = String(trigger)
-        let pattern = "\(NSRegularExpression.escapedPattern(for: triggerString))([a-zA-Z0-9][a-zA-Z0-9-]*)(?:\\s|$)"
+    /// Detect a completed mention (`@skill-name` followed by whitespace
+    /// or end-of-string). Returns the matched skill if it exists in
+    /// `skills` and isn't already in `alreadySelected`.
+    static func detectCompletedMention(
+        in text: String,
+        skills: [Skill],
+        alreadySelected: [Skill]
+    ) -> Skill? {
+        // `@` is not a regex metachar, so no escape needed.
+        let pattern = "@([a-zA-Z0-9][a-zA-Z0-9-]*)(?:\\s|$)"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
 
         let nsText = text as NSString
@@ -48,7 +57,7 @@ struct MentionDetector {
             let name = nsText.substring(with: nameRange)
             guard !name.isEmpty else { continue }
 
-            // Check trigger is preceded by whitespace or at start
+            // Trigger must be at start or preceded by whitespace.
             let triggerIdx = match.range.location
             if triggerIdx > 0 {
                 let prevChar = nsText.character(at: triggerIdx - 1)
@@ -56,12 +65,11 @@ struct MentionDetector {
                       CharacterSet.whitespacesAndNewlines.contains(scalar) else { continue }
             }
 
-            // Check not inside backticks
+            // Skip if inside an open code span.
             let beforeTrigger = nsText.substring(to: triggerIdx)
             let backtickCount = beforeTrigger.filter { $0 == "`" }.count
             if backtickCount % 2 != 0 { continue }
 
-            // Match against skills
             if let skill = skills.first(where: { $0.name.lowercased() == name.lowercased() }) {
                 if !alreadySelected.contains(where: { $0.name.lowercased() == name.lowercased() }) {
                     return skill
@@ -71,7 +79,9 @@ struct MentionDetector {
         return nil
     }
 
-    /// Filter and sort skills by query.
+    /// Filter and sort skills against `query`. Empty query returns the
+    /// list verbatim; non-empty matches name / description / tag and
+    /// sorts prefix matches first then by ascending name length.
     static func filterSkills(_ skills: [Skill], query: String) -> [Skill] {
         guard !query.isEmpty else { return skills }
 

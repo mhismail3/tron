@@ -38,7 +38,7 @@ struct MergeChangesSubSheet: View {
 
     private let accent: Color = .tronCoral
 
-    enum MergeStrategy: String, CaseIterable, Identifiable {
+    enum MergeStrategy: String, CaseIterable, Identifiable, StrategyDisplayable {
         case merge, rebase, squash
         var id: String { rawValue }
         var label: String { rawValue.capitalized }
@@ -104,24 +104,10 @@ struct MergeChangesSubSheet: View {
                             title: "Conflicts detected",
                             detail: result.error ?? "Launch the Conflict Resolver to continue."
                         )
-                        Button {
+                        OpenConflictResolverButton {
                             dismiss()
                             onConflicts?(result)
-                        } label: {
-                            HStack {
-                                Image(systemName: "wand.and.stars")
-                                Text("Open Conflict Resolver")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            }
-                            .foregroundStyle(.tronRose)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color.tronRose.opacity(0.12))
-                            }
                         }
-                        .buttonStyle(.plain)
                     } else {
                         finalizeSuccessBanner(result)
                     }
@@ -188,32 +174,7 @@ struct MergeChangesSubSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "Merge Strategy")
             SettingsCard(accent: accent) {
-                HStack(spacing: 0) {
-                    ForEach(MergeStrategy.allCases) { s in
-                        Button {
-                            strategy = s
-                        } label: {
-                            VStack(spacing: 4) {
-                                Image(systemName: s.icon)
-                                    .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                                Text(s.label)
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                            }
-                            .foregroundStyle(strategy == s ? accent : .tronTextMuted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background {
-                                if strategy == s {
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(accent.opacity(0.15))
-                                        .padding(4)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 4)
+                StrategyPicker(selection: $strategy, accent: accent)
             }
             SettingsCaption(text: strategy.description)
         }
@@ -302,7 +263,7 @@ struct MergeChangesSubSheet: View {
                     dismiss()
                 }
             } catch {
-                errorMessage = friendlyGitError(error, action: "Merge")
+                errorMessage = friendlyGitError(error, action: .merge)
             }
         }
     }

@@ -403,9 +403,12 @@ struct InputBar: View {
 
     private func detectSkillMention(in newText: String) {
         guard let store = config.skillStore else { return }
-        let detector = MentionDetector.skill
 
-        if let completed = detector.detectCompletedMention(in: newText, skills: store.skills, alreadySelected: state.selectedSkills) {
+        if let completed = SkillMentions.detectCompletedMention(
+            in: newText,
+            skills: store.skills,
+            alreadySelected: state.selectedSkills
+        ) {
             if !state.selectedSkills.contains(where: { $0.name == completed.name }) {
                 state.selectedSkills.append(completed)
             }
@@ -417,7 +420,7 @@ struct InputBar: View {
             return
         }
 
-        if let q = detector.detectMention(in: newText) {
+        if let q = SkillMentions.detectMention(in: newText) {
             skillMentionQuery = q
             if !showSkillMentionPopup {
                 withAnimation(.tronStandard) {
@@ -433,7 +436,7 @@ struct InputBar: View {
     }
 
     private func selectFromMention(_ skill: Skill) {
-        let trigger = MentionDetector.skill.trigger
+        let trigger = SkillMentions.trigger
         if let triggerIndex = state.text.lastIndex(of: trigger) {
             state.text = String(state.text[..<triggerIndex]) + String(trigger) + skill.name + " "
         }

@@ -12,9 +12,7 @@ struct SkillChip: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    private var tint: TintedColors {
-        TintedColors(accent: .tronCyan, colorScheme: colorScheme)
-    }
+    private var tint: TintedColors { .skill(colorScheme) }
 
     var body: some View {
         HStack(spacing: 5) {

@@ -1,12 +1,5 @@
 import SwiftUI
 
-// MARK: - Mention Badge
-
-struct MentionBadge {
-    let text: String
-    let color: Color
-}
-
 // MARK: - Mention Popup
 
 @available(iOS 26.0, *)
@@ -20,12 +13,10 @@ struct MentionPopup: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var detailSkill: Skill?
 
-    private var tint: TintedColors {
-        TintedColors(accent: .tronCyan, colorScheme: colorScheme)
-    }
+    private var tint: TintedColors { .skill(colorScheme) }
 
     private var filteredSkills: [Skill] {
-        MentionDetector.filterSkills(skills, query: query)
+        SkillMentions.filterSkills(skills, query: query)
     }
 
     var body: some View {
@@ -119,14 +110,6 @@ private struct MentionRow: View {
     let onTap: () -> Void
     let onInfo: () -> Void
 
-    private var badges: [MentionBadge] {
-        var badges: [MentionBadge] = []
-        if skill.source == .project {
-            badges.append(MentionBadge(text: "project", color: .tronEmerald))
-        }
-        return badges
-    }
-
     var body: some View {
         Button {
             onTap()
@@ -150,13 +133,13 @@ private struct MentionRow: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(tint.name)
 
-                        ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in
-                            Text(badge.text)
+                        if skill.source == .project {
+                            Text("project")
                                 .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                                .foregroundStyle(badge.color)
+                                .foregroundStyle(.tronEmerald)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
-                                .background(badge.color.opacity(0.15))
+                                .background(Color.tronEmerald.opacity(0.15))
                                 .clipShape(Capsule())
                         }
                     }

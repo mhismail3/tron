@@ -76,9 +76,8 @@ struct GitWorkflowSettingsPage: View {
                     Text("Strategy")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     Spacer()
-                    cycleToggle(
-                        values: ["merge", "rebase", "squash"],
-                        labels: ["Merge", "Rebase", "Squash"],
+                    SettingsCycleToggle(
+                        options: [("merge", "Merge"), ("rebase", "Rebase"), ("squash", "Squash")],
                         current: settingsState.gitMergeStrategy
                     ) { newValue in
                         settingsState.gitMergeStrategy = newValue
@@ -133,9 +132,8 @@ struct GitWorkflowSettingsPage: View {
                     Text("Isolation Mode")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     Spacer()
-                    cycleToggle(
-                        values: ["always", "lazy", "never"],
-                        labels: ["Always", "Lazy", "Never"],
+                    SettingsCycleToggle(
+                        options: [("always", "Always"), ("lazy", "Lazy"), ("never", "Never")],
                         current: settingsState.isolationMode
                     ) { newValue in
                         settingsState.isolationMode = newValue
@@ -167,9 +165,8 @@ struct GitWorkflowSettingsPage: View {
                     Text("Source Branch")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     Spacer()
-                    cycleToggle(
-                        values: ["keep", "deleteOnFinalize"],
-                        labels: ["Keep", "Delete"],
+                    SettingsCycleToggle(
+                        options: [("keep", "Keep"), ("deleteOnFinalize", "Delete")],
                         current: settingsState.gitSessionBranchPolicy
                     ) { newValue in
                         settingsState.gitSessionBranchPolicy = newValue
@@ -420,31 +417,4 @@ struct GitWorkflowSettingsPage: View {
         return "\(seconds)s"
     }
 
-    private func cycleToggle(
-        values: [String],
-        labels: [String],
-        current: String,
-        onCycle: @escaping (String) -> Void
-    ) -> some View {
-        let idx = values.firstIndex(of: current) ?? 0
-        return Button {
-            let next = values[(idx + 1) % values.count]
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                onCycle(next)
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Text(labels[idx])
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-            }
-            .foregroundStyle(.tronEmerald)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.tronEmerald.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
 }

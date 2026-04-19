@@ -33,7 +33,7 @@ struct RebaseOnMainSubSheet: View {
     private let accent: Color = .tronPurple
 
     /// Two strategies — `squash` is intentionally absent (server rejects).
-    enum Strategy: String, CaseIterable, Identifiable {
+    enum Strategy: String, CaseIterable, Identifiable, StrategyDisplayable {
         case rebase, merge
         var id: String { rawValue }
         var label: String { rawValue.capitalized }
@@ -116,32 +116,7 @@ struct RebaseOnMainSubSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "Strategy")
             SettingsCard(accent: accent) {
-                HStack(spacing: 0) {
-                    ForEach(Strategy.allCases) { s in
-                        Button {
-                            strategy = s
-                        } label: {
-                            VStack(spacing: 4) {
-                                Image(systemName: s.icon)
-                                    .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                                Text(s.label)
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                            }
-                            .foregroundStyle(strategy == s ? accent : .tronTextMuted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background {
-                                if strategy == s {
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(accent.opacity(0.15))
-                                        .padding(4)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 4)
+                StrategyPicker(selection: $strategy, accent: accent)
             }
             SettingsCaption(text: strategy.description)
         }
@@ -180,24 +155,10 @@ struct RebaseOnMainSubSheet: View {
                 title: "Conflicts detected",
                 detail: "\(c.count) file\(c.count == 1 ? "" : "s") need manual resolution. Open the conflict resolver to continue."
             )
-            Button {
+            OpenConflictResolverButton {
                 dismiss()
                 onConflicts?()
-            } label: {
-                HStack {
-                    Image(systemName: "wand.and.stars")
-                    Text("Open Conflict Resolver")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                }
-                .foregroundStyle(.tronRose)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.tronRose.opacity(0.12))
-                }
             }
-            .buttonStyle(.plain)
         case .noOp(let n):
             GitResultBanner(
                 kind: .success,
@@ -242,7 +203,7 @@ struct RebaseOnMainSubSheet: View {
                     dismiss()
                 }
             } catch {
-                errorMessage = friendlyGitError(error, action: "Rebase")
+                errorMessage = friendlyGitError(error, action: .rebase)
             }
         }
     }
