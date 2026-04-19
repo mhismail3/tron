@@ -16,7 +16,7 @@ import SwiftUI
 /// branch (auto-detected server-side). The action lives in the trailing
 /// toolbar slot; the leading `xmark` dismisses the sheet.
 @available(iOS 26.0, *)
-struct SyncMainSubSheet: View {
+struct PullRemoteSubSheet: View {
     let rpcClient: RPCClient
     let sessionId: String
 

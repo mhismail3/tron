@@ -15,7 +15,7 @@ import SwiftUI
 ///
 /// Primary action lives in the trailing toolbar slot; leading `xmark` dismisses.
 @available(iOS 26.0, *)
-struct FinalizeSessionSubSheet: View {
+struct MergeChangesSubSheet: View {
     let rpcClient: RPCClient
     let sessionId: String
     let suggestedTargetBranch: String?

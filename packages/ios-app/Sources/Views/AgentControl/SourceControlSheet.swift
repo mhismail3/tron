@@ -418,12 +418,12 @@ struct SourceControlSheet: View {
                 stagedFiles: stagedFiles
             )
         case .syncMain:
-            SyncMainSubSheet(
+            PullRemoteSubSheet(
                 rpcClient: rpcClient,
                 sessionId: sessionId
             )
         case .finalize:
-            FinalizeSessionSubSheet(
+            MergeChangesSubSheet(
                 rpcClient: rpcClient,
                 sessionId: sessionId,
                 suggestedTargetBranch: worktreeStatus?.worktree?.baseBranch,

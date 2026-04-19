@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Rebase on Main Sub-Sheet
 
 /// Pulls main's commits forward into the session branch — the reverse of
-/// `FinalizeSessionSubSheet`. The session stays on its current branch;
+/// `MergeChangesSubSheet`. The session stays on its current branch;
 /// main just lands on top.
 ///
 /// On conflicts, dismisses and calls `onConflicts` so the parent can
