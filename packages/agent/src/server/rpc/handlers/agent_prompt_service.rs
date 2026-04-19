@@ -13,10 +13,10 @@ use crate::skills::registry::SkillRegistry;
 use crate::server::rpc::context::{AgentDeps, RpcContext};
 
 use super::prompt_runtime::{
-    PromptBootstrapData, PromptContextArtifacts, build_skill_context_from_session,
-    build_user_content_override, build_user_event_payload, collect_pending_skill_payloads,
-    load_prompt_bootstrap, load_prompt_bootstrap_minimal, load_session_update_data,
-    persist_user_message_event, resume_prompt_session,
+    PromptBootstrapData, PromptContextArtifacts, build_user_content_override,
+    build_user_event_payload, collect_pending_skill_payloads, load_prompt_bootstrap,
+    load_prompt_bootstrap_minimal, load_session_update_data, persist_user_message_event,
+    prepare_skill_context_from_session, resume_prompt_session,
 };
 
 #[derive(Clone)]
@@ -607,8 +607,10 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         let _ = registry.refresh_if_stale(&working_dir);
     }
 
-    // Build skill context from server-owned session state
-    let skill_result = match build_skill_context_from_session(
+    // Prepare skill context — note this also writes a `skills.cleared`
+    // event under AskUser policy. See prepare_skill_context_from_session
+    // for the full side-effect contract.
+    let skill_result = match prepare_skill_context_from_session(
         skill_registry.clone(),
         event_store.clone(),
         session_id.clone(),

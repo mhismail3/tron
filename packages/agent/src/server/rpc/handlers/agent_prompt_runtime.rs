@@ -778,12 +778,17 @@ pub async fn persist_user_message_event(
     .await
 }
 
-/// Build skill context from server-owned session state.
+/// Prepare skill context for a prompt: reconstructs the [`SkillTracker`]
+/// from events, **emits a `skills.cleared` event** under the `AskUser`
+/// compaction policy if any skills were cleared at the last boundary,
+/// looks up active skills in the registry, and builds the `<skills>`
+/// XML block.
 ///
-/// Reconstructs the [`SkillTracker`] from events, looks up active skills
-/// in the registry, and builds the `<skills>` XML block. Returns the removal
-/// notice for recently deactivated skills.
-pub async fn build_skill_context_from_session(
+/// The `prepare_*` prefix (vs `build_*`) signals that this writes to the
+/// event store as a side effect — callers that want a pure formatter
+/// against an existing tracker should use the lower-level helpers in
+/// `crate::skills::injector` directly.
+pub async fn prepare_skill_context_from_session(
     skill_registry: Arc<RwLock<SkillRegistry>>,
     event_store: Arc<EventStore>,
     session_id: String,
@@ -800,7 +805,9 @@ pub async fn build_skill_context_from_session(
             &policy,
         );
 
-        // For AskUser policy, emit skills.cleared event once after compaction
+        // Side effect: under AskUser policy, persist a `skills.cleared`
+        // event so the iOS client can prompt the user to re-activate.
+        // Documented in the doc-comment above.
         if matches!(policy, crate::settings::types::CompactionPolicy::AskUser) {
             let cleared = tracker.cleared_at_boundary();
             if !cleared.is_empty() {

@@ -6,7 +6,7 @@ use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
-use crate::server::rpc::handlers::require_string_param;
+use crate::server::rpc::handlers::{map_event_store_error, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 
 /// Get tree visualization for a session.
@@ -21,9 +21,7 @@ impl MethodHandler for GetVisualizationHandler {
         let session = ctx
             .event_store
             .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
+            .map_err(map_event_store_error)?
             .ok_or_else(|| RpcError::NotFound {
                 code: errors::SESSION_NOT_FOUND.into(),
                 message: format!("Session '{session_id}' not found"),
@@ -36,9 +34,7 @@ impl MethodHandler for GetVisualizationHandler {
         let events = ctx
             .event_store
             .get_events_by_session(&session_id, &opts)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+            .map_err(map_event_store_error)?;
 
         let nodes: Vec<Value> = events
             .iter()
@@ -75,9 +71,7 @@ impl MethodHandler for GetBranchesHandler {
         let branches =
             ctx.event_store
                 .get_branches(&session_id)
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })?;
+                .map_err(map_event_store_error)?;
 
         let wire: Vec<Value> = branches
             .iter()
@@ -113,9 +107,7 @@ impl MethodHandler for GetSubtreeHandler {
         let descendants =
             ctx.event_store
                 .get_descendants(&event_id)
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })?;
+                .map_err(map_event_store_error)?;
 
         let nodes: Vec<Value> = descendants
             .iter()
@@ -148,9 +140,7 @@ impl MethodHandler for GetAncestorsHandler {
         let ancestors =
             ctx.event_store
                 .get_ancestors(&event_id)
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })?;
+                .map_err(map_event_store_error)?;
 
         let nodes: Vec<Value> = ancestors
             .iter()

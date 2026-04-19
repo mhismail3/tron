@@ -26,7 +26,7 @@ use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::orchestrator::subagent_manager::{SubagentManager, SubsessionConfig};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::require_string_param;
+use crate::server::rpc::handlers::{map_event_store_error, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 
 use std::fs;
@@ -106,9 +106,7 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
         .run_blocking("memory.retain.get_session", move || {
             event_store3
                 .get_session(&session_id_q3)
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Failed to get session: {e}"),
-                })
+                .map_err(map_event_store_error)
         })
         .await?;
 
@@ -473,9 +471,7 @@ fn get_messages_since(
 ) -> Result<Vec<Message>, RpcError> {
     let rows = store
         .get_events_since(session_id, after_sequence)
-        .map_err(|e| RpcError::Internal {
-            message: format!("Failed to fetch events: {e}"),
-        })?;
+        .map_err(map_event_store_error)?;
 
     if rows.is_empty() {
         return Ok(vec![]);

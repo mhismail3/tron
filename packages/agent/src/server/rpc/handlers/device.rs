@@ -6,7 +6,7 @@ use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::{opt_string, require_string_param};
+use crate::server::rpc::handlers::{map_event_store_error, opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 
 /// Register an APNS device token.
@@ -41,9 +41,7 @@ impl MethodHandler for RegisterTokenHandler {
                     workspace_id.as_deref(),
                     environment.as_deref().unwrap_or("production"),
                 )
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Failed to register device token: {e}"),
-                })?;
+                .map_err(map_event_store_error)?;
 
             Ok(serde_json::json!({
                 "id": result.id,
@@ -92,9 +90,7 @@ impl MethodHandler for UnregisterTokenHandler {
         ctx.run_blocking("device.unregister", move || {
             let success = event_store
                 .unregister_device_token(&device_token)
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Failed to unregister device token: {e}"),
-                })?;
+                .map_err(map_event_store_error)?;
 
             Ok(serde_json::json!({ "success": success }))
         })
