@@ -6,6 +6,7 @@
 //! `INTERNAL_ERROR`. New error mappers (event-store, cron, sandbox, …)
 //! belong in this file alongside `map_worktree_error`.
 
+use crate::events::errors::EventStoreError;
 use crate::server::rpc::errors::{self as codes, RpcError};
 use crate::worktree::WorktreeError;
 
@@ -104,14 +105,57 @@ pub(crate) fn map_worktree_error(e: WorktreeError) -> RpcError {
     }
 }
 
+/// Map an `EventStoreError` to a typed `RpcError`. Most events / session
+/// / memory / blob handlers should route their event-store calls through
+/// this instead of wrapping into `RpcError::Internal { e.to_string() }`,
+/// so iOS clients see actionable codes (`SESSION_NOT_FOUND`,
+/// `WORKSPACE_NOT_FOUND`, `BLOB_NOT_FOUND`) instead of `INTERNAL_ERROR`.
+///
+/// INVARIANT: the `match` is exhaustive over `EventStoreError`. Adding
+/// a variant forces a compile error here. Do NOT add a `_` arm.
+pub(crate) fn map_event_store_error(e: EventStoreError) -> RpcError {
+    use EventStoreError as E;
+    match e {
+        E::SessionNotFound(id) => RpcError::NotFound {
+            code: codes::SESSION_NOT_FOUND.into(),
+            message: format!("Session not found: {id}"),
+        },
+        E::EventNotFound(id) => RpcError::NotFound {
+            code: codes::EVENT_NOT_FOUND.into(),
+            message: format!("Event not found: {id}"),
+        },
+        E::WorkspaceNotFound(id) => RpcError::NotFound {
+            code: codes::WORKSPACE_NOT_FOUND.into(),
+            message: format!("Workspace not found: {id}"),
+        },
+        E::BlobNotFound(id) => RpcError::NotFound {
+            code: codes::BLOB_NOT_FOUND.into(),
+            message: format!("Blob not found: {id}"),
+        },
+        E::InvalidOperation(m) => RpcError::InvalidParams { message: m },
+        // Genuinely internal — sqlite/pool/serde/migration/busy/internal.
+        // The Display impl preserves the underlying detail for logs.
+        E::Sqlite(_)
+        | E::Pool(_)
+        | E::Serde(_)
+        | E::Migration { .. }
+        | E::Busy { .. }
+        | E::Internal(_) => RpcError::Internal {
+            message: e.to_string(),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    //! Per-variant coverage for `map_worktree_error`. Each test pins one
-    //! `WorktreeError` variant to its expected `RpcError` code — adding a
-    //! new variant to `WorktreeError` MUST come with a new test here, in
-    //! addition to the compile-error the exhaustive match raises.
+    //! Per-variant coverage for `map_worktree_error` and
+    //! `map_event_store_error`. Each test pins one variant to its
+    //! expected `RpcError` code — adding a new variant MUST come with a
+    //! new test here, in addition to the compile-error the exhaustive
+    //! match raises.
 
-    use super::map_worktree_error;
+    use super::{map_event_store_error, map_worktree_error};
+    use crate::events::errors::EventStoreError as E;
     use crate::worktree::WorktreeError as W;
 
     #[test]
@@ -245,6 +289,74 @@ mod tests {
     #[test]
     fn event_store_error_is_internal() {
         let rpc = map_worktree_error(W::EventStore("sqlite locked".into()));
+        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+    }
+
+    // ── map_event_store_error per-variant coverage ──
+
+    #[test]
+    fn event_store_session_not_found_is_typed() {
+        let rpc = map_event_store_error(E::SessionNotFound("sess-42".into()));
+        assert_eq!(rpc.code(), "SESSION_NOT_FOUND");
+        assert!(rpc.to_string().contains("sess-42"));
+    }
+
+    #[test]
+    fn event_store_event_not_found_is_typed() {
+        let rpc = map_event_store_error(E::EventNotFound("evt-7".into()));
+        assert_eq!(rpc.code(), "EVENT_NOT_FOUND");
+        assert!(rpc.to_string().contains("evt-7"));
+    }
+
+    #[test]
+    fn event_store_workspace_not_found_is_typed() {
+        let rpc = map_event_store_error(E::WorkspaceNotFound("ws-1".into()));
+        assert_eq!(rpc.code(), "WORKSPACE_NOT_FOUND");
+        assert!(rpc.to_string().contains("ws-1"));
+    }
+
+    #[test]
+    fn event_store_blob_not_found_is_typed() {
+        let rpc = map_event_store_error(E::BlobNotFound("blob-abc".into()));
+        assert_eq!(rpc.code(), "BLOB_NOT_FOUND");
+        assert!(rpc.to_string().contains("blob-abc"));
+    }
+
+    #[test]
+    fn event_store_invalid_operation_is_invalid_params() {
+        let rpc = map_event_store_error(E::InvalidOperation("can't fork".into()));
+        assert_eq!(rpc.code(), "INVALID_PARAMS");
+        assert!(rpc.to_string().contains("can't fork"));
+    }
+
+    #[test]
+    fn event_store_sqlite_is_internal() {
+        let rpc = map_event_store_error(E::Sqlite(rusqlite::Error::QueryReturnedNoRows));
+        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+    }
+
+    #[test]
+    fn event_store_busy_is_internal() {
+        let rpc = map_event_store_error(E::Busy { operation: "append", attempts: 5 });
+        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+    }
+
+    #[test]
+    fn event_store_serde_is_internal() {
+        let serde_err = serde_json::from_str::<String>("not json").unwrap_err();
+        let rpc = map_event_store_error(E::Serde(serde_err));
+        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+    }
+
+    #[test]
+    fn event_store_migration_is_internal() {
+        let rpc = map_event_store_error(E::Migration { message: "v005 failed".into() });
+        assert_eq!(rpc.code(), "INTERNAL_ERROR");
+    }
+
+    #[test]
+    fn event_store_internal_is_internal() {
+        let rpc = map_event_store_error(E::Internal("poisoned lock".into()));
         assert_eq!(rpc.code(), "INTERNAL_ERROR");
     }
 }

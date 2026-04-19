@@ -367,7 +367,7 @@ fn register_platform(registry: &mut MethodRegistry) {
 mod params;
 mod error_mapping;
 
-pub(crate) use error_mapping::map_worktree_error;
+pub(crate) use error_mapping::{map_event_store_error, map_worktree_error};
 pub(crate) use params::{opt_array, opt_bool, opt_string, opt_u64, require_param, require_string_param};
 
 #[cfg(test)]

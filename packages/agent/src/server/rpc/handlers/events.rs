@@ -7,7 +7,9 @@ use crate::events::sqlite::row_types::EventRow;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
-use crate::server::rpc::handlers::{opt_array, opt_string, require_param, require_string_param};
+use crate::server::rpc::handlers::{
+    map_event_store_error, opt_array, opt_string, require_param, require_string_param,
+};
 use crate::server::rpc::registry::MethodHandler;
 
 /// Convert an `EventRow` to wire format (camelCase).
@@ -85,9 +87,7 @@ impl MethodHandler for GetHistoryHandler {
         let _ = ctx
             .event_store
             .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
+            .map_err(map_event_store_error)?
             .ok_or_else(|| RpcError::NotFound {
                 code: errors::SESSION_NOT_FOUND.into(),
                 message: format!("Session '{session_id}' not found"),
@@ -111,9 +111,7 @@ impl MethodHandler for GetHistoryHandler {
             let type_strs: Vec<&str> = types.iter().map(String::as_str).collect();
             ctx.event_store
                 .get_events_by_type(&session_id, &type_strs, limit)
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })?
+                .map_err(map_event_store_error)?
         } else {
             let opts = crate::events::sqlite::repositories::event::ListEventsOptions {
                 limit,
@@ -121,9 +119,7 @@ impl MethodHandler for GetHistoryHandler {
             };
             ctx.event_store
                 .get_events_by_session(&session_id, &opts)
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })?
+                .map_err(map_event_store_error)?
         };
 
         // Apply beforeEventId filter (pagination backward)
@@ -174,9 +170,7 @@ impl MethodHandler for GetSinceHandler {
             // Look up the event to get its sequence number
             ctx.event_store
                 .get_event(&event_id)
-                .map_err(|e| RpcError::Internal {
-                    message: e.to_string(),
-                })?
+                .map_err(map_event_store_error)?
                 .map_or(-1, |row| row.sequence)
         } else {
             params
@@ -194,9 +188,7 @@ impl MethodHandler for GetSinceHandler {
         let mut events = ctx
             .event_store
             .get_events_since(&session_id, after_sequence)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+            .map_err(map_event_store_error)?;
 
         let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) >= l);
 
@@ -278,16 +270,12 @@ impl MethodHandler for AppendHandler {
                 parent_id: parent_id.as_deref(),
                 sequence: None,
             })
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+            .map_err(map_event_store_error)?;
 
         let session = ctx
             .event_store
             .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+            .map_err(map_event_store_error)?;
 
         let new_head = session.and_then(|s| s.head_event_id);
 
@@ -593,6 +581,11 @@ mod tests {
 
     #[tokio::test]
     async fn append_missing_session() {
+        // Appending to a session that doesn't exist surfaces the typed
+        // SESSION_NOT_FOUND code via map_event_store_error. Pre-rollout
+        // this fell through to INTERNAL_ERROR; after C1, clients can
+        // disambiguate "wrong id" from "server bug" without parsing
+        // the message string.
         let ctx = make_test_context();
         let err = AppendHandler
             .handle(
@@ -605,7 +598,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_eq!(err.code(), "INTERNAL_ERROR");
+        assert_eq!(err.code(), "SESSION_NOT_FOUND");
     }
 
     #[tokio::test]

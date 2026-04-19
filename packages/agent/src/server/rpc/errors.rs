@@ -66,6 +66,20 @@ pub const BRANCH_ACTIVE: &str = "BRANCH_ACTIVE";
 /// The target directory isn't a git repository.
 pub const NOT_GIT_REPO: &str = "NOT_GIT_REPO";
 
+// ── Typed event-store errors ─────────────────────────────────────────
+//
+// `EventStoreError` variants get mapped to these codes via
+// `map_event_store_error`. Most callers in the events / session /
+// memory / blob handlers should use it rather than wrapping into
+// `RpcError::Internal`.
+
+/// Requested event was not found.
+pub const EVENT_NOT_FOUND: &str = "EVENT_NOT_FOUND";
+/// Requested workspace was not found.
+pub const WORKSPACE_NOT_FOUND: &str = "WORKSPACE_NOT_FOUND";
+/// Requested blob was not found.
+pub const BLOB_NOT_FOUND: &str = "BLOB_NOT_FOUND";
+
 /// RPC error type returned by handlers.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {
@@ -217,6 +231,18 @@ mod tests {
         ];
         let unique: std::collections::HashSet<_> = codes.iter().collect();
         assert_eq!(unique.len(), codes.len(), "error codes must be distinct");
+    }
+
+    #[test]
+    fn event_store_codes_are_distinct() {
+        let codes = [
+            SESSION_NOT_FOUND,
+            EVENT_NOT_FOUND,
+            WORKSPACE_NOT_FOUND,
+            BLOB_NOT_FOUND,
+        ];
+        let unique: std::collections::HashSet<_> = codes.iter().collect();
+        assert_eq!(unique.len(), codes.len(), "event-store error codes must be distinct");
     }
 
     #[test]
