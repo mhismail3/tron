@@ -58,8 +58,7 @@ func friendlyGitError(_ error: Error, action: String) -> String {
         return "\(action) failed: \(rpc.message)"
     case .invalidParams:
         return rpc.message
-    case .sessionNotFound, .agentNotRunning, .methodNotFound,
-         .internalError, .maxSessionsReached:
+    case .sessionNotFound, .agentNotRunning, .methodNotFound, .internalError:
         return "\(action) failed: \(rpc.message)"
     }
 }

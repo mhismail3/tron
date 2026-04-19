@@ -58,32 +58,6 @@ struct SkillChip: View {
     }
 }
 
-// MARK: - Skill Chip Row (for InputBar)
-
-/// Horizontal scrollable row of skill chips for display above input bar.
-struct SkillChipRow: View {
-    let skills: [Skill]
-    let onRemove: (Skill) -> Void
-    let onTap: (Skill) -> Void
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(skills) { skill in
-                    SkillChip(
-                        skill: skill,
-                        showRemoveButton: true,
-                        onRemove: { onRemove(skill) },
-                        onTap: { onTap(skill) }
-                    )
-                }
-            }
-            .padding(.horizontal, 16)
-        }
-        .frame(height: 32)
-    }
-}
-
 // MARK: - Message Skill Chips (for MessageBubble - read-only)
 
 /// Row of skill chips displayed in sent messages (no remove button).
@@ -131,16 +105,6 @@ struct MessageSkillChips: View {
                 )
             )
         }
-
-        SkillChipRow(
-            skills: [
-                Skill(name: "api-design", displayName: "API Design", description: "API design patterns", source: .global, tags: nil),
-                Skill(name: "testing", displayName: "Testing", description: "Testing best practices", source: .project, tags: nil),
-                Skill(name: "rules", displayName: "Rules", description: "Project rules", source: .global, tags: nil)
-            ],
-            onRemove: { _ in },
-            onTap: { _ in }
-        )
 
         MessageSkillChips(
             skills: [

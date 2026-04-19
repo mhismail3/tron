@@ -35,7 +35,6 @@ enum RPCErrorCode: String, Sendable {
     case invalidParams = "INVALID_PARAMS"
     case methodNotFound = "METHOD_NOT_FOUND"
     case internalError = "INTERNAL_ERROR"
-    case maxSessionsReached = "MAX_SESSIONS_REACHED"
 
     // Typed git workflow errors — mirror the constants in
     // `packages/agent/src/server/rpc/errors.rs`.

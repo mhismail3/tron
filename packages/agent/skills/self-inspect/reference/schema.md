@@ -253,7 +253,6 @@ Settings live at `~/.tron/system/settings.json`. All keys are camelCase. Missing
 | `defaultProvider` | `"anthropic"` | Default LLM provider |
 | `defaultWorkspace` | null | Default workspace path |
 | `heartbeatIntervalMs` | 30000 | WebSocket heartbeat interval |
-| `maxConcurrentSessions` | 10 | Max concurrent sessions |
 | `sessionsDir` | `"sessions"` | Session data directory |
 | `memoryDbPath` | `"memory.db"` | Memory database path |
 | `transcription.enabled` | true | Audio transcription |

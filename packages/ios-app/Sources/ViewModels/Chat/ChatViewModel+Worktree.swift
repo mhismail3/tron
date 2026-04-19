@@ -18,25 +18,6 @@ extension ChatViewModel {
         }
     }
 
-    /// Commit changes in the session's worktree
-    func commitWorktreeChanges(message: String) async {
-        worktreeState.isLoading = true
-        defer { worktreeState.isLoading = false }
-
-        do {
-            _ = try await rpcClient.worktree.commit(
-                sessionId: sessionId,
-                message: message
-            )
-            // Failures now throw typed RPC errors; reaching here means
-            // the commit ran. Refresh status so the UI reflects the new
-            // commit count and cleared uncommitted-changes flag.
-            await requestWorktreeStatus()
-        } catch {
-            showErrorAlert(friendlyGitError(error, action: "Commit"))
-        }
-    }
-
     // MARK: - Real-time WebSocket Event Handlers
 
     func handleWorktreeAcquired(_ result: WorktreeAcquiredPlugin.Result) {

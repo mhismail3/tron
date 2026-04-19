@@ -380,6 +380,14 @@ mod tests {
 
     #[test]
     fn stale_fields_ignored_during_deserialization() {
+        // Users upgrading from older releases may have these keys in their
+        // settings.json. Deserialization must ignore them cleanly (serde's
+        // default behavior) rather than fail the load.
+        //   wsPort / healthPort / host / tailscaleIp / sessionTimeoutMs /
+        //   anthropicAccount: never existed in ServerSettings as a real field.
+        //   maxSessions / cacheTtl: removed in 754cbc6d (settings consolidation).
+        //   maxConcurrentSessions: bogus default written by old tron-lib.sh
+        //     (never decoded, purged from install template in this release).
         let json = serde_json::json!({
             "wsPort": 8082,
             "healthPort": 8083,
@@ -387,6 +395,9 @@ mod tests {
             "tailscaleIp": "100.64.213.113",
             "sessionTimeoutMs": 3600000,
             "anthropicAccount": "mhismail3",
+            "maxSessions": 20,
+            "cacheTtl": 7200,
+            "maxConcurrentSessions": 10,
             "defaultModel": "claude-sonnet-4-6"
         });
         let s: ServerSettings = serde_json::from_value(json).unwrap();

@@ -108,8 +108,7 @@ ensure_default_configs() {
   "server": {
     "defaultModel": "claude-sonnet-4-20250514",
     "defaultProvider": "anthropic",
-    "port": 9847,
-    "maxConcurrentSessions": 10
+    "port": 9847
   },
   "logging": {
     "dbLogLevel": "info"
