@@ -28,7 +28,7 @@
 //! ## State Model
 //!
 //! Skill state is event-sourced via `skill.activated` / `skill.deactivated` events.
-//! [`tracker::SkillTracker::from_events`] reconstructs the current state on session resume.
+//! [`tracker::SkillTracker::from_events_with_policy`] reconstructs the current state on session resume.
 //!
 //! ## Module Position
 //!

@@ -2,8 +2,9 @@
 //!
 //! These handlers manage per-session skill state via the event store.
 //! State is event-sourced: `skill.activated` / `skill.deactivated` events
-//! are appended, and [`SkillTracker::from_events`] reconstructs the current
-//! state on read.
+//! are appended, and [`reconstruct_tracker`] rebuilds the current state on
+//! read. All three handlers go through that single helper so they query the
+//! same event-type set and apply the same compaction policy.
 //!
 //! ## Handlers
 //!
@@ -19,6 +20,7 @@ use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::handlers::require_string_param;
 use crate::server::rpc::registry::MethodHandler;
+use crate::settings::types::CompactionPolicy;
 use crate::skills::tracker::SkillTracker;
 
 /// Activate a skill in a session.
@@ -56,35 +58,9 @@ impl MethodHandler for ActivateHandler {
         };
 
         // Check if already active (idempotent)
-        let already_active = {
-            let events = ctx
-                .event_store
-                .get_events_by_type(
-                    &session_id,
-                    &[
-                        "skill.activated",
-                        "skill.deactivated",
-                        "context.cleared",
-                        "compact.boundary",
-                    ],
-                    None,
-                )
-                .unwrap_or_default();
-            let json_events: Vec<Value> = events
-                .iter()
-                .filter_map(|e| {
-                    serde_json::from_str::<Value>(&e.payload).ok().map(|payload| {
-                        serde_json::json!({
-                            "type": e.event_type,
-                            "id": e.id,
-                            "payload": payload,
-                        })
-                    })
-                })
-                .collect();
-            let tracker = SkillTracker::from_events(&json_events);
-            tracker.has_skill(&skill_name)
-        };
+        let already_active =
+            reconstruct_tracker(&ctx.event_store, &session_id, &CompactionPolicy::ClearAll)
+                .has_skill(&skill_name);
 
         if already_active {
             return Ok(serde_json::json!({
@@ -149,35 +125,9 @@ impl MethodHandler for DeactivateHandler {
             })?;
 
         // Check if currently active
-        let is_active = {
-            let events = ctx
-                .event_store
-                .get_events_by_type(
-                    &session_id,
-                    &[
-                        "skill.activated",
-                        "skill.deactivated",
-                        "context.cleared",
-                        "compact.boundary",
-                    ],
-                    None,
-                )
-                .unwrap_or_default();
-            let json_events: Vec<Value> = events
-                .iter()
-                .filter_map(|e| {
-                    serde_json::from_str::<Value>(&e.payload).ok().map(|payload| {
-                        serde_json::json!({
-                            "type": e.event_type,
-                            "id": e.id,
-                            "payload": payload,
-                        })
-                    })
-                })
-                .collect();
-            let tracker = SkillTracker::from_events(&json_events);
-            tracker.has_skill(&skill_name)
-        };
+        let is_active =
+            reconstruct_tracker(&ctx.event_store, &session_id, &CompactionPolicy::ClearAll)
+                .has_skill(&skill_name);
 
         if !is_active {
             return Ok(serde_json::json!({
@@ -232,32 +182,8 @@ impl MethodHandler for ActiveHandler {
                 message: format!("Session '{session_id}' not found"),
             })?;
 
-        let events = ctx
-            .event_store
-            .get_events_by_type(
-                &session_id,
-                &[
-                    "skill.activated",
-                    "skill.deactivated",
-                    "context.cleared",
-                    "compact.boundary",
-                ],
-                None,
-            )
-            .unwrap_or_default();
-        let json_events: Vec<Value> = events
-            .iter()
-            .filter_map(|e| {
-                serde_json::from_str::<Value>(&e.payload).ok().map(|payload| {
-                    serde_json::json!({
-                        "type": e.event_type,
-                        "id": e.id,
-                        "payload": payload,
-                    })
-                })
-            })
-            .collect();
-        let tracker = SkillTracker::from_events(&json_events);
+        let tracker =
+            reconstruct_tracker(&ctx.event_store, &session_id, &CompactionPolicy::ClearAll);
 
         let skills: Vec<Value> = tracker
             .added_skills()

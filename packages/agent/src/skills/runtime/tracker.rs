@@ -2,9 +2,11 @@
 //!
 //! Tracks which skills are active in a session and which have been deactivated
 //! (for removal notice generation). State is reconstructed from events via
-//! [`SkillTracker::from_events`] (always uses `ClearAll` semantics) or
-//! [`SkillTracker::from_events_with_policy`] (respects the configured
-//! [`CompactionPolicy`](crate::settings::types::CompactionPolicy)).
+//! [`SkillTracker::from_events_with_policy`], which respects the configured
+//! [`CompactionPolicy`](crate::settings::types::CompactionPolicy). All
+//! reconstruction goes through this single entry point — there is no
+//! policy-less variant — so handlers and helpers can't drift apart on which
+//! event types they query or how they treat compaction boundaries.
 //!
 //! ## Event types handled
 //!
@@ -202,77 +204,6 @@ impl SkillTracker {
         self.skills_cleared_by_compaction
     }
 
-    /// Reconstruct tracker state from a sequence of session events.
-    ///
-    /// Always uses `ClearAll` compaction semantics: all state is discarded at
-    /// every `compact.boundary` or `context.cleared` event. Use
-    /// [`from_events_with_policy`](Self::from_events_with_policy) for
-    /// policy-aware reconstruction.
-    pub fn from_events(events: &[serde_json::Value]) -> Self {
-        let mut tracker = Self::new();
-
-        for event in events {
-            let event_type = event
-                .get("type")
-                .and_then(|t| t.as_str())
-                .unwrap_or_default();
-            let event_id = event
-                .get("id")
-                .and_then(|id| id.as_str())
-                .map(ToString::to_string);
-
-            match event_type {
-                "skill.activated" => {
-                    if let Some(payload) = event.get("payload") {
-                        let name = payload
-                            .get("skillName")
-                            .and_then(|n| n.as_str())
-                            .unwrap_or_default()
-                            .to_string();
-                        let source = match payload
-                            .get("source")
-                            .and_then(|s| s.as_str())
-                            .unwrap_or("global")
-                        {
-                            "project" => SkillSource::Project,
-                            _ => SkillSource::Global,
-                        };
-                        let added_via = match payload
-                            .get("addedVia")
-                            .and_then(|a| a.as_str())
-                            .unwrap_or("explicit")
-                        {
-                            "mention" => SkillAddMethod::Mention,
-                            _ => SkillAddMethod::Explicit,
-                        };
-
-                        if !name.is_empty() {
-                            tracker.add_skill(name, source, added_via, event_id);
-                        }
-                    }
-                }
-                "skill.deactivated" => {
-                    if let Some(payload) = event.get("payload") {
-                        let name = payload
-                            .get("skillName")
-                            .and_then(|n| n.as_str())
-                            .unwrap_or_default();
-                        if !name.is_empty() {
-                            let _ = tracker.remove_skill(name);
-                        }
-                    }
-                }
-                // Compaction / context clear: reset all state
-                "context.cleared" | "compact.boundary" => {
-                    tracker.clear();
-                }
-                _ => {}
-            }
-        }
-
-        tracker
-    }
-
     /// Reconstruct tracker state with compaction policy awareness.
     ///
     /// Like [`from_events`], but respects the `CompactionPolicy` when
@@ -384,6 +315,7 @@ impl Default for SkillTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::types::CompactionPolicy;
 
     // ── Direct API tests ────────────────────────────────────────────
 
@@ -608,7 +540,7 @@ mod tests {
                 "payload": { "spellName": "commit", "castEventId": "e1" }
             }),
         ];
-        let tracker = SkillTracker::from_events(&events);
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         assert_eq!(tracker.count(), 0);
         assert!(tracker.pending_removal_notices().is_empty());
         assert!(tracker.active_skill_names().is_empty());
@@ -668,7 +600,7 @@ mod tests {
 
     #[test]
     fn test_from_events_empty() {
-        let tracker = SkillTracker::from_events(&[]);
+        let tracker = SkillTracker::from_events_with_policy(&[], &CompactionPolicy::ClearAll);
         assert_eq!(tracker.count(), 0);
     }
 
@@ -682,7 +614,7 @@ mod tests {
                 "source": "global"
             }
         })];
-        let tracker = SkillTracker::from_events(&events);
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         assert!(tracker.has_skill("browser"));
     }
 
@@ -700,7 +632,7 @@ mod tests {
                 "payload": { "skillName": "browser" }
             }),
         ];
-        let tracker = SkillTracker::from_events(&events);
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         assert!(!tracker.has_skill("browser"));
         assert!(tracker.removed_skill_names().contains("browser"));
         assert!(tracker.pending_removal_notices().contains("browser"));
@@ -722,7 +654,7 @@ mod tests {
                 "payload": {}
             }),
         ];
-        let tracker = SkillTracker::from_events(&events);
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         assert_eq!(tracker.count(), 0);
     }
 
@@ -740,7 +672,7 @@ mod tests {
                 "payload": {}
             }),
         ];
-        let tracker = SkillTracker::from_events(&events);
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         assert_eq!(tracker.count(), 0);
     }
 
@@ -764,7 +696,7 @@ mod tests {
                 "payload": { "skillName": "new-skill", "source": "project" }
             }),
         ];
-        let tracker = SkillTracker::from_events(&events);
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         assert!(!tracker.has_skill("old-skill"));
         assert!(tracker.has_skill("new-skill"));
         assert_eq!(tracker.count(), 1);
@@ -789,7 +721,7 @@ mod tests {
                 "payload": { "skillName": "browser", "source": "global" }
             }),
         ];
-        let tracker = SkillTracker::from_events(&events);
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         assert!(tracker.has_skill("browser"));
         assert_eq!(tracker.count(), 1);
     }
@@ -813,7 +745,7 @@ mod tests {
                 "payload": {}
             }),
         ];
-        let tracker = SkillTracker::from_events(&events);
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         assert!(tracker.pending_removal_notices().is_empty());
         assert!(tracker.removed_skill_names().is_empty());
     }
@@ -834,7 +766,7 @@ mod tests {
                 "payload": { "skillName": "browser", "source": "project" }
             }),
         ];
-        let tracker = SkillTracker::from_events(&events);
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         assert_eq!(tracker.count(), 1); // Idempotent
     }
 
@@ -845,7 +777,7 @@ mod tests {
             "id": "evt-1",
             "payload": { "skillName": "tool", "source": "project" }
         })];
-        let tracker = SkillTracker::from_events(&events);
+        let tracker = SkillTracker::from_events_with_policy(&events, &CompactionPolicy::ClearAll);
         let skills = tracker.added_skills();
         assert_eq!(skills[0].source, SkillSource::Project);
         assert_eq!(skills[0].added_via, SkillAddMethod::Explicit);
