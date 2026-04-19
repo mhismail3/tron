@@ -28,8 +28,40 @@ struct NewSessionFlow: View {
     // Import from Claude Code
     @State private var showImportFlow = false
 
+    // Per-session worktree override
+    /// Global isolation mode fetched from server settings ("always" | "lazy" | "never").
+    /// Drives the inferred default state of the worktree toggle.
+    @State private var globalIsolationMode: String = "always"
+    /// Whether the chosen workspace is inside a git repo (decides toggle visibility).
+    @State private var workspaceIsGitRepo: Bool = false
+    /// User's explicit override. `nil` until they touch the toggle —
+    /// kept `nil` so we can distinguish "untouched, inherit global" from
+    /// "user explicitly chose default value".
+    @State private var useWorktreeOverride: Bool? = nil
+    /// In-flight git-repo lookup. Cancelled when workspace changes.
+    @State private var gitRepoCheckTask: Task<Void, Never>?
+
     private var canCreate: Bool {
         !isCreating && !workingDirectory.isEmpty && !selectedModel.isEmpty
+    }
+
+    /// Inferred default state of the worktree toggle, derived from the global
+    /// isolation mode. "always" and "lazy" both default to ON; "never" → OFF.
+    private var inferredWorktreeDefault: Bool {
+        globalIsolationMode != "never"
+    }
+
+    /// Effective on/off state shown in the toggle UI (override wins, else inferred).
+    private var effectiveUseWorktreeForUI: Bool {
+        useWorktreeOverride ?? inferredWorktreeDefault
+    }
+
+    private var useWorktreeCaption: String {
+        if effectiveUseWorktreeForUI {
+            return "Session will run on its own worktree branch."
+        } else {
+            return "Session will run directly on the current branch."
+        }
     }
 
     /// Unique workspace paths from recent sessions, ordered by most recent activity.
@@ -105,6 +137,38 @@ struct NewSessionFlow: View {
                         Text("The directory where the agent will operate")
                             .font(TronTypography.codeCaption)
                             .foregroundStyle(.tronTextMuted)
+                    }
+
+                    // Per-session worktree toggle — only meaningful for git repos
+                    if workspaceIsGitRepo {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Git Worktree")
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                                .foregroundStyle(.tronTextSecondary)
+
+                            HStack(spacing: 12) {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                    .foregroundStyle(.tronEmerald)
+                                Text("Isolated worktree")
+                                    .font(TronTypography.messageBody)
+                                    .foregroundStyle(.tronEmerald)
+                                Spacer()
+                                Toggle("", isOn: Binding(
+                                    get: { effectiveUseWorktreeForUI },
+                                    set: { useWorktreeOverride = $0 }
+                                ))
+                                .labelsHidden()
+                                .tint(.tronEmerald)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.2)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                            Text(useWorktreeCaption)
+                                .font(TronTypography.codeCaption)
+                                .foregroundStyle(.tronTextMuted)
+                        }
                     }
 
                     // Clone from GitHub option
@@ -292,10 +356,31 @@ struct NewSessionFlow: View {
             }
             .task {
                 await loadModels()
+                await loadGlobalIsolationMode()
             }
             .onChange(of: rpcClient.connectionState) { oldState, newState in
                 if newState.isConnected && !oldState.isConnected {
-                    _ = Task { await loadModels() }
+                    _ = Task {
+                        await loadModels()
+                        await loadGlobalIsolationMode()
+                    }
+                }
+            }
+            .onChange(of: workingDirectory) { _, newPath in
+                // Workspace changed: cancel any in-flight git-repo check, reset
+                // the user's override (so it remirrors the inferred default for
+                // the new workspace), and re-probe.
+                gitRepoCheckTask?.cancel()
+                workspaceIsGitRepo = false
+                useWorktreeOverride = nil
+                guard !newPath.isEmpty else { return }
+                gitRepoCheckTask = Task {
+                    let result = (try? await rpcClient.worktree.isGitRepo(newPath)) ?? false
+                    if !Task.isCancelled {
+                        await MainActor.run {
+                            workspaceIsGitRepo = result
+                        }
+                    }
                 }
             }
         }
@@ -371,15 +456,25 @@ struct NewSessionFlow: View {
         }
     }
 
+    private func loadGlobalIsolationMode() async {
+        guard let settings = try? await rpcClient.settings.get() else { return }
+        await MainActor.run {
+            globalIsolationMode = settings.isolationMode
+        }
+    }
+
     private func createSession() {
         isCreating = true
         errorMessage = nil
 
         Task {
             do {
+                // Pass `useWorktree` only if the user explicitly toggled it.
+                // `nil` defers to the global isolation mode on the server.
                 let result = try await rpcClient.session.create(
                     workingDirectory: workingDirectory,
-                    model: selectedModel
+                    model: selectedModel,
+                    useWorktree: useWorktreeOverride
                 )
 
                 // Persist non-default reasoning level to the new session

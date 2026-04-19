@@ -14,6 +14,19 @@ final class WorktreeClient: RPCDomainClient {
         return try await ws.send(method: "worktree.getStatus", params: params)
     }
 
+    /// Quick check: is the given absolute path inside a git repository?
+    /// Used by the New Session sheet to decide whether to surface the
+    /// per-session worktree-isolation toggle.
+    func isGitRepo(_ path: String) async throws -> Bool {
+        let ws = try requireTransport().requireConnection()
+        let params = WorktreeIsGitRepoParams(path: path)
+        let result: WorktreeIsGitRepoResult = try await ws.send(
+            method: "worktree.isGitRepo",
+            params: params
+        )
+        return result.isGitRepo
+    }
+
     // MARK: - Commit
 
     /// Commit changes in a session's worktree.

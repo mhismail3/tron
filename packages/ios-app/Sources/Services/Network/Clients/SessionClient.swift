@@ -10,7 +10,8 @@ final class SessionClient: RPCDomainClient {
         workingDirectory: String,
         model: String? = nil,
         title: String? = nil,
-        source: String? = nil
+        source: String? = nil,
+        useWorktree: Bool? = nil
     ) async throws -> SessionCreateResult {
         let ws = try requireTransport().requireConnection()
 
@@ -19,7 +20,8 @@ final class SessionClient: RPCDomainClient {
             model: model,
             contextFiles: nil,
             title: title,
-            source: source
+            source: source,
+            useWorktree: useWorktree
         )
 
         let result: SessionCreateResult = try await ws.send(

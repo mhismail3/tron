@@ -123,6 +123,24 @@ impl MethodHandler for GetStatusHandler {
     }
 }
 
+// ── IsGitRepo ───────────────────────────────────────────────────────
+
+/// Quick check: is the given absolute path a git repository?
+/// Used by the iOS new-session sheet to decide whether to surface the
+/// per-session worktree-isolation toggle.
+pub struct IsGitRepoHandler;
+
+#[async_trait]
+impl MethodHandler for IsGitRepoHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.isGitRepo"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let path = require_string_param(params.as_ref(), "path")?;
+        let coord = require_coordinator(ctx)?;
+        let is_git = coord.is_git_repo(std::path::Path::new(&path)).await;
+        Ok(serde_json::json!({ "isGitRepo": is_git }))
+    }
+}
+
 // ── Commit ──────────────────────────────────────────────────────────
 
 /// Commit worktree changes.

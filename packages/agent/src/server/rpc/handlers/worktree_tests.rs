@@ -90,6 +90,28 @@ async fn release_requires_coordinator() {
     assert!(err.to_string().contains("not enabled"));
 }
 
+// ── IsGitRepo handler tests ─────────────────────────────────────
+
+#[tokio::test]
+async fn is_git_repo_requires_coordinator() {
+    let ctx = make_test_context();
+    let err = IsGitRepoHandler
+        .handle(Some(json!({"path": "/tmp"})), &ctx)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("not enabled"));
+}
+
+#[tokio::test]
+async fn is_git_repo_missing_path() {
+    let ctx = make_test_context();
+    let err = IsGitRepoHandler
+        .handle(Some(json!({})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
 // ── ListSessionBranches handler tests ───────────────────────────
 
 #[tokio::test]

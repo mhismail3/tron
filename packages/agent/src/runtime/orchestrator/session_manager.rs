@@ -117,9 +117,33 @@ impl SessionManager {
         title: Option<&str>,
         source: Option<&str>,
     ) -> Result<String, RuntimeError> {
+        self.create_session_with_worktree_override(model, workspace_path, title, source, None)
+    }
+
+    /// Like [`create_session`] but accepts a per-session worktree override:
+    ///   * `None` defers to the global isolation mode setting (current default).
+    ///   * `Some(true)` forces an isolated worktree on first prompt (when in a git repo).
+    ///   * `Some(false)` forces passthrough (no worktree) regardless of global mode.
+    #[instrument(skip(self), fields(model, working_dir = workspace_path))]
+    pub fn create_session_with_worktree_override(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        source: Option<&str>,
+        use_worktree: Option<bool>,
+    ) -> Result<String, RuntimeError> {
         let result = self
             .event_store
-            .create_session(model, workspace_path, title, None, self.origin.as_deref(), source)
+            .create_session_with_worktree_override(
+                model,
+                workspace_path,
+                title,
+                None,
+                self.origin.as_deref(),
+                source,
+                use_worktree,
+            )
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
         let session_id = result.session.id.clone();

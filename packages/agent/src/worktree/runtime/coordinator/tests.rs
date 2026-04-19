@@ -120,6 +120,124 @@ async fn acquire_mode_never() {
     assert!(matches!(result, AcquireResult::Passthrough));
 }
 
+// ── Per-session worktree override ────────────────────────────────────────
+
+/// `Some(true)` overrides global `Never` and acquires a worktree in a git repo.
+#[tokio::test]
+async fn override_true_overrides_global_never() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let config = WorktreeConfig {
+        mode: crate::settings::types::IsolationMode::Never,
+        ..WorktreeConfig::default()
+    };
+    let coord = WorktreeCoordinator::new(config, store);
+
+    let result = coord
+        .maybe_acquire_with_override("override-true", dir.path(), Some(true))
+        .await
+        .unwrap();
+    assert!(matches!(result, AcquireResult::Acquired(_)));
+}
+
+/// `Some(false)` overrides global `Always` and returns Passthrough.
+#[tokio::test]
+async fn override_false_overrides_global_always() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    // Default WorktreeConfig is Always.
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let result = coord
+        .maybe_acquire_with_override("override-false", dir.path(), Some(false))
+        .await
+        .unwrap();
+    assert!(matches!(result, AcquireResult::Passthrough));
+}
+
+/// `None` falls through to the global mode (Always → Acquired in git repo).
+#[tokio::test]
+async fn override_none_defers_to_global_always() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let result = coord
+        .maybe_acquire_with_override("override-none", dir.path(), None)
+        .await
+        .unwrap();
+    assert!(matches!(result, AcquireResult::Acquired(_)));
+}
+
+/// `Some(true)` on a non-git directory still passthroughs (worktrees require git).
+#[tokio::test]
+async fn override_true_on_non_git_passthroughs() {
+    let dir = tempdir().unwrap();
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let result = coord
+        .maybe_acquire_with_override("override-true-non-git", dir.path(), Some(true))
+        .await
+        .unwrap();
+    assert!(matches!(result, AcquireResult::Passthrough));
+}
+
+/// `Some(true)` on an empty git repo (no commits) defers — same as Always-mode.
+#[tokio::test]
+async fn override_true_on_empty_git_repo_defers() {
+    let dir = tempdir().unwrap();
+    // Init repo without making any commits.
+    run_cmd(dir.path(), &["git", "init"]).await;
+
+    let store = make_store();
+    let config = WorktreeConfig {
+        mode: crate::settings::types::IsolationMode::Never,
+        ..WorktreeConfig::default()
+    };
+    let coord = WorktreeCoordinator::new(config, store);
+
+    let result = coord
+        .maybe_acquire_with_override("override-true-empty", dir.path(), Some(true))
+        .await
+        .unwrap();
+    assert!(matches!(
+        result,
+        AcquireResult::Deferred(DeferralReason::EmptyRepository)
+    ));
+}
+
+/// Cached worktree wins over a Some(false) override (cache check happens first).
+/// In practice this can't happen because overrides are immutable post-create —
+/// but we verify the behavior is safe if it ever did.
+#[tokio::test]
+async fn cached_worktree_returned_regardless_of_override() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let first = coord
+        .maybe_acquire_with_override("cached-sess", dir.path(), None)
+        .await
+        .unwrap();
+    assert!(matches!(first, AcquireResult::Acquired(_)));
+
+    // Even with Some(false), the cached worktree is returned.
+    let second = coord
+        .maybe_acquire_with_override("cached-sess", dir.path(), Some(false))
+        .await
+        .unwrap();
+    assert!(matches!(second, AcquireResult::Acquired(_)));
+}
+
 #[tokio::test]
 async fn release_unknown_session() {
     let store = make_store();

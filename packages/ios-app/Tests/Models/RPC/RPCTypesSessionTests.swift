@@ -149,3 +149,71 @@ struct SessionInfoTests {
         #expect(info.isFork == false)
     }
 }
+
+@Suite("SessionCreateParams useWorktree encoding")
+struct SessionCreateParamsUseWorktreeTests {
+
+    private func encode(_ params: SessionCreateParams) -> [String: Any] {
+        let data = try! JSONEncoder().encode(params)
+        return try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+    }
+
+    @Test("useWorktree true encodes as true")
+    func encodesTrue() {
+        let params = SessionCreateParams(workingDirectory: "/tmp", useWorktree: true)
+        let json = encode(params)
+        #expect(json["useWorktree"] as? Bool == true)
+    }
+
+    @Test("useWorktree false encodes as false")
+    func encodesFalse() {
+        let params = SessionCreateParams(workingDirectory: "/tmp", useWorktree: false)
+        let json = encode(params)
+        #expect(json["useWorktree"] as? Bool == false)
+    }
+
+    @Test("useWorktree omitted defaults to nil")
+    func omittedIsNil() {
+        let params = SessionCreateParams(workingDirectory: "/tmp")
+        // Server-side opt_bool() handles both `null` and missing identically (returns None).
+        // Default Swift JSONEncoder emits explicit `null` for nil optionals — that's accepted.
+        let json = encode(params)
+        let raw = json["useWorktree"]
+        #expect(raw == nil || raw is NSNull)
+    }
+}
+
+@Suite("SessionInfo useWorktree decoding")
+struct SessionInfoUseWorktreeTests {
+
+    private func decodeWith(useWorktree: Any?) -> SessionInfo {
+        var json: [String: Any] = [
+            "sessionId": "sess_x",
+            "model": "claude-sonnet-4-6",
+            "createdAt": "2026-04-01T00:00:00Z",
+            "messageCount": 0,
+            "isActive": true,
+        ]
+        if let v = useWorktree { json["useWorktree"] = v }
+        let data = try! JSONSerialization.data(withJSONObject: json)
+        return try! JSONDecoder().decode(SessionInfo.self, from: data)
+    }
+
+    @Test("decodes useWorktree=true")
+    func decodesTrue() {
+        let info = decodeWith(useWorktree: true)
+        #expect(info.useWorktree == true)
+    }
+
+    @Test("decodes useWorktree=false")
+    func decodesFalse() {
+        let info = decodeWith(useWorktree: false)
+        #expect(info.useWorktree == false)
+    }
+
+    @Test("decodes missing useWorktree as nil")
+    func decodesMissingAsNil() {
+        let info = decodeWith(useWorktree: nil)
+        #expect(info.useWorktree == nil)
+    }
+}

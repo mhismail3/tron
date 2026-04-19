@@ -59,6 +59,15 @@ struct WorktreeGetStatusResult: Decodable {
     let worktree: WorktreeInfo?
 }
 
+/// Quick check: is the given absolute path a git repository?
+struct WorktreeIsGitRepoParams: Encodable {
+    let path: String
+}
+
+struct WorktreeIsGitRepoResult: Decodable {
+    let isGitRepo: Bool
+}
+
 /// Commit changes in a session's worktree.
 ///
 /// All flag fields are optional on the wire. When omitted, the server

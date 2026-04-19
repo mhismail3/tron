@@ -46,6 +46,9 @@ pub struct CreateSessionOptions<'a> {
     pub origin: Option<&'a str>,
     /// Session source (e.g. "cron"). NULL for user-created sessions.
     pub source: Option<&'a str>,
+    /// Per-session worktree override. NULL = defer to global isolation mode;
+    /// Some(true) = force-isolate; Some(false) = force-passthrough.
+    pub use_worktree: Option<bool>,
 }
 
 /// Options for listing sessions.
@@ -191,8 +194,8 @@ impl SessionRepo {
         let _ = conn.execute(
             "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory,
              parent_session_id, fork_from_event_id, created_at, last_activity_at, tags,
-             spawning_session_id, spawn_type, spawn_task, origin, source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             spawning_session_id, spawn_type, spawn_task, origin, source, use_worktree)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 id,
                 opts.workspace_id,
@@ -209,6 +212,7 @@ impl SessionRepo {
                 opts.spawn_task,
                 opts.origin,
                 opts.source,
+                opts.use_worktree,
             ],
         )?;
 
@@ -240,6 +244,7 @@ impl SessionRepo {
             spawn_task: opts.spawn_task.map(String::from),
             origin: opts.origin.map(String::from),
             source: opts.source.map(String::from),
+            use_worktree: opts.use_worktree,
         })
     }
 
@@ -783,6 +788,7 @@ impl SessionRepo {
             spawn_task: row.get("spawn_task")?,
             origin: row.get("origin")?,
             source: row.get("source")?,
+            use_worktree: row.get("use_worktree")?,
         })
     }
 }
@@ -831,6 +837,7 @@ mod tests {
                 spawn_task: None,
                 origin: None,
                 source: None,
+                use_worktree: None,
             },
         )
         .unwrap()
@@ -847,6 +854,63 @@ mod tests {
         assert_eq!(sess.title.as_deref(), Some("Test Session"));
         assert_eq!(sess.event_count, 0);
         assert!(sess.ended_at.is_none());
+    }
+
+    fn create_session_with_use_worktree(
+        conn: &Connection,
+        ws_id: &str,
+        use_worktree: Option<bool>,
+    ) -> SessionRow {
+        SessionRepo::create(
+            conn,
+            &CreateSessionOptions {
+                workspace_id: ws_id,
+                model: "claude-opus-4-6",
+                working_directory: "/tmp/test",
+                title: Some("Override Test"),
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+                spawning_session_id: None,
+                spawn_type: None,
+                spawn_task: None,
+                origin: None,
+                source: None,
+                use_worktree,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn create_session_default_use_worktree_is_none() {
+        let (conn, ws_id) = setup();
+        let sess = create_default_session(&conn, &ws_id);
+        assert!(sess.use_worktree.is_none());
+
+        // Round-trip through get_by_id.
+        let fetched = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
+        assert!(fetched.use_worktree.is_none());
+    }
+
+    #[test]
+    fn create_session_with_use_worktree_true_round_trips() {
+        let (conn, ws_id) = setup();
+        let sess = create_session_with_use_worktree(&conn, &ws_id, Some(true));
+        assert_eq!(sess.use_worktree, Some(true));
+
+        let fetched = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
+        assert_eq!(fetched.use_worktree, Some(true));
+    }
+
+    #[test]
+    fn create_session_with_use_worktree_false_round_trips() {
+        let (conn, ws_id) = setup();
+        let sess = create_session_with_use_worktree(&conn, &ws_id, Some(false));
+        assert_eq!(sess.use_worktree, Some(false));
+
+        let fetched = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
+        assert_eq!(fetched.use_worktree, Some(false));
     }
 
     #[test]
@@ -904,6 +968,7 @@ mod tests {
                 spawn_task: None,
                 origin: None,
                 source: None,
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1152,6 +1217,7 @@ mod tests {
                 spawn_task: Some("do something"),
                 origin: None,
                 source: None,
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1181,6 +1247,7 @@ mod tests {
                 spawn_task: None,
                 origin: None,
                 source: None,
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1458,6 +1525,7 @@ mod tests {
                 spawn_task: None,
                 origin: Some("localhost:9847"),
                 source: None,
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1496,6 +1564,7 @@ mod tests {
                 spawn_task: None,
                 origin: Some("localhost:9847"),
                 source: None,
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1514,6 +1583,7 @@ mod tests {
                 spawn_task: None,
                 origin: Some("localhost:9846"),
                 source: None,
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1559,6 +1629,7 @@ mod tests {
                 spawn_task: None,
                 origin: Some("localhost:9847"),
                 source: None,
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1577,6 +1648,7 @@ mod tests {
                 spawn_task: None,
                 origin: Some("localhost:9846"),
                 source: None,
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1605,6 +1677,7 @@ mod tests {
                 spawn_task: None,
                 origin: None,
                 source: Some("cron"),
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1644,6 +1717,7 @@ mod tests {
                 spawn_task: None,
                 origin: None,
                 source: Some("cron"),
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1678,6 +1752,7 @@ mod tests {
                 spawn_task: None,
                 origin: None,
                 source: Some("cron"),
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1707,6 +1782,7 @@ mod tests {
                 spawn_task: None,
                 origin: None,
                 source: Some("cron"),
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1727,6 +1803,7 @@ mod tests {
                 spawn_task: None,
                 origin: None,
                 source: None,
+                use_worktree: None,
             },
         )
         .unwrap();
@@ -1764,6 +1841,7 @@ mod tests {
                 spawn_task: None,
                 origin: None,
                 source: Some("cron"),
+                use_worktree: None,
             },
         )
         .unwrap();

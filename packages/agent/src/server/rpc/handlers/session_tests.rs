@@ -40,6 +40,54 @@ async fn create_session_with_model_and_title() {
 }
 
 #[tokio::test]
+async fn create_session_without_use_worktree_persists_none() {
+    let ctx = make_test_context();
+    let result = CreateSessionHandler
+        .handle(Some(json!({"workingDirectory": "/tmp"})), &ctx)
+        .await
+        .unwrap();
+    let sid = result["sessionId"].as_str().unwrap();
+
+    let row = ctx.event_store.get_session(sid).unwrap().unwrap();
+    assert!(row.use_worktree.is_none());
+    assert!(result["useWorktree"].is_null());
+}
+
+#[tokio::test]
+async fn create_session_with_use_worktree_true_persists_some_true() {
+    let ctx = make_test_context();
+    let result = CreateSessionHandler
+        .handle(
+            Some(json!({"workingDirectory": "/tmp", "useWorktree": true})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let sid = result["sessionId"].as_str().unwrap();
+
+    let row = ctx.event_store.get_session(sid).unwrap().unwrap();
+    assert_eq!(row.use_worktree, Some(true));
+    assert_eq!(result["useWorktree"], json!(true));
+}
+
+#[tokio::test]
+async fn create_session_with_use_worktree_false_persists_some_false() {
+    let ctx = make_test_context();
+    let result = CreateSessionHandler
+        .handle(
+            Some(json!({"workingDirectory": "/tmp", "useWorktree": false})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let sid = result["sessionId"].as_str().unwrap();
+
+    let row = ctx.event_store.get_session(sid).unwrap().unwrap();
+    assert_eq!(row.use_worktree, Some(false));
+    assert_eq!(result["useWorktree"], json!(false));
+}
+
+#[tokio::test]
 async fn resume_session_success() {
     let ctx = make_test_context();
     let sid = ctx
@@ -85,6 +133,42 @@ async fn list_sessions_populated() {
 
     let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
     assert_eq!(result["sessions"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn list_sessions_exposes_use_worktree_override() {
+    let ctx = make_test_context();
+    // Three sessions: untouched (None), forced on, forced off.
+    let _ = CreateSessionHandler
+        .handle(Some(json!({"workingDirectory": "/tmp/a"})), &ctx)
+        .await
+        .unwrap();
+    let _ = CreateSessionHandler
+        .handle(
+            Some(json!({"workingDirectory": "/tmp/b", "useWorktree": true})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let _ = CreateSessionHandler
+        .handle(
+            Some(json!({"workingDirectory": "/tmp/c", "useWorktree": false})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
+    let sessions = result["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 3);
+    let by_dir: std::collections::HashMap<&str, &serde_json::Value> = sessions
+        .iter()
+        .map(|s| (s["workingDirectory"].as_str().unwrap(), s))
+        .collect();
+
+    assert!(by_dir["/tmp/a"]["useWorktree"].is_null());
+    assert_eq!(by_dir["/tmp/b"]["useWorktree"], json!(true));
+    assert_eq!(by_dir["/tmp/c"]["useWorktree"], json!(false));
 }
 
 #[tokio::test]

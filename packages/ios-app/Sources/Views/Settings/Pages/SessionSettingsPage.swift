@@ -31,16 +31,18 @@ struct SessionSettingsPage: View {
     }
 
     private var isolationDescription: String {
+        let mode: String
         switch settingsState.isolationMode {
         case "always":
-            return "Every session in a git repo gets its own worktree branch."
+            mode = "Every session in a git repo gets its own worktree branch."
         case "lazy":
-            return "Only create worktrees when multiple sessions target the same repo."
+            mode = "Only create worktrees when multiple sessions target the same repo."
         case "never":
-            return "Never create worktrees. All sessions work in the main working tree."
+            mode = "Never create worktrees. All sessions work in the main working tree."
         default:
             return ""
         }
+        return "\(mode) Override per session in the New Session sheet."
     }
 
     var body: some View {

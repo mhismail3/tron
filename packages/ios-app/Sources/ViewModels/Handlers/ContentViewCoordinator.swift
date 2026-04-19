@@ -112,11 +112,15 @@ final class ContentViewCoordinator {
 
         Task {
             do {
+                // Quick chat sessions are conversational, not edit-driven.
+                // Always skip worktree creation regardless of the global
+                // git-isolation setting.
                 let result = try await rpcClient.session.create(
                     workingDirectory: workspace,
                     model: dependencies.defaultModel,
                     title: "Chat",
-                    source: "chat"
+                    source: "chat",
+                    useWorktree: false
                 )
 
                 try await eventStoreManager.cacheNewSession(

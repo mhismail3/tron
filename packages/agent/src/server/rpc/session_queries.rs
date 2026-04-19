@@ -88,6 +88,7 @@ impl SessionQueryService {
                         "cacheCreationTokens": session.total_cache_creation_tokens,
                         "cost": session.total_cost,
                         "parentSessionId": session.parent_session_id,
+                        "useWorktree": session.use_worktree,
                         "lastUserPrompt": preview.and_then(|p| p.last_user_prompt.as_deref()),
                         "lastAssistantResponse": preview.and_then(|p| p.last_assistant_response.as_deref()),
                         "activityLines": activity_summaries.get(&session.id).cloned().unwrap_or_default(),

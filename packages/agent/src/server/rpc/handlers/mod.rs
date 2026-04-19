@@ -228,6 +228,7 @@ fn register_platform(registry: &mut MethodRegistry) {
 
     // Worktree
     registry.register("worktree.getStatus", worktree::GetStatusHandler);
+    registry.register("worktree.isGitRepo", worktree::IsGitRepoHandler);
     registry.register("worktree.commit", worktree::CommitHandler);
     registry.register("worktree.merge", worktree::MergeHandler);
     registry.register("worktree.list", worktree::ListHandler);
@@ -595,8 +596,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            156,
-            "expected 156 methods, got {}",
+            157,
+            "expected 157 methods, got {}",
             reg.methods().len()
         );
     }

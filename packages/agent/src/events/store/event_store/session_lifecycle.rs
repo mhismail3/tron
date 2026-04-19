@@ -32,6 +32,29 @@ impl EventStore {
         origin: Option<&str>,
         source: Option<&str>,
     ) -> Result<CreateSessionResult> {
+        self.create_session_with_worktree_override(
+            model,
+            workspace_path,
+            title,
+            provider,
+            origin,
+            source,
+            None,
+        )
+    }
+
+    /// Like [`create_session`] but accepts a per-session worktree override
+    /// (`None` = defer to global isolation mode).
+    pub fn create_session_with_worktree_override(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        provider: Option<&str>,
+        origin: Option<&str>,
+        source: Option<&str>,
+        use_worktree: Option<bool>,
+    ) -> Result<CreateSessionResult> {
         self.with_global_write_lock(|| {
             let conn = self.conn()?;
             let tx = conn.unchecked_transaction()?;
@@ -52,6 +75,7 @@ impl EventStore {
                     spawn_task: None,
                     origin,
                     source,
+                    use_worktree,
                 },
             )?;
 
@@ -157,6 +181,7 @@ impl EventStore {
                     spawn_task: None,
                     origin: source_session.origin.as_deref(),
                     source: None,
+                    use_worktree: None,
                 },
             )?;
 

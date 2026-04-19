@@ -36,6 +36,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Remove legacy spell.cast / spell.consumed events",
         sql: include_str!("v003_remove_spells.sql"),
     },
+    Migration {
+        version: 4,
+        description: "Per-session worktree override (sessions.use_worktree)",
+        sql: include_str!("v004_session_use_worktree.sql"),
+    },
 ];
 
 /// Result of running migrations.
@@ -187,8 +192,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 3);
-        assert_eq!(result.max_version_applied, 3);
+        assert_eq!(result.applied, 4);
+        assert_eq!(result.max_version_applied, 4);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -257,7 +262,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 3);
+        assert_eq!(first.applied, 4);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -275,12 +280,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 3);
+        assert_eq!(current_version(&conn).unwrap(), 4);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 3);
+        assert_eq!(latest_version(), 4);
     }
 
     #[test]
@@ -487,6 +492,7 @@ mod tests {
             "spawn_task",
             "origin",
             "source",
+            "use_worktree",
         ];
         for col in &expected {
             assert!(
@@ -791,10 +797,10 @@ mod tests {
         )
         .unwrap();
 
-        // Now run the full migrator — v2 and v3 should apply.
+        // Now run the full migrator — v2, v3, and v4 should apply.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 2);
-        assert_eq!(result.max_version_applied, 3);
+        assert_eq!(result.applied, 3);
+        assert_eq!(result.max_version_applied, 4);
 
         // v1 data is intact.
         let count: i64 = conn
@@ -995,8 +1001,8 @@ mod tests {
         .unwrap();
 
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 3);
+        assert_eq!(result.applied, 2);
+        assert_eq!(result.max_version_applied, 4);
 
         let spell_count: i64 = conn
             .query_row(
@@ -1015,6 +1021,92 @@ mod tests {
             )
             .unwrap();
         assert_eq!(preserved, 1);
+    }
+
+    // ── v004 use_worktree tests ───────────────────────────────────────
+
+    #[test]
+    fn v004_upgrade_from_v3_adds_use_worktree_column_and_preserves_rows() {
+        // Simulate a pre-v004 DB by running v1..v3 only.
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        for migration in &MIGRATIONS[..3] {
+            apply_migration(&conn, migration).unwrap();
+        }
+        assert_eq!(current_version(&conn).unwrap(), 3);
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_legacy', '/tmp/legacy', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
+             VALUES ('sess_legacy', 'ws_legacy', 'claude-3', '/tmp/legacy', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        // Upgrade.
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 4);
+
+        // Pre-existing row gets NULL for the new column.
+        let use_worktree: Option<i64> = conn
+            .query_row(
+                "SELECT use_worktree FROM sessions WHERE id = 'sess_legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(use_worktree.is_none(), "legacy row should have NULL use_worktree");
+    }
+
+    #[test]
+    fn v004_use_worktree_round_trips_true_false_null() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        // Insert three sessions with use_worktree = NULL, 1, 0.
+        for (sid, value) in &[
+            ("sess_null", "NULL"),
+            ("sess_true", "1"),
+            ("sess_false", "0"),
+        ] {
+            conn.execute(
+                &format!(
+                    "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                           created_at, last_activity_at, use_worktree)
+                     VALUES ('{sid}', 'ws_1', 'claude-3', '/tmp/test',
+                             '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', {value})"
+                ),
+                [],
+            )
+            .unwrap();
+        }
+
+        let null_val: Option<i64> = conn
+            .query_row("SELECT use_worktree FROM sessions WHERE id = 'sess_null'", [], |r| r.get(0))
+            .unwrap();
+        let true_val: Option<i64> = conn
+            .query_row("SELECT use_worktree FROM sessions WHERE id = 'sess_true'", [], |r| r.get(0))
+            .unwrap();
+        let false_val: Option<i64> = conn
+            .query_row("SELECT use_worktree FROM sessions WHERE id = 'sess_false'", [], |r| r.get(0))
+            .unwrap();
+
+        assert!(null_val.is_none());
+        assert_eq!(true_val, Some(1));
+        assert_eq!(false_val, Some(0));
     }
 
     #[test]

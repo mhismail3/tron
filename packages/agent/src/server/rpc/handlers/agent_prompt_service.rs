@@ -335,8 +335,19 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                     })
                 })
         } else if let Some(ref coordinator) = worktree_coordinator {
+            // Look up the session's optional per-session worktree override.
+            // None defers to the global IsolationMode setting.
+            let use_worktree_override = event_store
+                .get_session(&session_id)
+                .ok()
+                .flatten()
+                .and_then(|row| row.use_worktree);
             match coordinator
-                .maybe_acquire(&session_id, std::path::Path::new(&working_dir))
+                .maybe_acquire_with_override(
+                    &session_id,
+                    std::path::Path::new(&working_dir),
+                    use_worktree_override,
+                )
                 .await
             {
                 Ok(crate::worktree::AcquireResult::Acquired(info)) => {

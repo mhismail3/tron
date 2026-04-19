@@ -180,6 +180,13 @@ impl CoordinatorState {
 }
 
 /// Worktree coordinator — manages worktree lifecycle across sessions.
+///
+/// INVARIANT: [`Self::maybe_acquire_with_override`]'s `use_worktree_override`
+/// takes precedence over the global [`crate::settings::types::IsolationMode`]
+/// when set. `Some(true)` forces isolation in a git repo; `Some(false)` forces
+/// passthrough; `None` defers to the global mode (the legacy behavior).
+/// The override is read from `sessions.use_worktree` (set at session.create
+/// time, immutable afterward).
 pub struct WorktreeCoordinator {
     pub(super) config: WorktreeConfig,
     pub(super) git: GitExecutor,
@@ -234,6 +241,13 @@ impl WorktreeCoordinator {
     /// Resolve the git repository root for a given path.
     pub async fn resolve_repo_root(&self, path: &std::path::Path) -> crate::worktree::errors::Result<String> {
         self.git.repo_root(path).await
+    }
+
+    /// Quick check: is the given path inside a git repository?
+    /// Used by the iOS new-session sheet to decide whether to show the
+    /// per-session worktree-isolation toggle.
+    pub async fn is_git_repo(&self, path: &std::path::Path) -> bool {
+        self.git.is_git_repo(path).await
     }
 
     #[cfg(test)]

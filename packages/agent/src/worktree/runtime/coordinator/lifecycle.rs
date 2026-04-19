@@ -17,11 +17,34 @@ impl WorktreeCoordinator {
     ///
     /// Consults isolation policy, creates worktree if needed,
     /// emits `worktree.acquired` event, and tracks state.
-    #[instrument(skip(self), fields(session_id, working_dir = %working_dir.display()))]
+    ///
+    /// Equivalent to [`maybe_acquire_with_override`] with `use_worktree_override = None`
+    /// (defer to the global isolation mode).
     pub async fn maybe_acquire(
         &self,
         session_id: &str,
         working_dir: &std::path::Path,
+    ) -> Result<AcquireResult> {
+        self.maybe_acquire_with_override(session_id, working_dir, None).await
+    }
+
+    /// Like [`maybe_acquire`] but accepts an explicit per-session worktree override.
+    ///
+    /// The override semantics:
+    ///   * `None` defers to the global [`IsolationMode`] setting (same as `maybe_acquire`).
+    ///   * `Some(true)` forces an isolated worktree (when the dir is a git repo with commits);
+    ///     non-git or empty repos still passthrough/defer.
+    ///   * `Some(false)` forces passthrough regardless of global mode.
+    ///
+    /// The cache check (returning a previously-acquired worktree) runs first
+    /// and is independent of the override. Overrides are intended to be set
+    /// once at session-create time.
+    #[instrument(skip(self), fields(session_id, working_dir = %working_dir.display()))]
+    pub async fn maybe_acquire_with_override(
+        &self,
+        session_id: &str,
+        working_dir: &std::path::Path,
+        use_worktree_override: Option<bool>,
     ) -> Result<AcquireResult> {
         // Idempotent: return existing worktree if still healthy
         let cached = self.state.lock().active_info(session_id);
@@ -46,7 +69,16 @@ impl WorktreeCoordinator {
             0
         };
 
-        if !isolation::should_isolate(&self.config().mode, is_git, repo_count, false) {
+        // INVARIANT: per-session override takes precedence over global IsolationMode.
+        // None defers to global; Some(false) forces passthrough; Some(true) forces
+        // isolation when the dir is a git repo (non-git still passthroughs since
+        // worktrees require git).
+        let should_isolate = match use_worktree_override {
+            Some(false) => false,
+            Some(true) => is_git,
+            None => isolation::should_isolate(&self.config().mode, is_git, repo_count, false),
+        };
+        if !should_isolate {
             return Ok(AcquireResult::Passthrough);
         }
 

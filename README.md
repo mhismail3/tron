@@ -319,14 +319,14 @@ All messages use JSON-RPC 2.0 framing:
 | `import` | 4 | `import.listSources`, `import.listSessions`, `import.previewSession`, `import.execute` |
 | `tree` | 5 | `tree.getVisualization`, `tree.getBranches`, `tree.getSubtree`, `tree.getAncestors`, `tree.compareBranches` |
 
-### Platform (74)
+### Platform (75)
 
 | Group | Count | Methods |
 |-------|------:|---------|
 | `browser` | 3 | `browser.startStream`, `browser.stopStream`, `browser.getStatus` |
 | `display` | 1 | `display.stopStream` |
 | `job` | 5 | `job.background`, `job.cancel`, `job.list`, `job.subscribe`, `job.unsubscribe` |
-| `worktree` | 22 | `worktree.getStatus`, `worktree.commit`, `worktree.merge`, `worktree.list`, `worktree.getDiff`, `worktree.acquire`, `worktree.release`, `worktree.listSessionBranches`, `worktree.getCommittedDiff`, `worktree.deleteBranch`, `worktree.pruneBranches`, `worktree.stageFiles`, `worktree.unstageFiles`, `worktree.discardFiles`, `worktree.finalizeSession`, `worktree.rebaseOnMain`, `worktree.startMerge`, `worktree.listConflicts`, `worktree.resolveConflict`, `worktree.continueMerge`, `worktree.abortMerge`, `worktree.resolveConflictsWithSubagent` |
+| `worktree` | 23 | `worktree.getStatus`, `worktree.isGitRepo`, `worktree.commit`, `worktree.merge`, `worktree.list`, `worktree.getDiff`, `worktree.acquire`, `worktree.release`, `worktree.listSessionBranches`, `worktree.getCommittedDiff`, `worktree.deleteBranch`, `worktree.pruneBranches`, `worktree.stageFiles`, `worktree.unstageFiles`, `worktree.discardFiles`, `worktree.finalizeSession`, `worktree.rebaseOnMain`, `worktree.startMerge`, `worktree.listConflicts`, `worktree.resolveConflict`, `worktree.continueMerge`, `worktree.abortMerge`, `worktree.resolveConflictsWithSubagent` |
 | `transcribe` | 3 | `transcribe.audio`, `transcribe.listModels`, `transcribe.downloadModel` |
 | `device` | 3 | `device.register`, `device.unregister`, `device.respond` |
 | `plan` | 3 | `plan.enter`, `plan.exit`, `plan.getState` |
@@ -557,7 +557,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 ## Database Schema
 
-All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Migrations live under `packages/agent/src/events/sqlite/migrations/` (`v001_schema.sql` — the core event store; `v002_schema.sql` — the prompt library tables) and are registered in `migrations/mod.rs`, which is the source of truth for schema versioning.
+All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Migrations live under `packages/agent/src/events/sqlite/migrations/` (`v001_schema.sql` — the core event store; `v002_schema.sql` — the prompt library tables; `v003_remove_spells.sql` — strips legacy spell events; `v004_session_use_worktree.sql` — adds `sessions.use_worktree` for the per-session worktree override) and are registered in `migrations/mod.rs`, which is the source of truth for schema versioning.
 
 ### Tables
 
@@ -565,7 +565,7 @@ All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mo
 |-------|---------|
 | `schema_version` | Migration version tracking |
 | `workspaces` | Project/directory contexts (id, path, name, timestamps) |
-| `sessions` | Session metadata: head pointer, title, model, token counts, tags, fork lineage, spawn metadata |
+| `sessions` | Session metadata: head pointer, title, model, token counts, tags, fork lineage, spawn metadata, optional `use_worktree` per-session worktree override |
 | `events` | Immutable append-only event log. Denormalized columns (`role`, `tool_name`, `tool_call_id`, `turn`, token counts, `model`, `latency_ms`, `stop_reason`, `provider_type`, `cost`, ...) extracted from payloads for indexed queries |
 | `blobs` | Content-addressable deduplicated storage (hash, compressed content, MIME type, ref count) |
 | `branches` | Named positions in the event tree (root + head pointer per branch) |

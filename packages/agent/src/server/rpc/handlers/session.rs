@@ -24,6 +24,7 @@ impl MethodHandler for CreateSessionHandler {
             .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
         let title = opt_string(params.as_ref(), "title");
         let source = opt_string(params.as_ref(), "source");
+        let use_worktree = opt_bool(params.as_ref(), "useWorktree");
 
         SessionCommandService::create(
             ctx,
@@ -32,6 +33,7 @@ impl MethodHandler for CreateSessionHandler {
                 model,
                 title,
                 source,
+                use_worktree,
             },
         )
         .await

@@ -33,6 +33,10 @@ pub(crate) struct CreateSessionRequest {
     pub(crate) model: String,
     pub(crate) title: Option<String>,
     pub(crate) source: Option<String>,
+    /// Per-session worktree override.
+    /// `None` defers to the global isolation mode; `Some(true)` forces
+    /// isolation, `Some(false)` forces passthrough.
+    pub(crate) use_worktree: Option<bool>,
 }
 
 pub(crate) struct SessionCommandService;
@@ -47,10 +51,17 @@ impl SessionCommandService {
         let model = request.model.clone();
         let title = request.title.clone();
         let source = request.source.clone();
+        let use_worktree = request.use_worktree;
         let session_id = ctx
             .run_blocking("session.create", move || {
                 session_manager
-                    .create_session(&model, &working_directory, title.as_deref(), source.as_deref())
+                    .create_session_with_worktree_override(
+                        &model,
+                        &working_directory,
+                        title.as_deref(),
+                        source.as_deref(),
+                        use_worktree,
+                    )
                     .map_err(|error| RpcError::Internal {
                         message: error.to_string(),
                     })
@@ -87,6 +98,7 @@ impl SessionCommandService {
             "inputTokens": 0,
             "outputTokens": 0,
             "cost": 0.0,
+            "useWorktree": request.use_worktree,
         }))
     }
 
