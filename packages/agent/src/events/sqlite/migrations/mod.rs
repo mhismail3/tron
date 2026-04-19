@@ -41,6 +41,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Per-session worktree override (sessions.use_worktree)",
         sql: include_str!("v004_session_use_worktree.sql"),
     },
+    Migration {
+        version: 5,
+        description: "Add CHECK (use_worktree IN (0, 1)) to sessions",
+        sql: include_str!("v005_sessions_use_worktree_check.sql"),
+    },
 ];
 
 /// Result of running migrations.
@@ -192,8 +197,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 4);
-        assert_eq!(result.max_version_applied, 4);
+        assert_eq!(result.applied, 5);
+        assert_eq!(result.max_version_applied, 5);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -262,7 +267,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 4);
+        assert_eq!(first.applied, 5);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -280,12 +285,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 4);
+        assert_eq!(current_version(&conn).unwrap(), 5);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 4);
+        assert_eq!(latest_version(), 5);
     }
 
     #[test]
@@ -797,10 +802,10 @@ mod tests {
         )
         .unwrap();
 
-        // Now run the full migrator — v2, v3, and v4 should apply.
+        // Now run the full migrator — v2 through v5 should apply.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 3);
-        assert_eq!(result.max_version_applied, 4);
+        assert_eq!(result.applied, 4);
+        assert_eq!(result.max_version_applied, 5);
 
         // v1 data is intact.
         let count: i64 = conn
@@ -1001,8 +1006,8 @@ mod tests {
         .unwrap();
 
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 2);
-        assert_eq!(result.max_version_applied, 4);
+        assert_eq!(result.applied, 3);
+        assert_eq!(result.max_version_applied, 5);
 
         let spell_count: i64 = conn
             .query_row(
@@ -1050,8 +1055,8 @@ mod tests {
 
         // Upgrade.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 4);
+        assert_eq!(result.applied, 2);
+        assert_eq!(result.max_version_applied, 5);
 
         // Pre-existing row gets NULL for the new column.
         let use_worktree: Option<i64> = conn
@@ -1107,6 +1112,171 @@ mod tests {
         assert!(null_val.is_none());
         assert_eq!(true_val, Some(1));
         assert_eq!(false_val, Some(0));
+    }
+
+    // ── v005 use_worktree trigger-based check tests ──────────────────
+
+    #[test]
+    fn v005_rejects_invalid_use_worktree_on_insert() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        // 0, 1, and NULL all accepted.
+        for value in &["0", "1", "NULL"] {
+            let id = format!("sess_{value}");
+            conn.execute(
+                &format!(
+                    "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                           created_at, last_activity_at, use_worktree)
+                     VALUES ('{id}', 'ws_1', 'claude-3', '/tmp/test',
+                             '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', {value})"
+                ),
+                [],
+            )
+            .unwrap_or_else(|e| panic!("value {value} should be accepted: {e}"));
+        }
+
+        // 2 must be rejected.
+        let err = conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                   created_at, last_activity_at, use_worktree)
+             VALUES ('sess_two', 'ws_1', 'claude-3', '/tmp/test',
+                     '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 2)",
+            [],
+        );
+        assert!(err.is_err(), "use_worktree = 2 should be rejected on INSERT");
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("use_worktree must be 0, 1, or NULL"),
+            "expected explicit trigger failure, got: {msg}"
+        );
+
+        // Negative values rejected.
+        let err_neg = conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                   created_at, last_activity_at, use_worktree)
+             VALUES ('sess_neg', 'ws_1', 'claude-3', '/tmp/test',
+                     '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', -1)",
+            [],
+        );
+        assert!(err_neg.is_err(), "use_worktree = -1 should be rejected on INSERT");
+    }
+
+    #[test]
+    fn v005_rejects_invalid_use_worktree_on_update() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                   created_at, last_activity_at, use_worktree)
+             VALUES ('s1', 'ws_1', 'claude-3', '/tmp/test',
+                     '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', NULL)",
+            [],
+        )
+        .unwrap();
+
+        // Updating to a valid value works.
+        conn.execute("UPDATE sessions SET use_worktree = 1 WHERE id = 's1'", [])
+            .unwrap();
+
+        // Updating to an invalid value is rejected.
+        let err = conn.execute("UPDATE sessions SET use_worktree = 99 WHERE id = 's1'", []);
+        assert!(err.is_err(), "use_worktree = 99 must be rejected on UPDATE");
+
+        // The row's value remains unchanged after the rejected update.
+        let val: Option<i64> = conn
+            .query_row("SELECT use_worktree FROM sessions WHERE id = 's1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(val, Some(1), "row should retain pre-rejection value");
+    }
+
+    #[test]
+    fn v005_preserves_existing_session_data_on_upgrade_from_v4() {
+        // Simulate a populated v4 database, then upgrade to v5. v005 only
+        // adds triggers, so every existing row is untouched.
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        for migration in &MIGRATIONS[..4] {
+            apply_migration(&conn, migration).unwrap();
+        }
+        assert_eq!(current_version(&conn).unwrap(), 4);
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp/legacy', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (
+                id, workspace_id, latest_model, working_directory,
+                created_at, last_activity_at, use_worktree,
+                event_count, total_input_tokens, total_cost, tags, source
+             ) VALUES
+                ('s1','ws_1','m','/p','2025-01-01T00:00:00Z','2025-01-01T00:00:00Z',NULL,
+                  5, 1000, 0.50, '[\"a\",\"b\"]', 'project'),
+                ('s2','ws_1','m','/p','2025-01-02T00:00:00Z','2025-01-02T00:00:00Z',1,
+                  2, 500, 0.25, '[]', 'chat'),
+                ('s3','ws_1','m','/p','2025-01-03T00:00:00Z','2025-01-03T00:00:00Z',0,
+                  0, 0, 0.0, '[\"c\"]', 'project')",
+            [],
+        )
+        .unwrap();
+
+        // Upgrade to v5.
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 5);
+
+        // All three rows survive untouched.
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 3);
+
+        let s1_tags: String = conn
+            .query_row("SELECT tags FROM sessions WHERE id = 's1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(s1_tags, "[\"a\",\"b\"]");
+
+        let s2_use_worktree: Option<i64> = conn
+            .query_row("SELECT use_worktree FROM sessions WHERE id = 's2'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(s2_use_worktree, Some(1));
+
+        // The new triggers exist.
+        let triggers: Vec<String> = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'
+                 AND name LIKE 'trg_sessions_use_worktree%'
+                 ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+        assert_eq!(
+            triggers,
+            vec![
+                "trg_sessions_use_worktree_insert".to_string(),
+                "trg_sessions_use_worktree_update".to_string()
+            ]
+        );
     }
 
     #[test]
