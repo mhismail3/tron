@@ -54,10 +54,11 @@ struct SourceControlSheet: View {
     @State private var defaultSessionBranchPolicy: String = "keep"
     @State private var defaultAutoSetUpstream: Bool = true
     /// Protected branches from server settings — drives the Push tile's
-    /// enabled state so users can't even tap into the push sheet for
-    /// `main`/`master`/`develop`. Seeded with the server's default list
-    /// so the UI gates sensibly before `loadGitDefaults()` returns.
-    @State private var protectedBranches: [String] = ["main", "master", "develop"]
+    /// enabled state. `nil` means "not yet loaded from the server"; in that
+    /// state Push is gated off entirely so we never authorize a push to a
+    /// branch the user actually marked protected. Once `loadGitDefaults()`
+    /// returns, this becomes the user's authoritative `gitProtectedBranches`.
+    @State private var protectedBranches: [String]? = nil
 
     enum GitActionSheet: String, Identifiable {
         case commit, syncMain, finalize, push, repoSessions, conflictResolver, rebaseOnMain
@@ -360,13 +361,16 @@ struct SourceControlSheet: View {
     /// Push tile is enabled when a remote is configured, the current
     /// branch is NOT in the user's protected list, and the session is
     /// workflow-free. We don't gate on commit count — pushing a zero-
-    /// commit branch to set upstream is still legitimate.
+    /// commit branch to set upstream is still legitimate. Until the
+    /// `gitProtectedBranches` setting has loaded, Push stays disabled
+    /// (we won't authorize a push without knowing the user's policy).
     private var isPushEnabled: Bool {
         guard isWorkflowFree else { return false }
         guard divergence?.hasOrigin == true else { return false }
         guard let branch = worktreeStatus?.worktree?.branch, !branch.isEmpty
         else { return false }
-        guard !protectedBranches.contains(branch) else { return false }
+        guard let protected = protectedBranches else { return false }
+        guard !protected.contains(branch) else { return false }
         return true
     }
 
