@@ -107,10 +107,6 @@ struct Cli {
     #[arg(long, global = true)]
     db_path: Option<PathBuf>,
 
-    /// Maximum concurrent sessions (overrides settings if specified).
-    #[arg(long, global = true)]
-    max_sessions: Option<usize>,
-
     /// Override database log level (trace, debug, info, warn, error).
     #[arg(long, global = true)]
     log_level: Option<String>,
@@ -386,13 +382,12 @@ async fn init_services(
     event_store: Arc<EventStore>,
     settings: &tron::settings::TronSettings,
     origin: &str,
-    max_sessions: usize,
     push_service: PushServiceOption,
     mcp: McpState,
 ) -> ServiceState {
     let session_manager =
         Arc::new(SessionManager::new(event_store.clone()).with_origin(origin.to_owned()));
-    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), max_sessions));
+    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
 
     // Crash recovery: recover partial LLM output from orphaned streaming journals
     let recovered = tron::runtime::orchestrator::recovery::recover_incomplete_turns(&event_store);
@@ -917,12 +912,12 @@ fn build_rpc_context(
     }
 }
 
+/// TTL for idle session cache eviction. Sessions idle beyond this are
+/// dropped from the in-memory cache by the background eviction task.
+const IDLE_SESSION_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
+
 /// Spawn background maintenance tasks (sandbox cleanup, session eviction, permissions check).
-fn spawn_background_tasks(
-    session_manager: &Arc<SessionManager>,
-    server: &TronServer,
-    cache_ttl_secs: u64,
-) {
+fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronServer) {
     // Clean up stale sandbox directories from previous sessions (>24h old)
     let _sandbox_cleanup =
         tokio::spawn(async { tron::tools::system::sandbox::cleanup_stale_sandboxes().await });
@@ -930,7 +925,7 @@ fn spawn_background_tasks(
     // Periodic session cache eviction (prevents unbounded memory growth)
     let eviction_mgr = session_manager.clone();
     let eviction_shutdown = server.shutdown().token();
-    let cache_ttl = std::time::Duration::from_secs(cache_ttl_secs);
+    let cache_ttl = IDLE_SESSION_CACHE_TTL;
     let _eviction_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         let _ = interval.tick().await; // first tick is immediate, skip it
@@ -1004,18 +999,7 @@ async fn main() -> Result<()> {
     let push_for_deploy = push_service.clone();
     let mcp = init_mcp(&settings, &settings_path).await;
     let mcp_router = mcp.router.clone();
-    let max_sessions = args
-        .max_sessions
-        .unwrap_or(settings.server.max_concurrent_sessions);
-    let services = init_services(
-        event_store,
-        &settings,
-        &origin,
-        max_sessions,
-        push_service,
-        mcp,
-    )
-    .await;
+    let services = init_services(event_store, &settings, &origin, push_service, mcp).await;
 
     // Phase 4: Cron, worktree, RPC context
     let cron = init_cron(&services, &origin);
@@ -1070,11 +1054,7 @@ async fn main() -> Result<()> {
     }
 
     // Phase 6: Background tasks, self-test, bind
-    spawn_background_tasks(
-        &session_manager_for_startup,
-        &server,
-        settings.session.cache_ttl_secs,
-    );
+    spawn_background_tasks(&session_manager_for_startup, &server);
     let (cron_sched_handle, cron_watcher_handle) = cron.scheduler.clone().start();
     run_deploy_self_test(&db_path, &settings_path_for_selftest);
 

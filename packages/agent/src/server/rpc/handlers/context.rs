@@ -945,7 +945,7 @@ mod tests {
         let store = Arc::new(EventStore::new(pool));
         let mgr =
             Arc::new(SessionManager::new(store.clone()).with_origin("localhost:9847".to_string()));
-        let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
+        let orch = Arc::new(Orchestrator::new(mgr.clone()));
         let ctx = RpcContext {
             orchestrator: orch,
             session_manager: mgr.clone(),

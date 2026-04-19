@@ -363,7 +363,7 @@ mod tests {
     fn rpc_context_accessible() {
         let server = make_server();
         let ctx = server.rpc_context();
-        assert_eq!(ctx.orchestrator.max_concurrent_sessions(), 10);
+        assert!(ctx.orchestrator.can_accept_session());
     }
 
     #[tokio::test]

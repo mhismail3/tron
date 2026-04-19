@@ -16,6 +16,7 @@ struct GitWorkflowSettingsPage: View {
         SettingsPageContainer(title: "Git Workflow") {
             targetBranchCard
             mergeStrategyCard
+            gitIsolationCard
             sessionBranchPolicyCard
             protectedBranchesCard
             toggleCard
@@ -99,6 +100,55 @@ struct GitWorkflowSettingsPage: View {
         case "rebase": return "Replay session commits on top of the target branch (linear history)."
         case "squash": return "Collapse all session commits into a single merge commit."
         default:       return "Standard `git merge --no-ff` with a dedicated merge commit."
+        }
+    }
+
+    // MARK: - Git Isolation
+
+    private var isolationDescription: String {
+        let mode: String
+        switch settingsState.isolationMode {
+        case "always":
+            mode = "Every session in a git repo gets its own worktree branch."
+        case "lazy":
+            mode = "Only create worktrees when multiple sessions target the same repo."
+        case "never":
+            mode = "Never create worktrees. All sessions work in the main working tree."
+        default:
+            return ""
+        }
+        return "\(mode) Override per session in the New Session sheet."
+    }
+
+    private var gitIsolationCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Git Isolation")
+
+            SettingsCard {
+                HStack {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    Text("Isolation Mode")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                    Spacer()
+                    cycleToggle(
+                        values: ["always", "lazy", "never"],
+                        labels: ["Always", "Lazy", "Never"],
+                        current: settingsState.isolationMode
+                    ) { newValue in
+                        settingsState.isolationMode = newValue
+                        updateServerSetting {
+                            ServerSettingsUpdate(session: .init(isolation: .init(mode: newValue)))
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 14)
+            }
+
+            SettingsCaption(text: isolationDescription)
         }
     }
 

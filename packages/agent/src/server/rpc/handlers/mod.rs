@@ -645,7 +645,7 @@ pub(crate) mod test_helpers {
         }
         let store = Arc::new(EventStore::new(pool));
         let mgr = Arc::new(SessionManager::new(store.clone()));
-        let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
+        let orch = Arc::new(Orchestrator::new(mgr.clone()));
         RpcContext {
             orchestrator: orch,
             session_manager: mgr,

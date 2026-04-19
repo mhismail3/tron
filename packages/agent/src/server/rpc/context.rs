@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn context_has_orchestrator() {
         let ctx = make_test_context();
-        assert_eq!(ctx.orchestrator.max_concurrent_sessions(), 10);
+        assert!(ctx.orchestrator.can_accept_session());
     }
 
     #[test]
@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn make_test_context_populates_all_fields() {
         let ctx = make_test_context();
-        assert_eq!(ctx.orchestrator.max_concurrent_sessions(), 10);
+        assert!(ctx.orchestrator.can_accept_session());
         assert_eq!(ctx.session_manager.active_count(), 0);
         assert!(ctx.event_store.list_workspaces().is_ok());
         assert_eq!(ctx.skill_registry.read().list(None).len(), 0);

@@ -376,7 +376,7 @@ mod tests {
         let mgr = Arc::new(crate::runtime::orchestrator::session_manager::SessionManager::new(
             store.clone(),
         ));
-        let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
+        let orch = Arc::new(Orchestrator::new(mgr.clone()));
         let coord = Arc::new(WorktreeCoordinator::new(WorktreeConfig::default(), store.clone()));
 
         let ctx = RpcContext {

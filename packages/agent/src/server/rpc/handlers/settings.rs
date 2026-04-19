@@ -147,14 +147,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_settings_returns_max_concurrent_sessions_in_server_section() {
-        let _guard = settings_test_guard().await;
-        let (ctx, _dir) = make_ctx_with_temp_settings();
-        let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
-        assert!(result["server"]["maxConcurrentSessions"].is_number());
-    }
-
-    #[tokio::test]
     async fn get_settings_returns_compaction_in_context_section() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
@@ -277,7 +269,7 @@ mod tests {
         // Customize a setting first
         let _ = UpdateSettingsHandler
             .handle(
-                Some(json!({"settings": {"server": {"maxConcurrentSessions": 99}}})),
+                Some(json!({"settings": {"server": {"heartbeatIntervalMs": 99_000}}})),
                 &ctx,
             )
             .await
@@ -286,8 +278,8 @@ mod tests {
         // Reset
         let result = ResetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert!(result.is_object());
-        // maxConcurrentSessions should be back to default (10)
-        assert_eq!(result["server"]["maxConcurrentSessions"], 10);
+        // heartbeatIntervalMs should be back to default (30_000)
+        assert_eq!(result["server"]["heartbeatIntervalMs"], 30_000);
     }
 
     #[tokio::test]

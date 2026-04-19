@@ -12,14 +12,13 @@ struct ServerSettingsTests {
         let json = """
         {
             "models": { "default": "claude-opus-4-6" },
-            "server": { "maxConcurrentSessions": 20, "defaultWorkspace": "/projects", "connectionPresets": [{"id":"p1","label":"Local","host":"127.0.0.1","port":8080}] },
+            "server": { "defaultWorkspace": "/projects", "connectionPresets": [{"id":"p1","label":"Local","host":"127.0.0.1","port":8080}] },
             "context": {
                 "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 },
                 "rules": { "discoverStandaloneFiles": false }
             },
             "session": {
                 "isolation": { "mode": "never" },
-                "cacheTtlSecs": 7200,
                 "queueDrainMode": "parallel"
             },
             "hooks": { "llmModel": "claude-opus-4-6", "builtinHooks": [{"id":"h1","enabled":true}] },
@@ -29,7 +28,6 @@ struct ServerSettingsTests {
         """
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
         #expect(settings.defaultModel == "claude-opus-4-6")
-        #expect(settings.maxConcurrentSessions == 20)
         #expect(settings.defaultWorkspace == "/projects")
         #expect(settings.connectionPresets.count == 1)
         #expect(settings.connectionPresets[0].label == "Local")
@@ -37,8 +35,6 @@ struct ServerSettingsTests {
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
         #expect(settings.rules.discoverStandaloneFiles == false)
         #expect(settings.isolationMode == "never")
-        // chatWorkingDirectory removed with persistent chat feature
-        #expect(settings.cacheTtlSecs == 7200)
         #expect(settings.queueDrainMode == "parallel")
         #expect(settings.hooksLlmModel == "claude-opus-4-6")
         #expect(settings.builtinHooks.count == 1)
@@ -55,15 +51,12 @@ struct ServerSettingsTests {
         let json = "{}"
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
         #expect(settings.defaultModel == "claude-sonnet-4-6")
-        #expect(settings.maxConcurrentSessions == 10)
         #expect(settings.defaultWorkspace == nil)
         #expect(settings.connectionPresets.isEmpty)
         #expect(settings.compaction.preserveRecentCount == 5)
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
         #expect(settings.rules.discoverStandaloneFiles == true)
         #expect(settings.isolationMode == "always")
-        // chatWorkingDirectory removed with persistent chat feature
-        #expect(settings.cacheTtlSecs == 3600)
         #expect(settings.queueDrainMode == "sequential")
         #expect(settings.hooksLlmModel == "claude-haiku-4-5-20251001")
         #expect(settings.builtinHooks.isEmpty)
@@ -80,14 +73,14 @@ struct ServerSettingsTests {
         let json = #"{"models":{"default":"claude-opus-4-6"}}"#
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
         #expect(settings.defaultModel == "claude-opus-4-6")
-        #expect(settings.maxConcurrentSessions == 10) // server default
+        #expect(settings.isolationMode == "always") // session default
     }
 
     @Test("session key present but isolation key missing")
     func sessionWithoutIsolation() throws {
-        let json = #"{"session":{"cacheTtlSecs":1800}}"#
+        let json = #"{"session":{"queueDrainMode":"batched"}}"#
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
-        #expect(settings.cacheTtlSecs == 1800)
+        #expect(settings.queueDrainMode == "batched")
         #expect(settings.isolationMode == "always") // default
     }
 
@@ -184,7 +177,7 @@ struct ServerSettingsTests {
     func settingsUpdateEncode() throws {
         var update = ServerSettingsUpdate()
         update.server = .init(defaultModel: "claude-opus-4-6")
-        update.session = .init(cacheTtlSecs: 1800)
+        update.session = .init(queueDrainMode: "batched")
 
         let data = try JSONEncoder().encode(update)
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
@@ -193,6 +186,6 @@ struct ServerSettingsTests {
         #expect(server?["defaultModel"] as? String == "claude-opus-4-6")
 
         let session = json["session"] as? [String: Any]
-        #expect(session?["cacheTtlSecs"] as? Int == 1800)
+        #expect(session?["queueDrainMode"] as? String == "batched")
     }
 }

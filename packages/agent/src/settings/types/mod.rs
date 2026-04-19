@@ -204,8 +204,8 @@ mod tests {
         assert_eq!(back.version, defaults.version);
         assert_eq!(back.name, defaults.name);
         assert_eq!(
-            back.server.max_concurrent_sessions,
-            defaults.server.max_concurrent_sessions
+            back.server.heartbeat_interval_ms,
+            defaults.server.heartbeat_interval_ms
         );
         assert_eq!(
             back.context.compactor.max_tokens,
@@ -249,8 +249,8 @@ mod tests {
         let defaults = TronSettings::default();
         assert_eq!(settings.version, defaults.version);
         assert_eq!(
-            settings.server.max_concurrent_sessions,
-            defaults.server.max_concurrent_sessions
+            settings.server.heartbeat_interval_ms,
+            defaults.server.heartbeat_interval_ms
         );
         assert_eq!(settings.retry.max_retries, defaults.retry.max_retries);
     }
@@ -259,14 +259,14 @@ mod tests {
     fn partial_json_overrides() {
         let json = serde_json::json!({
             "server": {
-                "maxConcurrentSessions": 20
+                "heartbeatIntervalMs": 20_000
             },
             "retry": {
                 "maxRetries": 3
             }
         });
         let settings: TronSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(settings.server.max_concurrent_sessions, 20);
+        assert_eq!(settings.server.heartbeat_interval_ms, 20_000);
         assert_eq!(settings.retry.max_retries, 3);
         assert_eq!(settings.retry.base_delay_ms, 1000);
         assert_eq!(settings.version, "0.1.0");

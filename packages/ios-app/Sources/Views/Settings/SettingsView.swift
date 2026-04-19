@@ -34,7 +34,7 @@ struct SettingsView: View {
 
     /// Settings sub-pages, driven by a single `.sheet(item:)`.
     enum SettingsPage: String, Identifiable {
-        case server, session, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary
+        case server, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary
         var id: String { rawValue }
     }
 
@@ -67,9 +67,9 @@ struct SettingsView: View {
         } content: {
             categoriesCard
             dangerZoneCard
-                .cardEntrance(visible: cardsVisible, index: 9)
+                .cardEntrance(visible: cardsVisible, index: 8)
             footerView
-                .cardEntrance(visible: cardsVisible, index: 10)
+                .cardEntrance(visible: cardsVisible, index: 9)
         }
         #if DEBUG || BETA
         .sheet(isPresented: $showLogViewer) {
@@ -94,14 +94,12 @@ struct SettingsView: View {
                         },
                         updateServerSetting: updateServerSetting
                     )
-                case .session:
-                    SessionSettingsPage(
+                case .agent:
+                    ContextSettingsPage(
                         settingsState: settingsState,
                         selectedModelDisplayName: selectedModelDisplayName,
                         updateServerSetting: updateServerSetting
                     )
-                case .agent:
-                    ContextSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
                 case .providers:
                     ProvidersSettingsPage()
                 case .app:
@@ -177,46 +175,39 @@ struct SettingsView: View {
             .cardEntrance(visible: cardsVisible, index: 1)
 
             SettingsCard {
-                categoryRow(icon: "bolt", label: "Sessions", subtitle: "Configure how agent sessions are managed") {
-                    activePage = .session
-                }
-            }
-            .cardEntrance(visible: cardsVisible, index: 2)
-
-            SettingsCard {
-                categoryRow(icon: "brain", label: "Agent", subtitle: "Configure how agents learn and remember") {
+                categoryRow(icon: "brain", label: "Agent", subtitle: "Session defaults, compaction, memory, and queueing") {
                     activePage = .agent
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 3)
+            .cardEntrance(visible: cardsVisible, index: 2)
 
             SettingsCard {
                 categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "Configure external tool servers") {
                     activePage = .mcpServers
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 4)
+            .cardEntrance(visible: cardsVisible, index: 3)
 
             SettingsCard {
                 categoryRow(icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill", label: "Hooks", subtitle: "Manage agent lifecycle events") {
                     activePage = .hooks
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 5)
+            .cardEntrance(visible: cardsVisible, index: 4)
 
             SettingsCard {
                 categoryRow(icon: "point.3.connected.trianglepath.dotted", label: "Git Workflow", subtitle: "Configure sync, merge, push, and conflict policies") {
                     activePage = .gitWorkflow
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 6)
+            .cardEntrance(visible: cardsVisible, index: 5)
 
             SettingsCard {
                 categoryRow(icon: "text.book.closed", label: "Prompt Library", subtitle: "Configure prompt history and quick-prompt snippets") {
                     activePage = .promptLibrary
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 7)
+            .cardEntrance(visible: cardsVisible, index: 6)
 
             if #available(iOS 26.0, *) {
                 SettingsCard {
@@ -224,7 +215,7 @@ struct SettingsView: View {
                         activePage = .app
                     }
                 }
-                .cardEntrance(visible: cardsVisible, index: 8)
+                .cardEntrance(visible: cardsVisible, index: 7)
             }
         }
     }

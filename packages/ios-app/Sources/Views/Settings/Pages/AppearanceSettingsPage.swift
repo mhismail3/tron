@@ -9,10 +9,10 @@ struct AppearanceSettingsPage: View {
 
     var body: some View {
         SettingsPageContainer(title: "App") {
+            themeCard
             workspacePillsCard
             confirmArchivingCard
             autoMarkReadCard
-            themeCard
             fontCard
             codeFontCard
             thinkingIndicatorCard

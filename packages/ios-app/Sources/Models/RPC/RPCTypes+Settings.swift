@@ -11,12 +11,10 @@ import Foundation
 struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
-    let maxConcurrentSessions: Int
     let connectionPresets: [ConnectionPreset]
     let compaction: CompactionSettings
     let rules: RulesSettings
     let isolationMode: String
-    let cacheTtlSecs: Int
     let hooksLlmModel: String
     let builtinHooks: [BuiltinHookSetting]
     let skillsCompactionPolicy: String
@@ -71,7 +69,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum SessionKeys: String, CodingKey {
-        case isolation, cacheTtlSecs, queueDrainMode
+        case isolation, queueDrainMode
     }
 
     private enum IsolationKeys: String, CodingKey {
@@ -83,7 +81,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum ServerKeys: String, CodingKey {
-        case maxConcurrentSessions, defaultWorkspace, connectionPresets
+        case defaultWorkspace, connectionPresets
     }
 
     private enum ContextKeys: String, CodingKey {
@@ -102,11 +100,9 @@ struct ServerSettings: Decodable {
 
         // server.*
         if let serverContainer = try? container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server) {
-            maxConcurrentSessions = (try? serverContainer.decodeIfPresent(Int.self, forKey: .maxConcurrentSessions)) ?? 10
             defaultWorkspace = try? serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
             connectionPresets = (try? serverContainer.decodeIfPresent([ConnectionPreset].self, forKey: .connectionPresets)) ?? []
         } else {
-            maxConcurrentSessions = 10
             defaultWorkspace = nil
             connectionPresets = []
         }
@@ -120,18 +116,16 @@ struct ServerSettings: Decodable {
             rules = .defaults
         }
 
-        // session.isolation.mode + session.cacheTtlSecs
+        // session.isolation.mode + session.queueDrainMode
         if let sessionContainer = try? container.nestedContainer(keyedBy: SessionKeys.self, forKey: .session) {
             if let isoContainer = try? sessionContainer.nestedContainer(keyedBy: IsolationKeys.self, forKey: .isolation) {
                 isolationMode = (try? isoContainer.decodeIfPresent(String.self, forKey: .mode)) ?? "always"
             } else {
                 isolationMode = "always"
             }
-            cacheTtlSecs = (try? sessionContainer.decodeIfPresent(Int.self, forKey: .cacheTtlSecs)) ?? 3600
             queueDrainMode = (try? sessionContainer.decodeIfPresent(String.self, forKey: .queueDrainMode)) ?? "sequential"
         } else {
             isolationMode = "always"
-            cacheTtlSecs = 3600
             queueDrainMode = "sequential"
         }
 
@@ -254,7 +248,6 @@ struct ServerSettingsUpdate: Encodable {
     struct ServerUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
-        var maxConcurrentSessions: Int?
     }
 
     struct ContextUpdate: Encodable {
@@ -273,7 +266,6 @@ struct ServerSettingsUpdate: Encodable {
 
     struct SessionUpdate: Encodable {
         var isolation: IsolationUpdate?
-        var cacheTtlSecs: Int?
         var queueDrainMode: String?
 
         struct IsolationUpdate: Encodable {

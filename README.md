@@ -412,7 +412,6 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
 
   "server": {
     "heartbeatIntervalMs": 30000,
-    "maxConcurrentSessions": 10,
     "defaultProvider": "anthropic",
     "defaultModel": "claude-sonnet-4-6",
     "transcription": { "enabled": true },

@@ -309,7 +309,7 @@ async fn server_boots_and_responds() {
     let event_store = Arc::new(EventStore::new(pool));
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
-    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), 10));
+    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
     let rpc_context = RpcContext {
@@ -502,7 +502,7 @@ async fn server_graceful_shutdown() {
     }
     let event_store = Arc::new(EventStore::new(pool));
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
-    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), 10));
+    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
 
     let rpc_context = RpcContext {
         orchestrator,

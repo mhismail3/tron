@@ -4,6 +4,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+/// Hard ceiling on concurrent agent runs. Enforced by a semaphore in
+/// `RunRegistry` — exceeding this surfaces as `RuntimeError::ServerBusy`.
+pub const MAX_CONCURRENT_SESSIONS: usize = 50;
+
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast};
@@ -46,16 +50,14 @@ struct ActiveRun {
 }
 
 struct RunRegistry {
-    max_concurrent_sessions: usize,
     run_semaphore: Arc<Semaphore>,
     active_runs: Mutex<HashMap<String, ActiveRun>>,
 }
 
 impl RunRegistry {
-    fn new(max_concurrent_sessions: usize) -> Self {
+    fn new() -> Self {
         Self {
-            max_concurrent_sessions,
-            run_semaphore: Arc::new(Semaphore::new(max_concurrent_sessions)),
+            run_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_SESSIONS)),
             active_runs: Mutex::new(HashMap::new()),
         }
     }
@@ -105,7 +107,6 @@ impl std::fmt::Debug for StartedRun {
 pub struct Orchestrator {
     session_manager: Arc<SessionManager>,
     broadcast: Arc<EventEmitter>,
-    max_concurrent_sessions: usize,
     run_registry: Arc<RunRegistry>,
     /// Tool call tracker shared with RPC handlers.
     tool_tracker: Mutex<ToolCallTracker>,
@@ -121,12 +122,11 @@ pub struct Orchestrator {
 
 impl Orchestrator {
     /// Create a new orchestrator.
-    pub fn new(session_manager: Arc<SessionManager>, max_concurrent: usize) -> Self {
+    pub fn new(session_manager: Arc<SessionManager>) -> Self {
         Self {
             session_manager,
             broadcast: Arc::new(EventEmitter::new()),
-            max_concurrent_sessions: max_concurrent,
-            run_registry: Arc::new(RunRegistry::new(max_concurrent)),
+            run_registry: Arc::new(RunRegistry::new()),
             tool_tracker: Mutex::new(ToolCallTracker::new()),
             turn_accumulators: Arc::new(TurnAccumulatorMap::new()),
             sequence_counters: Arc::new(DashMap::new()),
@@ -251,7 +251,7 @@ impl Orchestrator {
             .try_acquire_owned()
             .map_err(|_| RuntimeError::ServerBusy {
                 current: runs.len(),
-                max: self.run_registry.max_concurrent_sessions,
+                max: MAX_CONCURRENT_SESSIONS,
             })?;
         let cancel = CancellationToken::new();
         let _ = runs.insert(
@@ -336,12 +336,12 @@ impl Orchestrator {
 
     /// Maximum concurrent session limit.
     pub fn max_concurrent_sessions(&self) -> usize {
-        self.max_concurrent_sessions
+        MAX_CONCURRENT_SESSIONS
     }
 
     /// Whether we can accept another concurrent session.
     pub fn can_accept_session(&self) -> bool {
-        self.session_manager.active_count() < self.max_concurrent_sessions
+        self.session_manager.active_count() < MAX_CONCURRENT_SESSIONS
     }
 
     /// Register a tool call, returning a receiver for the result.
@@ -420,13 +420,13 @@ mod tests {
         }
         let store = Arc::new(EventStore::new(pool));
         let mgr = Arc::new(SessionManager::new(store));
-        Orchestrator::new(mgr, 10)
+        Orchestrator::new(mgr)
     }
 
     #[test]
     fn create_orchestrator() {
         let orch = make_orchestrator();
-        assert_eq!(orch.max_concurrent_sessions(), 10);
+        assert_eq!(orch.max_concurrent_sessions(), MAX_CONCURRENT_SESSIONS);
         assert_eq!(orch.active_session_count(), 0);
         assert!(orch.can_accept_session());
     }
@@ -460,14 +460,14 @@ mod tests {
     async fn max_concurrent_enforced() {
         let orch = make_orchestrator();
 
-        for i in 0..10 {
+        for i in 0..MAX_CONCURRENT_SESSIONS {
             let _ = orch
                 .session_manager()
                 .create_session("model", &format!("/tmp/{i}"), None, None)
                 .unwrap();
         }
 
-        assert_eq!(orch.active_session_count(), 10);
+        assert_eq!(orch.active_session_count(), MAX_CONCURRENT_SESSIONS);
         assert!(!orch.can_accept_session());
     }
 
@@ -599,30 +599,35 @@ mod tests {
 
     #[test]
     fn begin_run_rejects_at_capacity() {
-        let orch = make_orchestrator(); // max_concurrent = 10
+        let orch = make_orchestrator();
 
         // Fill to capacity
         let mut runs = Vec::new();
-        for i in 0..10 {
+        for i in 0..MAX_CONCURRENT_SESSIONS {
             runs.push(
                 orch.begin_run(&format!("s{i}"), &format!("run_{i}"))
                     .unwrap(),
             );
         }
-        assert_eq!(orch.active_run_count(), 10);
+        assert_eq!(orch.active_run_count(), MAX_CONCURRENT_SESSIONS);
 
-        // 11th run should fail with ServerBusy
-        let err = orch.begin_run("s10", "run_10").unwrap_err();
+        // One past the ceiling should fail with ServerBusy
+        let err = orch
+            .begin_run(
+                &format!("s{MAX_CONCURRENT_SESSIONS}"),
+                &format!("run_{MAX_CONCURRENT_SESSIONS}"),
+            )
+            .unwrap_err();
         assert!(err.to_string().contains("Server busy"));
     }
 
     #[test]
     fn permit_released_on_drop() {
-        let orch = make_orchestrator(); // max_concurrent = 10
+        let orch = make_orchestrator();
 
         // Fill to capacity
         let mut runs = Vec::new();
-        for i in 0..10 {
+        for i in 0..MAX_CONCURRENT_SESSIONS {
             runs.push(
                 orch.begin_run(&format!("s{i}"), &format!("run_{i}"))
                     .unwrap(),
@@ -630,15 +635,26 @@ mod tests {
         }
 
         // At capacity — can't start another
-        assert!(orch.begin_run("s10", "run_10").is_err());
+        assert!(
+            orch.begin_run(
+                &format!("s{MAX_CONCURRENT_SESSIONS}"),
+                &format!("run_{MAX_CONCURRENT_SESSIONS}"),
+            )
+            .is_err()
+        );
 
         // Drop one run — frees a permit
         drop(runs.remove(0));
-        assert_eq!(orch.active_run_count(), 9);
+        assert_eq!(orch.active_run_count(), MAX_CONCURRENT_SESSIONS - 1);
 
         // Now we can start a new run
-        let _t = orch.begin_run("s10", "run_10").unwrap();
-        assert_eq!(orch.active_run_count(), 10);
+        let _t = orch
+            .begin_run(
+                &format!("s{MAX_CONCURRENT_SESSIONS}"),
+                &format!("run_{MAX_CONCURRENT_SESSIONS}"),
+            )
+            .unwrap();
+        assert_eq!(orch.active_run_count(), MAX_CONCURRENT_SESSIONS);
     }
 
     // --- Shutdown ---

@@ -14,10 +14,8 @@ final class SettingsState {
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
     var preserveRecentCount: Int = 5
     var triggerTokenThreshold: Double = 0.70
-    var maxConcurrentSessions: Int = 10
     var rulesDiscoverStandaloneFiles: Bool = true
     var isolationMode: String = "always"
-    var cacheTtlSecs: Int = 3600
     var queueDrainMode: String = "sequential"
 
     // MARK: - Hooks
@@ -143,10 +141,8 @@ final class SettingsState {
     private func applyServerSettings(_ settings: ServerSettings) {
         preserveRecentCount = settings.compaction.preserveRecentCount
         triggerTokenThreshold = settings.compaction.triggerTokenThreshold
-        maxConcurrentSessions = settings.maxConcurrentSessions
         rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
         isolationMode = settings.isolationMode
-        cacheTtlSecs = settings.cacheTtlSecs
         queueDrainMode = settings.queueDrainMode
         connectionPresets = settings.connectionPresets
         cachePresets(settings.connectionPresets)

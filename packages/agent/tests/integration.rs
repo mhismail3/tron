@@ -47,7 +47,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
     let event_store = Arc::new(EventStore::new(pool));
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
-    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), 10));
+    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
     let rpc_context = RpcContext {
@@ -329,7 +329,7 @@ async fn boot_server_with_provider_and_handles(
     let event_store = Arc::new(EventStore::new(pool));
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
-    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), 10));
+    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
     let rpc_context = RpcContext {

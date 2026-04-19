@@ -23,7 +23,6 @@ struct NewSessionFlow: View {
     // Clone repository sheet
     @State private var selectedReasoningLevel = "medium"
     @State private var showCloneSheet = false
-    @State private var showMaxSessionsAlert = false
 
     // Import from Claude Code
     @State private var showImportFlow = false
@@ -387,11 +386,6 @@ struct NewSessionFlow: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .alert("Session Limit Reached", isPresented: $showMaxSessionsAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Maximum concurrent sessions reached. Close an existing session or increase the limit in Settings.")
-        }
     }
 
     // MARK: - Computed Properties
@@ -490,11 +484,6 @@ struct NewSessionFlow: View {
                         result.model,
                         workingDirectory
                     )
-                    isCreating = false
-                }
-            } catch let error as RPCError where error.code == RPCErrorCode.maxSessionsReached.rawValue {
-                await MainActor.run {
-                    showMaxSessionsAlert = true
                     isCreating = false
                 }
             } catch {

@@ -13,8 +13,6 @@ use serde::{Deserialize, Serialize};
 pub struct ServerSettings {
     /// WebSocket heartbeat interval in milliseconds.
     pub heartbeat_interval_ms: u64,
-    /// Maximum number of concurrent sessions.
-    pub max_concurrent_sessions: usize,
     /// Path to the memory database (relative to `~/.tron`).
     pub memory_db_path: String,
     /// Default LLM model identifier.
@@ -35,7 +33,6 @@ impl Default for ServerSettings {
     fn default() -> Self {
         Self {
             heartbeat_interval_ms: 30_000,
-            max_concurrent_sessions: 10,
             memory_db_path: "memory.db".to_string(),
             default_model: "claude-sonnet-4-6".to_string(),
             default_provider: "anthropic".to_string(),
@@ -255,8 +252,6 @@ pub struct SessionSettings {
     pub worktree_timeout_ms: u64,
     /// Git worktree isolation settings.
     pub isolation: IsolationSettings,
-    /// TTL in seconds for idle session cache eviction. 0 = evict all idle immediately.
-    pub cache_ttl_secs: u64,
     /// How queued messages are drained when the agent finishes.
     pub queue_drain_mode: QueueDrainMode,
 }
@@ -266,7 +261,6 @@ impl Default for SessionSettings {
         Self {
             worktree_timeout_ms: 30_000,
             isolation: IsolationSettings::default(),
-            cache_ttl_secs: 3600,
             queue_drain_mode: QueueDrainMode::default(),
         }
     }
@@ -339,7 +333,6 @@ mod tests {
     fn server_defaults() {
         let s = ServerSettings::default();
         assert_eq!(s.heartbeat_interval_ms, 30_000);
-        assert_eq!(s.max_concurrent_sessions, 10);
         assert_eq!(s.default_provider, "anthropic");
         assert_eq!(s.default_model, "claude-sonnet-4-6");
         assert!(s.default_workspace.is_none());
@@ -398,7 +391,6 @@ mod tests {
         });
         let s: ServerSettings = serde_json::from_value(json).unwrap();
         assert_eq!(s.default_model, "claude-sonnet-4-6");
-        assert_eq!(s.max_concurrent_sessions, 10);
     }
 
     #[test]
@@ -592,6 +584,5 @@ mod tests {
         });
         let s: ServerSettings = serde_json::from_value(json).unwrap();
         assert_eq!(s.default_model, "claude-sonnet-4-5-20250929");
-        assert_eq!(s.max_concurrent_sessions, 10);
     }
 }

@@ -106,9 +106,6 @@ pub fn apply_env_overrides(settings: &mut TronSettings) {
     if let Some(v) = read_env_string("TRON_DEFAULT_PROVIDER") {
         settings.server.default_provider = v;
     }
-    if let Some(v) = read_env_usize("TRON_MAX_SESSIONS", 1, 10_000) {
-        settings.server.max_concurrent_sessions = v;
-    }
     if let Some(v) = read_env_u64("TRON_HEARTBEAT_INTERVAL", 1000, 600_000) {
         settings.server.heartbeat_interval_ms = v;
     }
@@ -162,12 +159,6 @@ pub fn parse_u64_range(val: &str, min: u64, max: u64) -> Option<u64> {
     (n >= min && n <= max).then_some(n)
 }
 
-/// Parse a string as a `usize` within a range.
-pub fn parse_usize_range(val: &str, min: usize, max: usize) -> Option<usize> {
-    let n: usize = val.parse().ok()?;
-    (n >= min && n <= max).then_some(n)
-}
-
 // ── Env var readers (thin wrappers) ─────────────────────────────────────────
 
 fn read_env_string(name: &str) -> Option<String> {
@@ -188,15 +179,6 @@ fn read_env_u64(name: &str, min: u64, max: u64) -> Option<u64> {
     let result = parse_u64_range(&val, min, max);
     if result.is_none() {
         tracing::warn!(key = name, value = %val, "invalid u64 env var, ignoring");
-    }
-    result
-}
-
-fn read_env_usize(name: &str, min: usize, max: usize) -> Option<usize> {
-    let val = std::env::var(name).ok()?;
-    let result = parse_usize_range(&val, min, max);
-    if result.is_none() {
-        tracing::warn!(key = name, value = %val, "invalid usize env var, ignoring");
     }
     result
 }
@@ -513,16 +495,4 @@ mod tests {
         assert_eq!(parse_u64_range("abc", 1000, 600_000), None);
     }
 
-    // ── parse_usize_range ───────────────────────────────────────────
-
-    #[test]
-    fn parse_usize_valid() {
-        assert_eq!(parse_usize_range("50", 1, 10_000), Some(50));
-    }
-
-    #[test]
-    fn parse_usize_out_of_range() {
-        assert_eq!(parse_usize_range("0", 1, 10_000), None);
-        assert_eq!(parse_usize_range("20000", 1, 10_000), None);
-    }
 }
