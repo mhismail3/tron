@@ -91,10 +91,10 @@ impl MethodHandler for GetStatusHandler {
                 coord
                     .passthrough_status(path)
                     .await
-                    .map_err(|e| map_worktree_error(e, &session_id))?
+                    .map_err(|e| map_worktree_error(e))?
             }
             Err(e) => {
-                return Err(map_worktree_error(e, &session_id));
+                return Err(map_worktree_error(e));
             }
         };
 
@@ -186,7 +186,7 @@ impl MethodHandler for CommitHandler {
                 "commitHash": null,
                 "message": "nothing to commit",
             })),
-            Err(e) => Err(map_worktree_error(e, &session_id)),
+            Err(e) => Err(map_worktree_error(e)),
         }
     }
 }
@@ -232,7 +232,7 @@ impl MethodHandler for MergeHandler {
                     "conflicts": conflicts,
                 }))
             }
-            Err(e) => Err(map_worktree_error(e, &session_id)),
+            Err(e) => Err(map_worktree_error(e)),
         }
     }
 }
@@ -298,7 +298,7 @@ impl MethodHandler for AcquireHandler {
                 "acquired": false,
                 "reason": "not a git repo or isolation disabled",
             })),
-            Err(e) => Err(map_worktree_error(e, &session_id)),
+            Err(e) => Err(map_worktree_error(e)),
         }
     }
 }
@@ -318,7 +318,7 @@ impl MethodHandler for ReleaseHandler {
         coord
             .release(&session_id)
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
 
         Ok(serde_json::json!({
             "released": true,
@@ -348,7 +348,7 @@ impl MethodHandler for ListSessionBranchesHandler {
         let repo_root = std::path::Path::new(&repo_root_str);
         match coord.list_session_branches(repo_root).await {
             Ok(branches) => Ok(serde_json::json!({ "branches": branches })),
-            Err(e) => Err(map_worktree_error(e, &session_id)),
+            Err(e) => Err(map_worktree_error(e)),
         }
     }
 }
@@ -379,7 +379,7 @@ impl MethodHandler for GetCommittedDiffHandler {
                 },
                 "truncated": false,
             })),
-            Err(e) => Err(map_worktree_error(e, &session_id)),
+            Err(e) => Err(map_worktree_error(e)),
         }
     }
 }
@@ -402,14 +402,14 @@ impl MethodHandler for DeleteBranchHandler {
         let repo_root_str = coord
             .resolve_repo_root(dir_path)
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
         let repo_root = std::path::Path::new(&repo_root_str);
 
         match coord.delete_session_branch(repo_root, &branch).await {
             Ok(result) => serde_json::to_value(&result).map_err(|e| RpcError::Internal {
                 message: format!("Serialization failed: {e}"),
             }),
-            Err(e) => Err(map_worktree_error(e, &session_id)),
+            Err(e) => Err(map_worktree_error(e)),
         }
     }
 }
@@ -431,14 +431,14 @@ impl MethodHandler for PruneBranchesHandler {
         let repo_root_str = coord
             .resolve_repo_root(dir_path)
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
         let repo_root = std::path::Path::new(&repo_root_str);
 
         match coord.prune_session_branches(repo_root).await {
             Ok(result) => serde_json::to_value(&result).map_err(|e| RpcError::Internal {
                 message: format!("Serialization failed: {e}"),
             }),
-            Err(e) => Err(map_worktree_error(e, &session_id)),
+            Err(e) => Err(map_worktree_error(e)),
         }
     }
 }

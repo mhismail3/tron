@@ -138,6 +138,6 @@ impl WorktreeCoordinator {
         {
             return Ok(PathBuf::from(root));
         }
-        Err(WorktreeError::NotFound(session_id.to_string()))
+        Err(WorktreeError::NotFound { session_id: session_id.to_string() })
     }
 }

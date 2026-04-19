@@ -38,7 +38,7 @@ impl WorktreeCoordinator {
             .state
             .lock()
             .active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
+            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
 
         let _guard = self
             .acquire_repo_lock(&info.repo_root, session_id, LockedOp::FinalizeSession)

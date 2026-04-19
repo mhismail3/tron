@@ -45,16 +45,16 @@ impl WorktreeCoordinator {
                 .git
                 .repo_root(dir)
                 .await
-                .map_err(|_| WorktreeError::NotFound(session_id.to_string()))?;
+                .map_err(|_| WorktreeError::NotFound { session_id: session_id.to_string() })?;
             let root = PathBuf::from(root_str);
             let cur = self
                 .git
                 .current_branch(&root)
                 .await
-                .map_err(|_| WorktreeError::NotFound(session_id.to_string()))?;
+                .map_err(|_| WorktreeError::NotFound { session_id: session_id.to_string() })?;
             (root, cur)
         } else {
-            return Err(WorktreeError::NotFound(session_id.to_string()));
+            return Err(WorktreeError::NotFound { session_id: session_id.to_string() });
         };
 
         let branch_owned = branch

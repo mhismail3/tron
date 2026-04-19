@@ -57,7 +57,7 @@ impl WorktreeCoordinator {
             .state
             .lock()
             .active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
+            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
 
         let pending = scm_conflict::start_merge_keep_conflicts(
             &info.repo_root,
@@ -275,7 +275,7 @@ impl WorktreeCoordinator {
             .lock()
             .active_info(session_id)
             .map(|i| i.worktree_path)
-            .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
+            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
 
         // Reject continue if there are still unmerged paths.
         let remaining = self
@@ -386,7 +386,7 @@ impl WorktreeCoordinator {
             .lock()
             .active_info(session_id)
             .map(|i| i.worktree_path)
-            .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
+            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
 
         self.git.reset_hard(&worktree_path, "HEAD").await?;
 
@@ -508,7 +508,7 @@ impl WorktreeCoordinator {
             .lock()
             .active_info(session_id)
             .map(|i| i.worktree_path)
-            .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
+            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
 
         // StashPop is "done" when no unmerged paths remain; the subagent
         // never calls `git merge --continue` / `rebase --continue` here.
@@ -602,7 +602,7 @@ impl WorktreeCoordinator {
         let state = self.state.lock();
         let info = state
             .active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
+            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
         let pending = state
             .pending_merges
             .get(session_id)

@@ -219,7 +219,7 @@ impl WorktreeCoordinator {
     #[instrument(skip(self), fields(session_id, new_branch))]
     pub async fn rename_branch(&self, session_id: &str, new_branch: &str) -> Result<()> {
         let info = self.state.lock().active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
+            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
 
         let old_branch = info.branch.clone();
 

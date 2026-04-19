@@ -65,7 +65,7 @@ impl WorktreeCoordinator {
             .state
             .lock()
             .active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound(session_id.to_string()))?;
+            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
 
         if self.state.lock().pending_merges.contains_key(session_id) {
             return Err(WorktreeError::PendingMergeExists);

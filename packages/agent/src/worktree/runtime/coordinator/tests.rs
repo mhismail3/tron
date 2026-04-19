@@ -1651,7 +1651,7 @@ async fn list_local_branches_errors_without_fallback_for_untracked_session() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, crate::worktree::WorktreeError::NotFound(_)),
+        matches!(err, crate::worktree::WorktreeError::NotFound { .. }),
         "expected NotFound, got {err:?}"
     );
 }

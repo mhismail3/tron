@@ -16,10 +16,10 @@ use crate::worktree::WorktreeError;
 /// INVARIANT: the `match` is exhaustive over `WorktreeError` — adding a
 /// new variant forces a compile error here. Do NOT add a `_` arm; every
 /// variant must be classified by hand.
-pub(crate) fn map_worktree_error(e: WorktreeError, session_id: &str) -> RpcError {
+pub(crate) fn map_worktree_error(e: WorktreeError) -> RpcError {
     use WorktreeError as W;
     match e {
-        W::NotFound(_) => RpcError::NotFound {
+        W::NotFound { session_id } => RpcError::NotFound {
             code: codes::WORKTREE_NOT_FOUND.into(),
             message: format!("No worktree or working directory for session '{session_id}'"),
         },
@@ -115,110 +115,106 @@ mod tests {
     use crate::worktree::WorktreeError as W;
 
     #[test]
-    fn not_found_uses_session_id_not_inner_message() {
-        let rpc = map_worktree_error(W::NotFound("inner".into()), "sid-42");
+    fn not_found_carries_inner_session_id() {
+        let rpc = map_worktree_error(W::NotFound { session_id: "sid-42".into() });
         assert_eq!(rpc.code(), "WORKTREE_NOT_FOUND");
         let msg = rpc.to_string();
         assert!(msg.contains("sid-42"), "message should carry session id; got {msg}");
-        assert!(!msg.contains("inner"), "inner session id must not leak; got {msg}");
     }
 
     #[test]
     fn not_git_repo_is_typed() {
-        let rpc = map_worktree_error(W::NotGitRepo("/tmp/x".into()), "sid");
+        let rpc = map_worktree_error(W::NotGitRepo("/tmp/x".into()));
         assert_eq!(rpc.code(), "NOT_GIT_REPO");
         assert!(rpc.to_string().contains("/tmp/x"));
     }
 
     #[test]
     fn protected_branch_preserves_message() {
-        let rpc = map_worktree_error(
-            W::ProtectedBranch("refusing to push 'main'".into()),
-            "sid",
-        );
+        let rpc = map_worktree_error(W::ProtectedBranch("refusing to push 'main'".into()));
         assert_eq!(rpc.code(), "PROTECTED_BRANCH");
         assert!(rpc.to_string().contains("'main'"));
     }
 
     #[test]
     fn no_remote_is_typed() {
-        let rpc = map_worktree_error(W::NoRemoteConfigured("origin missing".into()), "sid");
+        let rpc = map_worktree_error(W::NoRemoteConfigured("origin missing".into()));
         assert_eq!(rpc.code(), "NO_REMOTE");
     }
 
     #[test]
     fn non_fast_forward_is_typed() {
-        let rpc = map_worktree_error(W::NonFastForward("rejected".into()), "sid");
+        let rpc = map_worktree_error(W::NonFastForward("rejected".into()));
         assert_eq!(rpc.code(), "NON_FAST_FORWARD");
     }
 
     #[test]
     fn auth_failure_is_typed() {
-        let rpc = map_worktree_error(W::AuthFailure("401".into()), "sid");
+        let rpc = map_worktree_error(W::AuthFailure("401".into()));
         assert_eq!(rpc.code(), "GIT_AUTH_FAILED");
     }
 
     #[test]
     fn network_timeout_is_typed() {
-        let rpc = map_worktree_error(W::NetworkTimeout("timeout".into()), "sid");
+        let rpc = map_worktree_error(W::NetworkTimeout("timeout".into()));
         assert_eq!(rpc.code(), "GIT_NETWORK_ERROR");
     }
 
     #[test]
     fn dirty_working_tree_is_typed() {
-        let rpc = map_worktree_error(W::DirtyWorkingTree("dirty".into()), "sid");
+        let rpc = map_worktree_error(W::DirtyWorkingTree("dirty".into()));
         assert_eq!(rpc.code(), "DIRTY_WORKING_TREE");
     }
 
     #[test]
     fn pending_merge_exists_is_invalid_params() {
-        let rpc = map_worktree_error(W::PendingMergeExists, "sid");
+        let rpc = map_worktree_error(W::PendingMergeExists);
         assert_eq!(rpc.code(), "INVALID_PARAMS");
         assert!(rpc.to_string().contains("pending merge"));
     }
 
     #[test]
     fn no_pending_merge_is_invalid_params() {
-        let rpc = map_worktree_error(W::NoPendingMerge, "sid");
+        let rpc = map_worktree_error(W::NoPendingMerge);
         assert_eq!(rpc.code(), "INVALID_PARAMS");
     }
 
     #[test]
     fn missing_base_branch_is_typed() {
-        let rpc = map_worktree_error(W::MissingBaseBranch, "sid");
+        let rpc = map_worktree_error(W::MissingBaseBranch);
         assert_eq!(rpc.code(), "MISSING_BASE_BRANCH");
     }
 
     #[test]
     fn ref_not_found_is_typed() {
-        let rpc = map_worktree_error(W::RefNotFound("refs/heads/x".into()), "sid");
+        let rpc = map_worktree_error(W::RefNotFound("refs/heads/x".into()));
         assert_eq!(rpc.code(), "REF_NOT_FOUND");
         assert!(rpc.to_string().contains("refs/heads/x"));
     }
 
     #[test]
     fn branch_exists_is_typed() {
-        let rpc = map_worktree_error(W::BranchExists("feature/x".into()), "sid");
+        let rpc = map_worktree_error(W::BranchExists("feature/x".into()));
         assert_eq!(rpc.code(), "BRANCH_EXISTS");
         assert!(rpc.to_string().contains("feature/x"));
     }
 
     #[test]
     fn branch_active_is_typed() {
-        let rpc = map_worktree_error(W::BranchActive("feature/x".into()), "sid");
+        let rpc = map_worktree_error(W::BranchActive("feature/x".into()));
         assert_eq!(rpc.code(), "BRANCH_ACTIVE");
     }
 
     #[test]
     fn invalid_session_state_is_invalid_params() {
-        let rpc = map_worktree_error(W::InvalidSessionState("detached HEAD".into()), "sid");
+        let rpc = map_worktree_error(W::InvalidSessionState("detached HEAD".into()));
         assert_eq!(rpc.code(), "INVALID_PARAMS");
         assert!(rpc.to_string().contains("detached HEAD"));
     }
 
     #[test]
     fn git_error_is_typed() {
-        let rpc = map_worktree_error(W::Git("fatal: …".into()), "sid");
+        let rpc = map_worktree_error(W::Git("fatal: …".into()));
         assert_eq!(rpc.code(), "GIT_ERROR");
     }
 
@@ -226,29 +222,29 @@ mod tests {
     fn merge_conflicts_should_not_reach_boundary_but_is_internal() {
         // Handlers must special-case this; if one doesn't, falling
         // through to internal is the safe fallback.
-        let rpc = map_worktree_error(W::MergeConflicts(3), "sid");
+        let rpc = map_worktree_error(W::MergeConflicts(3));
         assert_eq!(rpc.code(), "INTERNAL_ERROR");
         assert!(rpc.to_string().contains("MergeConflicts(3)"));
     }
 
     #[test]
     fn timeout_is_internal() {
-        let rpc = map_worktree_error(W::Timeout(5000), "sid");
+        let rpc = map_worktree_error(W::Timeout(5000));
         assert_eq!(rpc.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn io_error_is_internal() {
-        let rpc = map_worktree_error(
-            W::Io(std::io::Error::new(std::io::ErrorKind::Other, "disk full")),
-            "sid",
-        );
+        let rpc = map_worktree_error(W::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "disk full",
+        )));
         assert_eq!(rpc.code(), "INTERNAL_ERROR");
     }
 
     #[test]
     fn event_store_error_is_internal() {
-        let rpc = map_worktree_error(W::EventStore("sqlite locked".into()), "sid");
+        let rpc = map_worktree_error(W::EventStore("sqlite locked".into()));
         assert_eq!(rpc.code(), "INTERNAL_ERROR");
     }
 }

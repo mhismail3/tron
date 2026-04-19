@@ -161,7 +161,7 @@ async fn rebase_on_main_session_not_found() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, crate::worktree::errors::WorktreeError::NotFound(_)),
+        matches!(err, crate::worktree::errors::WorktreeError::NotFound { .. }),
         "expected NotFound, got {err:?}"
     );
 }

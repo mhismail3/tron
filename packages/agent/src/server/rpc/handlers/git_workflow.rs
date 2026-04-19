@@ -211,7 +211,7 @@ impl MethodHandler for SyncMainHandler {
                 fallback.as_deref(),
             )
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
         Ok(sync_outcome_json(&outcome))
     }
 }
@@ -262,7 +262,7 @@ impl MethodHandler for PushHandler {
                 fallback.as_deref(),
             )
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
 
         // `success` is elided — on this wire path a successful push is
         // the only shape that reaches here (failures throw typed errors).
@@ -292,7 +292,7 @@ impl MethodHandler for ListLocalBranchesHandler {
         let branches = coord
             .list_local_branches(&session_id, fallback.as_deref())
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
         // `current` is best-effort: isolated sessions read it from the
         // coordinator's in-memory info, passthrough sessions read it from
         // git HEAD of the session's working dir.
@@ -333,7 +333,7 @@ impl MethodHandler for ListRemoteBranchesHandler {
         let branches = coord
             .list_remote_branches(&session_id, remote.as_deref(), fallback.as_deref())
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
         Ok(json!({
             "branches": branches,
             "remote": remote.unwrap_or_else(|| "origin".into()),
@@ -404,7 +404,7 @@ impl MethodHandler for FinalizeSessionHandler {
                 "error": format!("merge has conflicts ({} file(s)); resolve first", count),
                 "hint": "call worktree.startMerge, resolve, then worktree.continueMerge",
             })),
-            Err(e) => Err(map_worktree_error(e, &session_id)),
+            Err(e) => Err(map_worktree_error(e)),
         }
     }
 }
@@ -455,7 +455,7 @@ impl MethodHandler for RebaseOnMainHandler {
                 "type": "noOp",
                 "ahead": ahead as u64,
             })),
-            Err(e) => Err(map_worktree_error(e, &session_id)),
+            Err(e) => Err(map_worktree_error(e)),
         }
     }
 }
@@ -478,7 +478,7 @@ impl MethodHandler for StartMergeHandler {
         let pending = coord
             .start_merge_keep_conflicts(&session_id, &source, &target, strategy)
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
 
         // Probe conflicts so the caller gets the file list up front.
         let conflicts = coord
@@ -510,7 +510,7 @@ impl MethodHandler for ListConflictsHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
-        let conflicts = coord.list_conflicts(&session_id).await.map_err(|e| map_worktree_error(e, &session_id))?;
+        let conflicts = coord.list_conflicts(&session_id).await.map_err(|e| map_worktree_error(e))?;
         Ok(json!({
             "conflicts": conflicts.iter().map(conflicted_file_json).collect::<Vec<_>>(),
         }))
@@ -535,7 +535,7 @@ impl MethodHandler for ResolveConflictHandler {
         coord
             .resolve_conflict(&session_id, &path, resolution)
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
         let remaining = coord
             .list_conflicts(&session_id)
             .await
@@ -563,7 +563,7 @@ impl MethodHandler for ContinueMergeHandler {
         let sha = coord
             .continue_merge(&session_id, message.as_deref())
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
         Ok(json!({ "mergeCommit": sha }))
     }
 }
@@ -583,7 +583,7 @@ impl MethodHandler for AbortMergeHandler {
         coord
             .abort_merge_with_reason(&session_id, &reason)
             .await
-            .map_err(|e| map_worktree_error(e, &session_id))?;
+            .map_err(|e| map_worktree_error(e))?;
         Ok(json!({ "aborted": true }))
     }
 }

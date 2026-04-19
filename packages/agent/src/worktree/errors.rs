@@ -15,9 +15,14 @@ pub enum WorktreeError {
     #[error("not a git repository: {0}")]
     NotGitRepo(String),
 
-    /// Worktree not found for session.
-    #[error("no worktree for session: {0}")]
-    NotFound(String),
+    /// Worktree not found for session. Carries the session id so callers
+    /// don't have to thread it through a parallel parameter when mapping
+    /// the error to a user-facing code.
+    #[error("no worktree for session: {session_id}")]
+    NotFound {
+        /// Session id with no live worktree (or no working directory at all).
+        session_id: String,
+    },
 
     /// Branch already exists.
     #[error("branch already exists: {0}")]
