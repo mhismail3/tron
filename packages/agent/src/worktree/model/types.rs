@@ -468,7 +468,7 @@ pub enum SyncOutcome {
 }
 
 /// Why a sync did not run. Surfaces as typed variants (mapped into the
-/// iOS `SyncMainSubSheet` banner without string-matching).
+/// iOS `PullRemoteSubSheet` banner without string-matching).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SyncBlockReason {
     /// No remote configured for the repo.
