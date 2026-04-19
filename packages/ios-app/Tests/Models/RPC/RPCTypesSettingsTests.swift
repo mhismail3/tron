@@ -177,7 +177,7 @@ struct ServerSettingsTests {
     func settingsUpdateEncode() throws {
         var update = ServerSettingsUpdate()
         update.server = .init(defaultModel: "claude-opus-4-6")
-        update.session = .init(queueDrainMode: "batched")
+        update.session = .init(queueDrainMode: .batched)
 
         let data = try JSONEncoder().encode(update)
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
@@ -187,5 +187,67 @@ struct ServerSettingsTests {
 
         let session = json["session"] as? [String: Any]
         #expect(session?["queueDrainMode"] as? String == "batched")
+    }
+
+    // MARK: - Type-safe settings enum round-trips
+
+    @Test("Type-safe settings enums encode to camelCase wire values")
+    func settingsEnumsEncodeToWire() throws {
+        var update = ServerSettingsUpdate()
+        update.session = .init(
+            isolation: .init(mode: .lazy),
+            queueDrainMode: .sequential
+        )
+        update.skills = .init(
+            compactionPolicy: .askUser,
+            showIndex: .whenNoActiveSkills
+        )
+        update.git = .init(
+            sessionBranchPolicy: .deleteOnFinalize,
+            mergeStrategy: .squash
+        )
+
+        let data = try JSONEncoder().encode(update)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+
+        let session = json["session"] as! [String: Any]
+        let isolation = session["isolation"] as! [String: Any]
+        #expect(isolation["mode"] as? String == "lazy")
+        #expect(session["queueDrainMode"] as? String == "sequential")
+
+        let skills = json["skills"] as! [String: Any]
+        #expect(skills["compactionPolicy"] as? String == "askUser")
+        #expect(skills["showIndex"] as? String == "whenNoActiveSkills")
+
+        let git = json["git"] as! [String: Any]
+        #expect(git["sessionBranchPolicy"] as? String == "deleteOnFinalize")
+        #expect(git["mergeStrategy"] as? String == "squash")
+    }
+
+    @Test("Type-safe enums recognize known String values via from(_:)")
+    func settingsEnumsFromString() {
+        #expect(IsolationMode.from("always") == .always)
+        #expect(IsolationMode.from("lazy") == .lazy)
+        #expect(IsolationMode.from("never") == .never)
+        #expect(IsolationMode.from("garbage") == nil)
+        #expect(IsolationMode.from(nil) == nil)
+
+        #expect(QueueDrainMode.from("sequential") == .sequential)
+        #expect(QueueDrainMode.from("batched") == .batched)
+
+        #expect(SkillsCompactionPolicy.from("clearAll") == .clearAll)
+        #expect(SkillsCompactionPolicy.from("autoRestore") == .autoRestore)
+        #expect(SkillsCompactionPolicy.from("askUser") == .askUser)
+
+        #expect(SkillsShowIndex.from("always") == .always)
+        #expect(SkillsShowIndex.from("never") == .never)
+        #expect(SkillsShowIndex.from("whenNoActiveSkills") == .whenNoActiveSkills)
+
+        #expect(GitSessionBranchPolicy.from("keep") == .keep)
+        #expect(GitSessionBranchPolicy.from("deleteOnFinalize") == .deleteOnFinalize)
+
+        #expect(GitMergeStrategy.from("merge") == .merge)
+        #expect(GitMergeStrategy.from("rebase") == .rebase)
+        #expect(GitMergeStrategy.from("squash") == .squash)
     }
 }

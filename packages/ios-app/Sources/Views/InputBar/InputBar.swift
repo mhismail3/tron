@@ -302,26 +302,25 @@ struct InputBar: View {
                 state.text = selected
             }
         }
-        // Entrance animation
+        // Entrance animation — three staggered morph-ins over ~430ms.
+        // All timings/springs live in TronAnimationTiming so the
+        // cumulative timeline can be tweaked in one place.
         .onAppear {
             showAttachmentButton = false
             showMicButton = false
             hasAppeared = false
 
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 200_000_000)
-
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarAttachmentDelayNanos)
+                withAnimation(TronAnimationTiming.inputBarButtonSpring) {
                     showAttachmentButton = true
                 }
-
-                try? await Task.sleep(nanoseconds: 130_000_000)
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarMicDelayNanos)
+                withAnimation(TronAnimationTiming.inputBarButtonSpring) {
                     showMicButton = true
                 }
-
-                try? await Task.sleep(nanoseconds: 100_000_000)
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarFinalDelayNanos)
+                withAnimation(TronAnimationTiming.inputBarFinalSpring) {
                     hasAppeared = true
                 }
             }

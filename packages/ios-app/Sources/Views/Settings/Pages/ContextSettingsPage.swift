@@ -151,7 +151,7 @@ struct ContextSettingsPage: View {
         ) { newValue in
             settingsState.queueDrainMode = newValue
             updateServerSetting {
-                ServerSettingsUpdate(session: .init(queueDrainMode: newValue))
+                ServerSettingsUpdate(session: .init(queueDrainMode: QueueDrainMode.from(newValue)))
             }
         }
     }
@@ -286,7 +286,7 @@ struct ContextSettingsPage: View {
         ) { newValue in
             settingsState.skillsShowIndex = newValue
             updateServerSetting {
-                ServerSettingsUpdate(skills: .init(showIndex: newValue))
+                ServerSettingsUpdate(skills: .init(showIndex: SkillsShowIndex.from(newValue)))
             }
         }
     }
@@ -302,7 +302,7 @@ struct ContextSettingsPage: View {
         ) { newValue in
             settingsState.skillsCompactionPolicy = newValue
             updateServerSetting {
-                ServerSettingsUpdate(skills: .init(compactionPolicy: newValue))
+                ServerSettingsUpdate(skills: .init(compactionPolicy: SkillsCompactionPolicy.from(newValue)))
             }
         }
     }

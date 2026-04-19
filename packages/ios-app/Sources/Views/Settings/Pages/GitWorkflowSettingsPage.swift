@@ -82,7 +82,7 @@ struct GitWorkflowSettingsPage: View {
                     ) { newValue in
                         settingsState.gitMergeStrategy = newValue
                         updateServerSetting {
-                            ServerSettingsUpdate(git: .init(mergeStrategy: newValue))
+                            ServerSettingsUpdate(git: .init(mergeStrategy: GitMergeStrategy.from(newValue)))
                         }
                     }
                 }
@@ -138,7 +138,7 @@ struct GitWorkflowSettingsPage: View {
                     ) { newValue in
                         settingsState.isolationMode = newValue
                         updateServerSetting {
-                            ServerSettingsUpdate(session: .init(isolation: .init(mode: newValue)))
+                            ServerSettingsUpdate(session: .init(isolation: .init(mode: IsolationMode.from(newValue))))
                         }
                     }
                 }
@@ -171,7 +171,7 @@ struct GitWorkflowSettingsPage: View {
                     ) { newValue in
                         settingsState.gitSessionBranchPolicy = newValue
                         updateServerSetting {
-                            ServerSettingsUpdate(git: .init(sessionBranchPolicy: newValue))
+                            ServerSettingsUpdate(git: .init(sessionBranchPolicy: GitSessionBranchPolicy.from(newValue)))
                         }
                     }
                 }

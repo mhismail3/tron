@@ -239,6 +239,62 @@ struct ServerSettings: Decodable {
 
 }
 
+// MARK: - Type-safe enums for string-keyed settings
+//
+// Each enum mirrors the server's serialized form (camelCase). The
+// String-backed encoder fields below take these enums so a typo at the
+// call site is a compile error rather than a runtime drop. Use the
+// `from(_:)` convenience to convert a SettingsState String to the enum
+// (returns nil on unknown values; encoder treats nil as "no change").
+
+enum IsolationMode: String, Encodable {
+    case always, lazy, never
+
+    static func from(_ raw: String?) -> Self? {
+        raw.flatMap { Self(rawValue: $0) }
+    }
+}
+
+enum QueueDrainMode: String, Encodable {
+    case sequential, batched
+
+    static func from(_ raw: String?) -> Self? {
+        raw.flatMap { Self(rawValue: $0) }
+    }
+}
+
+enum SkillsCompactionPolicy: String, Encodable {
+    case clearAll, autoRestore, askUser
+
+    static func from(_ raw: String?) -> Self? {
+        raw.flatMap { Self(rawValue: $0) }
+    }
+}
+
+enum SkillsShowIndex: String, Encodable {
+    case always, never, whenNoActiveSkills
+
+    static func from(_ raw: String?) -> Self? {
+        raw.flatMap { Self(rawValue: $0) }
+    }
+}
+
+enum GitSessionBranchPolicy: String, Encodable {
+    case keep, deleteOnFinalize
+
+    static func from(_ raw: String?) -> Self? {
+        raw.flatMap { Self(rawValue: $0) }
+    }
+}
+
+enum GitMergeStrategy: String, Encodable {
+    case merge, rebase, squash
+
+    static func from(_ raw: String?) -> Self? {
+        raw.flatMap { Self(rawValue: $0) }
+    }
+}
+
 struct ServerSettingsUpdate: Encodable {
     var server: ServerUpdate?
     var context: ContextUpdate?
@@ -266,10 +322,10 @@ struct ServerSettingsUpdate: Encodable {
 
     struct SessionUpdate: Encodable {
         var isolation: IsolationUpdate?
-        var queueDrainMode: String?
+        var queueDrainMode: QueueDrainMode?
 
         struct IsolationUpdate: Encodable {
-            var mode: String?
+            var mode: IsolationMode?
         }
     }
 
@@ -279,8 +335,8 @@ struct ServerSettingsUpdate: Encodable {
     }
 
     struct SkillsUpdate: Encodable {
-        var compactionPolicy: String?
-        var showIndex: String?
+        var compactionPolicy: SkillsCompactionPolicy?
+        var showIndex: SkillsShowIndex?
     }
 
     struct MemoryUpdate: Encodable {
@@ -294,8 +350,8 @@ struct ServerSettingsUpdate: Encodable {
     struct GitUpdate: Encodable {
         var targetBranch: String?
         var protectedBranches: [String]?
-        var sessionBranchPolicy: String?
-        var mergeStrategy: String?
+        var sessionBranchPolicy: GitSessionBranchPolicy?
+        var mergeStrategy: GitMergeStrategy?
         var autoSetUpstream: Bool?
         var crashRecoveryAbortTimeoutMs: UInt64?
         var opTimeoutNetworkMs: UInt64?

@@ -547,13 +547,26 @@ enum TronAnimationTiming {
     /// Batch interval for text updates (100ms)
     static let textBatchNanos: UInt64 = 100_000_000
 
-    // MARK: - Entry Animation
-    /// Delay for entry morph from left (180ms)
-    static let entryMorphDelayNanos: UInt64 = 180_000_000
-    /// Attachment button morph delay (350ms)
-    static let attachmentButtonDelayNanos: UInt64 = 350_000_000
-    /// Mic button morph delay after other elements (300ms)
-    static let micButtonDelayNanos: UInt64 = 300_000_000
+    // MARK: - InputBar Entrance Animation
+    //
+    // The input bar fades in three pieces over ~430ms after the chat
+    // first becomes visible. Each delay below is the gap _between_
+    // steps (not absolute), so the cumulative timeline is:
+    //   t=0     onAppear
+    //   t=200   attachment button morphs in
+    //   t=330   mic button morphs in
+    //   t=430   trailing-padding gate flips (hasAppeared = true)
+
+    /// Initial delay before the attachment button appears (200ms).
+    static let inputBarAttachmentDelayNanos: UInt64 = 200_000_000
+    /// Delay between attachment and mic button (130ms).
+    static let inputBarMicDelayNanos: UInt64 = 130_000_000
+    /// Delay between mic button and the final hasAppeared flip (100ms).
+    static let inputBarFinalDelayNanos: UInt64 = 100_000_000
+    /// Spring used for both button morph-ins.
+    static let inputBarButtonSpring: Animation = .spring(response: 0.4, dampingFraction: 0.8)
+    /// Spring used for the final hasAppeared flip.
+    static let inputBarFinalSpring: Animation = .spring(response: 0.35, dampingFraction: 0.85)
 }
 
 // MARK: - ShapeStyle Extension for foregroundStyle compatibility
