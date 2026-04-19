@@ -10,8 +10,13 @@ enum WorktreeMergeAbortedPlugin: DispatchableEventPlugin {
         let data: DataPayload?
 
         struct DataPayload: Decodable, Sendable {
-            let strategy: String?
-            let reason: String?
+            let strategy: String
+            let reason: String
+            /// `"finalize" | "rebase_on_main" | "stash_pop"` — required on
+            /// the wire for schema validation. iOS currently treats all
+            /// origins identically here (clear banners, refresh status);
+            /// not forwarded to `Result`.
+            let origin: String
         }
     }
 
@@ -23,8 +28,8 @@ enum WorktreeMergeAbortedPlugin: DispatchableEventPlugin {
     static func transform(_ event: EventData) -> (any EventResult)? {
         guard let data = event.data else { return nil }
         return Result(
-            strategy: data.strategy ?? "",
-            reason: data.reason ?? ""
+            strategy: data.strategy,
+            reason: data.reason
         )
     }
 

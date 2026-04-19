@@ -129,6 +129,8 @@ final class EventRegistry: @unchecked Sendable {
         register(WorktreeMergeAbortedPlugin.self)
         register(WorktreePushedPlugin.self)
         register(WorktreePendingMergeDetectedPlugin.self)
+        register(WorktreeRebasedOnMainPlugin.self)
+        register(WorktreePostRebaseStashConflictPlugin.self)
 
         // Repo events
         register(RepoLockAcquiredPlugin.self)

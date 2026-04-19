@@ -30,12 +30,19 @@ final class GitWorkflowState {
     var pendingMerge: PendingMergeBanner?
 
     // ─────────────────────────────────────────────────────────────────────
-    // Conflict banner.
-    // Populated by `worktree.conflict_detected`; cleared once the resolver
-    // either succeeds (auto-dismiss via `merge_continued`) or aborts.
+    // Unified conflict banner.
+    //
+    // Populated by `worktree.conflict_detected` (fires for any origin:
+    // `finalize`, `rebase_on_main`, or `stash_pop`). Cleared by
+    // `worktree.merge_continued` / `worktree.merge_aborted`, or by
+    // `worktree.conflict_resolved` when the final conflict clears.
+    //
+    // The banner is the SINGLE source of "there are conflicts, user action
+    // required". The `origin` field drives contextual copy in the header
+    // and the resolver sheet.
     // ─────────────────────────────────────────────────────────────────────
 
-    /// Conflict count + strategy waiting for the resolver subagent.
+    /// Unresolved conflicts awaiting user action (resolve or abort).
     var conflictBanner: ConflictBanner?
 
     // ─────────────────────────────────────────────────────────────────────
@@ -64,8 +71,90 @@ struct PendingMergeBanner: Equatable {
     let autoAbortAtMs: UInt64
 }
 
+/// Origin of a conflict. Drives copy and action labels in the resolver.
+///
+/// Wire values match the server's `MergeOrigin::as_str()` output.
+enum ConflictOrigin: String, Equatable {
+    case finalize
+    case rebaseOnMain = "rebase_on_main"
+    case stashPop = "stash_pop"
+
+    /// Parse the wire string, falling back to `.finalize` for unknown
+    /// values (forward-compatibility with server additions).
+    init(wire: String) {
+        self = ConflictOrigin(rawValue: wire) ?? .finalize
+    }
+
+    /// Short human-readable label for banners ("Merge", "Rebase on main",
+    /// "Stashed changes"). Used in the status header banner.
+    var shortLabel: String {
+        switch self {
+        case .finalize: "Merge into main"
+        case .rebaseOnMain: "Rebase on main"
+        case .stashPop: "Restoring stashed changes"
+        }
+    }
+
+    /// One-sentence description of what's in progress and what the user
+    /// is being asked to do. Used in the resolver sub-sheet hero.
+    var resolverDescription: String {
+        switch self {
+        case .finalize:
+            "A merge into main is in progress and needs manual edits. Tap the wand to spawn a subagent that will read each file, choose ours/theirs or hand-edit, and commit the resolution — or abort to roll back."
+        case .rebaseOnMain:
+            "A rebase of this session onto main hit conflicts. Tap the wand to spawn a subagent that will resolve the conflicts and continue the rebase — or abort to restore your session's previous tip."
+        case .stashPop:
+            "The rebase finished, but restoring your uncommitted changes hit conflicts. Tap the wand to spawn a subagent to resolve the conflicts (and drop the stash) — or abort to throw the stash-pop away. The stash itself is preserved on the stash stack either way."
+        }
+    }
+
+    /// Banner subtitle shown in the source control header.
+    var bannerSubtitle: String {
+        switch self {
+        case .finalize: "Merge conflicts need your attention"
+        case .rebaseOnMain: "Rebase conflicts need your attention"
+        case .stashPop: "Stashed changes conflict with the rebase"
+        }
+    }
+
+    /// Confirmation message for the abort button.
+    var abortConfirmationMessage: String {
+        switch self {
+        case .finalize:
+            "Abort the merge and restore your branch to its pre-merge state?"
+        case .rebaseOnMain:
+            "Abort the rebase and restore your branch to its pre-rebase state?"
+        case .stashPop:
+            "Discard the half-applied stash pop? Your stash stays on the stack for manual recovery."
+        }
+    }
+}
+
 struct ConflictBanner: Equatable {
     let sourceBranch: String
     let targetBranch: String
+    let origin: ConflictOrigin
     let paths: [String]
+
+    /// Construct from a server event — parses the origin string.
+    init(sourceBranch: String, targetBranch: String, origin: String, paths: [String]) {
+        self.sourceBranch = sourceBranch
+        self.targetBranch = targetBranch
+        self.origin = ConflictOrigin(wire: origin)
+        self.paths = paths
+    }
+
+    /// Typed-origin convenience initialiser for callers already holding
+    /// a `ConflictOrigin` (e.g. tests, synthetic state).
+    init(
+        sourceBranch: String,
+        targetBranch: String,
+        origin: ConflictOrigin,
+        paths: [String]
+    ) {
+        self.sourceBranch = sourceBranch
+        self.targetBranch = targetBranch
+        self.origin = origin
+        self.paths = paths
+    }
 }

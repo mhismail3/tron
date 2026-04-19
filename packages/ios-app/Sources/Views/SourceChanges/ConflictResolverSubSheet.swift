@@ -58,9 +58,12 @@ struct ConflictResolverSubSheet: View {
         .task { await loadConflicts() }
         // Server-side transitions (subagent commits, peer aborts, crash
         // recovery auto-abort) clear `conflictBanner`. Mirror that by
-        // dismissing so the user isn't stuck on a stale sheet.
+        // dismissing so the user isn't stuck on a stale sheet — regardless
+        // of which stage we're in, as long as it wasn't a local abort
+        // (local abort transitions to `.failed` and surfaces the outcome
+        // message in-sheet before the user dismisses).
         .onChange(of: gitWorkflowState?.conflictBanner == nil) { _, isCleared in
-            guard isCleared, stage == .running else { return }
+            guard isCleared, stage != .failed else { return }
             onCompleted?()
             dismiss()
         }
@@ -99,7 +102,7 @@ struct ConflictResolverSubSheet: View {
             GitHeroCard(
                 icon: "exclamationmark.triangle",
                 title: conflictTitle,
-                description: "A merge is in progress and needs manual edits. Tap the wand in the toolbar to spawn a subagent that will read each file, choose ours/theirs or hand-edit, and commit the resolution.",
+                description: heroDescription,
                 accent: accent
             )
 
@@ -114,6 +117,15 @@ struct ConflictResolverSubSheet: View {
 
             abortInlineLink
         }
+    }
+
+    /// Hero copy adapts to the conflict origin so the user understands
+    /// exactly what's in progress. Falls back to finalize-style copy when
+    /// `gitWorkflowState` is absent (defensive; in practice it's always
+    /// provided).
+    private var heroDescription: String {
+        let origin = gitWorkflowState?.conflictBanner?.origin ?? .finalize
+        return origin.resolverDescription
     }
 
     private var conflictTitle: String {

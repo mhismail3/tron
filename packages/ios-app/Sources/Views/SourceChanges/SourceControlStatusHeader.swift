@@ -7,8 +7,16 @@ import UIKit
 ///
 /// Always shows the current branch, worktree path (tap-to-copy), a row of
 /// divergence chips (ahead/behind main, ahead/behind origin), and any repo-wide
-/// lock badge that another session holds. Pending-merge crash-recovery banners
-/// attach here too.
+/// lock badge that another session holds.
+///
+/// Also hosts the three "needs user attention" banners that can appear
+/// independently or together:
+/// - `pendingMerge` — crash-recovered merge from a previous run.
+/// - `conflictBanner` — unified conflict state (merge, rebase, or stash-pop
+///   origin). Always offers Resolve + Abort actions.
+///
+/// Clarity rule: if ANY banner is present, the user has a one-tap path to
+/// either resolve or abort the underlying operation. No dead ends.
 @available(iOS 26.0, *)
 struct SourceControlStatusHeader: View {
     let branch: String
@@ -16,10 +24,13 @@ struct SourceControlStatusHeader: View {
     let divergence: RepoDivergence?
     let lockHolder: RepoSessionLock?
     let pendingMerge: PendingMergeBanner?
+    let conflictBanner: ConflictBanner?
 
     // Callbacks
     var onContinueSubagent: (() -> Void)?
     var onAbortPending: (() -> Void)?
+    var onResolveConflicts: (() -> Void)?
+    var onAbortConflicts: (() -> Void)?
 
     @State private var didCopy = false
 
@@ -41,6 +52,9 @@ struct SourceControlStatusHeader: View {
             }
             if let pendingMerge {
                 pendingMergeBanner(pendingMerge)
+            }
+            if let conflictBanner {
+                conflictBannerView(conflictBanner)
             }
         }
         .padding(12)
@@ -220,6 +234,75 @@ struct SourceControlStatusHeader: View {
                 .fill(Color.tronWarning.opacity(0.10))
         }
     }
+
+    // MARK: Unified Conflict Banner
+    //
+    // ANY conflict (merge/rebase/stash-pop) surfaces here with Resolve
+    // and Abort buttons. Clarity rule: never show this banner without
+    // also showing the two action buttons.
+
+    private func conflictBannerView(_ banner: ConflictBanner) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronRose)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(banner.origin.shortLabel)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(conflictSubtitle(banner))
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextMuted)
+                }
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                Button {
+                    onResolveConflicts?()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Resolve")
+                    }
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.tronRose))
+                }
+                .buttonStyle(.plain)
+                Button {
+                    onAbortConflicts?()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "xmark.circle")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Abort")
+                    }
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(.tronError)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.tronError.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronRose.opacity(0.10))
+        }
+    }
+
+    private func conflictSubtitle(_ banner: ConflictBanner) -> String {
+        let count = banner.paths.count
+        let files = "\(count) file\(count == 1 ? "" : "s")"
+        return "\(files) · \(banner.origin.bannerSubtitle)"
+    }
 }
 
 // MARK: - Supporting Types
@@ -227,13 +310,14 @@ struct SourceControlStatusHeader: View {
 /// Lightweight repo-wide lock info for header rendering.
 struct RepoSessionLock: Equatable {
     let sessionId: String
-    let op: String // "syncMain" | "finalizeSession"
+    let op: String // "syncMain" | "finalizeSession" | "rebaseOnMain"
 
     var shortSessionId: String { String(sessionId.prefix(6)) }
     var opDescription: String {
         switch op {
         case "syncMain": "syncing"
         case "finalizeSession": "finalizing"
+        case "rebaseOnMain": "rebasing"
         default: "modifying"
         }
     }

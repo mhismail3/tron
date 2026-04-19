@@ -304,6 +304,78 @@ struct WorktreeFinalizeSessionResult: Decodable {
     let hint: String?
 }
 
+// MARK: - Rebase on Main
+
+/// Params for `worktree.rebaseOnMain` — pull main forward into the
+/// session's branch. Strategy is `"rebase"` (default) or `"merge"`;
+/// `"squash"` is rejected with INVALID_PARAMS.
+struct WorktreeRebaseOnMainParams: Encodable {
+    let sessionId: String
+    /// Overrides `info.base_branch` when set. Useful when the session's
+    /// base branch got renamed or no longer exists.
+    let mainBranch: String?
+    let strategy: String?
+
+    init(
+        sessionId: String,
+        mainBranch: String? = nil,
+        strategy: String? = nil
+    ) {
+        self.sessionId = sessionId
+        self.mainBranch = mainBranch
+        self.strategy = strategy
+    }
+}
+
+/// Result of `worktree.rebaseOnMain`. Three-shape tagged enum — the
+/// `type` discriminator picks between `success`, `conflicts`, and `noOp`.
+/// Each branch carries only the fields relevant to that outcome.
+enum WorktreeRebaseOnMainResult: Decodable, Equatable {
+    case success(RebaseSuccess)
+    case conflicts(RebaseConflicts)
+    case noOp(RebaseNoOp)
+
+    struct RebaseSuccess: Decodable, Equatable {
+        let oldBaseCommit: String
+        let newBaseCommit: String
+        let mainCommitsIncorporated: UInt64
+        let strategy: String
+        let hadAutoStash: Bool
+    }
+
+    struct RebaseConflicts: Decodable, Equatable {
+        let count: UInt64
+        let hint: String?
+    }
+
+    struct RebaseNoOp: Decodable, Equatable {
+        let ahead: UInt64
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "success":
+            self = .success(try RebaseSuccess(from: decoder))
+        case "conflicts":
+            self = .conflicts(try RebaseConflicts(from: decoder))
+        case "noOp":
+            self = .noOp(try RebaseNoOp(from: decoder))
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "unknown type '\(type)'"
+            )
+        }
+    }
+}
+
 // MARK: - Merge State Machine
 
 /// A conflicted file, with optional base64-encoded ours/theirs/base bytes.

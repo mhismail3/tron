@@ -144,6 +144,30 @@ final class WorktreeClient: RPCDomainClient {
         return try await ws.send(method: "worktree.finalizeSession", params: params)
     }
 
+    /// Rebase-on-main: pull main's commits forward into the session's
+    /// branch. Strategy is `"rebase"` (default, linear) or `"merge"`
+    /// (creates a merge commit on the session branch). `"squash"` is
+    /// rejected server-side as INVALID_PARAMS.
+    ///
+    /// Result is a tagged enum — callers pattern-match:
+    /// - `.success` — clean or post-conflict-resolution completion
+    /// - `.conflicts` — user must run the conflict state machine
+    ///   (`listConflicts` → `resolveConflict` → `continueMerge`)
+    /// - `.noOp` — session was already up-to-date with main
+    func rebaseOnMain(
+        sessionId: String,
+        mainBranch: String? = nil,
+        strategy: String? = nil
+    ) async throws -> WorktreeRebaseOnMainResult {
+        let ws = try requireTransport().requireConnection()
+        let params = WorktreeRebaseOnMainParams(
+            sessionId: sessionId,
+            mainBranch: mainBranch,
+            strategy: strategy
+        )
+        return try await ws.send(method: "worktree.rebaseOnMain", params: params)
+    }
+
     /// Probe current conflicts from `.git/MERGE_HEAD`. Idempotent — safe to
     /// call at any time; returns an empty array if no merge is in-flight.
     func listConflicts(sessionId: String) async throws -> [ConflictedFile] {

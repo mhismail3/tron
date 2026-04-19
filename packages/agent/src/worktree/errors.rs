@@ -65,6 +65,26 @@ pub enum WorktreeError {
     #[error("session has no pending merge")]
     NoPendingMerge,
 
+    /// Operation refused because the session already has a pending merge
+    /// — callers must resolve or abort it first.
+    #[error("session already has a pending merge; resolve or abort it first")]
+    PendingMergeExists,
+
+    /// `rebase_on_main` was called without a `main_branch` override and
+    /// the session's `info.base_branch` is unset — nothing to rebase onto.
+    #[error("session has no base branch; pass `mainBranch` explicitly")]
+    MissingBaseBranch,
+
+    /// A ref the caller named (e.g. `mainBranch`) could not be resolved
+    /// to a commit.
+    #[error("ref not found: {0}")]
+    RefNotFound(String),
+
+    /// Operation refused because the session's worktree is in an
+    /// unexpected state (detached HEAD, branch equals base, …).
+    #[error("invalid session state: {0}")]
+    InvalidSessionState(String),
+
     /// Event store error.
     #[error("event store: {0}")]
     EventStore(String),

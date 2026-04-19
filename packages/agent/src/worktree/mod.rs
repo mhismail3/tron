@@ -40,6 +40,20 @@
 //!    `recovery::reconstruct_pending_merge` rebuilds in-memory state from it.
 //! 4. `finalize_session` either completes fully (merge commit + new
 //!    follow-up branch) or leaves no partial state (no new branch created).
+//! 5. `scm::conflict::start_merge_keep_conflicts` is used in BOTH
+//!    directions: session → main (finalize flow) and main → session
+//!    (rebase_on_main flow). The conflict state machine is direction-
+//!    symmetric; only the coordinator layer (and its `MergeOrigin`
+//!    discriminator) distinguishes the two callers.
+//! 6. `StashPop` is a third `MergeOrigin` — it has no on-disk
+//!    `.git/MERGE_HEAD` / `.git/rebase-merge` state; conflicts live in
+//!    the index as unmerged entries from a conflicted `git stash pop`.
+//!    The coordinator synthesises a `PendingMergeState` (via
+//!    `handle_post_stash_pop`) so `listConflicts` / `resolveConflict` /
+//!    `continueMerge` / `abortMerge` work uniformly across all three
+//!    origins. `continueMerge(StashPop)` drops the stash;
+//!    `abortMerge(StashPop)` `git reset --hard HEAD`s the worktree and
+//!    preserves the stash on the stack.
 
 #[path = "runtime/coordinator/mod.rs"]
 pub mod coordinator;
@@ -71,8 +85,8 @@ pub use errors::WorktreeError;
 pub use types::{
     AcquireResult, CommitEntry, CommitOptions, CommitResult, CommittedDiffResult, CommittedFileEntry,
     ConflictKind, ConflictResolution, ConflictedFile, DeferralReason, DeleteBranchResult,
-    DiffSummary, FinalizeSessionResult, IsolationMode, MergeResult, MergeStrategy,
-    PendingMergeState, PruneBranchesResult, PruneFailure, PushOutput, ReleaseInfo,
-    SessionBranchInfo, SyncBlockReason, SyncOutcome, WorktreeConfig,
+    DiffSummary, FinalizeSessionResult, IsolationMode, MergeOrigin, MergeResult, MergeStrategy,
+    PendingMergeState, PruneBranchesResult, PruneFailure, PushOutput, RebaseOnMainResult,
+    ReleaseInfo, SessionBranchInfo, SyncBlockReason, SyncOutcome, WorktreeConfig,
     WorktreeInfo, WorktreeStatus,
 };

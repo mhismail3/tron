@@ -11,6 +11,12 @@ struct FileDetailSheet: View {
     var rpcClient: RPCClient? = nil
     var sessionId: String? = nil
     var onAction: (() -> Void)? = nil
+    /// Invoked when the user taps "Open Conflict Resolver" on an
+    /// unmerged file. Parent is expected to dismiss this sheet and open
+    /// `ConflictResolverSubSheet`. Required — all callers route conflict
+    /// resolution through the resolver; omitting it would leave unmerged
+    /// files with no actionable UI.
+    var onOpenConflictResolver: () -> Void
 
     @State private var selectedTab: FileDetailTab = .diff
     @State private var isStaging = false
@@ -19,6 +25,10 @@ struct FileDetailSheet: View {
     @State private var actionError: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+
+    private var isConflict: Bool {
+        file.changeStatus == .unmerged
+    }
 
     enum FileDetailTab: String, CaseIterable {
         case diff = "Diff"
@@ -53,7 +63,11 @@ struct FileDetailSheet: View {
                     .sheetSection()
                     .padding(.top, 8)
 
-                if isNewFile {
+                if isConflict {
+                    conflictCTA
+                        .sheetSection()
+                        .padding(.top, 12)
+                } else if isNewFile {
                     contentsContent
                 } else {
                     Picker("", selection: $selectedTab) {
@@ -388,6 +402,63 @@ struct FileDetailSheet: View {
             }
         } catch {
             actionError = "Failed to discard: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Conflict CTA
+    //
+    // Unmerged files can't be meaningfully diffed against a single parent
+    // (they have three stages: base, ours, theirs), and the stage/unstage
+    // pipeline would add them to the index in a way that loses the conflict
+    // state. Instead, surface a prominent CTA that routes the user to the
+    // conflict resolver where they can see ours/theirs and pick.
+
+    @ViewBuilder
+    private var conflictCTA: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .medium))
+                    .foregroundStyle(.tronRose)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Unresolved merge conflict")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text("This file has conflicting changes that need to be resolved before it can be staged or committed.")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            Button {
+                dismiss()
+                // Defer so the dismiss animation completes before the
+                // parent presents the resolver.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    onOpenConflictResolver()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Open Conflict Resolver")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.tronRose)
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronRose.opacity(0.10))
         }
     }
 

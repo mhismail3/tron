@@ -26,7 +26,7 @@ use crate::server::rpc::handlers::{
 use std::path::PathBuf;
 use crate::server::rpc::registry::MethodHandler;
 use crate::worktree::types::{
-    ConflictResolution, MergeStrategy, SyncBlockReason, SyncOutcome,
+    ConflictResolution, MergeStrategy, RebaseOnMainResult, SyncBlockReason, SyncOutcome,
 };
 use crate::worktree::{ConflictedFile, WorktreeCoordinator, WorktreeError};
 
@@ -58,6 +58,25 @@ fn parse_strategy(s: Option<&str>) -> MergeStrategy {
         Some("rebase") => MergeStrategy::Rebase,
         Some("squash") => MergeStrategy::Squash,
         _ => MergeStrategy::Merge,
+    }
+}
+
+/// Strategy parser for `worktree.rebaseOnMain` — accepts only `"rebase"`
+/// (default) or `"merge"`. `"squash"` and unknown values error with
+/// `INVALID_PARAMS` so callers find out at RPC boundary rather than
+/// deep in the coordinator.
+fn parse_rebase_strategy(s: Option<&str>) -> Result<MergeStrategy, RpcError> {
+    match s {
+        None | Some("rebase") => Ok(MergeStrategy::Rebase),
+        Some("merge") => Ok(MergeStrategy::Merge),
+        Some("squash") => Err(RpcError::InvalidParams {
+            message: "rebaseOnMain does not accept 'squash'".into(),
+        }),
+        Some(other) => Err(RpcError::InvalidParams {
+            message: format!(
+                "strategy must be 'rebase' or 'merge'; got '{other}'"
+            ),
+        }),
     }
 }
 
@@ -383,6 +402,74 @@ impl MethodHandler for FinalizeSessionHandler {
                 "error": format!("merge has conflicts ({} file(s)); resolve first", count),
                 "hint": "call worktree.startMerge, resolve, then worktree.continueMerge",
             })),
+            Err(e) => Err(internal(e)),
+        }
+    }
+}
+
+// ── worktree.rebaseOnMain ────────────────────────────────────────────
+
+/// Handler for `worktree.rebaseOnMain` — pull main forward into a
+/// session's branch.
+pub struct RebaseOnMainHandler;
+
+#[async_trait]
+impl MethodHandler for RebaseOnMainHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.rebaseOnMain"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        // Parse strategy BEFORE touching the coordinator so "squash" is
+        // rejected at the RPC boundary (plan requirement).
+        let strategy =
+            parse_rebase_strategy(opt_string(params.as_ref(), "strategy").as_deref())?;
+        let main_branch = opt_string(params.as_ref(), "mainBranch");
+
+        let coord = require_coordinator(ctx)?;
+
+        match coord
+            .rebase_on_main(&session_id, main_branch.as_deref(), strategy)
+            .await
+        {
+            Ok(RebaseOnMainResult::Success {
+                old_base_commit,
+                new_base_commit,
+                main_commits_incorporated,
+                strategy,
+                had_auto_stash,
+            }) => Ok(json!({
+                "type": "success",
+                "oldBaseCommit": old_base_commit,
+                "newBaseCommit": new_base_commit,
+                "mainCommitsIncorporated": main_commits_incorporated as u64,
+                "strategy": strategy.as_str(),
+                "hadAutoStash": had_auto_stash,
+            })),
+            Ok(RebaseOnMainResult::Conflicts { count }) => Ok(json!({
+                "type": "conflicts",
+                "count": count as u64,
+                "hint": "call worktree.listConflicts, resolve, then worktree.continueMerge",
+            })),
+            Ok(RebaseOnMainResult::NoOp { ahead }) => Ok(json!({
+                "type": "noOp",
+                "ahead": ahead as u64,
+            })),
+            Err(WorktreeError::NotFound(_)) => Err(RpcError::NotFound {
+                code: "WORKTREE_NOT_FOUND".into(),
+                message: format!("No worktree found for session '{session_id}'"),
+            }),
+            Err(WorktreeError::PendingMergeExists) => Err(RpcError::InvalidParams {
+                message:
+                    "session already has a pending merge; resolve or abort it first".into(),
+            }),
+            Err(WorktreeError::MissingBaseBranch) => Err(RpcError::InvalidParams {
+                message: "session has no base branch; pass `mainBranch` explicitly".into(),
+            }),
+            Err(WorktreeError::RefNotFound(r)) => Err(RpcError::InvalidParams {
+                message: format!("ref not found: {r}"),
+            }),
+            Err(WorktreeError::InvalidSessionState(m)) => Err(RpcError::InvalidParams {
+                message: m,
+            }),
             Err(e) => Err(internal(e)),
         }
     }
@@ -717,6 +804,70 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not enabled"));
+    }
+
+    // ── Phase A — rebase_on_main parser & handler guards ───────────
+
+    #[tokio::test]
+    async fn rebase_on_main_requires_coordinator() {
+        let ctx = make_test_context();
+        let err = RebaseOnMainHandler
+            .handle(Some(json!({"sessionId": "s1"})), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not enabled"));
+    }
+
+    #[tokio::test]
+    async fn rebase_on_main_missing_session_id() {
+        let ctx = make_test_context();
+        let err = RebaseOnMainHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn rebase_on_main_rejects_squash_strategy() {
+        let ctx = make_test_context();
+        let err = RebaseOnMainHandler
+            .handle(
+                Some(json!({"sessionId": "s1", "strategy": "squash"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(err.to_string().contains("squash"));
+    }
+
+    #[tokio::test]
+    async fn rebase_on_main_rejects_unknown_strategy() {
+        let ctx = make_test_context();
+        let err = RebaseOnMainHandler
+            .handle(
+                Some(json!({"sessionId": "s1", "strategy": "wizardry"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[test]
+    fn parse_strategy_defaults_to_rebase_when_absent() {
+        assert_eq!(parse_rebase_strategy(None).unwrap(), MergeStrategy::Rebase);
+        assert_eq!(
+            parse_rebase_strategy(Some("rebase")).unwrap(),
+            MergeStrategy::Rebase
+        );
+        assert_eq!(
+            parse_rebase_strategy(Some("merge")).unwrap(),
+            MergeStrategy::Merge
+        );
+        assert!(parse_rebase_strategy(Some("squash")).is_err());
+        assert!(parse_rebase_strategy(Some("foo")).is_err());
     }
 
     #[tokio::test]

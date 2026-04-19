@@ -151,6 +151,9 @@ pub struct WorktreeConflictDetectedPayload {
     pub source_branch: String,
     /// Target branch.
     pub target_branch: String,
+    /// Origin discriminator: `"finalize"` (session→main), `"rebase_on_main"`
+    /// (main→session), `"stash_pop"` (post-rebase stash carry-over conflict).
+    pub origin: String,
     /// Conflicted file paths (repo-relative).
     pub paths: Vec<String>,
 }
@@ -171,10 +174,13 @@ pub struct WorktreeConflictResolvedPayload {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeMergeContinuedPayload {
-    /// Merge commit sha produced.
+    /// Merge commit sha produced. For `StashPop` origin, this is the
+    /// current HEAD (unchanged by the stash drop).
     pub merge_commit: String,
-    /// Strategy used.
+    /// Strategy used. `"stash_pop"` uses a dummy `"merge"`.
     pub strategy: String,
+    /// Origin of the pending merge (`"finalize" | "rebase_on_main" | "stash_pop"`).
+    pub origin: String,
 }
 
 /// Emitted after `abort_merge`.
@@ -183,8 +189,11 @@ pub struct WorktreeMergeContinuedPayload {
 pub struct WorktreeMergeAbortedPayload {
     /// Strategy that was in flight.
     pub strategy: String,
-    /// Reason for the abort. `"user"` / `"subagent_failed"` / `"auto_recovery"`.
+    /// Reason for the abort. `"user"` / `"subagent_failed"` / `"auto_recovery"`
+    /// / `"crash_recovery_timeout"`.
     pub reason: String,
+    /// Origin of the aborted pending merge.
+    pub origin: String,
 }
 
 /// Emitted after a push succeeds.
@@ -218,4 +227,35 @@ pub struct WorktreePendingMergeDetectedPayload {
     pub started_at_ms: u64,
     /// Epoch ms when the auto-abort timer fires.
     pub auto_abort_at_ms: u64,
+}
+
+/// Emitted after `rebase_on_main` advances a session branch to include
+/// main's commits — either cleanly or after conflict resolution.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeRebasedOnMainPayload {
+    /// Branch that was rebased onto (usually `main`).
+    pub main_branch: String,
+    /// Strategy used (`"rebase"` or `"merge"`).
+    pub strategy: String,
+    /// Session HEAD before the rebase.
+    pub old_base_commit: String,
+    /// Session HEAD after the rebase.
+    pub new_base_commit: String,
+    /// How many of main's commits landed on the session branch.
+    pub main_commits_incorporated: u64,
+    /// Whether the worktree was dirty at call time (triggering an
+    /// auto-stash + pop).
+    pub had_auto_stash: bool,
+}
+
+/// Emitted when `git stash pop` after a successful rebase produces
+/// unmerged paths. The stash is left on the stack for manual recovery.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreePostRebaseStashConflictPayload {
+    /// Ref of the stash left on the stash stack (e.g. `stash@{0}`).
+    pub stash_ref: String,
+    /// Paths reported as unmerged after the pop.
+    pub paths: Vec<String>,
 }

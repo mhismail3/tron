@@ -1032,12 +1032,15 @@ tron_events! {
         conflict_count: u32,
     } => "worktree.merge_started",
 
-    /// Conflict(s) detected in an in-flight merge.
+    /// Conflict(s) detected in an in-flight merge / rebase / stash-pop.
     WorktreeConflictDetected {
         #[serde(rename = "sourceBranch")]
         source_branch: String,
         #[serde(rename = "targetBranch")]
         target_branch: String,
+        /// Origin discriminator (`"finalize" | "rebase_on_main" | "stash_pop"`)
+        /// — iOS renders contextual copy without re-deriving from branch names.
+        origin: String,
         paths: Vec<String>,
     } => "worktree.conflict_detected",
 
@@ -1048,17 +1051,23 @@ tron_events! {
         remaining: u32,
     } => "worktree.conflict_resolved",
 
-    /// In-flight merge continued after conflicts cleared.
+    /// In-flight merge / rebase / stash-pop continued after conflicts cleared.
     WorktreeMergeContinued {
         #[serde(rename = "mergeCommit")]
         merge_commit: String,
         strategy: String,
+        /// Origin of the underlying pending merge
+        /// (`"finalize" | "rebase_on_main" | "stash_pop"`). Drives iOS
+        /// banner clear semantics.
+        origin: String,
     } => "worktree.merge_continued",
 
-    /// In-flight merge aborted.
+    /// In-flight merge / rebase / stash-pop aborted.
     WorktreeMergeAborted {
         strategy: String,
         reason: String,
+        /// Origin of the aborted pending merge. See `WorktreeMergeContinued`.
+        origin: String,
     } => "worktree.merge_aborted",
 
     /// Branch pushed to remote.
@@ -1085,6 +1094,29 @@ tron_events! {
         #[serde(rename = "autoAbortAtMs")]
         auto_abort_at_ms: u64,
     } => "worktree.pending_merge_detected",
+
+    /// Session branch rebased onto main (clean or post-conflict resolution).
+    WorktreeRebasedOnMain {
+        #[serde(rename = "mainBranch")]
+        main_branch: String,
+        strategy: String,
+        #[serde(rename = "oldBaseCommit")]
+        old_base_commit: String,
+        #[serde(rename = "newBaseCommit")]
+        new_base_commit: String,
+        #[serde(rename = "mainCommitsIncorporated")]
+        main_commits_incorporated: u64,
+        #[serde(rename = "hadAutoStash")]
+        had_auto_stash: bool,
+    } => "worktree.rebased_on_main",
+
+    /// `git stash pop` after a successful rebase produced unmerged paths.
+    /// Stash stays on the stash stack for manual recovery.
+    WorktreePostRebaseStashConflict {
+        #[serde(rename = "stashRef")]
+        stash_ref: String,
+        paths: Vec<String>,
+    } => "worktree.post_rebase_stash_conflict",
 
     /// Per-repo lock acquired by a session.
     RepoLockAcquired {
@@ -2139,6 +2171,7 @@ mod tests {
                 base: base.clone(),
                 source_branch: "session/1".into(),
                 target_branch: "main".into(),
+                origin: "finalize".into(),
                 paths: vec!["f.txt".into()],
             },
             TronEvent::WorktreeConflictResolved {
@@ -2151,11 +2184,13 @@ mod tests {
                 base: base.clone(),
                 merge_commit: "def".into(),
                 strategy: "merge".into(),
+                origin: "finalize".into(),
             },
             TronEvent::WorktreeMergeAborted {
                 base: base.clone(),
                 strategy: "merge".into(),
                 reason: "user".into(),
+                origin: "finalize".into(),
             },
             TronEvent::WorktreePushed {
                 base: base.clone(),
@@ -2172,6 +2207,20 @@ mod tests {
                 strategy: "merge".into(),
                 started_at_ms: 0,
                 auto_abort_at_ms: 0,
+            },
+            TronEvent::WorktreeRebasedOnMain {
+                base: base.clone(),
+                main_branch: "main".into(),
+                strategy: "rebase".into(),
+                old_base_commit: "abc".into(),
+                new_base_commit: "def".into(),
+                main_commits_incorporated: 1,
+                had_auto_stash: false,
+            },
+            TronEvent::WorktreePostRebaseStashConflict {
+                base: base.clone(),
+                stash_ref: "stash@{0}".into(),
+                paths: vec!["f.txt".into()],
             },
             TronEvent::RepoLockAcquired {
                 base: base.clone(),

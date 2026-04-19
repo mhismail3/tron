@@ -30,7 +30,7 @@ use tracing::{debug, warn};
 use crate::worktree::errors::{Result, WorktreeError};
 use crate::worktree::git::GitExecutor;
 use crate::worktree::types::{
-    ConflictResolution, ConflictedFile, MergeStrategy, PendingMergeState,
+    ConflictResolution, ConflictedFile, MergeOrigin, MergeStrategy, PendingMergeState,
 };
 
 /// Start a merge or rebase that deliberately preserves conflict state when
@@ -53,6 +53,7 @@ pub async fn start_merge_keep_conflicts(
     source_branch: &str,
     target_branch: &str,
     strategy: MergeStrategy,
+    origin: MergeOrigin,
     git: &GitExecutor,
 ) -> Result<PendingMergeState> {
     match strategy {
@@ -77,6 +78,8 @@ pub async fn start_merge_keep_conflicts(
         strategy,
         started_at_ms: now_ms(),
         crash_recovered: false,
+        origin,
+        auto_stash_ref: None,
     })
 }
 
@@ -215,6 +218,7 @@ mod tests {
             "b",
             "a",
             MergeStrategy::Merge,
+            MergeOrigin::Finalize,
             &git,
         )
         .await
@@ -234,7 +238,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
 
@@ -254,7 +258,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_binary_conflict(dir.path(), "a", "b", "blob.bin").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
 
@@ -285,6 +289,7 @@ mod tests {
             "deleter",
             "modifier",
             MergeStrategy::Merge,
+            MergeOrigin::Finalize,
             &git,
         )
         .await
@@ -303,7 +308,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_deleted_by_us_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
 
@@ -320,7 +325,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
 
@@ -339,7 +344,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
 
@@ -360,7 +365,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
 
@@ -380,7 +385,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
         resolve_conflict(dir.path(), "f.txt", ConflictResolution::Ours, &git)
@@ -399,7 +404,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
 
@@ -414,7 +419,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
         assert!(git.has_merge_in_progress(dir.path()).await.unwrap());
@@ -431,7 +436,7 @@ mod tests {
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
         // Rebase b onto a — reverse direction from merge.
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Rebase, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Rebase, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
         assert!(
@@ -445,7 +450,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Rebase, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Rebase, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
         // In rebase direction b-onto-a: conflict presents with stages; pick ours.
@@ -463,7 +468,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Rebase, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Rebase, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
         abort_conflict_merge(dir.path(), MergeStrategy::Rebase, &git)
@@ -479,7 +484,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_conflict(dir.path(), "a", "b", "f.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
 
@@ -496,7 +501,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
         make_rename_conflict(dir.path(), "a", "b", "orig.txt", "aa.txt", "bb.txt").await;
-        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, &git)
+        start_merge_keep_conflicts(dir.path(), "s", "b", "a", MergeStrategy::Merge, MergeOrigin::Finalize, &git)
             .await
             .unwrap();
         let conflicts = list_conflicts(dir.path(), MergeStrategy::Merge, &git)

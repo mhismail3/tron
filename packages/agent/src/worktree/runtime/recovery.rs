@@ -16,7 +16,9 @@ use tracing::{debug, info, warn};
 
 use crate::worktree::errors::Result;
 use crate::worktree::git::GitExecutor;
-use crate::worktree::types::{MergeStrategy, PendingMergeState, WorktreeConfig, WorktreeInfo};
+use crate::worktree::types::{
+    MergeOrigin, MergeStrategy, PendingMergeState, WorktreeConfig, WorktreeInfo,
+};
 
 /// Information about a recovered orphan worktree.
 #[derive(Clone, Debug)]
@@ -232,6 +234,11 @@ pub async fn reconstruct_pending_merge(
         strategy,
         started_at_ms,
         crash_recovered: true,
+        // Default `origin` / `auto_stash_ref` — coordinator-level
+        // `rebuild_pending_merges` overlays sidecar data when present
+        // (rebase_on_main writes the sidecar before touching git).
+        origin: MergeOrigin::Finalize,
+        auto_stash_ref: None,
     })
 }
 
@@ -477,6 +484,7 @@ mod tests {
             "b",
             "a",
             crate::worktree::types::MergeStrategy::Merge,
+            crate::worktree::types::MergeOrigin::Finalize,
             &git,
         )
         .await

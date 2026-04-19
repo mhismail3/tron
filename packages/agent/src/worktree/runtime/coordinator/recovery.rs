@@ -133,6 +133,18 @@ impl WorktreeCoordinator {
     /// `worktree.pending_merge_detected` so iOS can render a banner, and
     /// arm an auto-abort timer so half-merged sessions can't linger.
     ///
+    /// Also scans for `rebase_on_main` sidecars (
+    /// `.git/tron-rebase-stash-<sid>.json`) and reconciles them against
+    /// the on-disk merge state:
+    /// - sidecar + merge/rebase in progress → rebuild with
+    ///   `auto_stash_ref` + `origin = RebaseOnMain`
+    /// - sidecar + no merge/rebase → orphan stash; pop it to restore the
+    ///   pre-op dirty state and clean up the sidecar (either the rebase
+    ///   succeeded and we crashed before popping, OR the rebase never
+    ///   started — the restored state is valid either way)
+    /// - no sidecar + merge/rebase in progress → existing finalize path
+    /// - no sidecar + no merge/rebase → nothing to do
+    ///
     /// Call after `rebuild_from_events` so active worktrees are populated.
     pub async fn rebuild_pending_merges(self: &Arc<Self>) -> usize {
         let infos: Vec<WorktreeInfo> = self
@@ -145,13 +157,78 @@ impl WorktreeCoordinator {
 
         let mut restored = 0usize;
         for info in infos {
-            let pending = match crate::worktree::recovery::reconstruct_pending_merge(
+            // Read any rebase_on_main sidecar first so we can overlay
+            // its metadata on the reconstructed PendingMergeState.
+            let sidecars =
+                super::rebase_on_main::read_sidecars_for_worktree(&info.worktree_path)
+                    .await;
+            let sidecar_for_session = sidecars
+                .into_iter()
+                .find(|(sid, _)| sid == &info.session_id)
+                .and_then(|(_, c)| c);
+
+            let reconstructed = crate::worktree::recovery::reconstruct_pending_merge(
                 &info, &self.git,
             )
-            .await
-            {
-                Some(p) => p,
-                None => continue,
+            .await;
+
+            let pending = match (reconstructed, sidecar_for_session.as_ref()) {
+                (None, None) => continue,
+                (None, Some(sc)) => {
+                    // No on-disk merge / rebase state — but there might
+                    // still be unresolved index entries from a previously
+                    // attempted (and conflicted) stash pop. Probe the
+                    // index first.
+                    let unmerged = self
+                        .git
+                        .conflict_files(&info.worktree_path)
+                        .await
+                        .unwrap_or_default();
+                    if !unmerged.is_empty() {
+                        // Previous stash pop conflicted; conflicts were
+                        // never resolved. Synthesise a StashPop pending
+                        // merge via the shared helper so the resolver UX
+                        // lights up. Keep the sidecar (it's still valid).
+                        self.handle_post_stash_pop(
+                            &info.session_id,
+                            &sc.stash_ref,
+                            Ok(unmerged),
+                        );
+                        restored += 1;
+                        continue;
+                    }
+                    // Orphan stash — sidecar exists but no merge state on
+                    // disk and no unresolved paths. Attempt to pop: a
+                    // clean pop restores the user's pre-op state; a
+                    // conflicted pop synthesises a StashPop pending merge.
+                    let pop_result =
+                        self.git.stash_pop(&info.worktree_path, &sc.stash_ref).await;
+                    let had_conflicts = matches!(pop_result.as_ref(), Ok(paths) if !paths.is_empty());
+                    self.handle_post_stash_pop(
+                        &info.session_id,
+                        &sc.stash_ref,
+                        pop_result,
+                    );
+                    if had_conflicts {
+                        restored += 1;
+                        // Keep the sidecar for subsequent crash recovery.
+                        continue;
+                    }
+                    // Clean pop — sidecar no longer needed.
+                    let _ = super::rebase_on_main::remove_sidecar(
+                        &info.worktree_path,
+                        &info.session_id,
+                    )
+                    .await;
+                    continue;
+                }
+                (Some(mut p), Some(sc)) => {
+                    // Overlay sidecar data onto the reconstructed merge.
+                    p.origin = crate::worktree::types::MergeOrigin::RebaseOnMain;
+                    p.auto_stash_ref = Some(sc.stash_ref.clone());
+                    p
+                }
+                (Some(p), None) => p,
             };
 
             self.state

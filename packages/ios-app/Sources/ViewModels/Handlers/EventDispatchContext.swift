@@ -66,6 +66,8 @@ import Foundation
     func handleWorktreeMergeAborted(_ result: WorktreeMergeAbortedPlugin.Result)
     func handleWorktreePushed(_ result: WorktreePushedPlugin.Result)
     func handleWorktreePendingMergeDetected(_ result: WorktreePendingMergeDetectedPlugin.Result)
+    func handleWorktreeRebasedOnMain(_ result: WorktreeRebasedOnMainPlugin.Result)
+    func handleWorktreePostRebaseStashConflict(_ result: WorktreePostRebaseStashConflictPlugin.Result)
 }
 
 @MainActor protocol RepoEventHandler: AnyObject {

@@ -527,6 +527,39 @@ pub struct FinalizeSessionResult {
     pub strategy: MergeStrategy,
 }
 
+/// Origin of a pending merge — tells `continue_merge` / `abort_merge`
+/// which post-op lifecycle to run (`rebase_on_main` carries over an
+/// auto-stash; `finalize` does not; `stash_pop` drops a stash on continue
+/// and preserves it on abort).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeOrigin {
+    /// Started by `worktree.startMerge` (part of the session-into-main
+    /// finalize workflow).
+    Finalize,
+    /// Started by `worktree.rebaseOnMain` (pulls main forward into the
+    /// session branch). Carries `auto_stash_ref` when the worktree was
+    /// dirty at call time.
+    RebaseOnMain,
+    /// Synthesised when `git stash pop` (post-rebase stash carry-over)
+    /// produces unmerged paths. There is no `.git/MERGE_HEAD` /
+    /// `.git/rebase-merge` on disk; conflicts live purely in the index as
+    /// unmerged entries. `continue_merge` drops the stash; `abort_merge`
+    /// does `git reset --hard HEAD` and preserves the stash on the stack.
+    StashPop,
+}
+
+impl MergeOrigin {
+    /// Canonical wire label (`"finalize" | "rebase_on_main" | "stash_pop"`).
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Finalize => "finalize",
+            Self::RebaseOnMain => "rebase_on_main",
+            Self::StashPop => "stash_pop",
+        }
+    }
+}
+
 /// In-flight merge/rebase state kept by the coordinator for the duration
 /// of a conflict resolution session.
 ///
@@ -548,6 +581,48 @@ pub struct PendingMergeState {
     /// Did we recover this from disk at coordinator startup (vs start it
     /// this process)?
     pub crash_recovered: bool,
+    /// Where this pending merge came from — drives whether
+    /// `continue_merge` pops a stash and emits `worktree.rebased_on_main`.
+    pub origin: MergeOrigin,
+    /// Ref of a `git stash store`d entry created by `rebase_on_main`
+    /// when the worktree was dirty at call time. `Some` iff the worktree
+    /// had uncommitted changes at the time of rebase.
+    pub auto_stash_ref: Option<String>,
+}
+
+/// Result of `rebase_on_main` — the "pull main forward into the session
+/// branch" operation. Variants mirror the three shapes the caller must
+/// distinguish on the wire.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RebaseOnMainResult {
+    /// Session branch moved forward to include main's commits (either
+    /// cleanly via fast-forward / rebase, or after conflict resolution
+    /// in a separate RPC).
+    Success {
+        /// Session HEAD before the rebase.
+        old_base_commit: String,
+        /// Session HEAD after the rebase.
+        new_base_commit: String,
+        /// How many of main's commits were incorporated.
+        main_commits_incorporated: usize,
+        /// Strategy used (Rebase or Merge).
+        strategy: MergeStrategy,
+        /// Whether the worktree was dirty and got auto-stashed + popped.
+        had_auto_stash: bool,
+    },
+    /// Rebase produced conflicts that the user must resolve via the
+    /// existing conflict state machine (`worktree.listConflicts` +
+    /// `worktree.resolveConflict` + `worktree.continueMerge`).
+    Conflicts {
+        /// Number of conflicted files at the point of detection.
+        count: usize,
+    },
+    /// Session was already up to date with main — no lock taken, no
+    /// events emitted, no stash created.
+    NoOp {
+        /// Commits the session is ahead of main (informational).
+        ahead: usize,
+    },
 }
 
 /// Instruction for `resolve_conflict`.

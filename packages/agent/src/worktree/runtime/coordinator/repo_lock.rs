@@ -33,6 +33,10 @@ pub enum LockedOp {
     SyncMain,
     /// `finalize_session` — merging session branch into `main` + rebranch.
     FinalizeSession,
+    /// `rebase_on_main` — pulling main forward into a session branch.
+    /// Serializes with `SyncMain` (which advances `main` underfoot) and
+    /// `FinalizeSession` (which expects `main` + session branch stable).
+    RebaseOnMain,
 }
 
 /// Wire-label for `LockedOp` (matches `RepoLockOp` payload variants).
@@ -40,6 +44,7 @@ fn lock_op_label(op: LockedOp) -> &'static str {
     match op {
         LockedOp::SyncMain => "syncMain",
         LockedOp::FinalizeSession => "finalizeSession",
+        LockedOp::RebaseOnMain => "rebaseOnMain",
     }
 }
 

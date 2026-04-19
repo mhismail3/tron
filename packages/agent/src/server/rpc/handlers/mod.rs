@@ -296,6 +296,10 @@ fn register_platform(registry: &mut MethodRegistry) {
         "worktree.finalizeSession",
         git_workflow::FinalizeSessionHandler,
     );
+    registry.register(
+        "worktree.rebaseOnMain",
+        git_workflow::RebaseOnMainHandler,
+    );
     registry.register("worktree.startMerge", git_workflow::StartMergeHandler);
     registry.register(
         "worktree.listConflicts",
@@ -592,8 +596,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            156,
-            "expected 156 methods, got {}",
+            157,
+            "expected 157 methods, got {}",
             reg.methods().len()
         );
     }

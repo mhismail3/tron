@@ -10,24 +10,29 @@ enum WorktreeConflictDetectedPlugin: DispatchableEventPlugin {
         let data: DataPayload?
 
         struct DataPayload: Decodable, Sendable {
-            let sourceBranch: String?
-            let targetBranch: String?
-            let paths: [String]?
+            let sourceBranch: String
+            let targetBranch: String
+            /// `"finalize" | "rebase_on_main" | "stash_pop"` — required.
+            /// Missing = server/wire contract violation; event is dropped.
+            let origin: String
+            let paths: [String]
         }
     }
 
     struct Result: EventResult {
         let sourceBranch: String
         let targetBranch: String
+        let origin: String
         let paths: [String]
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         guard let data = event.data else { return nil }
         return Result(
-            sourceBranch: data.sourceBranch ?? "",
-            targetBranch: data.targetBranch ?? "",
-            paths: data.paths ?? []
+            sourceBranch: data.sourceBranch,
+            targetBranch: data.targetBranch,
+            origin: data.origin,
+            paths: data.paths
         )
     }
 

@@ -42,6 +42,11 @@ struct SourceControlSheet: View {
     @State private var activeGitAction: GitActionSheet?
     @State private var divergence: RepoDivergence?
     @State private var repoSessionCount: Int = 0
+    /// Origin of a pending abort — drives the confirmation alert message
+    /// and, on confirmation, the `worktree.abortMerge` call. Non-nil means
+    /// the alert is visible.
+    @State private var pendingAbortOrigin: ConflictOrigin?
+    @State private var isAbortingConflict = false
 
     // Server-sourced defaults for git sub-sheets. Fetched once in `.task`;
     // fall back to hard-coded defaults if the RPC fails.
@@ -50,7 +55,7 @@ struct SourceControlSheet: View {
     @State private var defaultAutoSetUpstream: Bool = true
 
     enum GitActionSheet: String, Identifiable {
-        case commit, syncMain, finalize, push, repoSessions, conflictResolver
+        case commit, syncMain, finalize, push, repoSessions, conflictResolver, rebaseOnMain
         var id: String { rawValue }
     }
 
@@ -79,7 +84,32 @@ struct SourceControlSheet: View {
                                     worktreePath: info.path,
                                     divergence: divergence,
                                     lockHolder: gitWorkflowState?.lockHolder,
-                                    pendingMerge: gitWorkflowState?.pendingMerge
+                                    pendingMerge: gitWorkflowState?.pendingMerge,
+                                    conflictBanner: gitWorkflowState?.conflictBanner,
+                                    // Crash-recovered pending merges share the
+                                    // same action surface as live conflicts:
+                                    // open the resolver or trigger the
+                                    // origin-aware abort. The resolver itself
+                                    // drives `continueMerge` via the subagent
+                                    // path once spawned.
+                                    onContinueSubagent: {
+                                        activeGitAction = .conflictResolver
+                                    },
+                                    onAbortPending: {
+                                        // Fall back to `.finalize` when we
+                                        // don't know the origin (pending_merge
+                                        // events don't yet carry it). Server
+                                        // dispatches abort by actual origin
+                                        // from `pending_merges[sid].origin`.
+                                        pendingAbortOrigin =
+                                            gitWorkflowState?.conflictBanner?.origin ?? .finalize
+                                    },
+                                    onResolveConflicts: {
+                                        activeGitAction = .conflictResolver
+                                    },
+                                    onAbortConflicts: {
+                                        pendingAbortOrigin = gitWorkflowState?.conflictBanner?.origin
+                                    }
                                 )
                                 .sheetSection()
                             }
@@ -162,6 +192,10 @@ struct SourceControlSheet: View {
                 sessionId: sessionId,
                 onAction: {
                     Task { await loadData() }
+                },
+                onOpenConflictResolver: {
+                    selectedFileDetail = nil
+                    activeGitAction = .conflictResolver
                 }
             )
             .presentationDragIndicator(.hidden)
@@ -176,56 +210,96 @@ struct SourceControlSheet: View {
         }) { action in
             gitActionSheet(for: action)
         }
+        .alert(
+            "Abort?",
+            isPresented: Binding(
+                get: { pendingAbortOrigin != nil },
+                set: { if !$0 { pendingAbortOrigin = nil } }
+            ),
+            presenting: pendingAbortOrigin
+        ) { _ in
+            Button("Abort", role: .destructive) {
+                Task { await performAbort() }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingAbortOrigin = nil
+            }
+        } message: { origin in
+            Text(origin.abortConfirmationMessage)
+        }
     }
 
     // MARK: - Git Actions Card
 
-    /// Compact quick-action bar: one row of equal-width tiles, each a
-    /// tappable colored container opening its own sub-sheet. Previously a
-    /// mix of stacked rows and a separate toolbar commit button; the flat
-    /// Commit / Pull / Merge / Push row (+ optional Sessions) keeps the
-    /// main sheet dense and gives every git verb parity.
+    /// Two rows of three tiles each. Row 1 — Commit · Merge · Sessions.
+    /// Row 2 — Rebase · Pull · Push. Disabled tiles fade to 40% opacity.
+    /// The Rebase tile disables when the session is already up-to-date
+    /// with main, when a conflict banner is active, when a pending merge
+    /// exists, or when another session holds the repo lock — preconditions
+    /// that `rebaseOnMain` would reject server-side.
     private var gitActionsCard: some View {
-        HStack(spacing: 8) {
-            gitActionTile(
-                icon: "square.and.pencil",
-                title: "Commit",
-                tint: .tronTeal
-            ) { activeGitAction = .commit }
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                gitActionTile(
+                    icon: "square.and.pencil",
+                    title: "Commit",
+                    tint: .tronTeal
+                ) { activeGitAction = .commit }
 
-            gitActionTile(
-                icon: "arrow.down.circle",
-                title: "Pull",
-                tint: .tronEmerald
-            ) { activeGitAction = .syncMain }
+                gitActionTile(
+                    icon: "checkmark.seal",
+                    title: "Merge",
+                    tint: .tronCoral
+                ) { activeGitAction = .finalize }
 
-            gitActionTile(
-                icon: "checkmark.seal",
-                title: "Merge",
-                tint: .tronCoral
-            ) { activeGitAction = .finalize }
-
-            gitActionTile(
-                icon: "arrow.up.circle",
-                title: "Push",
-                tint: .tronSky
-            ) { activeGitAction = .push }
-
-            if repoSessionCount > 0 {
                 gitActionTile(
                     icon: "rectangle.stack.person.crop",
-                    title: repoSessionCount == 1 ? "1 Session" : "\(repoSessionCount) Sessions",
+                    title: repoSessionCount == 0
+                        ? "Sessions"
+                        : (repoSessionCount == 1 ? "1 Session" : "\(repoSessionCount) Sessions"),
                     tint: .tronAmber
                 ) { activeGitAction = .repoSessions }
-                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
+            }
+            HStack(spacing: 8) {
+                gitActionTile(
+                    icon: "arrow.triangle.2.circlepath",
+                    title: "Rebase",
+                    tint: .tronPurple,
+                    isEnabled: isRebaseEnabled
+                ) { activeGitAction = .rebaseOnMain }
+
+                gitActionTile(
+                    icon: "arrow.down.circle",
+                    title: "Pull",
+                    tint: .tronEmerald
+                ) { activeGitAction = .syncMain }
+
+                gitActionTile(
+                    icon: "arrow.up.circle",
+                    title: "Push",
+                    tint: .tronSky
+                ) { activeGitAction = .push }
             }
         }
+    }
+
+    /// Rebase tile is enabled when the session is demonstrably behind
+    /// main AND no blocking workflow state is present. Each condition
+    /// mirrors a server-side `rebaseOnMain` precondition so the UI fails
+    /// gracefully without a round trip.
+    private var isRebaseEnabled: Bool {
+        guard (divergence?.behindMain ?? 0) > 0 else { return false }
+        guard gitWorkflowState?.conflictBanner == nil else { return false }
+        guard gitWorkflowState?.pendingMerge == nil else { return false }
+        guard gitWorkflowState?.lockHolder == nil else { return false }
+        return true
     }
 
     private func gitActionTile(
         icon: String,
         title: String,
         tint: Color,
+        isEnabled: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -247,6 +321,8 @@ struct SourceControlSheet: View {
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+        .opacity(isEnabled ? 1.0 : 0.4)
+        .disabled(!isEnabled)
     }
 
     // MARK: - Git Action Sheet Router
@@ -307,6 +383,16 @@ struct SourceControlSheet: View {
                 sessionId: sessionId,
                 gitWorkflowState: gitWorkflowState
             )
+        case .rebaseOnMain:
+            RebaseOnMainSubSheet(
+                rpcClient: rpcClient,
+                sessionId: sessionId,
+                suggestedMainBranch: worktreeStatus?.worktree?.baseBranch,
+                divergence: divergence,
+                onConflicts: {
+                    activeGitAction = .conflictResolver
+                }
+            )
         }
     }
 
@@ -322,6 +408,29 @@ struct SourceControlSheet: View {
             if let resolvedSessions {
                 repoSessionCount = max(0, resolvedSessions.count - 1)
             }
+        }
+    }
+
+    /// Invoke `worktree.abortMerge`. The confirmation alert has already
+    /// displayed the origin-specific message; the server dispatches the
+    /// right abort semantics based on `pending_merges[sessionId].origin`.
+    /// On success the server emits `merge_aborted` which clears
+    /// `conflictBanner` via the event handler.
+    private func performAbort() async {
+        guard !isAbortingConflict else { return }
+        isAbortingConflict = true
+        defer { isAbortingConflict = false }
+        do {
+            _ = try await rpcClient.worktree.abortMerge(sessionId: sessionId)
+            pendingAbortOrigin = nil
+            // Refresh so UI reflects the post-abort state immediately
+            // rather than waiting on the next event round-trip.
+            await loadData()
+            await loadDivergence()
+            await onWorktreeStatusShouldRefresh?()
+        } catch {
+            errorMessage = "Abort failed: \(error.localizedDescription)"
+            pendingAbortOrigin = nil
         }
     }
 

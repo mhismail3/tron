@@ -20,9 +20,41 @@
 //! | `repo_lock`     | Per-repo async mutex for `sync_main` / `finalize_session` serialization |
 //! | `sync`          | `sync_main` — lock-guarded FF of local `main` from its upstream |
 //! | `finalize`      | `finalize_session` — lock-guarded merge + rebranch |
-//! | `conflict_ops`  | Conflict state machine (`start_merge_keep_conflicts`, `list_conflicts`, `resolve_conflict`, `continue_merge`, `abort_merge`) |
+//! | `rebase_on_main`| `rebase_on_main` — lock-guarded inverse (pulls main forward into the session branch, with dirty-tree auto-stash carry-over) |
+//! | `conflict_ops`  | Conflict state machine (`start_merge_keep_conflicts`, `list_conflicts`, `resolve_conflict`, `continue_merge`, `abort_merge`) with origin-aware stash pop |
 //! | `push_ops`      | `push_branch` with protected-branch rules |
 //! | `utils`         | `split_diff_by_file`, `count_diff_stats` (free functions) |
+//!
+//! ## Stash carry-over invariant
+//!
+//! When `rebase_on_main` is called with a dirty worktree it auto-stashes
+//! and writes a sidecar JSON file at `.git/tron-rebase-stash-<sid>.json`.
+//! The sidecar exists iff `PendingMergeState.auto_stash_ref.is_some()`
+//! for that session. Sidecar is removed on clean completion AND on
+//! abort; crash recovery reads it via `recovery::rebuild_pending_merges`
+//! to reattach the stash to the reconstructed merge state.
+//!
+//! ## Pending-merge origin
+//!
+//! Every `PendingMergeState` carries a `MergeOrigin`:
+//!
+//! | Origin        | Trigger                              | `continue_merge`                      | `abort_merge`                                |
+//! |---------------|--------------------------------------|---------------------------------------|----------------------------------------------|
+//! | `Finalize`    | `worktree.startMerge`                | `git merge/rebase/squash --continue`  | `git merge/rebase --abort`                   |
+//! | `RebaseOnMain`| `worktree.rebaseOnMain`              | `git rebase --continue` + pop stash   | `git rebase --abort` + pop stash (restores dirty state) |
+//! | `StashPop`    | post-rebase `git stash pop` conflict | `git stash drop <ref>`                | `git reset --hard HEAD` (stash kept on stack) |
+//!
+//! `StashPop` is synthesised by `conflict_ops::handle_post_stash_pop`
+//! when a `git stash pop` after a rebase produces unmerged paths.
+//! There's no on-disk `.git/MERGE_HEAD` / `.git/rebase-merge` for the
+//! `StashPop` origin — conflicts live purely in the index. The shared
+//! `listConflicts` / `resolveConflict` / `continueMerge` / `abortMerge`
+//! RPC surface works uniformly across all three origins; only the
+//! continue/abort side effects differ.
+//!
+//! `merge_context` routes the working directory by origin:
+//! - `Finalize` → `info.repo_root`
+//! - `RebaseOnMain` / `StashPop` → `info.worktree_path`
 
 mod branch;
 mod conflict_ops;
@@ -31,6 +63,7 @@ mod finalize;
 mod lifecycle;
 mod push_ops;
 mod queries;
+mod rebase_on_main;
 mod recovery;
 mod repo_lock;
 mod sync;

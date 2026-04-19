@@ -116,9 +116,13 @@ extension ChatViewModel {
     }
 
     func handleWorktreeConflictDetected(_ result: WorktreeConflictDetectedPlugin.Result) {
+        // Unified conflict banner — origin disambiguates between merge,
+        // rebase, and stash-pop conflict contexts; the resolver sheet
+        // adapts copy and abort semantics based on the origin.
         gitWorkflowState.conflictBanner = ConflictBanner(
             sourceBranch: result.sourceBranch,
             targetBranch: result.targetBranch,
+            origin: result.origin,
             paths: result.paths
         )
     }
@@ -134,6 +138,7 @@ extension ChatViewModel {
                 gitWorkflowState.conflictBanner = ConflictBanner(
                     sourceBranch: banner.sourceBranch,
                     targetBranch: banner.targetBranch,
+                    origin: banner.origin,
                     paths: remainingPaths
                 )
             }
@@ -167,5 +172,22 @@ extension ChatViewModel {
             startedAtMs: result.startedAtMs,
             autoAbortAtMs: result.autoAbortAtMs
         )
+    }
+
+    func handleWorktreeRebasedOnMain(_ result: WorktreeRebasedOnMainPlugin.Result) {
+        // Session branch tip moved to include main. Chips are stale;
+        // refresh divergence + worktree status so the UI reflects the
+        // new base commit.
+        gitWorkflowState.markDivergenceStale()
+        Task { await requestWorktreeStatus() }
+    }
+
+    func handleWorktreePostRebaseStashConflict(_ result: WorktreePostRebaseStashConflictPlugin.Result) {
+        // The `conflict_detected(origin = stash_pop)` event emitted by the
+        // server (via `handle_post_stash_pop`) already populates
+        // `conflictBanner`. This handler is informational: log the stash
+        // ref for diagnostics. Do not set a separate banner — all conflict
+        // surfacing flows through `conflictBanner` for UX consistency.
+        logDebug("worktree.post_rebase_stash_conflict stash=\(result.stashRef) paths=\(result.paths.count)")
     }
 }

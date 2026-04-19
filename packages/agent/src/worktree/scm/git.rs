@@ -566,16 +566,81 @@ impl GitExecutor {
         Ok(Some("stash@{0}".to_string()))
     }
 
-    /// Pop the most recent stash (or a specific ref). Returns
-    /// `Ok(())` on clean pop; surfaces conflicts as `WorktreeError::Git`
-    /// so callers can detect and leave the stash list intact.
-    pub async fn stash_pop(&self, dir: &Path, stash_ref: Option<&str>) -> Result<()> {
-        let args: Vec<&str> = match stash_ref {
-            Some(r) => vec!["stash", "pop", r],
-            None => vec!["stash", "pop"],
-        };
-        let _ = self.run(dir, &args).await?;
-        Ok(())
+    /// Stash tracked + untracked changes and return a reference usable
+    /// with `stash_pop`.
+    ///
+    /// Implementation: `git stash push -u -m <msg>` places the entry at
+    /// `stash@{0}`. We return that ref directly. The coordinator's
+    /// per-repo lock ensures no parallel stash operations can shift our
+    /// entry before `stash_pop` runs. Crash recovery reads the same ref
+    /// from the sidecar file and pops it — if the user manually pushed
+    /// another stash on top during the crash window, recovery falls back
+    /// to a warning rather than popping the wrong entry.
+    ///
+    /// Used by `rebase_on_main` when the worktree is dirty at call time.
+    pub async fn stash_create_with_untracked(
+        &self,
+        dir: &Path,
+        message: &str,
+    ) -> Result<String> {
+        let _ = self
+            .run(dir, &["stash", "push", "-u", "-m", message])
+            .await?;
+        Ok("stash@{0}".to_string())
+    }
+
+    /// Drop a specific stash entry. Idempotent-ish: git returns a non-zero
+    /// exit code if the stash ref doesn't exist — we treat that as success
+    /// (same end state: stash is gone). Used by `continue_merge` for
+    /// `MergeOrigin::StashPop` to clear the stash once conflicts are
+    /// resolved and integrated into the working tree.
+    pub async fn stash_drop(&self, dir: &Path, stash_ref: &str) -> Result<()> {
+        let (_stdout, stderr, ok) = self
+            .run_capture(dir, &["stash", "drop", stash_ref])
+            .await?;
+        if ok {
+            return Ok(());
+        }
+        // Typical failure: `error: <ref> is not a valid reference` — the
+        // stash is already gone. Harmless; report clean.
+        let s = stderr.to_lowercase();
+        if s.contains("not a valid reference") || s.contains("no stash entries") {
+            return Ok(());
+        }
+        Err(WorktreeError::Git(format!(
+            "git stash drop {stash_ref} failed: {}",
+            stderr.trim()
+        )))
+    }
+
+    /// Pop a specific stash entry. On success returns an empty `Vec`.
+    /// On conflict returns the list of unmerged file paths and LEAVES
+    /// the stash on the stack (matching `git stash pop`'s behavior — git
+    /// preserves a stash when the pop produces unmerged entries so the
+    /// user can retry or drop it manually).
+    ///
+    /// Callers distinguish "pop conflicted" from "pop failed for other
+    /// reasons" by: empty vec == clean, non-empty == conflicts, `Err`
+    /// == genuine git error.
+    pub async fn stash_pop(&self, dir: &Path, stash_ref: &str) -> Result<Vec<String>> {
+        let (_stdout, stderr, ok) = self
+            .run_capture(dir, &["stash", "pop", stash_ref])
+            .await?;
+        if ok {
+            return Ok(Vec::new());
+        }
+        // Non-zero exit — typically "CONFLICT: merge conflict in <path>".
+        // Query the index for unmerged paths; if any, report them as the
+        // conflict set. If none, the failure was something else (ref
+        // missing, working tree not clean, etc.) — propagate.
+        let conflicts = self.conflict_files(dir).await.unwrap_or_default();
+        if conflicts.is_empty() {
+            return Err(WorktreeError::Git(format!(
+                "git stash pop {stash_ref} failed: {}",
+                stderr.trim()
+            )));
+        }
+        Ok(conflicts)
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -2225,8 +2290,76 @@ mod phase1_tests {
         assert!(!dir.path().join("wip.txt").exists(),
             "stash should remove wip from working tree");
 
-        git.stash_pop(dir.path(), None).await.unwrap();
+        let conflicts = git.stash_pop(dir.path(), "stash@{0}").await.unwrap();
+        assert!(conflicts.is_empty(), "clean pop should report no conflicts");
         assert_eq!(std::fs::read_to_string(dir.path().join("wip.txt")).unwrap(), "contents");
+    }
+
+    #[tokio::test]
+    async fn stash_create_with_untracked_captures_and_pops() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        // Write an untracked file — `-u` flag means it must be captured.
+        std::fs::write(dir.path().join("untracked.txt"), "new").unwrap();
+        std::fs::write(dir.path().join("README.md"), "# modified").unwrap();
+
+        let stash_ref = git
+            .stash_create_with_untracked(dir.path(), "tron-rebase-test")
+            .await
+            .unwrap();
+        assert_eq!(stash_ref, "stash@{0}");
+        // Working tree clean after stash.
+        assert!(!git.has_changes(dir.path()).await.unwrap());
+        assert!(!dir.path().join("untracked.txt").exists());
+
+        let conflicts = git.stash_pop(dir.path(), &stash_ref).await.unwrap();
+        assert!(conflicts.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("untracked.txt")).unwrap(),
+            "new"
+        );
+    }
+
+    #[tokio::test]
+    async fn stash_drop_removes_entry_idempotent() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        std::fs::write(dir.path().join("README.md"), "# modified").unwrap();
+        let stash_ref = git
+            .stash_create_with_untracked(dir.path(), "tron-drop-test")
+            .await
+            .unwrap();
+
+        // First drop — stash exists, should succeed.
+        git.stash_drop(dir.path(), &stash_ref).await.unwrap();
+
+        // Second drop — stash no longer exists; must succeed (idempotent).
+        git.stash_drop(dir.path(), &stash_ref).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn stash_pop_reports_unmerged_paths_on_conflict() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        // Commit a baseline f.txt so it's tracked.
+        std::fs::write(dir.path().join("f.txt"), "base\n").unwrap();
+        let _ = git.commit_all(dir.path(), "base f.txt").await.unwrap();
+        // Modify in working tree — stash picks up the tracked change.
+        std::fs::write(dir.path().join("f.txt"), "line A\n").unwrap();
+        let stash_ref = git
+            .stash_create_with_untracked(dir.path(), "A")
+            .await
+            .unwrap();
+        // Commit a different change to the same file so popping conflicts.
+        std::fs::write(dir.path().join("f.txt"), "line B\n").unwrap();
+        let _ = git.commit_all(dir.path(), "line B").await.unwrap();
+
+        let conflicts = git.stash_pop(dir.path(), &stash_ref).await.unwrap();
+        assert!(
+            !conflicts.is_empty(),
+            "conflicting pop must report unmerged paths"
+        );
+        assert!(conflicts.iter().any(|p| p == "f.txt"));
     }
 
     // ── config / refs ──────────────────────────────────────────────

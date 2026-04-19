@@ -504,6 +504,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
         TronEvent::WorktreeConflictDetected {
             source_branch,
             target_branch,
+            origin,
             paths,
             ..
         } => Some(session_scoped(
@@ -512,6 +513,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             Some(json!({
                 "sourceBranch": source_branch,
                 "targetBranch": target_branch,
+                "origin": origin,
                 "paths": paths,
             })),
         )),
@@ -532,6 +534,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
         TronEvent::WorktreeMergeContinued {
             merge_commit,
             strategy,
+            origin,
             ..
         } => Some(session_scoped(
             event,
@@ -539,16 +542,21 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             Some(json!({
                 "mergeCommit": merge_commit,
                 "strategy": strategy,
+                "origin": origin,
             })),
         )),
         TronEvent::WorktreeMergeAborted {
-            strategy, reason, ..
+            strategy,
+            reason,
+            origin,
+            ..
         } => Some(session_scoped(
             event,
             "worktree.merge_aborted",
             Some(json!({
                 "strategy": strategy,
                 "reason": reason,
+                "origin": origin,
             })),
         )),
         TronEvent::WorktreePushed {
@@ -585,6 +593,38 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "strategy": strategy,
                 "startedAtMs": started_at_ms,
                 "autoAbortAtMs": auto_abort_at_ms,
+            })),
+        )),
+        TronEvent::WorktreeRebasedOnMain {
+            main_branch,
+            strategy,
+            old_base_commit,
+            new_base_commit,
+            main_commits_incorporated,
+            had_auto_stash,
+            ..
+        } => Some(session_scoped(
+            event,
+            "worktree.rebased_on_main",
+            Some(json!({
+                "mainBranch": main_branch,
+                "strategy": strategy,
+                "oldBaseCommit": old_base_commit,
+                "newBaseCommit": new_base_commit,
+                "mainCommitsIncorporated": main_commits_incorporated,
+                "hadAutoStash": had_auto_stash,
+            })),
+        )),
+        TronEvent::WorktreePostRebaseStashConflict {
+            stash_ref,
+            paths,
+            ..
+        } => Some(session_scoped(
+            event,
+            "worktree.post_rebase_stash_conflict",
+            Some(json!({
+                "stashRef": stash_ref,
+                "paths": paths,
             })),
         )),
         TronEvent::RepoLockAcquired {

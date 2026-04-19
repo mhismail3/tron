@@ -151,6 +151,10 @@ define_events! {
         WorktreePushed => "worktree.pushed" => payloads::worktree::WorktreePushedPayload,
         /// Pending merge detected during crash recovery.
         WorktreePendingMergeDetected => "worktree.pending_merge_detected" => payloads::worktree::WorktreePendingMergeDetectedPayload,
+        /// Session branch rebased onto main (clean or post-conflict resolution).
+        WorktreeRebasedOnMain => "worktree.rebased_on_main" => payloads::worktree::WorktreeRebasedOnMainPayload,
+        /// `git stash pop` after a successful rebase produced unmerged paths.
+        WorktreePostRebaseStashConflict => "worktree.post_rebase_stash_conflict" => payloads::worktree::WorktreePostRebaseStashConflictPayload,
         /// Per-repo lock acquired by a session.
         RepoLockAcquired => "repo.lock_acquired" => payloads::repo::RepoLockAcquiredPayload,
         /// Per-repo lock released.
@@ -177,7 +181,8 @@ define_events! {
             WorktreeMainSynced, WorktreeSessionFinalized,
             WorktreeMergeStarted, WorktreeConflictDetected, WorktreeConflictResolved,
             WorktreeMergeContinued, WorktreeMergeAborted, WorktreePushed,
-            WorktreePendingMergeDetected
+            WorktreePendingMergeDetected, WorktreeRebasedOnMain,
+            WorktreePostRebaseStashConflict
         ],
         /// Whether this is a repo-wide event (`repo.*`).
         is_repo_type => [RepoLockAcquired, RepoLockReleased, RepoMainAdvanced],
@@ -200,7 +205,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 73] = [
+    const EXPECTED: [(EventType, &str); 75] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -310,6 +315,14 @@ mod tests {
             EventType::WorktreePendingMergeDetected,
             "worktree.pending_merge_detected",
         ),
+        (
+            EventType::WorktreeRebasedOnMain,
+            "worktree.rebased_on_main",
+        ),
+        (
+            EventType::WorktreePostRebaseStashConflict,
+            "worktree.post_rebase_stash_conflict",
+        ),
         (EventType::RepoLockAcquired, "repo.lock_acquired"),
         (EventType::RepoLockReleased, "repo.lock_released"),
         (EventType::RepoMainAdvanced, "repo.main_advanced"),
@@ -317,7 +330,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 73);
+        assert_eq!(ALL_EVENT_TYPES.len(), 75);
     }
 
     #[test]
