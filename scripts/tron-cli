@@ -66,6 +66,9 @@ cmd_help() {
         echo "  install         Initial setup (launchd + CLI)"
         echo "  uninstall       Remove service (preserves data)"
         echo "  auto-deploy     Remote auto-deploy watcher"
+        if [ "$(uname)" = "Darwin" ]; then
+            echo "  ios             Build/run TronMobile on iOS devices (use -h for options)"
+        fi
         echo ""
     else
         echo -e "${DIM}Dev commands available when workspace is installed.${NC}"
@@ -91,7 +94,7 @@ case "$1" in
     rollback)        shift; cmd_rollback "$@" ;;
     login)           shift; cmd_login "$@" ;;
     # Dev (delegate to workspace)
-    dev|deploy|ci|bench|preflight|setup|install|uninstall|auto-deploy)
+    dev|deploy|ci|bench|preflight|setup|install|uninstall|auto-deploy|ios)
         delegate_to_workspace "$@" ;;
     *)
         print_error "Unknown command: $1"

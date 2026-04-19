@@ -54,6 +54,13 @@ fi
 
 source "$SCRIPT_DIR/tron-lib.sh"
 
+# iOS development commands (workspace-only, macOS-only).
+# Loaded lazily: only sourced on macOS where xcodebuild is available.
+# Never loaded by tron-cli (production runtime path).
+if [[ "$(uname)" == "Darwin" ]] && [[ -f "$SCRIPT_DIR/tron-ios.sh" ]]; then
+    source "$SCRIPT_DIR/tron-ios.sh"
+fi
+
 #=============================================================================
 # WORKSPACE-ONLY CONFIGURATION
 #=============================================================================
@@ -1458,6 +1465,9 @@ cmd_help() {
     echo "  ci              Run CI checks (fmt, check, clippy, test, bench, doc)"
     echo "  bench           Performance benchmarks (run, bless, compare)"
     echo "  setup           First-time project setup"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "  ios             Build/run TronMobile on iOS devices (use -h for options)"
+    fi
     echo ""
     echo -e "${BOLD}Deployment (workspace only):${NC}"
     echo "  preflight       Pre-deploy infrastructure check"
@@ -1511,5 +1521,6 @@ case "$1" in
     login)     shift; cmd_login "$@" ;;
     uninstall) cmd_uninstall ;;
     auto-deploy) shift; cmd_auto_deploy "$@" ;;
+    ios)       shift; cmd_ios "$@" ;;
     *) print_error "Unknown command: $1"; cmd_help; exit 1 ;;
 esac
