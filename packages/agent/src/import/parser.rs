@@ -55,9 +55,9 @@ pub fn decode_project_dir(encoded: &str) -> String {
     let naive = encoded.replace('-', "/");
 
     // Try to find the real path by checking the filesystem.
-    // For "-Users-moose-Downloads-projects-mohsin-ismail", the naive decode
-    // gives "/Users/moose/Downloads/projects/mohsin/ismail" but the real path
-    // is "/Users/moose/Downloads/projects/mohsin-ismail".
+    // The naive decode is ambiguous when a real directory name contains a
+    // hyphen (e.g. `my-project`): we can't tell whether `-my-project` meant
+    // `/my-project` or `/my/project` without consulting the filesystem.
     let naive_path = Path::new(&naive);
     if naive_path.exists() {
         return naive;

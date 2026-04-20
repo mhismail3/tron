@@ -112,14 +112,17 @@ pub fn remove_skill_references(prompt: &str, references: &[SkillReference]) -> S
 /// Build a lightweight skill index listing all available skills.
 ///
 /// Returns a markdown block with one line per skill (`- @name — description`).
+/// Skills are identified by `@name`; activation is handled by the injector's
+/// `@name` reference mechanism, so the index does not (and must not) embed
+/// per-service filesystem paths — a skill may live under `~/.tron/skills/` or
+/// `~/.claude/skills/` depending on the service folder it was discovered in.
 /// Returns an empty string if no skills are provided.
 pub fn build_skill_index(skills: &[SkillInfo]) -> String {
     if skills.is_empty() {
         return String::new();
     }
     use std::fmt::Write;
-    let mut out =
-        String::from("# Available Skills\n\nTo load a skill, read its file at `~/.tron/skills/<name>/SKILL.md`.\n\n");
+    let mut out = String::from("# Available Skills\n\n");
     for skill in skills {
         if skill.description.is_empty() {
             let _ = writeln!(out, "- `@{}`", skill.name);
@@ -285,6 +288,7 @@ mod tests {
             content: content.to_string(),
             frontmatter: SkillFrontmatter::default(),
             source: SkillSource::Global,
+            service: "tron".to_string(),
             scope_dir: String::new(),
             path: String::new(),
             skill_md_path: String::new(),
@@ -310,6 +314,7 @@ mod tests {
                 ..Default::default()
             },
             source: SkillSource::Global,
+            service: "tron".to_string(),
             scope_dir: String::new(),
             path: String::new(),
             skill_md_path: String::new(),
@@ -507,6 +512,7 @@ mod tests {
             display_name: name.to_string(),
             description: description.to_string(),
             source: SkillSource::Global,
+            service: "tron".to_string(),
             scope_dir: String::new(),
             tags: None,
         }
@@ -571,8 +577,29 @@ mod tests {
     fn test_build_skill_index_header_content() {
         let skills = vec![make_skill_info("any", "Any skill")];
         let index = build_skill_index(&skills);
-        assert!(index.contains("~/.tron/skills/<name>/SKILL.md"));
-        assert!(index.contains("Available Skills"));
+        assert!(index.contains("# Available Skills"));
+        assert!(index.contains("@any"));
+    }
+
+    #[test]
+    fn skill_index_does_not_hardcode_any_service_path() {
+        let skills = vec![
+            make_skill_info("foo", "first"),
+            make_skill_info("bar", "second"),
+        ];
+        let index = build_skill_index(&skills);
+        // The index must not bake in a per-service filesystem path; skills may
+        // live under .tron/skills or .claude/skills, and future services too.
+        assert!(
+            !index.contains("~/.tron/skills"),
+            "index must not reference ~/.tron/skills — services are not singular"
+        );
+        assert!(
+            !index.contains("~/.claude/skills"),
+            "index must not reference ~/.claude/skills — services are not singular"
+        );
+        assert!(index.contains("@foo"));
+        assert!(index.contains("@bar"));
     }
 
     #[test]

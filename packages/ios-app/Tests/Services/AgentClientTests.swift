@@ -69,7 +69,7 @@ struct AgentClientTests {
             activateSkillCallCount += 1
             lastActivatedSkill = skillName
             let json = """
-            {"success": true, "skill": {"name": "\(skillName)", "source": "global"}}
+            {"success": true, "skill": {"name": "\(skillName)", "source": "global", "service": "tron"}}
             """
             return try! JSONDecoder().decode(SkillActivateResult.self, from: json.data(using: .utf8)!)
         }

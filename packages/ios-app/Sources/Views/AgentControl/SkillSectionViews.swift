@@ -129,6 +129,10 @@ struct ProjectSkillRow: View {
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronEmerald)
 
+                if skill.serviceTag == .claude {
+                    SkillBadges(skill: skill, style: .capsule)
+                }
+
                 Spacer()
 
                 if let scope = skill.scopeDir, !scope.isEmpty {
@@ -190,6 +194,10 @@ struct SkillReferenceRow: View {
                 Text("@\(skill.name)")
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronCyan)
+
+                if skill.serviceTag == .claude {
+                    SkillBadges(skill: skill, style: .capsule)
+                }
 
                 Spacer()
 
@@ -259,6 +267,22 @@ struct AddedSkillRow: View {
                 Text("@\(skill.name)")
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(sourceColor)
+
+                if skill.serviceTag == .claude {
+                    // AddedSkillInfo doesn't carry enough Skill fields to reuse
+                    // SkillBadges directly; construct a minimal proxy.
+                    SkillBadges(
+                        skill: Skill(
+                            name: skill.name,
+                            displayName: skill.name,
+                            description: "",
+                            source: skill.source,
+                            tags: nil,
+                            service: skill.service
+                        ),
+                        style: .capsule
+                    )
+                }
 
                 Spacer()
 

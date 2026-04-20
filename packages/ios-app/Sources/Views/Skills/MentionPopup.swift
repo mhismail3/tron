@@ -133,15 +133,7 @@ private struct MentionRow: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(tint.name)
 
-                        if skill.source == .project {
-                            Text("project")
-                                .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                                .foregroundStyle(.tronEmerald)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Color.tronEmerald.opacity(0.15))
-                                .clipShape(Capsule())
-                        }
+                        SkillBadges(skill: skill, style: .capsule)
                     }
 
                     Text(skill.description)

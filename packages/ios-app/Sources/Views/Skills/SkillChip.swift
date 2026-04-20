@@ -25,11 +25,7 @@ struct SkillChip: View {
                 .foregroundStyle(tint.name)
                 .lineLimit(1)
 
-            if skill.source == .project {
-                Image(systemName: "folder.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeXXS))
-                    .foregroundStyle(.tronEmerald.opacity(0.6))
-            }
+            SkillBadges(skill: skill, style: .icon)
 
             if showRemoveButton {
                 Button {

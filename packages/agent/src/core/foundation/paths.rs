@@ -7,13 +7,6 @@
 
 use std::path::PathBuf;
 
-/// Fallback when `$HOME` is not set.
-///
-/// Uses a fixed path under the owner's tron workspace so that files
-/// created by a headless/launchd process still land somewhere sensible
-/// rather than polluting `/tmp`.
-const FALLBACK_HOME: &str = "/Users/moose/.tron/system";
-
 // ── Directory segment constants ────────────────────────────────────────
 
 /// Directory name constants for the `~/.tron/` layout.
@@ -94,9 +87,28 @@ pub mod files {
 
 // ── Core path functions ────────────────────────────────────────────────
 
-/// Get the user's home directory, falling back to [`FALLBACK_HOME`] if `$HOME` is unset.
+/// Resolve the user's home directory.
+///
+/// Order:
+/// 1. `$HOME` env var — set by the shell and by launchd's `UserName` key.
+/// 2. `home::home_dir()` — uses `getpwuid_r` on Unix, the platform-canonical
+///    lookup when the env var is absent (e.g. some sandboxed cron contexts).
+///
+/// Panics if neither resolves. Every path helper in this module descends
+/// from this function, so silently falling back to a writable tempdir would
+/// risk corrupting the wrong user's data on a shared host or masking a broken
+/// install. Failing loudly is the only safe option.
 pub fn home_dir() -> String {
-    std::env::var("HOME").unwrap_or_else(|_| FALLBACK_HOME.to_string())
+    if let Ok(h) = std::env::var("HOME") {
+        return h;
+    }
+    if let Some(h) = home::home_dir() {
+        return h.to_string_lossy().into_owned();
+    }
+    panic!(
+        "tron: cannot resolve a home directory — $HOME is unset and home::home_dir() returned None. \
+         Every on-disk path descends from this value; refusing to fall back to a guessed location."
+    );
 }
 
 /// Get the `~/.tron` directory path.
@@ -288,6 +300,52 @@ mod tests {
     fn home_dir_returns_env_var() {
         let home = std::env::var("HOME").unwrap();
         assert_eq!(home_dir(), home);
+    }
+
+    #[test]
+    fn paths_source_has_no_hardcoded_user_directory() {
+        let src = include_str!("paths.rs");
+        // Construct the needle from parts so this very test doesn't trigger itself.
+        let needle = format!("/Users/{}", "moose");
+        assert!(
+            !src.contains(&needle),
+            "hardcoded user path leaked back into paths.rs"
+        );
+    }
+
+    /// Regression guard covering every production file this refactor touched.
+    /// Extending the list is a cheap review-time change.
+    #[test]
+    fn skill_detection_source_has_no_hardcoded_user_directory() {
+        // Construct the needle from parts so this very test doesn't self-match.
+        let needle = format!("/Users/{}", "moose");
+        let offenders: &[(&str, &str)] = &[
+            ("paths.rs", include_str!("paths.rs")),
+            (
+                "skills/model/constants.rs",
+                include_str!("../../skills/model/constants.rs"),
+            ),
+            (
+                "skills/model/types.rs",
+                include_str!("../../skills/model/types.rs"),
+            ),
+            (
+                "skills/discovery/loader.rs",
+                include_str!("../../skills/discovery/loader.rs"),
+            ),
+            (
+                "skills/discovery/registry.rs",
+                include_str!("../../skills/discovery/registry.rs"),
+            ),
+            (
+                "skills/runtime/injector.rs",
+                include_str!("../../skills/runtime/injector.rs"),
+            ),
+            ("skills/mod.rs", include_str!("../../skills/mod.rs")),
+        ];
+        for (name, src) in offenders {
+            assert!(!src.contains(&needle), "hardcoded user path in {name}");
+        }
     }
 
     #[test]

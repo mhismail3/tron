@@ -10,12 +10,17 @@ use crate::server::rpc::handlers::{opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 
 /// Shape skill for the wire format (excludes internal fields: skillMdPath, lastModified, frontmatter).
+///
+/// INVARIANT: must emit every field that iOS's `SkillMetadata` requires. When
+/// adding a field to `SkillMetadata`, add it here too — there is a test in
+/// this module that pins the expected keys.
 fn skill_to_wire(skill: &crate::skills::types::SkillMetadata) -> Value {
     let mut v = serde_json::json!({
         "name": skill.name,
         "displayName": skill.display_name,
         "description": skill.description,
         "source": skill.source,
+        "service": skill.service,
         "tags": skill.frontmatter.tags,
         "content": skill.content,
         "path": skill.path,
@@ -121,6 +126,7 @@ mod tests {
             content: format!("{name} content"),
             frontmatter: SkillFrontmatter::default(),
             source: SkillSource::Global,
+            service: "tron".to_string(),
             scope_dir: String::new(),
             path: String::new(),
             skill_md_path: String::new(),
@@ -244,5 +250,89 @@ mod tests {
         assert!(skills.iter().any(|s| s["name"] == "alpha"));
         assert!(skills.iter().any(|s| s["name"] == "beta"));
         assert!(result.get("totalCount").is_none());
+    }
+
+    /// Pins the skill.get wire schema so any field added to SkillMetadata
+    /// that iOS depends on is caught here. Regression from the service-field
+    /// refactor where `skill_to_wire` silently omitted `service` and iOS
+    /// decode threw "Could not load skill content" on every tap.
+    #[tokio::test]
+    async fn get_skill_wire_includes_all_ios_fields() {
+        let ctx = make_test_context();
+        ctx.skill_registry.write().refresh("/tmp");
+        let mut meta = make_skill("xcode");
+        meta.service = "claude".to_string();
+        ctx.skill_registry.write().insert(meta);
+
+        let result = GetSkillHandler
+            .handle(Some(json!({"name": "xcode"})), &ctx)
+            .await
+            .unwrap();
+
+        let skill = &result["skill"];
+        for key in [
+            "name",
+            "displayName",
+            "description",
+            "source",
+            "service",
+            "tags",
+            "content",
+            "path",
+            "additionalFiles",
+        ] {
+            assert!(
+                skill.get(key).is_some(),
+                "skill.get wire is missing required field `{key}` — iOS SkillMetadata decode will fail"
+            );
+        }
+        assert_eq!(skill["service"], "claude");
+    }
+
+    /// End-to-end: `~/.claude/skills` symlinked to another dir must still be
+    /// discovered and its SKILL.md content returned via skill.get.
+    /// Mirrors the real-world dotfiles setup where `~/.claude/skills` is a
+    /// symlink to `~/.dotfiles/claude/skills`.
+    #[tokio::test]
+    async fn get_skill_follows_symlinked_global_dir() {
+        use std::os::unix::fs::symlink;
+        use tempfile::TempDir;
+
+        let fake_home = TempDir::new().unwrap();
+        let dotfiles = TempDir::new().unwrap();
+
+        // Real skills live under dotfiles/claude/skills/probe/
+        let real_skills = dotfiles.path().join("claude").join("skills");
+        std::fs::create_dir_all(&real_skills).unwrap();
+        let skill_dir = real_skills.join("probe");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: Probe\ndescription: from symlink\n---\n# Probe\n\nbody\n",
+        )
+        .unwrap();
+
+        // ~/.claude/skills -> <dotfiles>/claude/skills (the symlink under test)
+        std::fs::create_dir_all(fake_home.path().join(".claude")).unwrap();
+        symlink(&real_skills, fake_home.path().join(".claude").join("skills")).unwrap();
+
+        // Scan via the home-overriding entry point and verify the skill comes back
+        // with its loaded content, tagged as the claude service.
+        let (global, _) = crate::skills::loader::scan_all_for_home(
+            fake_home.path().to_str().unwrap(),
+            fake_home.path().to_str().unwrap(),
+        );
+
+        let probe = global
+            .skills
+            .iter()
+            .find(|s| s.name == "probe")
+            .expect("probe skill must be discovered through the symlink");
+        assert_eq!(probe.service, "claude");
+        assert!(
+            probe.content.contains("body"),
+            "SKILL.md content must be read through the symlink"
+        );
+        assert_eq!(probe.display_name, "Probe");
     }
 }

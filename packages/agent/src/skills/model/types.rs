@@ -9,9 +9,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SkillSource {
-    /// Loaded from `~/.tron/skills/`.
+    /// Loaded from any global skills directory under `$HOME`
+    /// (e.g. `~/.tron/skills/`, `~/.claude/skills/`).
     Global,
-    /// Loaded from project-local `.claude/skills/` or `.tron/skills/`.
+    /// Loaded from a project-local `.tron/skills/` or `.claude/skills/` at any depth.
     Project,
 }
 
@@ -105,6 +106,10 @@ pub struct SkillMetadata {
     pub frontmatter: SkillFrontmatter,
     /// Where this skill was loaded from.
     pub source: SkillSource,
+    /// Which service folder hosted this skill — one of
+    /// [`crate::skills::constants::SKILL_SERVICE_DIRS`] (`"tron"`, `"claude"`, …).
+    /// Used by the iOS UI to badge e.g. Claude-Code skills distinctly from Tron-native ones.
+    pub service: String,
     /// Relative path from project root to the package containing this skill.
     /// Empty string for root-level skills. E.g. "packages/ios-app".
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -131,6 +136,9 @@ pub struct SkillInfo {
     pub description: String,
     /// Source location.
     pub source: SkillSource,
+    /// Which service folder hosted this skill — one of
+    /// [`crate::skills::constants::SKILL_SERVICE_DIRS`] (`"tron"`, `"claude"`, …).
+    pub service: String,
     /// Relative path from project root to the package containing this skill.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub scope_dir: String,
@@ -146,6 +154,7 @@ impl From<&SkillMetadata> for SkillInfo {
             display_name: meta.display_name.clone(),
             description: meta.description.clone(),
             source: meta.source,
+            service: meta.service.clone(),
             scope_dir: meta.scope_dir.clone(),
             tags: meta.frontmatter.tags.clone(),
         }
@@ -234,6 +243,7 @@ mod tests {
             content: "content".to_string(),
             frontmatter: SkillFrontmatter::default(),
             source: SkillSource::Project,
+            service: "tron".to_string(),
             scope_dir: scope.to_string(),
             path: "/tmp/test".to_string(),
             skill_md_path: "/tmp/test/SKILL.md".to_string(),
@@ -244,9 +254,28 @@ mod tests {
 
     #[test]
     fn scope_dir_default_empty() {
-        let json = r#"{"name":"x","displayName":"x","description":"","content":"","frontmatter":{},"source":"global","path":"","skillMdPath":"","additionalFiles":[],"lastModified":0}"#;
+        let json = r#"{"name":"x","displayName":"x","description":"","content":"","frontmatter":{},"source":"global","service":"tron","path":"","skillMdPath":"","additionalFiles":[],"lastModified":0}"#;
         let meta: SkillMetadata = serde_json::from_str(json).unwrap();
         assert_eq!(meta.scope_dir, "");
+    }
+
+    #[test]
+    fn service_field_roundtrips() {
+        let meta = make_metadata("");
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(json.contains(r#""service":"tron""#));
+        let round: SkillMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(round.service, "tron");
+    }
+
+    #[test]
+    fn skill_info_from_metadata_carries_service() {
+        let mut meta = make_metadata("");
+        meta.service = "claude".to_string();
+        let info = SkillInfo::from(&meta);
+        assert_eq!(info.service, "claude");
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains(r#""service":"claude""#));
     }
 
     #[test]

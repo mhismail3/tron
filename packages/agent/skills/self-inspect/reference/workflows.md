@@ -11,7 +11,7 @@ DB="$HOME/.tron/system/database/log.db"
 1. `curl -s http://localhost:9847/health/deep | jq .` — full server health with subsystem checks
 2. `sqlite3 "$DB" "SELECT (SELECT COUNT(*) FROM sessions) as sessions, (SELECT COUNT(*) FROM events) as events, (SELECT COUNT(*) FROM logs) as logs;"` — database stats
 3. `cat ~/.tron/system/settings.json | jq .` — verify settings
-4. `du -sh ~/.tron/system/ ~/.tron/workspace/ ~/.tron/skills/` — disk usage
+4. `du -sh ~/.tron/system/ ~/.tron/workspace/ ~/.tron/skills/ ~/.claude/skills/ 2>/dev/null` — disk usage (both skill roots; `~/.claude/skills/` may not exist on fresh Macs)
 
 ## Workflow 2: Investigate a Failed Session
 

@@ -107,19 +107,25 @@ struct UserMessagePayload {
         self.imageCount = payload.int("imageCount")
         self.attachments = extractedAttachments.isEmpty ? nil : extractedAttachments
 
-        // Parse skills from payload
+        // Parse skills from payload. `service` is populated for events written
+        // after the service-tagging refactor; older stored events omit it, in
+        // which case we fall through to the Skill.init default ("tron"), so no
+        // service badge renders for historic activations — matching pre-refactor
+        // display behavior.
         if let skillsArray = payload["skills"]?.value as? [[String: Any]] {
             self.skills = skillsArray.compactMap { skillDict -> Skill? in
                 guard let name = skillDict["name"] as? String else { return nil }
                 let sourceString = skillDict["source"] as? String ?? "project"
                 let source: SkillSource = sourceString == "global" ? .global : .project
                 let displayName = skillDict["displayName"] as? String ?? name
+                let service = skillDict["service"] as? String ?? SkillService.tron.rawValue
                 return Skill(
                     name: name,
                     displayName: displayName,
                     description: "",
                     source: source,
-                    tags: nil
+                    tags: nil,
+                    service: service
                 )
             }
         } else {

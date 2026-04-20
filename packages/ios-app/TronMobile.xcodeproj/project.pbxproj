@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		005F0EAD1650D21207B9E1EB /* TokenRecordParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42B5221F1C55EB7298073D33 /* TokenRecordParsingTests.swift */; };
+		007C5F796457A9BE33CDC576 /* SkillBadges.swift in Sources */ = {isa = PBXBuildFile; fileRef = F55A5B1F4F2835F20EBBCD35 /* SkillBadges.swift */; };
 		0098504E27110ABA5526A277 /* ChatNotificationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14179D8DE18C8395648834F8 /* ChatNotificationCoordinator.swift */; };
 		00A15F190A47E39FC6651A6A /* ProcessedEventItemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E428D013A421C413FF3E423 /* ProcessedEventItemTests.swift */; };
 		015EA8A6D91D8CF64EB6C02A /* TokenRecordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67AAAFBBBB189F7F66F3242A /* TokenRecordTests.swift */; };
@@ -321,6 +322,7 @@
 		6769C4A760E9872FC4462501 /* MentionDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1C9A2BCF89A42D355F6C52 /* MentionDetector.swift */; };
 		67F1350335FAA4CCC8F6E85E /* TronColorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3B02B6C8363802CE2163B3 /* TronColorsTests.swift */; };
 		6855A8197F571DD7F96D9897 /* CommandToolTypesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE3B9CE86236E7F465571D9 /* CommandToolTypesTests.swift */; };
+		687F69893C5B01B1EB3D4256 /* SkillBadgesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7A8006F04F60CE707AB111 /* SkillBadgesTests.swift */; };
 		68D94CD30CBF8CC7B3012639 /* TextContentLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCA7437FC583F0F161B4DB24 /* TextContentLayoutTests.swift */; };
 		68F10F5CFF9AE69C663A5567 /* LoggingContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC475667BC6878E548D29BB1 /* LoggingContext.swift */; };
 		6991D3409DF47BD2DE13A4CA /* MockRPCTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77732E746FC2BA58CA940868 /* MockRPCTransport.swift */; };
@@ -898,6 +900,7 @@
 		1CA3462B5E6E278A66E9E9B7 /* VoiceNotesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesListView.swift; sourceTree = "<group>"; };
 		1CB0A79C220439F74FA4C4BB /* background-white.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "background-white.png"; sourceTree = "<group>"; };
 		1CF5274343CE2A3872EBFBC6 /* ErrorPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorPlugin.swift; sourceTree = "<group>"; };
+		1D7A8006F04F60CE707AB111 /* SkillBadgesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillBadgesTests.swift; sourceTree = "<group>"; };
 		1DBE6EFFB8AA5CA88B752F18 /* PromptLibrarySettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptLibrarySettingsPage.swift; sourceTree = "<group>"; };
 		1E1E2A2B22732B153F35C836 /* ConnectionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionCoordinator.swift; sourceTree = "<group>"; };
 		1EB42A678D783DF00F87C9A2 /* MarkdownBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockView.swift; sourceTree = "<group>"; };
@@ -1530,6 +1533,7 @@
 		F4C6348A82F197609B6FCECA /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
 		F4CFC0C58B7F643E839F5FCA /* CameraCaptureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureSheet.swift; sourceTree = "<group>"; };
 		F4DF01E5A7982A974BC563E3 /* LlmHookResultPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmHookResultPlugin.swift; sourceTree = "<group>"; };
+		F55A5B1F4F2835F20EBBCD35 /* SkillBadges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillBadges.swift; sourceTree = "<group>"; };
 		F58086E60ECF8827D8CDE511 /* ServerRestartingPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRestartingPluginTests.swift; sourceTree = "<group>"; };
 		F5C1DF1578EC7398CF56B21D /* RPCTypes+Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Events.swift"; sourceTree = "<group>"; };
 		F67ACAB616C4685DA20D92A8 /* IBMPlexMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Medium.ttf"; sourceTree = "<group>"; };
@@ -1991,6 +1995,7 @@
 			isa = PBXGroup;
 			children = (
 				8CF1ADB153C9B41F03256856 /* MentionPopup.swift */,
+				F55A5B1F4F2835F20EBBCD35 /* SkillBadges.swift */,
 				B05A0A587C0059CD96931E66 /* SkillChip.swift */,
 				081C39F4A377A4E0808FCA02 /* SkillDetailSheet.swift */,
 			);
@@ -3027,6 +3032,7 @@
 				3857EF703C066E11ED73DC37 /* NotificationPillTests.swift */,
 				4E428D013A421C413FF3E423 /* ProcessedEventItemTests.swift */,
 				FF618F1408E1EB525C9C0091 /* SessionTitleIconsTests.swift */,
+				1D7A8006F04F60CE707AB111 /* SkillBadgesTests.swift */,
 				3B3B0877E54541B6F3F6B054 /* SkillDetailSheetTests.swift */,
 				8E689E779C8C57917FB8E8C5 /* SourceChangesSheetTests.swift */,
 				FCA7437FC583F0F161B4DB24 /* TextContentLayoutTests.swift */,
@@ -4023,6 +4029,7 @@
 				5101A4562E51C30666F82503 /* SineWaveView.swift in Sources */,
 				38E4283F5D01D1F3B2AA3F2E /* Skill.swift in Sources */,
 				0FCDD0C9A4ACD491646C64B8 /* SkillActivatedPlugin.swift in Sources */,
+				007C5F796457A9BE33CDC576 /* SkillBadges.swift in Sources */,
 				955C382598FB1D0FCF2CFF39 /* SkillChip.swift in Sources */,
 				6F249561DD42CA949259372F /* SkillClient.swift in Sources */,
 				FCA5E44D5FF45EEF18E8D53B /* SkillDeactivatedPlugin.swift in Sources */,
@@ -4311,6 +4318,7 @@
 				9C6AFF1B3EEC118F23A10A16 /* SharedContentTests.swift in Sources */,
 				EA667FF49EB94A85A9163E8C /* SheetCoordinatorTests.swift in Sources */,
 				66731D5766A40CC970BD5716 /* SheetReadOnlyTests.swift in Sources */,
+				687F69893C5B01B1EB3D4256 /* SkillBadgesTests.swift in Sources */,
 				482DCD624E6046946BBDF76E /* SkillClientTests.swift in Sources */,
 				0AB3142C301892935DE8410B /* SkillDetailSheetTests.swift in Sources */,
 				6E50CAEE72D01BD61CF6BBA2 /* SkillStoreTests.swift in Sources */,

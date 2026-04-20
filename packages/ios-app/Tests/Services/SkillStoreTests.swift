@@ -211,6 +211,7 @@ final class SkillStoreTests: XCTestCase {
         {
             "name": "test-skill",
             "source": "global",
+            "service": "tron",
             "eventId": "evt_123"
         }
         """.data(using: .utf8)!
@@ -220,6 +221,8 @@ final class SkillStoreTests: XCTestCase {
 
         XCTAssertEqual(skillInfo.name, "test-skill")
         XCTAssertEqual(skillInfo.source, .global)
+        XCTAssertEqual(skillInfo.service, "tron")
+        XCTAssertEqual(skillInfo.serviceTag, .tron)
         XCTAssertEqual(skillInfo.eventId, "evt_123")
         XCTAssertEqual(skillInfo.id, "test-skill")
     }
@@ -230,6 +233,7 @@ final class SkillStoreTests: XCTestCase {
         {
             "name": "my-project-skill",
             "source": "project",
+            "service": "claude",
             "eventId": "evt_456"
         }
         """.data(using: .utf8)!
@@ -239,7 +243,29 @@ final class SkillStoreTests: XCTestCase {
 
         XCTAssertEqual(skillInfo.name, "my-project-skill")
         XCTAssertEqual(skillInfo.source, .project)
+        XCTAssertEqual(skillInfo.service, "claude")
+        XCTAssertEqual(skillInfo.serviceTag, .claude)
         XCTAssertEqual(skillInfo.eventId, "evt_456")
+    }
+
+    /// Test AddedSkillInfo serviceTag falls back to .unknown for a service string
+    /// the client hasn't been built to recognize yet. Guards forward compatibility
+    /// when the server adds a new service (e.g. "codex") before the client does.
+    func testAddedSkillInfoUnknownServiceFallsBack() throws {
+        let json = """
+        {
+            "name": "future-skill",
+            "source": "global",
+            "service": "codex",
+            "eventId": "evt_789"
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        let skillInfo = try decoder.decode(AddedSkillInfo.self, from: json)
+
+        XCTAssertEqual(skillInfo.service, "codex")
+        XCTAssertEqual(skillInfo.serviceTag, .unknown)
     }
 
     /// Test SkillRemoveResponse decoding - success case
@@ -280,11 +306,13 @@ final class SkillStoreTests: XCTestCase {
             {
                 "name": "skill-one",
                 "source": "global",
+                "service": "tron",
                 "eventId": "evt_1"
             },
             {
                 "name": "skill-two",
                 "source": "project",
+                "service": "claude",
                 "eventId": "evt_2"
             }
         ]
@@ -297,9 +325,52 @@ final class SkillStoreTests: XCTestCase {
 
         XCTAssertEqual(skills[0].name, "skill-one")
         XCTAssertEqual(skills[0].source, .global)
+        XCTAssertEqual(skills[0].service, "tron")
 
         XCTAssertEqual(skills[1].name, "skill-two")
         XCTAssertEqual(skills[1].source, .project)
+        XCTAssertEqual(skills[1].service, "claude")
+    }
+
+    /// Test Skill wire-format decoding with `service` field
+    func testSkillDecodesServiceField() throws {
+        let json = """
+        {
+            "name": "foo",
+            "displayName": "Foo",
+            "description": "Desc",
+            "source": "global",
+            "service": "claude",
+            "tags": null
+        }
+        """.data(using: .utf8)!
+
+        let skill = try JSONDecoder().decode(Skill.self, from: json)
+        XCTAssertEqual(skill.service, "claude")
+        XCTAssertEqual(skill.serviceTag, .claude)
+    }
+
+    /// Test SkillMetadata wire-format decoding with `service` field
+    func testSkillMetadataDecodesServiceField() throws {
+        let json = """
+        {
+            "name": "bar",
+            "displayName": "Bar",
+            "description": "Desc",
+            "source": "project",
+            "service": "tron",
+            "tags": ["a"],
+            "content": "",
+            "path": "/tmp/bar",
+            "additionalFiles": [],
+            "scopeDir": null
+        }
+        """.data(using: .utf8)!
+
+        let meta = try JSONDecoder().decode(SkillMetadata.self, from: json)
+        XCTAssertEqual(meta.service, "tron")
+        XCTAssertEqual(meta.serviceTag, .tron)
+        XCTAssertEqual(meta.asSkill.service, "tron", "asSkill conversion must carry service")
     }
 
     /// Test AddedSkillInfo Equatable conformance
@@ -307,18 +378,21 @@ final class SkillStoreTests: XCTestCase {
         let skill1 = AddedSkillInfo(
             name: "test",
             source: .global,
+            service: "tron",
             eventId: "evt_1",
             tokens: nil
         )
         let skill2 = AddedSkillInfo(
             name: "test",
             source: .global,
+            service: "tron",
             eventId: "evt_1",
             tokens: nil
         )
         let skill3 = AddedSkillInfo(
             name: "different",
             source: .project,
+            service: "tron",
             eventId: "evt_2",
             tokens: nil
         )
@@ -332,6 +406,7 @@ final class SkillStoreTests: XCTestCase {
         let skill = AddedSkillInfo(
             name: "my-skill",
             source: .global,
+            service: "tron",
             eventId: "evt_123",
             tokens: nil
         )

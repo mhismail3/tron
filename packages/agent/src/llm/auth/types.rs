@@ -38,7 +38,7 @@ pub struct ApiKeyEntry {
 
 /// Which credential is currently active for a provider.
 ///
-/// Serializes as `{"type":"oauth","label":"mhismail3"}` or
+/// Serializes as `{"type":"oauth","label":"personal"}` or
 /// `{"type":"apiKey","label":"work"}`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -46,7 +46,7 @@ pub enum ActiveCredential {
     /// An OAuth account identified by label.
     #[serde(rename = "oauth")]
     OAuth {
-        /// The account label (e.g., "mhismail3").
+        /// The account label (e.g., "personal").
         label: String,
     },
     /// A named API key identified by label.
@@ -572,17 +572,17 @@ mod tests {
     #[test]
     fn active_credential_oauth_serde() {
         let cred = ActiveCredential::OAuth {
-            label: "mhismail3".to_string(),
+            label: "personal".to_string(),
         };
         let json = serde_json::to_string(&cred).unwrap();
         assert!(json.contains(r#""type":"oauth""#));
-        assert!(json.contains(r#""label":"mhismail3""#));
+        assert!(json.contains(r#""label":"personal""#));
 
         let back: ActiveCredential = serde_json::from_str(&json).unwrap();
         assert_eq!(
             back,
             ActiveCredential::OAuth {
-                label: "mhismail3".to_string()
+                label: "personal".to_string()
             }
         );
     }

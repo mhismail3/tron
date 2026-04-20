@@ -48,13 +48,17 @@ impl MethodHandler for ActivateHandler {
             })?;
 
         // Look up skill in registry
-        let (source, tokens) = {
+        let (source, service, tokens) = {
             let registry = ctx.skill_registry.read();
             let skill = registry.get(&skill_name).ok_or_else(|| RpcError::NotFound {
                 code: errors::NOT_FOUND.into(),
                 message: format!("Skill '{skill_name}' not found"),
             })?;
-            (skill.source.to_string(), skill.content.len() as u64 / 4)
+            (
+                skill.source.to_string(),
+                skill.service.clone(),
+                skill.content.len() as u64 / 4,
+            )
         };
 
         // Check if already active (idempotent)
@@ -69,6 +73,7 @@ impl MethodHandler for ActivateHandler {
                 "skill": {
                     "name": skill_name,
                     "source": source,
+                    "service": service,
                     "tokens": tokens,
                 }
             }));
@@ -94,6 +99,7 @@ impl MethodHandler for ActivateHandler {
             "skill": {
                 "name": skill_name,
                 "source": source,
+                "service": service,
                 "tokens": tokens,
             }
         }))
@@ -185,22 +191,32 @@ impl MethodHandler for ActiveHandler {
         let tracker =
             reconstruct_tracker(&ctx.event_store, &session_id, &CompactionPolicy::ClearAll);
 
-        let skills: Vec<Value> = tracker
-            .added_skills()
-            .iter()
-            .map(|s| {
-                let added_via = match s.added_via {
-                    crate::skills::types::SkillAddMethod::Mention => "mention",
-                    crate::skills::types::SkillAddMethod::Explicit => "explicit",
-                };
-                serde_json::json!({
-                    "name": s.name,
-                    "source": s.source.to_string(),
-                    "addedVia": added_via,
-                    "tokens": s.tokens,
+        let skills: Vec<Value> = {
+            let registry = ctx.skill_registry.read();
+            tracker
+                .added_skills()
+                .iter()
+                .map(|s| {
+                    let added_via = match s.added_via {
+                        crate::skills::types::SkillAddMethod::Mention => "mention",
+                        crate::skills::types::SkillAddMethod::Explicit => "explicit",
+                    };
+                    // Enrich with service via registry lookup; unknown when the
+                    // underlying skill was deleted from disk after activation.
+                    let service = registry
+                        .get(&s.name)
+                        .map(|m| m.service.clone())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    serde_json::json!({
+                        "name": s.name,
+                        "source": s.source.to_string(),
+                        "service": service,
+                        "addedVia": added_via,
+                        "tokens": s.tokens,
+                    })
                 })
-            })
-            .collect();
+                .collect()
+        };
 
         Ok(serde_json::json!({
             "skills": skills,
@@ -263,6 +279,7 @@ mod tests {
             content: format!("{name} content — this is the full skill body"),
             frontmatter: SkillFrontmatter::default(),
             source: SkillSource::Global,
+            service: "tron".to_string(),
             scope_dir: String::new(),
             path: String::new(),
             skill_md_path: String::new(),
@@ -537,5 +554,183 @@ mod tests {
         let tracker = reconstruct_tracker(&ctx.event_store, &session_id, &crate::settings::types::CompactionPolicy::ClearAll);
         assert!(!tracker.has_skill("browser"));
         assert!(tracker.pending_removal_notices().contains("browser"));
+    }
+
+    // ── service wire tagging ────────────────────────────────────────
+    // These guard against the same class of regression that bit skill.get:
+    // iOS now decodes `service` on every skill-shaped wire payload; any
+    // handler that omits it silently breaks the UI.
+
+    #[tokio::test]
+    async fn activate_response_includes_service() {
+        let ctx = make_test_context();
+        let mut skill = make_skill("browser");
+        skill.service = "claude".to_string();
+        ctx.skill_registry.write().insert(skill);
+        let session_id = create_test_session(&ctx);
+
+        let result = ActivateHandler
+            .handle(
+                Some(json!({"sessionId": session_id, "skillName": "browser"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["skill"]["service"], "claude");
+    }
+
+    #[tokio::test]
+    async fn activate_already_active_response_includes_service() {
+        let ctx = make_test_context();
+        let mut skill = make_skill("browser");
+        skill.service = "claude".to_string();
+        ctx.skill_registry.write().insert(skill);
+        let session_id = create_test_session(&ctx);
+
+        let _ = ActivateHandler
+            .handle(
+                Some(json!({"sessionId": session_id, "skillName": "browser"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let again = ActivateHandler
+            .handle(
+                Some(json!({"sessionId": session_id, "skillName": "browser"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(again["alreadyActive"], true);
+        assert_eq!(again["skill"]["service"], "claude");
+    }
+
+    #[tokio::test]
+    async fn active_response_includes_service_per_skill() {
+        let ctx = make_test_context();
+        let mut tron_skill = make_skill("tron-one");
+        tron_skill.service = "tron".to_string();
+        let mut claude_skill = make_skill("claude-one");
+        claude_skill.service = "claude".to_string();
+        ctx.skill_registry.write().insert(tron_skill);
+        ctx.skill_registry.write().insert(claude_skill);
+        let session_id = create_test_session(&ctx);
+
+        for name in ["tron-one", "claude-one"] {
+            let _ = ActivateHandler
+                .handle(
+                    Some(json!({"sessionId": session_id, "skillName": name})),
+                    &ctx,
+                )
+                .await
+                .unwrap();
+        }
+
+        let result = ActiveHandler
+            .handle(Some(json!({"sessionId": session_id})), &ctx)
+            .await
+            .unwrap();
+        let skills = result["skills"].as_array().unwrap();
+        let tron = skills.iter().find(|s| s["name"] == "tron-one").unwrap();
+        let claude = skills.iter().find(|s| s["name"] == "claude-one").unwrap();
+        assert_eq!(tron["service"], "tron");
+        assert_eq!(claude["service"], "claude");
+    }
+
+    #[tokio::test]
+    async fn pending_skill_payloads_emit_service() {
+        // Regression for the user-message chip display: iOS parses
+        // payload.skills[].service and renders a claude badge on sent
+        // messages. Server must enrich the payload via the registry.
+        use crate::server::rpc::handlers::agent::prompt_runtime::collect_pending_skill_payloads;
+
+        let ctx = make_test_context();
+        let mut skill = make_skill("probe");
+        skill.service = "claude".to_string();
+        ctx.skill_registry.write().insert(skill);
+        let session_id = create_test_session(&ctx);
+
+        let _ = ActivateHandler
+            .handle(
+                Some(json!({"sessionId": session_id, "skillName": "probe"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let registry = ctx.skill_registry.read();
+        let payload = collect_pending_skill_payloads(
+            &ctx.event_store,
+            &session_id,
+            Some(&*registry),
+        )
+        .expect("skills_json should be Some");
+        let arr = payload.as_array().unwrap();
+        let probe = arr.iter().find(|s| s["name"] == "probe").unwrap();
+        assert_eq!(probe["service"], "claude");
+        assert!(probe.get("displayName").is_some());
+    }
+
+    #[tokio::test]
+    async fn pending_skill_payloads_service_unknown_when_skill_missing() {
+        use crate::server::rpc::handlers::agent::prompt_runtime::collect_pending_skill_payloads;
+
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("ephemeral"));
+        let session_id = create_test_session(&ctx);
+
+        let _ = ActivateHandler
+            .handle(
+                Some(json!({"sessionId": session_id, "skillName": "ephemeral"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // Remove from registry to simulate the skill being deleted on disk
+        let _ = ctx.skill_registry.write().remove("ephemeral");
+
+        let registry = ctx.skill_registry.read();
+        let payload = collect_pending_skill_payloads(
+            &ctx.event_store,
+            &session_id,
+            Some(&*registry),
+        )
+        .expect("skills_json should be Some");
+        let arr = payload.as_array().unwrap();
+        let skill = arr.iter().find(|s| s["name"] == "ephemeral").unwrap();
+        assert_eq!(skill["service"], "unknown");
+    }
+
+    #[tokio::test]
+    async fn active_response_service_is_unknown_for_deleted_skill() {
+        // Skill was activated, then removed from disk → registry lookup fails.
+        // Wire payload must report `"unknown"` so iOS decode still succeeds
+        // and the chip renders without a service badge.
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("ghost"));
+        let session_id = create_test_session(&ctx);
+        let _ = ActivateHandler
+            .handle(
+                Some(json!({"sessionId": session_id, "skillName": "ghost"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // Simulate skill removal from disk by dropping it from the registry.
+        let _ = ctx.skill_registry.write().remove("ghost");
+
+        let result = ActiveHandler
+            .handle(Some(json!({"sessionId": session_id})), &ctx)
+            .await
+            .unwrap();
+        let skill = result["skills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == "ghost")
+            .unwrap();
+        assert_eq!(skill["service"], "unknown");
     }
 }

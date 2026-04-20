@@ -543,9 +543,9 @@ System prompt    (stable, per-model)
 
 Reusable context packages stored as `SKILL.md` files with optional YAML frontmatter.
 
-**Locations:**
-- `~/.tron/skills/` — Global (all projects). First-party skills under `packages/agent/skills/` are synced here by `tron dev` / `tron install` and carry a `.managed` sentinel file.
-- `.claude/skills/` or `.tron/skills/` — Project-local (higher precedence).
+**Locations** — scanned across every service folder in `SKILL_SERVICE_DIRS` (currently `tron`, `claude`):
+- `~/.tron/skills/`, `~/.claude/skills/` — Global (all projects). First-party skills under `packages/agent/skills/` are synced into `~/.tron/skills/` by `tron dev` / `tron install` and carry a `.managed` sentinel file. `~/.claude/skills/` is read-only to Tron (Claude Code owns that tree) but its contents are detected automatically.
+- `.tron/skills/` or `.claude/skills/` under the working directory (any depth) — Project-local (higher precedence than globals). `.tron/skills/` wins over `.claude/skills/` on same-name collision within a single scope.
 
 **Usage:** Reference with `@skill-name` in prompts. The injector extracts references, resolves them from the registry, and prepends the skill content as `<skills>` XML context. Session-scoped activation is also exposed via `skill.activate` / `skill.deactivate` RPC methods.
 

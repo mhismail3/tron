@@ -1,6 +1,6 @@
 ---
 name: "Find Skill"
-description: "Search online skill repositories, evaluate candidates, and install the best match to ~/.tron/skills/"
+description: "Search online skill repositories, evaluate candidates, and install the best match into Tron's global skills directory"
 version: "1.0.0"
 tags: [skills, discovery, install, package-manager]
 deniedTools: [SpawnSubagent]
@@ -8,7 +8,7 @@ deniedTools: [SpawnSubagent]
 
 # Find Skill — Skill Discovery & Installation
 
-Search online skill repositories for a skill matching the user's need, evaluate candidates for quality and safety, and install the best match into `~/.tron/skills/`.
+Search online skill repositories for a skill matching the user's need, evaluate candidates for quality and safety, and install the best match into `~/.tron/skills/` — Tron's canonical install location for user-added skills. Tron also scans `~/.claude/skills/`, so any skill already installed there is detected automatically; you only need to copy when installing new ones.
 
 ## Prerequisites
 

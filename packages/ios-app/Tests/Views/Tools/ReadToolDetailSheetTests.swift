@@ -53,12 +53,12 @@ struct FileOperationErrorReadTests {
     @Test("is_a_directory")
     func testIsDirectory() {
         let e = FileOperationError.from(
-            details: details(errorClass: "is_a_directory", path: "/Users/moose/Sources"),
+            details: details(errorClass: "is_a_directory", path: "/Users/test/Sources"),
             result: nil,
             operation: .read
         )
         if case .isDirectory(let path) = e {
-            #expect(path == "/Users/moose/Sources")
+            #expect(path == "/Users/test/Sources")
         } else {
             Issue.record("expected .isDirectory, got \(e)")
         }

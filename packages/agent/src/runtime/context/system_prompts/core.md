@@ -124,7 +124,7 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 | TRON_HOME | `~/.tron/` |
 | SYSTEM | `~/.tron/system/` |
 | WORKSPACE | `~/.tron/workspace/` |
-| SKILLS | `~/.tron/skills/` |
+| SKILLS | `~/.tron/skills/` and `~/.claude/skills/` (both are scanned) |
 | USER | `~/.tron/user/` |
 
 **System (read-only for skills — managed by the server):**

@@ -3,10 +3,15 @@ use std::io::Write;
 
 #[test]
 fn decode_project_dir_standard() {
-    assert_eq!(
-        decode_project_dir("-Users-moose-Downloads-projects-tron"),
-        "/Users/moose/Downloads/projects/tron"
-    );
+    // Create a real nested path under a tempdir so the decoder's filesystem
+    // walk-up finds it. Using an FS-independent fixture (not the caller's
+    // home dir) keeps this test portable across machines.
+    let dir = tempfile::tempdir().unwrap();
+    let nested = dir.path().join("projects").join("tron");
+    fs::create_dir_all(&nested).unwrap();
+    let nested_str = nested.to_str().unwrap();
+    let encoded = format!("-{}", nested_str.trim_start_matches('/').replace('/', "-"));
+    assert_eq!(decode_project_dir(&encoded), nested_str);
 }
 
 #[test]

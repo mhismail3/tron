@@ -36,11 +36,25 @@ impl SkillFingerprint {
     /// Compute a fingerprint by stat-ing all skill directories and SKILL.md files.
     ///
     /// This is cheap: only `readdir` + `stat` calls, no file content is read.
+    /// Covers every service under [`SKILL_SERVICE_DIRS`] for globals, plus every
+    /// discovered project skills dir — so edits in `~/.claude/skills/*` flip the
+    /// fingerprint just as edits in `~/.tron/skills/*` do.
+    ///
+    /// [`SKILL_SERVICE_DIRS`]: crate::skills::constants::SKILL_SERVICE_DIRS
     pub fn compute(working_dir: &str) -> Self {
+        Self::compute_for_home(&crate::core::paths::home_dir(), working_dir)
+    }
+
+    /// Same as [`Self::compute`] but scoped to a caller-supplied home path.
+    ///
+    /// Lets tests point global discovery at a temp dir without manipulating
+    /// `$HOME` (the workspace lints `unsafe_code = "deny"`).
+    pub fn compute_for_home(home: &str, working_dir: &str) -> Self {
         let mut entries = BTreeMap::new();
 
-        let global_dir = loader::global_skills_dir();
-        Self::scan_dir(&global_dir, &mut entries);
+        for global_dir in loader::global_skills_dirs_for_home(home) {
+            Self::scan_dir(&global_dir, &mut entries);
+        }
 
         for psd in loader::discover_project_skills_dirs(working_dir) {
             Self::scan_dir(&psd.path, &mut entries);
@@ -290,6 +304,7 @@ mod tests {
             content: format!("{display_name} content"),
             frontmatter: SkillFrontmatter::default(),
             source,
+            service: "tron".to_string(),
             scope_dir: String::new(),
             path: String::new(),
             skill_md_path: String::new(),
@@ -684,5 +699,51 @@ mod tests {
             registry.get("new-skill").unwrap().scope_dir,
             "packages/foo"
         );
+    }
+
+    #[test]
+    fn fingerprint_changes_when_claude_global_skill_added() {
+        let home = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(home.path().join(".tron/skills")).unwrap();
+        std::fs::create_dir_all(home.path().join(".claude/skills")).unwrap();
+
+        let working = tempfile::TempDir::new().unwrap();
+        let home_str = home.path().to_str().unwrap();
+        let working_str = working.path().to_str().unwrap();
+
+        let fp_before = SkillFingerprint::compute_for_home(home_str, working_str);
+
+        // Add a claude-global skill
+        let skill = home.path().join(".claude/skills/new-claude-skill");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(skill.join("SKILL.md"), "---\nname: new-claude-skill\n---\nbody\n").unwrap();
+
+        let fp_after = SkillFingerprint::compute_for_home(home_str, working_str);
+
+        assert_ne!(
+            fp_before, fp_after,
+            "fingerprint must flip when ~/.claude/skills changes"
+        );
+    }
+
+    #[test]
+    fn fingerprint_changes_when_tron_global_skill_added() {
+        let home = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(home.path().join(".tron/skills")).unwrap();
+        std::fs::create_dir_all(home.path().join(".claude/skills")).unwrap();
+
+        let working = tempfile::TempDir::new().unwrap();
+        let home_str = home.path().to_str().unwrap();
+        let working_str = working.path().to_str().unwrap();
+
+        let fp_before = SkillFingerprint::compute_for_home(home_str, working_str);
+
+        let skill = home.path().join(".tron/skills/new-tron-skill");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(skill.join("SKILL.md"), "---\nname: new-tron-skill\n---\nbody\n").unwrap();
+
+        let fp_after = SkillFingerprint::compute_for_home(home_str, working_str);
+
+        assert_ne!(fp_before, fp_after, "fingerprint must flip when ~/.tron/skills changes");
     }
 }

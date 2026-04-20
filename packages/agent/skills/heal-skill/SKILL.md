@@ -19,7 +19,7 @@ Analyze, validate, and fix Tron skills. Use this when:
 |-----------|--------|
 | "heal `@X`" / "fix `@X`" / "validate `@X`" | Heal the named skill |
 | "import skill from `<path>`" | Copy to `~/.tron/skills/<name>/`, then heal |
-| "heal all skills" | Iterate every skill in `~/.tron/skills/` |
+| "heal all skills" | Iterate every skill in both `~/.tron/skills/` and `~/.claude/skills/` (Tron scans both) |
 
 ### 2. Read Everything
 

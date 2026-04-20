@@ -113,10 +113,15 @@ pub fn build_user_event_payload(
 /// Collect skills activated since the last `message.user` event.
 ///
 /// Returns `skills_json` in the format expected by iOS:
-/// `[{"name": "...", "source": "global"|"project", "displayName": "..."}]`
+/// `[{"name", "source", "service", "displayName"}]`
 ///
 /// Uses the event store sequence ordering to find only the skill events
 /// that belong to the current prompt (between last message.user and now).
+///
+/// `service` and `displayName` are enriched via the registry. If the skill
+/// is no longer present in the registry (deleted from disk), `service` is
+/// `"unknown"` and `displayName` falls back to the raw skill name — iOS
+/// renders the chip without a service badge in that case.
 pub fn collect_pending_skill_payloads(
     event_store: &crate::events::EventStore,
     session_id: &str,
@@ -146,13 +151,17 @@ pub fn collect_pending_skill_payloads(
                     .get("source")
                     .and_then(|v| v.as_str())
                     .unwrap_or("project");
-                let display_name = skill_registry
-                    .and_then(|r| r.get(name))
+                let registry_entry = skill_registry.and_then(|r| r.get(name));
+                let display_name = registry_entry
                     .map(|m| m.display_name.as_str())
                     .unwrap_or(name);
+                let service = registry_entry
+                    .map(|m| m.service.as_str())
+                    .unwrap_or("unknown");
                 skills.push(serde_json::json!({
                     "name": name,
                     "source": source,
+                    "service": service,
                     "displayName": display_name,
                 }));
             }

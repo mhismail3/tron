@@ -394,7 +394,7 @@ mod tests {
             "host": "0.0.0.0",
             "tailscaleIp": "100.64.213.113",
             "sessionTimeoutMs": 3600000,
-            "anthropicAccount": "mhismail3",
+            "anthropicAccount": "personal",
             "maxSessions": 20,
             "cacheTtl": 7200,
             "maxConcurrentSessions": 10,

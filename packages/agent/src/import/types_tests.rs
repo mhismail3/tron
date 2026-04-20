@@ -17,7 +17,7 @@ fn deserialize_user_plain_text() {
         },
         "userType": "external",
         "entrypoint": "cli",
-        "cwd": "/Users/moose/projects",
+        "cwd": "/Users/test/projects",
         "version": "2.1.84",
         "gitBranch": "main"
     });

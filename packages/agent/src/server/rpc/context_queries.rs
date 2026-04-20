@@ -54,6 +54,7 @@ impl ContextQueryService {
                 let added_skills = build_added_skills(
                     event_store.as_ref(),
                     &session_id_for_query,
+                    &skill_registry,
                 )?;
                 set_volatile_tokens_from_session(
                     &mut prepared.context_manager,
@@ -270,7 +271,7 @@ fn build_detailed_snapshot_response(
     // Reconstruct volatile token estimates from session state so the snapshot
     // reflects active skills even when queried between turns
     // (runs for all models — users can manually activate skills).
-    let added_skills = build_added_skills(event_store, session_id)?;
+    let added_skills = build_added_skills(event_store, session_id, skill_registry)?;
     set_volatile_tokens_from_session(
         &mut context_manager,
         &added_skills,
@@ -360,6 +361,7 @@ fn build_detailed_messages(
 fn build_added_skills(
     event_store: &crate::events::EventStore,
     session_id: &str,
+    skill_registry: &Arc<RwLock<SkillRegistry>>,
 ) -> Result<Vec<Value>, RpcError> {
     let policy = {
         let settings = crate::settings::get_settings();
@@ -409,9 +411,17 @@ fn build_added_skills(
                 SkillAddMethod::Mention => "mention",
                 SkillAddMethod::Explicit => "explicit",
             };
+            // Enrich with service from registry (robust to historical events
+            // that predate the service field on skill.activated payloads).
+            let service = skill_registry
+                .read()
+                .get(&skill.name)
+                .map(|m| m.service.clone())
+                .unwrap_or_else(|| "unknown".to_string());
             let mut value = json!({
                 "name": skill.name,
                 "source": source_str,
+                "service": service,
                 "addedVia": added_via_str,
                 "eventId": skill.event_id,
             });

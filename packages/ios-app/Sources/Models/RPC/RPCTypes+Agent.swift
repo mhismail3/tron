@@ -47,6 +47,8 @@ struct SkillActivateResult: Decodable {
     struct SkillActivateInfo: Decodable {
         let name: String
         let source: String
+        /// Service folder that produced the skill (`"tron"`, `"claude"`, …).
+        let service: String
     }
 }
 
@@ -61,6 +63,8 @@ struct SkillActiveResult: Decodable {
     struct ActiveSkillInfo: Decodable {
         let name: String
         let source: String
+        /// Service folder that produced the skill (`"tron"`, `"claude"`, …).
+        let service: String
     }
 }
 

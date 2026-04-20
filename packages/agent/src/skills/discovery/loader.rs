@@ -1,8 +1,14 @@
 //! Filesystem skill scanner.
 //!
 //! Discovers skills by scanning directories for folders containing `SKILL.md`.
-//! Walks the project tree recursively to find `.claude/skills/` and `.tron/skills/`
-//! directories at any depth. Also supports global skills from `~/.tron/skills/`.
+//! Covers two scopes × every service folder in [`SKILL_SERVICE_DIRS`]:
+//!   * Global:  `~/.tron/skills/`, `~/.claude/skills/` (and any future service).
+//!   * Project: `{working_dir}/**/.tron/skills/`, `{working_dir}/**/.claude/skills/`.
+//!
+//! Project skills shadow globals with the same name; within a single scope,
+//! earlier services in [`SKILL_SERVICE_DIRS`] shadow later ones.
+//!
+//! [`SKILL_SERVICE_DIRS`]: crate::skills::constants::SKILL_SERVICE_DIRS
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -10,8 +16,8 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
 use crate::skills::constants::{
-    GLOBAL_SKILLS_DIR, MAX_SKILL_FILE_SIZE, PROJECT_SKILLS_SUBDIRS, SKILL_MD_FILENAME,
-    SKILL_SCAN_EXCLUDE_DIRS, SKILL_SCAN_MAX_DEPTH,
+    MAX_SKILL_FILE_SIZE, SKILL_MD_FILENAME, SKILL_RELATIVE_SUBDIRS, SKILL_SCAN_EXCLUDE_DIRS,
+    SKILL_SCAN_MAX_DEPTH, SKILL_SERVICE_DIRS,
 };
 use crate::skills::parser::parse_skill_md;
 use crate::skills::types::{SkillMetadata, SkillScanError, SkillScanResult, SkillSource};
@@ -27,12 +33,31 @@ pub struct ProjectSkillsDir {
     pub path: PathBuf,
     /// Relative scope from project root. Empty string = root.
     pub scope_dir: String,
+    /// Service folder name that hosted this dir — one of
+    /// [`crate::skills::constants::SKILL_SERVICE_DIRS`].
+    pub service: String,
 }
 
-/// Get the global skills directory path (`~/.tron/skills`).
-pub fn global_skills_dir() -> PathBuf {
-    let home = crate::core::paths::home_dir();
-    PathBuf::from(home).join(GLOBAL_SKILLS_DIR)
+/// Get every global skills directory path (`~/.tron/skills`, `~/.claude/skills`, …).
+///
+/// Order follows [`SKILL_RELATIVE_SUBDIRS`], which is in turn derived from
+/// [`SKILL_SERVICE_DIRS`]: earlier entries take precedence on name collision.
+///
+/// [`SKILL_RELATIVE_SUBDIRS`]: crate::skills::constants::SKILL_RELATIVE_SUBDIRS
+/// [`SKILL_SERVICE_DIRS`]: crate::skills::constants::SKILL_SERVICE_DIRS
+pub fn global_skills_dirs() -> Vec<PathBuf> {
+    global_skills_dirs_for_home(&crate::core::paths::home_dir())
+}
+
+/// Same as [`global_skills_dirs`] but scoped to a caller-supplied home path.
+///
+/// Used by the registry's fingerprinter and by tests that need to point at a
+/// temp dir without manipulating `$HOME`.
+pub fn global_skills_dirs_for_home(home: &str) -> Vec<PathBuf> {
+    SKILL_RELATIVE_SUBDIRS
+        .iter()
+        .map(|rel| PathBuf::from(home).join(rel))
+        .collect()
 }
 
 /// Walk the project tree to find all `.claude/skills/` and `.tron/skills/` directories.
@@ -76,8 +101,10 @@ fn walk_for_skills_dirs(
             .join("/")
     };
 
-    // Check for skills subdirectories at this level
-    for subdir in PROJECT_SKILLS_SUBDIRS {
+    // Check for skills subdirectories at this level. Iterate in lockstep with
+    // SKILL_SERVICE_DIRS so we can tag each discovered directory with its service
+    // ("tron" for `.tron/skills`, "claude" for `.claude/skills`, …).
+    for (subdir, service) in SKILL_RELATIVE_SUBDIRS.iter().zip(SKILL_SERVICE_DIRS.iter()) {
         let skills_path = dir.join(subdir);
         if skills_path.is_dir() {
             // Deduplicate on case-insensitive filesystems
@@ -89,6 +116,7 @@ fn walk_for_skills_dirs(
             results.push(ProjectSkillsDir {
                 path: skills_path,
                 scope_dir: scope_dir.clone(),
+                service: (*service).to_string(),
             });
         }
     }
@@ -129,7 +157,14 @@ fn walk_for_skills_dirs(
 ///
 /// Non-existent directories return empty results (not errors).
 /// Each subdirectory containing a `SKILL.md` file is loaded as a skill.
-pub fn scan_directory(dir: &Path, source: SkillSource, scope_dir: &str) -> SkillScanResult {
+/// `service` is the service-folder label (`"tron"`, `"claude"`, …) that the
+/// directory belongs to; it is recorded on each discovered skill for UI tagging.
+pub fn scan_directory(
+    dir: &Path,
+    source: SkillSource,
+    service: &str,
+    scope_dir: &str,
+) -> SkillScanResult {
     let mut result = SkillScanResult::default();
 
     if !dir.exists() || !dir.is_dir() {
@@ -173,9 +208,9 @@ pub fn scan_directory(dir: &Path, source: SkillSource, scope_dir: &str) -> Skill
             continue;
         }
 
-        match load_skill(&path, &skill_md_path, &name, source, scope_dir) {
+        match load_skill(&path, &skill_md_path, &name, source, service, scope_dir) {
             Ok(skill) => {
-                debug!(name = %name, source = %source, "Loaded skill");
+                debug!(name = %name, source = %source, service = %service, "Loaded skill");
                 result.skills.push(skill);
             }
             Err(error) => {
@@ -190,15 +225,50 @@ pub fn scan_directory(dir: &Path, source: SkillSource, scope_dir: &str) -> Skill
 /// Scan both global and project skill directories.
 ///
 /// Returns `(global_result, project_result)`. Project skills take precedence
-/// when names conflict (handled by the registry, not here).
+/// when names conflict with globals (handled by the registry, not here).
+/// Within each scope, same-name skills across services are deduped: the first
+/// service in [`SKILL_SERVICE_DIRS`] wins.
+///
+/// [`SKILL_SERVICE_DIRS`]: crate::skills::constants::SKILL_SERVICE_DIRS
 pub fn scan_all(working_dir: &str) -> (SkillScanResult, SkillScanResult) {
-    let global_dir = global_skills_dir();
-    let global_result = scan_directory(&global_dir, SkillSource::Global, "");
+    scan_all_for_home(&crate::core::paths::home_dir(), working_dir)
+}
 
+/// Same as [`scan_all`] but scoped to a caller-supplied home path.
+///
+/// Used by tests that need to point global discovery at a temp dir without
+/// manipulating `$HOME` (the workspace lints `unsafe_code = "deny"`).
+pub fn scan_all_for_home(home: &str, working_dir: &str) -> (SkillScanResult, SkillScanResult) {
+    // Globals: scan each service dir; dedupe by skill name across services.
+    // First service wins (SKILL_RELATIVE_SUBDIRS order). The service name is
+    // recorded on each skill via SkillMetadata.service for UI tagging.
+    let mut global_result = SkillScanResult::default();
+    let mut seen_global_names: HashSet<String> = HashSet::new();
+    for (dir, service) in global_skills_dirs_for_home(home)
+        .into_iter()
+        .zip(SKILL_SERVICE_DIRS.iter())
+    {
+        let scan = scan_directory(&dir, SkillSource::Global, service, "");
+        for skill in scan.skills {
+            if seen_global_names.insert(skill.name.clone()) {
+                global_result.skills.push(skill);
+            }
+        }
+        global_result.errors.extend(scan.errors);
+    }
+
+    // Projects: dedupe by (scope_dir, skill_name) so that two services inside
+    // the same scope produce at most one skill per name. Cross-scope shadowing
+    // is handled downstream by SkillRegistry::initialize.
     let mut project_result = SkillScanResult::default();
+    let mut seen_project_scope_names: HashSet<(String, String)> = HashSet::new();
     for psd in discover_project_skills_dirs(working_dir) {
-        let scan = scan_directory(&psd.path, SkillSource::Project, &psd.scope_dir);
-        project_result.skills.extend(scan.skills);
+        let scan = scan_directory(&psd.path, SkillSource::Project, &psd.service, &psd.scope_dir);
+        for skill in scan.skills {
+            if seen_project_scope_names.insert((psd.scope_dir.clone(), skill.name.clone())) {
+                project_result.skills.push(skill);
+            }
+        }
         project_result.errors.extend(scan.errors);
     }
 
@@ -211,6 +281,7 @@ fn load_skill(
     skill_md_path: &Path,
     name: &str,
     source: SkillSource,
+    service: &str,
     scope_dir: &str,
 ) -> Result<SkillMetadata, SkillScanError> {
     let path_str = skill_path.to_string_lossy().into_owned();
@@ -270,6 +341,7 @@ fn load_skill(
         content: parsed.content,
         frontmatter: parsed.frontmatter,
         source,
+        service: service.to_string(),
         scope_dir: scope_dir.to_string(),
         path: path_str,
         skill_md_path: skill_md_path.to_string_lossy().into_owned(),
@@ -322,14 +394,14 @@ mod tests {
     #[test]
     fn test_scan_empty_directory() {
         let tmp = TempDir::new().unwrap();
-        let result = scan_directory(tmp.path(), SkillSource::Global, "");
+        let result = scan_directory(tmp.path(), SkillSource::Global, "tron", "");
         assert!(result.skills.is_empty());
         assert!(result.errors.is_empty());
     }
 
     #[test]
     fn test_scan_nonexistent_directory() {
-        let result = scan_directory(Path::new("/nonexistent/path"), SkillSource::Global, "");
+        let result = scan_directory(Path::new("/nonexistent/path"), SkillSource::Global, "tron", "");
         assert!(result.skills.is_empty());
         assert!(result.errors.is_empty());
     }
@@ -344,7 +416,7 @@ mod tests {
         );
         create_skill(tmp.path(), "git", "---\nname: Git\n---\nGit operations.");
 
-        let result = scan_directory(tmp.path(), SkillSource::Project, "");
+        let result = scan_directory(tmp.path(), SkillSource::Project, "tron", "");
         assert_eq!(result.skills.len(), 2);
         assert!(result.errors.is_empty());
 
@@ -358,7 +430,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         fs::write(tmp.path().join("not-a-dir.txt"), "hello").unwrap();
 
-        let result = scan_directory(tmp.path(), SkillSource::Global, "");
+        let result = scan_directory(tmp.path(), SkillSource::Global, "tron", "");
         assert!(result.skills.is_empty());
     }
 
@@ -369,7 +441,7 @@ mod tests {
         fs::create_dir_all(&no_skill).unwrap();
         fs::write(no_skill.join("README.md"), "Not a skill").unwrap();
 
-        let result = scan_directory(tmp.path(), SkillSource::Global, "");
+        let result = scan_directory(tmp.path(), SkillSource::Global, "tron", "");
         assert!(result.skills.is_empty());
     }
 
@@ -383,7 +455,7 @@ mod tests {
         let content = "x".repeat(MAX_SKILL_FILE_SIZE as usize + 1);
         fs::write(skill_dir.join(SKILL_MD_FILENAME), &content).unwrap();
 
-        let result = scan_directory(tmp.path(), SkillSource::Global, "");
+        let result = scan_directory(tmp.path(), SkillSource::Global, "tron", "");
         assert!(result.skills.is_empty());
         assert_eq!(result.errors.len(), 1);
         assert!(result.errors[0].recoverable);
@@ -403,7 +475,7 @@ mod tests {
         fs::write(skill_dir.join("helper.sh"), "#!/bin/bash").unwrap();
         fs::write(skill_dir.join("config.json"), "{}").unwrap();
 
-        let result = scan_directory(tmp.path(), SkillSource::Global, "");
+        let result = scan_directory(tmp.path(), SkillSource::Global, "tron", "");
         assert_eq!(result.skills.len(), 1);
         let skill = &result.skills[0];
         assert!(skill.additional_files.contains(&"helper.sh".to_string()));
@@ -424,7 +496,7 @@ mod tests {
             "---\nname: Browser Tool\ndescription: Browse websites\ntags: [web, browser]\n---\n# Browser\n\nUse this to browse.",
         );
 
-        let result = scan_directory(tmp.path(), SkillSource::Project, "");
+        let result = scan_directory(tmp.path(), SkillSource::Project, "tron", "");
         assert_eq!(result.skills.len(), 1);
 
         let skill = &result.skills[0];
@@ -441,7 +513,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         create_skill(tmp.path(), "my-tool", "---\ndescription: A tool\n---\nBody");
 
-        let result = scan_directory(tmp.path(), SkillSource::Global, "");
+        let result = scan_directory(tmp.path(), SkillSource::Global, "tron", "");
         assert_eq!(result.skills[0].display_name, "my-tool");
     }
 
@@ -632,7 +704,7 @@ mod tests {
         fs::create_dir_all(&skills_dir).unwrap();
         create_skill(&skills_dir, "test", "---\nname: Test\n---\nTest.");
 
-        let result = scan_directory(&skills_dir, SkillSource::Project, "packages/bar");
+        let result = scan_directory(&skills_dir, SkillSource::Project, "tron", "packages/bar");
         assert_eq!(result.skills.len(), 1);
         assert_eq!(result.skills[0].scope_dir, "packages/bar");
     }
@@ -667,9 +739,172 @@ mod tests {
         std::fs::create_dir_all(&bad_dir).unwrap();
         std::fs::write(bad_dir.join("SKILL.md"), "# Test\nTest skill").unwrap();
 
-        let result = scan_directory(tmp.path(), SkillSource::Global, "");
+        let result = scan_directory(tmp.path(), SkillSource::Global, "tron", "");
         assert!(result.skills.is_empty());
         assert_eq!(result.errors.len(), 1);
         assert!(result.errors[0].message.contains("Invalid skill name"));
+    }
+
+    // --- multi-service global detection + cross-service dedup ---
+
+    #[test]
+    fn global_skills_dirs_for_home_lists_both_services() {
+        let dirs = global_skills_dirs_for_home("/fake/home");
+        let expected: Vec<PathBuf> = crate::skills::constants::SKILL_RELATIVE_SUBDIRS
+            .iter()
+            .map(|rel| PathBuf::from("/fake/home").join(rel))
+            .collect();
+        assert_eq!(dirs, expected);
+    }
+
+    #[test]
+    fn scan_all_includes_claude_global_skills() {
+        let home = TempDir::new().unwrap();
+        let claude_skills = home.path().join(".claude/skills");
+        fs::create_dir_all(&claude_skills).unwrap();
+        create_skill(
+            &claude_skills,
+            "claude-only",
+            "---\nname: claude-only\ndescription: from claude\n---\nbody\n",
+        );
+
+        let working = TempDir::new().unwrap();
+        let (global, _project) =
+            scan_all_for_home(home.path().to_str().unwrap(), working.path().to_str().unwrap());
+
+        assert!(global.skills.iter().any(|s| s.name == "claude-only"));
+        assert_eq!(global.skills.iter().find(|s| s.name == "claude-only").unwrap().source, SkillSource::Global);
+    }
+
+    #[test]
+    fn scan_all_dedupes_same_name_global_tron_wins() {
+        let home = TempDir::new().unwrap();
+        for svc in ["tron", "claude"] {
+            let svc_skills = home.path().join(format!(".{svc}/skills"));
+            fs::create_dir_all(&svc_skills).unwrap();
+            create_skill(
+                &svc_skills,
+                "dup",
+                &format!("---\nname: dup\ndescription: from {svc}\n---\nbody\n"),
+            );
+        }
+
+        let working = TempDir::new().unwrap();
+        let (global, _project) =
+            scan_all_for_home(home.path().to_str().unwrap(), working.path().to_str().unwrap());
+
+        let dup: Vec<_> = global.skills.iter().filter(|s| s.name == "dup").collect();
+        assert_eq!(dup.len(), 1, "duplicate 'dup' skill must be deduped across services");
+        assert_eq!(dup[0].description, "from tron", "tron service must win on collision");
+    }
+
+    #[test]
+    fn scan_all_dedupes_same_name_project_same_scope_tron_wins() {
+        let project = TempDir::new().unwrap();
+        for svc in ["tron", "claude"] {
+            let svc_skills = project.path().join(format!(".{svc}/skills"));
+            fs::create_dir_all(&svc_skills).unwrap();
+            create_skill(
+                &svc_skills,
+                "pd",
+                &format!("---\nname: pd\ndescription: from {svc}\n---\nbody\n"),
+            );
+        }
+
+        let home = TempDir::new().unwrap();
+        let (_global, proj) =
+            scan_all_for_home(home.path().to_str().unwrap(), project.path().to_str().unwrap());
+
+        let pd: Vec<_> = proj.skills.iter().filter(|s| s.name == "pd").collect();
+        assert_eq!(pd.len(), 1, "same-scope duplicate must be deduped across services");
+        assert_eq!(pd[0].description, "from tron", "tron service must win on collision");
+    }
+
+    // --- service tagging (which .tron/.claude folder produced the skill) ---
+
+    #[test]
+    fn scan_all_tags_tron_global_with_tron_service() {
+        let home = TempDir::new().unwrap();
+        let tron_skills = home.path().join(".tron/skills");
+        fs::create_dir_all(&tron_skills).unwrap();
+        create_skill(&tron_skills, "one", "---\nname: one\n---\nbody\n");
+
+        let working = TempDir::new().unwrap();
+        let (global, _project) =
+            scan_all_for_home(home.path().to_str().unwrap(), working.path().to_str().unwrap());
+
+        let one = global.skills.iter().find(|s| s.name == "one").unwrap();
+        assert_eq!(one.service, "tron");
+    }
+
+    #[test]
+    fn scan_all_tags_claude_global_with_claude_service() {
+        let home = TempDir::new().unwrap();
+        let claude_skills = home.path().join(".claude/skills");
+        fs::create_dir_all(&claude_skills).unwrap();
+        create_skill(&claude_skills, "two", "---\nname: two\n---\nbody\n");
+
+        let working = TempDir::new().unwrap();
+        let (global, _project) =
+            scan_all_for_home(home.path().to_str().unwrap(), working.path().to_str().unwrap());
+
+        let two = global.skills.iter().find(|s| s.name == "two").unwrap();
+        assert_eq!(two.service, "claude");
+    }
+
+    #[test]
+    fn scan_all_tags_project_skills_with_service() {
+        let project = TempDir::new().unwrap();
+
+        let tron_dir = project.path().join(".tron/skills");
+        let claude_dir = project.path().join(".claude/skills");
+        fs::create_dir_all(&tron_dir).unwrap();
+        fs::create_dir_all(&claude_dir).unwrap();
+        create_skill(&tron_dir, "tron-proj", "---\nname: tron-proj\n---\nbody\n");
+        create_skill(&claude_dir, "claude-proj", "---\nname: claude-proj\n---\nbody\n");
+
+        let home = TempDir::new().unwrap();
+        let (_global, proj) =
+            scan_all_for_home(home.path().to_str().unwrap(), project.path().to_str().unwrap());
+
+        let tron_proj = proj.skills.iter().find(|s| s.name == "tron-proj").unwrap();
+        let claude_proj = proj.skills.iter().find(|s| s.name == "claude-proj").unwrap();
+        assert_eq!(tron_proj.service, "tron");
+        assert_eq!(claude_proj.service, "claude");
+    }
+
+    #[test]
+    fn skill_info_from_metadata_carries_service() {
+        let home = TempDir::new().unwrap();
+        let claude_skills = home.path().join(".claude/skills");
+        fs::create_dir_all(&claude_skills).unwrap();
+        create_skill(&claude_skills, "c1", "---\nname: c1\n---\nbody\n");
+
+        let working = TempDir::new().unwrap();
+        let (global, _) =
+            scan_all_for_home(home.path().to_str().unwrap(), working.path().to_str().unwrap());
+        let meta = global.skills.iter().find(|s| s.name == "c1").unwrap();
+        let info = crate::skills::types::SkillInfo::from(meta);
+        assert_eq!(info.service, "claude");
+    }
+
+    #[test]
+    fn scan_all_keeps_same_name_across_different_scopes() {
+        // Same skill name in two different scope_dirs remains two distinct entries;
+        // cross-scope shadowing is handled by SkillRegistry::initialize, not by scan_all.
+        let project = TempDir::new().unwrap();
+        let root_skills = project.path().join(".tron/skills");
+        let nested_skills = project.path().join("pkg/foo/.tron/skills");
+        fs::create_dir_all(&root_skills).unwrap();
+        fs::create_dir_all(&nested_skills).unwrap();
+        create_skill(&root_skills, "shared", "---\nname: shared\n---\nroot body\n");
+        create_skill(&nested_skills, "shared", "---\nname: shared\n---\nnested body\n");
+
+        let home = TempDir::new().unwrap();
+        let (_global, proj) =
+            scan_all_for_home(home.path().to_str().unwrap(), project.path().to_str().unwrap());
+
+        let shared: Vec<_> = proj.skills.iter().filter(|s| s.name == "shared").collect();
+        assert_eq!(shared.len(), 2);
     }
 }

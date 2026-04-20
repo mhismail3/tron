@@ -3,11 +3,16 @@
 //! Skill loader, registry, context injector, and session-scoped state tracker.
 //!
 //! Skills are `SKILL.md` files with optional YAML frontmatter + markdown body.
-//! The system discovers skills from three locations:
+//! The system discovers skills across two scopes × every service folder in
+//! [`constants::SKILL_SERVICE_DIRS`] (currently `tron` and `claude`):
 //!
-//! - **Global**: `~/.tron/skills/`
-//! - **Project (root)**: `{working_dir}/.claude/skills/` and `.tron/skills/`
-//! - **Project (nested)**: `{working_dir}/**/.claude/skills/` and `**/.tron/skills/`
+//! - **Global**: `~/.tron/skills/`, `~/.claude/skills/`
+//! - **Project (root)**: `{working_dir}/.tron/skills/`, `{working_dir}/.claude/skills/`
+//! - **Project (nested)**: `{working_dir}/**/.tron/skills/`, `{working_dir}/**/.claude/skills/`
+//!
+//! Project skills shadow globals with the same name. Within a single scope,
+//! earlier services in `SKILL_SERVICE_DIRS` shadow later ones (`.tron` wins
+//! over `.claude`).
 //!
 //! ## Session semantics
 //!

@@ -256,8 +256,8 @@ struct ToolArgumentParserTests {
 
     @Test("Parses real Read tool arguments")
     func testRealReadArgs() {
-        let args = "{\"file_path\": \"/Users/moose/Workspace/tron/packages/agent/src/index.ts\"}"
-        #expect(ToolArgumentParser.filePath(from: args) == "/Users/moose/Workspace/tron/packages/agent/src/index.ts")
+        let args = "{\"file_path\": \"/Users/test/Workspace/tron/packages/agent/src/index.ts\"}"
+        #expect(ToolArgumentParser.filePath(from: args) == "/Users/test/Workspace/tron/packages/agent/src/index.ts")
         #expect(ToolArgumentParser.shortenPath(ToolArgumentParser.filePath(from: args)) == "index.ts")
     }
 
