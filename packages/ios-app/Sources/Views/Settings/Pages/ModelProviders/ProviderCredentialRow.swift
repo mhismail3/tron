@@ -12,14 +12,10 @@ struct ProviderCredentialRow: View {
     @State private var showDeleteConfirm = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
-                .font(TronTypography.sans(size: TronTypography.sizeXL))
-                .foregroundStyle(isActive ? .tronEmerald : .tronTextMuted)
-
-            Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronEmerald)
+                .foregroundStyle(isActive ? .tronEmerald : .tronTextMuted)
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -36,6 +32,10 @@ struct ProviderCredentialRow: View {
             }
 
             Spacer()
+
+            Image(systemName: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(.tronEmerald)
 
             Button {
                 showDeleteConfirm = true

@@ -56,16 +56,20 @@ struct GoogleCloudRows: View {
     private var editFields: some View {
         VStack(spacing: 0) {
             SettingsRowDivider()
-            fieldRow(label: "Client ID", placeholder: "OAuth client ID", text: $clientId, secure: false)
+            fieldRow(icon: "number", label: "Client ID", placeholder: "OAuth client ID", text: $clientId, secure: false)
             SettingsRowDivider()
-            fieldRow(label: "Client Secret", placeholder: "OAuth secret", text: $clientSecret, secure: true)
+            fieldRow(icon: "lock.fill", label: "Client Secret", placeholder: "OAuth secret", text: $clientSecret, secure: true)
             SettingsRowDivider()
-            fieldRow(label: "Project ID", placeholder: "GCP project", text: $projectId, secure: false)
+            fieldRow(icon: "folder.fill", label: "Project ID", placeholder: "GCP project", text: $projectId, secure: false)
         }
     }
 
-    private func fieldRow(label: String, placeholder: String, text: Binding<String>, secure: Bool) -> some View {
-        HStack {
+    private func fieldRow(icon: String, label: String, placeholder: String, text: Binding<String>, secure: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(.tronEmerald)
+                .frame(width: 18)
             Text(label)
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextSecondary)
@@ -129,15 +133,17 @@ struct GoogleCloudRows: View {
     private var savedDisplay: some View {
         VStack(spacing: 0) {
             SettingsRowDivider()
-            savedRow(label: "Client ID", value: "Configured", valueColor: .tronSuccess)
+            savedRow(icon: "number", label: "Client ID", value: "Configured", valueColor: .tronSuccess)
             SettingsRowDivider()
             savedRow(
+                icon: "lock.fill",
                 label: "Client Secret",
                 value: hasClientSecret ? "Configured" : "Not set",
                 valueColor: hasClientSecret ? .tronSuccess : .tronTextMuted
             )
             SettingsRowDivider()
             savedRow(
+                icon: "folder.fill",
                 label: "Project ID",
                 value: savedProjectId ?? "Not set",
                 valueColor: savedProjectId != nil ? .tronSuccess : .tronTextMuted
@@ -145,8 +151,12 @@ struct GoogleCloudRows: View {
         }
     }
 
-    private func savedRow(label: String, value: String, valueColor: Color) -> some View {
-        HStack {
+    private func savedRow(icon: String, label: String, value: String, valueColor: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(.tronEmerald)
+                .frame(width: 18)
             Text(label)
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextSecondary)

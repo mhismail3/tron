@@ -81,7 +81,7 @@ struct ModelProviderSection: View {
 
         actionRow(
             icon: showAddApiKey ? "chevron.up" : "plus",
-            label: showAddApiKey ? "Hide Form" : "Add API Key",
+            label: showAddApiKey ? "Hide" : "Add API Key",
             disabled: false,
             accessibility: "Add API key",
             onTap: {
