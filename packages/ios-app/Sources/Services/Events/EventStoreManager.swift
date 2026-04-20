@@ -56,6 +56,17 @@ final class EventStoreManager {
     @ObservationIgnored
     private(set) lazy var dashboardStreamManager = DashboardStreamManager()
 
+    /// Per-session worktree status, shared by the chat toolbar and the sidebar.
+    /// Populated lazily by `.task` on sidebar rows and kept live by routing
+    /// worktree events through `handleGlobalEventV2`.
+    @ObservationIgnored
+    private(set) lazy var worktreeStatusCache: WorktreeStatusCache = {
+        WorktreeStatusCache(fetch: { [weak self] id in
+            guard let self else { throw CancellationError() }
+            return try await self.rpcClient.worktree.getStatus(sessionId: id)
+        })
+    }()
+
     // MARK: - Processing State
 
     var processingSessionIds: Set<String> = [] {
@@ -244,7 +255,7 @@ final class EventStoreManager {
             }
 
         default:
-            break
+            worktreeStatusCache.apply(event)
         }
     }
 
@@ -346,6 +357,7 @@ final class EventStoreManager {
         // Remove from in-memory list and clear stream buffer
         sessions.removeAll { $0.id == sessionId }
         dashboardStreamManager.clearBuffer(for: sessionId)
+        worktreeStatusCache.invalidate(sessionId: sessionId)
 
         // Remove from local DB
         Task {
@@ -374,6 +386,7 @@ final class EventStoreManager {
 
         sessions.removeAll { $0.id == sessionId }
         dashboardStreamManager.clearBuffer(for: sessionId)
+        worktreeStatusCache.invalidate(sessionId: sessionId)
         Task {
             do {
                 try await self.eventDB.events.deleteBySession(sessionId)

@@ -92,7 +92,8 @@ struct SessionSidebar: View {
                             CachedSessionSidebarRow(
                                 session: session,
                                 isSelected: session.id == selectedSessionId,
-                                streamManager: eventStoreManager.dashboardStreamManager
+                                streamManager: eventStoreManager.dashboardStreamManager,
+                                worktreeCache: eventStoreManager.worktreeStatusCache
                             )
                             .tag(session.id)
                             .listRowBackground(Color.clear)
@@ -219,19 +220,17 @@ struct CachedSessionSidebarRow: View {
     let session: CachedSession
     let isSelected: Bool
     let streamManager: DashboardStreamManager
+    let worktreeCache: WorktreeStatusCache
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // Header: title
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 6) {
-                    if session.isFork == true {
-                        Image(systemName: "tuningfork")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 11, height: 11)
-                            .foregroundStyle(.tronPurple)
-                    }
+                    SessionTitleIcons(
+                        isFork: session.isFork == true,
+                        worktree: worktreeCache.status(for: session.id)?.worktree
+                    )
                     Text(session.displayTitle)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.tronEmerald)
@@ -239,7 +238,8 @@ struct CachedSessionSidebarRow: View {
 
                     Spacer()
                 }
-
+                .animation(.smooth(duration: 0.25),
+                           value: worktreeCache.status(for: session.id)?.worktree)
             }
 
             // Mini-chat content — single data source for both live and persisted
@@ -289,6 +289,9 @@ struct CachedSessionSidebarRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(session.displayTitle)\(session.isFork == true ? ", forked" : ""), \(session.messageCount) messages, \(session.formattedDate)")
         .accessibilityAddTraits(.isButton)
+        .task(id: session.id) {
+            await worktreeCache.ensureLoaded(sessionId: session.id)
+        }
     }
 }
 

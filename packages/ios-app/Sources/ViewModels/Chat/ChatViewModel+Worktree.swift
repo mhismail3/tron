@@ -4,69 +4,30 @@ import Foundation
 
 extension ChatViewModel {
 
-    /// Request worktree status from server (fire-and-forget, swallows errors)
+    /// Request worktree status from server (fire-and-forget, swallows errors).
+    /// Writes to the shared cache so both toolbar and sidebar observe the update.
     func requestWorktreeStatus() async {
         worktreeState.isLoading = true
         defer { worktreeState.isLoading = false }
-
-        do {
-            let result = try await rpcClient.worktree.getStatus(sessionId: sessionId)
-            worktreeState.status = result
-        } catch {
-            // Swallow — worktree status is non-critical
-            logDebug("Worktree status request failed: \(error)")
-        }
+        await worktreeState.cache.refresh(sessionId: sessionId)
     }
 
     // MARK: - Real-time WebSocket Event Handlers
 
     func handleWorktreeAcquired(_ result: WorktreeAcquiredPlugin.Result) {
-        worktreeState.status = WorktreeGetStatusResult(
-            hasWorktree: true,
-            worktree: WorktreeInfo(
-                isolated: true,
-                branch: result.branch,
-                baseCommit: result.baseCommit,
-                path: result.path,
-                baseBranch: result.baseBranch,
-                repoRoot: nil,
-                hasUncommittedChanges: false,
-                commitCount: 0,
-                isMerged: false
-            )
-        )
+        worktreeState.cache.applyAcquired(result, sessionId: sessionId)
     }
 
     func handleWorktreeCommit(_ result: WorktreeCommitPlugin.Result) {
-        // Use server-authoritative commit count and dirty flag
-        if let info = worktreeState.status?.worktree {
-            worktreeState.status = WorktreeGetStatusResult(
-                hasWorktree: true,
-                worktree: WorktreeInfo(
-                    isolated: info.isolated,
-                    branch: info.branch,
-                    baseCommit: info.baseCommit,
-                    path: info.path,
-                    baseBranch: info.baseBranch,
-                    repoRoot: info.repoRoot,
-                    hasUncommittedChanges: result.hasUncommittedChanges,
-                    commitCount: result.totalCommitCount,
-                    isMerged: false
-                )
-            )
-        }
+        Task { await worktreeState.cache.applyCommit(result, sessionId: sessionId) }
     }
 
     func handleWorktreeMerged(_ result: WorktreeMergedPlugin.Result) {
-        // Refresh status after merge — the server state has changed
-        Task { await requestWorktreeStatus() }
+        Task { await worktreeState.cache.refresh(sessionId: sessionId) }
     }
 
     func handleWorktreeReleased(_ result: WorktreeReleasedPlugin.Result) {
-        worktreeState.status = WorktreeGetStatusResult(
-            hasWorktree: false,
-            worktree: nil
-        )
+        worktreeState.cache.applyReleased(sessionId: sessionId)
     }
 
     // MARK: - Git Workflow Event Handlers

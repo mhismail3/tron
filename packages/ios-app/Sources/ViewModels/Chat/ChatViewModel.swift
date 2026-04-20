@@ -95,8 +95,9 @@ final class ChatViewModel {
     var pendingSourceChangesPrompt: String?
     /// Model picker state (cached models, optimistic updates, switching)
     let modelPickerState: ModelPickerState
-    /// Worktree isolation state (status, loading)
-    let worktreeState = WorktreeIsolationState()
+    /// Worktree isolation state (status, loading) — read-through to the
+    /// shared `WorktreeStatusCache`.
+    let worktreeState: WorktreeIsolationState
     /// Git workflow state — lock holder, pending merge, conflict banner,
     /// divergence chips. Populated by worktree/repo event handlers.
     let gitWorkflowState = GitWorkflowState()
@@ -271,6 +272,15 @@ final class ChatViewModel {
         self.eventStoreManager = eventStoreManager
         self.connectionState = rpcClient.connectionState
         self.modelPickerState = ModelPickerState(modelClient: rpcClient.model)
+        // Worktree state reads through the shared cache when a store manager
+        // is available, else a lightweight fallback that exists only for this
+        // view model — tests passing a nil manager still get a working object.
+        let cache = eventStoreManager?.worktreeStatusCache
+            ?? WorktreeStatusCache(fetch: { [weak rpcClient] id in
+                guard let rpcClient else { throw CancellationError() }
+                return try await rpcClient.worktree.getStatus(sessionId: id)
+            })
+        self.worktreeState = WorktreeIsolationState(sessionId: sessionId, cache: cache)
         setupBindings()
         setupEventHandlers()
         setupAudioRecorder()

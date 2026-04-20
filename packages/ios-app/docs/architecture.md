@@ -17,6 +17,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 Sources/
 ├── App/                    # App entry point, delegates, configuration
 ├── Core/                   # Business logic extracted from other modules
+│   ├── Concurrency/        # Async primitives (AsyncSemaphore)
 │   ├── DI/                 # Dependency injection container
 │   └── Events/             # Event handling infrastructure
 │       ├── Plugins/        # Live event parsing (WebSocket -> UI)

@@ -33,30 +33,10 @@ extension ChatView {
     var principalToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             HStack(alignment: .center, spacing: 6) {
-                if eventStoreManager.activeSession?.isFork == true {
-                    Image(systemName: "tuningfork")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 11, height: 11)
-                        .foregroundStyle(.tronPurple)
-                        .transition(.opacity)
-                }
-                if let worktree = viewModel.worktreeState.worktree,
-                   !worktree.isOnBaseBranch {
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.triangle.branch")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 11, height: 11)
-                            .foregroundStyle(.tronAmber)
-                        if worktree.hasUncommittedChanges == true {
-                            Circle()
-                                .fill(.tronAmber)
-                                .frame(width: 5, height: 5)
-                        }
-                    }
-                    .transition(.opacity)
-                }
+                SessionTitleIcons(
+                    isFork: eventStoreManager.activeSession?.isFork == true,
+                    worktree: viewModel.worktreeState.worktree
+                )
                 TypewriterText(
                     text: eventStoreManager.activeSession?.displayTitle ?? "Chat",
                     font: TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold),

@@ -1,24 +1,24 @@
 import Foundation
 
-/// Manages worktree isolation state for ChatViewModel.
+/// Session-scoped view over `WorktreeStatusCache`.
+///
+/// Keeps the chat toolbar's bindings (`worktree`, `hasWorktree`) unchanged
+/// while delegating storage to the shared cache, so the sidebar row and the
+/// toolbar observe the same state.
 @Observable
 @MainActor
 final class WorktreeIsolationState {
-    /// Current worktree status from server
-    var status: WorktreeGetStatusResult?
+    let sessionId: String
+    let cache: WorktreeStatusCache
 
-    /// Whether an API call is in flight
     var isLoading = false
 
-    /// Whether this session has an active worktree
-    var hasWorktree: Bool {
-        status?.hasWorktree ?? false
+    init(sessionId: String, cache: WorktreeStatusCache) {
+        self.sessionId = sessionId
+        self.cache = cache
     }
 
-    /// The worktree info (nil if no worktree)
-    var worktree: WorktreeInfo? {
-        status?.worktree
-    }
-
-    init() {}
+    var status: WorktreeGetStatusResult? { cache.status(for: sessionId) }
+    var hasWorktree: Bool { status?.hasWorktree ?? false }
+    var worktree: WorktreeInfo? { status?.worktree }
 }

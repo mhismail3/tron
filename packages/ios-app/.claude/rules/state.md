@@ -20,7 +20,8 @@ paths:
 | `InputBarState` | Input field state |
 | `ContextTrackingState` | Token counts, costs, context window |
 | `DisplayStreamState` | Active display stream, frames, sheet |
-| `WorktreeIsolationState` | Worktree status, merge/commit |
+| `WorktreeIsolationState` | Session-scoped view over `WorktreeStatusCache`; the chat toolbar reads through it |
+| `WorktreeStatusCache` | Shared per-session worktree status; populated lazily by sidebar rows + kept live via global worktree events. Toolbar and sidebar row render from the same cache |
 
 ## Managers (`ViewModels/Managers/`)
 
