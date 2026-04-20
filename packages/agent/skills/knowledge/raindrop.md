@@ -89,7 +89,9 @@ For each unprocessed bookmark:
    - Create/update topic notes in WIKI_TOPICS for key concepts (Path A) or relevant existing topics (Path B, if the note provides enough context)
    - Cross-link selectively with existing topic notes
 
-5. **Tag in Raindrop:** Mark the bookmark based on outcome. Preserve existing tags.
+5. **Tag in Raindrop:** Mark the bookmark based on outcome.
+
+   **CRITICAL — tag discipline:** The agent may add EXACTLY ONE tag to a bookmark, and it must be either `wiki-ingested` (on success/reference) or `wiki-error` (on failure). Never add any other tag — not the source-note slug, not topic slugs, not categorization tags, nothing. All existing tags on the bookmark (including tags the user added in Raindrop) must be preserved unchanged. The merge is: `existing_tags ∪ {status_tag}` where `status_tag ∈ {wiki-ingested, wiki-error}`.
 
 **On success** — add `wiki-ingested`:
 
@@ -99,7 +101,7 @@ EXISTING=$(curl -s -H "Authorization: Bearer $TOKEN" \
   "https://api.raindrop.io/rest/v1/raindrop/<id>" \
   | jq -c '.item.tags')
 
-# Merge tags: existing + wiki-ingested + source-note-slug
+# Merge tags: existing + wiki-ingested (NEVER add any other tag)
 curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"tags": <merged_tags_array>}' \
@@ -109,7 +111,7 @@ curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
 **On error** (network failure, HTTP 5xx, PDF extraction crash, etc.) — add `wiki-error` and append the reason to the bookmark's note (preserve the user's existing note):
 
 ```bash
-# Merge tags: existing + wiki-error. Append error to note, preserving user's original.
+# Merge tags: existing + wiki-error (NEVER add any other tag). Append error to note, preserving user's original.
 curl -s -X PUT -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"tags": <merged_tags_with_wiki_error>, "note": "<existing note>\n\nwiki-error: <reason>"}' \
@@ -213,3 +215,5 @@ Any bookmark with a `wiki-` prefixed tag is skipped in normal runs. To retry an 
 3. If the underlying issue persists (e.g., site still requires JS), it will be re-tagged `wiki-error`
 
 ## Gotchas
+
+- **Only `wiki-ingested` or `wiki-error` may be added as tags.** Do not tag bookmarks with source-note slugs, topic slugs, content categories, or anything else. The `wiki-` prefix is reserved for skill-owned status tags and is the sole mechanism for the idempotency guard (Step 1 filters bookmarks whose tags include any `wiki-` prefixed tag). Adding other tags pollutes the user's Raindrop taxonomy and has no functional value — the source note in the wiki is where categorization lives.
