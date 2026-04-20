@@ -314,6 +314,7 @@ struct HistorySheet: View {
                 forkButtonState: forkButtonState(for: event, turn: turn),
                 isForking: forkingEventId == event.id,
                 isForkDisabled: forkingEventId != nil && forkingEventId != event.id,
+                forkTint: .tronCoral,
                 onFork: { await performFork(eventId: event.id) }
             )
 
@@ -369,6 +370,7 @@ struct HistorySheet: View {
                 ForkButton(
                     isForking: forkingEventId == call.id,
                     isDisabled: forkingEventId != nil && forkingEventId != call.id,
+                    tint: .tronCoral,
                     onFork: { await performFork(eventId: call.id) }
                 )
             }

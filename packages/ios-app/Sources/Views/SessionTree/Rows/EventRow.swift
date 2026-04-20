@@ -34,6 +34,7 @@ func deriveForkButtonState(
 struct ForkButton: View {
     let isForking: Bool
     let isDisabled: Bool
+    var tint: Color = .tronAmber
     let onFork: () async -> Void
 
     @State private var isExpanded = false
@@ -48,10 +49,10 @@ struct ForkButton: View {
                 } label: {
                     Text("Fork Session")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(tint)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .background(Color.tronAmber.opacity(0.15))
+                        .background(tint.opacity(0.15))
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -82,14 +83,14 @@ struct ForkButton: View {
                 if isForking {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(.tronAmber)
+                        .tint(tint)
                 } else {
                     Text("Fork")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(tint)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.tronAmber.opacity(0.15))
+                        .background(tint.opacity(0.15))
                         .clipShape(Capsule())
                 }
             }
@@ -111,6 +112,7 @@ struct EventRow: View {
     var forkButtonState: ForkButtonState = .active
     var isForking: Bool = false
     var isForkDisabled: Bool = false
+    var forkTint: Color = .tronAmber
     let onFork: () async -> Void
 
     @State private var isExpanded = false
@@ -161,6 +163,7 @@ struct EventRow: View {
                     ForkButton(
                         isForking: isForking,
                         isDisabled: isForkDisabled,
+                        tint: forkTint,
                         onFork: onFork
                     )
                 }
