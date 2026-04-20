@@ -1149,14 +1149,18 @@ fn memory_updated_wire_type_and_data() {
 fn memory_auto_retain_triggered_wire_type_and_data() {
     let event = TronEvent::MemoryAutoRetainTriggered {
         base: BaseEvent::now("s1"),
-        turn_number: 5,
         interval_fired: 5,
     };
     let rpc = tron_event_to_rpc(&event);
     assert_eq!(rpc.event_type, "agent.memory_auto_retain_triggered");
     let data = rpc.data.unwrap();
-    assert_eq!(data["turnNumber"], 5);
     assert_eq!(data["intervalFired"], 5);
+    // Deliberately no turnNumber: the payload now carries only observability
+    // metadata that isn't derivable from the event's own sequence/timestamp.
+    assert!(
+        data.get("turnNumber").is_none(),
+        "turnNumber was removed — iOS must not depend on it"
+    );
 }
 
 #[test]

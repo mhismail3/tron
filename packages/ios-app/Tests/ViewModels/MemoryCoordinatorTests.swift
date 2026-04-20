@@ -136,14 +136,14 @@ final class MemoryCoordinatorTests: XCTestCase {
     // MARK: - handleMemoryAutoRetainTriggered Tests
 
     func testAutoRetainTriggeredSetsIsRetaining() {
-        let result = MemoryAutoRetainTriggeredPlugin.Result(turnNumber: 5, intervalFired: 5)
+        let result = MemoryAutoRetainTriggeredPlugin.Result(intervalFired: 5)
         coordinator.handleMemoryAutoRetainTriggered(result, context: mockContext)
 
         XCTAssertTrue(mockContext.isRetaining)
     }
 
     func testAutoRetainTriggeredAppendsAutoInProgressPill() {
-        let result = MemoryAutoRetainTriggeredPlugin.Result(turnNumber: 5, intervalFired: 5)
+        let result = MemoryAutoRetainTriggeredPlugin.Result(intervalFired: 5)
         coordinator.handleMemoryAutoRetainTriggered(result, context: mockContext)
 
         XCTAssertEqual(mockContext.messages.count, 1)
@@ -155,7 +155,7 @@ final class MemoryCoordinatorTests: XCTestCase {
     }
 
     func testAutoRetainTriggeredTracksInProgressId() {
-        let result = MemoryAutoRetainTriggeredPlugin.Result(turnNumber: 5, intervalFired: 5)
+        let result = MemoryAutoRetainTriggeredPlugin.Result(intervalFired: 5)
         coordinator.handleMemoryAutoRetainTriggered(result, context: mockContext)
 
         XCTAssertNotNil(mockContext.memoryRetainInProgressMessageId)
@@ -167,7 +167,7 @@ final class MemoryCoordinatorTests: XCTestCase {
 
     func testMemoryUpdatingSkippedWhenAutoRetainPillAlreadyExists() {
         // Auto-retain triggered first (arrives before memory_updating on the wire).
-        let autoResult = MemoryAutoRetainTriggeredPlugin.Result(turnNumber: 5, intervalFired: 5)
+        let autoResult = MemoryAutoRetainTriggeredPlugin.Result(intervalFired: 5)
         coordinator.handleMemoryAutoRetainTriggered(autoResult, context: mockContext)
         XCTAssertEqual(mockContext.messages.count, 1)
 
@@ -188,7 +188,7 @@ final class MemoryCoordinatorTests: XCTestCase {
     }
 
     func testAutoRetainThenUpdatedMutatesAutoPillInPlace() {
-        let autoResult = MemoryAutoRetainTriggeredPlugin.Result(turnNumber: 5, intervalFired: 5)
+        let autoResult = MemoryAutoRetainTriggeredPlugin.Result(intervalFired: 5)
         coordinator.handleMemoryAutoRetainTriggered(autoResult, context: mockContext)
 
         let updatedResult = MemoryUpdatedPlugin.Result(title: "Auto summary", summary: "body")

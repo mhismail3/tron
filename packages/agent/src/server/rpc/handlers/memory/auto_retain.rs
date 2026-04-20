@@ -1,9 +1,12 @@
 //! Automatic memory retention policy.
 //!
 //! Decides whether to fire the retain pipeline at the end of an agent run,
-//! based on `memory.autoRetainInterval` from settings and the session's turn
-//! history. Three layers, each independently testable:
+//! based on `memory.autoRetainInterval` from settings and the session's
+//! **user-message** history. The threshold unit is a user-visible exchange,
+//! not an agent internal turn — a single prompt that spawns ten tool calls
+//! counts as one toward the threshold.
 //!
+//! Three layers, each independently testable:
 //! - [`should_auto_retain`] — pure policy decision, no I/O.
 //! - [`gather_state`] — sync state read from the event store.
 //! - [`maybe_fire`] — async entry point called from `agent_prompt_service`.
@@ -11,22 +14,27 @@
 use tracing::{debug, warn};
 
 use crate::events::EventStore;
-use crate::events::types::payloads::memory::MemoryRetainedPayload;
 use crate::server::rpc::context::run_blocking_task;
 use crate::server::rpc::errors::{RpcError, SESSION_NOT_FOUND};
 use crate::server::rpc::handlers::map_event_store_error;
 
 use super::RetainDeps;
 
+/// Event type string for user-message events. Single source of truth.
+const USER_MESSAGE_TYPE: &str = "message.user";
+
+/// Event type string for the retain-boundary event.
+const RETAINED_TYPE: &str = "memory.retained";
+
 /// Inputs to the auto-retain policy. Pure data; no I/O required to build.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AutoRetainInput {
     /// `memory.auto_retain_interval` from settings. `0` disables auto-retain.
     pub interval: u32,
-    /// Current `turn_count` on the session (MessageAssistant events logged).
-    pub current_turn_count: i64,
-    /// `turn_number` of the most recent `memory.retained` event, or `0` if none.
-    pub last_retained_turn: i64,
+    /// Number of `message.user` events appended to the session **since** the
+    /// most recent `memory.retained` event (or session start, whichever is
+    /// later).
+    pub user_messages_since_retain: i64,
     /// True if this session has a `parent_session_id` — i.e., it's a subagent
     /// run. Auto-retain never fires for subagents.
     pub is_subagent: bool,
@@ -45,18 +53,18 @@ pub enum SkipReason {
     Disabled,
     /// Session belongs to a subagent.
     Subagent,
-    /// Session hasn't produced any assistant turns yet (`current_turn_count == 0`).
-    NoPriorTurns,
-    /// `current_turn_count - last_retained_turn < interval`.
+    /// No user-visible exchanges since the last retain (`user_messages_since_retain == 0`).
+    NoUserMessages,
+    /// `user_messages_since_retain < interval`.
     BelowThreshold,
 }
 
 /// Pure policy decision. No I/O.
 ///
-/// Threshold math: fire when `current - last_retained >= interval`. This
-/// correctly handles interval changes mid-session — e.g., if the interval
-/// moves from 5 to 10 after a retain at turn 5, the next fire happens at
-/// turn 15 (not turn 10).
+/// Threshold: fire when `user_messages_since_retain >= interval`. The input is
+/// already a delta (user messages since the last retain boundary), so the
+/// comparison is direct — no subtraction or boundary arithmetic inside the
+/// policy.
 pub fn should_auto_retain(input: AutoRetainInput) -> AutoRetainDecision {
     if input.is_subagent {
         return AutoRetainDecision::Skip(SkipReason::Subagent);
@@ -64,11 +72,10 @@ pub fn should_auto_retain(input: AutoRetainInput) -> AutoRetainDecision {
     if input.interval == 0 {
         return AutoRetainDecision::Skip(SkipReason::Disabled);
     }
-    if input.current_turn_count <= 0 {
-        return AutoRetainDecision::Skip(SkipReason::NoPriorTurns);
+    if input.user_messages_since_retain <= 0 {
+        return AutoRetainDecision::Skip(SkipReason::NoUserMessages);
     }
-    let delta = input.current_turn_count - input.last_retained_turn;
-    if delta >= i64::from(input.interval) {
+    if input.user_messages_since_retain >= i64::from(input.interval) {
         AutoRetainDecision::Fire {
             interval_fired: input.interval,
         }
@@ -85,6 +92,10 @@ pub fn should_auto_retain(input: AutoRetainInput) -> AutoRetainDecision {
 ///
 /// Blocking: hits SQLite. Must be called from a blocking context
 /// (e.g. wrapped in `run_blocking` from an async caller).
+///
+/// The "since last retain" count is derived from the sequence of the most
+/// recent `memory.retained` event (0 if none) — the retain event itself is
+/// the boundary, so no `turn_number` field needs to live on its payload.
 pub fn gather_state(
     event_store: &EventStore,
     session_id: &str,
@@ -98,24 +109,23 @@ pub fn gather_state(
             message: format!("session {session_id} not found"),
         })?;
 
-    let last_retained_turn = match event_store
-        .get_latest_event_by_type(session_id, "memory.retained")
+    let last_retained_sequence = event_store
+        .get_latest_event_by_type(session_id, RETAINED_TYPE)
         .map_err(map_event_store_error)?
-    {
-        Some(row) => {
-            let payload: MemoryRetainedPayload =
-                serde_json::from_str(&row.payload).map_err(|e| RpcError::Internal {
-                    message: format!("memory.retained payload: {e}"),
-                })?;
-            payload.turn_number
-        }
-        None => 0,
-    };
+        .map(|row| row.sequence)
+        .unwrap_or(0);
+
+    let user_messages_since_retain = event_store
+        .count_events_by_type_after_sequence(
+            session_id,
+            USER_MESSAGE_TYPE,
+            last_retained_sequence,
+        )
+        .map_err(map_event_store_error)?;
 
     Ok(AutoRetainInput {
         interval,
-        current_turn_count: session.turn_count,
-        last_retained_turn,
+        user_messages_since_retain,
         is_subagent: session.parent_session_id.is_some(),
     })
 }
@@ -170,8 +180,7 @@ async fn maybe_fire_with_interval(deps: &RetainDeps, session_id: &str, interval:
             debug!(
                 session_id = %session_id_owned,
                 interval_fired,
-                current_turn = input.current_turn_count,
-                last_retained_turn = input.last_retained_turn,
+                user_messages_since_retain = input.user_messages_since_retain,
                 "auto-retain: firing"
             );
             if let Err(err) = super::trigger_retain(
@@ -192,8 +201,7 @@ async fn maybe_fire_with_interval(deps: &RetainDeps, session_id: &str, interval:
             debug!(
                 session_id = %session_id_owned,
                 ?reason,
-                current_turn = input.current_turn_count,
-                last_retained_turn = input.last_retained_turn,
+                user_messages_since_retain = input.user_messages_since_retain,
                 interval,
                 "auto-retain: skipped"
             );
@@ -209,84 +217,71 @@ async fn maybe_fire_with_interval(deps: &RetainDeps, session_id: &str, interval:
 mod tests {
     use super::*;
 
-    fn input(
-        interval: u32,
-        current: i64,
-        last_retained: i64,
-        is_subagent: bool,
-    ) -> AutoRetainInput {
+    fn input(interval: u32, user_msgs: i64, is_subagent: bool) -> AutoRetainInput {
         AutoRetainInput {
             interval,
-            current_turn_count: current,
-            last_retained_turn: last_retained,
+            user_messages_since_retain: user_msgs,
             is_subagent,
         }
     }
 
     #[test]
     fn should_auto_retain_table() {
-        // (interval, current, last_retained, is_subagent, expected)
-        let cases: &[(u32, i64, i64, bool, AutoRetainDecision)] = &[
-            // disabled via interval=0 takes precedence over threshold
-            (0, 100, 0, false, AutoRetainDecision::Skip(SkipReason::Disabled)),
-            // subagent guard is highest priority
-            (5, 100, 0, true, AutoRetainDecision::Skip(SkipReason::Subagent)),
-            (0, 100, 0, true, AutoRetainDecision::Skip(SkipReason::Subagent)),
-            // no prior turns
-            (5, 0, 0, false, AutoRetainDecision::Skip(SkipReason::NoPriorTurns)),
-            // below threshold from start
-            (5, 4, 0, false, AutoRetainDecision::Skip(SkipReason::BelowThreshold)),
-            // exactly threshold from start
-            (5, 5, 0, false, AutoRetainDecision::Fire { interval_fired: 5 }),
-            // past threshold with a prior retain
-            (5, 10, 5, false, AutoRetainDecision::Fire { interval_fired: 5 }),
-            // below threshold after a prior retain
-            (5, 9, 5, false, AutoRetainDecision::Skip(SkipReason::BelowThreshold)),
-            // interval change mid-session: 5→10 after retain at 5; turn 10 should NOT fire
-            (10, 10, 5, false, AutoRetainDecision::Skip(SkipReason::BelowThreshold)),
-            // same scenario at turn 15: fires
-            (10, 15, 5, false, AutoRetainDecision::Fire { interval_fired: 10 }),
-            // far past threshold
-            (5, 100, 0, false, AutoRetainDecision::Fire { interval_fired: 5 }),
-            // interval_fired reports the interval that triggered the fire
-            (7, 14, 7, false, AutoRetainDecision::Fire { interval_fired: 7 }),
+        // (interval, user_messages_since_retain, is_subagent, expected)
+        let cases: &[(u32, i64, bool, AutoRetainDecision)] = &[
+            // subagent guard is highest priority, regardless of threshold
+            (5, 100, true, AutoRetainDecision::Skip(SkipReason::Subagent)),
+            (0, 100, true, AutoRetainDecision::Skip(SkipReason::Subagent)),
+            // disabled via interval=0
+            (0, 100, false, AutoRetainDecision::Skip(SkipReason::Disabled)),
+            // no user messages since last retain
+            (5, 0, false, AutoRetainDecision::Skip(SkipReason::NoUserMessages)),
+            // below threshold
+            (5, 4, false, AutoRetainDecision::Skip(SkipReason::BelowThreshold)),
+            // exactly threshold
+            (5, 5, false, AutoRetainDecision::Fire { interval_fired: 5 }),
+            // past threshold
+            (5, 10, false, AutoRetainDecision::Fire { interval_fired: 5 }),
+            // small interval of 2 (the user's common case)
+            (2, 1, false, AutoRetainDecision::Skip(SkipReason::BelowThreshold)),
+            (2, 2, false, AutoRetainDecision::Fire { interval_fired: 2 }),
+            (2, 3, false, AutoRetainDecision::Fire { interval_fired: 2 }),
+            // interval of 1 fires on the very first user message
+            (1, 1, false, AutoRetainDecision::Fire { interval_fired: 1 }),
+            // interval_fired reports the interval that triggered the fire, not the delta
+            (7, 14, false, AutoRetainDecision::Fire { interval_fired: 7 }),
+            // negative / pathological count treated as "nothing to retain"
+            (5, -1, false, AutoRetainDecision::Skip(SkipReason::NoUserMessages)),
         ];
 
-        for (i, (interval, current, last_retained, is_subagent, expected)) in
-            cases.iter().enumerate()
-        {
-            let got = should_auto_retain(input(*interval, *current, *last_retained, *is_subagent));
+        for (i, (interval, user_msgs, is_subagent, expected)) in cases.iter().enumerate() {
+            let got = should_auto_retain(input(*interval, *user_msgs, *is_subagent));
             assert_eq!(
                 got, *expected,
-                "case {i}: interval={interval} current={current} last_retained={last_retained} is_subagent={is_subagent}",
+                "case {i}: interval={interval} user_msgs={user_msgs} is_subagent={is_subagent}",
             );
         }
     }
 
     #[test]
     fn fire_carries_interval_not_delta() {
-        let got = should_auto_retain(input(3, 100, 0, false));
+        // The fire payload must carry `interval` (the policy knob), not the
+        // delta (number of messages observed). Otherwise logs / iOS labels
+        // would flicker based on how often the agent gets invoked.
+        let got = should_auto_retain(input(3, 100, false));
         assert_eq!(got, AutoRetainDecision::Fire { interval_fired: 3 });
     }
 
     #[test]
     fn subagent_skip_takes_precedence_over_threshold() {
-        let got = should_auto_retain(input(1, 10, 0, true));
+        let got = should_auto_retain(input(1, 10, true));
         assert_eq!(got, AutoRetainDecision::Skip(SkipReason::Subagent));
     }
 
     #[test]
-    fn disabled_skip_takes_precedence_over_threshold() {
-        let got = should_auto_retain(input(0, 10, 0, false));
+    fn disabled_skip_takes_precedence_over_below_threshold() {
+        let got = should_auto_retain(input(0, 10, false));
         assert_eq!(got, AutoRetainDecision::Skip(SkipReason::Disabled));
-    }
-
-    #[test]
-    fn no_prior_turns_even_when_last_retained_nonzero() {
-        // Pathological but defensible: if the event store is in a weird state
-        // and current_turn_count is 0, we never fire regardless of last_retained.
-        let got = should_auto_retain(input(5, 0, 3, false));
-        assert_eq!(got, AutoRetainDecision::Skip(SkipReason::NoPriorTurns));
     }
 
     // ─── gather_state (integration with in-memory event store) ─────────────
@@ -341,63 +336,122 @@ mod tests {
         }
     }
 
-    fn set_turn_count(store: &EventStore, session_id: &str, turn_count: i64) {
-        use crate::events::sqlite::repositories::session::{IncrementCounters, SessionRepo};
-        let conn = store.pool().get().unwrap();
-        SessionRepo::increment_counters(
-            &conn,
-            session_id,
-            &IncrementCounters {
-                turn_count: Some(turn_count),
-                ..Default::default()
-            },
-        )
-        .unwrap();
+    /// Append a `message.user` event. Returns the persisted event's sequence.
+    fn append_user_message(store: &EventStore, session_id: &str, text: &str) -> i64 {
+        store
+            .append(&AppendOptions {
+                session_id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({ "content": text }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap()
+            .sequence
     }
 
-    fn append_memory_retained(store: &EventStore, session_id: &str, turn_number: i64) {
-        let payload = serde_json::json!({
-            "sessionId": session_id,
-            "turnNumber": turn_number,
-            "title": "Test",
-            "summary": "Test summary",
-            "timestamp": "2026-04-20T00:00:00Z",
-        });
+    /// Append a `memory.retained` boundary event. No `turn_number` field —
+    /// the sequence of the row is the boundary.
+    fn append_memory_retained(store: &EventStore, session_id: &str) -> i64 {
         store
             .append(&AppendOptions {
                 session_id,
                 event_type: EventType::MemoryRetained,
-                payload,
+                payload: serde_json::json!({
+                    "sessionId": session_id,
+                    "title": "Test",
+                    "summary": "Test summary",
+                    "timestamp": "2026-04-20T00:00:00Z",
+                }),
                 parent_id: None,
                 sequence: None,
             })
-            .unwrap();
+            .unwrap()
+            .sequence
     }
 
     #[test]
-    fn gather_state_reads_turn_count_and_no_last_retained() {
+    fn gather_state_counts_zero_for_empty_session() {
         let store = test_store();
         let sid = seed_session(&store, None);
-        set_turn_count(&store, &sid, 7);
 
         let input = gather_state(&store, &sid, 5).unwrap();
         assert_eq!(input.interval, 5);
-        assert_eq!(input.current_turn_count, 7);
-        assert_eq!(input.last_retained_turn, 0);
+        assert_eq!(input.user_messages_since_retain, 0);
         assert!(!input.is_subagent);
     }
 
     #[test]
-    fn gather_state_reads_latest_memory_retained_turn_number() {
+    fn gather_state_counts_all_user_messages_when_no_prior_retain() {
         let store = test_store();
         let sid = seed_session(&store, None);
-        set_turn_count(&store, &sid, 15);
-        append_memory_retained(&store, &sid, 5);
-        append_memory_retained(&store, &sid, 10);
+
+        append_user_message(&store, &sid, "first");
+        append_user_message(&store, &sid, "second");
+        append_user_message(&store, &sid, "third");
 
         let input = gather_state(&store, &sid, 5).unwrap();
-        assert_eq!(input.last_retained_turn, 10); // the most recent one
-        assert_eq!(input.current_turn_count, 15);
+        assert_eq!(input.user_messages_since_retain, 3);
+    }
+
+    #[test]
+    fn gather_state_counts_only_user_messages_after_latest_retain() {
+        let store = test_store();
+        let sid = seed_session(&store, None);
+
+        // Before retain: 3 user messages.
+        append_user_message(&store, &sid, "a");
+        append_user_message(&store, &sid, "b");
+        append_user_message(&store, &sid, "c");
+        append_memory_retained(&store, &sid);
+        // After retain: 2 more.
+        append_user_message(&store, &sid, "d");
+        append_user_message(&store, &sid, "e");
+
+        let input = gather_state(&store, &sid, 5).unwrap();
+        assert_eq!(
+            input.user_messages_since_retain, 2,
+            "only messages after the retain boundary count"
+        );
+    }
+
+    #[test]
+    fn gather_state_boundary_uses_latest_retain_when_multiple() {
+        let store = test_store();
+        let sid = seed_session(&store, None);
+
+        append_user_message(&store, &sid, "a");
+        append_memory_retained(&store, &sid); // first retain
+        append_user_message(&store, &sid, "b");
+        append_user_message(&store, &sid, "c");
+        append_memory_retained(&store, &sid); // second retain — this one is the boundary
+        append_user_message(&store, &sid, "d");
+
+        let input = gather_state(&store, &sid, 5).unwrap();
+        assert_eq!(input.user_messages_since_retain, 1);
+    }
+
+    #[test]
+    fn gather_state_counts_user_messages_not_assistant() {
+        // Assistant events and other types must not pollute the count.
+        let store = test_store();
+        let sid = seed_session(&store, None);
+
+        append_user_message(&store, &sid, "u1");
+        // Append an assistant event — should NOT be counted.
+        store
+            .append(&AppendOptions {
+                session_id: &sid,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({ "content": "reply" }),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        append_user_message(&store, &sid, "u2");
+
+        let input = gather_state(&store, &sid, 5).unwrap();
+        assert_eq!(input.user_messages_since_retain, 2);
     }
 
     #[test]
@@ -405,7 +459,7 @@ mod tests {
         let store = test_store();
         let parent = seed_session(&store, None);
         let child = seed_session(&store, Some(&parent));
-        set_turn_count(&store, &child, 3);
+        append_user_message(&store, &child, "task prompt");
 
         let input = gather_state(&store, &child, 5).unwrap();
         assert!(input.is_subagent, "child with parent should be flagged");
@@ -425,7 +479,7 @@ mod tests {
     fn gather_state_passes_interval_through_unchanged() {
         let store = test_store();
         let sid = seed_session(&store, None);
-        set_turn_count(&store, &sid, 1);
+        append_user_message(&store, &sid, "msg");
         let input = gather_state(&store, &sid, 42).unwrap();
         assert_eq!(input.interval, 42);
     }
@@ -434,12 +488,13 @@ mod tests {
     fn gather_state_composes_with_policy_to_fire() {
         let store = test_store();
         let sid = seed_session(&store, None);
-        set_turn_count(&store, &sid, 5);
+        append_user_message(&store, &sid, "a");
+        append_user_message(&store, &sid, "b");
 
-        let input = gather_state(&store, &sid, 5).unwrap();
+        let input = gather_state(&store, &sid, 2).unwrap();
         assert_eq!(
             should_auto_retain(input),
-            AutoRetainDecision::Fire { interval_fired: 5 }
+            AutoRetainDecision::Fire { interval_fired: 2 }
         );
     }
 
@@ -448,7 +503,9 @@ mod tests {
         let store = test_store();
         let parent = seed_session(&store, None);
         let child = seed_session(&store, Some(&parent));
-        set_turn_count(&store, &child, 100);
+        for _ in 0..100 {
+            append_user_message(&store, &child, "prompt");
+        }
 
         let input = gather_state(&store, &child, 5).unwrap();
         assert_eq!(
@@ -468,14 +525,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn maybe_fire_with_interval_persists_trigger_when_threshold_crossed() {
+    async fn maybe_fire_persists_trigger_when_threshold_crossed() {
         let ctx = make_test_context();
         let cr = ctx
             .event_store
             .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
             .unwrap();
         let sid = cr.session.id.clone();
-        set_turn_count(&ctx.event_store, &sid, 3);
+        // 3 user messages, interval 3 → fires.
+        append_user_message(&ctx.event_store, &sid, "a");
+        append_user_message(&ctx.event_store, &sid, "b");
+        append_user_message(&ctx.event_store, &sid, "c");
 
         let deps = deps_from_ctx(&ctx);
         maybe_fire_with_interval(&deps, &sid, 3).await;
@@ -487,18 +547,19 @@ mod tests {
             .expect("threshold crossed: trigger event must be persisted");
         let payload: serde_json::Value = serde_json::from_str(&row.payload).unwrap();
         assert_eq!(payload["intervalFired"], 3);
-        assert_eq!(payload["turnNumber"], 3);
     }
 
     #[tokio::test]
-    async fn maybe_fire_with_interval_skips_below_threshold() {
+    async fn maybe_fire_skips_below_threshold() {
         let ctx = make_test_context();
         let cr = ctx
             .event_store
             .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
             .unwrap();
         let sid = cr.session.id.clone();
-        set_turn_count(&ctx.event_store, &sid, 2);
+        // 2 user messages, interval 5 → skip.
+        append_user_message(&ctx.event_store, &sid, "a");
+        append_user_message(&ctx.event_store, &sid, "b");
 
         let deps = deps_from_ctx(&ctx);
         maybe_fire_with_interval(&deps, &sid, 5).await;
@@ -511,14 +572,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn maybe_fire_with_interval_zero_is_disabled() {
+    async fn maybe_fire_zero_is_disabled() {
         let ctx = make_test_context();
         let cr = ctx
             .event_store
             .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
             .unwrap();
         let sid = cr.session.id.clone();
-        set_turn_count(&ctx.event_store, &sid, 100);
+        for _ in 0..10 {
+            append_user_message(&ctx.event_store, &sid, "x");
+        }
 
         let deps = deps_from_ctx(&ctx);
         maybe_fire_with_interval(&deps, &sid, 0).await;
@@ -531,7 +594,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn maybe_fire_with_interval_skips_subagent() {
+    async fn maybe_fire_skips_subagent() {
         let ctx = make_test_context();
         let parent_id = ctx
             .event_store
@@ -539,9 +602,10 @@ mod tests {
             .unwrap()
             .session
             .id;
-        // Seed a subagent session whose parent is set.
         let child = seed_session(&ctx.event_store, Some(&parent_id));
-        set_turn_count(&ctx.event_store, &child, 100);
+        for _ in 0..100 {
+            append_user_message(&ctx.event_store, &child, "task");
+        }
 
         let deps = deps_from_ctx(&ctx);
         maybe_fire_with_interval(&deps, &child, 5).await;
@@ -557,7 +621,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn maybe_fire_with_interval_respects_prior_retain_boundary() {
+    async fn maybe_fire_respects_prior_retain_boundary() {
         let ctx = make_test_context();
         let cr = ctx
             .event_store
@@ -565,30 +629,112 @@ mod tests {
             .unwrap();
         let sid = cr.session.id.clone();
 
-        // Simulate a prior retain at turn 5 and a current turn of 8.
-        set_turn_count(&ctx.event_store, &sid, 8);
-        append_memory_retained(&ctx.event_store, &sid, 5);
+        // 5 user messages, then a retain → resets the boundary.
+        for _ in 0..5 {
+            append_user_message(&ctx.event_store, &sid, "pre");
+        }
+        append_memory_retained(&ctx.event_store, &sid);
 
         let deps = deps_from_ctx(&ctx);
-        // Interval of 5 → delta is 8-5=3, below threshold → no fire.
-        maybe_fire_with_interval(&deps, &sid, 5).await;
+
+        // 2 more user messages; interval 3 → should NOT fire.
+        append_user_message(&ctx.event_store, &sid, "post-1");
+        append_user_message(&ctx.event_store, &sid, "post-2");
+        maybe_fire_with_interval(&deps, &sid, 3).await;
         assert!(
             ctx.event_store
                 .get_latest_event_by_type(&sid, "memory.auto_retain_triggered")
                 .unwrap()
                 .is_none(),
-            "8-5 < 5: must not fire"
+            "2 messages since retain < interval 3: must not fire"
         );
 
-        // Bump to turn 10 — delta is 10-5=5, threshold met.
-        set_turn_count(&ctx.event_store, &sid, 2); // +2 more (total 10)
-        maybe_fire_with_interval(&deps, &sid, 5).await;
+        // 1 more (total 3 since retain) → fires.
+        append_user_message(&ctx.event_store, &sid, "post-3");
+        maybe_fire_with_interval(&deps, &sid, 3).await;
         assert!(
             ctx.event_store
                 .get_latest_event_by_type(&sid, "memory.auto_retain_triggered")
                 .unwrap()
                 .is_some(),
-            "10-5 >= 5: must fire"
+            "3 messages since retain >= interval 3: must fire"
+        );
+    }
+
+    /// Regression guard for the bug that prompted this refactor: a single
+    /// user prompt that spawns many agent iterations (tool calls) must count
+    /// as ONE toward the threshold, not N.
+    #[tokio::test]
+    async fn maybe_fire_counts_user_messages_not_agent_iterations() {
+        let ctx = make_test_context();
+        let cr = ctx
+            .event_store
+            .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
+            .unwrap();
+        let sid = cr.session.id.clone();
+
+        // One user prompt.
+        append_user_message(&ctx.event_store, &sid, "research gold prices");
+
+        // Simulate the agent making many internal iterations (tool calls):
+        // 10 assistant events, 10 turn_start/turn_end pairs. None of these
+        // are user exchanges — they must not count toward the threshold.
+        for _ in 0..10 {
+            ctx.event_store
+                .append(&AppendOptions {
+                    session_id: &sid,
+                    event_type: EventType::StreamTurnStart,
+                    payload: serde_json::json!({ "turn": 1 }),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+            ctx.event_store
+                .append(&AppendOptions {
+                    session_id: &sid,
+                    event_type: EventType::MessageAssistant,
+                    payload: serde_json::json!({ "content": "tool call" }),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+            ctx.event_store
+                .append(&AppendOptions {
+                    session_id: &sid,
+                    event_type: EventType::StreamTurnEnd,
+                    payload: serde_json::json!({ "turn": 1 }),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        let deps = deps_from_ctx(&ctx);
+        // Interval 2 — with the old buggy logic that counted turn iterations,
+        // this would fire after 2 internal iterations. With the correct
+        // user-message-based counter, it MUST NOT fire after a single prompt.
+        maybe_fire_with_interval(&deps, &sid, 2).await;
+
+        let row = ctx
+            .event_store
+            .get_latest_event_by_type(&sid, "memory.auto_retain_triggered")
+            .unwrap();
+        assert!(
+            row.is_none(),
+            "one user prompt with ten tool calls must not cross an interval=2 threshold"
+        );
+
+        // Send a second user message. Now we have 2 user exchanges — fires.
+        append_user_message(&ctx.event_store, &sid, "next prompt");
+        maybe_fire_with_interval(&deps, &sid, 2).await;
+
+        let row = ctx
+            .event_store
+            .get_latest_event_by_type(&sid, "memory.auto_retain_triggered")
+            .unwrap();
+        assert!(
+            row.is_some(),
+            "after 2 user exchanges the trigger must fire"
         );
     }
 }

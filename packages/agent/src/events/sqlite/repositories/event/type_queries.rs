@@ -61,6 +61,23 @@ impl EventRepo {
         Ok(count)
     }
 
+    /// Count events of a specific type in a session whose `sequence` is strictly
+    /// greater than `after_sequence`. Used by auto-retain to count user messages
+    /// since the last `memory.retained` boundary.
+    pub fn count_by_type_after_sequence(
+        conn: &Connection,
+        session_id: &str,
+        event_type: &str,
+        after_sequence: i64,
+    ) -> Result<i64> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM events WHERE session_id = ?1 AND type = ?2 AND sequence > ?3",
+            params![session_id, event_type, after_sequence],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
     /// Get events of specific types across multiple sessions.
     ///
     /// Results are ordered by `session_id`, then by sequence ascending within each session.

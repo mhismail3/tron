@@ -763,8 +763,6 @@ tron_events! {
     /// Emitted once, immediately before `MemoryUpdating`, so iOS can render
     /// a distinct indicator for automatic retentions.
     MemoryAutoRetainTriggered {
-        #[serde(rename = "turnNumber")]
-        turn_number: i64,
         #[serde(rename = "intervalFired")]
         interval_fired: u32,
     } => "memory_auto_retain_triggered",
@@ -1960,7 +1958,6 @@ mod tests {
             },
             TronEvent::MemoryAutoRetainTriggered {
                 base: base.clone(),
-                turn_number: 5,
                 interval_fired: 5,
             },
             TronEvent::ContextCleared {

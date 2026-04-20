@@ -29,9 +29,7 @@ final class MemoryCoordinator {
         _ pluginResult: MemoryAutoRetainTriggeredPlugin.Result,
         context: MemoryContext
     ) {
-        context.logInfo(
-            "Auto-retain triggered at turn \(pluginResult.turnNumber) (interval=\(pluginResult.intervalFired))"
-        )
+        context.logInfo("Auto-retain triggered (interval=\(pluginResult.intervalFired))")
         context.isRetaining = true
 
         context.flushPendingTextUpdates()

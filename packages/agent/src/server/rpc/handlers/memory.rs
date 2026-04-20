@@ -174,12 +174,12 @@ pub(crate) async fn trigger_retain(
     // ── Get events since boundary ─────────────────────────────────────────
     let event_store2 = deps.event_store.clone();
     let session_id_q2 = session_id.clone();
-    let messages = run_blocking_task("memory.retain.get_events", move || {
-        get_messages_since(&event_store2, &session_id_q2, boundary_sequence)
+    let slice = run_blocking_task("memory.retain.get_events", move || {
+        get_retain_slice(&event_store2, &session_id_q2, boundary_sequence)
     })
     .await?;
 
-    if messages.is_empty() {
+    let Some(slice) = slice else {
         // Nothing new to summarize.
         let _ = deps
             .orchestrator
@@ -192,7 +192,7 @@ pub(crate) async fn trigger_retain(
                 event_id: None,
             });
         return Ok(json!({ "retained": false, "reason": "nothing_new" }));
-    }
+    };
 
     // ── Get session metadata ───────────────────────────────────────────────
     let event_store3 = deps.event_store.clone();
@@ -215,13 +215,8 @@ pub(crate) async fn trigger_retain(
         .unwrap_or("claude-sonnet-4-6")
         .to_owned();
 
-    let turn_count = session_meta
-        .as_ref()
-        .map(|s| s.turn_count)
-        .unwrap_or(0);
-
     // ── Serialize transcript ───────────────────────────────────────────────
-    let transcript = serialize_for_memory(&messages);
+    let transcript = serialize_for_memory(&slice.messages);
 
     if transcript.is_empty() {
         let _ = deps
@@ -248,6 +243,8 @@ pub(crate) async fn trigger_retain(
     let bg_event_store = deps.event_store.clone();
     let bg_broadcast = Arc::clone(deps.orchestrator.broadcast());
     let bg_subagent_manager = deps.subagent_manager.clone();
+    let bg_start_ts = slice.start_ts;
+    let bg_end_ts = slice.end_ts;
 
     let _ = tokio::spawn(async move {
         retain_background_task(
@@ -257,8 +254,9 @@ pub(crate) async fn trigger_retain(
             bg_subagent_manager,
             working_directory,
             model,
-            turn_count,
             transcript,
+            bg_start_ts,
+            bg_end_ts,
         )
         .await;
         drop(guard);
@@ -278,21 +276,6 @@ async fn emit_auto_retain_triggered(
     session_id: &str,
     interval_fired: u32,
 ) {
-    // Best-effort turn_number lookup for the payload.
-    let event_store_q = deps.event_store.clone();
-    let session_id_q = session_id.to_owned();
-    let turn_number = run_blocking_task("memory.auto_retain_triggered.get_turn", move || {
-        Ok::<i64, RpcError>(
-            event_store_q
-                .get_session(&session_id_q)
-                .map_err(map_event_store_error)?
-                .map(|s| s.turn_count)
-                .unwrap_or(0),
-        )
-    })
-    .await
-    .unwrap_or(0);
-
     let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     // Persist to event store so it appears in session history.
@@ -305,7 +288,6 @@ async fn emit_auto_retain_triggered(
             event_type: EventType::MemoryAutoRetainTriggered,
             payload: json!({
                 "sessionId": session_id_p,
-                "turnNumber": turn_number,
                 "intervalFired": interval_fired,
                 "timestamp": timestamp_p,
             }),
@@ -328,7 +310,6 @@ async fn emit_auto_retain_triggered(
         .broadcast()
         .emit(crate::core::events::TronEvent::MemoryAutoRetainTriggered {
             base: crate::core::events::BaseEvent::now(session_id),
-            turn_number,
             interval_fired,
         });
 }
@@ -341,24 +322,18 @@ async fn retain_background_task(
     subagent_manager: Option<Arc<SubagentManager>>,
     working_directory: String,
     model: String,
-    turn_count: i64,
     transcript: String,
+    start_ts: String,
+    end_ts: String,
 ) {
     // ── Run summarizer ──────────────────────────────────────────────────────
     let raw_output = match subagent_manager {
         Some(manager) => {
-            run_summarizer(
-                manager,
-                &session_id,
-                &working_directory,
-                transcript,
-                turn_count,
-            )
-            .await
+            run_summarizer(manager, &session_id, &working_directory, transcript).await
         }
         None => {
             warn!(session_id = %session_id, "no subagent manager for memory retain, using keyword fallback");
-            keyword_summary(&session_id, turn_count)
+            keyword_summary(&session_id)
         }
     };
 
@@ -367,19 +342,25 @@ async fn retain_background_task(
 
     let journal_text = parsed.journal.as_deref().unwrap_or(&raw_output);
 
-    // ── Extract title (first non-empty line of journal) ─────────────────────
-    let title = journal_text
-        .lines()
-        .find(|l| !l.trim().is_empty())
-        .unwrap_or("Session summary")
-        .trim()
-        .to_owned();
+    // Subagent emits `{Title}\n\n{body}`. Split so the title is clean (for
+    // the event payload) and the body doesn't duplicate it in the file.
+    let (title, body) = split_title_and_body(journal_text);
 
     // ── Write journal entry (always) ────────────────────────────────────────
-    let now = Utc::now();
-    let ts = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    // `start_ts`/`end_ts` come from the first and last event rows in the
+    // summarized slice (deterministic); `created_ts` is only used for the
+    // file's initial frontmatter on first write.
+    let created_ts = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
-    if let Err(e) = write_session_entry(&session_id, &ts, &model, turn_count, &title, journal_text) {
+    if let Err(e) = write_session_entry(
+        &session_id,
+        &created_ts,
+        &model,
+        &start_ts,
+        &end_ts,
+        &title,
+        &body,
+    ) {
         warn!(session_id = %session_id, error = %e, "failed to write session journal file");
     }
 
@@ -412,16 +393,19 @@ async fn retain_background_task(
     let entry_type = entry_type_parts.join("+");
 
     // ── Persist memory.retained event ───────────────────────────────────────
+    // No turn_number here — the event's own `sequence` is the boundary that
+    // auto-retain uses to count subsequent user messages.
     let retained_event_id = event_store
         .append(&AppendOptions {
             session_id: &session_id,
             event_type: EventType::MemoryRetained,
             payload: json!({
                 "sessionId": session_id,
-                "turnNumber": turn_count,
                 "title": title,
-                "summary": journal_text,
-                "timestamp": ts,
+                "summary": body,
+                "timestamp": created_ts,
+                "rangeStart": start_ts,
+                "rangeEnd": end_ts,
                 "entryType": entry_type,
             }),
             parent_id: None,
@@ -434,7 +418,7 @@ async fn retain_background_task(
     let _ = broadcast.emit(crate::core::events::TronEvent::MemoryUpdated {
         base: crate::core::events::BaseEvent::now(&session_id),
         title: Some(title),
-        summary: Some(raw_output),
+        summary: Some(body),
         entry_type: Some(entry_type),
         event_id: if retained_event_id.is_empty() {
             None
@@ -625,27 +609,44 @@ fn find_boundary_sequence(store: &EventStore, session_id: &str) -> Result<i64, R
     Ok(0)
 }
 
-/// Get reconstructed messages since `after_sequence`.
-fn get_messages_since(
+/// The slice of events after the last retain boundary, along with the
+/// ISO timestamps of the first and last event in the slice. `None` when
+/// the slice is empty (i.e. nothing new to retain).
+struct RetainSlice {
+    messages: Vec<Message>,
+    /// Timestamp of the earliest event being summarized (ISO 8601).
+    start_ts: String,
+    /// Timestamp of the latest event being summarized (ISO 8601).
+    end_ts: String,
+}
+
+/// Reconstruct messages since `after_sequence` and capture the first/last
+/// event timestamps from the raw rows before they're collapsed.
+fn get_retain_slice(
     store: &EventStore,
     session_id: &str,
     after_sequence: i64,
-) -> Result<Vec<Message>, RpcError> {
+) -> Result<Option<RetainSlice>, RpcError> {
     let rows = store
         .get_events_since(session_id, after_sequence)
         .map_err(map_event_store_error)?;
 
     if rows.is_empty() {
-        return Ok(vec![]);
+        return Ok(None);
     }
+
+    let start_ts = rows.first().map(|r| r.timestamp.clone()).unwrap_or_default();
+    let end_ts = rows.last().map(|r| r.timestamp.clone()).unwrap_or_default();
 
     let events = event_rows_to_session_events(&rows);
     let result = reconstruct_from_events(&events);
-    Ok(result
+    let messages = result
         .messages_with_event_ids
         .into_iter()
         .map(|m| m.message)
-        .collect())
+        .collect();
+
+    Ok(Some(RetainSlice { messages, start_ts, end_ts }))
 }
 
 /// Serialize reconstructed messages to a plain-text transcript for summarization.
@@ -740,11 +741,8 @@ async fn run_summarizer(
     parent_session_id: &str,
     working_directory: &str,
     transcript: String,
-    turn_count: i64,
 ) -> String {
-    let task = format!(
-        "Summarize this session transcript (turns 1–{turn_count}):\n\n{transcript}"
-    );
+    let task = format!("Summarize the provided session transcript:\n\n{transcript}");
 
     match manager
         .spawn_subsession(SubsessionConfig {
@@ -764,14 +762,14 @@ async fn run_summarizer(
         Ok(result) => result.output,
         Err(e) => {
             warn!(session_id = %parent_session_id, error = %e, "memory summarizer subagent failed, using keyword fallback");
-            keyword_summary(parent_session_id, turn_count)
+            keyword_summary(parent_session_id)
         }
     }
 }
 
 /// Minimal keyword-based fallback when no subagent manager is available.
-fn keyword_summary(session_id: &str, turn_count: i64) -> String {
-    format!("Session {session_id} ({turn_count} turns)")
+fn keyword_summary(session_id: &str) -> String {
+    format!("Session {session_id}")
 }
 
 // =============================================================================
@@ -807,16 +805,82 @@ fn format_session_frontmatter(session_id: &str, ts: &str, model: &str) -> String
     )
 }
 
-/// Format a timestamped section entry.
-fn format_session_section(ts: &str, title: &str, summary: &str) -> String {
-    // Extract YYYY-MM-DD HH:MM from ISO timestamp
-    let short_ts = if ts.len() >= 16 {
-        &ts[..16]
+/// Extract `YYYY-MM-DD HH:MM` from an ISO-8601 timestamp. Returns the input
+/// unchanged if it's shorter than 16 chars (defensive — expected inputs
+/// always come from the event store which writes ISO-8601).
+fn short_ts(iso: &str) -> String {
+    if iso.len() >= 16 {
+        iso[..16].replace('T', " ")
     } else {
-        ts
+        iso.replace('T', " ")
+    }
+}
+
+/// Format the section header's time component as a range.
+///
+/// - Single point (same minute): `2026-04-20 09:03`
+/// - Same day: `2026-04-20 09:03 → 09:47`
+/// - Cross day: `2026-04-20 09:03 → 2026-04-21 11:15`
+fn format_range(start_ts: &str, end_ts: &str) -> String {
+    let start = short_ts(start_ts);
+    let end = short_ts(end_ts);
+
+    if start == end {
+        return start;
+    }
+
+    // Split on the space between date and time to compare dates cheaply.
+    let start_date = start.split_once(' ').map(|(d, _)| d).unwrap_or(&start);
+    let end_parts = end.split_once(' ');
+
+    match end_parts {
+        Some((end_date, end_time)) if end_date == start_date => {
+            // Same day: elide the redundant end date.
+            format!("{start} → {end_time}")
+        }
+        _ => format!("{start} → {end}"),
+    }
+}
+
+/// Format a timestamped section entry.
+///
+/// The handler owns the header format; the subagent supplies only the title
+/// text and body (see `split_title_and_body` and the summarizer system
+/// prompt).
+fn format_session_section(start_ts: &str, end_ts: &str, title: &str, body: &str) -> String {
+    let range = format_range(start_ts, end_ts);
+    let body_trimmed = body.trim();
+    if body_trimmed.is_empty() {
+        format!("\n## {range} — {title}\n")
+    } else {
+        format!("\n## {range} — {title}\n\n{body_trimmed}\n")
+    }
+}
+
+/// Split the journal text into a clean title and the body below it.
+///
+/// Contract with the summarizer: the first non-empty line is the title,
+/// everything after is the body. If the LLM slips and prefixes with `#`
+/// markers or a `title:` label, strip them defensively.
+fn split_title_and_body(journal_text: &str) -> (String, String) {
+    let trimmed = journal_text.trim_start();
+    let (first_line, rest) = match trimmed.split_once('\n') {
+        Some((head, tail)) => (head, tail),
+        None => (trimmed, ""),
     };
-    let display_ts = short_ts.replace('T', " ");
-    format!("\n## {display_ts} — {title}\n\n{summary}\n")
+
+    let mut t = first_line.trim().trim_start_matches('#').trim();
+    if let Some(after) = t.strip_prefix("title:").or_else(|| t.strip_prefix("TITLE:")) {
+        t = after.trim();
+    }
+
+    let title = if t.is_empty() {
+        "Session summary".to_owned()
+    } else {
+        t.to_owned()
+    };
+
+    (title, rest.trim_start().to_owned())
 }
 
 /// Write a session journal entry to `~/.tron/workspace/memory/sessions/{session_id}.md`.
@@ -825,18 +889,19 @@ fn format_session_section(ts: &str, title: &str, summary: &str) -> String {
 /// timestamped section on subsequent writes.
 fn write_session_entry(
     session_id: &str,
-    ts: &str,
+    created_ts: &str,
     model: &str,
-    _turns: i64,
+    start_ts: &str,
+    end_ts: &str,
     title: &str,
-    summary: &str,
+    body: &str,
 ) -> std::io::Result<()> {
     let path = session_file_path(session_id);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    let section = format_session_section(ts, title, summary);
+    let section = format_session_section(start_ts, end_ts, title, body);
     let is_new = !path.exists();
 
     use std::io::Write as _;
@@ -846,7 +911,7 @@ fn write_session_entry(
         .open(&path)?;
 
     if is_new {
-        let frontmatter = format_session_frontmatter(session_id, ts, model);
+        let frontmatter = format_session_frontmatter(session_id, created_ts, model);
         file.write_all(frontmatter.as_bytes())?;
     }
     file.write_all(section.as_bytes())?;
@@ -974,10 +1039,85 @@ mod tests {
     }
 
     #[test]
-    fn format_session_section_contains_title_and_summary() {
-        let section = format_session_section("2026-01-01T00:00:00Z", "Test title", "Test summary");
-        assert!(section.contains("## 2026-01-01 00:00 — Test title"));
-        assert!(section.contains("Test summary"));
+    fn format_session_section_contains_title_and_body() {
+        let section = format_session_section(
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:05:00Z",
+            "Test title",
+            "Test body",
+        );
+        assert!(section.contains("## 2026-01-01 00:00 → 00:05 — Test title"));
+        assert!(section.contains("Test body"));
+    }
+
+    #[test]
+    fn format_session_section_omits_body_block_when_empty() {
+        let section = format_session_section(
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:05:00Z",
+            "Solo title",
+            "",
+        );
+        assert!(section.contains("## 2026-01-01 00:00 → 00:05 — Solo title"));
+        // No trailing body block / no double newlines beyond the header itself.
+        assert!(!section.contains("Solo title\n\n"));
+    }
+
+    // ── Range formatter ─────────────────────────────────────────────────
+
+    #[test]
+    fn format_range_same_minute_collapses_to_single_timestamp() {
+        let r = format_range("2026-04-20T09:03:00Z", "2026-04-20T09:03:00Z");
+        assert_eq!(r, "2026-04-20 09:03");
+    }
+
+    #[test]
+    fn format_range_same_day_elides_second_date() {
+        let r = format_range("2026-04-20T09:03:00Z", "2026-04-20T09:47:12Z");
+        assert_eq!(r, "2026-04-20 09:03 → 09:47");
+    }
+
+    #[test]
+    fn format_range_cross_day_includes_both_dates() {
+        let r = format_range("2026-04-20T23:58:00Z", "2026-04-21T00:12:00Z");
+        assert_eq!(r, "2026-04-20 23:58 → 2026-04-21 00:12");
+    }
+
+    // ── Title splitter ──────────────────────────────────────────────────
+
+    #[test]
+    fn split_title_and_body_plain_first_line() {
+        let (title, body) = split_title_and_body("Gold Price Research Session\n\n**Goal**: ...");
+        assert_eq!(title, "Gold Price Research Session");
+        assert_eq!(body, "**Goal**: ...");
+    }
+
+    #[test]
+    fn split_title_and_body_strips_hash_prefix() {
+        let (title, body) = split_title_and_body("## Some Title\n\nbody line");
+        assert_eq!(title, "Some Title");
+        assert_eq!(body, "body line");
+    }
+
+    #[test]
+    fn split_title_and_body_strips_title_label() {
+        let (title, body) = split_title_and_body("title: Labelled\n\nbody");
+        assert_eq!(title, "Labelled");
+        assert_eq!(body, "body");
+    }
+
+    #[test]
+    fn split_title_and_body_single_line() {
+        let (title, body) = split_title_and_body("Only Title");
+        assert_eq!(title, "Only Title");
+        assert_eq!(body, "");
+    }
+
+    #[test]
+    fn split_title_and_body_empty_input_uses_fallback_title() {
+        let (title, body) = split_title_and_body("");
+        assert_eq!(title, "Session summary");
+        assert_eq!(body, "");
     }
 
     // ── Parse tests ─────────────────────────────────────────────────────
@@ -1073,13 +1213,18 @@ mod tests {
         let path = dir.path().join(format!("{session_id}.md"));
 
         let frontmatter = format_session_frontmatter(session_id, "2026-01-01T00:00:00Z", "claude-haiku");
-        let section = format_session_section("2026-01-01T00:00:00Z", "Initial work", "Did some things");
+        let section = format_session_section(
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:15:00Z",
+            "Initial work",
+            "Did some things",
+        );
 
         std::fs::write(&path, format!("{frontmatter}{section}")).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.starts_with("---\n"));
         assert!(content.contains("session: sess_test_create"));
-        assert!(content.contains("## 2026-01-01 00:00 — Initial work"));
+        assert!(content.contains("## 2026-01-01 00:00 → 00:15 — Initial work"));
         assert!(content.contains("Did some things"));
     }
 
@@ -1089,8 +1234,18 @@ mod tests {
         let path = dir.path().join("sess_test_append.md");
 
         let frontmatter = format_session_frontmatter("sess_test_append", "2026-01-01T00:00:00Z", "claude-haiku");
-        let section1 = format_session_section("2026-01-01T00:00:00Z", "First", "First work");
-        let section2 = format_session_section("2026-01-01T01:00:00Z", "Second", "More work");
+        let section1 = format_session_section(
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:10:00Z",
+            "First",
+            "First work",
+        );
+        let section2 = format_session_section(
+            "2026-01-01T01:00:00Z",
+            "2026-01-01T01:12:00Z",
+            "Second",
+            "More work",
+        );
 
         std::fs::write(&path, format!("{frontmatter}{section1}")).unwrap();
         use std::io::Write as _;
@@ -1099,8 +1254,8 @@ mod tests {
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content.matches("---").count(), 2); // only the frontmatter pair
-        assert!(content.contains("## 2026-01-01 00:00 — First"));
-        assert!(content.contains("## 2026-01-01 01:00 — Second"));
+        assert!(content.contains("## 2026-01-01 00:00 → 00:10 — First"));
+        assert!(content.contains("## 2026-01-01 01:00 → 01:12 — Second"));
     }
 
     #[test]
@@ -1148,21 +1303,8 @@ mod tests {
 
     #[test]
     fn keyword_summary_includes_session_id() {
-        let s = keyword_summary("sess_xyz", 3);
+        let s = keyword_summary("sess_xyz");
         assert!(s.contains("sess_xyz"));
-        assert!(s.contains("3 turns"));
-    }
-
-    #[test]
-    fn title_extraction_first_non_empty_line() {
-        let summary = "\n\nImplement JWT auth\n\n**Goal**: ...\n";
-        let title = summary
-            .lines()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or("Session summary")
-            .trim()
-            .to_owned();
-        assert_eq!(title, "Implement JWT auth");
     }
 
     #[tokio::test]

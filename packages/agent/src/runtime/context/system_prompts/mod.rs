@@ -121,9 +121,13 @@ pub const MEMORY_RETAIN_SUMMARIZER_PROMPT: &str = r#"You are a memory archivist 
 
 ## Section 1: Journal (ALWAYS produce this)
 
-Wrap in <journal>...</journal> tags. Format:
+Wrap in <journal>...</journal> tags. The caller owns the file header and
+timestamp range — do NOT emit any heading markers (`#`) or dates yourself.
+The first line of your output MUST be just the title text.
 
-## YYYY-MM-DD HH:MM — {Title under 60 chars}
+Format:
+
+{Title under 60 chars}
 
 **Goal**: what the user was trying to accomplish
 
@@ -161,6 +165,7 @@ evidence:
 ## Rules
 
 - Journal section is MANDATORY. Sections 2 and 3 are conditional.
+- The first line of the journal MUST be the title text only (no `#`, no date, no timestamp).
 - Be specific: include exact file paths, function names, decisions.
 - Omit empty subsections within journal.
 - Keep journal under 400 words.

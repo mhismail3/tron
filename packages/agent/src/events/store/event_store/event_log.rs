@@ -318,6 +318,21 @@ impl EventStore {
         EventRepo::get_latest_by_type(&conn, session_id, event_type)
     }
 
+    /// Count events of a specific type in a session with `sequence > after_sequence`.
+    ///
+    /// `after_sequence = 0` counts all events of that type in the session
+    /// (sequence numbers start at 1). Used by auto-retain to count user
+    /// messages since the last retain boundary.
+    pub fn count_events_by_type_after_sequence(
+        &self,
+        session_id: &str,
+        event_type: &str,
+        after_sequence: i64,
+    ) -> Result<i64> {
+        let conn = self.conn()?;
+        EventRepo::count_by_type_after_sequence(&conn, session_id, event_type, after_sequence)
+    }
+
     /// Get events by workspace and types (cross-session query).
     pub fn get_events_by_workspace_and_types(
         &self,

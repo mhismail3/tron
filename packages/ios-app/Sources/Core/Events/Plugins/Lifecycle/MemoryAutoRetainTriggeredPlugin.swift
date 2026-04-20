@@ -17,7 +17,6 @@ enum MemoryAutoRetainTriggeredPlugin: DispatchableEventPlugin {
         let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let turnNumber: Int64
             let intervalFired: Int
         }
     }
@@ -25,14 +24,13 @@ enum MemoryAutoRetainTriggeredPlugin: DispatchableEventPlugin {
     // MARK: - Result
 
     struct Result: EventResult {
-        let turnNumber: Int64
         let intervalFired: Int
     }
 
     // MARK: - Protocol Implementation
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        Result(turnNumber: event.data.turnNumber, intervalFired: event.data.intervalFired)
+        Result(intervalFired: event.data.intervalFired)
     }
 
     @MainActor
