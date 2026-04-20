@@ -597,8 +597,7 @@ struct MemoryRetainedNotificationView: View {
                         .foregroundStyle(.tronPink.opacity(0.5))
                         .transition(.blurReplace)
 
-                    Text(title)
-                        .font(TronTypography.codeCaption)
+                    Text(inlineMarkdown(from: title, size: TronTypography.sizeBody2))
                         .foregroundStyle(.tronPink.opacity(0.7))
                         .lineLimit(1)
                         .transition(.blurReplace)

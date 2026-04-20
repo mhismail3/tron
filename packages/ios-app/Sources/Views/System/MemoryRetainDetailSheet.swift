@@ -8,6 +8,8 @@ struct MemoryRetainDetailSheet: View {
     let summary: String?
     @Environment(\.dismiss) private var dismiss
 
+    @State private var parsedBlocks: [MarkdownBlock] = []
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
@@ -27,6 +29,9 @@ struct MemoryRetainDetailSheet: View {
         }
         .presentationDragIndicator(.hidden)
         .tint(.tronPink)
+        .task(id: summary ?? "") {
+            parsedBlocks = MarkdownBlockParser.parse(summary ?? "")
+        }
     }
 
     // MARK: - Summary Section
@@ -65,12 +70,17 @@ struct MemoryRetainDetailSheet: View {
                 }
 
                 if let summary, !summary.isEmpty {
-                    Text(summary)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextSecondary)
-                        .lineSpacing(4)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(parsedBlocks) { block in
+                            MarkdownBlockView(
+                                block: block,
+                                textColor: .tronTextSecondary,
+                                codeBlockBackground: Color.tronPink.opacity(0.08)
+                            )
+                        }
+                    }
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text("No summary available")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
