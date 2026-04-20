@@ -4,7 +4,7 @@ import SwiftUI
 /// Wraps content in a VStack with sectionFill background and rounded corners.
 struct SettingsCard<Content: View>: View {
     var accent: Color = .tronEmerald
-    var interactive: Bool = true
+    var interactive: Bool = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {

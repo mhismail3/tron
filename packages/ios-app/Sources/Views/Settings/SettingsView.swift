@@ -160,49 +160,49 @@ struct SettingsView: View {
 
     private var categoriesCard: some View {
         VStack(spacing: 8) {
-            SettingsCard {
+            SettingsCard(interactive: true) {
                 categoryRow(icon: "network", label: "Server", subtitle: "Configure the Tron server host/port") {
                     activePage = .server
                 }
             }
             .cardEntrance(visible: cardsVisible, index: 0)
 
-            SettingsCard {
+            SettingsCard(interactive: true) {
                 categoryRow(icon: "key.horizontal", label: "Model Providers", subtitle: "Login with OAuth and configure API keys") {
                     activePage = .providers
                 }
             }
             .cardEntrance(visible: cardsVisible, index: 1)
 
-            SettingsCard {
+            SettingsCard(interactive: true) {
                 categoryRow(icon: "brain", label: "Agent", subtitle: "Session defaults, compaction, memory, and queueing") {
                     activePage = .agent
                 }
             }
             .cardEntrance(visible: cardsVisible, index: 2)
 
-            SettingsCard {
+            SettingsCard(interactive: true) {
                 categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "Configure external tool servers") {
                     activePage = .mcpServers
                 }
             }
             .cardEntrance(visible: cardsVisible, index: 3)
 
-            SettingsCard {
+            SettingsCard(interactive: true) {
                 categoryRow(icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill", label: "Hooks", subtitle: "Manage agent lifecycle events") {
                     activePage = .hooks
                 }
             }
             .cardEntrance(visible: cardsVisible, index: 4)
 
-            SettingsCard {
+            SettingsCard(interactive: true) {
                 categoryRow(icon: "point.3.connected.trianglepath.dotted", label: "Git Workflow", subtitle: "Configure sync, merge, push, and conflict policies") {
                     activePage = .gitWorkflow
                 }
             }
             .cardEntrance(visible: cardsVisible, index: 5)
 
-            SettingsCard {
+            SettingsCard(interactive: true) {
                 categoryRow(icon: "text.book.closed", label: "Prompt Library", subtitle: "Configure prompt history and quick-prompt snippets") {
                     activePage = .promptLibrary
                 }
@@ -210,7 +210,7 @@ struct SettingsView: View {
             .cardEntrance(visible: cardsVisible, index: 6)
 
             if #available(iOS 26.0, *) {
-                SettingsCard {
+                SettingsCard(interactive: true) {
                     categoryRow(icon: "paintbrush", label: "App", subtitle: "Change how the iOS app looks and behaves") {
                         activePage = .app
                     }
@@ -257,7 +257,7 @@ struct SettingsView: View {
             SettingsSectionHeader(title: "Danger Zone", color: .tronError)
 
             VStack(spacing: 8) {
-                SettingsCard(accent: .tronError) {
+                SettingsCard(accent: .tronError, interactive: true) {
                     Button {
                         showArchiveAllConfirmation = true
                     } label: {
@@ -285,7 +285,7 @@ struct SettingsView: View {
                     .opacity(eventStoreManager.sessions.isEmpty || isArchivingAll ? 0.4 : 1)
                 }
 
-                SettingsCard(accent: .tronError) {
+                SettingsCard(accent: .tronError, interactive: true) {
                     Button {
                         showingResetAlert = true
                     } label: {

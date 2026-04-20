@@ -28,7 +28,7 @@ struct ModelProviderSection: View {
         VStack(alignment: .leading, spacing: 0) {
             ProviderSectionHeader(provider: provider, isConfigured: isConfigured)
 
-            SettingsCard(interactive: false) {
+            SettingsCard {
                 cardContents
             }
         }

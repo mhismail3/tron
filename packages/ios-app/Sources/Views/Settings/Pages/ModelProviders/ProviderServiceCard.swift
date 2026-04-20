@@ -13,7 +13,7 @@ struct ProviderServiceCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsCard(interactive: false) {
+            SettingsCard {
                 headerRow
                 SettingsRowDivider()
                 keyEntryRow
