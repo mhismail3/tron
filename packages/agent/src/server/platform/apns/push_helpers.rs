@@ -3,7 +3,20 @@
 //! Extracted from [`ApnsNotifyDelegate`](super::delegate::ApnsNotifyDelegate) so both
 //! the direct and relay delegates share identical token-query, notification-conversion,
 //! and result-processing logic.
+//!
+//! Key functions:
+//! - [`group_tokens`] — split the active-tokens list by `(environment, bundle_id)`.
+//!   Each group becomes one transport call so the `apns-topic` header is
+//!   correct for every token in the batch. The 2026-04-16 `DeviceTokenNotForTopic`
+//!   regression would have been caught by the `group_tokens_same_env_different_bundle_split`
+//!   unit test.
+//! - [`is_terminal_token_error`] — classifies an APNs failure as terminal
+//!   (deactivate the token) vs transient. Terminal: HTTP 410, HTTP 400
+//!   `BadDeviceToken`, HTTP 400 `DeviceTokenNotForTopic`. Everything else
+//!   (JWT errors, rate limits, 5xx, `TopicDisallowed`) retries on the
+//!   next `NotifyApp` call.
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 use tracing::debug;
@@ -20,10 +33,21 @@ pub(crate) fn token_prefix(token: &str) -> &str {
     crate::core::text::truncate_str(token, 8)
 }
 
-/// A device token with its APNs environment.
+/// A device token with its APNs environment and bundle ID.
 pub(crate) struct DeviceToken {
     pub token: String,
     pub environment: String,
+    /// APNs bundle ID (`apns-topic`). `None` for legacy tokens registered
+    /// before v006 — the send path falls back to the worker's default.
+    pub bundle_id: Option<String>,
+}
+
+/// A group of tokens that share the same (environment, bundle_id) tuple —
+/// the natural unit of an APNs request.
+pub(crate) struct TokenGroup<'a> {
+    pub environment: &'a str,
+    pub bundle_id: Option<&'a str>,
+    pub tokens: Vec<&'a str>,
 }
 
 /// Query all active device tokens from the database.
@@ -38,17 +62,36 @@ pub(crate) fn active_tokens(pool: &ConnectionPool) -> Result<Vec<DeviceToken>, T
         .map(|t| DeviceToken {
             token: t.device_token,
             environment: t.environment,
+            bundle_id: t.bundle_id,
         })
         .collect())
 }
 
-/// Group device tokens by environment.
-pub(crate) fn group_by_environment(tokens: &[DeviceToken]) -> HashMap<&str, Vec<&str>> {
-    let mut groups: HashMap<&str, Vec<&str>> = HashMap::new();
+/// Group device tokens by `(environment, bundle_id)`.
+///
+/// Two tokens in the same environment but against different bundles
+/// (e.g., Beta sandbox + a hypothetical other sandbox bundle) MUST end up
+/// in distinct groups — the relay sends one `apns-topic` per request.
+/// Merging them would reproduce the pre-fix bug where the Beta token was
+/// rejected with `DeviceTokenNotForTopic`.
+///
+/// `BTreeMap` gives deterministic ordering so tests don't flake.
+pub(crate) fn group_tokens(tokens: &[DeviceToken]) -> Vec<TokenGroup<'_>> {
+    let mut grouped: BTreeMap<(&str, Option<&str>), Vec<&str>> = BTreeMap::new();
     for dt in tokens {
-        groups.entry(&dt.environment).or_default().push(&dt.token);
+        grouped
+            .entry((&dt.environment, dt.bundle_id.as_deref()))
+            .or_default()
+            .push(&dt.token);
     }
-    groups
+    grouped
+        .into_iter()
+        .map(|((environment, bundle_id), tokens)| TokenGroup {
+            environment,
+            bundle_id,
+            tokens,
+        })
+        .collect()
 }
 
 /// Convert a tool-level [`Notification`] to a platform-level [`ApnsNotification`].
@@ -79,7 +122,37 @@ pub(crate) fn to_apns_notification(notification: &Notification) -> ApnsNotificat
     }
 }
 
-/// Process send results: mark 410 tokens invalid, collect errors, build summary.
+/// Return true when an APNs failure is terminal for this specific token —
+/// i.e., the token is permanently invalid and should be deactivated in
+/// the DB. Transient failures (JWT / rate / 5xx / non-terminal 400 reasons)
+/// must NOT deactivate.
+///
+/// Apple doc:
+/// - HTTP 410 (`Unregistered`): the device is no longer registered for the topic.
+/// - HTTP 400 `BadDeviceToken`: the token is malformed or not for this environment.
+/// - HTTP 400 `DeviceTokenNotForTopic`: the token was issued for a different
+///   bundle and will never work against the current `apns-topic`. We already
+///   pass the correct topic per token since v006, so if this still surfaces
+///   the token is genuinely wrong for the app — deactivate it.
+///
+/// Deliberately NOT terminal: `TopicDisallowed` (cert/team issue, not token),
+/// `ExpiredProviderToken` / `InvalidProviderToken` (JWT), `MissingProviderToken`
+/// (config), any 429 / 5xx.
+pub(crate) fn is_terminal_token_error(result: &ApnsSendResult) -> bool {
+    if result.success {
+        return false;
+    }
+    if result.status_code == Some(410) {
+        return true;
+    }
+    matches!(
+        result.reason.as_deref(),
+        Some("BadDeviceToken") | Some("DeviceTokenNotForTopic")
+    )
+}
+
+/// Process send results: auto-deactivate terminally-failed tokens, collect
+/// errors, build the summary shown to the user.
 pub(crate) fn process_send_results(
     results: &[ApnsSendResult],
     pool: &ConnectionPool,
@@ -103,10 +176,12 @@ pub(crate) fn process_send_results(
         if result.success {
             success_count += 1;
         } else {
-            if result.status_code == Some(410) {
+            if is_terminal_token_error(result) {
                 debug!(
                     device_token = token_prefix(&result.device_token),
-                    "Marking expired token as invalid"
+                    status = ?result.status_code,
+                    reason = ?result.reason,
+                    "deactivating token after terminal APNs error"
                 );
                 if let Ok(conn) = pool.get() {
                     let _ = DeviceTokenRepo::mark_invalid(&conn, &result.device_token);
@@ -293,4 +368,330 @@ mod tests {
         assert_eq!(result.success_count, 1);
         assert_eq!(result.total_count, 2);
     }
+
+    // ── group_tokens ─────────────────────────────────────────────────
+
+    fn dt(token: &str, env: &str, bundle: Option<&str>) -> DeviceToken {
+        DeviceToken {
+            token: token.to_string(),
+            environment: env.to_string(),
+            bundle_id: bundle.map(String::from),
+        }
+    }
+
+    #[test]
+    fn group_tokens_same_env_same_bundle_together() {
+        let tokens = vec![
+            dt("aa", "production", Some("com.tron.mobile")),
+            dt("bb", "production", Some("com.tron.mobile")),
+        ];
+        let groups = group_tokens(&tokens);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].environment, "production");
+        assert_eq!(groups[0].bundle_id, Some("com.tron.mobile"));
+        assert_eq!(groups[0].tokens, vec!["aa", "bb"]);
+    }
+
+    #[test]
+    fn group_tokens_same_env_different_bundle_split() {
+        // *** Regression test for the 2026-04-16 incident. ***
+        // If this fails, the Beta-scheme bug is back: two sandbox tokens
+        // from different bundles got sent with the same apns-topic.
+        let tokens = vec![
+            dt("aa", "sandbox", Some("com.tron.mobile")),
+            dt("bb", "sandbox", Some("com.tron.mobile.beta")),
+        ];
+        let groups = group_tokens(&tokens);
+        assert_eq!(groups.len(), 2, "distinct bundles must form distinct groups");
+        let beta = groups.iter().find(|g| g.bundle_id == Some("com.tron.mobile.beta")).unwrap();
+        let prod = groups.iter().find(|g| g.bundle_id == Some("com.tron.mobile")).unwrap();
+        assert_eq!(beta.tokens, vec!["bb"]);
+        assert_eq!(prod.tokens, vec!["aa"]);
+    }
+
+    #[test]
+    fn group_tokens_full_matrix_four_groups() {
+        let tokens = vec![
+            dt("a1", "production", Some("com.tron.mobile")),
+            dt("a2", "production", Some("com.tron.mobile.beta")),
+            dt("a3", "sandbox", Some("com.tron.mobile")),
+            dt("a4", "sandbox", Some("com.tron.mobile.beta")),
+        ];
+        let groups = group_tokens(&tokens);
+        assert_eq!(groups.len(), 4);
+    }
+
+    #[test]
+    fn group_tokens_null_bundle_forms_own_group() {
+        let tokens = vec![
+            dt("legacy", "production", None),
+            dt("legacy2", "production", None),
+        ];
+        let groups = group_tokens(&tokens);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].bundle_id, None);
+        assert_eq!(groups[0].tokens.len(), 2);
+    }
+
+    #[test]
+    fn group_tokens_null_and_some_do_not_merge() {
+        let tokens = vec![
+            dt("legacy", "production", None),
+            dt("modern", "production", Some("com.tron.mobile")),
+        ];
+        let groups = group_tokens(&tokens);
+        assert_eq!(groups.len(), 2, "None and Some must not merge even if env matches");
+    }
+
+    #[test]
+    fn group_tokens_empty_input_empty_output() {
+        let groups = group_tokens(&[]);
+        assert!(groups.is_empty());
+    }
+
+    // ── is_terminal_token_error ──────────────────────────────────────
+
+    fn failed(status: u16, reason: Option<&str>) -> ApnsSendResult {
+        ApnsSendResult {
+            success: false,
+            device_token: "tok".into(),
+            apns_id: None,
+            status_code: Some(status),
+            reason: reason.map(String::from),
+            error: Some("err".into()),
+        }
+    }
+
+    #[test]
+    fn terminal_410_is_terminal() {
+        assert!(is_terminal_token_error(&failed(410, Some("Unregistered"))));
+    }
+
+    #[test]
+    fn terminal_bad_device_token_is_terminal() {
+        assert!(is_terminal_token_error(&failed(400, Some("BadDeviceToken"))));
+    }
+
+    #[test]
+    fn terminal_device_token_not_for_topic_is_terminal() {
+        // *** Regression test for the original bug. ***
+        // Without this deactivation, a broken Beta token stays in the DB
+        // and keeps failing every NotifyApp call.
+        assert!(is_terminal_token_error(&failed(400, Some("DeviceTokenNotForTopic"))));
+    }
+
+    #[test]
+    fn terminal_topic_disallowed_is_NOT_terminal() {
+        // Cert/team config issue — not a per-token failure. Don't punish
+        // the user's tokens for a server-side provisioning mistake.
+        assert!(!is_terminal_token_error(&failed(400, Some("TopicDisallowed"))));
+    }
+
+    #[test]
+    fn terminal_other_400_reasons_are_NOT_terminal() {
+        assert!(!is_terminal_token_error(&failed(400, Some("PayloadTooLarge"))));
+        assert!(!is_terminal_token_error(&failed(400, Some("IdleTimeout"))));
+        assert!(!is_terminal_token_error(&failed(400, Some("BadMessageId"))));
+    }
+
+    #[test]
+    fn terminal_403_is_NOT_terminal() {
+        // JWT / provider-token issue. Never a per-token failure.
+        assert!(!is_terminal_token_error(&failed(403, Some("ExpiredProviderToken"))));
+        assert!(!is_terminal_token_error(&failed(403, Some("InvalidProviderToken"))));
+    }
+
+    #[test]
+    fn terminal_404_is_NOT_terminal() {
+        assert!(!is_terminal_token_error(&failed(404, None)));
+    }
+
+    #[test]
+    fn terminal_429_is_NOT_terminal() {
+        assert!(!is_terminal_token_error(&failed(429, None)));
+    }
+
+    #[test]
+    fn terminal_500_is_NOT_terminal() {
+        assert!(!is_terminal_token_error(&failed(500, None)));
+    }
+
+    #[test]
+    fn terminal_success_is_NOT_terminal() {
+        let ok = ApnsSendResult {
+            success: true,
+            device_token: "tok".into(),
+            apns_id: Some("id".into()),
+            status_code: Some(200),
+            reason: None,
+            error: None,
+        };
+        assert!(!is_terminal_token_error(&ok));
+    }
+
+    // ── process_send_results deactivation (with real DB) ─────────────
+
+    /// Build an in-memory pool with the full schema applied.
+    fn pool_with_schema() -> crate::events::ConnectionPool {
+        use r2d2_sqlite::SqliteConnectionManager;
+        let manager = SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::new(manager).unwrap();
+        let conn = pool.get().unwrap();
+        crate::events::sqlite::migrations::run_migrations(&conn).unwrap();
+        drop(conn);
+        pool
+    }
+
+    fn register(pool: &crate::events::ConnectionPool, token: &str) {
+        let conn = pool.get().unwrap();
+        DeviceTokenRepo::register(&conn, token, None, None, "sandbox", None).unwrap();
+    }
+
+    fn is_active(pool: &crate::events::ConnectionPool, token: &str) -> bool {
+        let conn = pool.get().unwrap();
+        let row = DeviceTokenRepo::get_all_active(&conn)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.device_token == token);
+        row.is_some()
+    }
+
+    #[test]
+    fn process_results_deactivates_on_http_410() {
+        let pool = pool_with_schema();
+        let token = "a".repeat(64);
+        register(&pool, &token);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(410),
+            reason: Some("Unregistered".into()),
+            error: Some("gone".into()),
+        }];
+        process_send_results(&results, &pool);
+
+        assert!(!is_active(&pool, &token), "410 should deactivate");
+    }
+
+    #[test]
+    fn process_results_deactivates_on_bad_device_token() {
+        let pool = pool_with_schema();
+        let token = "b".repeat(64);
+        register(&pool, &token);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(400),
+            reason: Some("BadDeviceToken".into()),
+            error: Some("bad".into()),
+        }];
+        process_send_results(&results, &pool);
+
+        assert!(!is_active(&pool, &token), "BadDeviceToken should deactivate");
+    }
+
+    #[test]
+    fn process_results_deactivates_on_device_token_not_for_topic() {
+        // *** Full-stack regression test for the original bug. ***
+        let pool = pool_with_schema();
+        let token = "c".repeat(64);
+        register(&pool, &token);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(400),
+            reason: Some("DeviceTokenNotForTopic".into()),
+            error: Some("wrong bundle".into()),
+        }];
+        process_send_results(&results, &pool);
+
+        assert!(
+            !is_active(&pool, &token),
+            "DeviceTokenNotForTopic should deactivate (was the 2026-04-16 bug)"
+        );
+    }
+
+    #[test]
+    fn process_results_does_not_deactivate_on_non_terminal_400() {
+        let pool = pool_with_schema();
+        let token = "d".repeat(64);
+        register(&pool, &token);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(400),
+            reason: Some("PayloadTooLarge".into()),
+            error: Some("too big".into()),
+        }];
+        process_send_results(&results, &pool);
+
+        assert!(is_active(&pool, &token), "transient 400 must not deactivate");
+    }
+
+    #[test]
+    fn process_results_does_not_deactivate_on_topic_disallowed() {
+        // Cert misconfig — never punish the token.
+        let pool = pool_with_schema();
+        let token = "e".repeat(64);
+        register(&pool, &token);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(400),
+            reason: Some("TopicDisallowed".into()),
+            error: Some("cert wrong".into()),
+        }];
+        process_send_results(&results, &pool);
+
+        assert!(is_active(&pool, &token), "TopicDisallowed must NOT deactivate");
+    }
+
+    #[test]
+    fn process_results_does_not_deactivate_on_5xx() {
+        let pool = pool_with_schema();
+        let token = "f".repeat(64);
+        register(&pool, &token);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(503),
+            reason: None,
+            error: Some("apns down".into()),
+        }];
+        process_send_results(&results, &pool);
+
+        assert!(is_active(&pool, &token), "server error must not deactivate");
+    }
+
+    #[test]
+    fn process_results_does_not_deactivate_on_success() {
+        let pool = pool_with_schema();
+        let token = "0".repeat(64);
+        register(&pool, &token);
+
+        let results = vec![ApnsSendResult {
+            success: true,
+            device_token: token.clone(),
+            apns_id: Some("id".into()),
+            status_code: Some(200),
+            reason: None,
+            error: None,
+        }];
+        process_send_results(&results, &pool);
+
+        assert!(is_active(&pool, &token), "success must never deactivate");
+    }
+
 }

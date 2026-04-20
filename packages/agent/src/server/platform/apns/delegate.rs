@@ -48,19 +48,25 @@ impl NotifyDelegate for ApnsNotifyDelegate {
 
         let apns_notif = push_helpers::to_apns_notification(notification);
         let total = device_tokens.len();
-        let groups = push_helpers::group_by_environment(&device_tokens);
+        let groups = push_helpers::group_tokens(&device_tokens);
 
         debug!(
             device_count = total,
-            environments = ?groups.keys().collect::<Vec<_>>(),
+            group_count = groups.len(),
             title = %notification.title,
             "Sending APNS notification"
         );
 
         let mut all_results = Vec::with_capacity(total);
-        for (env, tokens) in &groups {
-            let owned: Vec<String> = tokens.iter().map(|t| t.to_string()).collect();
-            let results = self.apns.send_to_many(&owned, &apns_notif, env).await;
+        for group in &groups {
+            let owned: Vec<String> = group.tokens.iter().map(|t| t.to_string()).collect();
+            // Legacy tokens with None fall back to the service's config
+            // bundle_id — matches the pre-v006 behaviour.
+            let bundle_id = group.bundle_id.unwrap_or_else(|| self.apns.default_bundle_id());
+            let results = self
+                .apns
+                .send_to_many(&owned, &apns_notif, group.environment, bundle_id)
+                .await;
             all_results.extend(results);
         }
         Ok(push_helpers::process_send_results(&all_results, &self.pool))

@@ -108,8 +108,13 @@ schemes:
     run:
       config: Prod
       debugEnabled: false
+    # Tests always run against the Beta (debug) config because
+    # `ENABLE_TESTABILITY = YES` is only set there — `@testable import
+    # TronMobile` fails against Prod (release), which disables testability.
+    # This is the standard Apple pattern: release builds ship without
+    # testability, tests run against a debug build of the same module.
     test:
-      config: Prod
+      config: Beta
       targets:
         - TronMobileTests
     profile:

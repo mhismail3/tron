@@ -56,26 +56,32 @@ final class MiscClient: RPCDomainClient {
 
     // MARK: - Device Token Methods (Push Notifications)
 
-    /// Check if this is a production build (for APNS environment)
-    private var isProductionBuild: Bool {
-        #if DEBUG
-        return false
-        #else
-        return true
-        #endif
-    }
-
-    /// Register a device token for push notifications
+    /// Register a device token for push notifications.
+    ///
+    /// Sends two pieces of routing metadata:
+    /// - `bundleId` (from `Bundle.main.bundleIdentifier`) — so the relay
+    ///   uses the right APNs topic per build (`com.tron.mobile` vs
+    ///   `com.tron.mobile.beta`).
+    /// - `environment` (from `APNsEnvironment.current()`) — parsed at
+    ///   runtime from `embedded.mobileprovision`, so Xcode-dev-signed
+    ///   release builds correctly report `sandbox` instead of lying
+    ///   about being `production` via a `#if DEBUG` heuristic.
     func registerDeviceToken(_ deviceToken: String, sessionId: String? = nil, workspaceId: String? = nil) async throws {
         let ws = try requireTransport().requireConnection()
 
         let effectiveSessionId = sessionId ?? currentTransport?.currentSessionId
+        let bundleId = Bundle.main.bundleIdentifier ?? "com.tron.mobile"
+        if Bundle.main.bundleIdentifier == nil {
+            logger.error("Bundle.main.bundleIdentifier is nil — falling back to com.tron.mobile", category: .notification)
+        }
+        let environment = APNsEnvironment.current()
 
         let params = DeviceTokenRegisterParams(
             deviceToken: deviceToken,
             sessionId: effectiveSessionId,
             workspaceId: workspaceId,
-            environment: isProductionBuild ? "production" : "sandbox"
+            environment: environment,
+            bundleId: bundleId
         )
 
         let result: DeviceTokenRegisterResult = try await ws.send(
@@ -83,7 +89,10 @@ final class MiscClient: RPCDomainClient {
             params: params
         )
 
-        logger.info("Device token registered: id=\(result.id), created=\(result.created)", category: .notification)
+        logger.info(
+            "Device token registered: id=\(result.id), created=\(result.created), bundle=\(bundleId), env=\(environment), session=\(effectiveSessionId ?? "nil")",
+            category: .notification
+        )
     }
 
     /// Unregister a device token

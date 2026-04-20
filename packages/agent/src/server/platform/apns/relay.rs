@@ -17,12 +17,14 @@ use super::types::{ApnsNotification, ApnsSendResult};
 type HmacSha256 = Hmac<Sha256>;
 
 /// Relay client for sending push notifications via a Cloudflare Worker.
+///
+/// Environment and bundle ID are passed per request (derived from each
+/// device token's registered values) so this struct carries neither.
 #[derive(Debug)]
 pub struct RelayClient {
     client: reqwest::Client,
     relay_url: String,
     relay_secret: String,
-    environment: String,
 }
 
 /// Request body sent to the relay.
@@ -31,6 +33,12 @@ struct RelayRequest<'a> {
     device_tokens: &'a [String],
     notification: &'a ApnsNotification,
     environment: &'a str,
+    /// Optional APNs `apns-topic`. Omitted from the JSON entirely when
+    /// empty — the relay worker falls back to its configured default.
+    /// Callers upstream compose `(environment, bundle_id)` groups so all
+    /// tokens in a single request share one topic.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    bundle_id: &'a str,
 }
 
 /// Response body from the relay.
@@ -75,7 +83,6 @@ impl RelayClient {
             client,
             relay_url: config.relay_url,
             relay_secret: config.relay_secret,
-            environment: config.environment,
         }
     }
 
@@ -111,6 +118,7 @@ impl PushSender for RelayClient {
         device_tokens: &[String],
         notification: &ApnsNotification,
         environment: &str,
+        bundle_id: &str,
     ) -> Vec<ApnsSendResult> {
         if device_tokens.is_empty() {
             return Vec::new();
@@ -120,6 +128,7 @@ impl PushSender for RelayClient {
             device_tokens,
             notification,
             environment,
+            bundle_id,
         };
 
         let body = match serde_json::to_string(&request) {
@@ -140,7 +149,8 @@ impl PushSender for RelayClient {
         debug!(
             url = %url,
             device_count = device_tokens.len(),
-            environment = %self.environment,
+            environment = %environment,
+            bundle_id = %bundle_id,
             "sending via relay"
         );
 
@@ -238,7 +248,6 @@ mod tests {
             client: reqwest::Client::new(),
             relay_url: "https://example.com".into(),
             relay_secret: "test-secret".into(),
-            environment: "production".into(),
         };
 
         let sig1 = client.sign(1000000, r#"{"test":"data"}"#);
@@ -254,7 +263,6 @@ mod tests {
             client: reqwest::Client::new(),
             relay_url: "https://example.com".into(),
             relay_secret: "test-secret".into(),
-            environment: "production".into(),
         };
 
         let sig1 = client.sign(1000000, "body");
@@ -268,7 +276,6 @@ mod tests {
             client: reqwest::Client::new(),
             relay_url: "https://example.com".into(),
             relay_secret: "test-secret".into(),
-            environment: "production".into(),
         };
 
         let sig1 = client.sign(1000000, "body1");
@@ -282,13 +289,11 @@ mod tests {
             client: reqwest::Client::new(),
             relay_url: "https://example.com".into(),
             relay_secret: "secret-a".into(),
-            environment: "production".into(),
         };
         let c2 = RelayClient {
             client: reqwest::Client::new(),
             relay_url: "https://example.com".into(),
             relay_secret: "secret-b".into(),
-            environment: "production".into(),
         };
 
         assert_ne!(c1.sign(1000000, "body"), c2.sign(1000000, "body"));
@@ -314,7 +319,6 @@ mod tests {
             client: reqwest::Client::new(),
             relay_url: "https://example.com".into(),
             relay_secret: "test".into(),
-            environment: "production".into(),
         };
         let notif = ApnsNotification {
             title: "T".into(),
@@ -326,7 +330,7 @@ mod tests {
             thread_id: None,
         };
 
-        let results = client.send_to_many(&[], &notif, "sandbox").await;
+        let results = client.send_to_many(&[], &notif, "sandbox", "").await;
         assert!(results.is_empty());
     }
 
@@ -346,6 +350,7 @@ mod tests {
             device_tokens: &tokens,
             notification: &notification,
             environment: "production",
+            bundle_id: "com.tron.mobile",
         };
 
         let json: serde_json::Value = serde_json::to_value(&request).unwrap();
@@ -354,6 +359,63 @@ mod tests {
         assert_eq!(json["notification"]["title"], "Test");
         assert_eq!(json["notification"]["body"], "Hello");
         assert_eq!(json["environment"], "production");
+        assert_eq!(json["bundle_id"], "com.tron.mobile");
+    }
+
+    #[test]
+    fn request_serialization_includes_bundle_id_when_non_empty() {
+        let tokens = vec!["aa".to_string()];
+        let notification = ApnsNotification {
+            title: "T".into(),
+            body: "B".into(),
+            data: Default::default(),
+            priority: "high".into(),
+            sound: None,
+            badge: None,
+            thread_id: None,
+        };
+        let request = RelayRequest {
+            device_tokens: &tokens,
+            notification: &notification,
+            environment: "sandbox",
+            bundle_id: "com.tron.mobile.beta",
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(
+            json.contains("\"bundle_id\":\"com.tron.mobile.beta\""),
+            "non-empty bundle_id must serialize: {json}"
+        );
+    }
+
+    #[test]
+    fn request_serialization_omits_bundle_id_when_empty() {
+        // *** Backward-compat regression guard ***
+        // An empty bundle_id must NOT appear in the JSON. Older relay
+        // workers would otherwise see the field and choke, and it would
+        // waste bytes on every request.
+        let tokens = vec!["aa".to_string()];
+        let notification = ApnsNotification {
+            title: "T".into(),
+            body: "B".into(),
+            data: Default::default(),
+            priority: "high".into(),
+            sound: None,
+            badge: None,
+            thread_id: None,
+        };
+        let request = RelayRequest {
+            device_tokens: &tokens,
+            notification: &notification,
+            environment: "sandbox",
+            bundle_id: "",
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(
+            !json.contains("bundle_id"),
+            "empty bundle_id must be omitted from wire: {json}"
+        );
     }
 
     #[test]

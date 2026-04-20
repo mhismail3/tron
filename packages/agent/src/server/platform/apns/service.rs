@@ -87,11 +87,23 @@ impl ApnsService {
         })
     }
 
+    /// The bundle ID from config — used as the `apns-topic` fallback when
+    /// a caller passes empty string. Exposed for the notify delegate which
+    /// groups tokens by `(environment, bundle_id)` and falls back for
+    /// legacy tokens that have no stored bundle_id.
+    pub fn default_bundle_id(&self) -> &str {
+        &self.config.bundle_id
+    }
+
     /// Send a notification to a single device.
+    ///
+    /// `bundle_id` is used as the `apns-topic` header. Pass empty string
+    /// to use the config default.
     pub async fn send(
         &self,
         device_token: &str,
         notification: &ApnsNotification,
+        bundle_id: &str,
     ) -> ApnsSendResult {
         let jwt = match self.get_or_refresh_token() {
             Ok(t) => t,
@@ -107,7 +119,7 @@ impl ApnsService {
             }
         };
 
-        let (request, url) = self.build_apns_request(device_token, notification, &jwt);
+        let (request, url) = self.build_apns_request(device_token, notification, &jwt, bundle_id);
         let result = request.send().await;
         Self::parse_apns_response(result, device_token, &url).await
     }
@@ -115,11 +127,13 @@ impl ApnsService {
     /// Assemble the APNS HTTP/2 request: JWT auth header, topic, priority, and JSON payload.
     ///
     /// Returns the ready-to-send request builder and the target URL (for error reporting).
+    /// `bundle_id` empty-string falls back to `self.config.bundle_id` (the legacy behaviour).
     fn build_apns_request(
         &self,
         device_token: &str,
         notification: &ApnsNotification,
         jwt: &str,
+        bundle_id: &str,
     ) -> (reqwest::RequestBuilder, String) {
         let url = format!(
             "https://{}:443/3/device/{}",
@@ -134,12 +148,17 @@ impl ApnsService {
         };
 
         let payload = self.build_payload(notification);
+        let effective_topic = if bundle_id.is_empty() {
+            &self.config.bundle_id
+        } else {
+            bundle_id
+        };
 
         debug!(
             url = %url,
             token_len = device_token.len(),
             token_prefix = crate::core::text::truncate_str(device_token, 8),
-            bundle_id = %self.config.bundle_id,
+            apns_topic = %effective_topic,
             priority = priority,
             payload = %payload,
             "APNS request"
@@ -149,7 +168,7 @@ impl ApnsService {
             .client
             .post(&url)
             .header("authorization", format!("bearer {jwt}"))
-            .header("apns-topic", &self.config.bundle_id)
+            .header("apns-topic", effective_topic)
             .header("apns-push-type", "alert")
             .header("apns-priority", priority)
             .header("apns-expiration", "0")
@@ -309,12 +328,15 @@ impl PushSender for ApnsService {
         device_tokens: &[String],
         notification: &ApnsNotification,
         _environment: &str,
+        bundle_id: &str,
     ) -> Vec<ApnsSendResult> {
         // Direct mode uses the environment from its own config (ApnsConfig),
         // not the per-token environment, since the host is fixed at init time.
+        // `bundle_id` is threaded through so the delegate can override the
+        // config default per group (Beta scheme → `com.tron.mobile.beta`).
         let futures: Vec<_> = device_tokens
             .iter()
-            .map(|token| self.send(token, notification))
+            .map(|token| self.send(token, notification, bundle_id))
             .collect();
         futures::future::join_all(futures).await
     }

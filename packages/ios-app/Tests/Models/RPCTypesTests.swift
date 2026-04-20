@@ -501,7 +501,8 @@ final class SystemTypesTests: XCTestCase {
             deviceToken: "abc123",
             sessionId: "sess_123",
             workspaceId: "ws_456",
-            environment: "production"
+            environment: "production",
+            bundleId: "com.tron.mobile"
         )
 
         let data = try JSONEncoder().encode(params)
@@ -509,6 +510,7 @@ final class SystemTypesTests: XCTestCase {
 
         XCTAssertEqual(decoded["deviceToken"] as? String, "abc123")
         XCTAssertEqual(decoded["environment"] as? String, "production")
+        XCTAssertEqual(decoded["bundleId"] as? String, "com.tron.mobile")
     }
 }
 

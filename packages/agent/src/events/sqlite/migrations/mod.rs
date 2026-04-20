@@ -46,6 +46,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Add CHECK (use_worktree IN (0, 1)) to sessions",
         sql: include_str!("v005_sessions_use_worktree_check.sql"),
     },
+    Migration {
+        version: 6,
+        description: "Per-token APNs bundle ID (device_tokens.bundle_id)",
+        sql: include_str!("v006_device_token_bundle_id.sql"),
+    },
 ];
 
 /// Result of running migrations.
@@ -197,8 +202,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 5);
-        assert_eq!(result.max_version_applied, 5);
+        assert_eq!(result.applied, 6);
+        assert_eq!(result.max_version_applied, 6);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -267,7 +272,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 5);
+        assert_eq!(first.applied, 6);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -285,12 +290,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 5);
+        assert_eq!(current_version(&conn).unwrap(), 6);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 5);
+        assert_eq!(latest_version(), 6);
     }
 
     #[test]
@@ -802,10 +807,10 @@ mod tests {
         )
         .unwrap();
 
-        // Now run the full migrator — v2 through v5 should apply.
+        // Now run the full migrator — v2 through v6 should apply.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 4);
-        assert_eq!(result.max_version_applied, 5);
+        assert_eq!(result.applied, 5);
+        assert_eq!(result.max_version_applied, 6);
 
         // v1 data is intact.
         let count: i64 = conn
@@ -1006,8 +1011,8 @@ mod tests {
         .unwrap();
 
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 3);
-        assert_eq!(result.max_version_applied, 5);
+        assert_eq!(result.applied, 4);
+        assert_eq!(result.max_version_applied, 6);
 
         let spell_count: i64 = conn
             .query_row(
@@ -1055,8 +1060,8 @@ mod tests {
 
         // Upgrade.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 2);
-        assert_eq!(result.max_version_applied, 5);
+        assert_eq!(result.applied, 3);
+        assert_eq!(result.max_version_applied, 6);
 
         // Pre-existing row gets NULL for the new column.
         let use_worktree: Option<i64> = conn
@@ -1237,10 +1242,10 @@ mod tests {
         )
         .unwrap();
 
-        // Upgrade to v5.
+        // Upgrade to v6.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 5);
+        assert_eq!(result.applied, 2);
+        assert_eq!(result.max_version_applied, 6);
 
         // All three rows survive untouched.
         let count: i64 = conn
@@ -1302,5 +1307,110 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 2);
+    }
+
+    // ── v006 bundle_id tests ──────────────────────────────────────────
+
+    #[test]
+    fn v006_adds_bundle_id_column_to_device_tokens() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(device_tokens)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        assert!(
+            columns.contains(&"bundle_id".to_string()),
+            "device_tokens missing bundle_id column after v006"
+        );
+    }
+
+    #[test]
+    fn v006_bundle_id_round_trips() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO device_tokens (id, device_token, platform, environment, bundle_id,
+                                        created_at, last_used_at, is_active)
+             VALUES ('dt_1', 'aa', 'ios', 'sandbox', 'com.tron.mobile.beta',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .unwrap();
+
+        let bundle_id: Option<String> = conn
+            .query_row(
+                "SELECT bundle_id FROM device_tokens WHERE id = 'dt_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(bundle_id.as_deref(), Some("com.tron.mobile.beta"));
+    }
+
+    #[test]
+    fn v006_bundle_id_is_nullable() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        // Omit bundle_id — should default to NULL.
+        conn.execute(
+            "INSERT INTO device_tokens (id, device_token, platform, environment,
+                                        created_at, last_used_at, is_active)
+             VALUES ('dt_2', 'bb', 'ios', 'production',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .unwrap();
+
+        let bundle_id: Option<String> = conn
+            .query_row(
+                "SELECT bundle_id FROM device_tokens WHERE id = 'dt_2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(bundle_id.is_none(), "legacy insert should have NULL bundle_id");
+    }
+
+    #[test]
+    fn v006_upgrade_from_v5_preserves_existing_tokens() {
+        // Simulate a pre-v006 DB: run v1..v5 only, insert a token, then upgrade.
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        for migration in &MIGRATIONS[..5] {
+            apply_migration(&conn, migration).unwrap();
+        }
+        assert_eq!(current_version(&conn).unwrap(), 5);
+
+        conn.execute(
+            "INSERT INTO device_tokens (id, device_token, platform, environment,
+                                        created_at, last_used_at, is_active)
+             VALUES ('dt_legacy', 'cc', 'ios', 'sandbox',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .unwrap();
+
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 6);
+
+        // Pre-existing row survives with NULL bundle_id.
+        let (token, bundle_id): (String, Option<String>) = conn
+            .query_row(
+                "SELECT device_token, bundle_id FROM device_tokens WHERE id = 'dt_legacy'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(token, "cc");
+        assert!(bundle_id.is_none(), "legacy token should have NULL bundle_id after v006");
     }
 }

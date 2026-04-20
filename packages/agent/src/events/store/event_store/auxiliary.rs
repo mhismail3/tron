@@ -54,16 +54,29 @@ impl EventStore {
     }
 
     /// Register or update a device token. Returns `{id, created}`.
+    ///
+    /// `bundle_id` is the APNs topic the token was issued against; when
+    /// present it's used as the `apns-topic` header at send time. Passing
+    /// `None` is supported for backward compatibility with older clients
+    /// and falls back to the relay worker's default.
     pub fn register_device_token(
         &self,
         device_token: &str,
         session_id: Option<&str>,
         workspace_id: Option<&str>,
         environment: &str,
+        bundle_id: Option<&str>,
     ) -> Result<RegisterTokenResult> {
         self.with_global_write_lock(|| {
             let conn = self.conn()?;
-            DeviceTokenRepo::register(&conn, device_token, session_id, workspace_id, environment)
+            DeviceTokenRepo::register(
+                &conn,
+                device_token,
+                session_id,
+                workspace_id,
+                environment,
+                bundle_id,
+            )
         })
     }
 

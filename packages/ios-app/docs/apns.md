@@ -56,6 +56,27 @@ npx wrangler secret put TRON_RELAY_SECRET  # same secret as in auth.json
 
 The APNs environment (sandbox vs production) is determined per-device-token, not per-server. When the iOS app registers its token, it includes its environment. The relay routes each token to the correct APNs host automatically.
 
+### Per-Build Bundle ID
+
+Each scheme (Tron vs Tron Beta) ships with a distinct bundle ID — respectively `com.tron.mobile` and `com.tron.mobile.beta`. APNs requires the `apns-topic` header to match the bundle that issued each token, so the iOS app sends `Bundle.main.bundleIdentifier` with every `device.register` call. The server stores it in `device_tokens.bundle_id` and includes it in each relay request. The relay worker uses it as the `apns-topic` header, falling back to `env.APNS_BUNDLE_ID` only when the server doesn't supply one (legacy tokens registered before v006).
+
+Tokens that surface `DeviceTokenNotForTopic` or `BadDeviceToken` are auto-deactivated so the DB self-heals — the iOS app re-registers with the correct bundle on the next launch.
+
+### Runtime environment detection
+
+The iOS app does NOT use `#if DEBUG` to decide the APNs environment. Compile-time flags are brittle: Xcode-rebuilt Prod-scheme apps still get Development provisioning profiles (Apple ID personal signing), which override the entitlements file's `aps-environment` from `production` to `development`. Reporting the wrong environment produces `BadDeviceToken` errors on every send.
+
+Instead, [`APNsEnvironment.swift`](../Sources/Services/Infrastructure/APNsEnvironment.swift) parses `embedded.mobileprovision` at runtime and reads the `Entitlements.aps-environment` key that is *actually in force*. Results:
+
+- Xcode-rebuilt (dev-signed) → `sandbox`, regardless of scheme.
+- TestFlight / ad-hoc → whatever the distribution profile carries (typically `production`).
+- App Store → falls back to `#if DEBUG` → `production` for release builds, since App Store binaries may not ship the profile.
+- Simulator / malformed profile → `sandbox` fallback (sandbox rejects fewer tokens than production).
+
+### Delivery model
+
+Every `NotifyApp` tool call fans out to all active device tokens, grouped by `(environment, bundle_id)` so the relay picks the right APNs topic per batch. This is intentional: a single user may have the same app on multiple devices (iPhone + iPad), and all of them should receive the notification regardless of which specific device initiated the session. The environment and bundle-ID routing (above) already prevents cross-app mis-delivery on the same device.
+
 ## Direct Mode (Developer Setup)
 
 For local development with direct APNs access (bypasses relay):
@@ -156,12 +177,24 @@ When releasing to App Store:
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `BadDeviceToken` | Environment mismatch | Match config environment to build type |
-| `InvalidProviderToken` | Wrong credentials | Verify keyId, teamId, bundleId |
+| `BadDeviceToken` | Token invalid (stale or wrong env) | Auto-deactivated; re-registers on next launch |
+| `DeviceTokenNotForTopic` | Token's bundle ≠ `apns-topic` | Auto-deactivated; fixed when iOS sends `bundleId` |
+| `TopicDisallowed` | Cert/team doesn't own the bundle | Check APNs key permissions — **not** a token issue |
+| `InvalidProviderToken` | JWT signing broken | Verify `keyId`, `teamId`, `.p8` key |
 | `no valid aps-environment` | Missing entitlements | Add Push Notifications capability in Xcode |
-| `Unregistered` | Token expired | App re-registers automatically on reconnect |
+| `Unregistered` (410) | Token expired | Auto-deactivated; re-registers on reconnect |
 | `relay: invalid signature` | HMAC mismatch | Verify `TRON_RELAY_SECRET` matches Worker secret |
 | `relay timeout` | Worker unreachable | Check Cloudflare Worker status |
+
+### Auto-deactivation
+
+`process_send_results` (in `server/platform/apns/push_helpers.rs`) deactivates tokens on terminal APNs failures:
+
+- HTTP 410 (`Unregistered`) — device removed
+- HTTP 400 `BadDeviceToken` — malformed or wrong environment
+- HTTP 400 `DeviceTokenNotForTopic` — wrong bundle ID
+
+Transient failures (403, 404, 429, 5xx, other 400 reasons including `TopicDisallowed`) do NOT deactivate — they're retried on the next `NotifyApp`.
 
 ### Debug Checklist
 

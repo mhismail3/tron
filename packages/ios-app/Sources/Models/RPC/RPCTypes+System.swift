@@ -20,6 +20,11 @@ struct DeviceTokenRegisterParams: Encodable {
     let sessionId: String?
     let workspaceId: String?
     let environment: String
+    /// APNs bundle ID the token was issued against (e.g.,
+    /// `com.tron.mobile` vs `com.tron.mobile.beta`). The server stores it
+    /// and the relay uses it as `apns-topic` — without it, Beta-scheme
+    /// tokens get rejected with `DeviceTokenNotForTopic`.
+    let bundleId: String
 }
 
 /// Result of device.register

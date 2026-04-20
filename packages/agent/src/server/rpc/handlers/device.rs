@@ -31,6 +31,14 @@ impl MethodHandler for RegisterTokenHandler {
         let session_id = opt_string(params.as_ref(), "sessionId");
         let workspace_id = opt_string(params.as_ref(), "workspaceId");
         let environment = opt_string(params.as_ref(), "environment");
+        let bundle_id = opt_string(params.as_ref(), "bundleId");
+        if let Some(ref bid) = bundle_id
+            && bid.is_empty()
+        {
+            return Err(RpcError::InvalidParams {
+                message: "bundleId must not be empty".into(),
+            });
+        }
 
         let event_store = ctx.event_store.clone();
         ctx.run_blocking("device.register", move || {
@@ -40,6 +48,7 @@ impl MethodHandler for RegisterTokenHandler {
                     session_id.as_deref(),
                     workspace_id.as_deref(),
                     environment.as_deref().unwrap_or("production"),
+                    bundle_id.as_deref(),
                 )
                 .map_err(map_event_store_error)?;
 
@@ -275,5 +284,97 @@ mod tests {
 
         assert!(result.get("success").is_some(), "missing 'success' field");
         assert!(result["success"].is_boolean(), "'success' must be Bool");
+    }
+
+    // ── bundleId flow (v006) ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn register_token_with_bundle_id_stores_it() {
+        let ctx = make_test_context();
+        let token = "1".repeat(64);
+        let _ = RegisterTokenHandler
+            .handle(
+                Some(json!({
+                    "deviceToken": token,
+                    "environment": "sandbox",
+                    "bundleId": "com.tron.mobile.beta",
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let rows = ctx.event_store.get_all_active_device_tokens().unwrap();
+        let row = rows.iter().find(|r| r.device_token == token).unwrap();
+        assert_eq!(row.bundle_id.as_deref(), Some("com.tron.mobile.beta"));
+        assert_eq!(row.environment, "sandbox");
+    }
+
+    #[tokio::test]
+    async fn register_token_without_bundle_id_stores_null() {
+        let ctx = make_test_context();
+        let token = "2".repeat(64);
+        let _ = RegisterTokenHandler
+            .handle(Some(json!({"deviceToken": token})), &ctx)
+            .await
+            .unwrap();
+
+        let rows = ctx.event_store.get_all_active_device_tokens().unwrap();
+        let row = rows.iter().find(|r| r.device_token == token).unwrap();
+        assert!(row.bundle_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn register_token_rejects_empty_bundle_id() {
+        let ctx = make_test_context();
+        let err = RegisterTokenHandler
+            .handle(
+                Some(json!({
+                    "deviceToken": "3".repeat(64),
+                    "bundleId": "",
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn register_token_bundle_id_updates_on_reregister() {
+        // Token moves between bundles (Beta → Prod reinstall). The stored
+        // bundle_id must track the client's current build, otherwise the
+        // relay will route to the wrong APNs topic on the next send.
+        let ctx = make_test_context();
+        let token = "4".repeat(64);
+
+        RegisterTokenHandler
+            .handle(
+                Some(json!({
+                    "deviceToken": token,
+                    "environment": "production",
+                    "bundleId": "com.tron.mobile",
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        RegisterTokenHandler
+            .handle(
+                Some(json!({
+                    "deviceToken": token,
+                    "environment": "sandbox",
+                    "bundleId": "com.tron.mobile.beta",
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let rows = ctx.event_store.get_all_active_device_tokens().unwrap();
+        let row = rows.iter().find(|r| r.device_token == token).unwrap();
+        assert_eq!(row.bundle_id.as_deref(), Some("com.tron.mobile.beta"));
+        assert_eq!(row.environment, "sandbox");
     }
 }

@@ -740,40 +740,53 @@ fn process_deploy_sentinel(
     #[cfg(feature = "apns")]
     fn active_device_tokens(
         pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
-    ) -> Vec<(String, String)> {
+    ) -> Vec<(String, String, Option<String>)> {
         pool.get()
             .ok()
             .and_then(|conn| {
                 conn.prepare(
-                    "SELECT device_token, environment FROM device_tokens WHERE is_active = 1",
+                    "SELECT device_token, environment, bundle_id FROM device_tokens WHERE is_active = 1",
                 )
                 .ok()
                 .and_then(|mut stmt| {
-                    stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
-                        .ok()
-                        .map(|rows| rows.filter_map(Result::ok).collect())
+                    stmt.query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    })
+                    .ok()
+                    .map(|rows| rows.filter_map(Result::ok).collect())
                 })
             })
             .unwrap_or_default()
     }
 
-    /// Send a push notification to all active devices, grouped by environment.
+    /// Send a push notification to all active devices, grouped by `(environment, bundle_id)`.
+    ///
+    /// Matches the grouping used by the main notify path in
+    /// `server::platform::apns::push_helpers::group_tokens`. Without the
+    /// bundle_id axis, Beta tokens go out with the production topic and
+    /// APNs rejects with `DeviceTokenNotForTopic`.
     #[cfg(feature = "apns")]
     fn send_push(
         push: &PushService,
-        tokens_with_env: Vec<(String, String)>,
+        tokens_with_meta: Vec<(String, String, Option<String>)>,
         notification: tron::server::platform::apns::ApnsNotification,
     ) {
         let sender = push.as_sender();
         drop(tokio::spawn(async move {
-            // Group by environment
-            let mut groups: std::collections::HashMap<String, Vec<String>> =
+            let mut groups: std::collections::HashMap<(String, Option<String>), Vec<String>> =
                 std::collections::HashMap::new();
-            for (token, env) in tokens_with_env {
-                groups.entry(env).or_default().push(token);
+            for (token, env, bundle_id) in tokens_with_meta {
+                groups.entry((env, bundle_id)).or_default().push(token);
             }
-            for (env, tokens) in &groups {
-                let _ = sender.send_to_many(tokens, &notification, env).await;
+            for ((env, bundle_id), tokens) in &groups {
+                let bid = bundle_id.as_deref().unwrap_or("");
+                let _ = sender
+                    .send_to_many(tokens, &notification, env, bid)
+                    .await;
             }
         }));
     }

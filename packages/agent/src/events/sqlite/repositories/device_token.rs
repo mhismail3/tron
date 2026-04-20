@@ -25,13 +25,20 @@ impl DeviceTokenRepo {
     /// Register or update a device token. Returns `{id, created}`.
     ///
     /// If the `(device_token, platform)` pair already exists, updates the
-    /// session/workspace/environment and reactivates it. Otherwise inserts a new row.
+    /// session/workspace/environment/bundle_id and reactivates it. Otherwise
+    /// inserts a new row.
+    ///
+    /// `bundle_id` is the APNs `apns-topic` this token was issued against
+    /// (e.g., `com.tron.mobile` vs `com.tron.mobile.beta`). Nullable for
+    /// callers that don't yet send it; the relay falls back to its env
+    /// default at delivery time.
     pub fn register(
         conn: &Connection,
         device_token: &str,
         session_id: Option<&str>,
         workspace_id: Option<&str>,
         environment: &str,
+        bundle_id: Option<&str>,
     ) -> Result<RegisterTokenResult> {
         let now = chrono::Utc::now().to_rfc3339();
         let platform = "ios";
@@ -46,13 +53,15 @@ impl DeviceTokenRepo {
             .optional()?;
 
         if let Some(id) = existing {
-            // Update existing token
+            // Update existing token — bundle_id overwrites, including NULL,
+            // so the DB reflects the current client's state (matches the
+            // existing semantics for session_id/workspace_id/environment).
             let _ = conn.execute(
                 "UPDATE device_tokens
                  SET session_id = ?1, workspace_id = ?2, environment = ?3,
-                     last_used_at = ?4, is_active = 1
-                 WHERE id = ?5",
-                params![session_id, workspace_id, environment, now, id],
+                     bundle_id = ?4, last_used_at = ?5, is_active = 1
+                 WHERE id = ?6",
+                params![session_id, workspace_id, environment, bundle_id, now, id],
             )?;
             Ok(RegisterTokenResult { id, created: false })
         } else {
@@ -60,8 +69,8 @@ impl DeviceTokenRepo {
             let id = Uuid::now_v7().to_string();
             let _ = conn.execute(
                 "INSERT INTO device_tokens (id, device_token, session_id, workspace_id,
-                     platform, environment, created_at, last_used_at, is_active)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
+                     platform, environment, bundle_id, created_at, last_used_at, is_active)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
                 params![
                     id,
                     device_token,
@@ -69,6 +78,7 @@ impl DeviceTokenRepo {
                     workspace_id,
                     platform,
                     environment,
+                    bundle_id,
                     now,
                     now
                 ],
@@ -91,7 +101,7 @@ impl DeviceTokenRepo {
         let row = conn
             .query_row(
                 "SELECT id, device_token, session_id, workspace_id, platform,
-                        environment, created_at, last_used_at, is_active
+                        environment, bundle_id, created_at, last_used_at, is_active
                  FROM device_tokens WHERE id = ?1",
                 params![id],
                 Self::map_row,
@@ -104,7 +114,7 @@ impl DeviceTokenRepo {
     pub fn get_all_active(conn: &Connection) -> Result<Vec<DeviceTokenRow>> {
         let mut stmt = conn.prepare(
             "SELECT id, device_token, session_id, workspace_id, platform,
-                    environment, created_at, last_used_at, is_active
+                    environment, bundle_id, created_at, last_used_at, is_active
              FROM device_tokens WHERE is_active = 1",
         )?;
         let rows = stmt
@@ -117,7 +127,7 @@ impl DeviceTokenRepo {
     pub fn get_by_session(conn: &Connection, session_id: &str) -> Result<Vec<DeviceTokenRow>> {
         let mut stmt = conn.prepare(
             "SELECT id, device_token, session_id, workspace_id, platform,
-                    environment, created_at, last_used_at, is_active
+                    environment, bundle_id, created_at, last_used_at, is_active
              FROM device_tokens WHERE session_id = ?1 AND is_active = 1",
         )?;
         let rows = stmt
@@ -136,6 +146,10 @@ impl DeviceTokenRepo {
     }
 
     /// Map a rusqlite row to `DeviceTokenRow`.
+    ///
+    /// Column order MUST match every `SELECT` above:
+    /// 0=id, 1=device_token, 2=session_id, 3=workspace_id, 4=platform,
+    /// 5=environment, 6=bundle_id, 7=created_at, 8=last_used_at, 9=is_active.
     fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceTokenRow> {
         Ok(DeviceTokenRow {
             id: row.get(0)?,
@@ -144,9 +158,10 @@ impl DeviceTokenRepo {
             workspace_id: row.get(3)?,
             platform: row.get(4)?,
             environment: row.get(5)?,
-            created_at: row.get(6)?,
-            last_used_at: row.get(7)?,
-            is_active: row.get::<_, i32>(8)? == 1,
+            bundle_id: row.get(6)?,
+            created_at: row.get(7)?,
+            last_used_at: row.get(8)?,
+            is_active: row.get::<_, i32>(9)? == 1,
         })
     }
 }
@@ -173,7 +188,7 @@ mod tests {
     fn register_new_token() {
         let conn = setup();
         let result =
-            DeviceTokenRepo::register(&conn, "a".repeat(64).as_str(), None, None, "production")
+            DeviceTokenRepo::register(&conn, "a".repeat(64).as_str(), None, None, "production", None)
                 .unwrap();
         assert!(!result.id.is_empty());
         assert!(result.created);
@@ -183,8 +198,8 @@ mod tests {
     fn register_existing_token_returns_same_id() {
         let conn = setup();
         let token = "b".repeat(64);
-        let first = DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
-        let second = DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
+        let first = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        let second = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
         assert_eq!(first.id, second.id);
         assert!(first.created);
         assert!(!second.created);
@@ -216,8 +231,8 @@ mod tests {
         let conn = setup();
         insert_workspace_and_session(&conn);
         let token = "c".repeat(64);
-        DeviceTokenRepo::register(&conn, &token, None, None, "sandbox").unwrap();
-        DeviceTokenRepo::register(&conn, &token, Some("sess_1"), Some("ws_1"), "production")
+        DeviceTokenRepo::register(&conn, &token, None, None, "sandbox", None).unwrap();
+        DeviceTokenRepo::register(&conn, &token, Some("sess_1"), Some("ws_1"), "production", None)
             .unwrap();
 
         let row = conn
@@ -242,11 +257,11 @@ mod tests {
     fn register_reactivates_inactive_token() {
         let conn = setup();
         let token = "d".repeat(64);
-        DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
+        DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
         DeviceTokenRepo::unregister(&conn, &token).unwrap();
 
         // Re-register should reactivate
-        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
+        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
         assert!(!result.created); // existing row
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
             .unwrap()
@@ -258,7 +273,7 @@ mod tests {
     fn unregister_existing_token() {
         let conn = setup();
         let token = "e".repeat(64);
-        DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
+        DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
         let success = DeviceTokenRepo::unregister(&conn, &token).unwrap();
         assert!(success);
     }
@@ -274,7 +289,7 @@ mod tests {
     fn get_by_id_found() {
         let conn = setup();
         let token = "f".repeat(64);
-        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
+        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id).unwrap();
         assert!(row.is_some());
         let row = row.unwrap();
@@ -303,8 +318,8 @@ mod tests {
         let conn = setup();
         let token1 = "a".repeat(64);
         let token2 = "b".repeat(64);
-        DeviceTokenRepo::register(&conn, &token1, None, None, "production").unwrap();
-        DeviceTokenRepo::register(&conn, &token2, None, None, "production").unwrap();
+        DeviceTokenRepo::register(&conn, &token1, None, None, "production", None).unwrap();
+        DeviceTokenRepo::register(&conn, &token2, None, None, "production", None).unwrap();
         DeviceTokenRepo::unregister(&conn, &token1).unwrap();
 
         let active = DeviceTokenRepo::get_all_active(&conn).unwrap();
@@ -318,8 +333,8 @@ mod tests {
         insert_workspace_and_session(&conn);
         let token1 = "a".repeat(64);
         let token2 = "b".repeat(64);
-        DeviceTokenRepo::register(&conn, &token1, Some("sess_1"), None, "production").unwrap();
-        DeviceTokenRepo::register(&conn, &token2, Some("sess_2"), None, "production").unwrap();
+        DeviceTokenRepo::register(&conn, &token1, Some("sess_1"), None, "production", None).unwrap();
+        DeviceTokenRepo::register(&conn, &token2, Some("sess_2"), None, "production", None).unwrap();
 
         let session_tokens = DeviceTokenRepo::get_by_session(&conn, "sess_1").unwrap();
         assert_eq!(session_tokens.len(), 1);
@@ -330,7 +345,7 @@ mod tests {
     fn mark_invalid_deactivates() {
         let conn = setup();
         let token = "g".repeat(64);
-        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
+        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
         DeviceTokenRepo::mark_invalid(&conn, &token).unwrap();
 
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
@@ -350,11 +365,184 @@ mod tests {
     fn register_preserves_platform_ios() {
         let conn = setup();
         let token = "h".repeat(64);
-        let result = DeviceTokenRepo::register(&conn, &token, None, None, "sandbox").unwrap();
+        let result = DeviceTokenRepo::register(&conn, &token, None, None, "sandbox", None).unwrap();
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
             .unwrap()
             .unwrap();
         assert_eq!(row.platform, "ios");
         assert_eq!(row.environment, "sandbox");
+    }
+
+    // ── bundle_id round-trip (v006) ─────────────────────────────────
+
+    #[test]
+    fn register_with_bundle_id_stores_it() {
+        let conn = setup();
+        let token = "1".repeat(64);
+        let result = DeviceTokenRepo::register(
+            &conn,
+            &token,
+            None,
+            None,
+            "sandbox",
+            Some("com.tron.mobile.beta"),
+        )
+        .unwrap();
+        let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.bundle_id.as_deref(), Some("com.tron.mobile.beta"));
+    }
+
+    #[test]
+    fn register_without_bundle_id_stores_null() {
+        let conn = setup();
+        let token = "2".repeat(64);
+        let result =
+            DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
+            .unwrap()
+            .unwrap();
+        assert!(
+            row.bundle_id.is_none(),
+            "register(..., None) should store NULL bundle_id"
+        );
+    }
+
+    #[test]
+    fn register_updates_bundle_id_on_reregistration() {
+        // Token moves between bundles (e.g., same device reinstalls Beta after Prod).
+        let conn = setup();
+        let token = "3".repeat(64);
+        DeviceTokenRepo::register(
+            &conn,
+            &token,
+            None,
+            None,
+            "production",
+            Some("com.tron.mobile"),
+        )
+        .unwrap();
+        DeviceTokenRepo::register(
+            &conn,
+            &token,
+            None,
+            None,
+            "sandbox",
+            Some("com.tron.mobile.beta"),
+        )
+        .unwrap();
+
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT bundle_id FROM device_tokens WHERE device_token = ?1",
+                params![token],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored.as_deref(), Some("com.tron.mobile.beta"));
+    }
+
+    #[test]
+    fn register_clears_bundle_id_when_new_is_none() {
+        // A downgraded or legacy client re-registers without bundle_id —
+        // DB reflects current state (matches session_id/workspace_id semantics).
+        let conn = setup();
+        let token = "4".repeat(64);
+        DeviceTokenRepo::register(
+            &conn,
+            &token,
+            None,
+            None,
+            "production",
+            Some("com.tron.mobile"),
+        )
+        .unwrap();
+        DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT bundle_id FROM device_tokens WHERE device_token = ?1",
+                params![token],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(stored.is_none(), "re-register with None should clear to NULL");
+    }
+
+    #[test]
+    fn get_all_active_returns_bundle_id_for_each_token() {
+        let conn = setup();
+        let t_prod = "5".repeat(64);
+        let t_beta = "6".repeat(64);
+        let t_legacy = "7".repeat(64);
+        DeviceTokenRepo::register(
+            &conn,
+            &t_prod,
+            None,
+            None,
+            "production",
+            Some("com.tron.mobile"),
+        )
+        .unwrap();
+        DeviceTokenRepo::register(
+            &conn,
+            &t_beta,
+            None,
+            None,
+            "sandbox",
+            Some("com.tron.mobile.beta"),
+        )
+        .unwrap();
+        DeviceTokenRepo::register(&conn, &t_legacy, None, None, "production", None).unwrap();
+
+        let mut rows = DeviceTokenRepo::get_all_active(&conn).unwrap();
+        rows.sort_by(|a, b| a.device_token.cmp(&b.device_token));
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].device_token, t_prod);
+        assert_eq!(rows[0].bundle_id.as_deref(), Some("com.tron.mobile"));
+        assert_eq!(rows[1].device_token, t_beta);
+        assert_eq!(rows[1].bundle_id.as_deref(), Some("com.tron.mobile.beta"));
+        assert_eq!(rows[2].device_token, t_legacy);
+        assert!(rows[2].bundle_id.is_none());
+    }
+
+    #[test]
+    fn get_by_session_returns_bundle_id() {
+        let conn = setup();
+        insert_workspace_and_session(&conn);
+        let token = "8".repeat(64);
+        DeviceTokenRepo::register(
+            &conn,
+            &token,
+            Some("sess_1"),
+            Some("ws_1"),
+            "sandbox",
+            Some("com.tron.mobile.beta"),
+        )
+        .unwrap();
+
+        let rows = DeviceTokenRepo::get_by_session(&conn, "sess_1").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].bundle_id.as_deref(), Some("com.tron.mobile.beta"));
+    }
+
+
+    #[test]
+    fn map_row_handles_null_bundle_id() {
+        // Direct insert with explicit NULL (simulates legacy pre-v006 row).
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO device_tokens (id, device_token, platform, environment,
+                                        created_at, last_used_at, is_active)
+             VALUES ('legacy_1', '9999', 'ios', 'production',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .unwrap();
+
+        let row = DeviceTokenRepo::get_by_id(&conn, "legacy_1").unwrap().unwrap();
+        assert_eq!(row.device_token, "9999");
+        assert!(row.bundle_id.is_none());
     }
 }

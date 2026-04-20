@@ -26,6 +26,13 @@ interface PushRequest {
     thread_id?: string | null;
   };
   environment?: string;
+  /**
+   * Optional APNs bundle ID (`apns-topic` header). When present and
+   * non-empty, overrides `env.APNS_BUNDLE_ID` for this request.
+   * Lets servers route sandbox-Beta (`com.tron.mobile.beta`) tokens to
+   * the right topic on the shared relay.
+   */
+  bundle_id?: string | null;
 }
 
 interface DeviceResult {
@@ -133,6 +140,14 @@ export default {
         ? "api.sandbox.push.apple.com"
         : "api.push.apple.com";
 
+    // Pick the APNs topic: per-request bundle_id wins; fall back to env.
+    // Treats null / undefined / "" all as "use default" so pre-fix servers
+    // and defensive clients keep working.
+    const bundleId =
+      typeof req.bundle_id === "string" && req.bundle_id.length > 0
+        ? req.bundle_id
+        : env.APNS_BUNDLE_ID;
+
     // Build APNs payload
     const payload = buildApnsPayload(req.notification);
     const priority = req.notification.priority === "high" ? "10" : "5";
@@ -140,7 +155,7 @@ export default {
     // Send to all tokens in parallel
     const results = await Promise.all(
       req.device_tokens.map((token) =>
-        sendToApns(host, token, jwt, env.APNS_BUNDLE_ID, payload, priority)
+        sendToApns(host, token, jwt, bundleId, payload, priority)
       )
     );
 

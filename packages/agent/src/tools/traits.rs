@@ -689,7 +689,7 @@ pub trait JobManagerOps: Send + Sync {
 /// iOS app notifications (`NotifyApp`).
 #[async_trait]
 pub trait NotifyDelegate: Send + Sync {
-    /// Send a push notification.
+    /// Send a push notification to every active device token.
     async fn send_notification(
         &self,
         notification: &Notification,

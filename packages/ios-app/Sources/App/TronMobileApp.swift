@@ -198,7 +198,9 @@ struct TronMobileApp: App {
         }
     }
 
-    /// Register device token with the server (global registration, no session required)
+    /// Register device token with the server (global registration — the
+    /// server fans out every NotifyApp to all active tokens regardless of
+    /// which session the notification originates from).
     private func registerDeviceToken(_ token: String) async {
         guard container.rpcClient.isConnected else {
             TronLogger.shared.debug("Not connected, will register token when connected", category: .notification)
@@ -206,7 +208,6 @@ struct TronMobileApp: App {
         }
 
         do {
-            // Register globally - any agent/session can send notifications
             try await container.rpcClient.misc.registerDeviceToken(token)
             TronLogger.shared.info("Device token registered with server", category: .notification)
         } catch {
