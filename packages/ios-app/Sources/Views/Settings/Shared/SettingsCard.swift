@@ -4,13 +4,14 @@ import SwiftUI
 /// Wraps content in a VStack with sectionFill background and rounded corners.
 struct SettingsCard<Content: View>: View {
     var accent: Color = .tronEmerald
+    var interactive: Bool = true
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(spacing: 0) {
             content()
         }
-        .sectionFill(accent)
+        .sectionFill(accent, interactive: interactive)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

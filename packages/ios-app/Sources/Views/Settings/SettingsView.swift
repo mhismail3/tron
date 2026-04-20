@@ -168,7 +168,7 @@ struct SettingsView: View {
             .cardEntrance(visible: cardsVisible, index: 0)
 
             SettingsCard {
-                categoryRow(icon: "key.horizontal", label: "LLM Providers", subtitle: "Login with OAuth and configure API keys") {
+                categoryRow(icon: "key.horizontal", label: "Model Providers", subtitle: "Login with OAuth and configure API keys") {
                     activePage = .providers
                 }
             }
