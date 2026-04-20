@@ -52,3 +52,6 @@ temp/
 
 # Tron agent worktrees
 .worktrees/
+
+# Claude runtime state
+.claude/scheduled_tasks.lock
