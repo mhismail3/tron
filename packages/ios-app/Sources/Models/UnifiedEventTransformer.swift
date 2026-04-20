@@ -398,9 +398,6 @@ extension UnifiedEventTransformer {
                     state.currentTurn = payload.turn
                 }
 
-            case .sessionFork:
-                state.sessionInfo.forkSource = event.payload["sourceEventId"]?.value as? String
-
             case .sessionBranch:
                 if let parsed = SessionBranchPayload(from: event.payload) {
                     state.sessionInfo.branchName = parsed.name

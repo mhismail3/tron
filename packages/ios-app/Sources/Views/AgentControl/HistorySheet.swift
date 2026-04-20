@@ -104,7 +104,7 @@ struct HistorySheet: View {
             HStack(spacing: 12) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronPurple)
+                    .foregroundStyle(.tronCoral)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Inherited Turns")
@@ -126,7 +126,7 @@ struct HistorySheet: View {
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
-                    .glassEffect(.regular.tint(Color.tronPurple.opacity(0.25)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .glassEffect(.regular.tint(Color.tronCoral.opacity(0.25)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onTapGesture {
@@ -314,7 +314,6 @@ struct HistorySheet: View {
                 forkButtonState: forkButtonState(for: event, turn: turn),
                 isForking: forkingEventId == event.id,
                 isForkDisabled: forkingEventId != nil && forkingEventId != event.id,
-                forkTint: .tronCoral,
                 onFork: { await performFork(eventId: event.id) }
             )
 
@@ -370,7 +369,6 @@ struct HistorySheet: View {
                 ForkButton(
                     isForking: forkingEventId == call.id,
                     isDisabled: forkingEventId != nil && forkingEventId != call.id,
-                    tint: .tronCoral,
                     onFork: { await performFork(eventId: call.id) }
                 )
             }

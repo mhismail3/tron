@@ -106,7 +106,7 @@ enum EventIconProvider {
         case .sessionEnd:
             return .tronTextMuted
         case .sessionFork, .sessionBranch:
-            return .tronPurple
+            return .tronCoral
         case .messageUser:
             return .tronBlue
         case .messageAssistant:

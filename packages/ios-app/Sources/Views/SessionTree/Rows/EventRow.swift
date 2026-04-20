@@ -10,8 +10,8 @@ enum ForkButtonState: Equatable {
 
 /// Derives the fork button state for an event in a turn detail context.
 ///
-/// Extracted as a free function for testability. Used by `HistorySheet`
-/// and `EventRow` to determine whether each event row should show a fork button.
+/// Extracted as a free function for testability. Used by `HistorySheet` and
+/// `EventRow` to determine whether each event row should show a fork button.
 func deriveForkButtonState(
     event: SessionEvent,
     sessionId: String,
@@ -28,16 +28,16 @@ func deriveForkButtonState(
 ///
 /// Tapping the "Fork" pill expands it in-place into a confirmation strip
 /// with "Fork Session" and "Cancel" capsules, then collapses back on
-/// cancel or after the fork completes. Used by both `EventRow` and
-/// `HistorySheet.mergedToolRow`.
+/// cancel or after the fork completes.
 @available(iOS 26.0, *)
 struct ForkButton: View {
     let isForking: Bool
     let isDisabled: Bool
-    var tint: Color = .tronAmber
     let onFork: () async -> Void
 
     @State private var isExpanded = false
+
+    private static let tint: Color = SessionTitleIcons.forkColor
 
     var body: some View {
         if isExpanded && !isForking {
@@ -49,13 +49,15 @@ struct ForkButton: View {
                 } label: {
                     Text("Fork Session")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(tint)
+                        .foregroundStyle(Self.tint)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .background(tint.opacity(0.15))
+                        .background(Self.tint.opacity(0.15))
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Confirm fork")
+                .accessibilityHint("Creates a new session branching from this point")
 
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -71,6 +73,7 @@ struct ForkButton: View {
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Cancel fork")
             }
             .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)))
         } else {
@@ -83,20 +86,21 @@ struct ForkButton: View {
                 if isForking {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(tint)
+                        .tint(Self.tint)
                 } else {
                     Text("Fork")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(tint)
+                        .foregroundStyle(Self.tint)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(tint.opacity(0.15))
+                        .background(Self.tint.opacity(0.15))
                         .clipShape(Capsule())
                 }
             }
             .buttonStyle(.plain)
             .disabled(isForking || isDisabled)
             .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)))
+            .accessibilityLabel(isForking ? "Forking session" : "Fork session from this event")
         }
     }
 }
@@ -112,7 +116,6 @@ struct EventRow: View {
     var forkButtonState: ForkButtonState = .active
     var isForking: Bool = false
     var isForkDisabled: Bool = false
-    var forkTint: Color = .tronAmber
     let onFork: () async -> Void
 
     @State private var isExpanded = false
@@ -154,7 +157,7 @@ struct EventRow: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.tronPurple)
+                        .background(Color.tronCoral)
                         .clipShape(Capsule())
                 }
 
@@ -163,14 +166,13 @@ struct EventRow: View {
                     ForkButton(
                         isForking: isForking,
                         isDisabled: isForkDisabled,
-                        tint: forkTint,
                         onFork: onFork
                     )
                 }
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 10)
-            .background(isHead ? Color.tronPurple.opacity(0.1) : Color.clear)
+            .background(isHead ? Color.tronCoral.opacity(0.1) : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .onTapGesture {

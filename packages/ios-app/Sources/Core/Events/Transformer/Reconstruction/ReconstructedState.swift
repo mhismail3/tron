@@ -227,13 +227,11 @@ extension ReconstructedState {
         var startTime: Date?
         var initialModel: String?
         var branchName: String?
-        var forkSource: String?
 
         init() {
             self.startTime = nil
             self.initialModel = nil
             self.branchName = nil
-            self.forkSource = nil
         }
 
         /// Duration since session started (nil if not started)

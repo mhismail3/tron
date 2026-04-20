@@ -1,8 +1,20 @@
+import SwiftUI
 import XCTest
 @testable import TronMobile
 
 @MainActor
 final class SessionTitleIconsTests: XCTestCase {
+
+    // Guard: canonical fork tint is coral. Prevents regressions that silently
+    // reintroduce purple.
+    func test_forkColor_isCoral() {
+        XCTAssertEqual(SessionTitleIcons.forkColor, Color.tronCoral)
+    }
+
+    func test_worktreeColor_isAmber() {
+        XCTAssertEqual(SessionTitleIcons.worktreeColor, Color.tronAmber)
+    }
+
 
     private func makeInfo(
         isolated: Bool = true,
