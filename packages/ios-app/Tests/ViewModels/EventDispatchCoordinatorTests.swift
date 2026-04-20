@@ -582,6 +582,7 @@ final class MockEventDispatchContext: EventDispatchTarget {
     // MARK: - Memory
     var handleMemoryUpdatingCalledWith: MemoryUpdatingPlugin.Result?
     var handleMemoryUpdatedCalledWith: MemoryUpdatedPlugin.Result?
+    var handleMemoryAutoRetainTriggeredCalledWith: MemoryAutoRetainTriggeredPlugin.Result?
 
     func handleMemoryUpdating(_ result: MemoryUpdatingPlugin.Result) {
         handleMemoryUpdatingCalledWith = result
@@ -589,6 +590,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result) {
         handleMemoryUpdatedCalledWith = result
+    }
+
+    func handleMemoryAutoRetainTriggered(_ result: MemoryAutoRetainTriggeredPlugin.Result) {
+        handleMemoryAutoRetainTriggeredCalledWith = result
     }
 
     // MARK: - Server

@@ -71,6 +71,10 @@ enum MessageContent: Equatable {
     static var memoryRetainInProgress: MessageContent {
         .systemEvent(.memoryRetainInProgress)
     }
+    /// In-chat notification for automatic memory retain in progress
+    static func memoryAutoRetainInProgress(intervalFired: Int) -> MessageContent {
+        .systemEvent(.memoryAutoRetainInProgress(intervalFired: intervalFired))
+    }
     /// In-chat notification for memory retained to long-term log
     static func memoryRetained(title: String, summary: String?) -> MessageContent {
         .systemEvent(.memoryRetained(title: title, summary: summary))

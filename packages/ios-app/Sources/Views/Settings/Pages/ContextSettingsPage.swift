@@ -330,8 +330,8 @@ struct ContextSettingsPage: View {
                         .frame(minWidth: 30, alignment: .trailing)
                     TronStepper(
                         value: Bindable(settingsState).autoRetainInterval,
-                        range: 0...50,
-                        step: 5
+                        range: 0...10,
+                        step: 1
                     )
                 }
                 .onChange(of: settingsState.autoRetainInterval) { _, newValue in

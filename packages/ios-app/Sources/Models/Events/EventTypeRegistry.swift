@@ -91,6 +91,7 @@ enum PersistedEventType: String, CaseIterable {
 
     // Memory
     case memoryRetained = "memory.retained"
+    case memoryAutoRetainTriggered = "memory.auto_retain_triggered"
 
     // Process management
     case notificationProcessResult = "notification.process_result"
@@ -170,6 +171,7 @@ enum PersistedEventType: String, CaseIterable {
         case .turnFailed:              return .init(true,    false,   false,   false,  "Turn failed")
         // Memory
         case .memoryRetained:          return .init(true,    false,   false,   false,  "Memory retained")
+        case .memoryAutoRetainTriggered: return .init(false,  false,   false,   true,   "Auto-retain triggered")
         // Process
         case .notificationProcessResult: return .init(false, false,   false,   false,  "Process result")
         case .processResultsConsumed:  return .init(false,   false,   false,   false,  "Results consumed")

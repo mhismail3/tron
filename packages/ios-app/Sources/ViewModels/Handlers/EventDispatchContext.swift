@@ -45,6 +45,7 @@ import Foundation
 @MainActor protocol MemoryEventHandler: AnyObject {
     func handleMemoryUpdating(_ result: MemoryUpdatingPlugin.Result)
     func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result)
+    func handleMemoryAutoRetainTriggered(_ result: MemoryAutoRetainTriggeredPlugin.Result)
 }
 
 @MainActor protocol ServerEventHandler: AnyObject {

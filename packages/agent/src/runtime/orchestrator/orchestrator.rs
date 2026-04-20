@@ -95,6 +95,30 @@ impl Drop for StartedRun {
     }
 }
 
+/// RAII guard for a session's retain slot.
+///
+/// Clears the session from `Orchestrator::retain_in_flight` on drop. Obtained
+/// via [`Orchestrator::try_begin_retain`]; there is no way to construct one
+/// without going through that method, so the set and the guard stay in sync.
+pub struct RetainGuard {
+    session_id: String,
+    set: Arc<DashMap<String, ()>>,
+}
+
+impl Drop for RetainGuard {
+    fn drop(&mut self) {
+        let _ = self.set.remove(&self.session_id);
+    }
+}
+
+impl std::fmt::Debug for RetainGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RetainGuard")
+            .field("session_id", &self.session_id)
+            .finish()
+    }
+}
+
 impl std::fmt::Debug for StartedRun {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StartedRun")
@@ -118,6 +142,13 @@ pub struct Orchestrator {
     /// Per-session compaction handlers for active agent sessions.
     /// Registered when an agent starts, removed when it ends.
     compaction_handlers: Arc<DashMap<String, Arc<CompactionHandler>>>,
+    /// Set of session IDs with a retain pipeline currently running.
+    ///
+    /// Prevents two concurrent retains on the same session (manual + auto,
+    /// or double-clicked manual) from running two summarizer subsessions
+    /// and producing duplicate `memory.retained` events. Held as `Arc<DashMap>`
+    /// so background tasks can hold a reference independent of the orchestrator.
+    retain_in_flight: Arc<DashMap<String, ()>>,
 }
 
 impl Orchestrator {
@@ -131,6 +162,7 @@ impl Orchestrator {
             turn_accumulators: Arc::new(TurnAccumulatorMap::new()),
             sequence_counters: Arc::new(DashMap::new()),
             compaction_handlers: Arc::new(DashMap::new()),
+            retain_in_flight: Arc::new(DashMap::new()),
         }
     }
 
@@ -194,6 +226,34 @@ impl Orchestrator {
         if self.sequence_counters.remove(session_id).is_some() {
             trace!(session_id, "sequence counter removed");
         }
+    }
+
+    // ── Retain concurrency guard ──
+
+    /// Claim the retain slot for a session. Returns `Some(RetainGuard)` if the
+    /// slot was free, or `None` if a retain is already in flight.
+    ///
+    /// The returned guard removes the session from the in-flight set on drop
+    /// (including on panic), so leaks cannot occur even if the caller task
+    /// unwinds.
+    pub fn try_begin_retain(&self, session_id: &str) -> Option<RetainGuard> {
+        // DashMap::entry vacant check gives single-call atomic insertion.
+        match self.retain_in_flight.entry(session_id.to_owned()) {
+            dashmap::mapref::entry::Entry::Occupied(_) => None,
+            dashmap::mapref::entry::Entry::Vacant(v) => {
+                let _ = v.insert(());
+                Some(RetainGuard {
+                    session_id: session_id.to_owned(),
+                    set: Arc::clone(&self.retain_in_flight),
+                })
+            }
+        }
+    }
+
+    /// True if a retain is currently running for `session_id`. Test-only.
+    #[cfg(test)]
+    pub fn retain_is_in_flight(&self, session_id: &str) -> bool {
+        self.retain_in_flight.contains_key(session_id)
     }
 
     /// Get a cloned reference to a session's sequence counter.
@@ -794,6 +854,67 @@ mod tests {
         // Re-init to a higher value (e.g., after DB sync)
         orch.init_sequence_counter("s1", 100);
         assert_eq!(orch.next_sequence("s1").unwrap(), 101);
+    }
+
+    // ── Retain concurrency guard tests ──
+
+    #[test]
+    fn try_begin_retain_first_call_succeeds() {
+        let orch = make_orchestrator();
+        let guard = orch.try_begin_retain("s1");
+        assert!(guard.is_some());
+        assert!(orch.retain_is_in_flight("s1"));
+    }
+
+    #[test]
+    fn try_begin_retain_second_call_blocked_until_first_drops() {
+        let orch = make_orchestrator();
+        let first = orch.try_begin_retain("s1").expect("first must succeed");
+        assert!(
+            orch.try_begin_retain("s1").is_none(),
+            "second concurrent call must return None"
+        );
+        drop(first);
+        assert!(
+            orch.try_begin_retain("s1").is_some(),
+            "after drop, slot must be reclaimable"
+        );
+    }
+
+    #[test]
+    fn try_begin_retain_independent_across_sessions() {
+        let orch = make_orchestrator();
+        let a = orch.try_begin_retain("s1").unwrap();
+        let b = orch.try_begin_retain("s2").unwrap();
+        // Both guards held simultaneously for different sessions.
+        assert!(orch.retain_is_in_flight("s1"));
+        assert!(orch.retain_is_in_flight("s2"));
+        drop(a);
+        assert!(!orch.retain_is_in_flight("s1"));
+        assert!(orch.retain_is_in_flight("s2"));
+        drop(b);
+        assert!(!orch.retain_is_in_flight("s2"));
+    }
+
+    #[test]
+    fn retain_guard_clears_on_panic() {
+        let orch = Arc::new(make_orchestrator());
+        let orch_clone = Arc::clone(&orch);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = orch_clone
+                .try_begin_retain("s1")
+                .expect("first must succeed");
+            panic!("forced panic to verify RAII cleanup");
+        }));
+        assert!(result.is_err(), "expected panic");
+        assert!(
+            !orch.retain_is_in_flight("s1"),
+            "guard drop during unwind must clear the slot"
+        );
+        assert!(
+            orch.try_begin_retain("s1").is_some(),
+            "slot is reclaimable after panic-drop"
+        );
     }
 
     #[test]

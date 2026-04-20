@@ -778,6 +778,27 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         });
     }
 
+    // Auto-retain: fire policy evaluation on successful completion. Subagent
+    // and disabled-interval cases are filtered inside `maybe_fire`, so the
+    // gate here only covers interrupt/error (retentions of half-finished runs
+    // would summarize noise). Spawned so the RPC response returns immediately;
+    // the summarizer itself is async inside `trigger_retain`.
+    if result.error.is_none() && !result.interrupted {
+        let deps = crate::server::rpc::handlers::memory::RetainDeps {
+            orchestrator: orchestrator.clone(),
+            event_store: event_store.clone(),
+            subagent_manager: subagent_manager.clone(),
+        };
+        let auto_retain_session_id = session_id.clone();
+        let _ = tokio::spawn(async move {
+            crate::server::rpc::handlers::memory::auto_retain::maybe_fire(
+                &deps,
+                &auto_retain_session_id,
+            )
+            .await;
+        });
+    }
+
     run_cleanup.release();
 
     match load_session_update_data(

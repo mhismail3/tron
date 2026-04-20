@@ -280,6 +280,12 @@ extension SessionEvent {
         case .memoryRetained:
             return "Memory retained"
 
+        case .memoryAutoRetainTriggered:
+            let interval = payload.int("intervalFired") ?? 0
+            return interval > 0
+                ? "Auto-retain triggered (every \(interval) turns)"
+                : "Auto-retain triggered"
+
         case .unknown:
             // Format raw type into friendly name: "rules.loaded" -> "Rules loaded"
             let formatted = type

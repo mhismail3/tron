@@ -214,6 +214,7 @@
 		467E6A490BB8E384A9ED45BD /* ErrorHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AB51ED817BDAB05A25CA903 /* ErrorHandlerTests.swift */; };
 		469D9F2F808178424B200CB3 /* MessageQueueState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41F3F49288E68CB2894749F3 /* MessageQueueState.swift */; };
 		4726E3E0436849DDD8156C32 /* DraftMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6704CE7E76B248474B6745B /* DraftMetadataTests.swift */; };
+		47B193B85742A5958DA2E4E5 /* MemoryAutoRetainTriggeredPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E0B1319158AA6A0159DCA93 /* MemoryAutoRetainTriggeredPlugin.swift */; };
 		47D15DD4869D82F881EBDDD1 /* SessionCreatedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1463E6DC7D278EF388E3BFD2 /* SessionCreatedPlugin.swift */; };
 		482DCD624E6046946BBDF76E /* SkillClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 822623BEB5DF8C76AF8220D5 /* SkillClientTests.swift */; };
 		490E7266613F29CD1E3F69F3 /* String+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68870B0709527607F70004EB /* String+Extensions.swift */; };
@@ -920,6 +921,7 @@
 		2CA946809C70489B4E68EBC3 /* DefaultAgentRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultAgentRepository.swift; sourceTree = "<group>"; };
 		2CDECC5E6127C91917466DEC /* MessageFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFinder.swift; sourceTree = "<group>"; };
 		2E0965260D231AB02406E417 /* RPCTypes+Filesystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Filesystem.swift"; sourceTree = "<group>"; };
+		2E0B1319158AA6A0159DCA93 /* MemoryAutoRetainTriggeredPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryAutoRetainTriggeredPlugin.swift; sourceTree = "<group>"; };
 		2E2F2BF782B756D47E100F37 /* TypewriterText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypewriterText.swift; sourceTree = "<group>"; };
 		2EA5598EC123DBC9717A35A7 /* RPCTypes+Auth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Auth.swift"; sourceTree = "<group>"; };
 		2ED3322DDABB60F27852BE4C /* IBMPlexSerif-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexSerif-Medium.ttf"; sourceTree = "<group>"; };
@@ -2525,6 +2527,7 @@
 				778EBE6FA27F00677570A951 /* CompletePlugin.swift */,
 				9F02C32D8D43B7DC9E958BAC /* ContextClearedPlugin.swift */,
 				1CF5274343CE2A3872EBFBC6 /* ErrorPlugin.swift */,
+				2E0B1319158AA6A0159DCA93 /* MemoryAutoRetainTriggeredPlugin.swift */,
 				CF4D7932E415EF8FCCB9ADDC /* MemoryUpdatedPlugin.swift */,
 				3B9B869A32A0EF5A35F9D34F /* MemoryUpdatingPlugin.swift */,
 				A208757B29D974B8B65009CB /* MessageDeletedPlugin.swift */,
@@ -3810,6 +3813,7 @@
 				D5CCDEA8C8A37578CB758EB7 /* McpCallToolDetailSheet.swift in Sources */,
 				8629D84695C96A9596F98DCB /* McpSearchToolDetailSheet.swift in Sources */,
 				DE697ED282ADD5F00BA2EB3C /* MediaClient.swift in Sources */,
+				47B193B85742A5958DA2E4E5 /* MemoryAutoRetainTriggeredPlugin.swift in Sources */,
 				9BA6B95FADA16CE0D2A73BA6 /* MemoryCoordinator.swift in Sources */,
 				EACF734D9C7C0B0D0000FB47 /* MemoryRetainDetailSheet.swift in Sources */,
 				225E21C270FF1F05161BD8E0 /* MemoryUpdatedPlugin.swift in Sources */,

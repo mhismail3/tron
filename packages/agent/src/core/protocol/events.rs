@@ -759,6 +759,16 @@ tron_events! {
         event_id: Option<String>,
     } => "memory_updated",
 
+    /// Auto-retain threshold crossed; retain pipeline is about to start.
+    /// Emitted once, immediately before `MemoryUpdating`, so iOS can render
+    /// a distinct indicator for automatic retentions.
+    MemoryAutoRetainTriggered {
+        #[serde(rename = "turnNumber")]
+        turn_number: i64,
+        #[serde(rename = "intervalFired")]
+        interval_fired: u32,
+    } => "memory_auto_retain_triggered",
+
     /// Context cleared.
     ContextCleared {
         #[serde(rename = "tokensBefore")]
@@ -1947,6 +1957,11 @@ mod tests {
                 summary: None,
                 entry_type: None,
                 event_id: None,
+            },
+            TronEvent::MemoryAutoRetainTriggered {
+                base: base.clone(),
+                turn_number: 5,
+                interval_fired: 5,
             },
             TronEvent::ContextCleared {
                 base: base.clone(),

@@ -183,6 +183,18 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "eventId": event_id,
             })),
         )),
+        TronEvent::MemoryAutoRetainTriggered {
+            turn_number,
+            interval_fired,
+            ..
+        } => Some(session_scoped(
+            event,
+            "agent.memory_auto_retain_triggered",
+            Some(json!({
+                "turnNumber": turn_number,
+                "intervalFired": interval_fired,
+            })),
+        )),
         TronEvent::ContextCleared {
             tokens_before,
             tokens_after,

@@ -129,6 +129,8 @@ define_events! {
         LlmHookResult => "hook.llm_result" => payloads::hook::LlmHookResultPayload,
         /// Memory retained (marks boundary for next Retain operation).
         MemoryRetained => "memory.retained" => payloads::memory::MemoryRetainedPayload,
+        /// Auto-retain threshold crossed; retain pipeline starting.
+        MemoryAutoRetainTriggered => "memory.auto_retain_triggered" => payloads::memory::MemoryAutoRetainTriggeredPayload,
         /// Local main fast-forwarded from remote.
         WorktreeMainSynced => "worktree.main_synced" => payloads::worktree::WorktreeMainSyncedPayload,
         /// Session finalized (merge + rebranch).
@@ -201,7 +203,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 73] = [
+    const EXPECTED: [(EventType, &str); 74] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -285,6 +287,10 @@ mod tests {
         ),
         (EventType::LlmHookResult, "hook.llm_result"),
         (EventType::MemoryRetained, "memory.retained"),
+        (
+            EventType::MemoryAutoRetainTriggered,
+            "memory.auto_retain_triggered",
+        ),
         (EventType::WorktreeMainSynced, "worktree.main_synced"),
         (
             EventType::WorktreeSessionFinalized,
@@ -324,7 +330,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 73);
+        assert_eq!(ALL_EVENT_TYPES.len(), 74);
     }
 
     #[test]

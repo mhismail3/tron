@@ -42,6 +42,8 @@ enum SystemEvent: Equatable, Hashable {
     case providerError(ProviderErrorDetailData)
     /// Memory retain in progress (shows spinner pill)
     case memoryRetainInProgress
+    /// Automatic memory retain in progress (shows distinct "Auto-retaining" pill)
+    case memoryAutoRetainInProgress(intervalFired: Int)
     /// Memory was retained to long-term log
     case memoryRetained(title: String, summary: String?)
     /// Memory retain was requested but there was nothing new since the last boundary
@@ -70,6 +72,7 @@ enum SystemEvent: Equatable, Hashable {
             return results.allSatisfy(\.success) ? .tronSuccess : .tronError
         case .providerError:              return .tronError
         case .memoryRetainInProgress:     return .tronPink
+        case .memoryAutoRetainInProgress: return .tronPink
         case .memoryRetained:             return .tronPink
         case .memoryRetainedNothingNew:   return .tronPink
         }
@@ -123,6 +126,8 @@ enum SystemEvent: Equatable, Hashable {
             return "\(label): \(data.message)"
         case .memoryRetainInProgress:
             return "Retaining memory..."
+        case .memoryAutoRetainInProgress:
+            return "Auto-retaining memory..."
         case .memoryRetained(let title, _):
             return "Memory saved: \(title)"
         case .memoryRetainedNothingNew:
@@ -133,14 +138,26 @@ enum SystemEvent: Equatable, Hashable {
     /// Whether this is a memory retain notification (for unified animation)
     var isMemoryRetainNotification: Bool {
         switch self {
-        case .memoryRetainInProgress, .memoryRetained, .memoryRetainedNothingNew: return true
-        default: return false
+        case .memoryRetainInProgress, .memoryAutoRetainInProgress,
+             .memoryRetained, .memoryRetainedNothingNew:
+            return true
+        default:
+            return false
         }
     }
 
     /// Whether the memory retain is still in progress
     var memoryRetainIsInProgress: Bool {
-        if case .memoryRetainInProgress = self { return true }
+        switch self {
+        case .memoryRetainInProgress, .memoryAutoRetainInProgress: return true
+        default: return false
+        }
+    }
+
+    /// True for automatic retentions (policy-triggered), false for manual ones.
+    /// Controls UI pill copy ("Auto-retaining memory..." vs "Retaining memory...").
+    var memoryRetainIsAuto: Bool {
+        if case .memoryAutoRetainInProgress = self { return true }
         return false
     }
 

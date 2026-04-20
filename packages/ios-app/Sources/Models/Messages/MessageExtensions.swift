@@ -96,6 +96,11 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .memoryRetainInProgress)
     }
 
+    /// In-chat notification for automatic memory retain in progress (distinct label)
+    static func memoryAutoRetainInProgress(intervalFired: Int) -> ChatMessage {
+        ChatMessage(role: .system, content: .memoryAutoRetainInProgress(intervalFired: intervalFired))
+    }
+
     /// In-chat notification for memory retained to long-term log
     static func memoryRetained(title: String, summary: String?) -> ChatMessage {
         ChatMessage(role: .system, content: .memoryRetained(title: title, summary: summary))

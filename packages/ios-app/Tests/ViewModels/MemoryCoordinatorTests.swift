@@ -132,6 +132,76 @@ final class MemoryCoordinatorTests: XCTestCase {
             XCTFail("Expected memoryRetainedNothingNew content")
         }
     }
+
+    // MARK: - handleMemoryAutoRetainTriggered Tests
+
+    func testAutoRetainTriggeredSetsIsRetaining() {
+        let result = MemoryAutoRetainTriggeredPlugin.Result(turnNumber: 5, intervalFired: 5)
+        coordinator.handleMemoryAutoRetainTriggered(result, context: mockContext)
+
+        XCTAssertTrue(mockContext.isRetaining)
+    }
+
+    func testAutoRetainTriggeredAppendsAutoInProgressPill() {
+        let result = MemoryAutoRetainTriggeredPlugin.Result(turnNumber: 5, intervalFired: 5)
+        coordinator.handleMemoryAutoRetainTriggered(result, context: mockContext)
+
+        XCTAssertEqual(mockContext.messages.count, 1)
+        if case .systemEvent(.memoryAutoRetainInProgress(let interval)) = mockContext.messages[0].content {
+            XCTAssertEqual(interval, 5)
+        } else {
+            XCTFail("Expected memoryAutoRetainInProgress content")
+        }
+    }
+
+    func testAutoRetainTriggeredTracksInProgressId() {
+        let result = MemoryAutoRetainTriggeredPlugin.Result(turnNumber: 5, intervalFired: 5)
+        coordinator.handleMemoryAutoRetainTriggered(result, context: mockContext)
+
+        XCTAssertNotNil(mockContext.memoryRetainInProgressMessageId)
+        XCTAssertEqual(
+            mockContext.memoryRetainInProgressMessageId,
+            mockContext.messages[0].id
+        )
+    }
+
+    func testMemoryUpdatingSkippedWhenAutoRetainPillAlreadyExists() {
+        // Auto-retain triggered first (arrives before memory_updating on the wire).
+        let autoResult = MemoryAutoRetainTriggeredPlugin.Result(turnNumber: 5, intervalFired: 5)
+        coordinator.handleMemoryAutoRetainTriggered(autoResult, context: mockContext)
+        XCTAssertEqual(mockContext.messages.count, 1)
+
+        // MemoryUpdating follows — must NOT stack a second pill on top.
+        let updatingResult = MemoryUpdatingPlugin.Result()
+        coordinator.handleMemoryUpdating(updatingResult, context: mockContext)
+
+        XCTAssertEqual(
+            mockContext.messages.count,
+            1,
+            "memory_updating must not add a second pill when auto-retain pill already exists"
+        )
+        if case .systemEvent(.memoryAutoRetainInProgress) = mockContext.messages[0].content {
+            // correct — still the auto pill
+        } else {
+            XCTFail("Expected auto pill to remain, not be replaced")
+        }
+    }
+
+    func testAutoRetainThenUpdatedMutatesAutoPillInPlace() {
+        let autoResult = MemoryAutoRetainTriggeredPlugin.Result(turnNumber: 5, intervalFired: 5)
+        coordinator.handleMemoryAutoRetainTriggered(autoResult, context: mockContext)
+
+        let updatedResult = MemoryUpdatedPlugin.Result(title: "Auto summary", summary: "body")
+        coordinator.handleMemoryUpdated(updatedResult, context: mockContext)
+
+        XCTAssertEqual(mockContext.messages.count, 1, "pill should be mutated in place, not appended")
+        if case .systemEvent(.memoryRetained(let title, _)) = mockContext.messages[0].content {
+            XCTAssertEqual(title, "Auto summary")
+        } else {
+            XCTFail("Expected auto pill to become memoryRetained after updated")
+        }
+        XCTAssertNil(mockContext.memoryRetainInProgressMessageId)
+    }
 }
 
 // MARK: - Mock Context

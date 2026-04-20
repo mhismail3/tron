@@ -217,6 +217,10 @@ extension ChatViewModel {
         memoryCoordinator.handleMemoryUpdated(pluginResult, context: self)
     }
 
+    func handleMemoryAutoRetainTriggered(_ pluginResult: MemoryAutoRetainTriggeredPlugin.Result) {
+        memoryCoordinator.handleMemoryAutoRetainTriggered(pluginResult, context: self)
+    }
+
     func handleContextCleared(_ pluginResult: ContextClearedPlugin.Result) {
         let tokensFreed = pluginResult.tokensBefore - pluginResult.tokensAfter
         logger.info("Context cleared: \(pluginResult.tokensBefore) -> \(pluginResult.tokensAfter) tokens (freed \(tokensFreed))", category: .events)

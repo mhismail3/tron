@@ -150,6 +150,7 @@ enum SessionEventType: String, Codable, Sendable {
 
     // Memory
     case memoryRetained = "memory.retained"
+    case memoryAutoRetainTriggered = "memory.auto_retain_triggered"
 
     // Hooks
     case llmHookResult = "hook.llm_result"

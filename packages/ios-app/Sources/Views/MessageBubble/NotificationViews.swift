@@ -556,6 +556,9 @@ struct MemoryRetainedNotificationView: View {
     let isInProgress: Bool
     var title: String?
     var nothingNew: Bool = false
+    /// True when the retain was fired automatically by the auto-retain policy.
+    /// Changes the in-progress pill text to "Auto-retaining memory...".
+    var isAuto: Bool = false
     var onTap: (() -> Void)? = nil
 
     private let iconSize: CGFloat = TronTypography.sizeBody2
@@ -579,7 +582,7 @@ struct MemoryRetainedNotificationView: View {
                 .frame(width: iconSize, height: iconSize)
 
                 if isInProgress {
-                    Text("Retaining memory...")
+                    Text(isAuto ? "Auto-retaining memory..." : "Retaining memory...")
                         .font(TronTypography.filePath)
                         .foregroundStyle(.tronPink.opacity(0.9))
                         .contentTransition(.interpolate)

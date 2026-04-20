@@ -30,7 +30,9 @@ macro_rules! define_events {
     ) => {
         // ── EventType enum ──────────────────────────────────────────
 
-        /// Discriminator for all 60 persisted session event types.
+        /// Discriminator for all persisted session event types (see
+        /// `ALL_EVENT_TYPES` and the test in `generated.rs` for the
+        /// authoritative count).
         ///
         /// Each variant serializes to its wire string (e.g. `"session.start"`)
         /// for compatibility with TypeScript and iOS clients.

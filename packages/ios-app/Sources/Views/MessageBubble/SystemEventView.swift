@@ -38,11 +38,13 @@ struct SystemEventView: View {
     @ViewBuilder
     private var memoryRetainNotificationView: some View {
         let isInProgress = event.memoryRetainIsInProgress
+        let isAuto = event.memoryRetainIsAuto
         let title = event.memoryRetainTitle
         let summary = event.memoryRetainSummary
         MemoryRetainedNotificationView(
             isInProgress: isInProgress,
             title: title,
+            isAuto: isAuto,
             onTap: isInProgress ? nil : (title != nil ? {
                 onTap?(.memoryRetainDetail(title: title!, summary: summary))
             } : nil)

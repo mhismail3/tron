@@ -1,4 +1,4 @@
-//! Memory handlers: retain.
+//! Memory handlers: retain (manual + auto).
 //!
 //! The retain system is the bridge between ephemeral conversations and
 //! persistent memory. It runs as an async background task (non-blocking)
@@ -12,6 +12,27 @@
 //! `<core_memory>`, and `<argument>` sections that the handler parses and routes
 //! to the right files. The `memory.retainModel` setting is plumbed through iOS
 //! for future configurability.
+//!
+//! ## Entry points
+//!
+//! - [`RetainMemoryHandler`] — `memory.retain` RPC (manual). Builds a
+//!   [`RetainDeps`] from `RpcContext` and calls [`trigger_retain`] with
+//!   [`RetainSource::Manual`].
+//! - [`auto_retain::maybe_fire`] — called from `agent_prompt_service` after
+//!   each successful agent run. Evaluates the auto-retain policy against the
+//!   session's turn history and fires [`trigger_retain`] with
+//!   [`RetainSource::Auto`] when the `memory.autoRetainInterval` threshold is
+//!   crossed. See the [`auto_retain`] submodule for the policy details.
+//!
+//! ## Concurrency
+//!
+//! The entire pipeline holds a session-keyed [`RetainGuard`] (owned by
+//! [`Orchestrator::try_begin_retain`]) for the full summarizer duration. A
+//! concurrent retain (double-click, or manual-while-auto-in-flight) returns
+//! `{ retained: false, reason: "in_flight" }` immediately with no side effects.
+//!
+//! [`RetainGuard`]: crate::runtime::orchestrator::orchestrator::RetainGuard
+//! [`Orchestrator::try_begin_retain`]: crate::runtime::orchestrator::orchestrator::Orchestrator::try_begin_retain
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -24,13 +45,58 @@ use crate::events::{AppendOptions, EventStore, event_rows_to_session_events, rec
 use crate::runtime::context::system_prompts::MEMORY_RETAIN_SUMMARIZER_PROMPT;
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::orchestrator::subagent_manager::{SubagentManager, SubsessionConfig};
-use crate::server::rpc::context::RpcContext;
+use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{map_event_store_error, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 
 use std::fs;
 use std::sync::Arc;
+
+pub(crate) mod auto_retain;
+
+// =============================================================================
+// Retain source discriminator + dependencies
+// =============================================================================
+
+/// Whether a retain was initiated by the user or by the auto-retain policy.
+///
+/// Controls whether a `MemoryAutoRetainTriggered` event is emitted at the
+/// start of the pipeline. The summarizer behaviour itself is identical.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RetainSource {
+    /// User hit the Retain button (`memory.retain` RPC).
+    Manual,
+    /// Auto-retain policy crossed its threshold at end of an agent run.
+    Auto {
+        /// The interval value that caused the fire (from settings).
+        interval_fired: u32,
+    },
+}
+
+/// The narrow set of dependencies the retain pipeline needs.
+///
+/// Exists so the pipeline can be driven from two different call sites without
+/// requiring the full `RpcContext`: the manual RPC handler constructs one via
+/// [`RetainDeps::from_rpc`], while the auto-retain path in
+/// `agent_prompt_service::execute_prompt_run` builds it directly from the
+/// fields it already holds.
+#[derive(Clone)]
+pub(crate) struct RetainDeps {
+    pub orchestrator: Arc<crate::runtime::orchestrator::orchestrator::Orchestrator>,
+    pub event_store: Arc<EventStore>,
+    pub subagent_manager: Option<Arc<SubagentManager>>,
+}
+
+impl RetainDeps {
+    pub fn from_rpc(ctx: &RpcContext) -> Self {
+        Self {
+            orchestrator: Arc::clone(&ctx.orchestrator),
+            event_store: Arc::clone(&ctx.event_store),
+            subagent_manager: ctx.subagent_manager.clone(),
+        }
+    }
+}
 
 // =============================================================================
 // Handler
@@ -49,7 +115,8 @@ impl MethodHandler for RetainMemoryHandler {
     #[instrument(skip(self, ctx), fields(method = "memory.retain", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        retain_memory(ctx, session_id).await
+        let deps = RetainDeps::from_rpc(ctx);
+        trigger_retain(&deps, session_id, RetainSource::Manual).await
     }
 }
 
@@ -57,9 +124,38 @@ impl MethodHandler for RetainMemoryHandler {
 // Core logic
 // =============================================================================
 
-async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, RpcError> {
+/// Entry point for both manual (`RetainMemoryHandler`) and automatic
+/// (`auto_retain::maybe_fire`) retentions. Async-spawns the summarizer and
+/// returns immediately with `{ retained, status }`.
+///
+/// Concurrency: holds a session-level `RetainGuard` for the entire duration of
+/// the background summarizer. A second concurrent retain (manual double-click,
+/// or manual-while-auto-in-flight) returns `{ retained: false, reason: "in_flight" }`
+/// immediately with no side effects.
+pub(crate) async fn trigger_retain(
+    deps: &RetainDeps,
+    session_id: String,
+    source: RetainSource,
+) -> Result<Value, RpcError> {
+    // Acquire the retain slot. If another retain is already running for this
+    // session, return the sentinel response and emit nothing — no events, no
+    // writes, no LLM calls.
+    let guard = match deps.orchestrator.try_begin_retain(&session_id) {
+        Some(g) => g,
+        None => {
+            debug!(session_id = %session_id, "retain already in-flight; skipping");
+            return Ok(json!({ "retained": false, "reason": "in_flight" }));
+        }
+    };
+
+    // For auto-retain: emit (and persist) the distinct trigger event first so
+    // iOS can render "auto-retain starting" before the generic spinner.
+    if let RetainSource::Auto { interval_fired } = source {
+        emit_auto_retain_triggered(deps, &session_id, interval_fired).await;
+    }
+
     // Emit MemoryUpdating so the iOS spinner appears immediately.
-    let _ = ctx
+    let _ = deps
         .orchestrator
         .broadcast()
         .emit(crate::core::events::TronEvent::MemoryUpdating {
@@ -67,26 +163,25 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
         });
 
     // ── Find summarization boundary ────────────────────────────────────────
-    let event_store = ctx.event_store.clone();
+    let event_store = deps.event_store.clone();
     let session_id_q = session_id.clone();
     let boundary_sequence =
-        ctx.run_blocking("memory.retain.find_boundary", move || {
+        run_blocking_task("memory.retain.find_boundary", move || {
             find_boundary_sequence(&event_store, &session_id_q)
         })
         .await?;
 
     // ── Get events since boundary ─────────────────────────────────────────
-    let event_store2 = ctx.event_store.clone();
+    let event_store2 = deps.event_store.clone();
     let session_id_q2 = session_id.clone();
-    let messages = ctx
-        .run_blocking("memory.retain.get_events", move || {
-            get_messages_since(&event_store2, &session_id_q2, boundary_sequence)
-        })
-        .await?;
+    let messages = run_blocking_task("memory.retain.get_events", move || {
+        get_messages_since(&event_store2, &session_id_q2, boundary_sequence)
+    })
+    .await?;
 
     if messages.is_empty() {
         // Nothing new to summarize.
-        let _ = ctx
+        let _ = deps
             .orchestrator
             .broadcast()
             .emit(crate::core::events::TronEvent::MemoryUpdated {
@@ -100,15 +195,14 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
     }
 
     // ── Get session metadata ───────────────────────────────────────────────
-    let event_store3 = ctx.event_store.clone();
+    let event_store3 = deps.event_store.clone();
     let session_id_q3 = session_id.clone();
-    let session_meta = ctx
-        .run_blocking("memory.retain.get_session", move || {
-            event_store3
-                .get_session(&session_id_q3)
-                .map_err(map_event_store_error)
-        })
-        .await?;
+    let session_meta = run_blocking_task("memory.retain.get_session", move || {
+        event_store3
+            .get_session(&session_id_q3)
+            .map_err(map_event_store_error)
+    })
+    .await?;
 
     let working_directory = session_meta
         .as_ref()
@@ -130,7 +224,7 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
     let transcript = serialize_for_memory(&messages);
 
     if transcript.is_empty() {
-        let _ = ctx
+        let _ = deps
             .orchestrator
             .broadcast()
             .emit(crate::core::events::TronEvent::MemoryUpdated {
@@ -146,10 +240,14 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
     // ── Spawn background retain task ────────────────────────────────────────
     // The handler returns immediately. The background task runs the summarizer,
     // parses the output, writes files, and emits MemoryUpdated when done.
+    //
+    // The RetainGuard moves into the spawn so the in-flight slot is held for
+    // the full summarizer duration, then released on drop — whether the task
+    // completes, errors, or panics.
     let bg_session_id = session_id.clone();
-    let bg_event_store = ctx.event_store.clone();
-    let bg_broadcast = Arc::clone(ctx.orchestrator.broadcast());
-    let bg_subagent_manager = ctx.subagent_manager.clone();
+    let bg_event_store = deps.event_store.clone();
+    let bg_broadcast = Arc::clone(deps.orchestrator.broadcast());
+    let bg_subagent_manager = deps.subagent_manager.clone();
 
     let _ = tokio::spawn(async move {
         retain_background_task(
@@ -163,12 +261,76 @@ async fn retain_memory(ctx: &RpcContext, session_id: String) -> Result<Value, Rp
             transcript,
         )
         .await;
+        drop(guard);
     });
 
     Ok(json!({
         "retained": true,
         "status": "retaining",
     }))
+}
+
+/// Persist and broadcast `memory.auto_retain_triggered` so iOS can distinguish
+/// automatic retentions from manual ones in the transcript and history. Errors
+/// are logged but never surfaced — the retain pipeline must proceed regardless.
+async fn emit_auto_retain_triggered(
+    deps: &RetainDeps,
+    session_id: &str,
+    interval_fired: u32,
+) {
+    // Best-effort turn_number lookup for the payload.
+    let event_store_q = deps.event_store.clone();
+    let session_id_q = session_id.to_owned();
+    let turn_number = run_blocking_task("memory.auto_retain_triggered.get_turn", move || {
+        Ok::<i64, RpcError>(
+            event_store_q
+                .get_session(&session_id_q)
+                .map_err(map_event_store_error)?
+                .map(|s| s.turn_count)
+                .unwrap_or(0),
+        )
+    })
+    .await
+    .unwrap_or(0);
+
+    let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    // Persist to event store so it appears in session history.
+    let event_store_p = deps.event_store.clone();
+    let session_id_p = session_id.to_owned();
+    let timestamp_p = timestamp.clone();
+    let _ = run_blocking_task("memory.auto_retain_triggered.persist", move || {
+        if let Err(e) = event_store_p.append(&AppendOptions {
+            session_id: &session_id_p,
+            event_type: EventType::MemoryAutoRetainTriggered,
+            payload: json!({
+                "sessionId": session_id_p,
+                "turnNumber": turn_number,
+                "intervalFired": interval_fired,
+                "timestamp": timestamp_p,
+            }),
+            parent_id: None,
+            sequence: None,
+        }) {
+            warn!(
+                session_id = %session_id_p,
+                error = %e,
+                "failed to persist memory.auto_retain_triggered event"
+            );
+        }
+        Ok::<(), RpcError>(())
+    })
+    .await;
+
+    // Broadcast to live WebSocket clients.
+    let _ = deps
+        .orchestrator
+        .broadcast()
+        .emit(crate::core::events::TronEvent::MemoryAutoRetainTriggered {
+            base: crate::core::events::BaseEvent::now(session_id),
+            turn_number,
+            interval_fired,
+        });
 }
 
 /// Background task that runs the summarizer and writes results.
@@ -1023,8 +1185,116 @@ mod tests {
             .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
             .unwrap();
 
-        let result = retain_memory(&ctx, cr.session.id.clone()).await.unwrap();
+        let deps = RetainDeps::from_rpc(&ctx);
+        let result = trigger_retain(&deps, cr.session.id.clone(), RetainSource::Manual)
+            .await
+            .unwrap();
         // No events since boundary (sequence 0 => empty since) => nothing_new
         assert_eq!(result["retained"], false);
+    }
+
+    #[tokio::test]
+    async fn auto_source_persists_trigger_event() {
+        use crate::events::EventType;
+        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        let ctx = make_test_context();
+
+        let cr = ctx
+            .event_store
+            .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
+            .unwrap();
+        let session_id = cr.session.id.clone();
+
+        let deps = RetainDeps::from_rpc(&ctx);
+        let _ = trigger_retain(
+            &deps,
+            session_id.clone(),
+            RetainSource::Auto { interval_fired: 5 },
+        )
+        .await
+        .unwrap();
+
+        let row = ctx
+            .event_store
+            .get_latest_event_by_type(&session_id, "memory.auto_retain_triggered")
+            .unwrap()
+            .expect("auto-retain trigger event should be persisted");
+        assert_eq!(row.event_type, "memory.auto_retain_triggered");
+
+        let payload: serde_json::Value = serde_json::from_str(&row.payload).unwrap();
+        assert_eq!(payload["intervalFired"], 5);
+        assert_eq!(payload["sessionId"], session_id);
+        let _ = EventType::MemoryAutoRetainTriggered; // compile-time check that the variant exists
+    }
+
+    #[tokio::test]
+    async fn trigger_retain_skips_when_already_in_flight() {
+        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        let ctx = make_test_context();
+
+        let cr = ctx
+            .event_store
+            .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
+            .unwrap();
+        let session_id = cr.session.id.clone();
+
+        // Take the slot directly (simulating a still-running retain background task).
+        let _held = ctx
+            .orchestrator
+            .try_begin_retain(&session_id)
+            .expect("fresh session must be claimable");
+
+        let deps = RetainDeps::from_rpc(&ctx);
+        let result = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
+            .await
+            .unwrap();
+        assert_eq!(result["retained"], false);
+        assert_eq!(result["reason"], "in_flight");
+
+        // Also true for auto.
+        let result_auto = trigger_retain(
+            &deps,
+            session_id.clone(),
+            RetainSource::Auto { interval_fired: 5 },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result_auto["reason"], "in_flight");
+
+        // No auto-retain event persisted (the guard short-circuits before any I/O).
+        let row = ctx
+            .event_store
+            .get_latest_event_by_type(&session_id, "memory.auto_retain_triggered")
+            .unwrap();
+        assert!(
+            row.is_none(),
+            "blocked auto retain must not persist the trigger event"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_source_does_not_persist_trigger_event() {
+        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        let ctx = make_test_context();
+
+        let cr = ctx
+            .event_store
+            .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
+            .unwrap();
+        let session_id = cr.session.id.clone();
+
+        let deps = RetainDeps::from_rpc(&ctx);
+        let _ = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
+            .await
+            .unwrap();
+
+        let row = ctx
+            .event_store
+            .get_latest_event_by_type(&session_id, "memory.auto_retain_triggered")
+            .unwrap();
+        assert!(
+            row.is_none(),
+            "manual retain must not produce an auto_retain_triggered event"
+        );
     }
 }
