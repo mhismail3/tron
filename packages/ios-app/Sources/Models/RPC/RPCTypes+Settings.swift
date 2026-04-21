@@ -17,6 +17,10 @@ struct ServerSettings: Decodable {
     let isolationMode: String
     let hooksLlmModel: String
     let builtinHooks: [BuiltinHookSetting]
+    /// What to do when a hook handler errors or times out.
+    /// - `"continue"` (default) — fail-open, agent proceeds
+    /// - `"block"` — synthesize a Block with a reason; security hooks opt in
+    let hooksErrorPolicy: String
     let skillsCompactionPolicy: String
     let skillsShowIndex: String
     let queueDrainMode: String
@@ -65,7 +69,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum HooksKeys: String, CodingKey {
-        case llmModel, builtinHooks
+        case llmModel, builtinHooks, errorPolicy
     }
 
     private enum SessionKeys: String, CodingKey {
@@ -133,9 +137,11 @@ struct ServerSettings: Decodable {
         if let hooksContainer = try? container.nestedContainer(keyedBy: HooksKeys.self, forKey: .hooks) {
             hooksLlmModel = (try? hooksContainer.decodeIfPresent(String.self, forKey: .llmModel)) ?? "claude-haiku-4-5-20251001"
             builtinHooks = (try? hooksContainer.decodeIfPresent([BuiltinHookSetting].self, forKey: .builtinHooks)) ?? []
+            hooksErrorPolicy = (try? hooksContainer.decodeIfPresent(String.self, forKey: .errorPolicy)) ?? "continue"
         } else {
             hooksLlmModel = "claude-haiku-4-5-20251001"
             builtinHooks = []
+            hooksErrorPolicy = "continue"
         }
 
         // skills.*
@@ -332,6 +338,7 @@ struct ServerSettingsUpdate: Encodable {
     struct HooksUpdate: Encodable {
         var llmModel: String?
         var builtinHooks: [BuiltinHookSetting]?
+        var errorPolicy: String?
     }
 
     struct SkillsUpdate: Encodable {

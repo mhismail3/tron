@@ -22,6 +22,10 @@ final class SettingsState {
 
     var hooksLlmModel: String = "claude-haiku-4-5-20251001"
     var builtinHooks: [BuiltinHookSetting] = []
+    /// What to do when a hook handler errors or times out.
+    /// - `"continue"` (default) — fail-open
+    /// - `"block"` — synthesize a Block with a reason
+    var hooksErrorPolicy: String = "continue"
 
     // MARK: - Skills
 
@@ -150,6 +154,7 @@ final class SettingsState {
         cachePresets(settings.connectionPresets)
         hooksLlmModel = settings.hooksLlmModel
         builtinHooks = settings.builtinHooks
+        hooksErrorPolicy = settings.hooksErrorPolicy
         if let workspace = settings.defaultWorkspace {
             quickSessionWorkspace = workspace
         }

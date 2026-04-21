@@ -15,6 +15,7 @@ struct HooksSettingsPage: View {
         SettingsPageContainer(title: "Hooks") {
             builtinHooksCard
             modelCard
+            errorPolicyCard
             userHooksCard
         }
     }
@@ -82,6 +83,35 @@ struct HooksSettingsPage: View {
             }
 
             SettingsCaption(text: "The model used for built-in and .prompt hooks. Defaults to Haiku for speed.")
+        }
+    }
+
+    // MARK: - Error Policy
+
+    private var errorPolicyCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Hook Error Policy")
+
+            SettingsCard {
+                SettingsRow(icon: "exclamationmark.shield", label: "On error or timeout") {
+                    Picker("", selection: Binding(
+                        get: { settingsState.hooksErrorPolicy },
+                        set: { newValue in
+                            settingsState.hooksErrorPolicy = newValue
+                            updateServerSetting {
+                                ServerSettingsUpdate(hooks: .init(errorPolicy: newValue))
+                            }
+                        }
+                    )) {
+                        Text("Continue").tag("continue")
+                        Text("Block").tag("block")
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
+            }
+
+            SettingsCaption(text: "Continue (default) lets the agent proceed when a hook fails. Block treats a failed hook as a safety violation and stops the operation with a reason.")
         }
     }
 

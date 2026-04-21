@@ -253,6 +253,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         let hook_settings = &settings.hooks;
 
         let mut engine = HookEngine::new(HookRegistry::new());
+        engine.set_error_policy(hook_settings.error_policy);
 
         // Register built-in hooks (title gen, branch name gen, etc.)
         if let Some(ref mgr) = subagent_manager {

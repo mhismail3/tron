@@ -112,6 +112,25 @@ pub enum HookExecutionMode {
     Background,
 }
 
+/// What to do when a hook handler errors or times out.
+///
+/// Security / guard hooks that want errors to be treated as policy violations
+/// should opt into `Block`. The default stays `Continue` for backwards-
+/// compatibility with the original "fail-open" semantics — errors in a
+/// script-based hook are usually developer bugs, not attacks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HookErrorPolicy {
+    /// On handler error or timeout, treat as `HookResult::continue_()` so
+    /// the agent proceeds. This is the default and matches behavior from
+    /// before H2 landed.
+    #[default]
+    Continue,
+    /// On handler error or timeout, synthesize a `HookResult::block(reason)`
+    /// with a descriptive reason. Blocks the operation.
+    Block,
+}
+
 /// Result returned by a hook handler.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

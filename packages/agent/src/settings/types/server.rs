@@ -163,6 +163,14 @@ pub struct HookSettings {
     pub llm_model: String,
     /// Enable/disable state for built-in hooks.
     pub builtin_hooks: Vec<BuiltinHookSetting>,
+    /// What to do when a hook handler errors or times out.
+    ///
+    /// - `"continue"` (default) — treat the failure as `Continue` so the
+    ///   agent proceeds. Matches the pre-H2 fail-open behavior.
+    /// - `"block"` — synthesize a `Block` with a reason naming the
+    ///   handler and the failure kind. Security / guard hooks that
+    ///   should not silently fail open opt into this.
+    pub error_policy: crate::runtime::hooks::types::HookErrorPolicy,
 }
 
 impl Default for HookSettings {
@@ -181,6 +189,7 @@ impl Default for HookSettings {
             ],
             llm_model: "claude-haiku-4-5-20251001".to_string(),
             builtin_hooks: BuiltinHookSetting::defaults(),
+            error_policy: crate::runtime::hooks::types::HookErrorPolicy::default(),
         }
     }
 }

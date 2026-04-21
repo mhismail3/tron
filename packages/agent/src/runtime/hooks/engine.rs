@@ -28,26 +28,53 @@ use super::prompt_handler::PromptHookHandler;
 use super::registry::HookRegistry;
 use super::script_handler::ScriptHookHandler;
 use super::types::{
-    DiscoveredHook, HookAction, HookContext, HookExecutionMode, HookResult, HookType,
+    DiscoveredHook, HookAction, HookContext, HookErrorPolicy, HookExecutionMode, HookResult,
+    HookType,
 };
 
 /// Hook execution engine.
 ///
 /// Owns the [`HookRegistry`] and [`BackgroundTracker`]. Provides the main
 /// `execute()` method that runs all registered hooks for a given context.
+///
+/// ## Error policy
+///
+/// When a handler returns `Err` or times out, the engine consults
+/// `error_policy`. The default is [`HookErrorPolicy::Continue`] (fail-open),
+/// which matches the pre-H2 behavior. Hooks that protect the agent from
+/// policy violations (security / guardrail hooks) should configure
+/// [`HookErrorPolicy::Block`] via the top-level setting — an error or
+/// timeout then synthesizes a `HookResult::block(...)` instead of a
+/// silent `Continue`.
 pub struct HookEngine {
     registry: HookRegistry,
     background: BackgroundTracker,
+    error_policy: HookErrorPolicy,
 }
 
 impl HookEngine {
-    /// Create a new engine with the given registry.
+    /// Create a new engine with the given registry and default
+    /// (fail-open) error policy.
     #[must_use]
     pub fn new(registry: HookRegistry) -> Self {
         Self {
             registry,
             background: BackgroundTracker::new(),
+            error_policy: HookErrorPolicy::default(),
         }
+    }
+
+    /// Update the error policy applied to handler errors and timeouts.
+    /// Default is [`HookErrorPolicy::Continue`]. Real construction paths
+    /// pass the value from `HookSettings::error_policy`.
+    pub fn set_error_policy(&mut self, policy: HookErrorPolicy) {
+        self.error_policy = policy;
+    }
+
+    /// The current error policy. Exposed for introspection / tests.
+    #[must_use]
+    pub fn error_policy(&self) -> HookErrorPolicy {
+        self.error_policy
     }
 
     /// Execute all registered hooks for the given context.
@@ -190,21 +217,37 @@ impl HookEngine {
 
         match result {
             Ok(Ok(hook_result)) => hook_result,
-            Ok(Err(e)) => {
-                warn!(
-                    name = %handler.name(),
-                    error = %e,
-                    "Hook handler error (fail-open)"
-                );
+            Ok(Err(e)) => self.on_handler_failure(
+                &handler_name,
+                format!("hook '{}' errored: {e}", handler_name),
+                "error",
+            ),
+            Err(_) => self.on_handler_failure(
+                &handler_name,
+                format!("hook '{}' timed out after {}ms", handler_name, timeout_ms),
+                "timeout",
+            ),
+        }
+    }
+
+    /// Convert a handler failure (error or timeout) into the configured
+    /// `HookResult` per [`HookErrorPolicy`]. Always logs — the difference
+    /// is whether the agent sees `Continue` (fail-open) or `Block` (hard
+    /// stop with a user-visible reason).
+    fn on_handler_failure(
+        &self,
+        handler_name: &str,
+        reason: String,
+        kind: &'static str,
+    ) -> HookResult {
+        match self.error_policy {
+            HookErrorPolicy::Continue => {
+                warn!(name = %handler_name, kind, reason = %reason, "hook failure → fail-open");
                 HookResult::continue_()
             }
-            Err(_) => {
-                warn!(
-                    name = %handler.name(),
-                    timeout_ms = timeout_ms,
-                    "Hook handler timed out (fail-open)"
-                );
-                HookResult::continue_()
+            HookErrorPolicy::Block => {
+                warn!(name = %handler_name, kind, reason = %reason, "hook failure → block (errorPolicy=block)");
+                HookResult::block(reason)
             }
         }
     }
@@ -685,6 +728,71 @@ mod tests {
         let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
 
         // Timeout → fail-open → Continue
+        assert_eq!(result.action, HookAction::Continue);
+    }
+
+    // ── H2: HookErrorPolicy ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_execute_error_with_block_policy_blocks_with_reason() {
+        let mut registry = HookRegistry::new();
+        registry.register(Arc::new(ErrorHandler {
+            name: "guard".to_string(),
+            hook_type: HookType::PreToolUse,
+        }));
+        let mut engine = HookEngine::new(registry);
+        engine.set_error_policy(HookErrorPolicy::Block);
+
+        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        assert!(result.is_blocked(), "errorPolicy=Block must synthesize a Block");
+        let reason = result.reason.unwrap_or_default();
+        assert!(
+            reason.contains("errored") && reason.contains("guard"),
+            "reason should name the handler and the error kind; got {reason:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_timeout_with_block_policy_blocks_with_reason() {
+        let mut registry = HookRegistry::new();
+        registry.register(Arc::new(SlowHandler {
+            name: "slow".to_string(),
+            hook_type: HookType::PreToolUse,
+            delay_ms: 5000,
+        }));
+        let mut engine = HookEngine::new(registry);
+        engine.set_error_policy(HookErrorPolicy::Block);
+
+        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
+        assert!(result.is_blocked());
+        let reason = result.reason.unwrap_or_default();
+        assert!(
+            reason.contains("timed out"),
+            "timeout reason should say so; got {reason:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_error_policy_defaults_to_continue() {
+        let engine = HookEngine::new(HookRegistry::new());
+        assert_eq!(engine.error_policy(), HookErrorPolicy::Continue);
+    }
+
+    #[tokio::test]
+    async fn test_successful_handler_unaffected_by_block_policy() {
+        // Handler returns Continue explicitly — block policy must NOT
+        // upgrade successful results; it only applies on error/timeout.
+        let mut registry = HookRegistry::new();
+        registry.register(make_simple(
+            "ok",
+            HookType::PreToolUse,
+            0,
+            HookResult::continue_(),
+        ));
+        let mut engine = HookEngine::new(registry);
+        engine.set_error_policy(HookErrorPolicy::Block);
+
+        let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
         assert_eq!(result.action, HookAction::Continue);
     }
 
