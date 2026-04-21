@@ -309,8 +309,13 @@ fn load_skill(
         recoverable: true,
     })?;
 
-    // Parse SKILL.md
-    let parsed = parse_skill_md(&content);
+    // Parse SKILL.md. Parser-side bounds (defense in depth) guard against
+    // crafted manifests that bypass this loader's file-size check.
+    let parsed = parse_skill_md(&content).map_err(|e| SkillScanError {
+        path: path_str.clone(),
+        message: format!("Failed to parse SKILL.md: {e}"),
+        recoverable: true,
+    })?;
 
     // List additional files
     let additional_files = list_additional_files(skill_path);
