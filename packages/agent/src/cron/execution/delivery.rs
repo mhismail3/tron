@@ -45,8 +45,51 @@ pub async fn deliver(job: &CronJob, run: &CronRun, deps: &ExecutorDeps) {
     } else {
         DeliveryOutcome::Failed
     };
-    if let Err(e) = crate::cron::store::update_delivery_status(&deps.pool, &run.id, &overall) {
-        tracing::warn!(run_id = %run.id, status = ?overall, error = %e, "failed to persist delivery status");
+    persist_delivery_status_with_retry(&deps, &run.id, &overall).await;
+}
+
+/// Persist the delivery status with a small retry budget to ride out
+/// transient `SQLite` busy/locked contention.
+///
+/// M29: the pre-fix single-shot UPDATE silently swallowed contention, so a
+/// brief lock collision on a busy DB would leave `cron_runs.delivery_status`
+/// in whatever state the previous run left it — often NULL, which made the
+/// distinction between "not yet delivered" and "delivery status lost" un-
+/// observable. Three attempts with a short linear backoff cover the common
+/// case; after that we log the attempted status at warn so the operator can
+/// reconstruct the intent from the log even without the DB row.
+async fn persist_delivery_status_with_retry(
+    deps: &ExecutorDeps,
+    run_id: &str,
+    status: &DeliveryOutcome,
+) {
+    const ATTEMPTS: u32 = 3;
+    const BACKOFF_MS: u64 = 20;
+
+    for attempt in 1..=ATTEMPTS {
+        match crate::cron::store::update_delivery_status(&deps.pool, run_id, status) {
+            Ok(()) => return,
+            Err(e) => {
+                if attempt == ATTEMPTS {
+                    tracing::warn!(
+                        run_id,
+                        status = ?status,
+                        attempts = ATTEMPTS,
+                        error = %e,
+                        "failed to persist delivery status after retries; row may read as stale"
+                    );
+                } else {
+                    tracing::debug!(
+                        run_id,
+                        status = ?status,
+                        attempt,
+                        error = %e,
+                        "delivery status update transient error; retrying"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(BACKOFF_MS * u64::from(attempt))).await;
+                }
+            }
+        }
     }
 }
 
