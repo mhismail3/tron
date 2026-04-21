@@ -231,7 +231,13 @@ final class StreamingManager {
     }
 
     /// Finalize the current streaming message
-    /// Returns the final text content
+    /// Returns the final text content.
+    ///
+    /// M13 INVARIANT: the trimming here (`.whitespacesAndNewlines`)
+    /// MUST match `AssistantMessagePayload.textContent` in
+    /// MessagePayloads.swift so the live-finalized text and the
+    /// reconstructed text for the same assistant message converge.
+    /// Guarded by `TextStreamConvergenceTests`.
     func finalizeStreamingMessage() -> String {
         flushPendingText()
         displayLinkWrapper?.isPaused = true

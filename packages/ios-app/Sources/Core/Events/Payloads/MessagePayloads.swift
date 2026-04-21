@@ -156,8 +156,14 @@ struct AssistantMessagePayload {
     let hasThinking: Bool?
     let interrupted: Bool?
 
-    /// Extracts ONLY the text content, ignoring tool_use blocks
-    /// Tool calls are rendered via separate tool.call events
+    /// Extracts ONLY the text content, ignoring tool_use blocks.
+    /// Tool calls are rendered via separate tool.call events.
+    ///
+    /// M13 INVARIANT: the trimming here (`.whitespacesAndNewlines`)
+    /// MUST match `StreamingManager.finalizeStreamingMessage` so the
+    /// reconstructed text for an assistant message converges with the
+    /// live-finalized text for the same message. Guarded by
+    /// `TextStreamConvergenceTests`.
     var textContent: String? {
         guard let blocks = contentBlocks else { return nil }
         let texts = blocks.compactMap { block -> String? in

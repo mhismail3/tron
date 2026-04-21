@@ -185,6 +185,7 @@
 		36D34C283E1302ADA0FBE574 /* DefaultAgentRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA946809C70489B4E68EBC3 /* DefaultAgentRepository.swift */; };
 		373776D08F37F18CF6F4AB54 /* AttachmentCapability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 660C2EBCA28ACA20A2F9863D /* AttachmentCapability.swift */; };
 		373BFD920785D7F15D8454BD /* SettingsPageContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F381FBEF94536C12E3CCF85E /* SettingsPageContainer.swift */; };
+		378D390C57B0DFE84EB2F471 /* TextStreamConvergenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688CE9C51C06DFFFA0845965 /* TextStreamConvergenceTests.swift */; };
 		37A7664776CCEE9B7A425D06 /* InputAreaDragModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A91A0F33B2C429B2442B45 /* InputAreaDragModifier.swift */; };
 		382740800CC6867D4A1D7BE6 /* IBMPlexMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D05A145BE8014E1D17C36824 /* IBMPlexMono-Regular.ttf */; };
 		38317572307F17BBC0A3869D /* TypewriterAnimationStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F11AA5B7763CF597F396C0 /* TypewriterAnimationStateTests.swift */; };
@@ -1113,6 +1114,7 @@
 		67D2BA3A87EF272E7303C546 /* GetConfirmationTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GetConfirmationTypes.swift; sourceTree = "<group>"; };
 		68870B0709527607F70004EB /* String+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Extensions.swift"; sourceTree = "<group>"; };
 		688A487D8A41776755416E9E /* AppConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConstants.swift; sourceTree = "<group>"; };
+		688CE9C51C06DFFFA0845965 /* TextStreamConvergenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextStreamConvergenceTests.swift; sourceTree = "<group>"; };
 		68C53AD3FC00E6F11E3CD04E /* IBMPlexSerif-Light.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexSerif-Light.ttf"; sourceTree = "<group>"; };
 		68FF256D5E59A844B8D41277 /* EventTreeBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTreeBuilder.swift; sourceTree = "<group>"; };
 		6931B2BBA3BDC7D3F2344F96 /* EditToolDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditToolDetailSheet.swift; sourceTree = "<group>"; };
@@ -2776,6 +2778,7 @@
 				136BFCC70A4DF30E22612772 /* StreamingManagerTests.swift */,
 				9B9FB35B74033A4BFC44CF26 /* SubagentEventFormatterTests.swift */,
 				B810A7EAC7BF064460D2E0A1 /* SubagentStateTests.swift */,
+				688CE9C51C06DFFFA0845965 /* TextStreamConvergenceTests.swift */,
 				D0E4069C509E341CD0F6EAFE /* ThinkingStateTests.swift */,
 				4CB682DF2B519182106BCE83 /* ToolEventCoordinatorTests.swift */,
 				75CF368F59582F88B6B81D59 /* TranscriptionCoordinatorTests.swift */,
@@ -4363,6 +4366,7 @@
 				6B96262082E1D79A0A47D0CA /* TaskFormattingTests.swift in Sources */,
 				68D94CD30CBF8CC7B3012639 /* TextContentLayoutTests.swift in Sources */,
 				C48368710269F664D562C2B5 /* TextDeltaPluginTests.swift in Sources */,
+				378D390C57B0DFE84EB2F471 /* TextStreamConvergenceTests.swift in Sources */,
 				8BF0689108D5389E875E87FC /* ThinkingDetailStateTests.swift in Sources */,
 				6994EC5A5D84B6F81D585ABB /* ThinkingIndicatorStyleTests.swift in Sources */,
 				3BA0B87462C7B912147DE959 /* ThinkingIndicatorTests.swift in Sources */,
