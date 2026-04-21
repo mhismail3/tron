@@ -107,9 +107,11 @@ impl TronTool for GetConfirmationTool {
             )));
         }
 
-        let summary = format!(
-            "Requesting confirmation:\n  Action: {action}\n  Reason: {reason}\n  Risk: {risk_level}"
-        );
+        // Slim acknowledgement — action/reason stay in the LLM's own tool_use
+        // args and in `details`. Echoing them here polluted memory auto-retain
+        // transcripts.
+        let summary =
+            format!("Requesting confirmation (risk: {risk_level}). Awaiting user response.");
 
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
@@ -180,8 +182,14 @@ mod tests {
         assert!(r.is_error.is_none());
     }
 
+    // ── Slim-result invariants (memory-retain pollution fix) ──
+    //
+    // The tool result text is intentionally minimal: just an acknowledgement
+    // and the risk level. Action/reason stay in the LLM's own `tool_use` args
+    // and in `details` — echoing them here polluted memory auto-retain.
+
     #[tokio::test]
-    async fn summary_contains_action_and_risk() {
+    async fn result_is_slim_acknowledgement() {
         let tool = GetConfirmationTool::new();
         let r = tool
             .execute(
@@ -195,8 +203,49 @@ mod tests {
             .await
             .unwrap();
         let text = extract_text(&r);
-        assert!(text.contains("Delete ~/old-project/"), "missing action: {text}");
-        assert!(text.contains("high"), "missing risk level: {text}");
+        assert_eq!(
+            text,
+            "Requesting confirmation (risk: high). Awaiting user response."
+        );
+    }
+
+    #[tokio::test]
+    async fn result_keeps_risk_level() {
+        let tool = GetConfirmationTool::new();
+        for level in ["low", "medium", "high"] {
+            let r = tool
+                .execute(
+                    json!({
+                        "action": "test",
+                        "reason": "test",
+                        "riskLevel": level
+                    }),
+                    &make_ctx(),
+                )
+                .await
+                .unwrap();
+            let text = extract_text(&r);
+            assert!(text.contains(level), "risk level '{level}' missing: {text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn result_does_not_leak_action_or_reason() {
+        let tool = GetConfirmationTool::new();
+        let r = tool
+            .execute(
+                json!({
+                    "action": "Delete /important/path",
+                    "reason": "Because yolo",
+                    "riskLevel": "high"
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        assert!(!text.contains("/important/path"), "action leaked: {text}");
+        assert!(!text.contains("yolo"), "reason leaked: {text}");
     }
 
     #[tokio::test]

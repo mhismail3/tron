@@ -8,8 +8,6 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
-use std::fmt::Write;
-
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
@@ -144,36 +142,13 @@ The question tool should be the FINAL action in your response.",
 
         let context = get_optional_string(&params, "context");
 
-        // Format summary — extract labels from both string and object options
-        let mut summary = String::new();
-        for (i, q) in questions.iter().enumerate() {
-            let text = q
-                .get("question")
-                .and_then(Value::as_str)
-                .unwrap_or("(no question)");
-            let mode = q.get("mode").and_then(Value::as_str).unwrap_or("single");
-            let options_text = q
-                .get("options")
-                .and_then(Value::as_array)
-                .map(|opts| {
-                    opts.iter()
-                        .filter_map(|o| {
-                            o.get("label").and_then(Value::as_str).map(String::from)
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .unwrap_or_default();
-            let _ = write!(summary, "Q{}: {text} [{mode}]", i + 1);
-            if !options_text.is_empty() {
-                let _ = write!(summary, " ({options_text})");
-            }
-            summary.push('\n');
-        }
-
-        if let Some(ctx) = &context {
-            let _ = write!(summary, "\nContext: {ctx}");
-        }
+        // Slim acknowledgement — the LLM already sees the full questions+options
+        // in its own tool_use args. Echoing them here was pure redundancy and
+        // the upstream source of memory-retain transcript pollution.
+        let summary = format!(
+            "Posted {} question(s) to user. Awaiting response.",
+            questions.len()
+        );
 
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
@@ -289,64 +264,137 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mode_single_and_multi() {
-        let tool = AskUserQuestionTool::new();
-        let r = tool
-            .execute(
-                json!({
-                    "questions": [
-                        {"question": "Pick", "options": ["A", "B"], "mode": "single"},
-                        {"question": "Select", "options": ["X", "Y"], "mode": "multi"}
-                    ]
-                }),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(text.contains("[single]"));
-        assert!(text.contains("[multi]"));
-    }
-
-    #[tokio::test]
-    async fn context_included() {
-        let tool = AskUserQuestionTool::new();
-        let r = tool
-            .execute(
-                json!({
-                    "questions": [{"question": "Q", "options": ["A", "B"]}],
-                    "context": "some context"
-                }),
-                &make_ctx(),
-            )
-            .await
-            .unwrap();
-        let text = extract_text(&r);
-        assert!(text.contains("some context"));
-    }
-
-    #[tokio::test]
     async fn missing_questions_error() {
         let tool = AskUserQuestionTool::new();
         let r = tool.execute(json!({}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
+    // ── Slim-result invariants (memory-retain pollution fix) ──
+    //
+    // The tool result text is intentionally minimal: just an acknowledgement
+    // and the question count. Full question/option/context data stays in the
+    // LLM's own `tool_use` args and in `details` JSON — echoing it here
+    // polluted memory auto-retain transcripts.
+
     #[tokio::test]
-    async fn result_content_formatted() {
+    async fn result_is_slim_acknowledgement() {
         let tool = AskUserQuestionTool::new();
         let r = tool
             .execute(
                 json!({
-                    "questions": [{"question": "Choose a color", "options": ["Red", "Blue"]}]
+                    "questions": [{"question": "Pick one", "options": [{"label": "A"}, {"label": "B"}]}]
                 }),
                 &make_ctx(),
             )
             .await
             .unwrap();
         let text = extract_text(&r);
-        assert!(text.contains("Choose a color"));
+        assert_eq!(text, "Posted 1 question(s) to user. Awaiting response.");
+    }
+
+    #[tokio::test]
+    async fn result_contains_question_count() {
+        let tool = AskUserQuestionTool::new();
+        let questions: Vec<Value> = (1..=3)
+            .map(|i| json!({"question": format!("Q{i}"), "options": [{"label":"A"}, {"label":"B"}]}))
+            .collect();
+        let r = tool
+            .execute(json!({"questions": questions}), &make_ctx())
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        assert!(text.contains("3"), "expected count in text: {text}");
+    }
+
+    #[tokio::test]
+    async fn result_does_not_leak_question_text() {
+        let tool = AskUserQuestionTool::new();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "What's your favorite color?", "options": [{"label":"A"},{"label":"B"}]}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        assert!(!text.contains("favorite color"), "question text leaked: {text}");
+    }
+
+    #[tokio::test]
+    async fn result_does_not_leak_option_labels() {
+        let tool = AskUserQuestionTool::new();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Pick", "options": [{"label": "Crimson"}, {"label": "Cerulean"}]}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        assert!(!text.contains("Crimson"), "option label leaked: {text}");
+        assert!(!text.contains("Cerulean"), "option label leaked: {text}");
+    }
+
+    #[tokio::test]
+    async fn result_does_not_leak_context() {
+        let tool = AskUserQuestionTool::new();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Q", "options": [{"label":"A"},{"label":"B"}]}],
+                    "context": "ratification gate - should we proceed?"
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        let text = extract_text(&r);
+        assert!(!text.contains("ratification"), "context leaked: {text}");
+    }
+
+    #[tokio::test]
+    async fn details_preserve_question_count() {
+        let tool = AskUserQuestionTool::new();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [
+                        {"question": "Q1", "options": [{"label":"A"},{"label":"B"}]},
+                        {"question": "Q2", "options": [{"label":"X"},{"label":"Y"}]}
+                    ]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r.details.as_ref().and_then(|d| d.get("questionCount")).and_then(Value::as_u64),
+            Some(2)
+        );
+    }
+
+    #[tokio::test]
+    async fn details_preserve_context_value() {
+        let tool = AskUserQuestionTool::new();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Q", "options": [{"label":"A"},{"label":"B"}]}],
+                    "context": "keep for retrieval"
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r.details.as_ref().and_then(|d| d.get("context")).and_then(Value::as_str),
+            Some("keep for retrieval")
+        );
     }
 
     // ── Object options tests ──
@@ -373,11 +421,6 @@ mod tests {
             "questions": [{"question": "Pick", "options": [{"label": "A", "description": "desc"}, {"label": "B"}]}]
         }), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
-        let text = extract_text(&r);
-        assert!(
-            text.contains('A'),
-            "summary should contain option label A: {text}"
-        );
     }
 
     #[tokio::test]
@@ -418,8 +461,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn string_options_ignored() {
-        // Bare-string options (old format) should be ignored — only object format accepted
+    async fn string_options_accepted_without_error() {
+        // Bare-string options are accepted (MIN_OPTIONS is about count, not shape).
+        // Prior version also asserted they didn't leak into the slim text — now
+        // implicit since the slim text contains no option data at all.
         let tool = AskUserQuestionTool::new();
         let r = tool
             .execute(
@@ -430,19 +475,6 @@ mod tests {
             )
             .await
             .unwrap();
-        let text = extract_text(&r);
-        // "A" and "B" should NOT appear because bare strings lack a "label" key
-        assert!(!text.contains("(A"), "bare-string options should not be extracted: {text}");
-    }
-
-    #[tokio::test]
-    async fn summary_contains_option_labels() {
-        let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({
-            "questions": [{"question": "Pick color", "options": [{"label": "Red"}, {"label": "Blue"}]}]
-        }), &make_ctx()).await.unwrap();
-        let text = extract_text(&r);
-        assert!(text.contains("Red"), "summary should contain Red: {text}");
-        assert!(text.contains("Blue"), "summary should contain Blue: {text}");
+        assert!(r.is_error.is_none());
     }
 }

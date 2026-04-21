@@ -795,9 +795,11 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     // Auto-retain: fire policy evaluation on successful completion. Subagent
     // and disabled-interval cases are filtered inside `maybe_fire`, so the
     // gate here only covers interrupt/error (retentions of half-finished runs
-    // would summarize noise). Spawned so the RPC response returns immediately;
-    // the summarizer itself is async inside `trigger_retain`.
-    if result.error.is_none() && !result.interrupted {
+    // would summarize noise) and interactive-tool pauses (`ToolStop` — the
+    // turn is waiting for user input, not concluded). Spawned so the RPC
+    // response returns immediately; the summarizer itself is async inside
+    // `trigger_retain`.
+    if result.error.is_none() && !result.interrupted && retain_eligible(&result.stop_reason) {
         let deps = crate::server::rpc::handlers::memory::RetainDeps {
             orchestrator: orchestrator.clone(),
             event_store: event_store.clone(),
@@ -1051,6 +1053,58 @@ fn drain_prompt_queue(
 /// callers don't need to pass `useWorktree: false` explicitly.
 fn should_acquire_worktree_for_source(source: Option<&str>) -> bool {
     source != Some("chat")
+}
+
+/// Whether a finished agent run's stop reason represents a coherent
+/// conclusion that auto-retain can safely summarize.
+///
+/// - `EndTurn`, `NoToolCalls`, `MaxTurns` — agent produced real work.
+/// - `ToolStop` — interactive tool paused the turn awaiting user input;
+///   summarizing mid-dialog produces incoherent output.
+/// - `Error`, `Interrupted` — already filtered by caller, included here
+///   as defense in depth.
+fn retain_eligible(stop_reason: &crate::runtime::errors::StopReason) -> bool {
+    use crate::runtime::errors::StopReason;
+    matches!(
+        stop_reason,
+        StopReason::EndTurn | StopReason::NoToolCalls | StopReason::MaxTurns
+    )
+}
+
+#[cfg(test)]
+mod retain_eligible_tests {
+    use super::retain_eligible;
+    use crate::runtime::errors::StopReason;
+
+    #[test]
+    fn end_turn_is_eligible() {
+        assert!(retain_eligible(&StopReason::EndTurn));
+    }
+
+    #[test]
+    fn no_tool_calls_is_eligible() {
+        assert!(retain_eligible(&StopReason::NoToolCalls));
+    }
+
+    #[test]
+    fn max_turns_is_eligible() {
+        assert!(retain_eligible(&StopReason::MaxTurns));
+    }
+
+    #[test]
+    fn tool_stop_is_not_eligible() {
+        assert!(!retain_eligible(&StopReason::ToolStop));
+    }
+
+    #[test]
+    fn interrupted_is_not_eligible() {
+        assert!(!retain_eligible(&StopReason::Interrupted));
+    }
+
+    #[test]
+    fn error_is_not_eligible() {
+        assert!(!retain_eligible(&StopReason::Error));
+    }
 }
 
 #[cfg(test)]

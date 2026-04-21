@@ -50,6 +50,7 @@ use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{map_event_store_error, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 
+use std::collections::HashSet;
 use std::fs;
 use std::sync::Arc;
 
@@ -649,13 +650,91 @@ fn get_retain_slice(
     Ok(Some(RetainSlice { messages, start_ts, end_ts }))
 }
 
+/// Tools whose results are UI scaffolding (verbose echoes of the call args),
+/// not semantically useful for memory summarization. Their tool_result lines
+/// are suppressed from the transcript — the agent still sees its own tool_use
+/// args + the user's follow-up answer message.
+const INTERACTIVE_TOOL_NAMES: &[&str] = &["AskUserQuestion", "GetConfirmation"];
+
+/// First-pass scan to collect `tool_use` block IDs that belong to an
+/// interactive tool. Their matching `tool_result` messages are then filtered
+/// by [`serialize_for_memory`].
+fn collect_interactive_tool_use_ids(messages: &[Message]) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    for msg in messages {
+        let Some(arr) = msg.content.as_array() else {
+            continue;
+        };
+        for block in arr {
+            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                continue;
+            }
+            let Some(name) = block.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            if !INTERACTIVE_TOOL_NAMES.contains(&name) {
+                continue;
+            }
+            if let Some(id) = block.get("id").and_then(Value::as_str) {
+                let _ = ids.insert(id.to_string());
+            }
+        }
+    }
+    ids
+}
+
+/// Extract a compact natural-language summary from an interactive-tool
+/// `tool_use` block so the transcript preserves what the agent asked.
+///
+/// Returns `None` for non-interactive tools or malformed blocks. This pairs
+/// with the tool_result filter: the verbose recap is dropped, but the
+/// question text from the original call still flows into the transcript.
+fn extract_interactive_tool_summary(block: &Value) -> Option<String> {
+    if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+        return None;
+    }
+    let name = block.get("name").and_then(Value::as_str)?;
+    let input = block.get("input")?;
+
+    match name {
+        "AskUserQuestion" => {
+            let questions = input.get("questions").and_then(Value::as_array)?;
+            let texts: Vec<String> = questions
+                .iter()
+                .filter_map(|q| q.get("question").and_then(Value::as_str))
+                .map(|s| format!("\"{s}\""))
+                .collect();
+            if texts.is_empty() {
+                None
+            } else {
+                Some(format!("Asked: {}", texts.join("; ")))
+            }
+        }
+        "GetConfirmation" => {
+            let action = input.get("action").and_then(Value::as_str)?;
+            match input.get("reason").and_then(Value::as_str) {
+                Some(reason) => Some(format!(
+                    "Requested confirmation: {action} (reason: {reason})"
+                )),
+                None => Some(format!("Requested confirmation: {action}")),
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Serialize reconstructed messages to a plain-text transcript for summarization.
 ///
-/// Truncates text content to keep the transcript within model limits.
+/// Truncates text content to keep the transcript within model limits. Results
+/// from interactive tools (`AskUserQuestion`, `GetConfirmation`) are dropped
+/// entirely — their text is UI scaffolding, not semantic content, and
+/// including it polluted summaries with raw question/option recaps.
 fn serialize_for_memory(messages: &[Message]) -> String {
     const MAX_TEXT: usize = 300;
     const MAX_TOOL: usize = 150;
     const MAX_TOTAL: usize = 20_000;
+
+    let interactive_ids = collect_interactive_tool_use_ids(messages);
 
     let mut lines = Vec::new();
     for msg in messages {
@@ -676,21 +755,45 @@ fn serialize_for_memory(messages: &[Message]) -> String {
                 }
             }
             "assistant" => {
-                let text = match &msg.content {
-                    Value::String(s) => s.clone(),
-                    Value::Array(arr) => arr
-                        .iter()
-                        .filter_map(|b| b.get("text").and_then(Value::as_str))
-                        .collect::<Vec<_>>()
-                        .join(" "),
+                // Collect visible content in order: text blocks plus compact
+                // summaries of interactive tool_use blocks (so the question
+                // context survives even when the tool_result line is filtered).
+                let mut parts: Vec<String> = Vec::new();
+                match &msg.content {
+                    Value::String(s) => {
+                        if !s.is_empty() {
+                            parts.push(s.clone());
+                        }
+                    }
+                    Value::Array(arr) => {
+                        for b in arr {
+                            if let Some(t) = b.get("text").and_then(Value::as_str) {
+                                if !t.is_empty() {
+                                    parts.push(t.to_string());
+                                }
+                            } else if let Some(summary) = extract_interactive_tool_summary(b) {
+                                parts.push(summary);
+                            }
+                        }
+                    }
                     _ => continue,
-                };
+                }
+                let text = parts.join(" ");
                 let t = truncate_str(&text, MAX_TEXT);
                 if !t.is_empty() {
                     lines.push(format!("[ASSISTANT] {t}"));
                 }
             }
             "tool_result" | "toolResult" => {
+                // Drop tool_results tied to interactive tools — their text is
+                // echo noise. Orphan tool_results (no matching tool_use) are
+                // preserved by default since we can't identify their source.
+                if let Some(id) = msg.tool_call_id.as_deref() {
+                    if interactive_ids.contains(id) {
+                        continue;
+                    }
+                }
+
                 let text = match &msg.content {
                     Value::String(s) => s.clone(),
                     Value::Array(arr) => arr
@@ -1438,5 +1541,527 @@ mod tests {
             row.is_none(),
             "manual retain must not produce an auto_retain_triggered event"
         );
+    }
+
+    // ── serialize_for_memory + collect_interactive_tool_use_ids ──────────
+
+    /// Build an assistant message that emits a `tool_use` block for `tool_name`
+    /// with the given id and (optional) input payload.
+    fn assistant_tool_use_with_input(tool_name: &str, tool_id: &str, input: Value) -> Message {
+        Message {
+            role: "assistant".to_string(),
+            content: json!([{
+                "type": "tool_use",
+                "id": tool_id,
+                "name": tool_name,
+                "input": input
+            }]),
+            tool_call_id: None,
+            is_error: None,
+        }
+    }
+
+    /// Minimal `tool_use` assistant message — input is an empty object.
+    /// Use this when the id/name are all that matters for the test.
+    fn assistant_tool_use(tool_name: &str, tool_id: &str) -> Message {
+        assistant_tool_use_with_input(tool_name, tool_id, json!({}))
+    }
+
+    /// Assistant message for an `AskUserQuestion` tool call with real question
+    /// text (what the agent would actually send at runtime).
+    fn assistant_ask_user_question(tool_id: &str, questions: &[&str]) -> Message {
+        let qs: Vec<Value> = questions
+            .iter()
+            .map(|q| {
+                json!({
+                    "question": q,
+                    "options": [{"label": "A"}, {"label": "B"}],
+                    "mode": "single"
+                })
+            })
+            .collect();
+        assistant_tool_use_with_input("AskUserQuestion", tool_id, json!({"questions": qs}))
+    }
+
+    /// Assistant message for a `GetConfirmation` tool call.
+    fn assistant_get_confirmation(tool_id: &str, action: &str, reason: &str) -> Message {
+        assistant_tool_use_with_input(
+            "GetConfirmation",
+            tool_id,
+            json!({"action": action, "reason": reason, "riskLevel": "high"}),
+        )
+    }
+
+    fn assistant_text(text: &str) -> Message {
+        Message {
+            role: "assistant".to_string(),
+            content: json!([{"type": "text", "text": text}]),
+            tool_call_id: None,
+            is_error: None,
+        }
+    }
+
+    fn user_text(text: &str) -> Message {
+        Message {
+            role: "user".to_string(),
+            content: json!(text),
+            tool_call_id: None,
+            is_error: None,
+        }
+    }
+
+    fn tool_result(tool_call_id: &str, text: &str) -> Message {
+        Message {
+            role: "tool_result".to_string(),
+            content: json!([{"type": "text", "text": text}]),
+            tool_call_id: Some(tool_call_id.to_string()),
+            is_error: None,
+        }
+    }
+
+    // ── collect_interactive_tool_use_ids ──
+
+    #[test]
+    fn collect_interactive_ids_finds_ask_user_question() {
+        let msgs = vec![assistant_tool_use("AskUserQuestion", "aq_1")];
+        let ids = collect_interactive_tool_use_ids(&msgs);
+        assert!(ids.contains("aq_1"));
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[test]
+    fn collect_interactive_ids_finds_get_confirmation() {
+        let msgs = vec![assistant_tool_use("GetConfirmation", "gc_1")];
+        let ids = collect_interactive_tool_use_ids(&msgs);
+        assert!(ids.contains("gc_1"));
+    }
+
+    #[test]
+    fn collect_interactive_ids_ignores_non_interactive_tools() {
+        let msgs = vec![
+            assistant_tool_use("Read", "r_1"),
+            assistant_tool_use("Bash", "b_1"),
+        ];
+        let ids = collect_interactive_tool_use_ids(&msgs);
+        assert!(ids.is_empty(), "should not collect non-interactive tool ids");
+    }
+
+    #[test]
+    fn collect_interactive_ids_mixed_tool_use() {
+        let msgs = vec![
+            Message {
+                role: "assistant".to_string(),
+                content: json!([
+                    {"type": "tool_use", "id": "aq_1", "name": "AskUserQuestion", "input": {}},
+                    {"type": "tool_use", "id": "r_1", "name": "Read", "input": {}}
+                ]),
+                tool_call_id: None,
+                is_error: None,
+            }
+        ];
+        let ids = collect_interactive_tool_use_ids(&msgs);
+        assert!(ids.contains("aq_1"));
+        assert!(!ids.contains("r_1"));
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[test]
+    fn collect_interactive_ids_string_content_skipped_safely() {
+        let msgs = vec![Message {
+            role: "user".to_string(),
+            content: json!("plain string content"),
+            tool_call_id: None,
+            is_error: None,
+        }];
+        let ids = collect_interactive_tool_use_ids(&msgs);
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn collect_interactive_ids_block_without_type_field() {
+        let msgs = vec![Message {
+            role: "assistant".to_string(),
+            content: json!([{"name": "AskUserQuestion", "id": "aq_1"}]),
+            tool_call_id: None,
+            is_error: None,
+        }];
+        let ids = collect_interactive_tool_use_ids(&msgs);
+        assert!(ids.is_empty(), "blocks without type field must be ignored");
+    }
+
+    #[test]
+    fn collect_interactive_ids_tool_use_without_id() {
+        let msgs = vec![Message {
+            role: "assistant".to_string(),
+            content: json!([{"type": "tool_use", "name": "AskUserQuestion"}]),
+            tool_call_id: None,
+            is_error: None,
+        }];
+        let ids = collect_interactive_tool_use_ids(&msgs);
+        assert!(ids.is_empty(), "tool_use without id produces no entry");
+    }
+
+    #[test]
+    fn collect_interactive_ids_multiple_ask_user_calls() {
+        let msgs = vec![
+            assistant_tool_use("AskUserQuestion", "aq_1"),
+            assistant_tool_use("AskUserQuestion", "aq_2"),
+            assistant_tool_use("AskUserQuestion", "aq_3"),
+        ];
+        let ids = collect_interactive_tool_use_ids(&msgs);
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains("aq_1"));
+        assert!(ids.contains("aq_2"));
+        assert!(ids.contains("aq_3"));
+    }
+
+    // ── serialize_for_memory ──
+
+    #[test]
+    fn serialize_empty_messages_returns_empty_string() {
+        let out = serialize_for_memory(&[]);
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn serialize_handles_string_content_message() {
+        let msgs = vec![user_text("hi there")];
+        let out = serialize_for_memory(&msgs);
+        assert!(out.contains("[USER] hi there"), "got: {out}");
+    }
+
+    #[test]
+    fn serialize_filters_ask_user_question_result_but_keeps_question_text() {
+        let msgs = vec![
+            assistant_ask_user_question("aq_1", &["What's your favorite color?"]),
+            tool_result("aq_1", "Q1: What's your favorite color? [single] (Red, Blue)"),
+            user_text("Red"),
+        ];
+        let out = serialize_for_memory(&msgs);
+        // Verbose tool_result recap is filtered.
+        assert!(
+            !out.contains("[TOOL_RESULT]"),
+            "interactive tool_result should be filtered: {out}"
+        );
+        // Option list noise stays out.
+        assert!(
+            !out.contains("(Red, Blue)"),
+            "option list from recap should not appear: {out}"
+        );
+        // But the question context survives via the assistant line.
+        assert!(
+            out.contains("[ASSISTANT] Asked: \"What's your favorite color?\""),
+            "question context should appear in assistant line: {out}"
+        );
+        // And the user's answer is preserved.
+        assert!(out.contains("[USER] Red"), "user answer preserved: {out}");
+    }
+
+    #[test]
+    fn serialize_filters_get_confirmation_result_but_keeps_action() {
+        let msgs = vec![
+            assistant_get_confirmation("gc_1", "Delete ~/old-project/", "User requested cleanup"),
+            tool_result("gc_1", "Requesting confirmation: Delete /path Risk: high"),
+            user_text("approved"),
+        ];
+        let out = serialize_for_memory(&msgs);
+        // Verbose tool_result filtered.
+        assert!(
+            !out.contains("[TOOL_RESULT]"),
+            "GetConfirmation result should be filtered: {out}"
+        );
+        // Recap text (from tool_result) gone.
+        assert!(
+            !out.contains("Delete /path"),
+            "recap action string leaked: {out}"
+        );
+        // Action/reason from the real tool_use input survive in the assistant line.
+        assert!(
+            out.contains("[ASSISTANT] Requested confirmation: Delete ~/old-project/"),
+            "action context should appear in assistant line: {out}"
+        );
+        assert!(
+            out.contains("reason: User requested cleanup"),
+            "reason should appear in assistant line: {out}"
+        );
+        assert!(out.contains("[USER] approved"));
+    }
+
+    #[test]
+    fn serialize_retains_non_interactive_tool_result() {
+        let msgs = vec![
+            assistant_tool_use("Read", "r_1"),
+            tool_result("r_1", "file contents here"),
+        ];
+        let out = serialize_for_memory(&msgs);
+        assert!(
+            out.contains("[TOOL_RESULT] file contents here"),
+            "non-interactive tool result should appear: {out}"
+        );
+    }
+
+    #[test]
+    fn serialize_filters_multiple_interactive_in_slice() {
+        let msgs = vec![
+            assistant_tool_use("AskUserQuestion", "aq_1"),
+            tool_result("aq_1", "Q1: first"),
+            user_text("a1"),
+            assistant_tool_use("AskUserQuestion", "aq_2"),
+            tool_result("aq_2", "Q2: second"),
+            user_text("a2"),
+            assistant_tool_use("AskUserQuestion", "aq_3"),
+            tool_result("aq_3", "Q3: third"),
+            user_text("a3"),
+        ];
+        let out = serialize_for_memory(&msgs);
+        assert!(!out.contains("[TOOL_RESULT]"), "all three should be filtered: {out}");
+        assert!(!out.contains("Q1:"), "no question echo: {out}");
+        assert!(!out.contains("Q2:"), "no question echo: {out}");
+        assert!(!out.contains("Q3:"), "no question echo: {out}");
+        assert!(out.contains("[USER] a1"));
+        assert!(out.contains("[USER] a2"));
+        assert!(out.contains("[USER] a3"));
+    }
+
+    #[test]
+    fn serialize_keeps_orphan_tool_result() {
+        // Tool result whose tool_call_id has no matching tool_use in the slice.
+        // Default: preserve it — we only filter when we can confidently identify
+        // the source as interactive.
+        let msgs = vec![tool_result("orphan_id", "some tool output")];
+        let out = serialize_for_memory(&msgs);
+        assert!(
+            out.contains("[TOOL_RESULT] some tool output"),
+            "orphan tool_result should be preserved: {out}"
+        );
+    }
+
+    #[test]
+    fn serialize_preserves_mixed_interactive_and_regular() {
+        let msgs = vec![
+            assistant_tool_use("AskUserQuestion", "aq_1"),
+            tool_result("aq_1", "Q1: pick one"),
+            user_text("done"),
+            assistant_tool_use("Read", "r_1"),
+            tool_result("r_1", "file body"),
+            assistant_text("final thoughts"),
+        ];
+        let out = serialize_for_memory(&msgs);
+        assert!(!out.contains("pick one"), "interactive filtered: {out}");
+        assert!(out.contains("[TOOL_RESULT] file body"), "Read kept: {out}");
+        assert!(out.contains("[ASSISTANT] final thoughts"));
+        assert!(out.contains("[USER] done"));
+    }
+
+    #[test]
+    fn serialize_flags_errored_non_interactive_tool_result() {
+        let msgs = vec![
+            assistant_tool_use("Bash", "b_1"),
+            Message {
+                role: "tool_result".to_string(),
+                content: json!([{"type": "text", "text": "command failed"}]),
+                tool_call_id: Some("b_1".to_string()),
+                is_error: Some(true),
+            },
+        ];
+        let out = serialize_for_memory(&msgs);
+        assert!(
+            out.contains("[TOOL_ERROR] command failed"),
+            "error label preserved: {out}"
+        );
+    }
+
+    // ── extract_interactive_tool_summary ──
+
+    #[test]
+    fn extract_summary_returns_none_for_text_block() {
+        let block = json!({"type": "text", "text": "hello"});
+        assert_eq!(extract_interactive_tool_summary(&block), None);
+    }
+
+    #[test]
+    fn extract_summary_returns_none_for_non_interactive_tool_use() {
+        let block = json!({
+            "type": "tool_use",
+            "id": "r_1",
+            "name": "Read",
+            "input": {"path": "/tmp/x"}
+        });
+        assert_eq!(extract_interactive_tool_summary(&block), None);
+    }
+
+    #[test]
+    fn extract_summary_returns_none_when_input_missing() {
+        let block = json!({
+            "type": "tool_use",
+            "id": "aq_1",
+            "name": "AskUserQuestion"
+        });
+        assert_eq!(extract_interactive_tool_summary(&block), None);
+    }
+
+    #[test]
+    fn extract_summary_ask_user_single_question() {
+        let block = json!({
+            "type": "tool_use",
+            "id": "aq_1",
+            "name": "AskUserQuestion",
+            "input": {
+                "questions": [{"question": "What's next?", "options": [{"label":"A"},{"label":"B"}], "mode":"single"}]
+            }
+        });
+        assert_eq!(
+            extract_interactive_tool_summary(&block),
+            Some("Asked: \"What's next?\"".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_summary_ask_user_multiple_questions_joined() {
+        let block = json!({
+            "type": "tool_use",
+            "id": "aq_1",
+            "name": "AskUserQuestion",
+            "input": {
+                "questions": [
+                    {"question": "Q one?", "options": [{"label":"A"},{"label":"B"}]},
+                    {"question": "Q two?", "options": [{"label":"X"},{"label":"Y"}]}
+                ]
+            }
+        });
+        let out = extract_interactive_tool_summary(&block).unwrap();
+        assert_eq!(out, "Asked: \"Q one?\"; \"Q two?\"");
+    }
+
+    #[test]
+    fn extract_summary_ask_user_without_questions_returns_none() {
+        let block = json!({
+            "type": "tool_use",
+            "id": "aq_1",
+            "name": "AskUserQuestion",
+            "input": {"questions": []}
+        });
+        assert_eq!(extract_interactive_tool_summary(&block), None);
+    }
+
+    #[test]
+    fn extract_summary_ask_user_omits_options_and_mode() {
+        // Options, modes, and context should NOT appear in the summary — they
+        // are the upstream source of transcript pollution. Only the question
+        // text itself is preserved.
+        let block = json!({
+            "type": "tool_use",
+            "id": "aq_1",
+            "name": "AskUserQuestion",
+            "input": {
+                "questions": [{
+                    "question": "Pick color",
+                    "options": [{"label": "Crimson"}, {"label": "Cerulean"}],
+                    "mode": "single"
+                }],
+                "context": "ratification gate"
+            }
+        });
+        let out = extract_interactive_tool_summary(&block).unwrap();
+        assert!(!out.contains("Crimson"), "options should be omitted: {out}");
+        assert!(!out.contains("Cerulean"), "options should be omitted: {out}");
+        assert!(!out.contains("[single]"), "mode should be omitted: {out}");
+        assert!(!out.contains("ratification"), "context should be omitted: {out}");
+    }
+
+    #[test]
+    fn extract_summary_get_confirmation_with_reason() {
+        let block = json!({
+            "type": "tool_use",
+            "id": "gc_1",
+            "name": "GetConfirmation",
+            "input": {"action": "Delete ~/x", "reason": "user cleanup", "riskLevel": "high"}
+        });
+        assert_eq!(
+            extract_interactive_tool_summary(&block),
+            Some("Requested confirmation: Delete ~/x (reason: user cleanup)".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_summary_get_confirmation_without_reason() {
+        let block = json!({
+            "type": "tool_use",
+            "id": "gc_1",
+            "name": "GetConfirmation",
+            "input": {"action": "Install pkg", "riskLevel": "low"}
+        });
+        assert_eq!(
+            extract_interactive_tool_summary(&block),
+            Some("Requested confirmation: Install pkg".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_summary_get_confirmation_without_action_returns_none() {
+        let block = json!({
+            "type": "tool_use",
+            "id": "gc_1",
+            "name": "GetConfirmation",
+            "input": {"reason": "some reason"}
+        });
+        assert_eq!(extract_interactive_tool_summary(&block), None);
+    }
+
+    // ── serialize assistant-line question preservation ──
+
+    #[test]
+    fn serialize_preserves_multi_question_ask_user_transcript() {
+        let msgs = vec![
+            assistant_ask_user_question(
+                "aq_1",
+                &["What's your role?", "What timezone?", "What language?"],
+            ),
+            tool_result("aq_1", "verbose recap"),
+            user_text("IC; PT; Swift"),
+        ];
+        let out = serialize_for_memory(&msgs);
+        assert!(out.contains("Asked: \"What's your role?\""), "q1 missing: {out}");
+        assert!(out.contains("\"What timezone?\""), "q2 missing: {out}");
+        assert!(out.contains("\"What language?\""), "q3 missing: {out}");
+        assert!(!out.contains("[TOOL_RESULT]"), "verbose recap leaked: {out}");
+        assert!(out.contains("[USER] IC; PT; Swift"));
+    }
+
+    #[test]
+    fn serialize_assistant_mixes_text_and_interactive_summary() {
+        // The agent often writes a short intro text block before the tool_use
+        // in the same message. Both should appear on the transcript line.
+        let msgs = vec![Message {
+            role: "assistant".to_string(),
+            content: json!([
+                {"type": "text", "text": "Let me ask you something."},
+                {"type": "tool_use", "id": "aq_1", "name": "AskUserQuestion", "input": {
+                    "questions": [{"question": "Ready?", "options": [{"label":"Y"},{"label":"N"}]}]
+                }}
+            ]),
+            tool_call_id: None,
+            is_error: None,
+        }];
+        let out = serialize_for_memory(&msgs);
+        assert!(out.contains("Let me ask you something"), "text block missing: {out}");
+        assert!(out.contains("Asked: \"Ready?\""), "question text missing: {out}");
+    }
+
+    #[test]
+    fn serialize_ignores_non_interactive_tool_use_in_assistant_content() {
+        let msgs = vec![Message {
+            role: "assistant".to_string(),
+            content: json!([
+                {"type": "text", "text": "reading file"},
+                {"type": "tool_use", "id": "r_1", "name": "Read", "input": {"path": "/tmp/x"}}
+            ]),
+            tool_call_id: None,
+            is_error: None,
+        }];
+        let out = serialize_for_memory(&msgs);
+        assert!(out.contains("[ASSISTANT] reading file"));
+        assert!(!out.contains("Asked:"));
+        assert!(!out.contains("Requested confirmation"));
     }
 }
