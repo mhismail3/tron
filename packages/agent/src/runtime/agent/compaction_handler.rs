@@ -25,7 +25,7 @@ use crate::runtime::context::compaction_trigger::CompactionTrigger;
 use crate::runtime::context::types::{CompactionTriggerConfig, CompactionTriggerInput};
 
 use metrics::{counter, histogram};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::errors::RuntimeError;
@@ -557,34 +557,14 @@ impl CompactionHandler {
                     session_id,
                     tokens_before, tokens_after, "compaction complete"
                 );
-                if let Some(counter) = sequence_counter {
-                    let _ = emitter.emit_sequenced(TronEvent::CompactionComplete {
-                        base: BaseEvent::now(session_id),
-                        success: compaction_result.success,
-                        tokens_before,
-                        tokens_after,
-                        compression_ratio: compaction_result.compression_ratio,
-                        reason: Some(reason.clone()),
-                        summary: summary_text.clone(),
-                        estimated_context_tokens: Some(tokens_after),
-                        preserved_turns: Some(compaction_result.preserved_turns),
-                        summarized_turns: Some(compaction_result.summarized_turns),
-                    }, counter);
-                } else {
-                    let _ = emitter.emit(TronEvent::CompactionComplete {
-                        base: BaseEvent::now(session_id),
-                        success: compaction_result.success,
-                        tokens_before,
-                        tokens_after,
-                        compression_ratio: compaction_result.compression_ratio,
-                        reason: Some(reason.clone()),
-                        summary: summary_text.clone(),
-                        estimated_context_tokens: Some(tokens_after),
-                        preserved_turns: Some(compaction_result.preserved_turns),
-                        summarized_turns: Some(compaction_result.summarized_turns),
-                    });
-                }
-
+                // C5 invariant: persist compact.boundary to the event log
+                // BEFORE broadcasting CompactionComplete. If persist fails the
+                // live iOS view shows "compaction complete" but session
+                // reconstruction on reconnect does NOT see the boundary, so
+                // the context is replayed as if no compaction occurred —
+                // DB and live view diverge. Persist-first + gate-broadcast
+                // closes the gap.
+                let mut persist_ok = true;
                 if compaction_result.success
                     && let Some(persister) = persister
                 {
@@ -595,7 +575,7 @@ impl CompactionHandler {
                         "compactedTokens": tokens_after as i64,
                         "compressionRatio": compaction_result.compression_ratio,
                         "reason": reason_str,
-                        "summary": summary_text,
+                        "summary": summary_text.clone(),
                         "estimatedContextTokens": tokens_after as i64,
                         "preservedTurns": compaction_result.preserved_turns,
                         "summarizedTurns": compaction_result.summarized_turns,
@@ -603,7 +583,7 @@ impl CompactionHandler {
                     });
                     let seq = sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                     if let Err(error) = persister
-                        .append_background_with_sequence(
+                        .append_with_sequence(
                             session_id,
                             crate::events::EventType::CompactBoundary,
                             payload,
@@ -611,13 +591,53 @@ impl CompactionHandler {
                         )
                         .await
                     {
-                        warn!(
+                        error!(
                             session_id,
                             error = %error,
-                            "failed to queue compaction boundary event"
+                            "failed to persist compaction boundary event; skipping CompactionComplete broadcast"
                         );
+                        persist_ok = false;
                     }
                 }
+
+                if persist_ok {
+                    if let Some(counter) = sequence_counter {
+                        let _ = emitter.emit_sequenced(
+                            TronEvent::CompactionComplete {
+                                base: BaseEvent::now(session_id),
+                                success: compaction_result.success,
+                                tokens_before,
+                                tokens_after,
+                                compression_ratio: compaction_result.compression_ratio,
+                                reason: Some(reason.clone()),
+                                summary: summary_text.clone(),
+                                estimated_context_tokens: Some(tokens_after),
+                                preserved_turns: Some(compaction_result.preserved_turns),
+                                summarized_turns: Some(compaction_result.summarized_turns),
+                            },
+                            counter,
+                        );
+                    } else {
+                        let _ = emitter.emit(TronEvent::CompactionComplete {
+                            base: BaseEvent::now(session_id),
+                            success: compaction_result.success,
+                            tokens_before,
+                            tokens_after,
+                            compression_ratio: compaction_result.compression_ratio,
+                            reason: Some(reason.clone()),
+                            summary: summary_text.clone(),
+                            estimated_context_tokens: Some(tokens_after),
+                            preserved_turns: Some(compaction_result.preserved_turns),
+                            summarized_turns: Some(compaction_result.summarized_turns),
+                        });
+                    }
+                }
+                // Return `true`: compaction ran (the in-process context_manager
+                // was compacted). A persist failure is surfaced via logs and
+                // the missing broadcast; caller semantics for "ran vs didn't
+                // run" remain unchanged. Future work: roll back in-memory
+                // compaction on persist failure so DB and in-process state
+                // cannot diverge.
                 true
             }
             Err(e) => {
