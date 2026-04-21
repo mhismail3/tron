@@ -42,7 +42,7 @@ impl SubagentSpawner for StubSubagentSpawner {
 
 /// Stub notification delegate — no push service configured on this server.
 ///
-/// M19: returns a non-error `NotifyResult` with `success: false` and a
+/// Returns a non-error `NotifyResult` with `success: false` and a
 /// `warning` field explaining the state. Erroring the tool blocks the
 /// agent's flow when a user simply hasn't wired push yet; a warning
 /// instead lets the agent continue and tell the user "the notification
@@ -103,10 +103,10 @@ mod tests {
 
     #[tokio::test]
     async fn stub_notify_delegate_returns_warning_not_error() {
-        // M19: the stub must NOT error (erroring blocks the agent's
-        // flow on an unconfigured-push setup). It must return a
-        // well-formed NotifyResult whose `warning` field explains the
-        // state so the NotifyApp tool can surface it.
+        // The stub must NOT error (erroring blocks the agent's flow
+        // on an unconfigured-push setup). It returns a well-formed
+        // NotifyResult whose `warning` field explains the state so
+        // the NotifyApp tool can surface it.
         let delegate = StubNotifyDelegate;
         let notification = Notification {
             title: "Test".into(),

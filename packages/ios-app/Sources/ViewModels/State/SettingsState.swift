@@ -26,8 +26,8 @@ final class SettingsState {
     /// - `"continue"` (default) — fail-open
     /// - `"block"` — synthesize a Block with a reason
     var hooksErrorPolicy: String = "continue"
-    /// M18: max characters of hook `add_context` content aggregated
-    /// per event. 0 disables the feature.
+    /// Max characters of hook `add_context` content aggregated per
+    /// event. 0 disables the feature.
     var hooksMaxAddedContextChars: UInt32 = 4096
 
     // MARK: - Skills

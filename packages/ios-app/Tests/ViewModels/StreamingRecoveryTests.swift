@@ -1,22 +1,23 @@
 import XCTest
 @testable import TronMobile
 
-/// H7 — Streaming-text recovery across disconnect.
+/// Streaming-text recovery across disconnect.
 ///
 /// Live streaming mid-turn uses a ChatMessage with a generated UUID.
 /// When the WebSocket drops, `cleanUpStreamingState` resets the
 /// streaming manager and removes the message. Reconstruction rebuilds
 /// messages from persisted events and `processInFlightState` creates a
 /// *new* streaming message — different UUID, different scroll identity,
-/// visible flicker in the UI even though the text converges (M13).
+/// visible flicker in the UI even though the text converges (see
+/// `TextStreamConvergenceTests`).
 ///
-/// H7's contract: capture the live streaming UUID + text in a
+/// The contract: capture the live streaming UUID + text in a
 /// `StreamingRecoverySnapshot` before teardown, and have
 /// `processInFlightState` reuse the snapshot UUID when the
 /// reconstructed in-flight text is a continuation of the snapshot
 /// (equal or starts with it as prefix). Any uncovered snapshot is
-/// logged but not injected as a synthetic message — C5's persist-
-/// before-broadcast makes uncovered a should-never-happen signal.
+/// logged but not injected as a synthetic message — persist-before-
+/// broadcast makes uncovered a should-never-happen signal.
 @MainActor
 final class StreamingRecoveryTests: XCTestCase {
 
@@ -163,9 +164,9 @@ final class StreamingRecoveryTests: XCTestCase {
 
     // MARK: - Integration: cleanup doesn't break pre-existing H8 contract
 
-    /// H8 invariant: cleanUpStreamingState must NOT touch user
-    /// composition (text, skills, attachments). H7 adds state but must
-    /// preserve that contract.
+    /// Invariant: cleanUpStreamingState must NOT touch user
+    /// composition (text, skills, attachments). Adding the streaming
+    /// recovery snapshot must preserve that contract.
     func testCleanUpStillPreservesInputComposition() {
         let vm = makeViewModel()
         vm.inputBarState.text = "user's draft"
@@ -179,7 +180,7 @@ final class StreamingRecoveryTests: XCTestCase {
 
         XCTAssertEqual(vm.inputBarState.text, "user's draft")
         XCTAssertEqual(vm.inputBarState.selectedSkills.count, 1)
-        // H7 snapshot captured alongside.
+        // Snapshot captured alongside — compositional state survives.
         XCTAssertEqual(vm.streamingRecoverySnapshot?.text, "agent mid-stream")
     }
 }

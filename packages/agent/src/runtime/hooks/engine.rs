@@ -136,10 +136,9 @@ impl HookEngine {
     ) -> HookResult {
         let mut merged_modifications: Option<serde_json::Value> = None;
         let mut messages: Vec<String> = Vec::new();
-        // M18: accumulated `added_context` fragments from every
-        // handler that returns `AddContext`. Concatenated with
-        // newlines in registration order so hooks compose
-        // deterministically.
+        // Accumulated `added_context` fragments from every handler
+        // that returns `AddContext`. Concatenated with newlines in
+        // registration order so hooks compose deterministically.
         let mut added_context_fragments: Vec<String> = Vec::new();
 
         for handler in handlers {
@@ -193,10 +192,10 @@ impl HookEngine {
             }
         }
 
-        // M18: budget check on the concatenated added_context. Over-
-        // budget drops the entire batch (silent truncation would
-        // violate the "all or nothing" contract callers rely on), and
-        // logs a warn so operators can see the miss.
+        // Budget check on the concatenated added_context. Over-budget
+        // drops the entire batch (silent truncation would violate the
+        // "all or nothing" contract callers rely on), and logs a warn
+        // so operators can see the miss.
         let aggregated_added_context = if added_context_fragments.is_empty() {
             None
         } else {

@@ -84,7 +84,7 @@ final class InputBarState {
 
 /// Why the send button is unavailable, if at all.
 ///
-/// H9: every reason the input is disabled is enumerated here so the UI
+/// Every reason the input is disabled is enumerated here so the UI
 /// can explain it in the disabled-button tooltip instead of leaving the
 /// user guessing why tapping does nothing. `nil` from `InputBarConfig.sendBlockReason`
 /// means there's no async blocker — the button may still be disabled

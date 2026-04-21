@@ -401,11 +401,12 @@ async fn retain_background_task(
         SummarizerOutcome::Err { fallback, reason } => (fallback, Some(reason)),
     };
 
-    // H3: when an auto-retain pipeline started (we persisted the
+    // When an auto-retain pipeline started (we persisted the
     // `triggered` event) and the summarizer subagent failed, persist +
-    // broadcast `auto_retain_failed` BEFORE writing the fallback summary.
-    // iOS uses the pair (triggered → failed) to exit the retain pill's
-    // spinner with an error label instead of a perpetual "retaining…".
+    // broadcast `auto_retain_failed` BEFORE writing the fallback
+    // summary. iOS uses the pair (triggered → failed) to exit the
+    // retain pill's spinner with an error label instead of a perpetual
+    // "retaining…".
     if let (RetainSource::Auto { interval_fired }, Some(reason)) =
         (source, summarizer_failure.as_ref())
     {

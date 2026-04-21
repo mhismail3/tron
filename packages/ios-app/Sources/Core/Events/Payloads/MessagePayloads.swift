@@ -159,8 +159,8 @@ struct AssistantMessagePayload {
     /// Extracts ONLY the text content, ignoring tool_use blocks.
     /// Tool calls are rendered via separate tool.call events.
     ///
-    /// M13 INVARIANT: the trimming here (`.whitespacesAndNewlines`)
-    /// MUST match `StreamingManager.finalizeStreamingMessage` so the
+    /// INVARIANT: the trimming here (`.whitespacesAndNewlines`) MUST
+    /// match `StreamingManager.finalizeStreamingMessage` so the
     /// reconstructed text for an assistant message converges with the
     /// live-finalized text for the same message. Guarded by
     /// `TextStreamConvergenceTests`.

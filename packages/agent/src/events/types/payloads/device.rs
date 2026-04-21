@@ -4,14 +4,14 @@ use serde::{Deserialize, Serialize};
 
 /// Payload for `device.token_invalidated` events.
 ///
-/// H22: emitted when APNS rejects a device token with a terminal error
+/// Emitted when APNS rejects a device token with a terminal error
 /// (HTTP 410 `Unregistered`, HTTP 400 `BadDeviceToken`, HTTP 400
 /// `DeviceTokenNotForTopic`). The row is atomically deactivated in
 /// `device_tokens` so the next `NotifyApp` call skips it; this event
 /// is the audit trail + broadcast hook so iOS can see that its token
 /// was rejected without polling the DB.
 ///
-/// Attributed to the session_id recorded on the token row at
+/// Attributed to the `session_id` recorded on the token row at
 /// registration time. If that session no longer exists the event is
 /// dropped (no session to attribute it to); operator visibility falls
 /// back to the `info` log line at the deactivation site.

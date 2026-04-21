@@ -1,7 +1,7 @@
 import XCTest
 @testable import TronMobile
 
-/// C6 — Post-reconstruction sequence-based dedup.
+/// Post-reconstruction sequence-based dedup.
 ///
 /// After a reconnect + reconstruction, `sequenceHighWaterMark` is set to
 /// the last sequence the server replayed. Any live event that arrives

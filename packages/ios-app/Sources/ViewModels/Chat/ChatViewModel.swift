@@ -166,7 +166,7 @@ final class ChatViewModel {
     var sequenceHighWaterMark: Int64 = -1
     /// Oldest sequence from the last reconstruction (for pagination cursor).
     var reconstructionOldestSequence: Int64?
-    /// H7: snapshot of the live streaming message captured in
+    /// Snapshot of the live streaming message captured in
     /// `cleanUpStreamingState` so reconstruction can reuse its UUID
     /// when the in-flight streaming text continues from the same point.
     /// Eliminates the flicker of the streaming bubble disappearing and
@@ -174,7 +174,7 @@ final class ChatViewModel {
     /// disconnect. Consumed in `processInFlightState`; any uncovered
     /// snapshot is logged at the end of `processReconstructionResult`
     /// as a defensive data-loss-detection signal (should be impossible
-    /// with C5's persist-before-broadcast, but guarded regardless).
+    /// with persist-before-broadcast, but guarded regardless).
     @ObservationIgnored
     var streamingRecoverySnapshot: StreamingRecoverySnapshot?
     /// ID of the compaction-in-progress notification (replaced when compaction completes)
@@ -494,7 +494,7 @@ final class ChatViewModel {
 
     /// Dispatch a single event to the appropriate handler.
     ///
-    /// C6 sequence filter: if the event carries a per-session event-log
+    /// Sequence filter: if the event carries a per-session event-log
     /// sequence, drop it when `sequence <= sequenceHighWaterMark` so an
     /// already-processed event (from a late reconnect, a buffered replay,
     /// or a reordered broadcast) does not get dispatched twice.

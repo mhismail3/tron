@@ -1,8 +1,8 @@
 import XCTest
 @testable import TronMobile
 
-/// M14 — the Wait tool's chip must be visually distinguishable from
-/// the Spawn chip so a user glancing at the conversation can tell
+/// The Wait tool's chip must be visually distinguishable from the
+/// Spawn chip so a user glancing at the conversation can tell
 /// "I'm waiting for an agent to return" apart from "I spawned an
 /// agent". Both share the same `SubagentToolData`, but the chip's
 /// render is driven by an explicit `SubagentChipVariant` passed from

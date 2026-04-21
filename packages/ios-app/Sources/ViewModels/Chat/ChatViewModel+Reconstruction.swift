@@ -80,7 +80,7 @@ extension ChatViewModel {
         hasInitiallyLoaded = true
         messageIndex.rebuild(from: messages)
 
-        // H7: resolve any streaming snapshot that wasn't consumed by
+        // Resolve any streaming-recovery snapshot that wasn't consumed by
         // processInFlightState. Two legitimate cases:
         //
         //   1. The turn ended during disconnect, so there's no
@@ -90,7 +90,7 @@ extension ChatViewModel {
         //      message whose text starts with the snapshot, the user
         //      sees the completed response — safe to drop.
         //
-        //   2. The snapshot doesn't appear anywhere. Under C5's
+        //   2. The snapshot doesn't appear anywhere. Under the server's
         //      persist-before-broadcast invariant this SHOULD be
         //      impossible (every delta the client rendered was
         //      persisted first, so reconstruction must see it). If it
@@ -106,7 +106,7 @@ extension ChatViewModel {
             }
             if !covered {
                 logger.warning(
-                    "[RECONSTRUCT] H7 streaming snapshot not covered by reconstruction (possible data loss). prefix=\(String(snap.text.prefix(60)))",
+                    "[RECONSTRUCT] streaming snapshot not covered by reconstruction (possible data loss). prefix=\(String(snap.text.prefix(60)))",
                     category: .session
                 )
             }
@@ -155,7 +155,7 @@ extension ChatViewModel {
                 }
 
                 if isStreaming {
-                    // H7: reuse the snapshot UUID if the reconstructed
+                    // Reuse the snapshot UUID if the reconstructed
                     // text is a continuation of what was live before
                     // cleanup — keeps the bubble's identity across a
                     // transient disconnect so the UI doesn't flicker.
@@ -175,7 +175,7 @@ extension ChatViewModel {
                     if let reusedId {
                         streamingMessage = ChatMessage.streamingReusing(id: reusedId)
                         streamingRecoverySnapshot = nil
-                        logger.info("[RECONSTRUCT] H7 reused streaming UUID \(reusedId) across reconnect", category: .session)
+                        logger.info("[RECONSTRUCT] reused streaming UUID \(reusedId) across reconnect", category: .session)
                     } else {
                         streamingMessage = ChatMessage.streaming()
                     }

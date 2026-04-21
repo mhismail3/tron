@@ -221,7 +221,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // 6. Create streaming journal for crash recovery.
     //
-    // M7: failure is a turn error, not a warning. Without the journal, a
+    // Failure is a turn error, not a warning. Without the journal, a
     // mid-stream crash loses the partial assistant message and session
     // reconstruction on restart is broken for that turn. Silently
     // continuing masks the real problem (disk full, bad perms, missing
@@ -364,7 +364,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         provider.model(),
     );
 
-    // C5 invariant: persist message.assistant BEFORE broadcasting
+    // INVARIANT: persist message.assistant BEFORE broadcasting
     // ResponseComplete. If persist fails we cannot emit because iOS would
     // see "response complete" for a message that is missing from the DB
     // on reconnect. Fail the turn with an actionable error instead.
@@ -458,7 +458,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // 9b. Persist + broadcast batched rules.activated if any new rules activated.
     //
-    // C5 invariant: persist BEFORE broadcasting. On persist failure the
+    // INVARIANT: persist BEFORE broadcasting. On persist failure the
     // rules-activated broadcast is skipped (turn continues — the rules are
     // already applied to the in-process context manager; only the
     // notification to iOS is lost). Unlike the assistant message path, this

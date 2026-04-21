@@ -58,7 +58,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
 
     let working_dir = params.context_manager.get_working_directory().to_owned();
 
-    // C5 invariant: persist tool.call events BEFORE broadcasting ToolUseBatch
+    // INVARIANT: persist tool.call events BEFORE broadcasting ToolUseBatch
     // so iOS subscribers cannot see a batch of tool calls that are missing
     // from session history. Synchronous append surfaces any DB failure here
     // instead of deferring it to a background warning.
@@ -153,12 +153,12 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     // with a live-stream ToolExecutionEnd event that has no
                     // matching row in session history.
                     //
-                    // H6 note: the broadcast-vs-persist ordering (broadcast
-                    // is inside tool_executor, persist is here) is NOT
-                    // fully inverted yet — that would require plumbing the
-                    // persister into tool_executor. Switching to sync
-                    // persist is the partial fix that at least makes the
-                    // failure visible.
+                    // The broadcast-vs-persist ordering (broadcast is
+                    // inside tool_executor, persist is here) is not
+                    // fully inverted — fully inverting would require
+                    // plumbing the persister into tool_executor.
+                    // Switching to sync persist makes the failure
+                    // visible while keeping the change surgical.
                     if let Some(persister) = params.persister {
                         let result_text = extract_result_text(&result);
                         let is_error = result.result.is_error.unwrap_or(false);

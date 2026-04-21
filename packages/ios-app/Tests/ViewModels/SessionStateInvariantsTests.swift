@@ -1,8 +1,8 @@
 import XCTest
 @testable import TronMobile
 
-/// H8 — codify the per-session state invariants so future refactors
-/// can't silently violate them:
+/// Codify the per-session state invariants so future refactors can't
+/// silently violate them:
 ///
 /// 1. Each session gets a fresh ChatViewModel because ContentView
 ///    uses `.id(sessionId)` on the navigation destination. Constructing

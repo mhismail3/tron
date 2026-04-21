@@ -110,7 +110,7 @@ impl AccumulatedToolCall {
 // CurrentToolSnapshot
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// M17: minimal projection of the tool currently executing within a
+/// Minimal projection of the tool currently executing within a
 /// session's turn, returned by [`TurnAccumulatorMap::current_running_tool`].
 ///
 /// Kept deliberately narrow — the `agent.status` RPC wants human-readable
@@ -365,7 +365,7 @@ impl TurnAccumulatorMap {
         result
     }
 
-    /// M17: name of the tool currently executing in the session's turn,
+    /// Name of the tool currently executing in the session's turn,
     /// if any. Returns the tool_name of the most recently-started tool
     /// whose status is `running` (tool.call persisted; tool.result not
     /// yet). `generating` doesn't count — the LLM is still streaming

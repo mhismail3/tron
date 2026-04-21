@@ -305,7 +305,7 @@ struct SourceControlSheet: View {
         )
     }
 
-    /// H12: centralised tile builder. Takes the `GitTile` identifier so
+    /// Centralised tile builder. Takes the `GitTile` identifier so
     /// the builder itself can look up enable state AND the disabled
     /// reason from the shared `gating` value — single source of truth,
     /// and tooltip copy stays in sync with the enable logic.

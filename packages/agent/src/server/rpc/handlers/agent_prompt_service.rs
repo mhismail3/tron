@@ -330,12 +330,13 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         // legacy rows predating this rule. See `should_acquire_worktree_for_source`.
         None
     } else if let Some(wt_path) = &state.worktree_path {
-        // M8: the event log recorded a worktree path for this session, but the
-        // directory itself may have been deleted or moved out-of-band (user
-        // `rm -rf`'d it, external cleanup script, volume unmount). If so,
-        // treat the path as stale and fall through to the acquire branch so
-        // the session gets a fresh worktree instead of operating on a dead
-        // directory and failing every git op downstream.
+        // The event log recorded a worktree path for this session,
+        // but the directory itself may have been deleted or moved
+        // out-of-band (user `rm -rf`'d it, external cleanup script,
+        // volume unmount). If so, treat the path as stale and fall
+        // through to the acquire branch so the session gets a fresh
+        // worktree instead of operating on a dead directory and
+        // failing every git op downstream.
         let path_buf = std::path::PathBuf::from(wt_path);
         if !path_buf.is_dir() {
             warn!(
@@ -786,10 +787,10 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         debug!(session_id = %session_id, "[hooks] SessionStart returned");
     }
 
-    // Fire UserPromptSubmit hook. M18: if any hook returns an
-    // AddContext action with non-empty `added_context`, prepend that
-    // content to the prompt inside a clearly-marked XML-style block
-    // so the LLM can distinguish it from what the user typed.
+    // Fire UserPromptSubmit hook. If any hook returns an AddContext
+    // action with non-empty `added_context`, prepend that content to
+    // the prompt inside a clearly-marked XML-style block so the LLM
+    // can distinguish it from what the user typed.
     let mut effective_prompt = prompt.clone();
     if let Some(hook_engine) = &hooks {
         debug!(session_id = %session_id, "[hooks] firing UserPromptSubmit");

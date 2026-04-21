@@ -291,7 +291,7 @@ pub struct NotifyResult {
     pub success_count: u32,
     /// Total number of devices the notification was sent to.
     pub total_count: u32,
-    /// M19: a non-fatal user/agent-visible caveat that the delivery path
+    /// A non-fatal user/agent-visible caveat that the delivery path
     /// wants to surface without erroring out. Set by the stub delegate
     /// when push service is not configured — `success` stays `false`
     /// (nothing was actually delivered) but the tool result flags the

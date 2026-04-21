@@ -57,7 +57,7 @@ extension ChatViewModel: ConnectionContext {
     func cleanUpStreamingState() {
         // Capture streaming message ID before reset nulls it
         let streamingId = streamingManager.streamingMessageId
-        // H7: before tearing the live streaming state down, snapshot the
+        // Before tearing the live streaming state down, snapshot the
         // streaming message UUID + accumulated text. If reconstruction's
         // in-flight state produces a streaming message that continues
         // from this snapshot, processInFlightState reuses the UUID so
@@ -94,7 +94,7 @@ extension ChatViewModel: ConnectionContext {
     /// Called by ConnectionCoordinator after reconstruction completes and
     /// sequenceHighWaterMark is set.
     ///
-    /// M12: sort the buffered batch by `sequence` before dispatch so
+    /// Sort the buffered batch by `sequence` before dispatch so
     /// out-of-order arrivals (race between the reconstructed history
     /// page and live broadcast frames) replay in the canonical
     /// session-log order. Sort is **stable** so events without a

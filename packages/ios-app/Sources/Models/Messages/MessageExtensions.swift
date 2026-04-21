@@ -33,10 +33,10 @@ extension ChatMessage {
         ChatMessage(role: .assistant, content: .streaming(text), isStreaming: true)
     }
 
-    /// H7: create a streaming message that reuses a specific UUID.
-    /// Used only on the reconstruction path to preserve bubble
-    /// identity across a transient disconnect so the UI doesn't
-    /// flicker the streaming message away and back.
+    /// Create a streaming message that reuses a specific UUID. Used
+    /// only on the reconstruction path to preserve bubble identity
+    /// across a transient disconnect so the UI doesn't flicker the
+    /// streaming message away and back.
     static func streamingReusing(id: UUID, text: String = "") -> ChatMessage {
         ChatMessage(id: id, role: .assistant, content: .streaming(text), isStreaming: true)
     }

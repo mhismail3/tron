@@ -2805,7 +2805,7 @@ async fn prompt_validation_failure_does_not_record_history() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// M17: agent.status RPC
+// agent.status RPC
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]

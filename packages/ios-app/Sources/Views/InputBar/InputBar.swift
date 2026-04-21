@@ -179,7 +179,7 @@ struct InputBar: View {
                         buttonSize: actionButtonSize
                     )
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
-                    // H9: explain the disabled state. Visible on long-press
+                    // Explain the disabled state. Visible on long-press
                     // / hover via `.help()`; always read by VoiceOver via
                     // `.accessibilityHint()`.
                     .help(config.sendBlockReason?.description ?? "")

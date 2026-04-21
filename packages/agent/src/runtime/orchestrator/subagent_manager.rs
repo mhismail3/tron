@@ -439,10 +439,11 @@ impl SubagentSpawner for SubagentManager {
             SpawnType::ToolAgent,
         );
 
-        // C5 invariant: persist subagent.spawned to the parent session BEFORE
-        // broadcasting SubagentSpawned. If persist fails, iOS would render a
-        // "subagent spawned" event that the parent's history doesn't record;
-        // reconstruction on reconnect would show no trace of the spawn.
+        // INVARIANT: persist subagent.spawned to the parent session
+        // BEFORE broadcasting SubagentSpawned. If persist fails, iOS
+        // would render a "subagent spawned" event that the parent's
+        // history doesn't record; reconstruction on reconnect would
+        // show no trace of the spawn.
         let broadcast_event = TronEvent::SubagentSpawned {
             base: BaseEvent::now(&parent_sid),
             subagent_session_id: child_session_id.clone(),

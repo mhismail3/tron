@@ -21,7 +21,7 @@ struct ServerSettings: Decodable {
     /// - `"continue"` (default) — fail-open, agent proceeds
     /// - `"block"` — synthesize a Block with a reason; security hooks opt in
     let hooksErrorPolicy: String
-    /// M18: character budget for hook `add_context` content aggregated
+    /// Character budget for hook `add_context` content aggregated
     /// across all hooks per event. Content over budget is dropped with
     /// a warn log. 0 disables AddContext injection entirely.
     let hooksMaxAddedContextChars: UInt32

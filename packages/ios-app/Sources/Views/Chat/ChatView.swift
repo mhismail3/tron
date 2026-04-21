@@ -235,7 +235,7 @@ struct ChatView: View {
             await viewModel.connectAndReconstruct()
             logger.debug("[INIT] connectAndReconstruct done, messages=\(viewModel.messages.count)", category: .ui)
 
-            // H10: entering a session from the sidebar implicitly clears
+            // Entering a session from the sidebar implicitly clears
             // its unread notifications — the user has seen them by the
             // time they've opened the session. Fire-and-forget so any
             // server hiccup doesn't delay the UI.
@@ -290,7 +290,7 @@ struct ChatView: View {
             }
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
-            // H10: when the user brings the app back to the foreground
+            // When the user brings the app back to the foreground
             // WHILE this session is on screen, their unread notifications
             // for this session are implicitly seen. Fire-and-forget.
             guard newPhase == .active, oldPhase != .active else { return }

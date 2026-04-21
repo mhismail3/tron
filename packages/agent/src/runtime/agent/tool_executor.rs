@@ -181,9 +181,9 @@ pub async fn execute_tool(
         let event_result = match result.action {
             HookAction::Block => EventHookResult::Block,
             HookAction::Modify => EventHookResult::Modify,
-            // M18: AddContext is a no-op on PreToolUse (tools don't
-            // accept context injection). Map to Continue so existing
-            // event wire format is unchanged.
+            // AddContext is a no-op on PreToolUse (tools don't accept
+            // context injection). Map to Continue so the event wire
+            // format is unchanged.
             HookAction::Continue | HookAction::AddContext => EventHookResult::Continue,
         };
         if let Some(counter) = ctx.sequence_counter {
@@ -230,9 +230,8 @@ pub async fn execute_tool(
                     effective_args = mods;
                 }
             }
-            // M18: AddContext is a no-op for PreToolUse — there is no
-            // context surface on a tool call. A well-behaved hook
-            // wouldn't return AddContext here, but handle it cleanly
+            // AddContext has no meaning on a PreToolUse hook (tools
+            // don't carry a prompt to inject into). Handle it cleanly
             // rather than producing a behavioral surprise.
             HookAction::Continue | HookAction::AddContext => {}
         }
@@ -385,8 +384,9 @@ pub async fn execute_tool(
                     let event_result = match bg_result.action {
                         HookAction::Block => EventHookResult::Block,
                         HookAction::Modify => EventHookResult::Modify,
-                        // M18: AddContext on PostToolUse is a no-op
-                        // (no context surface on a completed tool).
+                        // AddContext on PostToolUse is a no-op — a
+                        // completed tool has no prompt surface to
+                        // inject context into.
                         HookAction::Continue | HookAction::AddContext => EventHookResult::Continue,
                     };
                     let _ = emitter_bg.emit(TronEvent::HookCompleted {

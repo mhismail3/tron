@@ -389,11 +389,11 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
     let success = result.error.is_none();
     let result_output;
 
-    // C5 invariant: persist EventType::Subagent{Completed,Failed} BEFORE
-    // broadcasting the corresponding TronEvent. Pre-fix the broadcast could
-    // reach iOS without a matching row in the parent session's event log;
-    // session reconstruction on reconnect would show no record that the
-    // subagent ever finished.
+    // INVARIANT: persist EventType::Subagent{Completed,Failed} BEFORE
+    // broadcasting the corresponding TronEvent. Otherwise the broadcast
+    // could reach iOS without a matching row in the parent session's
+    // event log; session reconstruction on reconnect would show no
+    // record that the subagent ever finished.
     let tracked_result = if success {
         if !params.tracker.parent_session_id.is_empty() {
             let persist_result = params.event_store.append(&AppendOptions {

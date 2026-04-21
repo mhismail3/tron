@@ -1,8 +1,8 @@
 import XCTest
 @testable import TronMobile
 
-/// M13 — Live streaming and reconstruction must converge on the same
-/// final string for the same assistant message. Two separate code paths
+/// Live streaming and reconstruction must converge on the same final
+/// string for the same assistant message. Two separate code paths
 /// produce the `.text(String)` ChatMessage content:
 ///
 /// 1. **Live**: `StreamingManager.handleTextDelta` accumulates server

@@ -81,7 +81,7 @@ struct MessageBubble: View {
                     ToolResultRouter(tool: tool)
                 }
             case .waitForSubagent:
-                // M14: render with .wait variant so the chip reads
+                // Render with .wait variant so the chip reads
                 // "Waiting for agent #<id>" and is visually
                 // distinguishable from the earlier Spawn chip.
                 if let chipData = ToolResultParser.parseWaitForSubagent(from: tool) {

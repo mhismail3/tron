@@ -430,9 +430,10 @@ mod tests {
         assert!(info.is_none(), "no row → no info → caller must not emit event");
     }
 
-    /// H22 dedup: a second terminal error on the same token must NOT
-    /// re-emit an invalidation event. The deactivate query filters on
-    /// is_active = 1 so already-deactivated tokens return None.
+    /// Dedup invariant: a second terminal error on the same token
+    /// must NOT re-emit an invalidation event. The deactivate query
+    /// filters on `is_active = 1` so already-deactivated tokens
+    /// return None.
     #[test]
     fn deactivate_returns_none_on_already_inactive_row() {
         let conn = setup();

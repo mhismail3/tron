@@ -1,7 +1,7 @@
 import XCTest
 @testable import TronMobile
 
-/// H9 — SendBlockReason derivation from InputBarConfig state.
+/// SendBlockReason derivation from InputBarConfig state.
 ///
 /// `InputBarConfig.sendBlockReason` is the single source of truth for
 /// "why is the send button disabled?". The UI derives its `canSend`

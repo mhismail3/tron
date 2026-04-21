@@ -158,7 +158,7 @@ impl MethodHandler for AbortHandler {
     }
 }
 
-/// M17: `agent.status` — inspect the in-flight state of a session.
+/// `agent.status` — inspect the in-flight state of a session.
 ///
 /// Returns a snapshot combining orchestrator run registry,
 /// turn-accumulator tool state, and the event log's latest

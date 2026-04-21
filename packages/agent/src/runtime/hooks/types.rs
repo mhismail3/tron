@@ -100,14 +100,14 @@ pub enum HookAction {
     /// Modify the operation with provided modifications (e.g., tool
     /// argument rewriting in PreToolUse).
     Modify,
-    /// M18: append `added_context` to the prompt/turn this hook is
-    /// firing on, without otherwise modifying it. Used by hooks that
-    /// want to inject context (reminders, policy excerpts, fetched
-    /// state) into the next LLM turn. The engine aggregates the
-    /// `added_context` field across all AddContext-returning hooks
-    /// before returning the final HookResult. Subject to
-    /// `hooks.maxAddedContextChars` — over-budget aggregated content
-    /// is dropped with a warn log rather than truncated.
+    /// Append `added_context` to the prompt/turn this hook is firing
+    /// on, without otherwise modifying it. Used by hooks that want to
+    /// inject context (reminders, policy excerpts, fetched state) into
+    /// the next LLM turn. The engine aggregates the `added_context`
+    /// field across all `AddContext`-returning hooks before returning
+    /// the final `HookResult`. Subject to `hooks.maxAddedContextChars`
+    /// — over-budget aggregated content is dropped with a warn log
+    /// rather than truncated.
     ///
     /// Serializes as `"add_context"` (snake_case) on the wire so
     /// scripts returning JSON can opt in cleanly.
@@ -159,7 +159,7 @@ pub struct HookResult {
     /// Modifications to apply (for `Modify` action).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modifications: Option<serde_json::Value>,
-    /// M18: extra context to inject into the prompt/turn this hook is
+    /// Extra context to inject into the prompt/turn this hook is
     /// firing on. Set alongside `action: AddContext`. When multiple
     /// hooks return `AddContext`, the engine concatenates their
     /// `added_context` fields with newlines in registration order.
@@ -219,8 +219,8 @@ impl HookResult {
         }
     }
 
-    /// M18: create an `AddContext` result carrying extra text to
-    /// inject into the prompt/turn this hook is firing on.
+    /// Create an `AddContext` result carrying extra text to inject
+    /// into the prompt/turn this hook is firing on.
     #[must_use]
     pub fn add_context(content: impl Into<String>) -> Self {
         Self {
@@ -625,15 +625,15 @@ mod tests {
             serde_json::to_string(&HookAction::Modify).unwrap(),
             "\"modify\""
         );
-        // M18: AddContext serializes snake_case so scripts emitting
-        // JSON can opt in with a readable token.
+        // AddContext serializes snake_case so scripts emitting JSON
+        // can opt in with a readable token.
         assert_eq!(
             serde_json::to_string(&HookAction::AddContext).unwrap(),
             "\"add_context\""
         );
     }
 
-    // M18: end-to-end serde of the whole HookResult with added_context.
+    // End-to-end serde of the whole HookResult with added_context.
     #[test]
     fn test_hook_result_add_context_constructor() {
         let result = HookResult::add_context("helpful reminder");

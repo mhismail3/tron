@@ -113,7 +113,7 @@ impl PathRule {
 
     /// Check if a bash command would write to protected paths.
     ///
-    /// M25 hardening:
+    /// Hardening:
     /// - Write-operation regexes are compiled once via `std::sync::OnceLock`
     ///   instead of `Regex::new` per (protected_path × pattern) — a 5N
     ///   regex-compilation cost on every bash command pre-fix where N was
@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn bash_command_over_limit_fails_safe_to_triggered() {
-        // M25: a pasted multi-MB command must not be scanned character-by-
+        // A pasted multi-MB command must not be scanned character-by-
         // character against N×5 regexes. The rule fails safe to "writes
         // protected path" so the command is blocked without burning CPU.
         let rule = make_path_rule(vec!["/home/user/.tron".into()]);

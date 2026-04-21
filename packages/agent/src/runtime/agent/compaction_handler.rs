@@ -442,8 +442,8 @@ impl CompactionHandler {
         let event_result = match result.action {
             HookAction::Block => EventHookResult::Block,
             HookAction::Modify => EventHookResult::Modify,
-            // M18: AddContext is not meaningful for PreCompact
-            // (compaction doesn't carry a user prompt to inject into).
+            // AddContext has no meaning for PreCompact — compaction
+            // doesn't carry a user prompt to inject into.
             HookAction::Continue | HookAction::AddContext => EventHookResult::Continue,
         };
         if let Some(counter) = sequence_counter {
@@ -566,7 +566,7 @@ impl CompactionHandler {
                     session_id,
                     tokens_before, tokens_after, "compaction complete"
                 );
-                // H13 two-phase commit.
+                // Two-phase commit.
                 //
                 // Phase 1: persist `compact.summary_staging` carrying the
                 //   summarizer's output. This durably records the LLM's
@@ -577,7 +577,7 @@ impl CompactionHandler {
                 //   the boundary as authoritative; a staging event without
                 //   a successor boundary is ignored.
                 //
-                // C5 invariant: both persists complete BEFORE broadcasting
+                // INVARIANT: both persists complete BEFORE broadcasting
                 // CompactionComplete. If either phase fails, the broadcast
                 // is suppressed so live iOS never claims a compaction that
                 // didn't land durably.

@@ -110,7 +110,7 @@ impl TronTool for NotifyAppTool {
 
         match self.delegate.send_notification(&notification).await {
             Ok(result) => {
-                // M19: a `warning` on the result means the delivery path
+                // A `warning` on the result means the delivery path
                 // took a non-fatal stub / config-missing branch. Surface
                 // the warning prominently in the tool text so the agent
                 // tells the user "your notification was requested but

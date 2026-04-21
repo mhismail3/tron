@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Which tool call produced this subagent chip. Controls the running-
 /// state label and whether the target session id is surfaced so the
-/// Wait chip (M14) is visually distinguishable from Spawn.
+/// Wait chip is visually distinguishable from Spawn.
 ///
 /// Both tools share the same `SubagentToolData` shape server-side, so
 /// this flag is passed in by the call site (MessageBubble) rather

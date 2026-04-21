@@ -1,7 +1,7 @@
 import XCTest
 @testable import TronMobile
 
-/// H11d — Settings parity meta-test.
+/// Settings parity meta-test.
 ///
 /// CLAUDE.md codifies a rule that every server setting decoded into
 /// `ServerSettings` must have a 1-to-1 control in the iOS settings UI.

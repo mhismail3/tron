@@ -171,16 +171,16 @@ pub struct HookSettings {
     ///   handler and the failure kind. Security / guard hooks that
     ///   should not silently fail open opt into this.
     pub error_policy: crate::runtime::hooks::types::HookErrorPolicy,
-    /// M18: maximum total characters a hook may inject via
+    /// Maximum total characters a hook may inject via
     /// `HookAction::AddContext` into a single prompt. Applies to the
     /// aggregated content across all hooks on a single event; the
     /// limit is a soft cap to keep a misbehaving hook from flooding
-    /// the LLM context window. Over-budget AddContext is DROPPED
+    /// the LLM context window. Over-budget `AddContext` is dropped
     /// silently-with-warn (not truncated) so hooks can rely on
     /// "either all or nothing" semantics.
     ///
-    /// Default 4096 chars ≈ 1 KB of extra context per prompt. Zero or
-    /// negative disables the feature entirely (hooks can inject nothing).
+    /// Default 4096 chars ≈ 1 KB of extra context per prompt. Zero
+    /// disables the feature entirely (hooks can inject nothing).
     pub max_added_context_chars: u32,
 }
 

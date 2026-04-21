@@ -155,8 +155,8 @@ pub(crate) fn is_terminal_token_error(result: &ApnsSendResult) -> bool {
     )
 }
 
-/// Process send results: auto-deactivate terminally-failed tokens, collect
-/// errors, build the summary shown to the user, and — H22 — emit a
+/// Process send results: auto-deactivate terminally-failed tokens,
+/// collect errors, build the summary shown to the user, and emit a
 /// `device.token_invalidated` event for each deactivation so iOS has
 /// a push-driven signal of the server discarding its token.
 ///
@@ -198,7 +198,7 @@ pub(crate) fn process_send_results(
                                 bundle_id = info.bundle_id.as_deref().unwrap_or("<none>"),
                                 status = ?result.status_code,
                                 reason = ?result.reason,
-                                "H22: deactivated device token after terminal APNs error"
+                                "deactivated device token after terminal APNs error"
                             );
                             drop(conn);
                             maybe_emit_invalidated_event(event_store, result, &info);
@@ -781,7 +781,7 @@ mod tests {
         assert!(is_active(&pool, &token), "success must never deactivate");
     }
 
-    // ── H22: device.token_invalidated event emission ─────────────────
+    // ── device.token_invalidated event emission ─────────────────────
 
     /// Fixture: a schema-migrated event store plus a workspace+session
     /// row so a device token bound to them doesn't fail the FK.
@@ -836,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn h22_emits_invalidated_event_on_410() {
+    fn emits_invalidated_event_on_410() {
         let (store, session_id) = event_store_with_session();
         let token = "a".repeat(64);
         register_with_session(&store, &token, &session_id);
@@ -859,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn h22_does_not_emit_for_non_terminal_errors() {
+    fn does_not_emit_for_non_terminal_errors() {
         let (store, session_id) = event_store_with_session();
         let token = "b".repeat(64);
         register_with_session(&store, &token, &session_id);
@@ -882,7 +882,7 @@ mod tests {
     }
 
     #[test]
-    fn h22_dedups_repeat_terminal_errors_on_same_token() {
+    fn dedups_repeat_terminal_errors_on_same_token() {
         // If APNS responds 410 twice for the same token, we should only
         // emit ONE invalidated event. The second 410 hits an already-
         // inactive row and deactivate() returns None, skipping emission.
@@ -917,7 +917,7 @@ mod tests {
     }
 
     #[test]
-    fn h22_no_emission_when_event_store_is_absent() {
+    fn no_emission_when_event_store_is_absent() {
         // The delegate is shipped with `None` event_store from tests that
         // exercise deactivation in isolation (the scope tests above). The
         // deactivation side effect still runs; emission is skipped silently.
@@ -946,7 +946,7 @@ mod tests {
     }
 
     #[test]
-    fn h22_skips_emission_when_token_has_no_session_binding() {
+    fn skips_emission_when_token_has_no_session_binding() {
         // Token registered via a legacy path with no session_id → no
         // sensible attribution for the event. Deactivation still runs.
         let (store, _session_id) = event_store_with_session();
@@ -980,7 +980,7 @@ mod tests {
     }
 
     #[test]
-    fn h22_event_payload_carries_prefix_and_status_and_reason() {
+    fn event_payload_carries_prefix_and_status_and_reason() {
         let (store, session_id) = event_store_with_session();
         let token = "f".repeat(64);
         register_with_session(&store, &token, &session_id);

@@ -1,6 +1,6 @@
 import Foundation
 
-/// H7 — Minimal handle on a live streaming message captured at the
+/// Minimal handle on a live streaming message captured at the
 /// moment `cleanUpStreamingState` runs for a reconstruction cycle.
 ///
 /// The live path streams text deltas into an in-memory bubble with a
