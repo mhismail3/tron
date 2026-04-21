@@ -29,6 +29,10 @@ pub enum McpErrorKind {
     Transient(String),
     /// Server's protocol version is incompatible.
     VersionMismatch(String),
+    /// Server has exhausted its auto-restart budget and will not be retried
+    /// until the user explicitly issues a manual restart. Emitted by
+    /// `McpServerManager::try_auto_restart` when health is already `Failed`.
+    PermanentlyFailed,
 }
 
 impl std::fmt::Display for McpErrorKind {
@@ -39,6 +43,9 @@ impl std::fmt::Display for McpErrorKind {
             Self::Protocol(msg) => write!(f, "protocol error: {msg}"),
             Self::Transient(msg) => write!(f, "transient error: {msg}"),
             Self::VersionMismatch(msg) => write!(f, "version mismatch: {msg}"),
+            Self::PermanentlyFailed => {
+                write!(f, "server permanently failed — manual restart required")
+            }
         }
     }
 }

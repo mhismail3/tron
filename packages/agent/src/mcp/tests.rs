@@ -433,8 +433,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
         let tool_count: usize = discovered.iter().map(|(_, d)| d.len()).sum();
         assert_eq!(tool_count, 2);
 
-        // Restart should yield fresh tool defs
-        let new_defs = manager.restart_server("restart-test").await.unwrap();
+        // Manual restart should yield fresh tool defs
+        let new_defs = manager.manual_restart("restart-test").await.unwrap();
         assert_eq!(new_defs.len(), 2);
         assert!(manager.is_connected("restart-test"));
         assert_eq!(manager.health("restart-test"), Some(McpServerHealth::Healthy));

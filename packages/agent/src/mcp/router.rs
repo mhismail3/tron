@@ -74,7 +74,7 @@ impl McpRouter {
             }
             Err(e) if e.requires_restart() => {
                 warn!(server, tool, "connection lost — attempting restart");
-                match self.manager.restart_server(server).await {
+                match self.manager.try_auto_restart(server).await {
                     Ok(new_defs) => {
                         self.index.remove_server(server);
                         self.index.add_server_tools(server, &new_defs);
@@ -107,7 +107,7 @@ impl McpRouter {
         let name = config.name.clone();
         self.manager.add_config(config);
 
-        let defs = self.manager.restart_server(&name).await?;
+        let defs = self.manager.manual_restart(&name).await?;
         let tool_count = defs.len();
         self.index.add_server_tools(&name, &defs);
 
@@ -137,7 +137,7 @@ impl McpRouter {
             });
         }
 
-        let defs = self.manager.restart_server(name).await?;
+        let defs = self.manager.manual_restart(name).await?;
         self.index.add_server_tools(name, &defs);
         self.persist_configs();
         Ok(())
@@ -162,8 +162,11 @@ impl McpRouter {
     }
 
     /// Restart a server: reconnect and rebuild its index entries.
+    ///
+    /// Always treated as a manual restart — the user has explicitly asked for
+    /// a restart via RPC, so any prior `Failed` state is forgiven.
     pub async fn restart_server(&mut self, name: &str) -> Result<usize, McpError> {
-        let defs = self.manager.restart_server(name).await?;
+        let defs = self.manager.manual_restart(name).await?;
         let tool_count = defs.len();
         self.index.remove_server(name);
         self.index.add_server_tools(name, &defs);

@@ -144,12 +144,15 @@ impl McpServerManager {
 
     /// Record a failed tool call. Returns the new health state.
     ///
-    /// Increments the failure counter and transitions health:
+    /// Increments the failure counter (saturating on u32 overflow) and
+    /// transitions health:
     /// - 1..MAX → Degraded
-    /// - >= MAX → Failed (tools should be disabled)
+    /// - >= MAX → Failed (tools should be disabled; auto-restart refuses)
     pub fn record_failure(&mut self, server_name: &str, error: &str) -> McpServerHealth {
         if let Some(state) = self.servers.get_mut(server_name) {
-            state.consecutive_failures += 1;
+            // INVARIANT: consecutive_failures uses saturating_add so the
+            // counter can never wrap on a server stuck in a restart loop.
+            state.consecutive_failures = state.consecutive_failures.saturating_add(1);
             state.last_error = Some(error.to_string());
 
             state.health = if state.consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
@@ -175,17 +178,58 @@ impl McpServerManager {
         }
     }
 
-    /// Attempt to restart a failed or degraded server with exponential backoff.
+    /// Auto-restart attempt from the tool-call recovery path.
     ///
-    /// Returns new tools on success. The caller is responsible for re-registering
-    /// them in the tool registry (replacing stale entries).
-    pub async fn restart_server(&mut self, name: &str) -> Result<Vec<McpToolDef>, McpError> {
+    /// Refuses with [`McpErrorKind::PermanentlyFailed`] if the server is
+    /// already `Failed` — the caller must surface the error to the user and
+    /// wait for manual intervention. Does NOT increment the failure counter
+    /// on refusal; the counter advance happens only in the actual restart
+    /// path when connect_server fails.
+    pub async fn try_auto_restart(
+        &mut self,
+        name: &str,
+    ) -> Result<Vec<McpToolDef>, McpError> {
+        if let Some(state) = self.servers.get(name) {
+            if state.health == McpServerHealth::Failed {
+                return Err(McpError {
+                    server: name.to_string(),
+                    kind: McpErrorKind::PermanentlyFailed,
+                    message: format!(
+                        "MCP server '{name}' exceeded {MAX_CONSECUTIVE_FAILURES} consecutive failures; \
+                         manual restart required via settings",
+                    ),
+                });
+            }
+        }
+        self.do_restart(name).await
+    }
+
+    /// Manual restart initiated by the user (RPC / settings UI).
+    ///
+    /// Always proceeds regardless of the server's current health, so that
+    /// a user can recover a `Failed` server after fixing the underlying
+    /// config. On success, `do_restart` replaces `ServerState` wholesale
+    /// and the counter resets to 0.
+    pub async fn manual_restart(
+        &mut self,
+        name: &str,
+    ) -> Result<Vec<McpToolDef>, McpError> {
+        self.do_restart(name).await
+    }
+
+    /// Shared restart body. Performs exponential backoff, shuts down the old
+    /// client, reconnects, and installs a fresh ServerState on success.
+    async fn do_restart(&mut self, name: &str) -> Result<Vec<McpToolDef>, McpError> {
         let attempt = self.servers.get(name)
             .map_or(0, |s| s.consecutive_failures);
 
-        // Exponential backoff: base * 2^(attempt-1), capped at max
+        // Exponential backoff: base * 2^(attempt-1), capped at max.
+        // Every arithmetic op is saturating so a pathological `attempt`
+        // (e.g. from a counter that reached its cap) can never overflow.
         if attempt > 0 {
-            let delay_ms = (BACKOFF_BASE_MS * 2u64.saturating_pow(attempt.saturating_sub(1)))
+            let factor = 2u64.saturating_pow(attempt.saturating_sub(1));
+            let delay_ms = BACKOFF_BASE_MS
+                .saturating_mul(factor)
                 .min(BACKOFF_MAX_MS);
             debug!(server = %name, delay_ms, attempt, "backoff before restart");
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
@@ -222,7 +266,9 @@ impl McpServerManager {
             }
             Err(e) => {
                 if let Some(state) = self.servers.get_mut(name) {
-                    state.consecutive_failures += 1;
+                    // INVARIANT: saturating_add keeps the counter bounded.
+                    state.consecutive_failures =
+                        state.consecutive_failures.saturating_add(1);
                     state.last_error = Some(e.message.clone());
                     state.health = if state.consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
                         McpServerHealth::Failed
@@ -527,7 +573,138 @@ mod tests {
     #[tokio::test]
     async fn restart_unknown_server_returns_error() {
         let mut manager = McpServerManager::new(Vec::new());
-        let result = manager.restart_server("nonexistent").await;
+        let result = manager.manual_restart("nonexistent").await;
         assert!(result.is_err());
+    }
+
+    // ── H17 saturating counter + auto-refusal ────────────────────────────
+
+    #[test]
+    fn record_failure_counter_saturates_at_u32_max() {
+        let mut manager = McpServerManager::new(Vec::new());
+        let _ = manager.servers.insert("s".into(), ServerState {
+            client: Arc::new(McpClient::failed_placeholder("s")),
+            tool_count: 0,
+            health: McpServerHealth::Failed,
+            consecutive_failures: u32::MAX,
+            last_error: None,
+            connected_at: "t".into(),
+        });
+        let _ = manager.record_failure("s", "more");
+        assert_eq!(manager.servers.get("s").unwrap().consecutive_failures, u32::MAX);
+    }
+
+    #[tokio::test]
+    async fn try_auto_restart_refuses_when_failed() {
+        let mut manager = McpServerManager::new(vec![McpServerConfig {
+            name: "s".into(),
+            command: Some("nonexistent-mcp-binary".into()),
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: None,
+            tool_timeout_ms: 5_000,
+            enabled: true,
+        }]);
+        let _ = manager.servers.insert("s".into(), ServerState {
+            client: Arc::new(McpClient::failed_placeholder("s")),
+            tool_count: 0,
+            health: McpServerHealth::Failed,
+            consecutive_failures: MAX_CONSECUTIVE_FAILURES,
+            last_error: Some("hit cap".into()),
+            connected_at: "t".into(),
+        });
+
+        let err = manager.try_auto_restart("s").await.unwrap_err();
+        assert!(matches!(err.kind, McpErrorKind::PermanentlyFailed));
+        // Counter must not have been incremented by the refusal.
+        assert_eq!(
+            manager.servers.get("s").unwrap().consecutive_failures,
+            MAX_CONSECUTIVE_FAILURES
+        );
+    }
+
+    #[tokio::test]
+    async fn try_auto_restart_proceeds_when_degraded() {
+        // Configured but pointing at a nonexistent binary, so the restart will
+        // fail — we just want to confirm the refusal gate does NOT fire for
+        // Degraded health.
+        let mut manager = McpServerManager::new(vec![McpServerConfig {
+            name: "s".into(),
+            command: Some("nonexistent-mcp-binary".into()),
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: None,
+            tool_timeout_ms: 5_000,
+            enabled: true,
+        }]);
+        let _ = manager.servers.insert("s".into(), ServerState {
+            client: Arc::new(McpClient::failed_placeholder("s")),
+            tool_count: 0,
+            health: McpServerHealth::Degraded,
+            consecutive_failures: 1,
+            last_error: None,
+            connected_at: "t".into(),
+        });
+
+        let err = manager.try_auto_restart("s").await.unwrap_err();
+        // Degraded → attempted restart → transient/connection error, NOT refusal.
+        assert!(!matches!(err.kind, McpErrorKind::PermanentlyFailed));
+    }
+
+    #[tokio::test]
+    async fn manual_restart_always_attempts_even_when_failed() {
+        // Manual restart should bypass the refusal gate and attempt a real
+        // reconnection. We can't run a real MCP server here, so we just check
+        // the error kind is from the connection attempt (Transient), not the
+        // refusal path (PermanentlyFailed).
+        let mut manager = McpServerManager::new(vec![McpServerConfig {
+            name: "s".into(),
+            command: Some("nonexistent-mcp-binary".into()),
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: None,
+            tool_timeout_ms: 5_000,
+            enabled: true,
+        }]);
+        let _ = manager.servers.insert("s".into(), ServerState {
+            client: Arc::new(McpClient::failed_placeholder("s")),
+            tool_count: 0,
+            health: McpServerHealth::Failed,
+            consecutive_failures: MAX_CONSECUTIVE_FAILURES,
+            last_error: Some("hit cap".into()),
+            connected_at: "t".into(),
+        });
+
+        let err = manager.manual_restart("s").await.unwrap_err();
+        assert!(!matches!(err.kind, McpErrorKind::PermanentlyFailed));
+    }
+
+    #[tokio::test]
+    async fn restart_counter_increments_saturating_on_failure() {
+        // Configured; nonexistent binary makes connect fail.
+        let mut manager = McpServerManager::new(vec![McpServerConfig {
+            name: "s".into(),
+            command: Some("nonexistent-mcp-binary".into()),
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: None,
+            tool_timeout_ms: 5_000,
+            enabled: true,
+        }]);
+        let _ = manager.servers.insert("s".into(), ServerState {
+            client: Arc::new(McpClient::failed_placeholder("s")),
+            tool_count: 0,
+            health: McpServerHealth::Degraded,
+            consecutive_failures: u32::MAX,
+            last_error: None,
+            connected_at: "t".into(),
+        });
+
+        let _ = manager.manual_restart("s").await;
+        // Still saturated; must not have overflowed.
+        assert_eq!(
+            manager.servers.get("s").unwrap().consecutive_failures,
+            u32::MAX
+        );
     }
 }
