@@ -42,7 +42,7 @@ final class MemoryCoordinator {
         context.memoryRetainInProgressMessageId = inProgressMessage.id
     }
 
-    /// Handle automatic memory retain failure (H3).
+    /// Handle automatic memory retain failure.
     ///
     /// Fires on `agent.memory_auto_retain_failed` when an auto-retain
     /// pipeline started but the summarizer subagent failed. The server

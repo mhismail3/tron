@@ -12,10 +12,10 @@ protocol EventResult: Sendable {}
 ///
 /// The `sequence` field carries the event-log sequence number from the
 /// server. It is per-session and monotonically increasing. iOS uses it
-/// for the H5/C6 gap-detection + post-reconstruction dedup filter;
-/// plugins themselves never need to read it. Events that are not
-/// persisted (e.g. transient lifecycle signals) arrive with a nil
-/// sequence and bypass the filter.
+/// for gap detection and the post-reconstruction dedup filter; plugins
+/// themselves never need to read it. Events that are not persisted
+/// (e.g. transient lifecycle signals) arrive with a nil sequence and
+/// bypass the filter.
 protocol StandardEventData: Decodable, Sendable {
     var type: String { get }
     var sessionId: String? { get }
@@ -118,9 +118,9 @@ extension EventPluginBox {
 
 /// Lightweight extractor for the top-level `sequence` field on the raw
 /// event JSON. Keeps plugins free of boilerplate: every plugin's EventData
-/// stays focused on the fields the plugin actually uses, while C6's
-/// post-reconstruction dedup gets the sequence it needs via a single
-/// small second-pass decode on the same bytes.
+/// stays focused on the fields the plugin actually uses, while the
+/// post-reconstruction dedup filter gets the sequence it needs via a
+/// single small second-pass decode on the same bytes.
 private struct EventSequenceExtract: Decodable {
     let sequence: Int64?
 }

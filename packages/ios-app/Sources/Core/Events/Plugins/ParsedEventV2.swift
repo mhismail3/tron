@@ -19,8 +19,8 @@ enum ParsedEventV2: @unchecked Sendable {
     /// - sequence: Event-log sequence number from the server. Per-session,
     ///   monotonically increasing. `nil` for transient events that the
     ///   server doesn't persist (e.g. some lifecycle signals). Used by
-    ///   ChatViewModel.dispatchEvent for the C6 post-reconstruction
-    ///   dedup filter (event.sequence <= sequenceHighWaterMark -> drop).
+    ///   ChatViewModel.dispatchEvent for the post-reconstruction dedup
+    ///   filter (event.sequence <= sequenceHighWaterMark -> drop).
     /// - transform: Lazy transformation closure to get EventResult
     case plugin(
         type: String,

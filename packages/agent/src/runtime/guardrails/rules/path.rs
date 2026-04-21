@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(normalize_path("/foo/./bar"), "/foo/bar");
     }
 
-    // ── M25 regex budget ────────────────────────────────────────────────────
+    // ── Regex budget ────────────────────────────────────────────────────────
 
     fn make_path_rule(protected: Vec<String>) -> PathRule {
         use crate::runtime::guardrails::rules::{RuleTier, Scope};
@@ -423,7 +423,8 @@ mod tests {
 
     #[test]
     fn write_patterns_loaded_five() {
-        // The five patterns from the pre-M25 implementation are preserved.
+        // Pin the expected pattern count so silent additions/removals of
+        // write-detection regexes surface as a test failure.
         assert_eq!(write_patterns().len(), 5);
     }
 }

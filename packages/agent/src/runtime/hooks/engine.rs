@@ -40,12 +40,11 @@ use super::types::{
 /// ## Error policy
 ///
 /// When a handler returns `Err` or times out, the engine consults
-/// `error_policy`. The default is [`HookErrorPolicy::Continue`] (fail-open),
-/// which matches the pre-H2 behavior. Hooks that protect the agent from
-/// policy violations (security / guardrail hooks) should configure
-/// [`HookErrorPolicy::Block`] via the top-level setting — an error or
-/// timeout then synthesizes a `HookResult::block(...)` instead of a
-/// silent `Continue`.
+/// `error_policy`. The default is [`HookErrorPolicy::Continue`] (fail-open).
+/// Hooks that protect the agent from policy violations (security / guardrail
+/// hooks) should configure [`HookErrorPolicy::Block`] via the top-level
+/// setting — an error or timeout then synthesizes a `HookResult::block(...)`
+/// instead of a silent `Continue`.
 pub struct HookEngine {
     registry: HookRegistry,
     background: BackgroundTracker,
@@ -782,7 +781,7 @@ mod tests {
         assert_eq!(result.action, HookAction::Continue);
     }
 
-    // ── H2: HookErrorPolicy ─────────────────────────────────────────────
+    // ── HookErrorPolicy ─────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_execute_error_with_block_policy_blocks_with_reason() {
@@ -1258,11 +1257,11 @@ mod tests {
         assert_eq!(merged, 42);
     }
 
-    // ── M18: HookAction::AddContext ─────────────────────────────────────
+    // ── HookAction::AddContext ──────────────────────────────────────────
 
-    /// Serialize M18 tests that mutate the process-wide settings so
-    /// parallel test threads don't race on the budget override.
-    fn m18_settings_lock() -> &'static tokio::sync::Mutex<()> {
+    /// Serialize `AddContext` tests that mutate the process-wide settings
+    /// so parallel test threads don't race on the budget override.
+    fn add_context_settings_lock() -> &'static tokio::sync::Mutex<()> {
         static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
         LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
     }
@@ -1290,7 +1289,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_add_context_single_hook_surfaces_content() {
-        let _guard = m18_settings_lock().lock().await;
+        let _guard = add_context_settings_lock().lock().await;
         set_added_context_budget(4096);
 
         let mut registry = HookRegistry::new();
@@ -1316,7 +1315,7 @@ mod tests {
     async fn test_execute_add_context_concatenates_across_hooks() {
         // Two hooks both return AddContext — engine joins their
         // contributions with newlines in registration order.
-        let _guard = m18_settings_lock().lock().await;
+        let _guard = add_context_settings_lock().lock().await;
         set_added_context_budget(4096);
 
         let mut registry = HookRegistry::new();
@@ -1347,7 +1346,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_add_context_rejected_when_over_budget() {
         // 50-char budget — a 60-char contribution must be dropped.
-        let _guard = m18_settings_lock().lock().await;
+        let _guard = add_context_settings_lock().lock().await;
         set_added_context_budget(50);
 
         let mut registry = HookRegistry::new();
@@ -1370,7 +1369,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_add_context_disabled_by_zero_budget() {
         // budget=0 is the explicit "disable feature" semantic.
-        let _guard = m18_settings_lock().lock().await;
+        let _guard = add_context_settings_lock().lock().await;
         set_added_context_budget(0);
 
         let mut registry = HookRegistry::new();
@@ -1393,7 +1392,7 @@ mod tests {
     async fn test_execute_add_context_combined_aggregate_exceeds_budget_rejected() {
         // Each fragment is under-budget, but their sum (including
         // separator newline) exceeds it.
-        let _guard = m18_settings_lock().lock().await;
+        let _guard = add_context_settings_lock().lock().await;
         set_added_context_budget(20);
 
         let mut registry = HookRegistry::new();
@@ -1424,7 +1423,7 @@ mod tests {
         // wins (existing chain-stopping semantic for Block) and the
         // added context is discarded — never mix a permissive hook's
         // contribution with a guard hook's veto.
-        let _guard = m18_settings_lock().lock().await;
+        let _guard = add_context_settings_lock().lock().await;
         set_added_context_budget(4096);
 
         let mut registry = HookRegistry::new();
@@ -1457,7 +1456,7 @@ mod tests {
     async fn test_execute_add_context_empty_string_is_ignored() {
         // Hooks that return AddContext with empty content don't
         // contribute — the aggregated result collapses to Continue.
-        let _guard = m18_settings_lock().lock().await;
+        let _guard = add_context_settings_lock().lock().await;
         set_added_context_budget(4096);
 
         let mut registry = HookRegistry::new();

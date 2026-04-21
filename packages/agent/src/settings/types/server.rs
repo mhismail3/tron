@@ -166,7 +166,8 @@ pub struct HookSettings {
     /// What to do when a hook handler errors or times out.
     ///
     /// - `"continue"` (default) — treat the failure as `Continue` so the
-    ///   agent proceeds. Matches the pre-H2 fail-open behavior.
+    ///   agent proceeds. Fail-open: errors in a script-based hook are usually
+    ///   developer bugs, not attacks, so the default is not to block.
     /// - `"block"` — synthesize a `Block` with a reason naming the
     ///   handler and the failure kind. Security / guard hooks that
     ///   should not silently fail open opt into this.

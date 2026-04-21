@@ -438,7 +438,7 @@ mod tests {
         assert_eq!(d["totalCount"], 10);
     }
 
-    // ── M19: warning propagation from stub delegate ──────────────────
+    // ── Warning propagation from stub delegate ───────────────────────
 
     #[tokio::test]
     async fn warning_surfaces_in_tool_text() {

@@ -212,7 +212,7 @@ mod tests {
         assert_eq!(level_num, 10);
     }
 
-    // ── M2 message truncation ────────────────────────────────────────────
+    // ── Message truncation ───────────────────────────────────────────────
 
     #[test]
     fn truncate_short_message_is_borrow_no_alloc() {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Plugin for handling auto-retain failure events (H3).
+/// Plugin for handling auto-retain failure events.
 /// Emitted by the server when an auto-retain pipeline started
 /// (`memory_auto_retain_triggered` was persisted) but the summarizer
 /// subagent failed to produce a clean output. The pipeline still writes

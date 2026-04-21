@@ -17,8 +17,8 @@ import Foundation
 ///
 /// The snapshot is in-memory-only; its lifetime is a single
 /// disconnect → reconstruct → drain cycle on one `ChatViewModel`
-/// instance. Session switch constructs a new view model (see H8) and
-/// therefore starts with a nil snapshot by construction.
+/// instance. Session switch constructs a new view model and therefore
+/// starts with a nil snapshot by construction.
 struct StreamingRecoverySnapshot: Equatable {
     /// The streaming message's UUID at cleanup time. Reused on
     /// reconstruction so the bubble's identity is preserved.

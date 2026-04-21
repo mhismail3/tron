@@ -33,7 +33,7 @@ fn next_seq(counter: Option<&AtomicI64>) -> Option<i64> {
 /// Persist a `stream.turn_start` event, then broadcast the matching
 /// `TurnStart` over the emitter.
 ///
-/// INVARIANT (C5): the broadcast is emitted ONLY after the DB write
+/// INVARIANT: the broadcast is emitted ONLY after the DB write
 /// succeeds. If persistence fails, no subscriber sees the event, so iOS
 /// and the DB cannot diverge — a reconnecting client that reconstructs
 /// from the DB will see the same set of events as a live subscriber.
@@ -265,10 +265,10 @@ pub(super) fn build_completed_assistant_payload(
 
 /// Persist a completed `message.assistant` event synchronously.
 ///
-/// INVARIANT (C5): returns the persist error to the caller so that the
+/// INVARIANT: returns the persist error to the caller so that the
 /// corresponding `ResponseComplete` broadcast can be gated on successful
-/// persistence. A silent log-and-continue here was how `ResponseComplete`
-/// could reach iOS with no matching message in the event log.
+/// persistence. A silent log-and-continue here would let `ResponseComplete`
+/// reach iOS with no matching message in the event log.
 pub(super) async fn persist_completed_assistant_message(
     persister: Option<&EventPersister>,
     session_id: &str,
@@ -294,10 +294,10 @@ pub(super) async fn persist_completed_assistant_message(
 
 /// Persist a `rules.activated` event synchronously and return the outcome.
 ///
-/// INVARIANT (C5): synchronous append so the caller can gate the matching
-/// `RulesActivated` broadcast on success. The previous fire-and-forget
-/// path meant a broadcast-only consumer (iOS) could render activated-rules
-/// that were silently missing from session history on reconnect.
+/// INVARIANT: synchronous append so the caller can gate the matching
+/// `RulesActivated` broadcast on success. A fire-and-forget append would
+/// let a broadcast-only consumer (iOS) render activated-rules that were
+/// silently missing from session history on reconnect.
 pub(super) async fn persist_rules_activated(
     persister: Option<&EventPersister>,
     session_id: &str,
@@ -337,7 +337,7 @@ pub(super) async fn persist_rules_activated(
 
 /// Persist a `stream.turn_end` event, then broadcast the matching `TurnEnd`.
 ///
-/// INVARIANT (C5): persist before broadcast. On persist failure the broadcast
+/// INVARIANT: persist before broadcast. On persist failure the broadcast
 /// is skipped so iOS subscribers and the persisted DB state stay consistent.
 pub(super) async fn emit_turn_end(
     emitter: &Arc<EventEmitter>,
@@ -442,10 +442,11 @@ pub(super) fn emit_tool_use_batch(
 
 #[cfg(test)]
 mod tests {
-    //! Tests guard the C5 invariant: turn-start and turn-end persist to the
-    //! event store BEFORE broadcasting the matching TronEvent. Pre-fix code
-    //! broadcast first, so a persist failure left iOS subscribers with an
-    //! event the DB never recorded — reconstruction on reconnect diverged.
+    //! Tests guard the persist-before-broadcast invariant: turn-start and
+    //! turn-end persist to the event store BEFORE broadcasting the matching
+    //! TronEvent. Broadcasting first would let a persist failure leave iOS
+    //! subscribers with an event the DB never recorded, so reconstruction on
+    //! reconnect would diverge from what live clients already rendered.
     use super::*;
     use crate::events::sqlite::connection::{self, ConnectionConfig};
     use crate::events::sqlite::migrations::run_migrations;
@@ -640,7 +641,7 @@ mod tests {
         );
     }
 
-    // ── C5 coverage extension: response-complete + rules-activated ─────────
+    // ── Persist-before-broadcast: response-complete + rules-activated ──────
 
     #[tokio::test]
     async fn persist_completed_assistant_message_returns_ok_on_success() {

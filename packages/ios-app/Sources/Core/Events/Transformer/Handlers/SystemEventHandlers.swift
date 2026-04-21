@@ -196,7 +196,7 @@ enum SystemEventHandlers {
         )
     }
 
-    /// Transform memory.auto_retain_failed event into a ChatMessage (H3).
+    /// Transform memory.auto_retain_failed event into a ChatMessage.
     ///
     /// Reconstructed history shows the failure as a diagnostic breadcrumb
     /// in addition to the subsequent fallback-summary `memoryRetained`

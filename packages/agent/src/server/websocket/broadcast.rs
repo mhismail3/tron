@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(b_conns.len(), 1);
     }
 
-    // ── H5: broadcast-level sequence ──────────────────────────────────────
+    // ── Broadcast-level sequence ──────────────────────────────────────────
 
     /// Successive broadcasts to the same session stamp monotonic
     /// `broadcast_seq` values on each connection's outbound messages.

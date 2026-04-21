@@ -577,7 +577,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── H17 saturating counter + auto-refusal ────────────────────────────
+    // ── Saturating counter + auto-refusal ────────────────────────────────
 
     #[test]
     fn record_failure_counter_saturates_at_u32_max() {

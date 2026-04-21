@@ -533,11 +533,12 @@ impl CompactionHandler {
 
     /// Emit the terminal events for a compaction attempt.
     ///
-    /// Implements the H13 two-phase commit: Phase 1 writes
+    /// Two-phase commit for the compaction boundary: Phase 1 writes
     /// `compact.summary_staging` carrying the produced summary; Phase 2
-    /// writes `compact.boundary`. Both complete before broadcasting
-    /// `CompactionComplete` (C5 invariant). Public only for tests — the
-    /// production path calls it from `check_and_compact`.
+    /// writes `compact.boundary`. Both must persist before broadcasting
+    /// `CompactionComplete` so a crash between phases leaves either no
+    /// trace or a fully-committed boundary — never a partial one. Public
+    /// only for tests; production calls it from `check_and_compact`.
     pub(super) async fn emit_compaction_events(
         result: Result<
             crate::runtime::context::types::CompactionResult,
@@ -611,7 +612,7 @@ impl CompactionHandler {
                         error!(
                             session_id,
                             error = %error,
-                            "H13 phase 1 failed: compaction staging persist failed; skipping boundary + broadcast"
+                            "phase 1 failed: compaction staging persist failed; skipping boundary + broadcast"
                         );
                         persist_ok = false;
                     }
@@ -645,7 +646,7 @@ impl CompactionHandler {
                             error!(
                                 session_id,
                                 error = %error,
-                                "H13 phase 2 failed: boundary persist failed after staging; staging remains for diagnostics"
+                                "phase 2 failed: boundary persist failed after staging; staging remains for diagnostics"
                             );
                             persist_ok = false;
                         }
@@ -840,7 +841,7 @@ mod tests {
 
     // -- Multi-signal trigger --
 
-    // ── H13: compaction two-phase commit ────────────────────────────────
+    // ── Compaction two-phase commit ─────────────────────────────────────
 
     fn make_event_store_for_test() -> Arc<crate::events::EventStore> {
         let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default())

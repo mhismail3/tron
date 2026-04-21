@@ -288,11 +288,10 @@ mod tests {
 
     #[test]
     fn retry_default_matches_retry_module_constant() {
-        // Regression guard for H1 + M16: the settings default MUST be the
-        // same value the runtime retry executor uses. A divergence here
-        // meant the documented default differed from the actual runtime
-        // default — users saw retries happen N times when the settings file
-        // said M, and vice versa.
+        // The settings default MUST be the same value the runtime retry
+        // executor uses. A divergence would mean the documented default
+        // differs from the actual runtime default — users would see retries
+        // happen N times when the settings file said M, and vice versa.
         let settings_r = RetrySettings::default();
         let runtime_r = crate::core::retry::RetryConfig::default();
         assert_eq!(settings_r.max_retries, runtime_r.max_retries);

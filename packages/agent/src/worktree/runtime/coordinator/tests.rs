@@ -1876,7 +1876,7 @@ async fn coordinator_commit_stage_all_false_only_commits_index() {
     );
 }
 
-// ── H4: concurrent acquire for the same session is serialized ────────────
+// ── Concurrent acquire for the same session is serialized ────────────────
 
 /// Fire N concurrent `maybe_acquire_with_override` calls for the SAME session
 /// and assert exactly one worktree gets created. Without the per-session lock

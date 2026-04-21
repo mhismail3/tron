@@ -1643,7 +1643,7 @@ mod tests {
         );
     }
 
-    // ── H3: memory.auto_retain_failed unit tests ─────────────────────────
+    // ── memory.auto_retain_failed unit tests ─────────────────────────────
 
     /// Direct unit test of the failure-emitter. Persists a
     /// `memory.auto_retain_failed` event with payload fields matching

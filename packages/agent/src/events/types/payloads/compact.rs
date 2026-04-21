@@ -53,7 +53,7 @@ pub struct CompactSummaryPayload {
     pub boundary_event_id: String,
 }
 
-/// Payload for `compact.summary_staging` events (H13 two-phase commit).
+/// Payload for `compact.summary_staging` events.
 ///
 /// Phase 1 of the compaction two-phase commit: written right after the
 /// summarizer returns its output and BEFORE the boundary commit. Carries

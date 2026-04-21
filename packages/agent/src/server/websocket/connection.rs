@@ -1,6 +1,6 @@
 //! WebSocket client connection state.
 //!
-//! ## Broadcast sequence (H5)
+//! ## Broadcast sequence
 //!
 //! Every outbound WebSocket frame carries a monotonic, per-connection
 //! `broadcastSeq` field spliced as the first key of the top-level JSON
@@ -639,7 +639,7 @@ mod tests {
         assert!(conn.should_close());
     }
 
-    // ── H5: per-connection broadcast sequence + stamping ─────────────────
+    // ── Per-connection broadcast sequence + stamping ─────────────────────
 
     #[tokio::test]
     async fn send_assigns_monotonic_broadcast_seq() {
@@ -686,8 +686,8 @@ mod tests {
     }
 
     /// A send on a closed channel returns `Closed` without panicking,
-    /// even though a seq was allocated internally. Documents the H5
-    /// design: Closed is terminal, the gap is not observable.
+    /// even though a seq was allocated internally. Closed is terminal,
+    /// the gap is not observable by any client.
     #[tokio::test]
     async fn send_on_closed_channel_returns_closed_not_panic() {
         let (tx, rx) = mpsc::unbounded_channel();

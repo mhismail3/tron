@@ -20,10 +20,11 @@ use super::sender::PushSender;
 pub struct RelayNotifyDelegate {
     sender: Arc<dyn PushSender>,
     pool: ConnectionPool,
-    /// Event store for H22 `device.token_invalidated` emission on relay
-    /// responses that map to terminal APNs token errors. Same store the
-    /// rest of the server uses — see [`ApnsNotifyDelegate::new`] for the
-    /// reasoning on sharing the canonical instance.
+    /// Event store used to emit `device.token_invalidated` when the
+    /// relay returns a response mapping to a terminal APNs token error.
+    /// Same store the rest of the server uses — see
+    /// [`ApnsNotifyDelegate::new`] for the reasoning on sharing the
+    /// canonical instance.
     event_store: Arc<EventStore>,
 }
 

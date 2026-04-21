@@ -19,9 +19,10 @@ use super::push_helpers;
 pub struct ApnsNotifyDelegate {
     apns: Arc<ApnsService>,
     pool: ConnectionPool,
-    /// Event store for H22 `device.token_invalidated` emission on 410s.
-    /// Cloneable `Arc` pointer so the tool factory can share the
-    /// canonical store without ownership dance.
+    /// Event store used to emit `device.token_invalidated` when APNs
+    /// returns a terminal token error. Cloneable `Arc` pointer so the
+    /// tool factory can share the canonical store without ownership
+    /// dance.
     event_store: Arc<EventStore>,
 }
 

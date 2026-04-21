@@ -590,7 +590,7 @@ This is the body.";
         assert_eq!(result.frontmatter.subagent_model.as_deref(), Some("haiku"));
     }
 
-    // ── H19 bounds + M23 strict subagent parsing ─────────────────────────────
+    // ── Bounds + strict subagent parsing ─────────────────────────────────────
 
     #[test]
     fn rejects_oversized_input() {
