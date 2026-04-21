@@ -292,4 +292,102 @@ struct GitTileGatingTests {
         )
         #expect(g.isPushEnabled == false)
     }
+
+    // MARK: - H12: reason(for:) + isEnabled(_:)
+
+    @Test("isEnabled(tile) mirrors each boolean field")
+    func isEnabledMirrorsBooleans() {
+        let g = GitTileGating(
+            worktree: info(hasUncommittedChanges: true, commitCount: 2),
+            divergence: divergence(behindMain: 1, behindOrigin: 1, hasOrigin: true),
+            protectedBranches: [],
+            repoSessionCount: 2
+        )
+        #expect(g.isEnabled(.commit)   == g.isCommitEnabled)
+        #expect(g.isEnabled(.merge)    == g.isMergeEnabled)
+        #expect(g.isEnabled(.sessions) == g.isSessionsEnabled)
+        #expect(g.isEnabled(.rebase)   == g.isRebaseEnabled)
+        #expect(g.isEnabled(.pull)     == g.isPullEnabled)
+        #expect(g.isEnabled(.push)     == g.isPushEnabled)
+    }
+
+    @Test("reason(for:) returns nil for every enabled tile")
+    func reasonNilWhenEnabled() {
+        let g = GitTileGating(
+            worktree: info(branch: "feature/x", hasUncommittedChanges: true, commitCount: 2),
+            divergence: divergence(behindMain: 1, behindOrigin: 1, hasOrigin: true),
+            protectedBranches: [],
+            repoSessionCount: 3
+        )
+        // Commit + merge mutually exclude (merge wants a clean tree).
+        // Build a separate config for merge.
+        let mergeConfig = GitTileGating(
+            worktree: info(branch: "feature/x", hasUncommittedChanges: false, commitCount: 2),
+            divergence: divergence(hasOrigin: true),
+            protectedBranches: [],
+            repoSessionCount: 3
+        )
+        // Commit/sessions/rebase/pull/push all enabled in g.
+        #expect(g.reason(for: .commit)   == nil)
+        #expect(g.reason(for: .sessions) == nil)
+        #expect(g.reason(for: .rebase)   == nil)
+        #expect(g.reason(for: .pull)     == nil)
+        #expect(g.reason(for: .push)     == nil)
+        #expect(mergeConfig.reason(for: .merge) == nil)
+    }
+
+    @Test("Workflow-free block reason takes precedence over per-tile reasons")
+    func workflowFreeBlockTakesPrecedence() {
+        let g = GitTileGating(
+            hasLockHolder: true,
+            worktree: info(hasUncommittedChanges: true, commitCount: 2),
+            divergence: divergence(behindMain: 1, behindOrigin: 1, hasOrigin: true),
+            protectedBranches: [],
+            repoSessionCount: 2
+        )
+        // Every tile disabled, all reasons should point at the shared gate.
+        for tile: GitTile in [.commit, .merge, .rebase, .pull, .push] {
+            #expect(
+                g.reason(for: tile)?.contains("lock") == true,
+                "workflow-free reason missing for tile"
+            )
+        }
+    }
+
+    @Test("Pending-merge reason mentions conflict resolver")
+    func pendingMergeReasonHasActionableHint() {
+        let g = GitTileGating(hasPendingMerge: true)
+        let r = g.reason(for: .commit) ?? ""
+        #expect(r.contains("Conflict Resolver"))
+    }
+
+    @Test("Push reason names the protected branch")
+    func pushReasonNamesProtectedBranch() {
+        let g = GitTileGating(
+            worktree: info(branch: "main"),
+            divergence: divergence(hasOrigin: true),
+            protectedBranches: ["main", "master"]
+        )
+        #expect(g.isPushEnabled == false)
+        let r = g.reason(for: .push) ?? ""
+        #expect(r.contains("main"))
+    }
+
+    @Test("Merge reason on base branch is distinct from conflict reason")
+    func mergeReasonOnBaseBranchIsSpecific() {
+        let g = GitTileGating(
+            worktree: info(branch: "main", baseBranch: "main", commitCount: 0)
+        )
+        let r = g.reason(for: .merge) ?? ""
+        #expect(r.contains("base branch"))
+    }
+
+    @Test("Loading state yields specific reasons, not nil")
+    func loadingStateHasReasons() {
+        // Zero inputs — loading collapse.
+        let g = GitTileGating()
+        #expect(g.reason(for: .merge)?.contains("loading") == true)
+        #expect(g.reason(for: .pull)?.contains("loading") == true)
+        #expect(g.reason(for: .rebase)?.contains("loading") == true)
+    }
 }

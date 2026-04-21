@@ -239,21 +239,20 @@ struct SourceControlSheet: View {
     /// resolution — the conflict resolver, not this grid, is the way out
     /// of those states.
     private var gitActionsCard: some View {
-        let g = gating
-        return VStack(spacing: 8) {
+        VStack(spacing: 8) {
             HStack(spacing: 8) {
                 gitActionTile(
                     icon: "square.and.pencil",
                     title: "Commit",
                     tint: .tronTeal,
-                    isEnabled: g.isCommitEnabled
+                    tile: .commit
                 ) { activeGitAction = .commit }
 
                 gitActionTile(
                     icon: "checkmark.seal",
                     title: "Merge",
                     tint: .tronCoral,
-                    isEnabled: g.isMergeEnabled
+                    tile: .merge
                 ) { activeGitAction = .finalize }
 
                 gitActionTile(
@@ -262,7 +261,7 @@ struct SourceControlSheet: View {
                         ? "Sessions"
                         : (repoSessionCount == 1 ? "1 Session" : "\(repoSessionCount) Sessions"),
                     tint: .tronAmber,
-                    isEnabled: g.isSessionsEnabled
+                    tile: .sessions
                 ) { activeGitAction = .repoSessions }
             }
             HStack(spacing: 8) {
@@ -270,21 +269,21 @@ struct SourceControlSheet: View {
                     icon: "arrow.triangle.2.circlepath",
                     title: "Rebase",
                     tint: .tronPurple,
-                    isEnabled: g.isRebaseEnabled
+                    tile: .rebase
                 ) { activeGitAction = .rebaseOnMain }
 
                 gitActionTile(
                     icon: "arrow.down.circle",
                     title: "Pull",
                     tint: .tronEmerald,
-                    isEnabled: g.isPullEnabled
+                    tile: .pull
                 ) { activeGitAction = .syncMain }
 
                 gitActionTile(
                     icon: "arrow.up.circle",
                     title: "Push",
                     tint: .tronSky,
-                    isEnabled: g.isPushEnabled
+                    tile: .push
                 ) { activeGitAction = .push }
             }
         }
@@ -306,14 +305,21 @@ struct SourceControlSheet: View {
         )
     }
 
+    /// H12: centralised tile builder. Takes the `GitTile` identifier so
+    /// the builder itself can look up enable state AND the disabled
+    /// reason from the shared `gating` value — single source of truth,
+    /// and tooltip copy stays in sync with the enable logic.
     private func gitActionTile(
         icon: String,
         title: String,
         tint: Color,
-        isEnabled: Bool = true,
+        tile: GitTile,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let g = gating
+        let isEnabled = g.isEnabled(tile)
+        let reason = g.reason(for: tile)
+        return Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: 16, weight: .medium))
@@ -334,6 +340,8 @@ struct SourceControlSheet: View {
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1.0 : 0.4)
         .disabled(!isEnabled)
+        .help(reason ?? "")
+        .accessibilityHint(reason ?? "")
     }
 
     // MARK: - Git Action Sheet Router

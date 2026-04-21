@@ -1,5 +1,18 @@
 import Foundation
 
+/// Which git workflow tile we're asking about — used by
+/// [`GitTileGating.reason(for:)`] to surface a single user-facing
+/// explanation when a tile is disabled. Each case maps 1-to-1 to a
+/// tile in the Source Control sheet.
+enum GitTile: Equatable, Sendable {
+    case commit
+    case merge
+    case sessions
+    case rebase
+    case pull
+    case push
+}
+
 /// Pure value-type that captures whether each git workflow tile in the
 /// Source Control sheet should be enabled given the current
 /// worktree/divergence/lock state. Mirrors the server-side preconditions
@@ -42,6 +55,18 @@ struct GitTileGating: Equatable {
     /// we never authorize a push to a branch the user marked protected.
     let isPushEnabled: Bool
 
+    /// Captured inputs — kept around so `reason(for:)` can produce an
+    /// accurate human-readable explanation for a disabled tile
+    /// without a second round of re-derivation that might diverge
+    /// from the enabled flags above.
+    private let hasLockHolder: Bool
+    private let hasPendingMerge: Bool
+    private let hasConflictBanner: Bool
+    private let worktree: WorktreeInfo?
+    private let divergence: RepoDivergence?
+    private let protectedBranches: [String]?
+    private let repoSessionCount: Int
+
     /// All inputs are optional / sensibly-defaulted so the "loading"
     /// state (everything `nil`) collapses to "every tile disabled".
     /// Protected branches are normalized (lowercased + trimmed) so
@@ -55,6 +80,13 @@ struct GitTileGating: Equatable {
         protectedBranches: [String]? = nil,
         repoSessionCount: Int = 0
     ) {
+        self.hasLockHolder = hasLockHolder
+        self.hasPendingMerge = hasPendingMerge
+        self.hasConflictBanner = hasConflictBanner
+        self.worktree = worktree
+        self.divergence = divergence
+        self.protectedBranches = protectedBranches
+        self.repoSessionCount = repoSessionCount
         let workflowFree = !hasLockHolder && !hasPendingMerge && !hasConflictBanner
         self.isWorkflowFree = workflowFree
 
@@ -102,5 +134,96 @@ struct GitTileGating: Equatable {
         } else {
             self.isPushEnabled = false
         }
+    }
+
+    // MARK: - Per-tile query
+
+    /// Whether the given tile is currently enabled.
+    func isEnabled(_ tile: GitTile) -> Bool {
+        switch tile {
+        case .commit:   return isCommitEnabled
+        case .merge:    return isMergeEnabled
+        case .sessions: return isSessionsEnabled
+        case .rebase:   return isRebaseEnabled
+        case .pull:     return isPullEnabled
+        case .push:     return isPushEnabled
+        }
+    }
+
+    /// Human-readable explanation for WHY a tile is disabled, suitable
+    /// for a tooltip / accessibility hint. Returns `nil` when the tile
+    /// is enabled.
+    ///
+    /// The workflow-free gate (lock / pending merge / conflict banner)
+    /// takes precedence because it's the clearest signal: nothing will
+    /// work until the user resolves that state, regardless of what
+    /// tile they tap. Per-tile reasons follow, ordered by specificity.
+    func reason(for tile: GitTile) -> String? {
+        if isEnabled(tile) { return nil }
+
+        if let shared = workflowBlockReason() {
+            return shared
+        }
+
+        switch tile {
+        case .commit:
+            return "Nothing to commit — no uncommitted changes."
+        case .merge:
+            if worktree == nil { return "Worktree status is still loading…" }
+            if worktree?.isOnBaseBranch == true {
+                return "Merge is unavailable on the base branch."
+            }
+            if (worktree?.commitCount ?? 0) == 0 {
+                return "Nothing to integrate — no commits on this branch."
+            }
+            if worktree?.hasUncommittedChanges == true {
+                return "Commit or stash uncommitted changes before merging."
+            }
+            return "Merge preconditions not met."
+        case .sessions:
+            return "No peer sessions in this repo yet."
+        case .rebase:
+            if divergence == nil { return "Divergence info still loading…" }
+            return "Already up to date with the base branch."
+        case .pull:
+            if divergence == nil { return "Divergence info still loading…" }
+            if divergence?.hasOrigin != true {
+                return "No remote configured for this repo."
+            }
+            return "Local main is already up to date with origin."
+        case .push:
+            if divergence?.hasOrigin != true {
+                return "No remote configured for this repo."
+            }
+            if worktree?.branch == nil || worktree?.branch.isEmpty == true {
+                return "Current branch is not yet known."
+            }
+            if protectedBranches == nil {
+                return "Protected-branch list still loading…"
+            }
+            if let branch = worktree?.branch.trimmingCharacters(in: .whitespaces).lowercased(),
+               let raws = protectedBranches {
+                let protected = Set(raws.map { $0.trimmingCharacters(in: .whitespaces).lowercased() })
+                if protected.contains(branch) {
+                    return "\(branch) is a protected branch. Push manually or disable the guard in Settings."
+                }
+            }
+            return "Push preconditions not met."
+        }
+    }
+
+    /// Shared workflow-gate reason: lock / pending merge / conflict.
+    /// Returns nil when none of those are asserted.
+    private func workflowBlockReason() -> String? {
+        if hasLockHolder {
+            return "Another session is holding the repo lock. Try again once it releases."
+        }
+        if hasPendingMerge {
+            return "A merge is pending resolution — use the Conflict Resolver to continue."
+        }
+        if hasConflictBanner {
+            return "Unresolved conflicts detected — use the Conflict Resolver to continue."
+        }
+        return nil
     }
 }
