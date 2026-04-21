@@ -18,7 +18,13 @@ use crate::core::errors::parse::ParsedError;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Default maximum retries.
-pub const DEFAULT_MAX_RETRIES: u32 = 5;
+///
+/// Three is the canonical sweet spot for Anthropic/OpenAI-style transient
+/// errors: the first attempt covers the happy path, two retries absorb a
+/// single 503/timeout plus one follow-up hiccup. Higher values make a
+/// streaming agent feel stuck on a persistent provider degradation; lower
+/// values (the prior default of 1) kill sessions on a single network blip.
+pub const DEFAULT_MAX_RETRIES: u32 = 3;
 /// Default base delay in milliseconds.
 pub const DEFAULT_BASE_DELAY_MS: u64 = 1000;
 /// Default maximum delay in milliseconds.
@@ -30,7 +36,7 @@ pub const DEFAULT_JITTER_FACTOR: f64 = 0.2;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RetryConfig {
-    /// Maximum number of retry attempts (default: 5).
+    /// Maximum number of retry attempts (default: [`DEFAULT_MAX_RETRIES`]).
     #[serde(default = "default_max_retries")]
     pub max_retries: u32,
     /// Base delay for exponential backoff in ms (default: 1000).
@@ -211,7 +217,8 @@ mod tests {
     #[test]
     fn retry_config_defaults() {
         let config = RetryConfig::default();
-        assert_eq!(config.max_retries, 5);
+        assert_eq!(config.max_retries, DEFAULT_MAX_RETRIES);
+        assert_eq!(config.max_retries, 3);
         assert_eq!(config.base_delay_ms, 1000);
         assert_eq!(config.max_delay_ms, 60_000);
         assert!((config.jitter_factor - 0.2).abs() < f64::EPSILON);
@@ -235,7 +242,7 @@ mod tests {
     fn retry_config_serde_defaults() {
         let json = "{}";
         let config: RetryConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(config.max_retries, 5);
+        assert_eq!(config.max_retries, DEFAULT_MAX_RETRIES);
         assert_eq!(config.base_delay_ms, 1000);
     }
 

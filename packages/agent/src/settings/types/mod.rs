@@ -172,11 +172,15 @@ pub struct RetrySettings {
 
 impl Default for RetrySettings {
     fn default() -> Self {
+        // INVARIANT: retry defaults flow from a single source of truth in
+        // `core::foundation::retry`, which is the module both settings and
+        // the runtime retry executor consume. Changing a default here without
+        // changing the constant (or vice versa) is a bug.
         Self {
-            max_retries: 1,
-            base_delay_ms: 1000,
-            max_delay_ms: 60_000,
-            jitter_factor: 0.2,
+            max_retries: crate::core::retry::DEFAULT_MAX_RETRIES,
+            base_delay_ms: crate::core::retry::DEFAULT_BASE_DELAY_MS,
+            max_delay_ms: crate::core::retry::DEFAULT_MAX_DELAY_MS,
+            jitter_factor: crate::core::retry::DEFAULT_JITTER_FACTOR,
         }
     }
 }
@@ -275,10 +279,26 @@ mod tests {
     #[test]
     fn retry_defaults() {
         let r = RetrySettings::default();
-        assert_eq!(r.max_retries, 1);
+        assert_eq!(r.max_retries, crate::core::retry::DEFAULT_MAX_RETRIES);
+        assert_eq!(r.max_retries, 3);
         assert_eq!(r.base_delay_ms, 1000);
         assert_eq!(r.max_delay_ms, 60_000);
         assert!((r.jitter_factor - 0.2).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn retry_default_matches_retry_module_constant() {
+        // Regression guard for H1 + M16: the settings default MUST be the
+        // same value the runtime retry executor uses. A divergence here
+        // meant the documented default differed from the actual runtime
+        // default — users saw retries happen N times when the settings file
+        // said M, and vice versa.
+        let settings_r = RetrySettings::default();
+        let runtime_r = crate::core::retry::RetryConfig::default();
+        assert_eq!(settings_r.max_retries, runtime_r.max_retries);
+        assert_eq!(settings_r.base_delay_ms, runtime_r.base_delay_ms);
+        assert_eq!(settings_r.max_delay_ms, runtime_r.max_delay_ms);
+        assert!((settings_r.jitter_factor - runtime_r.jitter_factor).abs() < f64::EPSILON);
     }
 
     #[test]

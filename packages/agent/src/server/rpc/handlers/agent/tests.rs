@@ -75,7 +75,12 @@ fn make_text_context(text: &str) -> RpcContext {
 }
 
 async fn wait_for_run_completion(ctx: &RpcContext, session_id: &str) {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // Budget must cover the worst-case retry sequence for tests that simulate
+    // transient provider errors: with DEFAULT_MAX_RETRIES = 3 and a 1s base
+    // delay, exhausting retries takes ~1 + 2 + 4 = 7s of backoff plus the
+    // attempts themselves. 20s gives headroom without making successful-path
+    // tests feel slow (they short-circuit the moment the run clears).
+    tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             if !ctx.orchestrator.has_active_run(session_id) {
                 break;
@@ -911,8 +916,9 @@ async fn prompt_error_agent_error_has_rate_limit_category() {
         .await
         .unwrap();
 
-    // With retry enabled (default: 1 retry, 1000ms base delay), the error
-    // propagates after retry exhaustion. Wait long enough for that.
+    // With retry enabled (default: 3 retries, 1s base, exponential + jitter),
+    // the error propagates only after retry exhaustion (~7s of backoff).
+    // wait_for_run_completion budgets 20s for this path.
     wait_for_run_completion(&ctx, &sid).await;
 
     let mut found_error = false;
