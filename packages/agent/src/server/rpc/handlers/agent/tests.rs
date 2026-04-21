@@ -2803,3 +2803,245 @@ async fn prompt_validation_failure_does_not_record_history() {
 
     confirm_no_history_after_tick(&ctx).await;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M17: agent.status RPC
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn status_returns_idle_phase_for_session_with_no_active_run() {
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    let result = StatusHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(result["sessionId"], sid);
+    assert_eq!(result["phase"], "idle");
+    assert!(result["runId"].is_null());
+    assert!(result["currentTool"].is_null());
+}
+
+#[tokio::test]
+async fn status_reports_processing_phase_when_run_is_active() {
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    // Register an active run (simulates mid-turn state without actually
+    // running a prompt — StatusHandler reads orchestrator run_registry
+    // not the LLM stream itself).
+    let run_id = "run-m17-abc";
+    let started = ctx.orchestrator.begin_run(&sid, run_id).unwrap();
+
+    let result = StatusHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(result["phase"], "processing");
+    assert_eq!(result["runId"], run_id);
+    drop(started); // drops the active run guard
+}
+
+#[tokio::test]
+async fn status_missing_session_id_returns_invalid_params() {
+    let ctx = make_test_context();
+    let err = StatusHandler
+        .handle(Some(json!({})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
+#[tokio::test]
+async fn status_unknown_session_returns_session_not_found() {
+    let ctx = make_test_context();
+    let err = StatusHandler
+        .handle(
+            Some(json!({"sessionId": "nonexistent-session"})),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "SESSION_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn status_surfaces_running_tool_snapshot_from_turn_accumulator() {
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    // Seed the accumulator: start a turn, register a tool call, flip
+    // it to `running` via handle_tool_start. The accumulator mirrors
+    // the lifecycle the real agent produces.
+    let accumulators = ctx.orchestrator.turn_accumulators();
+    accumulators.handle_turn_start(&sid);
+    accumulators.handle_tool_generating(&sid, "tc-1", "Bash");
+    accumulators.handle_tool_start(
+        &sid,
+        "tc-1",
+        Some(&serde_json::json!({"cmd": "ls"})),
+    );
+
+    let result = StatusHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+
+    let tool = result["currentTool"].as_object().expect("currentTool should be present");
+    assert_eq!(tool["name"], "Bash");
+    assert_eq!(tool["toolCallId"], "tc-1");
+    assert!(
+        tool["startedAt"].is_string(),
+        "startedAt must be populated by handle_tool_start"
+    );
+}
+
+#[tokio::test]
+async fn status_current_tool_is_null_when_only_generating_tools() {
+    // A tool in `generating` status is not yet executing — the LLM is
+    // still streaming the tool_use block. Status should report no
+    // current tool.
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    let accumulators = ctx.orchestrator.turn_accumulators();
+    accumulators.handle_turn_start(&sid);
+    accumulators.handle_tool_generating(&sid, "tc-1", "Bash");
+
+    let result = StatusHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+
+    assert!(
+        result["currentTool"].is_null(),
+        "generating tools must not surface as currentTool"
+    );
+}
+
+#[tokio::test]
+async fn status_picks_most_recent_running_tool_when_several_are_active() {
+    // Parallel tool calls: two tools both in `running`. The handler
+    // returns the most recently started one (rev-iteration).
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    let accumulators = ctx.orchestrator.turn_accumulators();
+    accumulators.handle_turn_start(&sid);
+    accumulators.handle_tool_generating(&sid, "tc-1", "Read");
+    accumulators.handle_tool_start(&sid, "tc-1", None);
+    accumulators.handle_tool_generating(&sid, "tc-2", "Bash");
+    accumulators.handle_tool_start(&sid, "tc-2", None);
+
+    let result = StatusHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+
+    let tool = result["currentTool"].as_object().unwrap();
+    assert_eq!(tool["name"], "Bash", "most recently started tool wins");
+    assert_eq!(tool["toolCallId"], "tc-2");
+}
+
+#[tokio::test]
+async fn status_skips_completed_tools() {
+    // A tool that has already finished (`completed` status) must NOT
+    // surface as currentTool — the agent is no longer waiting on it.
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    let accumulators = ctx.orchestrator.turn_accumulators();
+    accumulators.handle_turn_start(&sid);
+    accumulators.handle_tool_generating(&sid, "tc-1", "Read");
+    accumulators.handle_tool_start(&sid, "tc-1", None);
+    accumulators.handle_tool_end(&sid, "tc-1", Some("ok"), false);
+
+    let result = StatusHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+
+    assert!(
+        result["currentTool"].is_null(),
+        "completed tools must not surface as currentTool"
+    );
+}
+
+#[tokio::test]
+async fn status_exposes_last_event_timestamp_and_elapsed_when_events_exist() {
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    // Append an event so the session has a latest-event timestamp.
+    let _ = ctx
+        .event_store
+        .append(&crate::events::AppendOptions {
+            session_id: &sid,
+            event_type: EventType::MessageUser,
+            payload: json!({"text": "hi"}),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+
+    let result = StatusHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+
+    assert!(result["lastEventTimestamp"].is_string());
+    // timeSinceLastEventMs should be a non-negative integer.
+    let elapsed = result["timeSinceLastEventMs"].as_i64().unwrap();
+    assert!(elapsed >= 0, "elapsed should never go negative");
+    assert!(elapsed < 60_000, "elapsed should be small (< 60s) for a just-created event");
+}
+
+#[tokio::test]
+async fn status_reports_no_elapsed_when_session_has_no_events() {
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("mock", "/tmp", Some("t"), None)
+        .unwrap();
+
+    // Don't append anything — but session-create itself DOES emit
+    // session.start, so a freshly-created session already has events.
+    // Assert the invariant the shape provides: timestamp is either
+    // present (with non-negative elapsed) or null (no events).
+    let result = StatusHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+
+    // Either both null or both set — can't have one without the other.
+    let ts_null = result["lastEventTimestamp"].is_null();
+    let elapsed_null = result["timeSinceLastEventMs"].is_null();
+    assert_eq!(
+        ts_null, elapsed_null,
+        "lastEventTimestamp and timeSinceLastEventMs must be set/unset together"
+    );
+}

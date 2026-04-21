@@ -158,6 +158,114 @@ impl MethodHandler for AbortHandler {
     }
 }
 
+/// M17: `agent.status` — inspect the in-flight state of a session.
+///
+/// Returns a snapshot combining orchestrator run registry,
+/// turn-accumulator tool state, and the event log's latest
+/// timestamp for quick "what is the agent doing right now" queries.
+/// Cheap: no writes, no mutex contention beyond short reads.
+///
+/// Response shape:
+/// ```json
+/// {
+///   "sessionId": "...",
+///   "phase": "idle" | "processing",
+///   "runId": "..." | null,
+///   "currentTool": { "name": "...", "toolCallId": "...", "startedAt": "..." } | null,
+///   "lastEventTimestamp": "2026-04-21T22:00:00Z" | null,
+///   "timeSinceLastEventMs": 1234 | null
+/// }
+/// ```
+///
+/// `currentTool` reflects the most recent tool in the turn accumulator
+/// whose status is `running`; `null` means no tool is actively
+/// executing (the agent is streaming text, thinking, or between turns).
+pub struct StatusHandler;
+
+#[async_trait]
+impl MethodHandler for StatusHandler {
+    #[instrument(skip(self, ctx), fields(method = "agent.status", session_id))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+
+        // Verify session exists — a typo'd sessionId from the client
+        // should error clearly rather than silently returning idle.
+        let event_store = ctx.event_store.clone();
+        let sid_for_check = session_id.clone();
+        let session_exists = ctx
+            .run_blocking("agent.status.session_check", move || {
+                event_store
+                    .get_session(&sid_for_check)
+                    .map(|opt| opt.is_some())
+                    .map_err(crate::server::rpc::handlers::map_event_store_error)
+            })
+            .await?;
+        if !session_exists {
+            return Err(RpcError::NotFound {
+                code: "SESSION_NOT_FOUND".into(),
+                message: format!("Session '{session_id}' not found"),
+            });
+        }
+
+        let run_id = ctx.orchestrator.get_run_id(&session_id);
+        let phase = if run_id.is_some() { "processing" } else { "idle" };
+
+        let current_tool = ctx
+            .orchestrator
+            .turn_accumulators()
+            .current_running_tool(&session_id);
+
+        // Look up the latest event's timestamp to derive time-since
+        // signal. Blocking DB query; move off the async thread.
+        let event_store = ctx.event_store.clone();
+        let sid_for_latest = session_id.clone();
+        let latest_timestamp = ctx
+            .run_blocking("agent.status.latest_event", move || {
+                let pool = event_store.pool().clone();
+                let conn = pool.get().map_err(|e| RpcError::Internal {
+                    message: format!("DB connection failed: {e}"),
+                })?;
+                crate::events::sqlite::repositories::event::EventRepo::get_latest(
+                    &conn,
+                    &sid_for_latest,
+                )
+                .map(|opt| opt.map(|row| row.timestamp))
+                .map_err(crate::server::rpc::handlers::map_event_store_error)
+            })
+            .await?;
+
+        // Derive elapsed time from the last-event timestamp. If parse
+        // fails or the timestamp is in the future (clock skew), return
+        // None rather than a nonsensical negative.
+        let time_since_last_event_ms = latest_timestamp
+            .as_deref()
+            .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+            .and_then(|parsed| {
+                let now = chrono::Utc::now();
+                let delta = now.signed_duration_since(parsed.with_timezone(&chrono::Utc));
+                delta.num_milliseconds().try_into().ok()
+            })
+            .map(|ms: i64| ms.max(0));
+
+        let current_tool_value = current_tool.map(|snap| {
+            serde_json::json!({
+                "name": snap.tool_name,
+                "toolCallId": snap.tool_call_id,
+                "startedAt": snap.started_at,
+            })
+        });
+
+        Ok(serde_json::json!({
+            "sessionId": session_id,
+            "phase": phase,
+            "runId": run_id,
+            "currentTool": current_tool_value,
+            "lastEventTimestamp": latest_timestamp,
+            "timeSinceLastEventMs": time_since_last_event_ms,
+        }))
+    }
+}
+
 #[cfg(test)]
 #[path = "agent/tests.rs"]
 mod tests;

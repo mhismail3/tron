@@ -107,6 +107,26 @@ impl AccumulatedToolCall {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CurrentToolSnapshot
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// M17: minimal projection of the tool currently executing within a
+/// session's turn, returned by [`TurnAccumulatorMap::current_running_tool`].
+///
+/// Kept deliberately narrow — the `agent.status` RPC wants human-readable
+/// "what is the agent doing" info, not the full accumulator state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CurrentToolSnapshot {
+    /// The tool's registered name (e.g. "Bash", "WebFetch").
+    pub tool_name: String,
+    /// Unique ID of the in-flight tool call.
+    pub tool_call_id: String,
+    /// ISO-8601 timestamp when execution started. Lets callers compute
+    /// elapsed duration without a separate clock fetch.
+    pub started_at: Option<String>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TurnAccumulator
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -343,6 +363,31 @@ impl TurnAccumulatorMap {
             );
         }
         result
+    }
+
+    /// M17: name of the tool currently executing in the session's turn,
+    /// if any. Returns the tool_name of the most recently-started tool
+    /// whose status is `running` (tool.call persisted; tool.result not
+    /// yet). `generating` doesn't count — the LLM is still streaming
+    /// the tool_use block and hasn't begun execution. Returns `None`
+    /// when no turn is in flight or no tool has entered `running`.
+    pub fn current_running_tool(&self, session_id: &str) -> Option<CurrentToolSnapshot> {
+        let guard = self.accumulators.lock();
+        let acc = guard.get(session_id)?;
+        // Iterate from the end — most recent Running tool wins. Tool
+        // calls can run in parallel within one turn; the "current tool"
+        // returned here is the most recently started. Callers that need
+        // the full set should use `get_state` which exposes every
+        // tool_call.
+        acc.tool_calls
+            .iter()
+            .rev()
+            .find(|tc| tc.status == "running")
+            .map(|tc| CurrentToolSnapshot {
+                tool_name: tc.tool_name.clone(),
+                tool_call_id: tc.tool_call_id.clone(),
+                started_at: tc.started_at.clone(),
+            })
     }
 
     // ── Event dispatch ──

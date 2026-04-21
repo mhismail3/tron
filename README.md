@@ -297,7 +297,7 @@ All messages use JSON-RPC 2.0 framing:
 | `system` | 3 | `system.ping`, `system.getInfo`, `system.shutdown` |
 | `blob` | 1 | `blob.get` |
 | `session` | 11 | `session.create`, `session.resume`, `session.list`, `session.delete`, `session.fork`, `session.getHead`, `session.getState`, `session.getHistory`, `session.reconstruct`, `session.archive`, `session.unarchive` |
-| `agent` | 8 | `agent.prompt`, `agent.abort`, `agent.queuePrompt`, `agent.dequeuePrompt`, `agent.clearQueue`, `agent.deliverSubagentResults`, `agent.submitConfirmation`, `agent.submitAnswers` |
+| `agent` | 9 | `agent.prompt`, `agent.abort`, `agent.status`, `agent.queuePrompt`, `agent.dequeuePrompt`, `agent.clearQueue`, `agent.deliverSubagentResults`, `agent.submitConfirmation`, `agent.submitAnswers` |
 | `model` / `config` | 3 | `model.list`, `model.switch`, `config.setReasoningLevel` |
 | `context` | 8 | `context.getSnapshot`, `context.getDetailedSnapshot`, `context.shouldCompact`, `context.previewCompaction`, `context.confirmCompaction`, `context.canAcceptTurn`, `context.clear`, `context.compact` |
 | `events` | 5 | `events.getHistory`, `events.getSince`, `events.subscribe`, `events.unsubscribe`, `events.append` |

@@ -93,6 +93,7 @@ fn register_core(registry: &mut MethodRegistry) {
     // Agent
     registry.register("agent.prompt", agent::PromptHandler);
     registry.register("agent.abort", agent::AbortHandler);
+    registry.register("agent.status", agent::StatusHandler);
     registry.register("agent.queuePrompt", agent_queue::QueuePromptHandler);
     registry.register("agent.dequeuePrompt", agent_queue::DequeuePromptHandler);
     registry.register("agent.clearQueue", agent_queue::ClearQueueHandler);
@@ -400,8 +401,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            157,
-            "expected 157 methods, got {}",
+            158,
+            "expected 158 methods, got {}",
             reg.methods().len()
         );
     }
