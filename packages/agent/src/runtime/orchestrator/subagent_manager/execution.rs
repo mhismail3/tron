@@ -389,21 +389,14 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
     let success = result.error.is_none();
     let result_output;
 
+    // C5 invariant: persist EventType::Subagent{Completed,Failed} BEFORE
+    // broadcasting the corresponding TronEvent. Pre-fix the broadcast could
+    // reach iOS without a matching row in the parent session's event log;
+    // session reconstruction on reconnect would show no record that the
+    // subagent ever finished.
     let tracked_result = if success {
-        let _ = params.broadcast.emit(TronEvent::SubagentCompleted {
-            base: BaseEvent::now(&params.tracker.parent_session_id),
-            subagent_session_id: params.child_session_id.clone(),
-            total_turns: result.turns_executed,
-            duration: duration_ms,
-            full_output: Some(output.clone()),
-            result_summary: Some(truncate(&output, 200).to_owned()),
-            token_usage: token_usage.clone(),
-            model: Some(params.model.clone()),
-            spawn_type: Some(params.spawn_type.clone()),
-        });
-
         if !params.tracker.parent_session_id.is_empty() {
-            let _ = params.event_store.append(&AppendOptions {
+            let persist_result = params.event_store.append(&AppendOptions {
                 session_id: &params.tracker.parent_session_id,
                 event_type: EventType::SubagentCompleted,
                 payload: json!({
@@ -418,6 +411,39 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
                 parent_id: None,
                 sequence: None,
             });
+            if let Err(error) = persist_result {
+                tracing::error!(
+                    parent_session = %params.tracker.parent_session_id,
+                    child_session = %params.child_session_id,
+                    error = %error,
+                    "failed to persist subagent.completed event; skipping broadcast"
+                );
+            } else {
+                let _ = params.broadcast.emit(TronEvent::SubagentCompleted {
+                    base: BaseEvent::now(&params.tracker.parent_session_id),
+                    subagent_session_id: params.child_session_id.clone(),
+                    total_turns: result.turns_executed,
+                    duration: duration_ms,
+                    full_output: Some(output.clone()),
+                    result_summary: Some(truncate(&output, 200).to_owned()),
+                    token_usage: token_usage.clone(),
+                    model: Some(params.model.clone()),
+                    spawn_type: Some(params.spawn_type.clone()),
+                });
+            }
+        } else {
+            // No parent session → broadcast only; nothing to persist against.
+            let _ = params.broadcast.emit(TronEvent::SubagentCompleted {
+                base: BaseEvent::now(&params.tracker.parent_session_id),
+                subagent_session_id: params.child_session_id.clone(),
+                total_turns: result.turns_executed,
+                duration: duration_ms,
+                full_output: Some(output.clone()),
+                result_summary: Some(truncate(&output, 200).to_owned()),
+                token_usage: token_usage.clone(),
+                model: Some(params.model.clone()),
+                spawn_type: Some(params.spawn_type.clone()),
+            });
         }
 
         result_output = output.clone();
@@ -431,16 +457,9 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
         }
     } else {
         let error = result.error.unwrap_or_else(|| "Unknown error".into());
-        let _ = params.broadcast.emit(TronEvent::SubagentFailed {
-            base: BaseEvent::now(&params.tracker.parent_session_id),
-            subagent_session_id: params.child_session_id.clone(),
-            error: error.clone(),
-            duration: duration_ms,
-            spawn_type: Some(params.spawn_type.clone()),
-        });
 
         if !params.tracker.parent_session_id.is_empty() {
-            let _ = params.event_store.append(&AppendOptions {
+            let persist_result = params.event_store.append(&AppendOptions {
                 session_id: &params.tracker.parent_session_id,
                 event_type: EventType::SubagentFailed,
                 payload: json!({
@@ -451,6 +470,31 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
                 }),
                 parent_id: None,
                 sequence: None,
+            });
+            if let Err(persist_err) = persist_result {
+                tracing::error!(
+                    parent_session = %params.tracker.parent_session_id,
+                    child_session = %params.child_session_id,
+                    error = %persist_err,
+                    "failed to persist subagent.failed event; skipping broadcast"
+                );
+            } else {
+                let _ = params.broadcast.emit(TronEvent::SubagentFailed {
+                    base: BaseEvent::now(&params.tracker.parent_session_id),
+                    subagent_session_id: params.child_session_id.clone(),
+                    error: error.clone(),
+                    duration: duration_ms,
+                    spawn_type: Some(params.spawn_type.clone()),
+                });
+            }
+        } else {
+            // No parent session → broadcast only.
+            let _ = params.broadcast.emit(TronEvent::SubagentFailed {
+                base: BaseEvent::now(&params.tracker.parent_session_id),
+                subagent_session_id: params.child_session_id.clone(),
+                error: error.clone(),
+                duration: duration_ms,
+                spawn_type: Some(params.spawn_type.clone()),
             });
         }
 
