@@ -197,9 +197,32 @@ fn init_directories() {
 }
 
 /// Open the SQLite database, run migrations, and return the pool + resolved path.
-fn init_database(db_path_override: Option<PathBuf>) -> Result<(r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>, PathBuf)> {
+fn init_database(
+    db_path_override: Option<PathBuf>,
+) -> Result<(
+    r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    PathBuf,
+    tron::events::DatabaseLock,
+)> {
     let db_path = resolve_production_db_path(db_path_override)?;
     ensure_parent_dir(&db_path)?;
+
+    // INVARIANT: A single process owns the event-store DB. Take the
+    // OS-level flock before opening the connection pool so a stray
+    // `tron dev` alongside the launchd service aborts at startup
+    // instead of silently racing on (session_id, sequence).
+    let db_lock = tron::events::acquire_database_lock(&db_path).map_err(|e| match e {
+        tron::events::LockError::AlreadyLocked { db_path, holder_pid } => anyhow::anyhow!(
+            "Another Tron process (PID {holder_pid}) is already using {}. \
+             Stop it (e.g. `launchctl stop com.tron.server` or `kill {holder_pid}`) and retry.",
+            db_path.display()
+        ),
+        tron::events::LockError::Io { path, source } => anyhow::anyhow!(
+            "Failed to prepare database lock file at {}: {source}",
+            path.display()
+        ),
+    })?;
+
     let db_str = db_path.to_string_lossy();
     let pool = tron::events::new_file(&db_str, &ConnectionConfig::default())
         .context("Failed to open database")?;
@@ -207,7 +230,7 @@ fn init_database(db_path_override: Option<PathBuf>) -> Result<(r2d2::Pool<r2d2_s
         let conn = pool.get().context("Failed to get DB connection")?;
         let _ = tron::events::run_migrations(&conn).context("Failed to run migrations")?;
     }
-    Ok((pool, db_path))
+    Ok((pool, db_path, db_lock))
 }
 
 /// Initialize tracing with SQLite persistence and start the periodic flush task.
@@ -977,7 +1000,10 @@ async fn main() -> Result<()> {
     init_directories();
 
     // Phase 2: Database and logging
-    let (pool, db_path) = init_database(args.db_path)?;
+    // _db_lock is bound for the lifetime of main(); dropping it releases the
+    // process-level lock on the event-store DB. Keep in scope explicitly so
+    // compilation fails if it's ever moved out without an equivalent guard.
+    let (pool, db_path, _db_lock) = init_database(args.db_path)?;
     let settings_path = tron::settings::loader::settings_path();
     let settings =
         tron::settings::loader::load_settings_from_path(&settings_path).unwrap_or_default();

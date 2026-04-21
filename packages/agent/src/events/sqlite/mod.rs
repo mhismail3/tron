@@ -18,6 +18,7 @@
 pub mod connection;
 pub mod contention;
 pub mod migrations;
+pub mod process_lock;
 pub mod repositories;
 pub mod row_types;
 
@@ -26,3 +27,4 @@ pub use connection::{
     verify_pragmas,
 };
 pub use migrations::{MigrationResult, current_version, latest_version, run_migrations};
+pub use process_lock::{DatabaseLock, LockError, acquire_database_lock};

@@ -685,6 +685,7 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   +-- defaults/                 Seed copies of settings.json and auth.json (used on first install)
 |   +-- database/                 SQLite event store
 |   |   +-- log.db                Events, sessions, tasks, journals, cron state
+|   |   +-- log.db.lock           OS-level flock sidecar; one Tron process owns it while running
 |   |   +-- journals/             Streaming journals for crash recovery of partial LLM output
 |   +-- deployment/               Deploy state: tron-cli, tron-lib.sh, deployed-commit, ...; optional apns.json + AuthKey_*.p8 for direct APNs
 |   +-- transcription/            Speech-to-text sidecar
@@ -770,6 +771,8 @@ These constraints are enforced in code with `// INVARIANT:` markers at the enfor
 7. **Hook drain ordering**: Background hooks are drained before accepting a new prompt (pre-run) and before session reconstruction (resume). Prevents stale hook state from interfering.
 
 8. **Production DB guard**: Startup validates the database path is `~/.tron/system/database/log.db` only. Rejects alternate filenames, wrong directories, and symlinked paths.
+
+9. **Single-process DB ownership**: Startup takes an OS-level `flock(2)` on `log.db.lock` before opening the connection pool. A second `tron` process pointed at the same database aborts with a clear error naming the holder's PID, instead of silently racing on `(session_id, sequence)` writes. Released on process exit (normal or abnormal). Enforced by `events/sqlite/process_lock.rs::acquire_database_lock` called from `init_database` in `main.rs`.
 
 ---
 
