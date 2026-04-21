@@ -25,6 +25,35 @@ extension ChatViewModel: ConnectionContext {
         try await rpcClient.session.reconstruct(sessionId: sessionId, limit: limit, beforeSequence: beforeSequence)
     }
 
+    /// Clear state that refers to an in-flight turn (streaming text,
+    /// thinking, running tools) so reconstruction can rebuild it from
+    /// the event log without double-rendering.
+    ///
+    /// ## Scope
+    ///
+    /// This resets ONLY transient-turn state — the deliberate contract
+    /// is that everything else survives reconnect:
+    ///
+    /// - `inputBarState` (text, selectedSkills, attachments): the user
+    ///   may be mid-composition; losing it on a transient reconnect
+    ///   would destroy their work.
+    /// - `draftStore` (persisted drafts): same reason, and these are
+    ///   disk-backed anyway.
+    /// - `displayStreamState`: driven by server events; the server
+    ///   re-emits on reconnect.
+    /// - Coordinator-local caches: derived from persisted events, so
+    ///   reconstruction refreshes them implicitly.
+    ///
+    /// ## Session switching is NOT this function's job
+    ///
+    /// Sessions are switched by `ContentView.navigationDestination`
+    /// instantiating a new `ChatView` with `.id(sessionId)`, which
+    /// forces SwiftUI to destroy the old view tree and rebuild a fresh
+    /// `ChatViewModel`. Per-session state starts clean by construction;
+    /// there is no single "reset everything" path here. Any new state
+    /// added to `ChatViewModel` that should clear on reconstruction
+    /// (not switch) belongs in THIS function — but "on switch" is
+    /// handled automatically by view-model recreation.
     func cleanUpStreamingState() {
         // Capture streaming message ID before reset nulls it
         let streamingId = streamingManager.streamingMessageId
