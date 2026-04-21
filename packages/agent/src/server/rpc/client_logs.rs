@@ -8,6 +8,13 @@ use crate::server::rpc::errors::RpcError;
 
 const MAX_INGEST_ENTRIES: usize = 10_000;
 
+/// Maximum stored length for a client-supplied log message. Over-long messages
+/// are truncated on ingest with a `[truncated N bytes]` suffix so the table
+/// stays responsive to scans and the UI stays readable. iOS stack traces and
+/// large payloads are the realistic cause; 8 KB is generous for genuine log
+/// lines and prevents a misbehaving client from bloating the DB.
+const MAX_MESSAGE_BYTES: usize = 8 * 1024;
+
 /// A single log entry sent from the iOS client.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct ClientLogEntry {
@@ -63,6 +70,21 @@ fn map_ios_level(s: &str) -> LogLevel {
     }
 }
 
+/// Truncate an over-long log message at a UTF-8 char boundary and append
+/// a marker so readers know the cut happened. Short messages are returned
+/// as-borrowed (no allocation).
+fn truncate_message(message: &str) -> std::borrow::Cow<'_, str> {
+    if message.len() <= MAX_MESSAGE_BYTES {
+        return std::borrow::Cow::Borrowed(message);
+    }
+    let dropped = message.len() - MAX_MESSAGE_BYTES;
+    let mut cut = MAX_MESSAGE_BYTES;
+    while cut > 0 && !message.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    std::borrow::Cow::Owned(format!("{} [truncated {} bytes]", &message[..cut], dropped))
+}
+
 fn insert_client_logs(
     conn: &mut PooledConnection,
     entries: &[ClientLogEntry],
@@ -93,6 +115,7 @@ fn insert_client_logs(
             let component = format!("ios.{}", entry.category);
             let level_str = level.to_string();
             let level_num = level.as_num().to_string();
+            let message = truncate_message(&entry.message);
 
             count += stmt
                 .execute([
@@ -100,7 +123,7 @@ fn insert_client_logs(
                     level_str.as_str(),
                     level_num.as_str(),
                     component.as_str(),
-                    entry.message.as_str(),
+                    message.as_ref(),
                 ])
                 .map_err(|e| RpcError::Internal {
                     message: format!("Failed to insert log entry: {e}"),
@@ -187,5 +210,82 @@ mod tests {
             )
             .unwrap();
         assert_eq!(level_num, 10);
+    }
+
+    // ── M2 message truncation ────────────────────────────────────────────
+
+    #[test]
+    fn truncate_short_message_is_borrow_no_alloc() {
+        // Cheap round-trip for the common case; Borrowed proves no alloc happened.
+        let short = "hello";
+        let out = truncate_message(short);
+        assert!(matches!(out, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(&*out, short);
+    }
+
+    #[test]
+    fn truncate_message_at_boundary_is_not_truncated() {
+        let at_limit = "x".repeat(MAX_MESSAGE_BYTES);
+        let out = truncate_message(&at_limit);
+        assert!(matches!(out, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(out.len(), MAX_MESSAGE_BYTES);
+    }
+
+    #[test]
+    fn truncate_over_limit_appends_marker() {
+        let big = "x".repeat(MAX_MESSAGE_BYTES + 500);
+        let out = truncate_message(&big);
+        assert!(matches!(out, std::borrow::Cow::Owned(_)));
+        assert!(out.contains("[truncated 500 bytes]"));
+        // Truncated body length must respect the cap.
+        assert!(out.len() < MAX_MESSAGE_BYTES + 64);
+    }
+
+    #[test]
+    fn truncate_respects_utf8_char_boundary() {
+        // A multi-byte char straddling the boundary must not be split.
+        // Each emoji is 4 bytes. Build a string of length > MAX_MESSAGE_BYTES
+        // where the byte-exact cut would land mid-char.
+        let prefix_bytes = MAX_MESSAGE_BYTES - 1; // force boundary into an emoji
+        let prefix = "a".repeat(prefix_bytes);
+        let mut msg = prefix;
+        msg.push_str(&"\u{1F600}".repeat(100)); // 400 bytes of emoji
+        let out = truncate_message(&msg);
+        // Re-parsing the result must not error on UTF-8 boundary.
+        assert!(std::str::from_utf8(out.as_bytes()).is_ok());
+        assert!(out.contains("[truncated"));
+    }
+
+    #[test]
+    fn ingest_stores_truncated_message_with_marker() {
+        let ctx = make_test_context();
+        let mut conn = ctx.event_store.pool().get().unwrap();
+        let huge_message = "y".repeat(MAX_MESSAGE_BYTES + 100);
+        let entries = vec![ClientLogEntry {
+            timestamp: "2026-03-03T14:30:05.000Z".to_string(),
+            level: "info".to_string(),
+            category: "RPC".to_string(),
+            message: huge_message,
+        }];
+
+        let result = ClientLogsService::ingest(&mut conn, &entries).unwrap();
+        assert_eq!(result.inserted, 1);
+
+        let stored: String = conn
+            .query_row(
+                "SELECT message FROM logs WHERE origin = 'ios-client'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            stored.contains("[truncated 100 bytes]"),
+            "expected truncation marker in stored message"
+        );
+        assert!(
+            stored.len() <= MAX_MESSAGE_BYTES + 64,
+            "stored message should be capped; got {} bytes",
+            stored.len()
+        );
     }
 }
