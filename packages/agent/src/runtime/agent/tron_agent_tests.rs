@@ -240,17 +240,55 @@ fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
     }
 }
 
-fn make_agent(provider: MockProvider) -> TronAgent {
-    TronAgent::new(
-        AgentConfig::default(),
-        make_deps(provider),
-        "test-session".into(),
-    )
+/// RAII guard that removes the test-specific streaming-journal directory when
+/// the test finishes (success, failure, or panic). Tests that run through the
+/// turn_runner create `~/.tron/system/database/journals/<session_id>/` and
+/// expect StreamingJournal::finalize_and_delete to remove it — but a panic
+/// between create and finalize leaves orphan directories. Combined with
+/// shared session IDs, orphan dirs caused inter-test races.
+///
+/// Every test that drives an agent binds a `JournalCleanup` for the lifetime
+/// of the test. Unique session IDs (see [`unique_test_session_id`]) mean each
+/// guard targets a disjoint path, so cleanup is independent across parallel
+/// tests.
+pub(super) struct JournalCleanup {
+    session_id: String,
+}
+
+impl JournalCleanup {
+    pub(super) fn new(session_id: &str) -> Self {
+        Self {
+            session_id: session_id.to_owned(),
+        }
+    }
+}
+
+impl Drop for JournalCleanup {
+    fn drop(&mut self) {
+        let dir = crate::core::paths::journals_dir().join(&self.session_id);
+        if dir.exists() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}
+
+/// Generate a unique test session ID. Uses UUIDv7 so IDs are monotonic and
+/// distinct across parallel tests, which is the precondition for the
+/// journal-directory race fix.
+pub(super) fn unique_test_session_id() -> String {
+    format!("test-{}", uuid::Uuid::now_v7())
+}
+
+fn make_agent(provider: MockProvider) -> (TronAgent, JournalCleanup) {
+    let sid = unique_test_session_id();
+    let cleanup = JournalCleanup::new(&sid);
+    let agent = TronAgent::new(AgentConfig::default(), make_deps(provider), sid);
+    (agent, cleanup)
 }
 
 #[tokio::test]
 async fn single_turn_text_only() {
-    let mut agent = make_agent(MockProvider::text_only("Hello!"));
+    let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello!"));
 
     let result = agent.run("Hi", RunContext::default()).await;
 
@@ -316,7 +354,7 @@ async fn multi_turn_with_tools() {
     ];
 
     let provider = MockProvider::multi_turn(vec![turn1_events, turn2_events]);
-    let mut agent = make_agent(provider);
+    let (mut agent, _journal) = make_agent(provider);
 
     // Register a mock tool so tool_not_found doesn't error
     agent.registry.register(Arc::new(StaticTool {
@@ -385,7 +423,7 @@ async fn max_turns_limit() {
     ];
 
     let provider = MockProvider::multi_turn(vec![turn1.clone(), turn1.clone(), turn1]);
-    let mut agent = make_agent(provider);
+    let (mut agent, _journal) = make_agent(provider);
     agent.config.max_turns = 2;
 
     // Register echo tool
@@ -406,11 +444,9 @@ async fn max_turns_limit() {
 
 #[tokio::test]
 async fn abort_mid_run() {
-    let mut agent = TronAgent::new(
-        AgentConfig::default(),
-        make_deps(SlowProvider),
-        "test-session".into(),
-    );
+    let sid = unique_test_session_id();
+    let _journal = JournalCleanup::new(&sid);
+    let mut agent = TronAgent::new(AgentConfig::default(), make_deps(SlowProvider), sid);
 
     // Spawn abort after a short delay
     let abort_agent = {
@@ -431,7 +467,7 @@ async fn abort_mid_run() {
 
 #[tokio::test]
 async fn concurrent_run_rejected() {
-    let mut agent = make_agent(MockProvider::text_only("Hi"));
+    let (mut agent, _journal) = make_agent(MockProvider::text_only("Hi"));
     agent.is_running.store(true, Ordering::SeqCst);
 
     let result = agent.run("Go", RunContext::default()).await;
@@ -443,10 +479,12 @@ async fn concurrent_run_rejected() {
 
 #[tokio::test]
 async fn is_running_reset_after_error() {
+    let sid = unique_test_session_id();
+    let _journal = JournalCleanup::new(&sid);
     let mut agent = TronAgent::new(
         AgentConfig::default(),
         make_deps(AuthErrorProvider { message: "expired" }),
-        "test-session".into(),
+        sid,
     );
 
     let result = agent.run("Hi", RunContext::default()).await;
@@ -460,34 +498,35 @@ async fn is_running_reset_after_error() {
 async fn run_result_includes_context_window_tokens() {
     // MockProvider.text_only returns input_tokens=10 — normalize computes
     // contextWindowTokens = input + cacheRead + cacheCreation = 10
-    let mut agent = make_agent(MockProvider::text_only("Hello!"));
+    let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello!"));
     let result = agent.run("Hi", RunContext::default()).await;
     assert_eq!(result.last_context_window_tokens, Some(10));
 }
 
 #[tokio::test]
 async fn run_result_context_window_tokens_none_without_usage() {
-    let mut agent = TronAgent::new(
-        AgentConfig::default(),
-        make_deps(NoUsageProvider),
-        "test-session".into(),
-    );
+    let sid = unique_test_session_id();
+    let _journal = JournalCleanup::new(&sid);
+    let mut agent = TronAgent::new(AgentConfig::default(), make_deps(NoUsageProvider), sid);
     let result = agent.run("Hi", RunContext::default()).await;
     assert!(result.last_context_window_tokens.is_none());
 }
 
 #[test]
 fn agent_state_tracking() {
-    let agent = make_agent(MockProvider::text_only("Hi"));
+    let (agent, _journal) = make_agent(MockProvider::text_only("Hi"));
     assert!(!agent.is_running());
     assert_eq!(agent.current_turn(), 0);
-    assert_eq!(agent.session_id(), "test-session");
+    assert!(
+        agent.session_id().starts_with("test-"),
+        "unique test session id should carry the 'test-' prefix"
+    );
     assert_eq!(agent.model(), "claude-opus-4-6");
 }
 
 #[tokio::test]
 async fn subscribe_receives_events() {
-    let mut agent = make_agent(MockProvider::text_only("Hello"));
+    let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello"));
     let mut rx = agent.subscribe();
 
     let _ = agent.run("Hi", RunContext::default()).await;
@@ -506,7 +545,7 @@ async fn subscribe_receives_events() {
 
 #[tokio::test]
 async fn empty_tool_list_works() {
-    let mut agent = make_agent(MockProvider::text_only("Hello"));
+    let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello"));
     assert!(agent.registry.is_empty());
 
     let result = agent.run("Hi", RunContext::default()).await;
@@ -516,12 +555,14 @@ async fn empty_tool_list_works() {
 
 #[tokio::test]
 async fn provider_error_on_stream() {
+    let sid = unique_test_session_id();
+    let _journal = JournalCleanup::new(&sid);
     let mut agent = TronAgent::new(
         AgentConfig::default(),
         make_deps(AuthErrorProvider {
             message: "Token expired",
         }),
-        "test-session".into(),
+        sid,
     );
 
     let result = agent.run("Hi", RunContext::default()).await;
@@ -535,7 +576,7 @@ async fn provider_error_on_stream() {
 
 #[test]
 fn set_abort_token_replaces_default() {
-    let mut agent = make_agent(MockProvider::text_only("Hi"));
+    let (mut agent, _journal) = make_agent(MockProvider::text_only("Hi"));
     let token = CancellationToken::new();
     agent.set_abort_token(token.clone());
     assert!(!token.is_cancelled());
@@ -546,11 +587,9 @@ fn set_abort_token_replaces_default() {
 
 #[tokio::test]
 async fn external_abort_token_cancels_run() {
-    let mut agent = TronAgent::new(
-        AgentConfig::default(),
-        make_deps(SlowProvider),
-        "test-session".into(),
-    );
+    let sid = unique_test_session_id();
+    let _journal = JournalCleanup::new(&sid);
+    let mut agent = TronAgent::new(AgentConfig::default(), make_deps(SlowProvider), sid);
 
     let token = CancellationToken::new();
     agent.set_abort_token(token.clone());
@@ -567,7 +606,7 @@ async fn external_abort_token_cancels_run() {
 
 #[tokio::test]
 async fn external_token_not_reset_between_runs() {
-    let mut agent = make_agent(MockProvider::text_only("Hello"));
+    let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello"));
     let token = CancellationToken::new();
     agent.set_abort_token(token.clone());
 
@@ -595,7 +634,7 @@ fn make_event_store() -> Arc<crate::events::EventStore> {
 
 #[tokio::test]
 async fn agent_run_without_persister() {
-    let mut agent = make_agent(MockProvider::text_only("Hello"));
+    let (mut agent, _journal) = make_agent(MockProvider::text_only("Hello"));
     let result = agent.run("Hi", RunContext::default()).await;
     assert_eq!(result.stop_reason, StopReason::EndTurn);
     assert_eq!(result.turns_executed, 1);
@@ -982,7 +1021,10 @@ fn make_end_turn_events() -> Vec<StreamEvent> {
     ]
 }
 
-fn make_agent_with_tools(provider: MockProvider, tools: Vec<Arc<dyn TronTool>>) -> TronAgent {
+fn make_agent_with_tools(
+    provider: MockProvider,
+    tools: Vec<Arc<dyn TronTool>>,
+) -> (TronAgent, JournalCleanup) {
     let mut deps = AgentDeps {
         provider: Arc::new(provider),
         registry: ToolRegistry::new(),
@@ -998,7 +1040,10 @@ fn make_agent_with_tools(provider: MockProvider, tools: Vec<Arc<dyn TronTool>>) 
     for tool in tools {
         deps.registry.register(tool);
     }
-    TronAgent::new(AgentConfig::default(), deps, "test-session".into())
+    let sid = unique_test_session_id();
+    let cleanup = JournalCleanup::new(&sid);
+    let agent = TronAgent::new(AgentConfig::default(), deps, sid);
+    (agent, cleanup)
 }
 
 #[tokio::test]
@@ -1006,7 +1051,7 @@ async fn parallel_tools_execute_concurrently() {
     let turn1 =
         make_tool_call_events(&[("tc-1", "slow_a"), ("tc-2", "slow_b"), ("tc-3", "slow_c")]);
     let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
-    let mut agent = make_agent_with_tools(
+    let (mut agent, _journal) = make_agent_with_tools(
         provider,
         vec![
             Arc::new(SlowTool {
@@ -1046,7 +1091,7 @@ async fn parallel_results_in_original_order() {
     let turn1 =
         make_tool_call_events(&[("tc-a", "slow_a"), ("tc-b", "slow_b"), ("tc-c", "slow_c")]);
     let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
-    let mut agent = make_agent_with_tools(
+    let (mut agent, _journal) = make_agent_with_tools(
         provider,
         vec![
             Arc::new(SlowTool {
@@ -1175,7 +1220,7 @@ async fn cancellation_during_parallel_batch() {
     let turn1 =
         make_tool_call_events(&[("tc-1", "slow_a"), ("tc-2", "slow_b"), ("tc-3", "slow_c")]);
     let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
-    let mut agent = make_agent_with_tools(
+    let (mut agent, _journal) = make_agent_with_tools(
         provider,
         vec![
             Arc::new(SlowTool {
@@ -1221,7 +1266,7 @@ async fn stops_turn_in_parallel_batch() {
     let turn1 = make_tool_call_events(&[("tc-1", "slow_a"), ("tc-2", "stop_tool")]);
     // No turn2 needed — stop_tool should end the run
     let provider = MockProvider::multi_turn(vec![turn1]);
-    let mut agent = make_agent_with_tools(
+    let (mut agent, _journal) = make_agent_with_tools(
         provider,
         vec![
             Arc::new(SlowTool {
@@ -1263,7 +1308,7 @@ async fn serialized_tools_execute_sequentially() {
         ("tc-3", "parallel"),
     ]);
     let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
-    let mut agent = make_agent_with_tools(
+    let (mut agent, _journal) = make_agent_with_tools(
         provider,
         vec![
             Arc::new(SerializedSlowTool {
@@ -1326,7 +1371,7 @@ async fn single_tool_unchanged_behavior() {
     // Regression: single tool call should work identically
     let turn1 = make_tool_call_events(&[("tc-1", "slow_a")]);
     let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
-    let mut agent = make_agent_with_tools(
+    let (mut agent, _journal) = make_agent_with_tools(
         provider,
         vec![Arc::new(SlowTool {
             tool_name: "slow_a",
