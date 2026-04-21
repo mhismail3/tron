@@ -44,19 +44,18 @@ struct AskUserQuestionSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 12) {
-                        Button {
-                            dismiss()
-                            onDismiss()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                                .foregroundStyle(.tronTextMuted)
-                        }
-
-                        if questions.count > 1 {
-                            pageIndicators
-                        }
+                    Button {
+                        dismiss()
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(.tronTextMuted)
+                    }
+                }
+                if questions.count > 1 {
+                    ToolbarItem(placement: .topBarLeading) {
+                        pageIndicators
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -272,35 +271,38 @@ struct QuestionCardView: View {
                 }
             }
 
-            // Other option
-            if question.allowOther == true {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Other")
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextMuted)
+            // Other option - always available
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Other")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextMuted)
 
-                    TextField(question.otherPlaceholder ?? "Enter your answer...", text: $otherText)
-                        .textFieldStyle(.plain)
-                        .font(TronTypography.messageBody)
-                        .foregroundStyle(.tronTextPrimary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .background {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(.clear)
-                                .glassEffect(
-                                    .regular.tint(accentColor.opacity(otherText.isEmpty ? 0.06 : 0.15)),
-                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                )
-                        }
-                        .disabled(readOnly)
-                        .onChange(of: otherText) { _, newValue in
-                            guard !readOnly else { return }
-                            answer.otherValue = newValue.isEmpty ? nil : newValue
-                        }
-                }
-                .padding(.top, 8)
+                TextField(
+                    question.otherPlaceholder ?? "Something else\u{2026}",
+                    text: $otherText,
+                    axis: .vertical
+                )
+                    .textFieldStyle(.plain)
+                    .font(TronTypography.messageBody)
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1...8)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(
+                                .regular.tint(accentColor.opacity(otherText.isEmpty ? 0.06 : 0.15)),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            )
+                    }
+                    .disabled(readOnly)
+                    .onChange(of: otherText) { _, newValue in
+                        guard !readOnly else { return }
+                        answer.otherValue = newValue.isEmpty ? nil : newValue
+                    }
             }
+            .padding(.top, 8)
         }
         .onAppear {
             otherText = answer.otherValue ?? ""
