@@ -439,8 +439,11 @@ impl SubagentSpawner for SubagentManager {
             SpawnType::ToolAgent,
         );
 
-        // 3. Emit SubagentSpawned on broadcast (routed to parent session for iOS)
-        let _ = self.broadcast.emit(TronEvent::SubagentSpawned {
+        // C5 invariant: persist subagent.spawned to the parent session BEFORE
+        // broadcasting SubagentSpawned. If persist fails, iOS would render a
+        // "subagent spawned" event that the parent's history doesn't record;
+        // reconstruction on reconnect would show no trace of the spawn.
+        let broadcast_event = TronEvent::SubagentSpawned {
             base: BaseEvent::now(&parent_sid),
             subagent_session_id: child_session_id.clone(),
             task: task.clone(),
@@ -451,11 +454,13 @@ impl SubagentSpawner for SubagentManager {
             blocking_timeout_ms: config.blocking_timeout_ms,
             working_directory: Some(config.working_directory.clone()),
             spawn_type: Some(SpawnType::ToolAgent.as_str().to_owned()),
-        });
+        };
 
-        // Persist subagent.spawned to parent session (iOS reconstructs from this on resume)
-        if !parent_sid.is_empty() {
-            let _ = self.event_store.append(&crate::events::AppendOptions {
+        if parent_sid.is_empty() {
+            // No parent session → broadcast only; nothing to persist against.
+            let _ = self.broadcast.emit(broadcast_event);
+        } else {
+            let persist_result = self.event_store.append(&crate::events::AppendOptions {
                 session_id: &parent_sid,
                 event_type: EventType::SubagentSpawned,
                 payload: json!({
@@ -472,6 +477,16 @@ impl SubagentSpawner for SubagentManager {
                 parent_id: None,
                 sequence: None,
             });
+            if let Err(error) = persist_result {
+                tracing::error!(
+                    parent_session = %parent_sid,
+                    child_session = %child_session_id,
+                    error = %error,
+                    "failed to persist subagent.spawned event; skipping broadcast"
+                );
+            } else {
+                let _ = self.broadcast.emit(broadcast_event);
+            }
         }
 
         execution::spawn_tool_agent_task(execution::ToolAgentTaskLaunch {
