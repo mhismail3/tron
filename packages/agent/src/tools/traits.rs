@@ -291,6 +291,14 @@ pub struct NotifyResult {
     pub success_count: u32,
     /// Total number of devices the notification was sent to.
     pub total_count: u32,
+    /// M19: a non-fatal user/agent-visible caveat that the delivery path
+    /// wants to surface without erroring out. Set by the stub delegate
+    /// when push service is not configured — `success` stays `false`
+    /// (nothing was actually delivered) but the tool result flags the
+    /// condition so the agent can tell the user "push isn't set up".
+    /// Real delegates leave this `None` by design.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

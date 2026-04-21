@@ -13,4 +13,4 @@ pub mod stubs;
 pub use filesystem::RealFileSystem;
 pub use http::ReqwestHttpClient;
 pub use process::TokioProcessRunner;
-pub use stubs::{StubNotifyDelegate, StubSubagentSpawner};
+pub use stubs::{STUB_NOTIFY_WARNING, StubNotifyDelegate, StubSubagentSpawner};

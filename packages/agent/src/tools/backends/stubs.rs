@@ -40,8 +40,21 @@ impl SubagentSpawner for StubSubagentSpawner {
 
 // ─── NotifyDelegate ──────────────────────────────────────────────────────────
 
-/// Stub notification delegate — APNS push isn't wired yet.
+/// Stub notification delegate — no push service configured on this server.
+///
+/// M19: returns a non-error `NotifyResult` with `success: false` and a
+/// `warning` field explaining the state. Erroring the tool blocks the
+/// agent's flow when a user simply hasn't wired push yet; a warning
+/// instead lets the agent continue and tell the user "the notification
+/// was requested but push isn't configured — here's what to set up".
 pub struct StubNotifyDelegate;
+
+/// Message surfaced to the agent when a `NotifyApp` call hits the stub.
+/// Extracted as a constant so tests can assert on the exact wording.
+pub const STUB_NOTIFY_WARNING: &str =
+    "Push service is not configured on this server. The notification \
+     was not delivered to any device. Configure APNs (direct or via \
+     relay) in the server settings to enable push notifications.";
 
 #[async_trait]
 impl NotifyDelegate for StubNotifyDelegate {
@@ -49,7 +62,13 @@ impl NotifyDelegate for StubNotifyDelegate {
         &self,
         _notification: &Notification,
     ) -> Result<NotifyResult, ToolError> {
-        Err(not_available("Push notifications"))
+        Ok(NotifyResult {
+            success: false,
+            message: None,
+            success_count: 0,
+            total_count: 0,
+            warning: Some(STUB_NOTIFY_WARNING.to_string()),
+        })
     }
 }
 
@@ -83,7 +102,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stub_notify_delegate_returns_error() {
+    async fn stub_notify_delegate_returns_warning_not_error() {
+        // M19: the stub must NOT error (erroring blocks the agent's
+        // flow on an unconfigured-push setup). It must return a
+        // well-formed NotifyResult whose `warning` field explains the
+        // state so the NotifyApp tool can surface it.
         let delegate = StubNotifyDelegate;
         let notification = Notification {
             title: "Test".into(),
@@ -93,8 +116,30 @@ mod tests {
             data: None,
             sheet_content: None,
         };
-        let err = delegate.send_notification(&notification).await;
-        assert!(err.is_err());
+        let result = delegate.send_notification(&notification).await.unwrap();
+        assert!(!result.success, "nothing was actually delivered");
+        assert_eq!(result.success_count, 0);
+        assert_eq!(result.total_count, 0);
+        let warning = result.warning.expect("stub MUST set warning");
+        assert_eq!(warning, STUB_NOTIFY_WARNING);
+    }
+
+    #[tokio::test]
+    async fn stub_warning_mentions_push_service_configuration() {
+        // The exact wording matters — the agent relays it to the user,
+        // so "configure APNs" and "relay" need to be in the text.
+        assert!(
+            STUB_NOTIFY_WARNING.to_lowercase().contains("push"),
+            "warning must reference 'push'"
+        );
+        assert!(
+            STUB_NOTIFY_WARNING.to_lowercase().contains("apn"),
+            "warning must reference APNs so user knows what to configure"
+        );
+        assert!(
+            STUB_NOTIFY_WARNING.to_lowercase().contains("relay"),
+            "warning must mention the relay as an alternative"
+        );
     }
 
 }

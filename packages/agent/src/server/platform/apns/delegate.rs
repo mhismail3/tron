@@ -54,6 +54,7 @@ impl NotifyDelegate for ApnsNotifyDelegate {
                 message: None,
                 success_count: 0,
                 total_count: 0,
+                warning: None,
             });
         }
 

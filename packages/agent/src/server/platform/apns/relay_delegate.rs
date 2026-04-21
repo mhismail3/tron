@@ -54,6 +54,7 @@ impl NotifyDelegate for RelayNotifyDelegate {
                 message: None,
                 success_count: 0,
                 total_count: 0,
+                warning: None,
             });
         }
 

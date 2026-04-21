@@ -253,6 +253,8 @@ pub(crate) fn process_send_results(
         message: Some(message),
         success_count: u32::try_from(success_count).unwrap_or(u32::MAX),
         total_count: u32::try_from(total).unwrap_or(u32::MAX),
+        // Real delegates (direct APNs + relay) don't stub — no warning.
+        warning: None,
     }
 }
 

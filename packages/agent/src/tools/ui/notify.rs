@@ -110,7 +110,15 @@ impl TronTool for NotifyAppTool {
 
         match self.delegate.send_notification(&notification).await {
             Ok(result) => {
-                let msg = if result.success {
+                // M19: a `warning` on the result means the delivery path
+                // took a non-fatal stub / config-missing branch. Surface
+                // the warning prominently in the tool text so the agent
+                // tells the user "your notification was requested but
+                // could not be delivered because…" instead of silently
+                // assuming it went out.
+                let msg = if let Some(w) = result.warning.as_deref() {
+                    format!("Warning: {w}")
+                } else if result.success {
                     result.message.as_deref().map_or_else(
                         || "Notification sent successfully".to_string(),
                         String::from,
@@ -121,19 +129,25 @@ impl TronTool for NotifyAppTool {
                         |m| format!("Notification delivery failed. {m}"),
                     )
                 };
+                let mut details = json!({
+                    "title": title,
+                    "body": body,
+                    "priority": priority,
+                    "success": result.success,
+                    "successCount": result.success_count,
+                    "totalCount": result.total_count,
+                    "failureCount": result.total_count.saturating_sub(result.success_count),
+                });
+                if let Some(ref w) = result.warning
+                    && let Some(obj) = details.as_object_mut()
+                {
+                    let _ = obj.insert("warning".into(), Value::String(w.clone()));
+                }
                 Ok(TronToolResult {
                     content: ToolResultBody::Blocks(vec![
                         crate::core::content::ToolResultContent::text(&msg),
                     ]),
-                    details: Some(json!({
-                        "title": title,
-                        "body": body,
-                        "priority": priority,
-                        "success": result.success,
-                        "successCount": result.success_count,
-                        "totalCount": result.total_count,
-                        "failureCount": result.total_count.saturating_sub(result.success_count),
-                    })),
+                    details: Some(details),
                     is_error: None,
                     stop_turn: None,
                 })
@@ -164,6 +178,7 @@ mod tests {
                     message: None,
                     success_count: 1,
                     total_count: 1,
+                    warning: None,
                 },
                 last_notification: Mutex::new(None),
             }
@@ -176,6 +191,20 @@ mod tests {
                     message: None,
                     success_count,
                     total_count,
+                    warning: None,
+                },
+                last_notification: Mutex::new(None),
+            }
+        }
+
+        fn with_warning(warning: &str) -> Self {
+            Self {
+                result: NotifyResult {
+                    success: false,
+                    message: None,
+                    success_count: 0,
+                    total_count: 0,
+                    warning: Some(warning.to_string()),
                 },
                 last_notification: Mutex::new(None),
             }
@@ -407,5 +436,115 @@ mod tests {
         assert_eq!(d["successCount"], 7);
         assert_eq!(d["failureCount"], 3);
         assert_eq!(d["totalCount"], 10);
+    }
+
+    // ── M19: warning propagation from stub delegate ──────────────────
+
+    #[tokio::test]
+    async fn warning_surfaces_in_tool_text() {
+        // When the delegate returns a warning, the tool's text result
+        // MUST start with "Warning: " so the agent sees the caveat up
+        // front. This is how the agent knows to tell the user "push
+        // wasn't configured" instead of claiming delivery.
+        let mock = Arc::new(MockNotify::with_warning("Push not configured"));
+        let tool = NotifyAppTool::new(mock);
+        let r = tool
+            .execute(json!({"title": "t", "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none(), "warning must not mark the tool as errored");
+        assert!(
+            extract_text(&r).starts_with("Warning: "),
+            "warning must be surfaced with a prefix; got: {}",
+            extract_text(&r)
+        );
+        assert!(
+            extract_text(&r).contains("Push not configured"),
+            "warning body must appear verbatim"
+        );
+    }
+
+    #[tokio::test]
+    async fn warning_appears_in_details_json() {
+        let mock = Arc::new(MockNotify::with_warning("stub mode"));
+        let tool = NotifyAppTool::new(mock);
+        let r = tool
+            .execute(json!({"title": "t", "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
+        let d = r.details.unwrap();
+        assert_eq!(d["warning"], "stub mode");
+        assert_eq!(
+            d["success"], false,
+            "warning implies no delivery — details.success must be false"
+        );
+        assert_eq!(d["successCount"], 0);
+        assert_eq!(d["totalCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn warning_takes_precedence_over_success_text() {
+        // If a delegate somehow returns success=true WITH a warning,
+        // the warning still wins in the tool text — the warning is
+        // the agent-facing signal. success=true is unusual with
+        // warnings but the contract must be defined.
+        struct WeirdMock;
+        #[async_trait]
+        impl NotifyDelegate for WeirdMock {
+            async fn send_notification(
+                &self,
+                _n: &Notification,
+            ) -> Result<NotifyResult, ToolError> {
+                Ok(NotifyResult {
+                    success: true,
+                    message: Some("one device ok".into()),
+                    success_count: 1,
+                    total_count: 1,
+                    warning: Some("but also: queue overflowed".into()),
+                })
+            }
+        }
+        let tool = NotifyAppTool::new(Arc::new(WeirdMock));
+        let r = tool
+            .execute(json!({"title": "t", "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(extract_text(&r).starts_with("Warning: "));
+        assert!(extract_text(&r).contains("queue overflowed"));
+    }
+
+    #[tokio::test]
+    async fn no_warning_preserves_legacy_success_text() {
+        // Regression: adding the warning field must not change the
+        // success text for the normal APNs-delivered path.
+        let mock = Arc::new(MockNotify::success());
+        let tool = NotifyAppTool::new(mock);
+        let r = tool
+            .execute(json!({"title": "t", "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(extract_text(&r).contains("successfully"));
+        let d = r.details.unwrap();
+        assert!(d.get("warning").is_none(), "no warning field when delegate didn't set one");
+    }
+
+    #[tokio::test]
+    async fn stub_delegate_integration_produces_warning_result() {
+        // Full stack: ship the real StubNotifyDelegate (as used by
+        // tool_factory when push_service is None) and assert the tool
+        // result carries the stub's warning.
+        use crate::tools::backends::{STUB_NOTIFY_WARNING, StubNotifyDelegate};
+        let tool = NotifyAppTool::new(Arc::new(StubNotifyDelegate));
+        let r = tool
+            .execute(json!({"title": "t", "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+        assert!(extract_text(&r).starts_with("Warning: "));
+        assert!(extract_text(&r).contains(STUB_NOTIFY_WARNING));
+        let d = r.details.unwrap();
+        assert_eq!(d["warning"], STUB_NOTIFY_WARNING);
+        assert_eq!(d["success"], false);
+        assert_eq!(d["totalCount"], 0);
     }
 }
