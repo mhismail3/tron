@@ -16,8 +16,19 @@ enum ParsedEventV2: @unchecked Sendable {
     /// - type: The event type string (e.g., "agent.text_delta")
     /// - event: The parsed event data (type-erased wrapper)
     /// - sessionId: Extracted session ID for filtering
+    /// - sequence: Event-log sequence number from the server. Per-session,
+    ///   monotonically increasing. `nil` for transient events that the
+    ///   server doesn't persist (e.g. some lifecycle signals). Used by
+    ///   ChatViewModel.dispatchEvent for the C6 post-reconstruction
+    ///   dedup filter (event.sequence <= sequenceHighWaterMark -> drop).
     /// - transform: Lazy transformation closure to get EventResult
-    case plugin(type: String, event: ParsedEventData, sessionId: String?, transform: @Sendable () -> (any EventResult)?)
+    case plugin(
+        type: String,
+        event: ParsedEventData,
+        sessionId: String?,
+        sequence: Int64?,
+        transform: @Sendable () -> (any EventResult)?
+    )
 
     /// Unknown event type (not registered in EventRegistry).
     case unknown(String)
@@ -27,7 +38,7 @@ enum ParsedEventV2: @unchecked Sendable {
     /// The event type string.
     var eventType: String {
         switch self {
-        case .plugin(let type, _, _, _): return type
+        case .plugin(let type, _, _, _, _): return type
         case .unknown(let type): return type
         }
     }
@@ -36,7 +47,16 @@ enum ParsedEventV2: @unchecked Sendable {
     /// Returns nil for events that don't have a sessionId (e.g., connected, unknown).
     var sessionId: String? {
         switch self {
-        case .plugin(_, _, let sessionId, _): return sessionId
+        case .plugin(_, _, let sessionId, _, _): return sessionId
+        case .unknown: return nil
+        }
+    }
+
+    /// Event-log sequence number, if the event carries one. See the
+    /// `.plugin` variant's `sequence` field for the semantics.
+    var sequence: Int64? {
+        switch self {
+        case .plugin(_, _, _, let sequence, _): return sequence
         case .unknown: return nil
         }
     }
@@ -52,7 +72,7 @@ enum ParsedEventV2: @unchecked Sendable {
     /// Get the transformed result, if available.
     func getResult() -> (any EventResult)? {
         switch self {
-        case .plugin(_, _, _, let transform): return transform()
+        case .plugin(_, _, _, _, let transform): return transform()
         case .unknown: return nil
         }
     }
@@ -60,7 +80,7 @@ enum ParsedEventV2: @unchecked Sendable {
     /// Get the raw event data (type-erased).
     func getEvent<T>() -> T? {
         switch self {
-        case .plugin(_, let event, _, _): return event.value as? T
+        case .plugin(_, let event, _, _, _): return event.value as? T
         case .unknown: return nil
         }
     }

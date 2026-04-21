@@ -34,7 +34,7 @@ final class ServerRestartingPluginTests: XCTestCase {
         let result = EventRegistry.shared.parse(type: "server.restarting", data: json)
         XCTAssertNotNil(result)
 
-        if case .plugin(let type, _, let sessionId, let transform) = result {
+        if case .plugin(let type, _, let sessionId, _, let transform) = result {
             XCTAssertEqual(type, "server.restarting")
             XCTAssertNil(sessionId, "server.restarting is a global event with no sessionId")
 
@@ -60,7 +60,7 @@ final class ServerRestartingPluginTests: XCTestCase {
         let result = EventRegistry.shared.parse(type: "server.restarting", data: json)
         XCTAssertNotNil(result)
 
-        if case .plugin(_, _, _, let transform) = result {
+        if case .plugin(_, _, _, _, let transform) = result {
             let eventResult = transform() as? ServerRestartingPlugin.Result
             XCTAssertNotNil(eventResult)
             XCTAssertEqual(eventResult?.reason, "deploy")
@@ -86,7 +86,7 @@ final class ServerRestartingPluginTests: XCTestCase {
 
         let result = EventRegistry.shared.parse(type: "server.restarting", data: json)
 
-        if case .plugin(_, _, _, let transform) = result {
+        if case .plugin(_, _, _, _, let transform) = result {
             let eventResult = transform() as? ServerRestartingPlugin.Result
             XCTAssertEqual(eventResult?.reason, "manual")
             XCTAssertEqual(eventResult?.commit, "unknown")

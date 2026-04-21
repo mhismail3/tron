@@ -60,7 +60,7 @@ final class EventPluginTests: XCTestCase {
         let result = EventRegistry.shared.parse(type: "agent.text_delta", data: json)
         XCTAssertNotNil(result)
 
-        if case .plugin(let type, _, let sessionId, let transform) = result {
+        if case .plugin(let type, _, let sessionId, _, let transform) = result {
             XCTAssertEqual(type, "agent.text_delta")
             XCTAssertEqual(sessionId, "session-123")
 
@@ -180,7 +180,7 @@ final class EventPluginTests: XCTestCase {
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.sessionId, "sess-123")
 
-        if case .plugin(let type, _, _, let transform) = result {
+        if case .plugin(let type, _, _, _, let transform) = result {
             XCTAssertEqual(type, "session.archived")
             let eventResult = transform() as? SessionArchivedPlugin.Result
             XCTAssertEqual(eventResult?.sessionId, "sess-123")
@@ -200,7 +200,7 @@ final class EventPluginTests: XCTestCase {
         """.data(using: .utf8)!
 
         let result = EventRegistry.shared.parse(type: "session.archived", data: json)
-        if case .plugin(_, _, _, let transform) = result {
+        if case .plugin(_, _, _, _, let transform) = result {
             let eventResult = transform() as? SessionArchivedPlugin.Result
             XCTAssertEqual(eventResult?.sessionId, "sess-456")
         } else {
@@ -222,7 +222,7 @@ final class EventPluginTests: XCTestCase {
         let result = EventRegistry.shared.parse(type: "session.unarchived", data: json)
         XCTAssertNotNil(result)
 
-        if case .plugin(let type, _, _, let transform) = result {
+        if case .plugin(let type, _, _, _, let transform) = result {
             XCTAssertEqual(type, "session.unarchived")
             let eventResult = transform() as? SessionUnarchivedPlugin.Result
             XCTAssertEqual(eventResult?.sessionId, "sess-789")

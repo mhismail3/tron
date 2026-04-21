@@ -343,6 +343,7 @@ final class WorktreeStatusCacheTests: XCTestCase {
             type: ServerRestartingPlugin.eventType,
             event: ParsedEventData(value: ()),
             sessionId: nil,
+            sequence: nil,
             transform: { r }
         )
 
@@ -366,6 +367,7 @@ final class WorktreeStatusCacheTests: XCTestCase {
             type: type,
             event: ParsedEventData(value: ()),
             sessionId: sessionId,
+            sequence: nil,
             transform: { result }
         )
     }

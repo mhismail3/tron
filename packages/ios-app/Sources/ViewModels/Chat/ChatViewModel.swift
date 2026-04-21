@@ -481,13 +481,34 @@ final class ChatViewModel {
         dispatchEvent(event)
     }
 
-    /// Dispatch a single event to the appropriate handler
+    /// Dispatch a single event to the appropriate handler.
+    ///
+    /// C6 sequence filter: if the event carries a per-session event-log
+    /// sequence, drop it when `sequence <= sequenceHighWaterMark` so an
+    /// already-processed event (from a late reconnect, a buffered replay,
+    /// or a reordered broadcast) does not get dispatched twice.
+    /// Events without a sequence bypass the filter — they are either
+    /// unpersisted lifecycle signals or the `.unknown` placeholder.
     func dispatchEvent(_ event: ParsedEventV2) {
+        if let seq = event.sequence, seq <= sequenceHighWaterMark {
+            logger.debug(
+                "[DEDUP] dropping \(event.eventType) seq=\(seq) <= watermark=\(sequenceHighWaterMark)",
+                category: .events
+            )
+            return
+        }
+
         switch event {
-        case .plugin(let type, _, _, let transform):
+        case .plugin(let type, _, _, _, let transform):
             handlePluginEvent(type: type, transform: transform)
         case .unknown(let type):
             logger.debug("Unknown event type: \(type)", category: .events)
+        }
+
+        // Advance the watermark AFTER successful dispatch so a failure in
+        // handlePluginEvent doesn't prematurely skip a retry.
+        if let seq = event.sequence, seq > sequenceHighWaterMark {
+            sequenceHighWaterMark = seq
         }
     }
 

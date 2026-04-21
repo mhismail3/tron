@@ -11,7 +11,7 @@ import Foundation
 /// // When parsing events
 /// if let event = EventRegistry.shared.parse(type: "agent.text_delta", data: data) {
 ///     switch event {
-///     case .plugin(let type, _, _, let transform):
+///     case .plugin(let type, _, _, _, let transform):
 ///         // Handle plugin event
 ///     case .unknown(let type):
 ///         // Unknown event type
