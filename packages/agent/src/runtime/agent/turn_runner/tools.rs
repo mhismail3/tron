@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use tracing::{error, warn};
 use crate::core::events::ActivatedRuleInfo;
 use crate::core::messages::{Message, ToolResultMessageContent};
 use crate::tools::registry::ToolRegistry;
@@ -56,19 +56,18 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
         return ToolPhaseOutcome::default();
     }
 
-    persistence::emit_tool_use_batch(
-        params.emitter,
-        params.session_id,
-        &params.stream_result.tool_calls,
-        params.sequence_counter,
-    );
     let working_dir = params.context_manager.get_working_directory().to_owned();
 
+    // C5 invariant: persist tool.call events BEFORE broadcasting ToolUseBatch
+    // so iOS subscribers cannot see a batch of tool calls that are missing
+    // from session history. Synchronous append surfaces any DB failure here
+    // instead of deferring it to a background warning.
+    let mut persist_failed = false;
     for tool_call in &params.stream_result.tool_calls {
         if let Some(persister) = params.persister {
             let seq = params.sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
             if let Err(error) = persister
-                .append_background_with_sequence(
+                .append_with_sequence(
                     params.session_id,
                     EventType::ToolCall,
                     json!({
@@ -86,11 +85,27 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     turn = params.turn,
                     tool_call_id = %tool_call.id,
                     error = %error,
-                    "failed to queue tool-call event"
+                    "failed to persist tool-call event; skipping broadcast + execution"
                 );
+                persist_failed = true;
+                break;
             }
         }
     }
+
+    if persist_failed {
+        // Don't execute tools whose call events failed to persist; iOS
+        // would see no history of them, and the agent would see results
+        // for calls that don't exist. Surface the failure upward.
+        return ToolPhaseOutcome::default();
+    }
+
+    persistence::emit_tool_use_batch(
+        params.emitter,
+        params.session_id,
+        &params.stream_result.tool_calls,
+        params.sequence_counter,
+    );
 
     let waves = build_execution_waves(&params.stream_result.tool_calls, params.registry);
     let mut results: Vec<Option<ToolExecutionResult>> =
@@ -130,14 +145,26 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     )
                     .await;
 
-                    // Persist tool.result immediately so the DB reflects
-                    // completion even while other parallel tools are still running.
+                    // Persist tool.result synchronously (await the DB write)
+                    // so failures surface immediately and the agent sees a
+                    // consistent history when it resumes after a crash. A
+                    // background fire-and-forget here could silently drop
+                    // the result under pressure or on DB error, leaving iOS
+                    // with a live-stream ToolExecutionEnd event that has no
+                    // matching row in session history.
+                    //
+                    // H6 note: the broadcast-vs-persist ordering (broadcast
+                    // is inside tool_executor, persist is here) is NOT
+                    // fully inverted yet — that would require plumbing the
+                    // persister into tool_executor. Switching to sync
+                    // persist is the partial fix that at least makes the
+                    // failure visible.
                     if let Some(persister) = params.persister {
                         let result_text = extract_result_text(&result);
                         let is_error = result.result.is_error.unwrap_or(false);
                         let seq = params.sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                         if let Err(error) = persister
-                            .append_background_with_sequence(
+                            .append_with_sequence(
                                 params.session_id,
                                 EventType::ToolResult,
                                 json!({
@@ -152,12 +179,12 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                             )
                             .await
                         {
-                            warn!(
+                            error!(
                                 params.session_id,
                                 turn = params.turn,
                                 tool_call_id = %tool_call.id,
                                 error = %error,
-                                "failed to queue tool-result event"
+                                "failed to persist tool-result event"
                             );
                         }
                     }
