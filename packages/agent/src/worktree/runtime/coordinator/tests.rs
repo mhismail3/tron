@@ -2006,6 +2006,80 @@ async fn concurrent_acquire_different_sessions_not_serialized() {
     assert_eq!(coord.list_active().len(), 3);
 }
 
+/// After an acquire that RETURNS AN ERROR, the per-session lock must
+/// still be released (RAII on `_guard`). Otherwise one failed acquire
+/// would stall every subsequent prompt for that session.
+///
+/// We can't easily inject a failure into the real flow, but we can
+/// verify the lock-release invariant at the primitive level: acquire
+/// the same mutex twice back-to-back and confirm it returns fast.
+#[tokio::test]
+async fn session_acquire_mutex_releases_on_scope_exit() {
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    // Simulate an "acquire attempt" that early-returns (e.g. error path):
+    // take the lock inside a scope and drop it, then confirm a second
+    // acquire for the same session proceeds immediately.
+    {
+        let lock = coord.session_acquire_mutex("stuck-sess");
+        let _guard = lock.lock().await;
+        // guard dropped at end of scope
+    }
+
+    let start = std::time::Instant::now();
+    let lock2 = coord.session_acquire_mutex("stuck-sess");
+    let _guard2 = lock2.lock().await;
+    assert!(
+        start.elapsed() < std::time::Duration::from_millis(100),
+        "second acquire must not wait — prior lock RAII-released; elapsed={:?}",
+        start.elapsed()
+    );
+}
+
+/// After an acquire that RETURNED EmptyRepository (a real error path
+/// through the function), the lock must be available for the next
+/// caller. This exercises the full `maybe_acquire_with_override` flow.
+#[tokio::test]
+async fn error_path_does_not_leak_session_lock() {
+    let dir = tempdir().unwrap();
+    // git init with no commits → EmptyRepository deferral.
+    run_cmd(dir.path(), &["git", "init"]).await;
+
+    let store = make_store();
+    let session = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("err-sess"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let sid = session.session.id;
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    // First call: returns Deferred(EmptyRepository). We care about the
+    // lock being released afterward, not the result itself.
+    let _ = coord
+        .maybe_acquire_with_override(&sid, dir.path(), Some(true))
+        .await
+        .unwrap();
+
+    // Second call for the same session must not block on a stuck lock.
+    let start = std::time::Instant::now();
+    let _ = coord
+        .maybe_acquire_with_override(&sid, dir.path(), Some(true))
+        .await
+        .unwrap();
+    assert!(
+        start.elapsed() < std::time::Duration::from_millis(500),
+        "error-path must release the per-session lock; elapsed={:?}",
+        start.elapsed()
+    );
+}
+
 /// After acquire returns, the per-session lock must be released so a
 /// subsequent acquire for the same session can proceed. (The lock is a
 /// short-lived coordination primitive, NOT a long-held resource.)

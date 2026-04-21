@@ -239,20 +239,24 @@ impl ClientConnection {
     /// Send a text message to the client.
     ///
     /// Returns whether the message was queued, the queue was closed, or the
-    /// connection is overloaded beyond its byte budget. On `Enqueued`, a
-    /// fresh broadcast sequence is allocated and attached to the message;
-    /// drops / closes do NOT advance the counter, so the client's gap
-    /// detection is based purely on what actually left the server.
+    /// connection is overloaded beyond its byte budget.
+    ///
+    /// Sequence semantics:
+    /// - `Overloaded`: no seq is allocated; the client's gap detection
+    ///   does not see a phantom gap for drops the server proactively
+    ///   refused on the byte budget.
+    /// - `Enqueued`: a fresh per-connection seq is attached.
+    /// - `Closed`: the channel is gone (receiver dropped), so the
+    ///   connection is terminal. We may have consumed a seq — that's
+    ///   acceptable because the only client that could observe the gap
+    ///   is this one, and it will never receive another frame on this
+    ///   connection.
     pub fn send(&self, message: Arc<String>) -> SendOutcome {
         let size_bytes = message.len();
         if !self.reserve_bytes(size_bytes) {
             return SendOutcome::Overloaded(self.record_drop());
         }
 
-        // Allocate the seq BEFORE the send so the number that ultimately
-        // reaches the client is uniquely tied to this send attempt. If the
-        // send fails below we don't roll back — subsequent sends just see a
-        // gap, which is the correct signal for the client to catch up.
         let broadcast_seq = self.next_broadcast_seq.fetch_add(1, Ordering::Relaxed);
 
         if self
@@ -678,6 +682,27 @@ mod tests {
         assert_eq!(
             c2_m1.broadcast_seq, 1,
             "second connection must start its own sequence at 1"
+        );
+    }
+
+    /// A send on a closed channel returns `Closed` without panicking,
+    /// even though a seq was allocated internally. Documents the H5
+    /// design: Closed is terminal, the gap is not observable.
+    #[tokio::test]
+    async fn send_on_closed_channel_returns_closed_not_panic() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let conn = ClientConnection::new("dead".into(), tx);
+        drop(rx); // simulate receiver going away
+
+        let outcome = conn.send(Arc::new(r#"{"type":"x"}"#.to_string()));
+        assert_eq!(outcome, SendOutcome::Closed);
+
+        // Reserved bytes must be released — otherwise a closed connection
+        // would still show pending_bytes pressure in diagnostics.
+        assert_eq!(
+            conn.pending_bytes(),
+            0,
+            "reserved bytes must be released on Closed"
         );
     }
 
