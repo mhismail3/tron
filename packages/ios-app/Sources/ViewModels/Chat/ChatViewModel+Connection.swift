@@ -49,7 +49,16 @@ extension ChatViewModel: ConnectionContext {
     }
 
     /// Drain events that were buffered during reconstruction.
-    /// Called by ConnectionCoordinator after reconstruction completes and sequenceHighWaterMark is set.
+    /// Called by ConnectionCoordinator after reconstruction completes and
+    /// sequenceHighWaterMark is set.
+    ///
+    /// M12: sort the buffered batch by `sequence` before dispatch so
+    /// out-of-order arrivals (race between the reconstructed history
+    /// page and live broadcast frames) replay in the canonical
+    /// session-log order. Sort is **stable** so events without a
+    /// sequence (transient lifecycle signals) keep their arrival
+    /// order and are routed AFTER all sequenced events — they depend
+    /// on session state established by the sequenced path.
     func drainEventBuffer() {
         guard !eventBuffer.isEmpty else {
             logger.debug("[RECONSTRUCT] Event buffer empty, nothing to drain", category: .session)
@@ -57,8 +66,36 @@ extension ChatViewModel: ConnectionContext {
         }
         let buffered = eventBuffer
         eventBuffer.removeAll()
-        logger.info("[RECONSTRUCT] Draining \(buffered.count) buffered events (highWaterMark=\(sequenceHighWaterMark))", category: .session)
-        for event in buffered {
+
+        // Stable sort: sequenced events first by sequence, unsequenced
+        // events retain their relative order at the end.
+        // Swift's `sort(by:)` is NOT guaranteed stable; we build the
+        // ordering manually with an enumerated index tiebreaker.
+        let ordered = buffered
+            .enumerated()
+            .sorted { lhs, rhs in
+                switch (lhs.element.sequence, rhs.element.sequence) {
+                case let (lSeq?, rSeq?):
+                    // Both sequenced: ascending by sequence; tie by index.
+                    if lSeq != rSeq { return lSeq < rSeq }
+                    return lhs.offset < rhs.offset
+                case (_?, nil):
+                    // Sequenced before unsequenced.
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    // Both unsequenced: preserve arrival order.
+                    return lhs.offset < rhs.offset
+                }
+            }
+            .map(\.element)
+
+        logger.info(
+            "[RECONSTRUCT] Draining \(ordered.count) buffered events (highWaterMark=\(sequenceHighWaterMark))",
+            category: .session
+        )
+        for event in ordered {
             dispatchEvent(event)
         }
         logger.info("[RECONSTRUCT] Buffer drain complete, messages now \(messages.count)", category: .session)

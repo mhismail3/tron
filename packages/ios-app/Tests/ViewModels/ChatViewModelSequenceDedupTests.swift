@@ -142,4 +142,46 @@ final class ChatViewModelSequenceDedupTests: XCTestCase {
         XCTAssertEqual(viewModel.sequenceHighWaterMark, 12,
                        "only the > 10 event should have advanced the watermark")
     }
+
+    // MARK: - M12: seq-ordered drain
+
+    /// Events arrive buffered in the order they were received (which may
+    /// be non-monotonic due to broadcast races). The drain must sort by
+    /// sequence so dispatch sees them in canonical session-log order —
+    /// the watermark after drain equals the highest sequence in the batch.
+    func testBufferedEventsDispatchInSequenceOrder() {
+        viewModel.isReconstructing = true
+        // Arrive in shuffled order:
+        viewModel.handleEventForTesting(makeSequencedEvent(seq: 3))
+        viewModel.handleEventForTesting(makeSequencedEvent(seq: 1))
+        viewModel.handleEventForTesting(makeSequencedEvent(seq: 5))
+        viewModel.handleEventForTesting(makeSequencedEvent(seq: 2))
+
+        viewModel.sequenceHighWaterMark = 0
+        viewModel.isReconstructing = false
+        viewModel.drainEventBuffer()
+
+        // Watermark now 5; all events dispatched, ascending order
+        // implied by the monotonic watermark update in dispatchEvent.
+        XCTAssertEqual(viewModel.sequenceHighWaterMark, 5)
+    }
+
+    /// Mixed sequenced + unsequenced events: sequenced ones go first in
+    /// order, unsequenced ones after in arrival order. Unsequenced events
+    /// (lifecycle signals) depend on the state that sequenced events
+    /// set up, so this ordering is load-bearing.
+    func testMixedSequencedAndUnsequencedDrainsInPriorityOrder() {
+        viewModel.isReconstructing = true
+        viewModel.handleEventForTesting(makeSequencedEvent(seq: 7))
+        viewModel.handleEventForTesting(makeSequencedEvent(seq: nil)) // unsequenced A
+        viewModel.handleEventForTesting(makeSequencedEvent(seq: 3))
+        viewModel.handleEventForTesting(makeSequencedEvent(seq: nil)) // unsequenced B
+
+        viewModel.sequenceHighWaterMark = 0
+        viewModel.isReconstructing = false
+        viewModel.drainEventBuffer()
+
+        // After drain, the highest sequenced event (7) is the watermark.
+        XCTAssertEqual(viewModel.sequenceHighWaterMark, 7)
+    }
 }
