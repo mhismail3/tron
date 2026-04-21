@@ -46,24 +46,46 @@ pub fn load_auth_storage(path: &Path) -> Option<AuthStorage> {
 
 /// Save auth storage to file (sync).
 ///
-/// Creates parent directories if needed. Sets file permissions to 0o600.
+/// Creates parent directories if needed. Writes atomically via a temp file in
+/// the same directory, created with mode 0o600 at `open(2)` time, then
+/// `rename(2)`d into place. Readers observe either the prior contents or the
+/// new contents — never a partial file — and the file is never world-readable
+/// at any point.
+///
+/// INVARIANT: auth.json is 0o600 from the moment it exists on disk. The
+/// atomic temp-then-rename pattern ensures there is no window where the file
+/// carries wider permissions, regardless of the caller's umask.
 pub fn save_auth_storage(path: &Path, storage: &mut AuthStorage) -> Result<(), AuthError> {
     storage.last_updated = chrono::Utc::now().to_rfc3339();
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    let parent = path.parent().ok_or_else(|| {
+        AuthError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "auth path must have a parent directory",
+        ))
+    })?;
+    std::fs::create_dir_all(parent)?;
 
-    let json = serde_json::to_string_pretty(storage)?;
-    std::fs::write(path, &json)?;
+    let json = serde_json::to_vec_pretty(storage)?;
+    atomic_write_0600(parent, path, &json)
+}
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        let _ = std::fs::set_permissions(path, perms);
-    }
+/// Atomically write `contents` to `final_path`. The temp file is created in
+/// `parent` so that `rename` is guaranteed to stay within a single filesystem.
+///
+/// On Unix `tempfile::Builder::tempfile_in` opens the temp file with mode 0o600
+/// at `open(2)` time, so the file never exists on disk with wider permissions.
+/// On any failure the temp file is cleaned up by `NamedTempFile`'s drop guard.
+fn atomic_write_0600(parent: &Path, final_path: &Path, contents: &[u8]) -> Result<(), AuthError> {
+    use std::io::Write as _;
 
+    let mut tmp = tempfile::Builder::new()
+        .prefix(".auth.tmp.")
+        .tempfile_in(parent)?;
+
+    tmp.write_all(contents)?;
+    tmp.as_file().sync_all()?;
+    let _persisted = tmp.persist(final_path).map_err(|e| AuthError::Io(e.error))?;
     Ok(())
 }
 
@@ -468,6 +490,121 @@ mod tests {
         save_auth_storage(&path, &mut storage).unwrap();
         let perms = std::fs::metadata(&path).unwrap().permissions();
         assert_eq!(perms.mode() & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_leaves_no_temp_artifacts_on_success() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+        let mut storage = AuthStorage::new();
+        save_auth_storage(&path, &mut storage).unwrap();
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                name != "auth.json" && name != "deployment"
+            })
+            .map(|e| e.file_name())
+            .collect();
+        assert!(leftovers.is_empty(), "unexpected files left by save: {leftovers:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_cleans_tmp_on_write_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let readonly = dir.path().join("readonly");
+        std::fs::create_dir(&readonly).unwrap();
+        std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let target = readonly.join("auth.json");
+        let mut storage = AuthStorage::new();
+        let result = save_auth_storage(&target, &mut storage);
+
+        std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_err(), "save into read-only parent must fail");
+
+        let leftovers: Vec<_> = std::fs::read_dir(&readonly)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name())
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no temp files should remain after failed save: {leftovers:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_is_atomic_under_concurrent_readers() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        save_named_api_key(&path, "anthropic", "seed", "sk-seed").unwrap();
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let bad_reads = Arc::new(std::sync::atomic::AtomicU32::new(0));
+
+        let reader = {
+            let path = path.clone();
+            let stop = Arc::clone(&stop);
+            let bad_reads = Arc::clone(&bad_reads);
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    if let Ok(content) = std::fs::read_to_string(&path)
+                        && serde_json::from_str::<AuthStorage>(&content).is_err()
+                    {
+                        bad_reads.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            })
+        };
+
+        for i in 0..100 {
+            save_named_api_key(&path, "anthropic", &format!("k-{i}"), &format!("sk-{i}")).unwrap();
+        }
+
+        stop.store(true, Ordering::Relaxed);
+        reader.join().unwrap();
+
+        assert_eq!(
+            bad_reads.load(Ordering::Relaxed),
+            0,
+            "reader saw invalid JSON — write was not atomic"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_over_existing_wider_permissions_narrows_to_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+
+        std::fs::write(&path, "{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+
+        let mut storage = AuthStorage::new();
+        save_auth_storage(&path, &mut storage).unwrap();
+
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "atomic save must rewrite permissions to 0o600 regardless of prior mode"
+        );
     }
 
     #[test]

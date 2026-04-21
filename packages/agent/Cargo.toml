@@ -79,6 +79,7 @@ globset = "0.4"
 walkdir = "2"
 regex = "1"
 rustix = { version = "1.1", features = ["fs"] }
+tempfile = "3"
 
 # HTML
 scraper = "0.22"
@@ -119,7 +120,6 @@ libc = "0.2"
 enigo = { version = "0.6.1", default-features = false }
 
 [dev-dependencies]
-tempfile = "3"
 wiremock = "0.6"
 insta = { version = "1", features = ["json", "redactions"] }
 proptest = "1"
