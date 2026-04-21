@@ -52,3 +52,30 @@ pub struct CompactSummaryPayload {
     /// Event ID of the corresponding boundary event.
     pub boundary_event_id: String,
 }
+
+/// Payload for `compact.summary_staging` events (H13 two-phase commit).
+///
+/// Phase 1 of the compaction two-phase commit: written right after the
+/// summarizer returns its output and BEFORE the boundary commit. Carries
+/// the produced summary durably so the LLM's work is preserved even if
+/// the boundary persist later fails.
+///
+/// Reconstruction ignores a staging event that lacks a matching
+/// [`CompactBoundaryPayload`]; the boundary is the authoritative commit
+/// point. On startup, a janitor removes staging rows that are older than
+/// the configured age without a successor boundary event.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactSummaryStagingPayload {
+    /// Token count of the original messages (copied into the boundary on commit).
+    pub original_tokens: i64,
+    /// Expected token count after applying this staged summary.
+    pub compacted_tokens: i64,
+    /// Why compaction was triggered.
+    pub reason: String,
+    /// The summary text produced by the summarizer. The boundary on commit
+    /// gets the same text so reconstruction needs to read only the boundary.
+    pub summary: String,
+    /// ISO 8601 timestamp of when the staging event was written.
+    pub timestamp: String,
+}

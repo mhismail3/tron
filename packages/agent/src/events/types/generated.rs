@@ -53,6 +53,12 @@ define_events! {
         NotificationSubagentResult => "notification.subagent_result" => payloads::notification::NotificationSubagentResultPayload,
         /// Compaction boundary marker.
         CompactBoundary => "compact.boundary" => payloads::compact::CompactBoundaryPayload,
+        /// Phase 1 of the H13 compaction two-phase commit: summary produced,
+        /// boundary not yet committed. Durably preserves the summarizer's
+        /// output before the context is mutated and the boundary persist is
+        /// attempted. Reconstruction ignores a staging event without a
+        /// matching successor `CompactBoundary`.
+        CompactSummaryStaging => "compact.summary_staging" => payloads::compact::CompactSummaryStagingPayload,
         /// Compaction summary.
         CompactSummary => "compact.summary" => payloads::compact::CompactSummaryPayload,
         /// Context cleared.
@@ -205,7 +211,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 75] = [
+    const EXPECTED: [(EventType, &str); 76] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -234,6 +240,7 @@ mod tests {
         ),
         (EventType::CompactBoundary, "compact.boundary"),
         (EventType::CompactSummary, "compact.summary"),
+        (EventType::CompactSummaryStaging, "compact.summary_staging"),
         (EventType::ContextCleared, "context.cleared"),
         (EventType::SkillActivated, "skill.activated"),
         (EventType::SkillDeactivated, "skill.deactivated"),
@@ -336,7 +343,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 75);
+        assert_eq!(ALL_EVENT_TYPES.len(), 76);
     }
 
     #[test]

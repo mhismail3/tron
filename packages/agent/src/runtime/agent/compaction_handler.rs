@@ -529,7 +529,14 @@ impl CompactionHandler {
         }
     }
 
-    async fn emit_compaction_events(
+    /// Emit the terminal events for a compaction attempt.
+    ///
+    /// Implements the H13 two-phase commit: Phase 1 writes
+    /// `compact.summary_staging` carrying the produced summary; Phase 2
+    /// writes `compact.boundary`. Both complete before broadcasting
+    /// `CompactionComplete` (C5 invariant). Public only for tests — the
+    /// production path calls it from `check_and_compact`.
+    pub(super) async fn emit_compaction_events(
         result: Result<
             crate::runtime::context::types::CompactionResult,
             Box<dyn std::error::Error + Send + Sync>,
@@ -557,46 +564,89 @@ impl CompactionHandler {
                     session_id,
                     tokens_before, tokens_after, "compaction complete"
                 );
-                // C5 invariant: persist compact.boundary to the event log
-                // BEFORE broadcasting CompactionComplete. If persist fails the
-                // live iOS view shows "compaction complete" but session
-                // reconstruction on reconnect does NOT see the boundary, so
-                // the context is replayed as if no compaction occurred —
-                // DB and live view diverge. Persist-first + gate-broadcast
-                // closes the gap.
+                // H13 two-phase commit.
+                //
+                // Phase 1: persist `compact.summary_staging` carrying the
+                //   summarizer's output. This durably records the LLM's
+                //   work BEFORE we try to commit the boundary — if the
+                //   boundary persist later fails, the summary is preserved
+                //   for diagnostics and future recovery.
+                // Phase 2: persist `compact.boundary`. Reconstruction treats
+                //   the boundary as authoritative; a staging event without
+                //   a successor boundary is ignored.
+                //
+                // C5 invariant: both persists complete BEFORE broadcasting
+                // CompactionComplete. If either phase fails, the broadcast
+                // is suppressed so live iOS never claims a compaction that
+                // didn't land durably.
                 let mut persist_ok = true;
                 if compaction_result.success
                     && let Some(persister) = persister
                 {
                     let reason_str = format!("{reason:?}");
+                    let staging_timestamp = chrono::Utc::now().to_rfc3339();
+
+                    // ── Phase 1: staging ─────────────────────────────────
                     #[allow(clippy::cast_possible_wrap)]
-                    let payload = serde_json::json!({
+                    let staging_payload = serde_json::json!({
                         "originalTokens": tokens_before as i64,
                         "compactedTokens": tokens_after as i64,
-                        "compressionRatio": compaction_result.compression_ratio,
-                        "reason": reason_str,
-                        "summary": summary_text.clone(),
-                        "estimatedContextTokens": tokens_after as i64,
-                        "preservedTurns": compaction_result.preserved_turns,
-                        "summarizedTurns": compaction_result.summarized_turns,
-                        "preservedMessages": compaction_result.preserved_messages,
+                        "reason": reason_str.clone(),
+                        "summary": summary_text.clone().unwrap_or_default(),
+                        "timestamp": staging_timestamp,
                     });
-                    let seq = sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
+                    let staging_seq =
+                        sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                     if let Err(error) = persister
                         .append_with_sequence(
                             session_id,
-                            crate::events::EventType::CompactBoundary,
-                            payload,
-                            seq,
+                            crate::events::EventType::CompactSummaryStaging,
+                            staging_payload,
+                            staging_seq,
                         )
                         .await
                     {
                         error!(
                             session_id,
                             error = %error,
-                            "failed to persist compaction boundary event; skipping CompactionComplete broadcast"
+                            "H13 phase 1 failed: compaction staging persist failed; skipping boundary + broadcast"
                         );
                         persist_ok = false;
+                    }
+
+                    // ── Phase 2: boundary ────────────────────────────────
+                    // Only run if phase 1 succeeded, so the log never contains
+                    // a boundary without a matching prior staging.
+                    if persist_ok {
+                        #[allow(clippy::cast_possible_wrap)]
+                        let payload = serde_json::json!({
+                            "originalTokens": tokens_before as i64,
+                            "compactedTokens": tokens_after as i64,
+                            "compressionRatio": compaction_result.compression_ratio,
+                            "reason": reason_str,
+                            "summary": summary_text.clone(),
+                            "estimatedContextTokens": tokens_after as i64,
+                            "preservedTurns": compaction_result.preserved_turns,
+                            "summarizedTurns": compaction_result.summarized_turns,
+                            "preservedMessages": compaction_result.preserved_messages,
+                        });
+                        let seq = sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
+                        if let Err(error) = persister
+                            .append_with_sequence(
+                                session_id,
+                                crate::events::EventType::CompactBoundary,
+                                payload,
+                                seq,
+                            )
+                            .await
+                        {
+                            error!(
+                                session_id,
+                                error = %error,
+                                "H13 phase 2 failed: boundary persist failed after staging; staging remains for diagnostics"
+                            );
+                            persist_ok = false;
+                        }
                     }
                 }
 
@@ -787,6 +837,171 @@ mod tests {
     }
 
     // -- Multi-signal trigger --
+
+    // ── H13: compaction two-phase commit ────────────────────────────────
+
+    fn make_event_store_for_test() -> Arc<crate::events::EventStore> {
+        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default())
+            .expect("in-memory pool");
+        {
+            let conn = pool.get().unwrap();
+            let _ = crate::events::run_migrations(&conn).unwrap();
+        }
+        Arc::new(crate::events::EventStore::new(pool))
+    }
+
+    async fn make_persister_and_session()
+        -> (Arc<crate::runtime::orchestrator::event_persister::EventPersister>, Arc<crate::events::EventStore>, String)
+    {
+        let store = make_event_store_for_test();
+        let session = store
+            .create_session("test-model", "/tmp", Some("compaction-h13"), None, None, None)
+            .unwrap();
+        let persister =
+            Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(
+                store.clone(),
+            ));
+        (persister, store, session.session.id)
+    }
+
+    fn make_event_emitter_for_test() -> Arc<EventEmitter> {
+        Arc::new(EventEmitter::new())
+    }
+
+    /// Phase 1 (staging) lands BEFORE phase 2 (boundary) in the event log.
+    #[tokio::test]
+    async fn h13_two_phase_staging_precedes_boundary() {
+        let (persister, store, session_id) = make_persister_and_session().await;
+        let emitter = make_event_emitter_for_test();
+
+        let result = Ok(crate::runtime::context::types::CompactionResult {
+            success: true,
+            tokens_before: 100,
+            tokens_after: 30,
+            compression_ratio: 0.3,
+            preserved_turns: 2,
+            summarized_turns: 3,
+            preserved_messages: 4,
+            summary: "the summarizer's precious output".into(),
+            extracted_data: None,
+        });
+
+        let persist_ok = CompactionHandler::emit_compaction_events(
+            result,
+            std::time::Instant::now(),
+            100,
+            30,
+            &session_id,
+            &emitter,
+            CompactionReason::ThresholdExceeded,
+            Some(&persister),
+            None,
+        )
+        .await;
+        assert!(persist_ok, "successful compaction with ok persister returns true");
+
+        let opts = crate::events::sqlite::repositories::event::ListEventsOptions::default();
+        let events = store.get_events_by_session(&session_id, &opts).unwrap();
+
+        let staging_seq = events
+            .iter()
+            .find(|e| e.event_type == "compact.summary_staging")
+            .expect("staging event must exist")
+            .sequence;
+        let boundary_seq = events
+            .iter()
+            .find(|e| e.event_type == "compact.boundary")
+            .expect("boundary event must exist")
+            .sequence;
+        assert!(
+            staging_seq < boundary_seq,
+            "staging must come before boundary; staging.seq={staging_seq} boundary.seq={boundary_seq}"
+        );
+    }
+
+    /// The staging event carries the same summary text that the boundary
+    /// carries, so a reader that walked off during phase 2 can recover the
+    /// LLM's work from staging alone.
+    #[tokio::test]
+    async fn h13_staging_carries_summary_text() {
+        let (persister, store, session_id) = make_persister_and_session().await;
+        let emitter = make_event_emitter_for_test();
+
+        let summary = "durable summarizer output".to_string();
+        let result = Ok(crate::runtime::context::types::CompactionResult {
+            success: true,
+            tokens_before: 200,
+            tokens_after: 50,
+            compression_ratio: 0.25,
+            preserved_turns: 1,
+            summarized_turns: 4,
+            preserved_messages: 2,
+            summary: summary.clone(),
+            extracted_data: None,
+        });
+
+        let _ = CompactionHandler::emit_compaction_events(
+            result,
+            std::time::Instant::now(),
+            200,
+            50,
+            &session_id,
+            &emitter,
+            CompactionReason::ThresholdExceeded,
+            Some(&persister),
+            None,
+        )
+        .await;
+
+        let opts = crate::events::sqlite::repositories::event::ListEventsOptions::default();
+        let events = store.get_events_by_session(&session_id, &opts).unwrap();
+        let staging = events
+            .iter()
+            .find(|e| e.event_type == "compact.summary_staging")
+            .expect("staging must exist");
+        let payload: serde_json::Value = serde_json::from_str(&staging.payload).unwrap();
+        assert_eq!(payload["summary"], summary);
+        assert_eq!(payload["originalTokens"], 200);
+        assert_eq!(payload["compactedTokens"], 50);
+    }
+
+    /// A failed compaction (Err result) emits CompactionComplete with
+    /// success=false and does NOT persist either staging or boundary.
+    #[tokio::test]
+    async fn h13_failed_compaction_persists_neither_event() {
+        let (persister, store, session_id) = make_persister_and_session().await;
+        let emitter = make_event_emitter_for_test();
+
+        let err: Result<
+            crate::runtime::context::types::CompactionResult,
+            Box<dyn std::error::Error + Send + Sync>,
+        > = Err("summarizer error".into());
+
+        let persist_ok = CompactionHandler::emit_compaction_events(
+            err,
+            std::time::Instant::now(),
+            100,
+            100,
+            &session_id,
+            &emitter,
+            CompactionReason::ThresholdExceeded,
+            Some(&persister),
+            None,
+        )
+        .await;
+        assert!(!persist_ok, "failed compaction returns false");
+
+        let opts = crate::events::sqlite::repositories::event::ListEventsOptions::default();
+        let events = store.get_events_by_session(&session_id, &opts).unwrap();
+        assert!(
+            !events.iter().any(|e| e.event_type == "compact.summary_staging"),
+            "failed compaction must not persist staging"
+        );
+        assert!(
+            !events.iter().any(|e| e.event_type == "compact.boundary"),
+            "failed compaction must not persist boundary"
+        );
+    }
 
     #[test]
     fn record_bash_command_accumulates() {
