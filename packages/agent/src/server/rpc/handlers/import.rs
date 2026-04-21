@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use tracing::instrument;
 
-use super::{map_import_error, opt_string, require_string_param};
+use super::{map_event_store_error, map_import_error, opt_string, require_string_param};
 use crate::core::paths::home_dir;
 use crate::import;
 use crate::server::rpc::context::RpcContext;
@@ -266,8 +266,9 @@ fn check_already_imported(
     session_uuid: &str,
 ) -> Result<(bool, Option<String>), RpcError> {
     let tag = format!("claude_code_import:{session_uuid}");
-    let result = import::writer::find_session_with_tag(event_store, &tag)
-        .map_err(map_import_error)?;
+    let result = event_store
+        .find_session_id_with_metadata_tag(&tag)
+        .map_err(map_event_store_error)?;
     Ok(match result {
         Some(id) => (true, Some(id)),
         None => (false, None),

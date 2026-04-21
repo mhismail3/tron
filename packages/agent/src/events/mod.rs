@@ -47,8 +47,8 @@ pub use sqlite::{
     run_migrations,
 };
 pub use store::{
-    AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult,
-    event_rows_to_session_events,
+    AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult, ImportAtomicOptions,
+    ImportAtomicResult, ImportEventSpec, event_rows_to_session_events,
 };
 pub use types::{
     ALL_EVENT_TYPES, Branch, EventType, Message, MessageWithEventId, SessionEvent,

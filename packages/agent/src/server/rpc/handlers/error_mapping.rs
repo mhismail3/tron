@@ -136,6 +136,15 @@ pub(crate) fn map_event_store_error(e: EventStoreError) -> RpcError {
             message: format!("Blob not found: {id}"),
         },
         E::InvalidOperation(m) => RpcError::InvalidParams { message: m },
+        E::DuplicateImport { existing_session_id } => RpcError::Custom {
+            code: codes::IMPORT_ALREADY_IMPORTED.into(),
+            message: format!(
+                "This source has already been imported into session '{existing_session_id}'."
+            ),
+            details: Some(serde_json::json!({
+                "tronSessionId": existing_session_id,
+            })),
+        },
         // Genuinely internal — sqlite/pool/serde/migration/busy/internal.
         // The Display impl preserves the underlying detail for logs.
         E::Sqlite(_)

@@ -9,12 +9,118 @@ use crate::events::sqlite::repositories::branch::BranchRepo;
 use crate::events::sqlite::repositories::event::{EventRepo, ListEventsOptions};
 use crate::events::types::TokenTotals;
 use crate::events::sqlite::repositories::session::{IncrementCounters, SessionRepo};
-use crate::events::sqlite::row_types::EventRow;
+use crate::events::sqlite::row_types::{EventRow, SessionRow};
 use crate::events::types::EventType;
 use crate::events::types::base::SessionEvent;
 
 use super::{AppendOptions, EventStore};
 use crate::events::redaction::redact_sensitive_content;
+
+/// Append a single event inside an existing transaction.
+///
+/// This is the core write primitive shared by [`EventStore::append`] (which
+/// wraps it in per-session locking + tx + commit) and the multi-write atomic
+/// helpers like `import_atomic` (which drive the same primitive across many
+/// events under a single tx).
+///
+/// The caller is responsible for:
+/// - acquiring any required locks before opening the transaction,
+/// - committing or rolling back the transaction,
+/// - keeping `session.head_event_id` fresh if performing a loop of appends
+///   (set it to the returned event's id after each call).
+pub(super) fn append_event_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session: &SessionRow,
+    opts: &AppendOptions<'_>,
+) -> Result<SessionEvent> {
+    let parent_id = match opts.parent_id {
+        Some(pid) => Some(pid.to_string()),
+        None => session.head_event_id.clone(),
+    };
+
+    let sequence = match opts.sequence {
+        Some(seq) => seq,
+        None => {
+            tracing::trace!(
+                session_id = opts.session_id,
+                event_type = %opts.event_type,
+                "sequence not pre-assigned, falling back to DB MAX+1"
+            );
+            let max: Option<i64> = tx
+                .query_row(
+                    "SELECT MAX(sequence) FROM events WHERE session_id = ?1",
+                    rusqlite::params![opts.session_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            max.unwrap_or(0) + 1
+        }
+    };
+
+    let event_id = format!("evt_{}", Uuid::now_v7());
+    let now = chrono::Utc::now().to_rfc3339();
+    let payload = redact_json_strings(&opts.payload);
+
+    let event = SessionEvent {
+        id: event_id,
+        session_id: opts.session_id.to_string(),
+        parent_id,
+        workspace_id: session.workspace_id.clone(),
+        timestamp: now,
+        event_type: opts.event_type,
+        sequence,
+        checksum: None,
+        payload,
+    };
+
+    EventRepo::insert(tx, &event)?;
+    let _ = SessionRepo::update_head(tx, opts.session_id, &event.id)?;
+
+    let mut counters = IncrementCounters {
+        event_count: Some(1),
+        ..Default::default()
+    };
+
+    if matches!(
+        opts.event_type,
+        EventType::MessageUser | EventType::MessageAssistant
+    ) {
+        counters.message_count = Some(1);
+    }
+
+    if opts.event_type == EventType::MessageAssistant {
+        counters.turn_count = Some(1);
+    }
+
+    if opts.event_type == EventType::StreamTurnEnd {
+        if let Some(tu) = opts.payload.get("tokenUsage") {
+            counters.input_tokens = tu.get("inputTokens").and_then(Value::as_i64);
+            counters.output_tokens = tu.get("outputTokens").and_then(Value::as_i64);
+            counters.cache_read_tokens = tu.get("cacheReadTokens").and_then(Value::as_i64);
+            counters.cache_creation_tokens =
+                tu.get("cacheCreationTokens").and_then(Value::as_i64);
+        }
+        if let Some(cost) = opts.payload.get("cost").and_then(Value::as_f64) {
+            counters.cost = Some(cost);
+        }
+    }
+
+    if opts.event_type == EventType::MessageAssistant
+        && let Some(tu) = opts.payload.get("tokenUsage")
+    {
+        counters.last_turn_input_tokens = opts
+            .payload
+            .get("tokenRecord")
+            .and_then(|r| r.get("computed"))
+            .and_then(|c| c.get("contextWindowTokens"))
+            .and_then(Value::as_i64)
+            .or_else(|| tu.get("inputTokens").and_then(Value::as_i64));
+    }
+
+    let _ = SessionRepo::increment_counters(tx, opts.session_id, &counters)?;
+    Ok(event)
+}
 
 /// Recursively redact sensitive strings in a JSON value.
 fn redact_json_strings(value: &Value) -> Value {
@@ -50,99 +156,11 @@ impl EventStore {
         let session = SessionRepo::get_by_id(&tx, opts.session_id)?
             .ok_or_else(|| EventStoreError::SessionNotFound(opts.session_id.to_string()))?;
 
-        let parent_id = match opts.parent_id {
-            Some(pid) => Some(pid.to_string()),
-            None => session.head_event_id.clone(),
-        };
-
-        let sequence = match opts.sequence {
-            Some(seq) => seq,
-            None => {
-                // Fallback: assign sequence from DB MAX+1. Used by non-agent callers
-                // (cron, session manager, recovery) that don't have a sequence counter.
-                tracing::trace!(
-                    session_id = opts.session_id,
-                    event_type = %opts.event_type,
-                    "sequence not pre-assigned, falling back to DB MAX+1"
-                );
-                let max: Option<i64> = tx
-                    .query_row(
-                        "SELECT MAX(sequence) FROM events WHERE session_id = ?1",
-                        rusqlite::params![opts.session_id],
-                        |row| row.get(0),
-                    )
-                    .optional()?
-                    .flatten();
-                max.unwrap_or(0) + 1
-            }
-        };
-        let event_id = format!("evt_{}", Uuid::now_v7());
-        let now = chrono::Utc::now().to_rfc3339();
-
-        let payload = redact_json_strings(&opts.payload);
-
-        let event = SessionEvent {
-            id: event_id,
-            session_id: opts.session_id.to_string(),
-            parent_id,
-            workspace_id: session.workspace_id.clone(),
-            timestamp: now,
-            event_type: opts.event_type,
-            sequence,
-            checksum: None,
-            payload,
-        };
-
-        EventRepo::insert(&tx, &event)?;
-        let _ = SessionRepo::update_head(&tx, opts.session_id, &event.id)?;
-
-        let mut counters = IncrementCounters {
-            event_count: Some(1),
-            ..Default::default()
-        };
-
-        if matches!(
-            opts.event_type,
-            EventType::MessageUser | EventType::MessageAssistant
-        ) {
-            counters.message_count = Some(1);
-        }
-
-        if opts.event_type == EventType::MessageAssistant {
-            counters.turn_count = Some(1);
-        }
-
-        if opts.event_type == EventType::StreamTurnEnd {
-            if let Some(tu) = opts.payload.get("tokenUsage") {
-                counters.input_tokens = tu.get("inputTokens").and_then(Value::as_i64);
-                counters.output_tokens = tu.get("outputTokens").and_then(Value::as_i64);
-                counters.cache_read_tokens = tu.get("cacheReadTokens").and_then(Value::as_i64);
-                counters.cache_creation_tokens =
-                    tu.get("cacheCreationTokens").and_then(Value::as_i64);
-            }
-            if let Some(cost) = opts.payload.get("cost").and_then(Value::as_f64) {
-                counters.cost = Some(cost);
-            }
-        }
-
-        if opts.event_type == EventType::MessageAssistant
-            && let Some(tu) = opts.payload.get("tokenUsage")
-        {
-            counters.last_turn_input_tokens = opts
-                .payload
-                .get("tokenRecord")
-                .and_then(|r| r.get("computed"))
-                .and_then(|c| c.get("contextWindowTokens"))
-                .and_then(Value::as_i64)
-                .or_else(|| tu.get("inputTokens").and_then(Value::as_i64));
-        }
-
-        let _ = SessionRepo::increment_counters(&tx, opts.session_id, &counters)?;
+        let event = append_event_in_tx(&tx, &session, opts)?;
         tx.commit()?;
 
-        let inserted = EventRepo::get_by_id(&conn, &event.id)?
-            .ok_or(EventStoreError::EventNotFound(event.id))?;
-        Ok(inserted)
+        EventRepo::get_by_id(&conn, &event.id)?
+            .ok_or(EventStoreError::EventNotFound(event.id))
     }
 
     /// Delete a message by appending a `message.deleted` event.

@@ -19,6 +19,7 @@ mod locking;
 mod session_lifecycle;
 mod state;
 
+pub use self::session_lifecycle::{ImportAtomicOptions, ImportAtomicResult, ImportEventSpec};
 pub use self::state::event_rows_to_session_events;
 
 /// Result of creating a new session.

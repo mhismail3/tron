@@ -5,9 +5,7 @@
 
 use std::path::Path;
 
-use serde_json::json;
-
-use crate::events::{AppendOptions, EventStore, EventType};
+use crate::events::{EventStore, EventStoreError, ImportAtomicOptions, ImportEventSpec};
 use crate::import::assembler::assemble;
 use crate::import::errors::ImportError;
 use crate::import::parser::parse_session;
@@ -37,6 +35,12 @@ pub struct ImportResult {
 ///
 /// Full pipeline: parse → linearize → assemble → transform → write.
 /// Returns `ImportError::AlreadyImported` if the session was previously imported.
+///
+/// The DB write phase runs entirely through [`EventStore::import_atomic`],
+/// which performs the dedup check and every event append inside a single
+/// SQLite transaction. A failed import therefore never leaves a partial
+/// session in the store, and concurrent imports of the same source file
+/// race to a single winner.
 pub fn import_session(
     event_store: &EventStore,
     session_path: &Path,
@@ -44,19 +48,11 @@ pub fn import_session(
     extra_tags: &[String],
     origin: Option<&str>,
 ) -> Result<ImportResult, ImportError> {
-    // Extract session UUID from filename.
     let session_uuid = session_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("unknown");
     let dedup_tag = format!("claude_code_import:{session_uuid}");
-
-    // Check for duplicate import.
-    if let Some(existing_id) = find_session_with_tag(event_store, &dedup_tag)? {
-        return Err(ImportError::AlreadyImported {
-            tron_session_id: existing_id,
-        });
-    }
 
     let records = parse_session(session_path)?;
     let linear = linearize(records);
@@ -73,57 +69,46 @@ pub fn import_session(
     }
 
     // Fallback when no assistant message carried a model ID
-    let model = if result.model.is_empty() {
+    let model: &str = if result.model.is_empty() {
         "claude-sonnet-4-20250514"
     } else {
         &result.model
     };
 
-    let session = event_store.create_session(
-        model,
-        working_directory,
-        result.title.as_deref(),
-        None,
-        origin,
-        Some("import"),
-    )?;
-
-    let session_id = &session.session.id;
-
-    for spec in &result.events {
-        let _ = event_store.append(&AppendOptions {
-            session_id,
+    let event_specs: Vec<ImportEventSpec<'_>> = result
+        .events
+        .iter()
+        .map(|spec| ImportEventSpec {
             event_type: spec.event_type,
-            payload: spec.payload.clone(),
-            parent_id: None,
-            sequence: None,
+            payload: &spec.payload,
+        })
+        .collect();
+
+    let atomic = event_store
+        .import_atomic(&ImportAtomicOptions {
+            model,
+            workspace_path: working_directory,
+            title: result.title.as_deref(),
+            origin,
+            source: Some("import"),
+            events: &event_specs,
+            dedup_tag: &dedup_tag,
+            extra_tags,
+        })
+        .map_err(|e| match e {
+            EventStoreError::DuplicateImport { existing_session_id } => {
+                ImportError::AlreadyImported {
+                    tron_session_id: existing_session_id,
+                }
+            }
+            other => ImportError::Database(other),
         })?;
-    }
-
-    let _ = event_store.append(&AppendOptions {
-        session_id,
-        event_type: EventType::MetadataTag,
-        payload: json!({ "action": "add", "tag": dedup_tag }),
-        parent_id: None,
-        sequence: None,
-    })?;
-
-    for tag in extra_tags {
-        let _ = event_store.append(&AppendOptions {
-            session_id,
-            event_type: EventType::MetadataTag,
-            payload: json!({ "action": "add", "tag": tag }),
-            parent_id: None,
-            sequence: None,
-        })?;
-    }
-
-    if let Some(title) = &result.title {
-        let _ = event_store.update_session_title(session_id, Some(title));
-    }
 
     Ok(ImportResult {
-        tron_session_id: session_id.clone(),
+        tron_session_id: atomic.session.id,
+        // The event_count on the public API reports events ADDED during import,
+        // excluding the synthetic session.start event (preserves prior semantics:
+        // caller sees `transformed_events + 1 dedup_tag + extra_tags`).
         event_count: result.events.len() as i64 + 1 + extra_tags.len() as i64,
         turn_count: result.turn_count,
         message_count: result.message_count,
@@ -131,38 +116,6 @@ pub fn import_session(
         model: model.to_string(),
         working_directory: working_directory.to_string(),
     })
-}
-
-/// Find a session that has the given tag in its metadata.tag events.
-pub(crate) fn find_session_with_tag(
-    event_store: &EventStore,
-    tag: &str,
-) -> Result<Option<String>, ImportError> {
-    use crate::events::sqlite::repositories::event::ListEventsOptions;
-    use crate::events::sqlite::repositories::session::ListSessionsOptions;
-
-    let sessions = event_store
-        .list_sessions(&ListSessionsOptions::default())
-        .map_err(ImportError::Database)?;
-
-    let opts = ListEventsOptions::default();
-    for session in sessions {
-        let events = event_store
-            .get_events_by_session(&session.id, &opts)
-            .map_err(ImportError::Database)?;
-
-        for event in &events {
-            if event.event_type == "metadata.tag"
-                && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
-                && payload.get("tag").and_then(|t| t.as_str()) == Some(tag)
-                && payload.get("action").and_then(|a| a.as_str()) == Some("add")
-            {
-                return Ok(Some(session.id));
-            }
-        }
-    }
-
-    Ok(None)
 }
 
 #[cfg(test)]

@@ -408,6 +408,69 @@ fn import_reconstruction_handles_compact() {
 }
 
 #[test]
+fn concurrent_imports_of_same_file_produce_single_session() {
+    use std::sync::Arc;
+
+    let store = Arc::new(setup());
+    let dir = tempdir().unwrap();
+    let path = write_sample_session(dir.path());
+
+    let mut handles = vec![];
+    for _ in 0..5 {
+        let store = Arc::clone(&store);
+        let path = path.clone();
+        handles.push(std::thread::spawn(move || {
+            import_session(&store, &path, "/tmp/project", &[], None)
+        }));
+    }
+
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    let successes: usize = results.iter().filter(|r| r.is_ok()).count();
+    let failures: usize = results
+        .iter()
+        .filter(|r| matches!(r, Err(ImportError::AlreadyImported { .. })))
+        .count();
+
+    assert_eq!(successes, 1, "exactly one concurrent import must succeed");
+    assert_eq!(
+        failures,
+        4,
+        "the other four must fail with AlreadyImported"
+    );
+
+    let sessions = store
+        .list_sessions(&ListSessionsOptions::default())
+        .unwrap();
+    assert_eq!(
+        sessions.len(),
+        1,
+        "exactly one session must exist in store; got {}: {:?}",
+        sessions.len(),
+        sessions.iter().map(|s| &s.id).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn import_produces_exactly_the_advertised_event_count() {
+    // Regression guard for atomicity: event_count reported by import_session
+    // must match what actually ended up in the DB. On the non-atomic pipeline
+    // a partial failure could report N-1 but leave N rows (or vice versa).
+    let store = setup();
+    let dir = tempdir().unwrap();
+    let path = write_sample_session(dir.path());
+
+    let result = import_session(&store, &path, "/tmp/project", &["t1".into(), "t2".into()], None).unwrap();
+    let events = get_events(&store, &result.tron_session_id);
+
+    // +1 for session.start (created alongside session), which the pipeline also counts.
+    assert_eq!(
+        events.len() as i64,
+        result.event_count + 1,
+        "DB event count must equal reported count + session.start"
+    );
+}
+
+#[test]
 fn import_multiturn_session() {
     let store = setup();
     let dir = tempdir().unwrap();
