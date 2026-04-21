@@ -14,7 +14,7 @@ use metrics::{counter, gauge, histogram};
 use tracing::{debug, instrument, warn};
 
 use super::broadcast::BroadcastManager;
-use super::connection::{ClientConnection, ConnectionLimits};
+use super::connection::{ClientConnection, ConnectionLimits, stamp_broadcast_seq};
 use super::handler::handle_message;
 
 /// How long to wait for the outbound forwarder to drain after disconnect.
@@ -114,9 +114,13 @@ pub(crate) async fn run_ws_session_with_limits(
                 msg = send_rx.recv() => {
                     match msg {
                         Some(message) => {
-                            let s = Arc::unwrap_or_clone(message.text);
+                            // Splice `"broadcastSeq":N` into the wire JSON
+                            // so the client can detect missed frames and
+                            // trigger a catch-up via session.reconstruct.
+                            let raw = Arc::unwrap_or_clone(message.text);
+                            let wire = stamp_broadcast_seq(raw, message.broadcast_seq);
                             outbound_conn.complete_send(message.size_bytes);
-                            if ws_tx.send(Message::Text(s.into())).await.is_err() {
+                            if ws_tx.send(Message::Text(wire.into())).await.is_err() {
                                 break;
                             }
                         }
@@ -142,11 +146,12 @@ pub(crate) async fn run_ws_session_with_limits(
                     }
                 }
                 () = shutdown_signal.notified() => {
-                    // Drain any remaining queued messages
+                    // Drain any remaining queued messages (still stamped).
                     while let Ok(message) = send_rx.try_recv() {
-                        let s = Arc::unwrap_or_clone(message.text);
+                        let raw = Arc::unwrap_or_clone(message.text);
+                        let wire = stamp_broadcast_seq(raw, message.broadcast_seq);
                         outbound_conn.complete_send(message.size_bytes);
-                        if ws_tx.send(Message::Text(s.into())).await.is_err() {
+                        if ws_tx.send(Message::Text(wire.into())).await.is_err() {
                             break;
                         }
                     }

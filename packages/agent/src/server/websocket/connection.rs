@@ -1,4 +1,20 @@
 //! WebSocket client connection state.
+//!
+//! ## Broadcast sequence (H5)
+//!
+//! Every outbound WebSocket frame carries a monotonic, per-connection
+//! `broadcastSeq` field spliced as the first key of the top-level JSON
+//! object by [`stamp_broadcast_seq`]. The sequence starts at 1 on a new
+//! connection and advances on every successful enqueue — drops and closes
+//! do NOT consume a sequence number, so a gap in the client-observed
+//! values is a strict signal that the server actually sent (and
+//! subsequently lost) a message.
+//!
+//! Clients detect gaps by comparing the received `broadcastSeq` against
+//! the last one they saw. On a gap they call `events.getSince(lastEventSeq)`
+//! to backfill missed session events via the event-log sequence. The
+//! broadcast sequence is purely the gap DETECTION signal; the event-log
+//! sequence drives the catch-up QUERY.
 
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -24,6 +40,10 @@ pub struct OutboundMessage {
     pub text: Arc<String>,
     /// Number of bytes currently reserved in the per-connection queue budget.
     pub size_bytes: usize,
+    /// Monotonic per-connection sequence number. The outbound forwarder
+    /// splices `"broadcastSeq": N,` into the wire JSON so the client can
+    /// detect gaps (dropped / reordered) messages and trigger a catch-up.
+    pub broadcast_seq: u64,
 }
 
 impl Deref for OutboundMessage {
@@ -32,6 +52,31 @@ impl Deref for OutboundMessage {
     fn deref(&self) -> &Self::Target {
         self.text.as_str()
     }
+}
+
+/// Produce the final wire JSON for `payload`, splicing `"broadcastSeq":N`
+/// as the first key of the top-level object. Every tron wire message is a
+/// JSON object, so the logic is deterministic:
+///
+/// - `{}` + seq=5 → `{"broadcastSeq":5}`
+/// - `{"foo":1}` + seq=5 → `{"broadcastSeq":5,"foo":1}`
+///
+/// If `payload` is not a JSON object (no leading `{`), the function returns
+/// it unchanged — this is a safety net; every real caller passes an object.
+pub fn stamp_broadcast_seq(mut payload: String, seq: u64) -> String {
+    let Some(open) = payload.find('{') else {
+        debug_assert!(false, "outbound payload is not a JSON object");
+        return payload;
+    };
+    let after_open = open + 1;
+    let body_is_empty = payload[after_open..].trim_start().starts_with('}');
+    let insertion = if body_is_empty {
+        format!(r#""broadcastSeq":{seq}"#)
+    } else {
+        format!(r#""broadcastSeq":{seq},"#)
+    };
+    payload.insert_str(after_open, &insertion);
+    payload
 }
 
 /// Per-connection queue and overload limits.
@@ -135,6 +180,12 @@ pub struct ClientConnection {
     pending_bytes: AtomicUsize,
     /// Monotonically increasing count of dropped messages.
     dropped_messages_total: AtomicU64,
+    /// Per-connection monotonic broadcast sequence. Advances on every
+    /// successful `send`; never resets. Clients compare the received
+    /// `broadcastSeq` against the last seen and trigger a catch-up if a
+    /// gap appears (missed message). INVARIANT: strictly increasing by 1
+    /// for every message that actually enters the outbound queue.
+    next_broadcast_seq: AtomicU64,
     /// Recent-drop window used to disconnect only persistently overloaded clients.
     drop_window: parking_lot::Mutex<DropWindowState>,
     /// Queue/drop thresholds for this connection.
@@ -167,6 +218,7 @@ impl ClientConnection {
             last_pong: parking_lot::Mutex::new(now),
             pending_bytes: AtomicUsize::new(0),
             dropped_messages_total: AtomicU64::new(0),
+            next_broadcast_seq: AtomicU64::new(1),
             drop_window: parking_lot::Mutex::new(DropWindowState::new()),
             limits,
             close_requested: AtomicBool::new(false),
@@ -187,18 +239,28 @@ impl ClientConnection {
     /// Send a text message to the client.
     ///
     /// Returns whether the message was queued, the queue was closed, or the
-    /// connection is overloaded beyond its byte budget.
+    /// connection is overloaded beyond its byte budget. On `Enqueued`, a
+    /// fresh broadcast sequence is allocated and attached to the message;
+    /// drops / closes do NOT advance the counter, so the client's gap
+    /// detection is based purely on what actually left the server.
     pub fn send(&self, message: Arc<String>) -> SendOutcome {
         let size_bytes = message.len();
         if !self.reserve_bytes(size_bytes) {
             return SendOutcome::Overloaded(self.record_drop());
         }
 
+        // Allocate the seq BEFORE the send so the number that ultimately
+        // reaches the client is uniquely tied to this send attempt. If the
+        // send fails below we don't roll back — subsequent sends just see a
+        // gap, which is the correct signal for the client to catch up.
+        let broadcast_seq = self.next_broadcast_seq.fetch_add(1, Ordering::Relaxed);
+
         if self
             .tx
             .send(OutboundMessage {
                 text: message,
                 size_bytes,
+                broadcast_seq,
             })
             .is_ok()
         {
@@ -207,6 +269,12 @@ impl ClientConnection {
             self.release_bytes(size_bytes);
             SendOutcome::Closed
         }
+    }
+
+    /// Last sequence that will be assigned on the next send. Exposed for
+    /// testing and metrics; reads as-of-now (not authoritative under concurrent sends).
+    pub fn next_broadcast_seq(&self) -> u64 {
+        self.next_broadcast_seq.load(Ordering::Relaxed)
     }
 
     fn reserve_bytes(&self, size_bytes: usize) -> bool {
@@ -565,5 +633,122 @@ mod tests {
         assert!(!conn.should_close());
         conn.request_close();
         assert!(conn.should_close());
+    }
+
+    // ── H5: per-connection broadcast sequence + stamping ─────────────────
+
+    #[tokio::test]
+    async fn send_assigns_monotonic_broadcast_seq() {
+        let (conn, mut rx) = make_connection();
+
+        for _ in 0..3 {
+            assert_eq!(
+                conn.send(Arc::new(r#"{"type":"x"}"#.to_string())),
+                SendOutcome::Enqueued
+            );
+        }
+
+        let m1 = rx.recv().await.unwrap();
+        let m2 = rx.recv().await.unwrap();
+        let m3 = rx.recv().await.unwrap();
+        assert_eq!(m1.broadcast_seq, 1);
+        assert_eq!(m2.broadcast_seq, 2);
+        assert_eq!(m3.broadcast_seq, 3);
+        for m in [m1, m2, m3] {
+            conn.complete_send(m.size_bytes);
+        }
+    }
+
+    #[tokio::test]
+    async fn broadcast_seq_is_per_connection() {
+        let (c1, mut r1) = make_connection();
+        let (tx2, mut r2) = mpsc::unbounded_channel();
+        let c2 = ClientConnection::new("conn_2".into(), tx2);
+
+        let _ = c1.send(Arc::new(r#"{"a":1}"#.to_string()));
+        let _ = c2.send(Arc::new(r#"{"b":2}"#.to_string()));
+        let _ = c1.send(Arc::new(r#"{"a":3}"#.to_string()));
+
+        let c1_m1 = r1.recv().await.unwrap();
+        let c1_m2 = r1.recv().await.unwrap();
+        let c2_m1 = r2.recv().await.unwrap();
+
+        assert_eq!(c1_m1.broadcast_seq, 1);
+        assert_eq!(c1_m2.broadcast_seq, 2);
+        assert_eq!(
+            c2_m1.broadcast_seq, 1,
+            "second connection must start its own sequence at 1"
+        );
+    }
+
+    #[tokio::test]
+    async fn drop_does_not_advance_broadcast_seq() {
+        let (conn, mut rx) = make_limited_connection(ConnectionLimits {
+            // 10-byte budget so the first ~10-byte message fits; the second
+            // would push over and is rejected without ever being queued.
+            max_pending_bytes: 10,
+            drop_window: Duration::from_secs(60),
+            max_recent_drops: 100,
+        });
+
+        assert_eq!(
+            conn.send(Arc::new(r#"{"k":"v"}"#.to_string())),
+            SendOutcome::Enqueued
+        );
+        let first = rx.recv().await.unwrap();
+        conn.complete_send(first.size_bytes);
+        assert_eq!(first.broadcast_seq, 1);
+
+        // Queue is drained; second would fit. Instead, a payload that over-
+        // flows the byte budget is rejected and MUST NOT advance the seq.
+        let big = Arc::new("x".repeat(20));
+        let outcome = conn.send(big);
+        assert!(matches!(outcome, SendOutcome::Overloaded(_)));
+
+        // Next successful send should be seq=2, not seq=3.
+        assert_eq!(
+            conn.send(Arc::new(r#"{"k":"w"}"#.to_string())),
+            SendOutcome::Enqueued
+        );
+        let second = rx.recv().await.unwrap();
+        assert_eq!(second.broadcast_seq, 2, "drops must not consume a sequence");
+        conn.complete_send(second.size_bytes);
+    }
+
+    #[test]
+    fn stamp_broadcast_seq_splices_into_object() {
+        let out = stamp_broadcast_seq(r#"{"foo":"bar"}"#.to_string(), 42);
+        assert_eq!(out, r#"{"broadcastSeq":42,"foo":"bar"}"#);
+    }
+
+    #[test]
+    fn stamp_broadcast_seq_handles_empty_object() {
+        let out = stamp_broadcast_seq("{}".to_string(), 5);
+        assert_eq!(out, r#"{"broadcastSeq":5}"#);
+    }
+
+    #[test]
+    fn stamp_broadcast_seq_preserves_whitespace_in_empty_body() {
+        // Unlikely in practice (serde_json emits compact JSON), but we still
+        // want well-formed output.
+        let out = stamp_broadcast_seq("{ }".to_string(), 7);
+        assert!(out.starts_with(r#"{"broadcastSeq":7"#));
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        assert_eq!(parsed["broadcastSeq"], 7);
+    }
+
+    #[test]
+    fn stamp_broadcast_seq_result_is_valid_json() {
+        let base = serde_json::json!({
+            "type": "agent.text_delta",
+            "sessionId": "s1",
+            "data": {"text": "hi"},
+        });
+        let serialized = serde_json::to_string(&base).unwrap();
+        let stamped = stamp_broadcast_seq(serialized, 99);
+        let parsed: serde_json::Value = serde_json::from_str(&stamped).expect("valid JSON");
+        assert_eq!(parsed["broadcastSeq"], 99);
+        assert_eq!(parsed["type"], "agent.text_delta");
+        assert_eq!(parsed["data"]["text"], "hi");
     }
 }

@@ -527,6 +527,58 @@ mod tests {
         assert_eq!(b_conns.len(), 1);
     }
 
+    // ── H5: broadcast-level sequence ──────────────────────────────────────
+
+    /// Successive broadcasts to the same session stamp monotonic
+    /// `broadcast_seq` values on each connection's outbound messages.
+    /// Holes in the sequence are the client's signal to catch up.
+    #[tokio::test]
+    async fn broadcast_stamps_monotonic_seq_per_connection() {
+        let bm = BroadcastManager::new();
+        let (conn, mut rx) = make_connection_with_rx("c1", Some("s"));
+        bm.add(conn.clone()).await;
+
+        for i in 0..4 {
+            let event = make_event(&format!("evt_{i}"), Some("s"));
+            bm.broadcast_to_session("s", &event).await;
+        }
+
+        for expected in 1..=4u64 {
+            let msg = rx.recv().await.unwrap();
+            assert_eq!(
+                msg.broadcast_seq, expected,
+                "expected broadcast_seq={expected} got {}",
+                msg.broadcast_seq
+            );
+            conn.complete_send(msg.size_bytes);
+        }
+    }
+
+    /// Two connections receiving the same broadcast each stamp their own
+    /// independent seq — a different client's gaps don't interfere.
+    #[tokio::test]
+    async fn broadcast_seq_independent_across_connections() {
+        let bm = BroadcastManager::new();
+        let (c1, mut r1) = make_connection_with_rx("c1", Some("s"));
+        let (c2, mut r2) = make_connection_with_rx("c2", Some("s"));
+        bm.add(c1).await;
+        bm.add(c2).await;
+
+        let event = make_event("x", Some("s"));
+        bm.broadcast_to_session("s", &event).await;
+        bm.broadcast_to_session("s", &event).await;
+
+        let m1a = r1.recv().await.unwrap();
+        let m1b = r1.recv().await.unwrap();
+        let m2a = r2.recv().await.unwrap();
+        let m2b = r2.recv().await.unwrap();
+
+        assert_eq!(m1a.broadcast_seq, 1);
+        assert_eq!(m1b.broadcast_seq, 2);
+        assert_eq!(m2a.broadcast_seq, 1);
+        assert_eq!(m2b.broadcast_seq, 2);
+    }
+
     #[tokio::test]
     async fn broadcast_arc_shared_not_cloned() {
         let bm = BroadcastManager::new();
