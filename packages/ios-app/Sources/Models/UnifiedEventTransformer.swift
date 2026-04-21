@@ -177,6 +177,8 @@ struct UnifiedEventTransformer {
             return SystemEventHandlers.transformRulesActivated(payload, timestamp: ts)
         case .memoryRetained:
             return SystemEventHandlers.transformMemoryRetained(payload, timestamp: ts)
+        case .memoryAutoRetainFailed:
+            return SystemEventHandlers.transformMemoryAutoRetainFailed(payload, timestamp: ts)
         default:
             return nil
         }

@@ -44,6 +44,10 @@ enum SystemEvent: Equatable, Hashable {
     case memoryRetainInProgress
     /// Automatic memory retain in progress (shows distinct "Auto-retaining" pill)
     case memoryAutoRetainInProgress(intervalFired: Int)
+    /// Automatic memory retain failed mid-pipeline (H3). Paired with a
+    /// prior `memoryAutoRetainInProgress` — a `memoryUpdated` still
+    /// lands afterward when the server writes the fallback summary.
+    case memoryAutoRetainFailed(intervalFired: Int, reason: String)
     /// Memory was retained to long-term log
     case memoryRetained(title: String, summary: String?)
     /// Memory retain was requested but there was nothing new since the last boundary
@@ -73,6 +77,7 @@ enum SystemEvent: Equatable, Hashable {
         case .providerError:              return .tronError
         case .memoryRetainInProgress:     return .tronPink
         case .memoryAutoRetainInProgress: return .tronPink
+        case .memoryAutoRetainFailed:     return .tronError
         case .memoryRetained:             return .tronPink
         case .memoryRetainedNothingNew:   return .tronPink
         }
@@ -128,6 +133,8 @@ enum SystemEvent: Equatable, Hashable {
             return "Retaining memory..."
         case .memoryAutoRetainInProgress:
             return "Auto-retaining memory..."
+        case .memoryAutoRetainFailed(_, let reason):
+            return "Auto-retain failed: \(reason)"
         case .memoryRetained(let title, _):
             return "Memory saved: \(title)"
         case .memoryRetainedNothingNew:
@@ -139,6 +146,7 @@ enum SystemEvent: Equatable, Hashable {
     var isMemoryRetainNotification: Bool {
         switch self {
         case .memoryRetainInProgress, .memoryAutoRetainInProgress,
+             .memoryAutoRetainFailed,
              .memoryRetained, .memoryRetainedNothingNew:
             return true
         default:
@@ -158,7 +166,15 @@ enum SystemEvent: Equatable, Hashable {
     /// Controls UI pill copy ("Auto-retaining memory..." vs "Retaining memory...").
     var memoryRetainIsAuto: Bool {
         if case .memoryAutoRetainInProgress = self { return true }
+        if case .memoryAutoRetainFailed = self { return true }
         return false
+    }
+
+    /// When present, the memory-retain pill should render in its "failed"
+    /// variant with this reason (H3). Nil for all other memory states.
+    var memoryRetainFailureReason: String? {
+        if case .memoryAutoRetainFailed(_, let reason) = self { return reason }
+        return nil
     }
 
     /// Memory retain title (nil for in-progress / nothing-new)

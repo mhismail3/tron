@@ -41,10 +41,12 @@ struct SystemEventView: View {
         let isAuto = event.memoryRetainIsAuto
         let title = event.memoryRetainTitle
         let summary = event.memoryRetainSummary
+        let failureReason = event.memoryRetainFailureReason
         MemoryRetainedNotificationView(
             isInProgress: isInProgress,
             title: title,
             isAuto: isAuto,
+            failureReason: failureReason,
             onTap: isInProgress ? nil : (title != nil ? {
                 onTap?(.memoryRetainDetail(title: title!, summary: summary))
             } : nil)

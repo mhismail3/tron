@@ -42,6 +42,46 @@ final class MemoryCoordinator {
         context.memoryRetainInProgressMessageId = inProgressMessage.id
     }
 
+    /// Handle automatic memory retain failure (H3).
+    ///
+    /// Fires on `agent.memory_auto_retain_failed` when an auto-retain
+    /// pipeline started but the summarizer subagent failed. The server
+    /// STILL falls back to a keyword-based summary and emits
+    /// `memory_updated` next, but the pill should signal that the quality
+    /// is low. We mutate the in-progress pill in-place to a failed state
+    /// with the reason, and keep `memoryRetainInProgressMessageId` set so
+    /// the subsequent `memory_updated` can land its final content (or
+    /// remove it if there's nothing new).
+    func handleMemoryAutoRetainFailed(
+        _ pluginResult: MemoryAutoRetainFailedPlugin.Result,
+        context: MemoryContext
+    ) {
+        context.logInfo("Auto-retain FAILED (interval=\(pluginResult.intervalFired)): \(pluginResult.reason)")
+
+        context.flushPendingTextUpdates()
+        context.finalizeStreamingMessage()
+
+        if let inProgressId = context.memoryRetainInProgressMessageId,
+           let index = context.messageIndex.index(for: inProgressId) {
+            withAnimation(.smooth(duration: 0.35)) {
+                context.messages[index].content = .memoryAutoRetainFailed(
+                    intervalFired: pluginResult.intervalFired,
+                    reason: pluginResult.reason
+                )
+            }
+            // Don't clear the in-progress marker — the paired `memory_updated`
+            // still arrives, and `handleMemoryUpdated` will either replace
+            // this message with the fallback summary or leave it as-is.
+        } else {
+            // Defensive: `triggered` should always arrive before `failed`,
+            // so no pill to update. Append a standalone failure notice.
+            context.appendToMessages(ChatMessage.memoryAutoRetainFailed(
+                intervalFired: pluginResult.intervalFired,
+                reason: pluginResult.reason
+            ))
+        }
+    }
+
     /// Handle memory retain started event.
     func handleMemoryUpdating(
         _ pluginResult: MemoryUpdatingPlugin.Result,

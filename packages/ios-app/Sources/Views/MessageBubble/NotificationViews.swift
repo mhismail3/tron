@@ -559,52 +559,85 @@ struct MemoryRetainedNotificationView: View {
     /// True when the retain was fired automatically by the auto-retain policy.
     /// Changes the in-progress pill text to "Auto-retaining memory...".
     var isAuto: Bool = false
+    /// Non-nil signals that an auto-retain attempt failed mid-pipeline (H3).
+    /// When present, the pill renders in an error tint with the provided reason
+    /// rather than the success/in-progress states.
+    var failureReason: String? = nil
     var onTap: (() -> Void)? = nil
 
     private let iconSize: CGFloat = TronTypography.sizeBody2
 
+    /// Single source of truth for the pill tint — error when the retain
+    /// failed, pink otherwise.
+    private var tint: Color { failureReason == nil ? .tronPink : .tronError }
+
     var body: some View {
-        NotificationPill(tint: .tronPink, interactive: !isInProgress && title != nil, onTap: isInProgress ? nil : onTap) {
+        NotificationPill(
+            tint: tint,
+            interactive: !isInProgress && (title != nil || failureReason != nil),
+            onTap: isInProgress ? nil : onTap
+        ) {
             HStack(spacing: 8) {
                 ZStack {
                     if isInProgress {
                         ProgressView()
                             .scaleEffect(0.7)
-                            .tint(.tronPink)
+                            .tint(tint)
+                            .transition(.blurReplace)
+                    } else if failureReason != nil {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(TronTypography.codeSM)
+                            .foregroundStyle(tint)
                             .transition(.blurReplace)
                     } else {
                         Image(systemName: "brain")
                             .font(TronTypography.codeSM)
-                            .foregroundStyle(.tronPink)
+                            .foregroundStyle(tint)
                             .transition(.blurReplace)
                     }
                 }
                 .frame(width: iconSize, height: iconSize)
 
-                if isInProgress {
-                    Text(isAuto ? "Auto-retaining memory..." : "Retaining memory...")
+                if let failureReason {
+                    Text("Auto-retain failed")
                         .font(TronTypography.filePath)
-                        .foregroundStyle(.tronPink.opacity(0.9))
-                        .contentTransition(.interpolate)
-                } else if let title {
-                    Text("Memory saved")
-                        .font(TronTypography.filePath)
-                        .foregroundStyle(.tronPink.opacity(0.9))
+                        .foregroundStyle(tint.opacity(0.9))
                         .contentTransition(.interpolate)
 
                     Text("\u{2022}")
                         .font(TronTypography.badge)
-                        .foregroundStyle(.tronPink.opacity(0.5))
+                        .foregroundStyle(tint.opacity(0.5))
+                        .transition(.blurReplace)
+
+                    Text(failureReason)
+                        .font(TronTypography.filePath)
+                        .foregroundStyle(tint.opacity(0.7))
+                        .lineLimit(1)
+                        .transition(.blurReplace)
+                } else if isInProgress {
+                    Text(isAuto ? "Auto-retaining memory..." : "Retaining memory...")
+                        .font(TronTypography.filePath)
+                        .foregroundStyle(tint.opacity(0.9))
+                        .contentTransition(.interpolate)
+                } else if let title {
+                    Text("Memory saved")
+                        .font(TronTypography.filePath)
+                        .foregroundStyle(tint.opacity(0.9))
+                        .contentTransition(.interpolate)
+
+                    Text("\u{2022}")
+                        .font(TronTypography.badge)
+                        .foregroundStyle(tint.opacity(0.5))
                         .transition(.blurReplace)
 
                     Text(inlineMarkdown(from: title, size: TronTypography.sizeBody2))
-                        .foregroundStyle(.tronPink.opacity(0.7))
+                        .foregroundStyle(tint.opacity(0.7))
                         .lineLimit(1)
                         .transition(.blurReplace)
                 } else {
                     Text("Nothing new to retain")
                         .font(TronTypography.filePath)
-                        .foregroundStyle(.tronPink.opacity(0.6))
+                        .foregroundStyle(tint.opacity(0.6))
                         .contentTransition(.interpolate)
                 }
             }

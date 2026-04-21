@@ -195,4 +195,23 @@ enum SystemEventHandlers {
             timestamp: timestamp
         )
     }
+
+    /// Transform memory.auto_retain_failed event into a ChatMessage (H3).
+    ///
+    /// Reconstructed history shows the failure as a diagnostic breadcrumb
+    /// in addition to the subsequent fallback-summary `memoryRetained`
+    /// pill, so users can tell which session summaries came from a
+    /// failing summarizer.
+    static func transformMemoryAutoRetainFailed(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        let intervalFired = (payload["intervalFired"]?.value as? Int) ?? 0
+        let reason = (payload["reason"]?.value as? String) ?? "unknown"
+        return ChatMessage(
+            role: .system,
+            content: .memoryAutoRetainFailed(intervalFired: intervalFired, reason: reason),
+            timestamp: timestamp
+        )
+    }
 }

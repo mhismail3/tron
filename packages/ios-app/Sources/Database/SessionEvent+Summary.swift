@@ -286,6 +286,12 @@ extension SessionEvent {
                 ? "Auto-retain triggered (every \(interval) turns)"
                 : "Auto-retain triggered"
 
+        case .memoryAutoRetainFailed:
+            let reason = payload.string("reason") ?? ""
+            return reason.isEmpty
+                ? "Auto-retain failed"
+                : "Auto-retain failed: \(String(reason.prefix(40)))"
+
         case .unknown:
             // Format raw type into friendly name: "rules.loaded" -> "Rules loaded"
             let formatted = type

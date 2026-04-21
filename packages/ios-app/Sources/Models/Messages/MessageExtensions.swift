@@ -101,6 +101,13 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .memoryAutoRetainInProgress(intervalFired: intervalFired))
     }
 
+    /// In-chat notification that an auto-retain pipeline failed (H3).
+    /// The server will still land a fallback summary; this pill surfaces
+    /// the quality signal to the user.
+    static func memoryAutoRetainFailed(intervalFired: Int, reason: String) -> ChatMessage {
+        ChatMessage(role: .system, content: .memoryAutoRetainFailed(intervalFired: intervalFired, reason: reason))
+    }
+
     /// In-chat notification for memory retained to long-term log
     static func memoryRetained(title: String, summary: String?) -> ChatMessage {
         ChatMessage(role: .system, content: .memoryRetained(title: title, summary: summary))

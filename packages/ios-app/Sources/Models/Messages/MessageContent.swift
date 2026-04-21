@@ -75,6 +75,12 @@ enum MessageContent: Equatable {
     static func memoryAutoRetainInProgress(intervalFired: Int) -> MessageContent {
         .systemEvent(.memoryAutoRetainInProgress(intervalFired: intervalFired))
     }
+    /// In-chat notification that an auto-retain pipeline started but its
+    /// summarizer subagent failed. The server still falls back to a
+    /// keyword summary; this pill surfaces the quality signal.
+    static func memoryAutoRetainFailed(intervalFired: Int, reason: String) -> MessageContent {
+        .systemEvent(.memoryAutoRetainFailed(intervalFired: intervalFired, reason: reason))
+    }
     /// In-chat notification for memory retained to long-term log
     static func memoryRetained(title: String, summary: String?) -> MessageContent {
         .systemEvent(.memoryRetained(title: title, summary: summary))
