@@ -375,6 +375,7 @@
 		744A044BE10A98AA47B75DFA /* SubagentStatusPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA41CF3D8205850F82C6EFA6 /* SubagentStatusPlugin.swift */; };
 		7454A3174918DF3D040071D8 /* GeistMono-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A942A75F48120A8C3EB1490E /* GeistMono-Variable.ttf */; };
 		7468D763F93087DFAE9DB984 /* ThinkingContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D4057C20D31DB761BB86A2 /* ThinkingContentView.swift */; };
+		74E0405256A3C295337CED6D /* SubagentChipVariantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4791D6A3F98EE49411BC7869 /* SubagentChipVariantTests.swift */; };
 		74E6F33CE449E1CBF3B73B96 /* DatabaseSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9877164A09CA5834EAF8AE3 /* DatabaseSchema.swift */; };
 		75478C84CF739F65D13392ED /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A30612FBADC8849EA655FE26 /* PrivacyInfo.xcprivacy */; };
 		760D0198B3B0935697179CEC /* TurnLifecycleContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6616CB1CDBC7DDA0513F88ED /* TurnLifecycleContext.swift */; };
@@ -1029,6 +1030,7 @@
 		46B8AD33A0F14E78B4347A80 /* VoiceNotesRecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesRecorderTests.swift; sourceTree = "<group>"; };
 		47489EAA5498041BC06FBF55 /* ChatViewModel+DisplayStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+DisplayStream.swift"; sourceTree = "<group>"; };
 		475E03441DAA29FFAE1CC911 /* ModelPickerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPickerState.swift; sourceTree = "<group>"; };
+		4791D6A3F98EE49411BC7869 /* SubagentChipVariantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentChipVariantTests.swift; sourceTree = "<group>"; };
 		47C66B4B0B54B4C0AC49D7E7 /* SandboxClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxClient.swift; sourceTree = "<group>"; };
 		4844B4F1693E78F7249696D3 /* ToolArgumentExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolArgumentExtractor.swift; sourceTree = "<group>"; };
 		485B54C19D15CC8E97591460 /* SheetReadOnlyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetReadOnlyTests.swift; sourceTree = "<group>"; };
@@ -3066,6 +3068,7 @@
 				1D7A8006F04F60CE707AB111 /* SkillBadgesTests.swift */,
 				3B3B0877E54541B6F3F6B054 /* SkillDetailSheetTests.swift */,
 				8E689E779C8C57917FB8E8C5 /* SourceChangesSheetTests.swift */,
+				4791D6A3F98EE49411BC7869 /* SubagentChipVariantTests.swift */,
 				FCA7437FC583F0F161B4DB24 /* TextContentLayoutTests.swift */,
 				909E84C398239617CB2ABBB5 /* TurnGroupingTests.swift */,
 				73F11AA5B7763CF597F396C0 /* TypewriterAnimationStateTests.swift */,
@@ -4368,6 +4371,7 @@
 				3F4B5DE1C409EE52571ED4FF /* StatusDisplayTests.swift in Sources */,
 				C2D44DAE91C67DE81807ABE3 /* StreamingManagerTests.swift in Sources */,
 				5597F730388E3C0F875A55DD /* StreamingRecoveryTests.swift in Sources */,
+				74E0405256A3C295337CED6D /* SubagentChipVariantTests.swift in Sources */,
 				094F672D89EDE5BF7BFD7832 /* SubagentEventFormatterTests.swift in Sources */,
 				2AA9F3FEC522CB75DE582696 /* SubagentStateTests.swift in Sources */,
 				6ADA2FAF88F5D5B29C6A47BC /* SyncRepositoryTests.swift in Sources */,

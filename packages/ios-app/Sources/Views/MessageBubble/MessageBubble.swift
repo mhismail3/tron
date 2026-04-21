@@ -74,15 +74,18 @@ struct MessageBubble: View {
             switch ToolKind(toolName: tool.toolName) {
             case .spawnSubagent:
                 if let chipData = ToolResultParser.parseSpawnSubagent(from: tool) {
-                    SubagentChip(data: chipData) {
+                    SubagentChip(data: chipData, variant: .spawn) {
                         onTap?(.subagent(chipData))
                     }
                 } else {
                     ToolResultRouter(tool: tool)
                 }
             case .waitForSubagent:
+                // M14: render with .wait variant so the chip reads
+                // "Waiting for agent #<id>" and is visually
+                // distinguishable from the earlier Spawn chip.
                 if let chipData = ToolResultParser.parseWaitForSubagent(from: tool) {
-                    SubagentChip(data: chipData) {
+                    SubagentChip(data: chipData, variant: .wait) {
                         onTap?(.subagent(chipData))
                     }
                 } else {
