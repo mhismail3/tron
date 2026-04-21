@@ -82,6 +82,34 @@ final class InputBarState {
     }
 }
 
+/// Why the send button is unavailable, if at all.
+///
+/// H9: every reason the input is disabled is enumerated here so the UI
+/// can explain it in the disabled-button tooltip instead of leaving the
+/// user guessing why tapping does nothing. `nil` from `InputBarConfig.sendBlockReason`
+/// means there's no async blocker — the button may still be disabled
+/// because the text field is empty, but *that* is user-controllable.
+enum SendBlockReason: Equatable, Sendable {
+    /// WebSocket isn't connected to the server.
+    case disconnected
+    /// Context compaction is in progress.
+    case compacting
+    /// Memory retention summarizer is running.
+    case retaining
+    /// This chat view is read-only (shared, workspace deleted, etc.).
+    case readOnly
+
+    /// User-facing explanation shown in the disabled-button tooltip.
+    var description: String {
+        switch self {
+        case .disconnected: return "Reconnect to the server to send messages."
+        case .compacting:   return "Waiting for context compaction to finish…"
+        case .retaining:    return "Waiting for memory retention to finish…"
+        case .readOnly:     return "This conversation is read-only."
+        }
+    }
+}
+
 /// Read-only configuration for the InputBar component
 struct InputBarConfig {
     // MARK: - Processing State
@@ -89,6 +117,10 @@ struct InputBarConfig {
     let agentPhase: AgentPhase
     /// Compaction in progress (send blocked, spinning pill shown)
     let isCompacting: Bool
+    /// Memory retention summarizer in progress (send blocked).
+    let isRetaining: Bool
+    /// WebSocket connection is live. False during reconnect attempts.
+    let isConnected: Bool
 
     /// Whether the agent is currently processing (convenience).
     var isProcessing: Bool { agentPhase.isProcessing }
@@ -96,6 +128,23 @@ struct InputBarConfig {
     var isPostProcessing: Bool { agentPhase.isPostProcessing }
     let isRecording: Bool
     let isTranscribing: Bool
+
+    /// Why the send button would be unavailable even with non-empty input.
+    /// `nil` means no async blocker; input emptiness is the only remaining gate.
+    ///
+    /// Evaluation order matters: show the FIRST reason that applies, so
+    /// the tooltip names the most specific cause. `readOnly` wins over
+    /// everything else (the session fundamentally can't accept input);
+    /// `disconnected` over async processing (reconnect would unblock it
+    /// regardless of what the server is doing); compaction over retain
+    /// (users see the compaction pill more prominently).
+    var sendBlockReason: SendBlockReason? {
+        if readOnly { return .readOnly }
+        if !isConnected { return .disconnected }
+        if isCompacting { return .compacting }
+        if isRetaining { return .retaining }
+        return nil
+    }
 
     // MARK: - Status Display
     let tokenUsage: TokenUsage?
@@ -137,6 +186,8 @@ struct InputBarConfig {
     init(
         agentPhase: AgentPhase = .idle,
         isCompacting: Bool = false,
+        isRetaining: Bool = false,
+        isConnected: Bool = true,
         isRecording: Bool = false,
         isTranscribing: Bool = false,
         tokenUsage: TokenUsage? = nil,
@@ -153,6 +204,8 @@ struct InputBarConfig {
     ) {
         self.agentPhase = agentPhase
         self.isCompacting = isCompacting
+        self.isRetaining = isRetaining
+        self.isConnected = isConnected
         self.isRecording = isRecording
         self.isTranscribing = isTranscribing
         self.tokenUsage = tokenUsage

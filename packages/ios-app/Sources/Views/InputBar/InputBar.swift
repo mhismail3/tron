@@ -46,10 +46,13 @@ struct InputBar: View {
 
     private var canSend: Bool {
         if config.agentPhase.isActive {
-            // During processing/postProcessing: allow send if has text (server rejects if queue full)
-            return state.hasTextContent
+            // During processing/postProcessing: allow send if has text
+            // so the message can be queued (server rejects if queue full).
+            // Async blockers like compaction / retain / disconnect still
+            // prevent queueing — nothing to queue into.
+            return state.hasTextContent && config.sendBlockReason == nil
         }
-        return state.hasContent && !config.isCompacting
+        return state.hasContent && config.sendBlockReason == nil
     }
 
     /// Show stop button when agent is active and user has no text to queue.
@@ -176,6 +179,11 @@ struct InputBar: View {
                         buttonSize: actionButtonSize
                     )
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    // H9: explain the disabled state. Visible on long-press
+                    // / hover via `.help()`; always read by VoiceOver via
+                    // `.accessibilityHint()`.
+                    .help(config.sendBlockReason?.description ?? "")
+                    .accessibilityHint(config.sendBlockReason?.description ?? "")
                 }
 
                 // Mic button

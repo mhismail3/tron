@@ -349,6 +349,8 @@ struct ChatView: View {
                     config: InputBarConfig(
                         agentPhase: viewModel.agentPhase,
                         isCompacting: viewModel.isCompacting,
+                        isRetaining: viewModel.isRetaining,
+                        isConnected: viewModel.connectionState == .connected,
                         isRecording: viewModel.isRecording,
                         isTranscribing: viewModel.isTranscribing,
                         tokenUsage: viewModel.contextState.totalTokenUsage,
