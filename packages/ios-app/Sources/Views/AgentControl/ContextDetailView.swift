@@ -134,22 +134,26 @@ struct ContextDetailView: View {
                         .padding(.vertical, 6)
                     }
 
-                    SystemPromptSection(
-                        tokens: snapshot.breakdown.systemPrompt,
-                        content: snapshot.systemPromptContent
-                    )
+                    if snapshot.breakdown.systemPrompt > 0 {
+                        SystemPromptSection(
+                            tokens: snapshot.breakdown.systemPrompt,
+                            content: snapshot.systemPromptContent
+                        )
+                    }
 
-                    if let memory = snapshot.memory {
+                    if let memory = snapshot.memory, snapshot.breakdown.memory > 0 {
                         MemorySection(
                             tokens: snapshot.breakdown.memory,
                             memory: memory
                         )
                     }
 
-                    ToolsSection(
-                        toolsContent: snapshot.toolsContent,
-                        tokens: snapshot.breakdown.tools
-                    )
+                    if snapshot.breakdown.tools > 0 {
+                        ToolsSection(
+                            toolsContent: snapshot.toolsContent,
+                            tokens: snapshot.breakdown.tools
+                        )
+                    }
                 }
                 .padding(.horizontal, ContextLayout.outerPadding)
 
