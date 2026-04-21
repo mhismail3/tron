@@ -767,6 +767,17 @@ tron_events! {
         interval_fired: u32,
     } => "memory_auto_retain_triggered",
 
+    /// Auto-retain pipeline failed (or was orphaned by a server restart).
+    /// Paired with a prior `MemoryAutoRetainTriggered` for the same session.
+    /// iOS uses this to exit the retain pill's spinner state with an error
+    /// label instead of a perpetual "retaining…".
+    MemoryAutoRetainFailed {
+        #[serde(rename = "intervalFired")]
+        interval_fired: u32,
+        /// Operator-readable reason (one line). Rendered verbatim.
+        reason: String,
+    } => "memory_auto_retain_failed",
+
     /// Context cleared.
     ContextCleared {
         #[serde(rename = "tokensBefore")]
@@ -1959,6 +1970,11 @@ mod tests {
             TronEvent::MemoryAutoRetainTriggered {
                 base: base.clone(),
                 interval_fired: 5,
+            },
+            TronEvent::MemoryAutoRetainFailed {
+                base: base.clone(),
+                interval_fired: 5,
+                reason: "subagent error".into(),
             },
             TronEvent::ContextCleared {
                 base: base.clone(),

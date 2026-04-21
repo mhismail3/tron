@@ -27,6 +27,10 @@ pub struct MemoryRetainedPayload {
 /// `memory.autoRetainInterval` threshold) from manual retentions (user hit
 /// the Retain button). The summary itself still lands in a `memory.retained`
 /// event after the summarizer completes.
+///
+/// Acts as the "started" side of the H3 triplet. Exit is signaled by either
+/// a [`MemoryRetainedPayload`] (success) or a [`MemoryAutoRetainFailedPayload`]
+/// (failure — subagent error, task panic, server restart janitor).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryAutoRetainTriggeredPayload {
@@ -35,5 +39,33 @@ pub struct MemoryAutoRetainTriggeredPayload {
     /// The `memory.autoRetainInterval` value that caused the fire.
     pub interval_fired: u32,
     /// ISO 8601 timestamp.
+    pub timestamp: String,
+}
+
+/// Payload for `memory.auto_retain_failed` events.
+///
+/// Emitted when an auto-retain pipeline started (a
+/// [`MemoryAutoRetainTriggeredPayload`] was persisted) but could not
+/// terminate successfully. Reasons:
+///
+/// - Summarizer subagent returned an error.
+/// - Background task panicked.
+/// - Server was restarted mid-retain; a startup janitor emits this for any
+///   `auto_retain_triggered` that has no matching `memory.retained` or
+///   `memory.auto_retain_failed` successor event in the log.
+///
+/// iOS uses the triplet (triggered → either retained or failed) to render
+/// the auto-retain pill's lifecycle without a perpetual-spinner state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryAutoRetainFailedPayload {
+    /// Session ID this failure belongs to.
+    pub session_id: String,
+    /// The `intervalFired` copied from the paired `triggered` event, so iOS
+    /// can correlate without a lookup.
+    pub interval_fired: u32,
+    /// Operator-readable reason (one line). iOS renders verbatim.
+    pub reason: String,
+    /// ISO 8601 timestamp when the failure was detected.
     pub timestamp: String,
 }

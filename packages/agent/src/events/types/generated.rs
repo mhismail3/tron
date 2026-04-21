@@ -131,6 +131,8 @@ define_events! {
         MemoryRetained => "memory.retained" => payloads::memory::MemoryRetainedPayload,
         /// Auto-retain threshold crossed; retain pipeline starting.
         MemoryAutoRetainTriggered => "memory.auto_retain_triggered" => payloads::memory::MemoryAutoRetainTriggeredPayload,
+        /// Auto-retain pipeline failed (or was orphaned by a server restart).
+        MemoryAutoRetainFailed => "memory.auto_retain_failed" => payloads::memory::MemoryAutoRetainFailedPayload,
         /// Local main fast-forwarded from remote.
         WorktreeMainSynced => "worktree.main_synced" => payloads::worktree::WorktreeMainSyncedPayload,
         /// Session finalized (merge + rebranch).
@@ -203,7 +205,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 74] = [
+    const EXPECTED: [(EventType, &str); 75] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -291,6 +293,10 @@ mod tests {
             EventType::MemoryAutoRetainTriggered,
             "memory.auto_retain_triggered",
         ),
+        (
+            EventType::MemoryAutoRetainFailed,
+            "memory.auto_retain_failed",
+        ),
         (EventType::WorktreeMainSynced, "worktree.main_synced"),
         (
             EventType::WorktreeSessionFinalized,
@@ -330,7 +336,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 74);
+        assert_eq!(ALL_EVENT_TYPES.len(), 75);
     }
 
     #[test]

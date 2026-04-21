@@ -247,6 +247,7 @@ pub(crate) async fn trigger_retain(
     let bg_start_ts = slice.start_ts;
     let bg_end_ts = slice.end_ts;
 
+    let bg_source = source;
     let _ = tokio::spawn(async move {
         retain_background_task(
             bg_session_id,
@@ -258,6 +259,7 @@ pub(crate) async fn trigger_retain(
             transcript,
             bg_start_ts,
             bg_end_ts,
+            bg_source,
         )
         .await;
         drop(guard);
@@ -267,6 +269,57 @@ pub(crate) async fn trigger_retain(
         "retained": true,
         "status": "retaining",
     }))
+}
+
+/// Persist and broadcast `memory.auto_retain_failed`. Paired with a prior
+/// `MemoryAutoRetainTriggered` to signal that the auto-retain pipeline for
+/// this session did not complete successfully. iOS exits the retain pill's
+/// spinner state with an error label instead of a perpetual "retaining…".
+///
+/// Errors persisting or broadcasting are logged but never surfaced — the
+/// retain background task must proceed regardless (it will still write a
+/// fallback summary and emit `MemoryUpdated` to clear the spinner).
+async fn emit_auto_retain_failed(
+    event_store: &Arc<EventStore>,
+    broadcast: &Arc<EventEmitter>,
+    session_id: &str,
+    interval_fired: u32,
+    reason: &str,
+) {
+    let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    let event_store_p = event_store.clone();
+    let session_id_p = session_id.to_owned();
+    let reason_p = reason.to_owned();
+    let timestamp_p = timestamp.clone();
+    let _ = run_blocking_task("memory.auto_retain_failed.persist", move || {
+        if let Err(e) = event_store_p.append(&AppendOptions {
+            session_id: &session_id_p,
+            event_type: EventType::MemoryAutoRetainFailed,
+            payload: json!({
+                "sessionId": session_id_p,
+                "intervalFired": interval_fired,
+                "reason": reason_p,
+                "timestamp": timestamp_p,
+            }),
+            parent_id: None,
+            sequence: None,
+        }) {
+            warn!(
+                session_id = %session_id_p,
+                error = %e,
+                "failed to persist memory.auto_retain_failed event"
+            );
+        }
+        Ok::<(), RpcError>(())
+    })
+    .await;
+
+    let _ = broadcast.emit(crate::core::events::TronEvent::MemoryAutoRetainFailed {
+        base: crate::core::events::BaseEvent::now(session_id),
+        interval_fired,
+        reason: reason.to_owned(),
+    });
 }
 
 /// Persist and broadcast `memory.auto_retain_triggered` so iOS can distinguish
@@ -316,6 +369,7 @@ async fn emit_auto_retain_triggered(
 }
 
 /// Background task that runs the summarizer and writes results.
+#[allow(clippy::too_many_arguments)]
 async fn retain_background_task(
     session_id: String,
     event_store: Arc<EventStore>,
@@ -326,17 +380,44 @@ async fn retain_background_task(
     transcript: String,
     start_ts: String,
     end_ts: String,
+    source: RetainSource,
 ) {
     // ── Run summarizer ──────────────────────────────────────────────────────
-    let raw_output = match subagent_manager {
+    let outcome = match subagent_manager {
         Some(manager) => {
             run_summarizer(manager, &session_id, &working_directory, transcript).await
         }
         None => {
             warn!(session_id = %session_id, "no subagent manager for memory retain, using keyword fallback");
-            keyword_summary(&session_id)
+            SummarizerOutcome::Err {
+                fallback: keyword_summary(&session_id),
+                reason: "no subagent manager configured".to_string(),
+            }
         }
     };
+
+    let (raw_output, summarizer_failure) = match outcome {
+        SummarizerOutcome::Ok(text) => (text, None),
+        SummarizerOutcome::Err { fallback, reason } => (fallback, Some(reason)),
+    };
+
+    // H3: when an auto-retain pipeline started (we persisted the
+    // `triggered` event) and the summarizer subagent failed, persist +
+    // broadcast `auto_retain_failed` BEFORE writing the fallback summary.
+    // iOS uses the pair (triggered → failed) to exit the retain pill's
+    // spinner with an error label instead of a perpetual "retaining…".
+    if let (RetainSource::Auto { interval_fired }, Some(reason)) =
+        (source, summarizer_failure.as_ref())
+    {
+        emit_auto_retain_failed(
+            &event_store,
+            &broadcast,
+            &session_id,
+            interval_fired,
+            reason,
+        )
+        .await;
+    }
 
     // ── Parse structured output ─────────────────────────────────────────────
     let parsed = parse_retain_output(&raw_output);
@@ -838,13 +919,27 @@ fn truncate_str(s: &str, max: usize) -> &str {
     }
 }
 
+/// Outcome of an attempt to run the LLM summarizer subsession.
+///
+/// Distinguishes a real summarizer output from a graceful fallback so the
+/// background task can decide whether to fire `MemoryAutoRetainFailed`
+/// (auto-retain lifecycle exit event). A fallback summary is still written
+/// to disk — it's better than nothing — but iOS sees the failure signal.
+enum SummarizerOutcome {
+    /// Real output from the summarizer subagent.
+    Ok(String),
+    /// Subagent failed or returned an error. The returned string is the
+    /// graceful keyword fallback; `reason` names what went wrong.
+    Err { fallback: String, reason: String },
+}
+
 /// Run the LLM summarizer subsession and return its text output.
 async fn run_summarizer(
     manager: Arc<SubagentManager>,
     parent_session_id: &str,
     working_directory: &str,
     transcript: String,
-) -> String {
+) -> SummarizerOutcome {
     let task = format!("Summarize the provided session transcript:\n\n{transcript}");
 
     match manager
@@ -862,10 +957,14 @@ async fn run_summarizer(
         })
         .await
     {
-        Ok(result) => result.output,
+        Ok(result) => SummarizerOutcome::Ok(result.output),
         Err(e) => {
-            warn!(session_id = %parent_session_id, error = %e, "memory summarizer subagent failed, using keyword fallback");
-            keyword_summary(parent_session_id)
+            let reason = e.to_string();
+            warn!(session_id = %parent_session_id, error = %reason, "memory summarizer subagent failed, using keyword fallback");
+            SummarizerOutcome::Err {
+                fallback: keyword_summary(parent_session_id),
+                reason,
+            }
         }
     }
 }
@@ -1540,6 +1639,143 @@ mod tests {
         assert!(
             row.is_none(),
             "manual retain must not produce an auto_retain_triggered event"
+        );
+    }
+
+    // ── H3: memory.auto_retain_failed unit tests ─────────────────────────
+
+    /// Direct unit test of the failure-emitter. Persists a
+    /// `memory.auto_retain_failed` event with payload fields matching
+    /// the triggered/failed pair iOS consumes.
+    #[tokio::test]
+    async fn emit_auto_retain_failed_persists_event_with_reason() {
+        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        let ctx = make_test_context();
+
+        let cr = ctx
+            .event_store
+            .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
+            .unwrap();
+        let session_id = cr.session.id.clone();
+
+        let broadcast = Arc::clone(ctx.orchestrator.broadcast());
+
+        emit_auto_retain_failed(
+            &ctx.event_store,
+            &broadcast,
+            &session_id,
+            7,
+            "subagent spawn failed: subsession cap reached",
+        )
+        .await;
+
+        let row = ctx
+            .event_store
+            .get_latest_event_by_type(&session_id, "memory.auto_retain_failed")
+            .unwrap()
+            .expect("auto_retain_failed event should be persisted");
+        assert_eq!(row.event_type, "memory.auto_retain_failed");
+
+        let payload: serde_json::Value = serde_json::from_str(&row.payload).unwrap();
+        assert_eq!(payload["intervalFired"], 7);
+        assert_eq!(payload["sessionId"], session_id);
+        assert!(
+            payload["reason"]
+                .as_str()
+                .unwrap_or("")
+                .contains("subsession cap reached"),
+            "reason should be preserved verbatim; got {:?}",
+            payload["reason"]
+        );
+    }
+
+    /// The `triggered` and `failed` events land in the correct order when
+    /// an auto-retain pipeline starts and then fails. iOS depends on this
+    /// ordering to transition the retain pill from "started" → "failed".
+    #[tokio::test]
+    async fn auto_retain_triggered_and_failed_land_in_order() {
+        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        let ctx = make_test_context();
+
+        let cr = ctx
+            .event_store
+            .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
+            .unwrap();
+        let session_id = cr.session.id.clone();
+
+        // Step 1: record the triggered event.
+        emit_auto_retain_triggered(&RetainDeps::from_rpc(&ctx), &session_id, 3).await;
+
+        // Step 2: record the failed event.
+        let broadcast = Arc::clone(ctx.orchestrator.broadcast());
+        emit_auto_retain_failed(
+            &ctx.event_store,
+            &broadcast,
+            &session_id,
+            3,
+            "test failure",
+        )
+        .await;
+
+        let triggered = ctx
+            .event_store
+            .get_latest_event_by_type(&session_id, "memory.auto_retain_triggered")
+            .unwrap()
+            .expect("triggered must exist");
+        let failed = ctx
+            .event_store
+            .get_latest_event_by_type(&session_id, "memory.auto_retain_failed")
+            .unwrap()
+            .expect("failed must exist");
+
+        assert!(
+            triggered.sequence < failed.sequence,
+            "triggered must come before failed; got triggered.seq={} failed.seq={}",
+            triggered.sequence,
+            failed.sequence
+        );
+    }
+
+    /// A manual retain that encounters a summarizer error must NOT emit
+    /// `auto_retain_failed` — that event is auto-only.
+    #[tokio::test]
+    async fn manual_retain_never_emits_auto_retain_failed() {
+        use crate::server::rpc::handlers::test_helpers::make_test_context;
+        let ctx = make_test_context();
+
+        let cr = ctx
+            .event_store
+            .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
+            .unwrap();
+        let session_id = cr.session.id.clone();
+
+        // Seed a user message so the retain pipeline has content to summarize.
+        let _ = ctx
+            .event_store
+            .append(&AppendOptions {
+                session_id: &session_id,
+                event_type: EventType::MessageUser,
+                payload: json!({"text": "hello"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+
+        let deps = RetainDeps::from_rpc(&ctx);
+        let _ = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
+            .await
+            .unwrap();
+
+        // trigger_retain spawns the background task; give it a moment to complete.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let failed = ctx
+            .event_store
+            .get_latest_event_by_type(&session_id, "memory.auto_retain_failed")
+            .unwrap();
+        assert!(
+            failed.is_none(),
+            "manual retain must never produce an auto_retain_failed event"
         );
     }
 
