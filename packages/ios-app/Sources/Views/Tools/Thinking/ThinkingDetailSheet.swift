@@ -9,6 +9,7 @@ import SwiftUI
 struct ThinkingDetailSheet: View {
     let state: ThinkingDetailState
     @Environment(\.dismiss) private var dismiss
+    @State private var sawStreaming: Bool = false
 
     private let bottomAnchorID = "thinking-bottom"
     private let topAnchorID = "thinking-top"
@@ -59,11 +60,21 @@ struct ThinkingDetailSheet: View {
                         }
                     }
                 }
-                .onChange(of: state.isActivelyStreaming) { _, _ in
-                    // Force toolbar re-evaluation when streaming state changes
+                .onChange(of: state.isActivelyStreaming) { _, isStreaming in
+                    if isStreaming {
+                        sawStreaming = true
+                    } else if sawStreaming {
+                        // Auto-dismiss once the thinking stream ends, so the user is
+                        // returned to the chat. Small delay lets the final tokens settle.
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(400))
+                            dismiss()
+                        }
+                    }
                 }
                 .onAppear {
                     if state.isActivelyStreaming {
+                        sawStreaming = true
                         // Deferred to next run loop: ScrollViewReader proxy requires
                         // layout to complete before scrollTo works reliably on appear.
                         DispatchQueue.main.async {
