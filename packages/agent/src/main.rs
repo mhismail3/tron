@@ -228,6 +228,14 @@ fn init_database(
         .context("Failed to open database")?;
     {
         let conn = pool.get().context("Failed to get DB connection")?;
+        // M34: catch WAL-recovery-hiding-corruption before any writes happen.
+        // The first connection to a file-backed DB triggers automatic WAL
+        // replay; if the WAL was corrupt we want to know NOW, not after a
+        // session has been partially reconstructed from damaged data.
+        tron::events::check_integrity(&conn).context(
+            "Database integrity check failed. The event store may be corrupt; \
+             restore from a backup or investigate ~/.tron/system/database/log.db.",
+        )?;
         let _ = tron::events::run_migrations(&conn).context("Failed to run migrations")?;
     }
     Ok((pool, db_path, db_lock))

@@ -44,7 +44,7 @@ pub use sqlite::repositories::device_token::RegisterTokenResult;
 pub use sqlite::repositories::session::{ActivitySummaryLine, MessagePreview};
 pub use sqlite::{
     ConnectionConfig, ConnectionPool, DatabaseLock, LockError, MigrationResult, PooledConnection,
-    acquire_database_lock, new_file, new_in_memory, run_migrations,
+    acquire_database_lock, check_integrity, new_file, new_in_memory, run_migrations,
 };
 pub use store::{
     AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult, ImportAtomicOptions,
