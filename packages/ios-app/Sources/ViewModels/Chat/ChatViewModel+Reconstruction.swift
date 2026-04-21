@@ -79,6 +79,40 @@ extension ChatViewModel {
 
         hasInitiallyLoaded = true
         messageIndex.rebuild(from: messages)
+
+        // H7: resolve any streaming snapshot that wasn't consumed by
+        // processInFlightState. Two legitimate cases:
+        //
+        //   1. The turn ended during disconnect, so there's no
+        //      in-flight streaming. The final assistant text should
+        //      already be among `messages` (reconstructed from the
+        //      persisted message.assistant event). If we can find a
+        //      message whose text starts with the snapshot, the user
+        //      sees the completed response — safe to drop.
+        //
+        //   2. The snapshot doesn't appear anywhere. Under C5's
+        //      persist-before-broadcast invariant this SHOULD be
+        //      impossible (every delta the client rendered was
+        //      persisted first, so reconstruction must see it). If it
+        //      happens anyway, log a warning so the anomaly is
+        //      diagnosable — but do NOT inject a synthetic message,
+        //      because a subsequent event could duplicate it.
+        if let snap = streamingRecoverySnapshot {
+            let covered = messages.contains { msg in
+                if case .text(let existing) = msg.content {
+                    return existing.hasPrefix(snap.text) || existing == snap.text
+                }
+                return false
+            }
+            if !covered {
+                logger.warning(
+                    "[RECONSTRUCT] H7 streaming snapshot not covered by reconstruction (possible data loss). prefix=\(String(snap.text.prefix(60)))",
+                    category: .session
+                )
+            }
+            streamingRecoverySnapshot = nil
+        }
+
         logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil), pendingQueue=\(result.pendingQueue?.count ?? 0)", category: .session)
     }
 
@@ -121,8 +155,30 @@ extension ChatViewModel {
                 }
 
                 if isStreaming {
-                    // Last text + actively streaming → create streaming message
-                    let streamingMessage = ChatMessage.streaming()
+                    // H7: reuse the snapshot UUID if the reconstructed
+                    // text is a continuation of what was live before
+                    // cleanup — keeps the bubble's identity across a
+                    // transient disconnect so the UI doesn't flicker.
+                    //
+                    // Continuation means: reconstructed `text` equals
+                    // the snapshot text exactly (nothing new since
+                    // disconnect) OR starts with it as a prefix (new
+                    // deltas landed while we were offline). Anything
+                    // else (shorter text, divergent content) is NOT a
+                    // safe continuation — fall through to a fresh UUID
+                    // and let the defensive check at the end of
+                    // processReconstructionResult log the mismatch.
+                    let reusedId: UUID? = streamingRecoverySnapshot.flatMap { snap in
+                        (text == snap.text || text.hasPrefix(snap.text)) ? snap.messageId : nil
+                    }
+                    let streamingMessage: ChatMessage
+                    if let reusedId {
+                        streamingMessage = ChatMessage.streamingReusing(id: reusedId)
+                        streamingRecoverySnapshot = nil
+                        logger.info("[RECONSTRUCT] H7 reused streaming UUID \(reusedId) across reconnect", category: .session)
+                    } else {
+                        streamingMessage = ChatMessage.streaming()
+                    }
                     messages.append(streamingMessage)
                     streamingManager.catchUpToInProgress(existingText: text, messageId: streamingMessage.id)
                     if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = streamingMessage.id }

@@ -57,6 +57,19 @@ extension ChatViewModel: ConnectionContext {
     func cleanUpStreamingState() {
         // Capture streaming message ID before reset nulls it
         let streamingId = streamingManager.streamingMessageId
+        // H7: before tearing the live streaming state down, snapshot the
+        // streaming message UUID + accumulated text. If reconstruction's
+        // in-flight state produces a streaming message that continues
+        // from this snapshot, processInFlightState reuses the UUID so
+        // the bubble doesn't flicker away and back with a new identity.
+        // Only captured when there is actual text to preserve —
+        // an empty streaming bubble has no visible state to protect.
+        if let streamingId, !streamingManager.receivedText.isEmpty {
+            streamingRecoverySnapshot = StreamingRecoverySnapshot(
+                messageId: streamingId,
+                text: streamingManager.receivedText
+            )
+        }
         streamingManager.reset()
         // Remove any in-flight streaming message
         if let streamingId {
