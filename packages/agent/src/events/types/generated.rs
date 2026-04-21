@@ -33,6 +33,8 @@ define_events! {
         ToolCall => "tool.call" => payloads::tool::ToolCallPayload,
         /// Tool execution result.
         ToolResult => "tool.result" => payloads::tool::ToolResultPayload,
+        /// Tool execution progress update (long-running tools only).
+        ToolProgress => "tool.progress" => payloads::tool::ToolProgressPayload,
         /// Text delta during streaming.
         StreamTextDelta => "stream.text_delta" => payloads::streaming::StreamTextDeltaPayload,
         /// Thinking delta during streaming.
@@ -215,7 +217,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 77] = [
+    const EXPECTED: [(EventType, &str); 78] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -227,6 +229,7 @@ mod tests {
         (EventType::MessageDequeued, "message.dequeued"),
         (EventType::ToolCall, "tool.call"),
         (EventType::ToolResult, "tool.result"),
+        (EventType::ToolProgress, "tool.progress"),
         (EventType::StreamTextDelta, "stream.text_delta"),
         (EventType::StreamThinkingDelta, "stream.thinking_delta"),
         (EventType::StreamTurnStart, "stream.turn_start"),
@@ -351,7 +354,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 77);
+        assert_eq!(ALL_EVENT_TYPES.len(), 78);
     }
 
     #[test]
