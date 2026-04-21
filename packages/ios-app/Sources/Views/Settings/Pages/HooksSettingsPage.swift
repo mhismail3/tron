@@ -18,6 +18,7 @@ struct HooksSettingsPage: View {
             builtinHooksCard
             modelCard
             errorPolicyCard
+            addedContextCard
             userHooksCard
         }
         .sheet(isPresented: $showHooksModelPicker) {
@@ -146,6 +147,48 @@ struct HooksSettingsPage: View {
             }
 
             SettingsCaption(text: "Continue (default) lets the agent proceed when a hook fails. Block treats a failed hook as a safety violation and stops the operation with a reason.")
+        }
+    }
+
+    // MARK: - Added-Context Budget (M18)
+
+    /// Labeled options for the M18 add_context budget slider. Three
+    /// presets cover the common cases; a 0 value is exposed as "Off"
+    /// because zero is the explicit-disable semantic server-side.
+    private var addedContextOptions: [(label: String, value: UInt32)] {
+        [
+            (label: "Off", value: 0),
+            (label: "Small (1 KB)", value: 1024),
+            (label: "Medium (4 KB)", value: 4096),
+            (label: "Large (16 KB)", value: 16384),
+        ]
+    }
+
+    private var addedContextCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Hook Added-Context Budget")
+
+            SettingsCard {
+                SettingsRow(icon: "text.insert", label: "Maximum injected context") {
+                    Picker("", selection: Binding(
+                        get: { settingsState.hooksMaxAddedContextChars },
+                        set: { newValue in
+                            settingsState.hooksMaxAddedContextChars = newValue
+                            updateServerSetting {
+                                ServerSettingsUpdate(hooks: .init(maxAddedContextChars: newValue))
+                            }
+                        }
+                    )) {
+                        ForEach(addedContextOptions, id: \.value) { opt in
+                            Text(opt.label).tag(opt.value)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
+            }
+
+            SettingsCaption(text: "Cap on characters a hook may inject via the add_context action per event. Over-budget content is dropped (not truncated). Off disables the feature.")
         }
     }
 

@@ -136,6 +136,11 @@ impl HookEngine {
     ) -> HookResult {
         let mut merged_modifications: Option<serde_json::Value> = None;
         let mut messages: Vec<String> = Vec::new();
+        // M18: accumulated `added_context` fragments from every
+        // handler that returns `AddContext`. Concatenated with
+        // newlines in registration order so hooks compose
+        // deterministically.
+        let mut added_context_fragments: Vec<String> = Vec::new();
 
         for handler in handlers {
             // Check filter
@@ -154,12 +159,27 @@ impl HookEngine {
                         reason = result.reason.as_deref().unwrap_or("(none)"),
                         "Hook blocked execution"
                     );
+                    // Block short-circuits: any partial modifications
+                    // or added-context from prior hooks are
+                    // intentionally discarded so a guard hook's veto
+                    // isn't silently mixed with a permissive hook's
+                    // contribution.
                     return result;
                 }
                 HookAction::Modify => {
                     if let Some(mods) = &result.modifications {
                         merged_modifications =
                             Some(merge_json(merged_modifications.as_ref(), mods));
+                    }
+                    if let Some(msg) = &result.message {
+                        messages.push(msg.clone());
+                    }
+                }
+                HookAction::AddContext => {
+                    if let Some(content) = &result.added_context
+                        && !content.is_empty()
+                    {
+                        added_context_fragments.push(content.clone());
                     }
                     if let Some(msg) = &result.message {
                         messages.push(msg.clone());
@@ -173,14 +193,45 @@ impl HookEngine {
             }
         }
 
+        // M18: budget check on the concatenated added_context. Over-
+        // budget drops the entire batch (silent truncation would
+        // violate the "all or nothing" contract callers rely on), and
+        // logs a warn so operators can see the miss.
+        let aggregated_added_context = if added_context_fragments.is_empty() {
+            None
+        } else {
+            let joined = added_context_fragments.join("\n");
+            let budget = crate::settings::get_settings()
+                .hooks
+                .max_added_context_chars as usize;
+            if budget == 0 || joined.len() > budget {
+                tracing::warn!(
+                    hook_type = %context.hook_type(),
+                    session_id = %context.session_id(),
+                    aggregated_chars = joined.len(),
+                    budget_chars = budget,
+                    "hook AddContext exceeded budget — dropping (all or nothing)"
+                );
+                None
+            } else {
+                Some(joined)
+            }
+        };
+
         // Build aggregated result
-        if merged_modifications.is_some() || !messages.is_empty() {
+        let action = if merged_modifications.is_some() {
+            HookAction::Modify
+        } else if aggregated_added_context.is_some() {
+            HookAction::AddContext
+        } else {
+            HookAction::Continue
+        };
+        if merged_modifications.is_some()
+            || aggregated_added_context.is_some()
+            || !messages.is_empty()
+        {
             HookResult {
-                action: if merged_modifications.is_some() {
-                    HookAction::Modify
-                } else {
-                    HookAction::Continue
-                },
+                action,
                 reason: None,
                 message: if messages.is_empty() {
                     None
@@ -188,6 +239,7 @@ impl HookEngine {
                     Some(messages.join("\n"))
                 },
                 modifications: merged_modifications,
+                added_context: aggregated_added_context,
             }
         } else {
             HookResult::continue_()
@@ -1205,5 +1257,223 @@ mod tests {
         let b = serde_json::json!(42);
         let merged = merge_json(Some(&a), &b);
         assert_eq!(merged, 42);
+    }
+
+    // ── M18: HookAction::AddContext ─────────────────────────────────────
+
+    /// Serialize M18 tests that mutate the process-wide settings so
+    /// parallel test threads don't race on the budget override.
+    fn m18_settings_lock() -> &'static tokio::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+    }
+
+    /// Install a settings override with the given budget. Caller holds
+    /// the lock guard for the duration of the test — the guard's drop
+    /// restores defaults so the next test starts clean.
+    fn set_added_context_budget(budget_chars: u32) {
+        let mut settings = crate::settings::TronSettings::default();
+        settings.hooks.max_added_context_chars = budget_chars;
+        crate::settings::init_settings(settings);
+    }
+
+    fn restore_default_settings() {
+        crate::settings::init_settings(crate::settings::TronSettings::default());
+    }
+
+    fn user_prompt_ctx() -> HookContext {
+        HookContext::UserPromptSubmit {
+            session_id: "s1".to_string(),
+            timestamp: "t".to_string(),
+            prompt: "hi".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_context_single_hook_surfaces_content() {
+        let _guard = m18_settings_lock().lock().await;
+        set_added_context_budget(4096);
+
+        let mut registry = HookRegistry::new();
+        registry.register(make_simple(
+            "ctx-hook",
+            HookType::UserPromptSubmit,
+            0,
+            HookResult::add_context("remember to cite sources"),
+        ));
+
+        let engine = HookEngine::new(registry);
+        let result = engine.execute(&user_prompt_ctx()).await;
+
+        assert_eq!(result.action, HookAction::AddContext);
+        assert_eq!(
+            result.added_context.as_deref(),
+            Some("remember to cite sources")
+        );
+        restore_default_settings();
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_context_concatenates_across_hooks() {
+        // Two hooks both return AddContext — engine joins their
+        // contributions with newlines in registration order.
+        let _guard = m18_settings_lock().lock().await;
+        set_added_context_budget(4096);
+
+        let mut registry = HookRegistry::new();
+        registry.register(make_simple(
+            "first",
+            HookType::UserPromptSubmit,
+            10,
+            HookResult::add_context("fragment one"),
+        ));
+        registry.register(make_simple(
+            "second",
+            HookType::UserPromptSubmit,
+            5,
+            HookResult::add_context("fragment two"),
+        ));
+
+        let engine = HookEngine::new(registry);
+        let result = engine.execute(&user_prompt_ctx()).await;
+
+        assert_eq!(result.action, HookAction::AddContext);
+        assert_eq!(
+            result.added_context.as_deref(),
+            Some("fragment one\nfragment two")
+        );
+        restore_default_settings();
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_context_rejected_when_over_budget() {
+        // 50-char budget — a 60-char contribution must be dropped.
+        let _guard = m18_settings_lock().lock().await;
+        set_added_context_budget(50);
+
+        let mut registry = HookRegistry::new();
+        registry.register(make_simple(
+            "bloat",
+            HookType::UserPromptSubmit,
+            0,
+            HookResult::add_context("x".repeat(60)),
+        ));
+
+        let engine = HookEngine::new(registry);
+        let result = engine.execute(&user_prompt_ctx()).await;
+
+        // Dropped, not truncated — action collapses to Continue.
+        assert_eq!(result.action, HookAction::Continue);
+        assert!(result.added_context.is_none());
+        restore_default_settings();
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_context_disabled_by_zero_budget() {
+        // budget=0 is the explicit "disable feature" semantic.
+        let _guard = m18_settings_lock().lock().await;
+        set_added_context_budget(0);
+
+        let mut registry = HookRegistry::new();
+        registry.register(make_simple(
+            "ctx",
+            HookType::UserPromptSubmit,
+            0,
+            HookResult::add_context("anything"),
+        ));
+
+        let engine = HookEngine::new(registry);
+        let result = engine.execute(&user_prompt_ctx()).await;
+
+        assert_eq!(result.action, HookAction::Continue);
+        assert!(result.added_context.is_none());
+        restore_default_settings();
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_context_combined_aggregate_exceeds_budget_rejected() {
+        // Each fragment is under-budget, but their sum (including
+        // separator newline) exceeds it.
+        let _guard = m18_settings_lock().lock().await;
+        set_added_context_budget(20);
+
+        let mut registry = HookRegistry::new();
+        registry.register(make_simple(
+            "a",
+            HookType::UserPromptSubmit,
+            10,
+            HookResult::add_context("x".repeat(15)),
+        ));
+        registry.register(make_simple(
+            "b",
+            HookType::UserPromptSubmit,
+            5,
+            HookResult::add_context("y".repeat(15)),
+        ));
+
+        let engine = HookEngine::new(registry);
+        let result = engine.execute(&user_prompt_ctx()).await;
+
+        assert_eq!(result.action, HookAction::Continue);
+        assert!(result.added_context.is_none());
+        restore_default_settings();
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_context_yields_to_block() {
+        // If one hook adds context and a later hook blocks, the block
+        // wins (existing chain-stopping semantic for Block) and the
+        // added context is discarded — never mix a permissive hook's
+        // contribution with a guard hook's veto.
+        let _guard = m18_settings_lock().lock().await;
+        set_added_context_budget(4096);
+
+        let mut registry = HookRegistry::new();
+        registry.register(make_simple(
+            "add-ctx",
+            HookType::UserPromptSubmit,
+            100, // runs first
+            HookResult::add_context("should be discarded"),
+        ));
+        registry.register(make_simple(
+            "blocker",
+            HookType::UserPromptSubmit,
+            50,
+            HookResult::block("policy violation"),
+        ));
+
+        let engine = HookEngine::new(registry);
+        let result = engine.execute(&user_prompt_ctx()).await;
+
+        assert!(result.is_blocked());
+        assert_eq!(result.reason.as_deref(), Some("policy violation"));
+        assert!(
+            result.added_context.is_none(),
+            "block must discard any in-progress added_context"
+        );
+        restore_default_settings();
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_context_empty_string_is_ignored() {
+        // Hooks that return AddContext with empty content don't
+        // contribute — the aggregated result collapses to Continue.
+        let _guard = m18_settings_lock().lock().await;
+        set_added_context_budget(4096);
+
+        let mut registry = HookRegistry::new();
+        registry.register(make_simple(
+            "ctx",
+            HookType::UserPromptSubmit,
+            0,
+            HookResult::add_context(""),
+        ));
+
+        let engine = HookEngine::new(registry);
+        let result = engine.execute(&user_prompt_ctx()).await;
+
+        assert_eq!(result.action, HookAction::Continue);
+        assert!(result.added_context.is_none());
+        restore_default_settings();
     }
 }

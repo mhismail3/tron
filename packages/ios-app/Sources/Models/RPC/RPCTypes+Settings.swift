@@ -21,6 +21,10 @@ struct ServerSettings: Decodable {
     /// - `"continue"` (default) — fail-open, agent proceeds
     /// - `"block"` — synthesize a Block with a reason; security hooks opt in
     let hooksErrorPolicy: String
+    /// M18: character budget for hook `add_context` content aggregated
+    /// across all hooks per event. Content over budget is dropped with
+    /// a warn log. 0 disables AddContext injection entirely.
+    let hooksMaxAddedContextChars: UInt32
     let skillsCompactionPolicy: String
     let skillsShowIndex: String
     let queueDrainMode: String
@@ -69,7 +73,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum HooksKeys: String, CodingKey {
-        case llmModel, builtinHooks, errorPolicy
+        case llmModel, builtinHooks, errorPolicy, maxAddedContextChars
     }
 
     private enum SessionKeys: String, CodingKey {
@@ -138,10 +142,12 @@ struct ServerSettings: Decodable {
             hooksLlmModel = (try? hooksContainer.decodeIfPresent(String.self, forKey: .llmModel)) ?? "claude-haiku-4-5-20251001"
             builtinHooks = (try? hooksContainer.decodeIfPresent([BuiltinHookSetting].self, forKey: .builtinHooks)) ?? []
             hooksErrorPolicy = (try? hooksContainer.decodeIfPresent(String.self, forKey: .errorPolicy)) ?? "continue"
+            hooksMaxAddedContextChars = (try? hooksContainer.decodeIfPresent(UInt32.self, forKey: .maxAddedContextChars)) ?? 4096
         } else {
             hooksLlmModel = "claude-haiku-4-5-20251001"
             builtinHooks = []
             hooksErrorPolicy = "continue"
+            hooksMaxAddedContextChars = 4096
         }
 
         // skills.*
@@ -339,6 +345,7 @@ struct ServerSettingsUpdate: Encodable {
         var llmModel: String?
         var builtinHooks: [BuiltinHookSetting]?
         var errorPolicy: String?
+        var maxAddedContextChars: UInt32?
     }
 
     struct SkillsUpdate: Encodable {

@@ -442,7 +442,9 @@ impl CompactionHandler {
         let event_result = match result.action {
             HookAction::Block => EventHookResult::Block,
             HookAction::Modify => EventHookResult::Modify,
-            HookAction::Continue => EventHookResult::Continue,
+            // M18: AddContext is not meaningful for PreCompact
+            // (compaction doesn't carry a user prompt to inject into).
+            HookAction::Continue | HookAction::AddContext => EventHookResult::Continue,
         };
         if let Some(counter) = sequence_counter {
             let _ = emitter.emit_sequenced(TronEvent::HookCompleted {

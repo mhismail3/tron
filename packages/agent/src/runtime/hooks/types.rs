@@ -91,14 +91,27 @@ impl std::fmt::Display for HookType {
 
 /// Action a hook handler can take.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum HookAction {
     /// Continue execution normally.
     Continue,
     /// Block the current operation.
     Block,
-    /// Modify the operation with provided modifications.
+    /// Modify the operation with provided modifications (e.g., tool
+    /// argument rewriting in PreToolUse).
     Modify,
+    /// M18: append `added_context` to the prompt/turn this hook is
+    /// firing on, without otherwise modifying it. Used by hooks that
+    /// want to inject context (reminders, policy excerpts, fetched
+    /// state) into the next LLM turn. The engine aggregates the
+    /// `added_context` field across all AddContext-returning hooks
+    /// before returning the final HookResult. Subject to
+    /// `hooks.maxAddedContextChars` — over-budget aggregated content
+    /// is dropped with a warn log rather than truncated.
+    ///
+    /// Serializes as `"add_context"` (snake_case) on the wire so
+    /// scripts returning JSON can opt in cleanly.
+    AddContext,
 }
 
 /// How a hook executes relative to the agent flow.
@@ -146,6 +159,12 @@ pub struct HookResult {
     /// Modifications to apply (for `Modify` action).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modifications: Option<serde_json::Value>,
+    /// M18: extra context to inject into the prompt/turn this hook is
+    /// firing on. Set alongside `action: AddContext`. When multiple
+    /// hooks return `AddContext`, the engine concatenates their
+    /// `added_context` fields with newlines in registration order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_context: Option<String>,
 }
 
 impl HookResult {
@@ -157,6 +176,7 @@ impl HookResult {
             reason: None,
             message: None,
             modifications: None,
+            added_context: None,
         }
     }
 
@@ -168,6 +188,7 @@ impl HookResult {
             reason: Some(reason.into()),
             message: None,
             modifications: None,
+            added_context: None,
         }
     }
 
@@ -179,6 +200,7 @@ impl HookResult {
             reason: None,
             message: None,
             modifications: Some(modifications),
+            added_context: None,
         }
     }
 
@@ -193,6 +215,20 @@ impl HookResult {
             reason: None,
             message: Some(message.into()),
             modifications: Some(modifications),
+            added_context: None,
+        }
+    }
+
+    /// M18: create an `AddContext` result carrying extra text to
+    /// inject into the prompt/turn this hook is firing on.
+    #[must_use]
+    pub fn add_context(content: impl Into<String>) -> Self {
+        Self {
+            action: HookAction::AddContext,
+            reason: None,
+            message: None,
+            modifications: None,
+            added_context: Some(content.into()),
         }
     }
 
@@ -563,7 +599,12 @@ mod tests {
 
     #[test]
     fn test_hook_action_serde_roundtrip() {
-        for action in &[HookAction::Continue, HookAction::Block, HookAction::Modify] {
+        for action in &[
+            HookAction::Continue,
+            HookAction::Block,
+            HookAction::Modify,
+            HookAction::AddContext,
+        ] {
             let json = serde_json::to_string(action).unwrap();
             let deserialized: HookAction = serde_json::from_str(&json).unwrap();
             assert_eq!(&deserialized, action);
@@ -584,6 +625,38 @@ mod tests {
             serde_json::to_string(&HookAction::Modify).unwrap(),
             "\"modify\""
         );
+        // M18: AddContext serializes snake_case so scripts emitting
+        // JSON can opt in with a readable token.
+        assert_eq!(
+            serde_json::to_string(&HookAction::AddContext).unwrap(),
+            "\"add_context\""
+        );
+    }
+
+    // M18: end-to-end serde of the whole HookResult with added_context.
+    #[test]
+    fn test_hook_result_add_context_constructor() {
+        let result = HookResult::add_context("helpful reminder");
+        assert_eq!(result.action, HookAction::AddContext);
+        assert_eq!(result.added_context.as_deref(), Some("helpful reminder"));
+        assert!(result.modifications.is_none());
+        assert!(!result.is_blocked());
+    }
+
+    #[test]
+    fn test_hook_result_add_context_wire_shape() {
+        let result = HookResult::add_context("payload");
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"action\":\"add_context\""));
+        assert!(json.contains("\"addedContext\":\"payload\""));
+    }
+
+    #[test]
+    fn test_hook_result_parses_add_context_from_script_shape() {
+        let json = r#"{"action":"add_context","addedContext":"reminder"}"#;
+        let result: HookResult = serde_json::from_str(json).unwrap();
+        assert_eq!(result.action, HookAction::AddContext);
+        assert_eq!(result.added_context.as_deref(), Some("reminder"));
     }
 
     // --- HookExecutionMode ---

@@ -786,7 +786,11 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         debug!(session_id = %session_id, "[hooks] SessionStart returned");
     }
 
-    // Fire UserPromptSubmit hook
+    // Fire UserPromptSubmit hook. M18: if any hook returns an
+    // AddContext action with non-empty `added_context`, prepend that
+    // content to the prompt inside a clearly-marked XML-style block
+    // so the LLM can distinguish it from what the user typed.
+    let mut effective_prompt = prompt.clone();
     if let Some(hook_engine) = &hooks {
         debug!(session_id = %session_id, "[hooks] firing UserPromptSubmit");
         let hook_ctx = crate::runtime::hooks::types::HookContext::UserPromptSubmit {
@@ -794,12 +798,27 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             timestamp: chrono::Utc::now().to_rfc3339(),
             prompt: prompt.clone(),
         };
-        let _ = hook_engine.execute(&hook_ctx).await;
+        let hook_result = hook_engine.execute(&hook_ctx).await;
+        if hook_result.action == crate::runtime::hooks::types::HookAction::AddContext
+            && let Some(content) = hook_result.added_context
+            && !content.is_empty()
+        {
+            debug!(
+                session_id = %session_id,
+                bytes = content.len(),
+                "[hooks] UserPromptSubmit injected added_context into prompt"
+            );
+            effective_prompt = format!(
+                "<hook-context>\n{content}\n</hook-context>\n\n{prompt}",
+                content = content,
+                prompt = prompt,
+            );
+        }
         debug!(session_id = %session_id, "[hooks] UserPromptSubmit returned");
     }
 
     debug!(session_id = %session_id, "[hooks] all hooks returned, calling run_agent");
-    let result = run_agent(&mut agent, &prompt, run_context, &hooks, &broadcast, sequence_counter).await;
+    let result = run_agent(&mut agent, &effective_prompt, run_context, &hooks, &broadcast, sequence_counter).await;
     orchestrator.remove_compaction_handler(&session_id);
 
     let _ = persister.flush().await;

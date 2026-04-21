@@ -181,7 +181,10 @@ pub async fn execute_tool(
         let event_result = match result.action {
             HookAction::Block => EventHookResult::Block,
             HookAction::Modify => EventHookResult::Modify,
-            HookAction::Continue => EventHookResult::Continue,
+            // M18: AddContext is a no-op on PreToolUse (tools don't
+            // accept context injection). Map to Continue so existing
+            // event wire format is unchanged.
+            HookAction::Continue | HookAction::AddContext => EventHookResult::Continue,
         };
         if let Some(counter) = ctx.sequence_counter {
             let _ = ctx.emitter.emit_sequenced(TronEvent::HookCompleted {
@@ -227,7 +230,11 @@ pub async fn execute_tool(
                     effective_args = mods;
                 }
             }
-            HookAction::Continue => {}
+            // M18: AddContext is a no-op for PreToolUse — there is no
+            // context surface on a tool call. A well-behaved hook
+            // wouldn't return AddContext here, but handle it cleanly
+            // rather than producing a behavioral surprise.
+            HookAction::Continue | HookAction::AddContext => {}
         }
     }
 
@@ -378,7 +385,9 @@ pub async fn execute_tool(
                     let event_result = match bg_result.action {
                         HookAction::Block => EventHookResult::Block,
                         HookAction::Modify => EventHookResult::Modify,
-                        HookAction::Continue => EventHookResult::Continue,
+                        // M18: AddContext on PostToolUse is a no-op
+                        // (no context surface on a completed tool).
+                        HookAction::Continue | HookAction::AddContext => EventHookResult::Continue,
                     };
                     let _ = emitter_bg.emit(TronEvent::HookCompleted {
                         base: BaseEvent::now(&sid),
