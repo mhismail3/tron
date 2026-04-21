@@ -364,6 +364,58 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         provider.model(),
     );
 
+    // C5 invariant: persist message.assistant BEFORE broadcasting
+    // ResponseComplete. If persist fails we cannot emit because iOS would
+    // see "response complete" for a message that is missing from the DB
+    // on reconnect. Fail the turn with an actionable error instead.
+    let has_thinking = {
+        let content_has_thinking = stream_result.message.content.iter().any(|c| {
+            matches!(c, crate::core::content::AssistantContent::Thinking { .. })
+        });
+        content_has_thinking
+    };
+
+    let assistant_payload = build_completed_assistant_payload(
+        &stream_result,
+        turn,
+        provider.model(),
+        turn_start.elapsed().as_millis() as u64,
+        has_thinking,
+        provider.provider_type(),
+        token_record_json.as_ref(),
+        cost,
+    );
+
+    if let Err(error) = persist_completed_assistant_message(
+        persister,
+        session_id,
+        assistant_payload,
+        sequence_counter,
+    )
+    .await
+    {
+        let error_msg = format!("failed to persist assistant message: {error}");
+        error!(session_id, turn, error = %error_msg);
+        let _ = emitter.emit(TronEvent::TurnFailed {
+            base: BaseEvent::now(session_id),
+            turn,
+            error: error_msg.clone(),
+            code: Some("ASSISTANT_PERSIST_FAILED".into()),
+            category: Some("persistence".into()),
+            recoverable: false,
+            partial_content: None,
+        });
+        return TurnResult {
+            success: false,
+            error: Some(error_msg),
+            stop_reason: Some(StopReason::Error),
+            ..Default::default()
+        };
+    }
+
+    // Persist succeeded — safe to commit the assistant turn to local context
+    // and tell iOS the response is complete.
+    let _ = add_assistant_message_to_context(context_manager, &stream_result);
     emit_response_complete(
         emitter,
         session_id,
@@ -373,25 +425,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         &model_name,
         sequence_counter,
     );
-
-    let has_thinking = add_assistant_message_to_context(context_manager, &stream_result);
-
-    persist_completed_assistant_message(
-        persister,
-        session_id,
-        build_completed_assistant_payload(
-            &stream_result,
-            turn,
-            provider.model(),
-            turn_start.elapsed().as_millis() as u64,
-            has_thinking,
-            provider.provider_type(),
-            token_record_json.as_ref(),
-            cost,
-        ),
-        sequence_counter,
-    )
-    .await;
 
     // Finalize journal — assistant message was persisted successfully
     if let Some(j) = journal.take() {
@@ -423,25 +456,18 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     })
     .await;
 
-    // 9b. Emit batched rules.activated if any new rules were activated this turn
+    // 9b. Persist + broadcast batched rules.activated if any new rules activated.
+    //
+    // C5 invariant: persist BEFORE broadcasting. On persist failure the
+    // rules-activated broadcast is skipped (turn continues — the rules are
+    // already applied to the in-process context manager; only the
+    // notification to iOS is lost). Unlike the assistant message path, this
+    // is a secondary signal and does not warrant a hard turn failure.
     if !tool_phase.activated_rules.is_empty() {
         let total = context_manager
             .rules_tracker()
             .activated_scoped_rules_count() as u32;
-        if let Some(counter) = sequence_counter {
-            let _ = emitter.emit_sequenced(TronEvent::RulesActivated {
-                base: BaseEvent::now(session_id),
-                rules: tool_phase.activated_rules.clone(),
-                total_activated: total,
-            }, counter);
-        } else {
-            let _ = emitter.emit(TronEvent::RulesActivated {
-                base: BaseEvent::now(session_id),
-                rules: tool_phase.activated_rules.clone(),
-                total_activated: total,
-            });
-        }
-        persist_rules_activated(
+        if persist_rules_activated(
             persister,
             session_id,
             turn,
@@ -449,7 +475,26 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             total,
             sequence_counter,
         )
-        .await;
+        .await
+        .is_ok()
+        {
+            if let Some(counter) = sequence_counter {
+                let _ = emitter.emit_sequenced(
+                    TronEvent::RulesActivated {
+                        base: BaseEvent::now(session_id),
+                        rules: tool_phase.activated_rules.clone(),
+                        total_activated: total,
+                    },
+                    counter,
+                );
+            } else {
+                let _ = emitter.emit(TronEvent::RulesActivated {
+                    base: BaseEvent::now(session_id),
+                    rules: tool_phase.activated_rules.clone(),
+                    total_activated: total,
+                });
+            }
+        }
     }
 
     // 10. Emit TurnEnd

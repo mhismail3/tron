@@ -263,27 +263,41 @@ pub(super) fn build_completed_assistant_payload(
     payload
 }
 
+/// Persist a completed `message.assistant` event synchronously.
+///
+/// INVARIANT (C5): returns the persist error to the caller so that the
+/// corresponding `ResponseComplete` broadcast can be gated on successful
+/// persistence. A silent log-and-continue here was how `ResponseComplete`
+/// could reach iOS with no matching message in the event log.
 pub(super) async fn persist_completed_assistant_message(
     persister: Option<&EventPersister>,
     session_id: &str,
     payload: Value,
     sequence_counter: Option<&AtomicI64>,
-) {
-    if let Some(persister) = persister {
-        let seq = next_seq(sequence_counter);
-        if let Err(error) = persister
-            .append_with_sequence(session_id, EventType::MessageAssistant, payload, seq)
-            .await
-        {
+) -> Result<(), crate::runtime::errors::RuntimeError> {
+    let Some(persister) = persister else {
+        return Ok(());
+    };
+    let seq = next_seq(sequence_counter);
+    persister
+        .append_with_sequence(session_id, EventType::MessageAssistant, payload, seq)
+        .await
+        .map(|_| ())
+        .inspect_err(|error| {
             error!(
                 session_id,
                 error = %error,
                 "failed to persist message.assistant"
             );
-        }
-    }
+        })
 }
 
+/// Persist a `rules.activated` event synchronously and return the outcome.
+///
+/// INVARIANT (C5): synchronous append so the caller can gate the matching
+/// `RulesActivated` broadcast on success. The previous fire-and-forget
+/// path meant a broadcast-only consumer (iOS) could render activated-rules
+/// that were silently missing from session history on reconnect.
 pub(super) async fn persist_rules_activated(
     persister: Option<&EventPersister>,
     session_id: &str,
@@ -291,32 +305,34 @@ pub(super) async fn persist_rules_activated(
     activated_rules: &[ActivatedRuleInfo],
     total_activated: u32,
     sequence_counter: Option<&AtomicI64>,
-) {
-    if let Some(persister) = persister {
-        let seq = next_seq(sequence_counter);
-        if let Err(error) = persister
-            .append_background_with_sequence(
-                session_id,
-                EventType::RulesActivated,
-                json!({
-                    "rules": activated_rules.iter().map(|a| json!({
-                        "relativePath": a.relative_path,
-                        "scopeDir": a.scope_dir,
-                    })).collect::<Vec<_>>(),
-                    "totalActivated": total_activated,
-                }),
-                seq,
-            )
-            .await
-        {
+) -> Result<(), crate::runtime::errors::RuntimeError> {
+    let Some(persister) = persister else {
+        return Ok(());
+    };
+    let seq = next_seq(sequence_counter);
+    persister
+        .append_with_sequence(
+            session_id,
+            EventType::RulesActivated,
+            json!({
+                "rules": activated_rules.iter().map(|a| json!({
+                    "relativePath": a.relative_path,
+                    "scopeDir": a.scope_dir,
+                })).collect::<Vec<_>>(),
+                "totalActivated": total_activated,
+            }),
+            seq,
+        )
+        .await
+        .map(|_| ())
+        .inspect_err(|error| {
             warn!(
                 session_id,
                 turn,
                 error = %error,
-                "failed to queue rules-activated event"
+                "failed to persist rules-activated event"
             );
-        }
-    }
+        })
 }
 
 /// Persist a `stream.turn_end` event, then broadcast the matching `TurnEnd`.
@@ -622,5 +638,113 @@ mod tests {
             result.is_err(),
             "no broadcast should fire when persist fails, got: {result:?}"
         );
+    }
+
+    // ── C5 coverage extension: response-complete + rules-activated ─────────
+
+    #[tokio::test]
+    async fn persist_completed_assistant_message_returns_ok_on_success() {
+        let h = harness().await;
+        let payload = json!({ "content": [], "turn": 1 });
+        let result = persist_completed_assistant_message(
+            Some(&h.persister),
+            &h.session_id,
+            payload,
+            Some(&h.counter),
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn persist_completed_assistant_message_returns_err_on_worker_death() {
+        let h = harness().await;
+        h.persister.worker_handle.abort();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        let payload = json!({ "content": [], "turn": 1 });
+        let result = persist_completed_assistant_message(
+            Some(&h.persister),
+            &h.session_id,
+            payload,
+            Some(&h.counter),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "persist must surface error when worker is dead"
+        );
+    }
+
+    #[tokio::test]
+    async fn persist_completed_assistant_message_is_noop_when_no_persister() {
+        // Callers that pass None (tests, pure-live-emit contexts) must get
+        // Ok so they proceed to emit ResponseComplete — no persister, no
+        // failure mode to guard against.
+        let h = harness().await;
+        let payload = json!({ "content": [], "turn": 1 });
+        let result = persist_completed_assistant_message(
+            None,
+            &h.session_id,
+            payload,
+            Some(&h.counter),
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn persist_rules_activated_returns_ok_on_success() {
+        let h = harness().await;
+        let result = persist_rules_activated(
+            Some(&h.persister),
+            &h.session_id,
+            1,
+            &[],
+            0,
+            Some(&h.counter),
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn persist_rules_activated_returns_err_on_worker_death() {
+        let h = harness().await;
+        h.persister.worker_handle.abort();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        let result = persist_rules_activated(
+            Some(&h.persister),
+            &h.session_id,
+            1,
+            &[],
+            0,
+            Some(&h.counter),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn persist_rules_activated_writes_to_db_when_successful() {
+        // Regression guard: after switching from background to sync, the
+        // rules.activated row must still land in the event log under the
+        // expected event_type.
+        let h = harness().await;
+        persist_rules_activated(
+            Some(&h.persister),
+            &h.session_id,
+            1,
+            &[],
+            3,
+            Some(&h.counter),
+        )
+        .await
+        .unwrap();
+
+        h.persister.flush().await.unwrap();
+        let persisted = persisted_events(&h.store, &h.session_id, "rules.activated");
+        assert_eq!(persisted.len(), 1, "expected exactly one rules.activated row");
     }
 }
