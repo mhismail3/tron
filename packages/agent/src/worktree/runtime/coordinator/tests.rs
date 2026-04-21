@@ -1875,3 +1875,174 @@ async fn coordinator_commit_stage_all_false_only_commits_index() {
         r.files_changed
     );
 }
+
+// ── H4: concurrent acquire for the same session is serialized ────────────
+
+/// Fire N concurrent `maybe_acquire_with_override` calls for the SAME session
+/// and assert exactly one worktree gets created. Without the per-session lock
+/// these would race on the cache check → create → track window and produce
+/// multiple `WorktreeAcquired` events.
+#[tokio::test]
+async fn concurrent_acquire_same_session_creates_exactly_one_worktree() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let session = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("race-sess"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let sid = session.session.id.clone();
+    let coord = Arc::new(WorktreeCoordinator::new(
+        WorktreeConfig::default(),
+        store.clone(),
+    ));
+
+    // Launch 10 concurrent acquire attempts for the same session.
+    let mut handles = Vec::new();
+    for _ in 0..10 {
+        let coord = coord.clone();
+        let path = dir.path().to_path_buf();
+        let sid = sid.clone();
+        handles.push(tokio::spawn(async move {
+            coord
+                .maybe_acquire_with_override(&sid, &path, None)
+                .await
+        }));
+    }
+
+    let results: Vec<_> = futures::future::join_all(handles).await;
+    // All must succeed...
+    let acquires: Vec<_> = results
+        .into_iter()
+        .map(|r| r.unwrap().unwrap())
+        .collect();
+    assert_eq!(acquires.len(), 10);
+    for r in &acquires {
+        assert!(matches!(r, AcquireResult::Acquired(_)));
+    }
+
+    // ...and all must reference the SAME worktree path + branch.
+    let paths: std::collections::HashSet<_> = acquires
+        .iter()
+        .filter_map(|r| match r {
+            AcquireResult::Acquired(info) => Some(info.worktree_path.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        paths.len(),
+        1,
+        "concurrent acquires must converge on a single worktree; got {paths:?}"
+    );
+
+    // Only one persistent `worktree.acquired` event should exist.
+    let opts = crate::events::sqlite::repositories::event::ListEventsOptions::default();
+    let events = store.get_events_by_session(&sid, &opts).unwrap();
+    let acquired_count = events
+        .iter()
+        .filter(|e| e.event_type == crate::events::EventType::WorktreeAcquired.as_str())
+        .count();
+    assert_eq!(
+        acquired_count, 1,
+        "exactly one worktree.acquired event expected; got {acquired_count}"
+    );
+}
+
+/// Different sessions must still acquire in parallel; the per-session lock
+/// scopes by session_id and must not serialize across sessions.
+#[tokio::test]
+async fn concurrent_acquire_different_sessions_not_serialized() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let mut sids: Vec<String> = Vec::new();
+    for title in ["s1", "s2", "s3"] {
+        let r = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some(title),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        sids.push(r.session.id);
+    }
+    let coord = Arc::new(WorktreeCoordinator::new(
+        WorktreeConfig::default(),
+        store,
+    ));
+
+    let start = std::time::Instant::now();
+    let mut handles = Vec::new();
+    for sid in sids {
+        let coord = coord.clone();
+        let path = dir.path().to_path_buf();
+        handles.push(tokio::spawn(async move {
+            coord.maybe_acquire_with_override(&sid, &path, None).await
+        }));
+    }
+    for h in handles {
+        let _ = h.await.unwrap().unwrap();
+    }
+    let elapsed = start.elapsed();
+
+    // Three sessions creating worktrees on one repo. Even sequentially
+    // this completes in well under a minute; we just want to confirm the
+    // per-session lock doesn't pathologically serialize them.
+    assert!(
+        elapsed < std::time::Duration::from_secs(60),
+        "three-session acquire took {elapsed:?}"
+    );
+    assert_eq!(coord.list_active().len(), 3);
+}
+
+/// After acquire returns, the per-session lock must be released so a
+/// subsequent acquire for the same session can proceed. (The lock is a
+/// short-lived coordination primitive, NOT a long-held resource.)
+#[tokio::test]
+async fn acquire_releases_lock_after_return() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let session = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("release-sess"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let sid = session.session.id;
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    // First acquire creates.
+    let first = coord
+        .maybe_acquire_with_override(&sid, dir.path(), None)
+        .await
+        .unwrap();
+    assert!(matches!(first, AcquireResult::Acquired(_)));
+
+    // Second acquire (idempotent) must not block — proves the lock dropped.
+    let start = std::time::Instant::now();
+    let _second = coord
+        .maybe_acquire_with_override(&sid, dir.path(), None)
+        .await
+        .unwrap();
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(1),
+        "second acquire must not have waited on a stuck lock"
+    );
+}

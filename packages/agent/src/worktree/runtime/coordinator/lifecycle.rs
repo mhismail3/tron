@@ -46,6 +46,17 @@ impl WorktreeCoordinator {
         working_dir: &std::path::Path,
         use_worktree_override: Option<bool>,
     ) -> Result<AcquireResult> {
+        // H4: serialize concurrent acquire attempts for the same session.
+        // Without this, two in-flight prompts for the same session_id (fast
+        // double-tap, reconnection mid-send) would both pass the cache
+        // check, both call `lifecycle::create`, and both emit
+        // `worktree.acquired` — leaking one of the resulting worktrees.
+        // Holding the lock across the entire cache-check → create → track
+        // window makes the second caller see the first's tracked state on
+        // its cache check and return the already-acquired worktree.
+        let session_lock = self.session_acquire_mutex(session_id);
+        let _guard = session_lock.lock().await;
+
         // Idempotent: return existing worktree if still healthy
         let cached = self.state.lock().active_info(session_id);
         if let Some(info) = cached {

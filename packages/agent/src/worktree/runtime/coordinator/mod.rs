@@ -76,7 +76,7 @@ pub use utils::{split_diff_by_file, count_diff_stats};
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, Mutex as AsyncMutex};
@@ -195,6 +195,13 @@ pub struct WorktreeCoordinator {
     pub(super) broadcast_tx: Option<broadcast::Sender<TronEvent>>,
     /// All active worktree state, kept coherent behind a single lock.
     pub(super) state: Mutex<CoordinatorState>,
+    /// Per-session async mutexes used to serialize `maybe_acquire_with_override`
+    /// calls for the same session. Concurrent prompts on the same session_id
+    /// (double-tap, reconnect-mid-send, etc.) would otherwise all pass the
+    /// cache check and each try to create a worktree. Weak refs so entries
+    /// drop automatically once no call is holding the lock.
+    pub(super) session_acquire_locks:
+        Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
 }
 
 impl WorktreeCoordinator {
@@ -207,6 +214,7 @@ impl WorktreeCoordinator {
             event_store,
             broadcast_tx: None,
             state: Mutex::new(CoordinatorState::default()),
+            session_acquire_locks: Mutex::new(HashMap::new()),
         }
     }
 
@@ -223,7 +231,31 @@ impl WorktreeCoordinator {
             event_store,
             broadcast_tx: Some(tx),
             state: Mutex::new(CoordinatorState::default()),
+            session_acquire_locks: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Return the per-session async mutex for `session_id`, creating it lazily.
+    ///
+    /// Used by [`Self::maybe_acquire_with_override`] to serialize concurrent
+    /// acquire attempts for the same session. Entries are stored as `Weak`,
+    /// so they are garbage-collected automatically once no caller is holding
+    /// the returned `Arc`.
+    pub(super) fn session_acquire_mutex(&self, session_id: &str) -> Arc<AsyncMutex<()>> {
+        let mut locks = self.session_acquire_locks.lock();
+
+        // Opportunistic GC: if the map grows past a threshold, drop dead weaks.
+        if locks.len() > 128 {
+            locks.retain(|_, weak| weak.strong_count() > 0);
+        }
+
+        if let Some(existing) = locks.get(session_id).and_then(Weak::upgrade) {
+            return existing;
+        }
+
+        let lock = Arc::new(AsyncMutex::new(()));
+        let _ = locks.insert(session_id.to_string(), Arc::downgrade(&lock));
+        lock
     }
 
     /// Broadcast a `TronEvent` to WebSocket clients (non-blocking, best-effort).
