@@ -329,20 +329,69 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         // legacy rows predating this rule. See `should_acquire_worktree_for_source`.
         None
     } else if let Some(wt_path) = &state.worktree_path {
-        worktree_coordinator
-            .as_ref()
-            .and_then(|coordinator| coordinator.get_info(&session_id))
-            .or_else(|| {
-                Some(crate::worktree::WorktreeInfo {
-                    session_id: session_id.clone(),
-                    worktree_path: std::path::PathBuf::from(wt_path),
-                    branch: String::new(),
-                    base_commit: String::new(),
-                    base_branch: None,
-                    original_working_dir: std::path::PathBuf::from(&working_dir),
-                    repo_root: std::path::PathBuf::from(&working_dir),
+        // M8: the event log recorded a worktree path for this session, but the
+        // directory itself may have been deleted or moved out-of-band (user
+        // `rm -rf`'d it, external cleanup script, volume unmount). If so,
+        // treat the path as stale and fall through to the acquire branch so
+        // the session gets a fresh worktree instead of operating on a dead
+        // directory and failing every git op downstream.
+        let path_buf = std::path::PathBuf::from(wt_path);
+        if !path_buf.is_dir() {
+            warn!(
+                session_id = %session_id,
+                stale_path = %path_buf.display(),
+                "recorded worktree path no longer exists on disk; falling back to acquire"
+            );
+            // Drop the stale info and re-enter the acquire branch below by
+            // falling through with None. The `else if` chain handles it.
+            if let Some(ref coordinator) = worktree_coordinator {
+                let use_worktree_override = event_store
+                    .get_session(&session_id)
+                    .ok()
+                    .flatten()
+                    .and_then(|row| row.use_worktree);
+                match coordinator
+                    .maybe_acquire_with_override(
+                        &session_id,
+                        std::path::Path::new(&working_dir),
+                        use_worktree_override,
+                    )
+                    .await
+                {
+                    Ok(crate::worktree::AcquireResult::Acquired(info)) => {
+                        freshly_acquired_worktree = true;
+                        Some(info)
+                    }
+                    Ok(crate::worktree::AcquireResult::Deferred(_)) => None,
+                    Ok(crate::worktree::AcquireResult::Passthrough) => None,
+                    Err(error) => {
+                        warn!(
+                            session_id = %session_id,
+                            error = %error,
+                            "worktree re-acquisition after stale path failed; using original directory"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            worktree_coordinator
+                .as_ref()
+                .and_then(|coordinator| coordinator.get_info(&session_id))
+                .or_else(|| {
+                    Some(crate::worktree::WorktreeInfo {
+                        session_id: session_id.clone(),
+                        worktree_path: path_buf,
+                        branch: String::new(),
+                        base_commit: String::new(),
+                        base_branch: None,
+                        original_working_dir: std::path::PathBuf::from(&working_dir),
+                        repo_root: std::path::PathBuf::from(&working_dir),
+                    })
                 })
-            })
+        }
     } else if let Some(ref coordinator) = worktree_coordinator {
         // Look up the session's optional per-session worktree override.
         // None defers to the global IsolationMode setting.
