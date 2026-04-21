@@ -7,6 +7,7 @@
 pub mod compact;
 pub mod config;
 pub mod context;
+pub mod device;
 pub mod error;
 pub mod file;
 pub mod hook;

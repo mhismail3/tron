@@ -9,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::debug;
 
-use crate::events::ConnectionPool;
+use crate::events::{ConnectionPool, EventStore};
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{NotifyDelegate, NotifyResult};
 
@@ -20,12 +20,22 @@ use super::sender::PushSender;
 pub struct RelayNotifyDelegate {
     sender: Arc<dyn PushSender>,
     pool: ConnectionPool,
+    /// Event store for H22 `device.token_invalidated` emission on relay
+    /// responses that map to terminal APNs token errors. Same store the
+    /// rest of the server uses — see [`ApnsNotifyDelegate::new`] for the
+    /// reasoning on sharing the canonical instance.
+    event_store: Arc<EventStore>,
 }
 
 impl RelayNotifyDelegate {
-    /// Create a new delegate with the given push sender and DB pool.
-    pub fn new(sender: Arc<dyn PushSender>, pool: ConnectionPool) -> Self {
-        Self { sender, pool }
+    /// Create a new delegate with the given push sender and event store.
+    pub fn new(sender: Arc<dyn PushSender>, event_store: Arc<EventStore>) -> Self {
+        let pool = event_store.pool().clone();
+        Self {
+            sender,
+            pool,
+            event_store,
+        }
     }
 }
 
@@ -76,7 +86,11 @@ impl NotifyDelegate for RelayNotifyDelegate {
                 .await;
             all_results.extend(results);
         }
-        Ok(push_helpers::process_send_results(&all_results, &self.pool))
+        Ok(push_helpers::process_send_results(
+            &all_results,
+            &self.pool,
+            Some(&self.event_store),
+        ))
     }
 }
 
@@ -89,23 +103,26 @@ mod tests {
     use crate::server::platform::apns::types::ApnsSendResult;
     use crate::tools::traits::Notification;
 
-    fn pool() -> crate::events::ConnectionPool {
+    /// Test fixture: an in-memory event store already wired through its
+    /// own pool. Returns both so tests that want to inspect the DB can
+    /// still `pool.get()` without constructing a parallel connection.
+    fn event_store_with_schema() -> Arc<EventStore> {
         use r2d2_sqlite::SqliteConnectionManager;
         let manager = SqliteConnectionManager::memory();
         let pool = r2d2::Pool::new(manager).unwrap();
         let conn = pool.get().unwrap();
         run_migrations(&conn).unwrap();
         drop(conn);
-        pool
+        Arc::new(EventStore::new(pool))
     }
 
     fn register(
-        pool: &crate::events::ConnectionPool,
+        store: &EventStore,
         token: &str,
         env: &str,
         bundle: Option<&str>,
     ) {
-        let conn = pool.get().unwrap();
+        let conn = store.pool().get().unwrap();
         DeviceTokenRepo::register(&conn, token, None, None, env, bundle).unwrap();
     }
 
@@ -137,12 +154,12 @@ mod tests {
         // two separate relay calls, each with its own apns-topic. If the
         // delegate collapses them, the Beta token hits production topic
         // and Apple rejects with DeviceTokenNotForTopic.
-        let pool = pool();
-        register(&pool, &"1".repeat(64), "sandbox", Some("com.tron.mobile"));
-        register(&pool, &"2".repeat(64), "sandbox", Some("com.tron.mobile.beta"));
+        let store = event_store_with_schema();
+        register(&store, &"1".repeat(64), "sandbox", Some("com.tron.mobile"));
+        register(&store, &"2".repeat(64), "sandbox", Some("com.tron.mobile.beta"));
 
         let mock = Arc::new(MockPushSender::succeeding());
-        let delegate = RelayNotifyDelegate::new(mock.clone(), pool);
+        let delegate = RelayNotifyDelegate::new(mock.clone(), store);
 
         let result = delegate.send_notification(&notif()).await.unwrap();
         assert!(result.success);
@@ -161,11 +178,11 @@ mod tests {
     async fn legacy_token_with_null_bundle_passes_empty_string() {
         // Legacy tokens registered before v006 must still send — they
         // fall through to the relay worker's env.APNS_BUNDLE_ID default.
-        let pool = pool();
-        register(&pool, &"1".repeat(64), "production", None);
+        let store = event_store_with_schema();
+        register(&store, &"1".repeat(64), "production", None);
 
         let mock = Arc::new(MockPushSender::succeeding());
-        let delegate = RelayNotifyDelegate::new(mock.clone(), pool);
+        let delegate = RelayNotifyDelegate::new(mock.clone(), store);
 
         delegate.send_notification(&notif()).await.unwrap();
 
@@ -183,9 +200,9 @@ mod tests {
         // relay uses env.APNS_BUNDLE_ID = "com.tron.mobile" (production);
         // APNs rejects with DeviceTokenNotForTopic. The DB must self-heal
         // by deactivating the token so the Beta app re-registers cleanly.
-        let pool = pool();
+        let store = event_store_with_schema();
         let token = "b".repeat(64);
-        register(&pool, &token, "sandbox", None);
+        register(&store, &token, "sandbox", None);
 
         let mock = Arc::new(MockPushSender::with_results(vec![vec![ApnsSendResult {
             success: false,
@@ -195,12 +212,12 @@ mod tests {
             reason: Some("DeviceTokenNotForTopic".into()),
             error: Some("wrong bundle".into()),
         }]]));
-        let delegate = RelayNotifyDelegate::new(mock, pool.clone());
+        let delegate = RelayNotifyDelegate::new(mock, store.clone());
 
         delegate.send_notification(&notif()).await.unwrap();
 
         // Token should be deactivated — next send skips it.
-        let conn = pool.get().unwrap();
+        let conn = store.pool().get().unwrap();
         let active = DeviceTokenRepo::get_all_active(&conn).unwrap();
         assert!(
             active.is_empty(),
@@ -210,9 +227,9 @@ mod tests {
 
     #[tokio::test]
     async fn empty_tokens_returns_success_with_zero_count() {
-        let pool = pool();
+        let store = event_store_with_schema();
         let mock = Arc::new(MockPushSender::succeeding());
-        let delegate = RelayNotifyDelegate::new(mock.clone(), pool);
+        let delegate = RelayNotifyDelegate::new(mock.clone(), store);
 
         let result = delegate.send_notification(&notif()).await.unwrap();
         assert!(result.success);
@@ -228,13 +245,13 @@ mod tests {
         // apns-topic per bundle — but every registered device gets a
         // push, not just the ones "viewing" the session. This matches
         // the iPhone + iPad use case (two Prod devices → both pinged).
-        let pool = pool();
-        register(&pool, &"1".repeat(64), "production", Some("com.tron.mobile"));
-        register(&pool, &"2".repeat(64), "production", Some("com.tron.mobile"));
-        register(&pool, &"3".repeat(64), "sandbox", Some("com.tron.mobile.beta"));
+        let store = event_store_with_schema();
+        register(&store, &"1".repeat(64), "production", Some("com.tron.mobile"));
+        register(&store, &"2".repeat(64), "production", Some("com.tron.mobile"));
+        register(&store, &"3".repeat(64), "sandbox", Some("com.tron.mobile.beta"));
 
         let mock = Arc::new(MockPushSender::succeeding());
-        let delegate = RelayNotifyDelegate::new(mock.clone(), pool);
+        let delegate = RelayNotifyDelegate::new(mock.clone(), store);
 
         let result = delegate.send_notification(&notif()).await.unwrap();
         assert_eq!(result.total_count, 3, "every registered device gets a push");

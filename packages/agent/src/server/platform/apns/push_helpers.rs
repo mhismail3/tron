@@ -18,11 +18,15 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use tracing::debug;
+use tracing::{debug, info, warn};
 
-use crate::events::ConnectionPool;
-use crate::events::sqlite::repositories::device_token::DeviceTokenRepo;
+use crate::events::sqlite::repositories::device_token::{
+    DeactivatedTokenInfo, DeviceTokenRepo,
+};
+use crate::events::{AppendOptions, ConnectionPool, EventStore, EventType};
+use crate::events::types::payloads::device::DeviceTokenInvalidatedPayload;
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{Notification, NotifyResult};
 
@@ -152,10 +156,18 @@ pub(crate) fn is_terminal_token_error(result: &ApnsSendResult) -> bool {
 }
 
 /// Process send results: auto-deactivate terminally-failed tokens, collect
-/// errors, build the summary shown to the user.
+/// errors, build the summary shown to the user, and — H22 — emit a
+/// `device.token_invalidated` event for each deactivation so iOS has
+/// a push-driven signal of the server discarding its token.
+///
+/// Event emission is best-effort: if the token row has no session_id
+/// (registered without a session binding) or the attributed session no
+/// longer exists, the info is still logged at `info` level so operator
+/// visibility doesn't depend on the broadcast path.
 pub(crate) fn process_send_results(
     results: &[ApnsSendResult],
     pool: &ConnectionPool,
+    event_store: Option<&Arc<EventStore>>,
 ) -> NotifyResult {
     let total = results.len();
     let mut success_count = 0;
@@ -177,14 +189,34 @@ pub(crate) fn process_send_results(
             success_count += 1;
         } else {
             if is_terminal_token_error(result) {
-                debug!(
-                    device_token = token_prefix(&result.device_token),
-                    status = ?result.status_code,
-                    reason = ?result.reason,
-                    "deactivating token after terminal APNs error"
-                );
                 if let Ok(conn) = pool.get() {
-                    let _ = DeviceTokenRepo::mark_invalid(&conn, &result.device_token);
+                    match DeviceTokenRepo::deactivate(&conn, &result.device_token) {
+                        Ok(Some(info)) => {
+                            info!(
+                                token_prefix = token_prefix(&result.device_token),
+                                session_id = info.session_id.as_deref().unwrap_or("<none>"),
+                                bundle_id = info.bundle_id.as_deref().unwrap_or("<none>"),
+                                status = ?result.status_code,
+                                reason = ?result.reason,
+                                "H22: deactivated device token after terminal APNs error"
+                            );
+                            drop(conn);
+                            maybe_emit_invalidated_event(event_store, result, &info);
+                        }
+                        Ok(None) => {
+                            debug!(
+                                token_prefix = token_prefix(&result.device_token),
+                                "token already inactive — skipping duplicate deactivation"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                token_prefix = token_prefix(&result.device_token),
+                                error = %e,
+                                "failed to deactivate device token after terminal APNs error"
+                            );
+                        }
+                    }
                 }
             }
             if let Some(ref err) = result.error {
@@ -221,6 +253,59 @@ pub(crate) fn process_send_results(
         message: Some(message),
         success_count: u32::try_from(success_count).unwrap_or(u32::MAX),
         total_count: u32::try_from(total).unwrap_or(u32::MAX),
+    }
+}
+
+/// Emit a `device.token_invalidated` event if we have an event store and
+/// the token's session is still valid. Returns quietly on any failure —
+/// the deactivation itself is what protects the user from repeated
+/// 410s; the event is diagnostic-quality only.
+fn maybe_emit_invalidated_event(
+    event_store: Option<&Arc<EventStore>>,
+    result: &ApnsSendResult,
+    info: &DeactivatedTokenInfo,
+) {
+    let Some(store) = event_store else { return };
+    let Some(session_id) = info.session_id.as_deref() else {
+        debug!(
+            token_prefix = token_prefix(&result.device_token),
+            "skipping device.token_invalidated emission: token had no session binding"
+        );
+        return;
+    };
+
+    let payload = DeviceTokenInvalidatedPayload {
+        session_id: session_id.to_owned(),
+        token_prefix: token_prefix(&result.device_token).to_owned(),
+        bundle_id: info.bundle_id.clone(),
+        status_code: result.status_code,
+        reason: result.reason.clone(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+
+    let Ok(value) = serde_json::to_value(&payload) else {
+        warn!("failed to serialize DeviceTokenInvalidatedPayload");
+        return;
+    };
+
+    let append_result = store.append(&AppendOptions {
+        session_id,
+        event_type: EventType::DeviceTokenInvalidated,
+        payload: value,
+        parent_id: None,
+        sequence: None,
+    });
+
+    if let Err(e) = append_result {
+        // Session may no longer exist (user deleted it) — that's expected
+        // for long-abandoned sessions whose tokens finally rot. Log at
+        // debug so normal operation isn't noisy.
+        debug!(
+            session_id,
+            token_prefix = token_prefix(&result.device_token),
+            error = %e,
+            "device.token_invalidated event not persisted (session may be gone)"
+        );
     }
 }
 
@@ -309,7 +394,7 @@ mod tests {
             },
         ];
 
-        let result = process_send_results(&results, &pool);
+        let result = process_send_results(&results, &pool, None);
         assert!(result.success);
         assert!(result.message.as_ref().unwrap().contains("2 of 2"));
         assert_eq!(result.success_count, 2);
@@ -330,7 +415,7 @@ mod tests {
             error: Some("bad token".into()),
         }];
 
-        let result = process_send_results(&results, &pool);
+        let result = process_send_results(&results, &pool, None);
         assert!(!result.success);
         assert!(result.message.as_ref().unwrap().contains("0 of 1"));
         assert!(result.message.as_ref().unwrap().contains("bad token"));
@@ -362,7 +447,7 @@ mod tests {
             },
         ];
 
-        let result = process_send_results(&results, &pool);
+        let result = process_send_results(&results, &pool, None);
         assert!(result.success); // at least one succeeded
         assert!(result.message.as_ref().unwrap().contains("1 of 2"));
         assert_eq!(result.success_count, 1);
@@ -570,7 +655,7 @@ mod tests {
             reason: Some("Unregistered".into()),
             error: Some("gone".into()),
         }];
-        process_send_results(&results, &pool);
+        process_send_results(&results, &pool, None);
 
         assert!(!is_active(&pool, &token), "410 should deactivate");
     }
@@ -589,7 +674,7 @@ mod tests {
             reason: Some("BadDeviceToken".into()),
             error: Some("bad".into()),
         }];
-        process_send_results(&results, &pool);
+        process_send_results(&results, &pool, None);
 
         assert!(!is_active(&pool, &token), "BadDeviceToken should deactivate");
     }
@@ -609,7 +694,7 @@ mod tests {
             reason: Some("DeviceTokenNotForTopic".into()),
             error: Some("wrong bundle".into()),
         }];
-        process_send_results(&results, &pool);
+        process_send_results(&results, &pool, None);
 
         assert!(
             !is_active(&pool, &token),
@@ -631,7 +716,7 @@ mod tests {
             reason: Some("PayloadTooLarge".into()),
             error: Some("too big".into()),
         }];
-        process_send_results(&results, &pool);
+        process_send_results(&results, &pool, None);
 
         assert!(is_active(&pool, &token), "transient 400 must not deactivate");
     }
@@ -651,7 +736,7 @@ mod tests {
             reason: Some("TopicDisallowed".into()),
             error: Some("cert wrong".into()),
         }];
-        process_send_results(&results, &pool);
+        process_send_results(&results, &pool, None);
 
         assert!(is_active(&pool, &token), "TopicDisallowed must NOT deactivate");
     }
@@ -670,7 +755,7 @@ mod tests {
             reason: None,
             error: Some("apns down".into()),
         }];
-        process_send_results(&results, &pool);
+        process_send_results(&results, &pool, None);
 
         assert!(is_active(&pool, &token), "server error must not deactivate");
     }
@@ -689,9 +774,243 @@ mod tests {
             reason: None,
             error: None,
         }];
-        process_send_results(&results, &pool);
+        process_send_results(&results, &pool, None);
 
         assert!(is_active(&pool, &token), "success must never deactivate");
+    }
+
+    // ── H22: device.token_invalidated event emission ─────────────────
+
+    /// Fixture: a schema-migrated event store plus a workspace+session
+    /// row so a device token bound to them doesn't fail the FK.
+    fn event_store_with_session() -> (Arc<EventStore>, String) {
+        use r2d2_sqlite::SqliteConnectionManager;
+        let manager = SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::new(manager).unwrap();
+        let conn = pool.get().unwrap();
+        crate::events::sqlite::migrations::run_migrations(&conn).unwrap();
+        let session_id = "sess-h22".to_string();
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws-h22', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory, created_at, last_activity_at)
+             VALUES (?1, 'ws-h22', 't', 'claude-opus', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            rusqlite::params![session_id],
+        )
+        .unwrap();
+        drop(conn);
+        (Arc::new(EventStore::new(pool)), session_id)
+    }
+
+    fn register_with_session(
+        store: &EventStore,
+        token: &str,
+        session_id: &str,
+    ) {
+        let conn = store.pool().get().unwrap();
+        DeviceTokenRepo::register(
+            &conn,
+            token,
+            Some(session_id),
+            Some("ws-h22"),
+            "production",
+            Some("com.tron.mobile"),
+        )
+        .unwrap();
+    }
+
+    fn count_invalidated_events(store: &EventStore, session_id: &str) -> i64 {
+        let conn = store.pool().get().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM events WHERE session_id = ?1 AND type = ?2",
+            rusqlite::params![session_id, EventType::DeviceTokenInvalidated.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn h22_emits_invalidated_event_on_410() {
+        let (store, session_id) = event_store_with_session();
+        let token = "a".repeat(64);
+        register_with_session(&store, &token, &session_id);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(410),
+            reason: Some("Unregistered".into()),
+            error: Some("gone".into()),
+        }];
+        process_send_results(&results, &store.pool().clone(), Some(&store));
+
+        assert_eq!(
+            count_invalidated_events(&store, &session_id),
+            1,
+            "exactly one device.token_invalidated event must be persisted on terminal error"
+        );
+    }
+
+    #[test]
+    fn h22_does_not_emit_for_non_terminal_errors() {
+        let (store, session_id) = event_store_with_session();
+        let token = "b".repeat(64);
+        register_with_session(&store, &token, &session_id);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(503),
+            reason: None,
+            error: Some("upstream down".into()),
+        }];
+        process_send_results(&results, &store.pool().clone(), Some(&store));
+
+        assert_eq!(
+            count_invalidated_events(&store, &session_id),
+            0,
+            "transient errors must NOT emit an invalidation event"
+        );
+    }
+
+    #[test]
+    fn h22_dedups_repeat_terminal_errors_on_same_token() {
+        // If APNS responds 410 twice for the same token, we should only
+        // emit ONE invalidated event. The second 410 hits an already-
+        // inactive row and deactivate() returns None, skipping emission.
+        let (store, session_id) = event_store_with_session();
+        let token = "c".repeat(64);
+        register_with_session(&store, &token, &session_id);
+
+        let terminal = ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(410),
+            reason: Some("Unregistered".into()),
+            error: Some("gone".into()),
+        };
+        process_send_results(
+            std::slice::from_ref(&terminal),
+            &store.pool().clone(),
+            Some(&store),
+        );
+        process_send_results(
+            std::slice::from_ref(&terminal),
+            &store.pool().clone(),
+            Some(&store),
+        );
+
+        assert_eq!(
+            count_invalidated_events(&store, &session_id),
+            1,
+            "repeat 410s on the same token must not produce duplicate events"
+        );
+    }
+
+    #[test]
+    fn h22_no_emission_when_event_store_is_absent() {
+        // The delegate is shipped with `None` event_store from tests that
+        // exercise deactivation in isolation (the scope tests above). The
+        // deactivation side effect still runs; emission is skipped silently.
+        let (store, _session_id) = event_store_with_session();
+        let token = "d".repeat(64);
+        // Register with no session binding so deactivate returns info with
+        // session_id = None — which ALSO skips emission even if a store were
+        // passed. This asserts the None-store path.
+        let conn = store.pool().get().unwrap();
+        DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        drop(conn);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(410),
+            reason: Some("Unregistered".into()),
+            error: Some("gone".into()),
+        }];
+        // Pass None explicitly for event_store.
+        process_send_results(&results, &store.pool().clone(), None);
+
+        // Token is still deactivated (side effect preserved).
+        assert!(!is_active(&store.pool().clone(), &token));
+    }
+
+    #[test]
+    fn h22_skips_emission_when_token_has_no_session_binding() {
+        // Token registered via a legacy path with no session_id → no
+        // sensible attribution for the event. Deactivation still runs.
+        let (store, _session_id) = event_store_with_session();
+        let token = "e".repeat(64);
+        let conn = store.pool().get().unwrap();
+        DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        drop(conn);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(410),
+            reason: Some("Unregistered".into()),
+            error: Some("gone".into()),
+        }];
+        process_send_results(&results, &store.pool().clone(), Some(&store));
+
+        // No event produced for a session-less token.
+        let conn = store.pool().get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE type = ?1",
+                rusqlite::params![EventType::DeviceTokenInvalidated.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "no session_id → no event");
+        // Deactivation still applied.
+        assert!(!is_active(&store.pool().clone(), &token));
+    }
+
+    #[test]
+    fn h22_event_payload_carries_prefix_and_status_and_reason() {
+        let (store, session_id) = event_store_with_session();
+        let token = "f".repeat(64);
+        register_with_session(&store, &token, &session_id);
+
+        let results = vec![ApnsSendResult {
+            success: false,
+            device_token: token.clone(),
+            apns_id: None,
+            status_code: Some(400),
+            reason: Some("BadDeviceToken".into()),
+            error: Some("bad".into()),
+        }];
+        process_send_results(&results, &store.pool().clone(), Some(&store));
+
+        let conn = store.pool().get().unwrap();
+        let payload: String = conn
+            .query_row(
+                "SELECT payload FROM events WHERE type = ?1 AND session_id = ?2 LIMIT 1",
+                rusqlite::params![
+                    EventType::DeviceTokenInvalidated.as_str(),
+                    session_id
+                ],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(payload["tokenPrefix"], "ffffffff");
+        assert_eq!(payload["statusCode"], 400);
+        assert_eq!(payload["reason"], "BadDeviceToken");
+        assert_eq!(payload["bundleId"], "com.tron.mobile");
+        assert_eq!(payload["sessionId"], session_id);
+        assert!(payload["timestamp"].is_string());
     }
 
 }

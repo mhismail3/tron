@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tracing::debug;
-use crate::events::ConnectionPool;
+use crate::events::{ConnectionPool, EventStore};
 use crate::server::platform::apns::{ApnsService, PushSender};
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{Notification, NotifyDelegate, NotifyResult};
@@ -19,12 +19,23 @@ use super::push_helpers;
 pub struct ApnsNotifyDelegate {
     apns: Arc<ApnsService>,
     pool: ConnectionPool,
+    /// Event store for H22 `device.token_invalidated` emission on 410s.
+    /// Cloneable `Arc` pointer so the tool factory can share the
+    /// canonical store without ownership dance.
+    event_store: Arc<EventStore>,
 }
 
 impl ApnsNotifyDelegate {
-    /// Create a new delegate with the given APNS service and DB pool.
-    pub fn new(apns: Arc<ApnsService>, pool: ConnectionPool) -> Self {
-        Self { apns, pool }
+    /// Create a new delegate with the given APNS service and event store.
+    /// The DB pool is pulled from the event store so both sides of the
+    /// 410 → deactivate → event emission flow speak to the same DB.
+    pub fn new(apns: Arc<ApnsService>, event_store: Arc<EventStore>) -> Self {
+        let pool = event_store.pool().clone();
+        Self {
+            apns,
+            pool,
+            event_store,
+        }
     }
 }
 
@@ -69,7 +80,11 @@ impl NotifyDelegate for ApnsNotifyDelegate {
                 .await;
             all_results.extend(results);
         }
-        Ok(push_helpers::process_send_results(&all_results, &self.pool))
+        Ok(push_helpers::process_send_results(
+            &all_results,
+            &self.pool,
+            Some(&self.event_store),
+        ))
     }
 }
 

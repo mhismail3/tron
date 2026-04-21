@@ -93,14 +93,6 @@ impl EventStore {
         let conn = self.conn()?;
         DeviceTokenRepo::get_all_active(&conn)
     }
-
-    /// Mark a device token as invalid (e.g., after APNS 410 response).
-    pub fn mark_device_token_invalid(&self, device_token: &str) -> Result<bool> {
-        self.with_global_write_lock(|| {
-            let conn = self.conn()?;
-            DeviceTokenRepo::mark_invalid(&conn, device_token)
-        })
-    }
 }
 
 #[async_trait::async_trait]

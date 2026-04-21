@@ -167,6 +167,10 @@ define_events! {
         RepoLockReleased => "repo.lock_released" => payloads::repo::RepoLockReleasedPayload,
         /// Main branch advanced in a repo (cross-session broadcast).
         RepoMainAdvanced => "repo.main_advanced" => payloads::repo::RepoMainAdvancedPayload,
+        /// APNS device token invalidated by Apple (410 / BadDeviceToken /
+        /// DeviceTokenNotForTopic). Row already deactivated in the DB;
+        /// this event is the audit trail + broadcast signal for iOS.
+        DeviceTokenInvalidated => "device.token_invalidated" => payloads::device::DeviceTokenInvalidatedPayload,
     }
     raw_events {
     }
@@ -211,7 +215,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 76] = [
+    const EXPECTED: [(EventType, &str); 77] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -339,11 +343,15 @@ mod tests {
         (EventType::RepoLockAcquired, "repo.lock_acquired"),
         (EventType::RepoLockReleased, "repo.lock_released"),
         (EventType::RepoMainAdvanced, "repo.main_advanced"),
+        (
+            EventType::DeviceTokenInvalidated,
+            "device.token_invalidated",
+        ),
     ];
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 76);
+        assert_eq!(ALL_EVENT_TYPES.len(), 77);
     }
 
     #[test]

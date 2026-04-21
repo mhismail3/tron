@@ -94,13 +94,13 @@ pub(crate) fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry 
             Some(crate::PushService::Direct(ref apns)) => {
                 Arc::new(tron::server::platform::apns::delegate::ApnsNotifyDelegate::new(
                     apns.clone(),
-                    config.event_store.pool().clone(),
+                    config.event_store.clone(),
                 ))
             }
             Some(crate::PushService::Relay(ref relay)) => {
                 Arc::new(tron::server::platform::apns::relay_delegate::RelayNotifyDelegate::new(
                     relay.clone(),
-                    config.event_store.pool().clone(),
+                    config.event_store.clone(),
                 ))
             }
             None => Arc::new(StubNotifyDelegate),
