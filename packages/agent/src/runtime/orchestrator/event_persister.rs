@@ -35,7 +35,10 @@ type WorkerStartGate = ();
 /// to a single consumer task, guaranteeing linear `parent_id` threading.
 pub struct EventPersister {
     tx: mpsc::Sender<PersistRequest>,
-    worker_handle: tokio::task::JoinHandle<()>,
+    /// Handle to the background worker task. Crate-visible so sibling test
+    /// modules can simulate worker death (see `turn_runner::persistence`
+    /// tests that verify no-broadcast-on-persist-failure).
+    pub(crate) worker_handle: tokio::task::JoinHandle<()>,
 }
 
 impl EventPersister {

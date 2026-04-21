@@ -30,6 +30,13 @@ fn next_seq(counter: Option<&AtomicI64>) -> Option<i64> {
     counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1)
 }
 
+/// Persist a `stream.turn_start` event, then broadcast the matching
+/// `TurnStart` over the emitter.
+///
+/// INVARIANT (C5): the broadcast is emitted ONLY after the DB write
+/// succeeds. If persistence fails, no subscriber sees the event, so iOS
+/// and the DB cannot diverge — a reconnecting client that reconstructs
+/// from the DB will see the same set of events as a live subscriber.
 pub(super) async fn emit_turn_start(
     emitter: &Arc<EventEmitter>,
     persister: Option<&EventPersister>,
@@ -37,26 +44,29 @@ pub(super) async fn emit_turn_start(
     turn: u32,
     sequence_counter: Option<&AtomicI64>,
 ) {
-    emit_maybe_sequenced(emitter, TronEvent::TurnStart {
-        base: BaseEvent::now(session_id),
-        turn,
-    }, sequence_counter);
     if let Some(persister) = persister {
         let seq = next_seq(sequence_counter);
         if let Err(error) = persister
-            .append_background_with_sequence(
+            .append_with_sequence(
                 session_id,
                 EventType::StreamTurnStart,
-                json!({
-                    "turn": turn,
-                }),
+                json!({ "turn": turn }),
                 seq,
             )
             .await
         {
-            warn!(session_id, turn, error = %error, "failed to queue turn-start event");
+            warn!(session_id, turn, error = %error, "failed to persist turn-start event; skipping broadcast");
+            return;
         }
     }
+    emit_maybe_sequenced(
+        emitter,
+        TronEvent::TurnStart {
+            base: BaseEvent::now(session_id),
+            turn,
+        },
+        sequence_counter,
+    );
 }
 
 pub(super) fn build_interrupted_message_payload(
@@ -309,6 +319,10 @@ pub(super) async fn persist_rules_activated(
     }
 }
 
+/// Persist a `stream.turn_end` event, then broadcast the matching `TurnEnd`.
+///
+/// INVARIANT (C5): persist before broadcast. On persist failure the broadcast
+/// is skipped so iOS subscribers and the persisted DB state stay consistent.
 pub(super) async fn emit_turn_end(
     emitter: &Arc<EventEmitter>,
     persister: Option<&EventPersister>,
@@ -322,26 +336,6 @@ pub(super) async fn emit_turn_end(
     model_name: &str,
     sequence_counter: Option<&AtomicI64>,
 ) {
-    let turn_token_usage = stream_result.token_usage.as_ref().map(|u| TurnTokenUsage {
-        input_tokens: u.input_tokens,
-        output_tokens: u.output_tokens,
-        cache_read_tokens: u.cache_read_tokens,
-        cache_creation_tokens: u.cache_creation_tokens,
-        ..TurnTokenUsage::default()
-    });
-
-    emit_maybe_sequenced(emitter, TronEvent::TurnEnd {
-        base: BaseEvent::now(session_id),
-        turn,
-        duration: duration_ms,
-        token_usage: turn_token_usage,
-        token_record: token_record_json.clone(),
-        cost,
-        stop_reason: Some(stream_result.stop_reason.clone()),
-        context_limit: Some(context_limit),
-        model: Some(model_name.to_owned()),
-    }, sequence_counter);
-
     if let Some(persister) = persister {
         let mut token_usage_object = json!({
             "inputTokens": stream_result.token_usage.as_ref().map_or(0, |u| u.input_tokens),
@@ -362,8 +356,8 @@ pub(super) async fn emit_turn_end(
             "stopReason": &stream_result.stop_reason,
             "contextLimit": context_limit,
         });
-        if let Some(token_record_json) = token_record_json {
-            payload["tokenRecord"] = token_record_json;
+        if let Some(ref token_record) = token_record_json {
+            payload["tokenRecord"] = token_record.clone();
         }
         if let Some(cost) = cost {
             payload["cost"] = json!(cost);
@@ -371,17 +365,42 @@ pub(super) async fn emit_turn_end(
 
         let seq = next_seq(sequence_counter);
         if let Err(error) = persister
-            .append_background_with_sequence(session_id, EventType::StreamTurnEnd, payload, seq)
+            .append_with_sequence(session_id, EventType::StreamTurnEnd, payload, seq)
             .await
         {
             warn!(
                 session_id,
                 turn,
                 error = %error,
-                "failed to queue turn-end event"
+                "failed to persist turn-end event; skipping broadcast"
             );
+            return;
         }
     }
+
+    let turn_token_usage = stream_result.token_usage.as_ref().map(|u| TurnTokenUsage {
+        input_tokens: u.input_tokens,
+        output_tokens: u.output_tokens,
+        cache_read_tokens: u.cache_read_tokens,
+        cache_creation_tokens: u.cache_creation_tokens,
+        ..TurnTokenUsage::default()
+    });
+
+    emit_maybe_sequenced(
+        emitter,
+        TronEvent::TurnEnd {
+            base: BaseEvent::now(session_id),
+            turn,
+            duration: duration_ms,
+            token_usage: turn_token_usage,
+            token_record: token_record_json,
+            cost,
+            stop_reason: Some(stream_result.stop_reason.clone()),
+            context_limit: Some(context_limit),
+            model: Some(model_name.to_owned()),
+        },
+        sequence_counter,
+    );
 }
 
 pub(super) fn emit_tool_use_batch(
@@ -403,4 +422,205 @@ pub(super) fn emit_tool_use_batch(
         base: BaseEvent::now(session_id),
         tool_calls: summaries,
     }, sequence_counter);
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests guard the C5 invariant: turn-start and turn-end persist to the
+    //! event store BEFORE broadcasting the matching TronEvent. Pre-fix code
+    //! broadcast first, so a persist failure left iOS subscribers with an
+    //! event the DB never recorded — reconstruction on reconnect diverged.
+    use super::*;
+    use crate::events::sqlite::connection::{self, ConnectionConfig};
+    use crate::events::sqlite::migrations::run_migrations;
+    use crate::events::sqlite::repositories::event::ListEventsOptions;
+    use crate::events::EventStore;
+    use crate::runtime::types::StreamResult;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicI64;
+
+    struct Harness {
+        emitter: Arc<EventEmitter>,
+        persister: EventPersister,
+        store: Arc<EventStore>,
+        session_id: String,
+        counter: AtomicI64,
+        rx: tokio::sync::broadcast::Receiver<TronEvent>,
+    }
+
+    async fn harness() -> Harness {
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("m", "/tmp", Some("t"), None, None, None)
+            .unwrap();
+        let emitter = Arc::new(EventEmitter::new());
+        let rx = emitter.subscribe();
+        let persister = EventPersister::new(Arc::clone(&store));
+        Harness {
+            emitter,
+            persister,
+            store,
+            session_id: session.session.id,
+            counter: AtomicI64::new(0),
+            rx,
+        }
+    }
+
+    fn persisted_events(store: &EventStore, sid: &str, event_type: &str) -> Vec<i64> {
+        store
+            .get_events_by_session(sid, &ListEventsOptions::default())
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.event_type == event_type)
+            .map(|e| e.sequence)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn emit_turn_start_persists_before_broadcasting() {
+        let mut h = harness().await;
+
+        emit_turn_start(&h.emitter, Some(&h.persister), &h.session_id, 1, Some(&h.counter)).await;
+
+        // Collect the broadcast event.
+        let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
+            .await
+            .expect("broadcast should arrive")
+            .expect("broadcast channel alive");
+        let broadcast_seq = broadcast.sequence().expect("sequenced event");
+
+        // Persister is synchronous in emit_turn_start now, but flush to be safe.
+        h.persister.flush().await.unwrap();
+        let persisted = persisted_events(&h.store, &h.session_id, "stream.turn_start");
+
+        assert_eq!(persisted.len(), 1, "one stream.turn_start row expected");
+        assert!(
+            persisted[0] < broadcast_seq,
+            "persist (seq {}) must precede broadcast (seq {})",
+            persisted[0],
+            broadcast_seq
+        );
+    }
+
+    #[tokio::test]
+    async fn emit_turn_start_without_persister_still_broadcasts() {
+        // When no persister is configured (pure live emit, used by some test
+        // harnesses), the function must still broadcast — no regression for
+        // emitter-only callers.
+        let mut h = harness().await;
+
+        emit_turn_start(&h.emitter, None, &h.session_id, 1, Some(&h.counter)).await;
+
+        let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
+            .await
+            .expect("broadcast should arrive")
+            .expect("broadcast channel alive");
+        assert_eq!(broadcast.event_type(), "turn_start");
+    }
+
+    #[tokio::test]
+    async fn emit_turn_start_skips_broadcast_on_persist_failure() {
+        // Kill the persister worker so append_with_sequence returns an error.
+        // The function must detect that and NOT emit the broadcast.
+        let mut h = harness().await;
+        h.persister.worker_handle.abort();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        emit_turn_start(&h.emitter, Some(&h.persister), &h.session_id, 1, Some(&h.counter)).await;
+
+        // A broadcast would arrive immediately if the emit fired — give it a
+        // short window, then confirm no event appeared.
+        let result = tokio::time::timeout(std::time::Duration::from_millis(100), h.rx.recv()).await;
+        assert!(
+            result.is_err(),
+            "no broadcast should fire when persist fails, got: {result:?}"
+        );
+    }
+
+    fn stream_result_stub() -> StreamResult {
+        StreamResult {
+            message: crate::core::events::AssistantMessage {
+                content: Vec::new(),
+                token_usage: None,
+            },
+            stop_reason: "end_turn".into(),
+            token_usage: None,
+            tool_calls: Vec::new(),
+            interrupted: false,
+            partial_content: None,
+            ttft_ms: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn emit_turn_end_persists_before_broadcasting() {
+        let mut h = harness().await;
+        let stream = stream_result_stub();
+
+        emit_turn_end(
+            &h.emitter,
+            Some(&h.persister),
+            &h.session_id,
+            1,
+            42,
+            &stream,
+            None,
+            None,
+            25_000,
+            "m",
+            Some(&h.counter),
+        )
+        .await;
+
+        let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
+            .await
+            .expect("broadcast should arrive")
+            .expect("broadcast channel alive");
+        let broadcast_seq = broadcast.sequence().expect("sequenced event");
+
+        h.persister.flush().await.unwrap();
+        let persisted = persisted_events(&h.store, &h.session_id, "stream.turn_end");
+
+        assert_eq!(persisted.len(), 1);
+        assert!(
+            persisted[0] < broadcast_seq,
+            "persist (seq {}) must precede broadcast (seq {})",
+            persisted[0],
+            broadcast_seq
+        );
+    }
+
+    #[tokio::test]
+    async fn emit_turn_end_skips_broadcast_on_persist_failure() {
+        let mut h = harness().await;
+        h.persister.worker_handle.abort();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let stream = stream_result_stub();
+
+        emit_turn_end(
+            &h.emitter,
+            Some(&h.persister),
+            &h.session_id,
+            1,
+            42,
+            &stream,
+            None,
+            None,
+            25_000,
+            "m",
+            Some(&h.counter),
+        )
+        .await;
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(100), h.rx.recv()).await;
+        assert!(
+            result.is_err(),
+            "no broadcast should fire when persist fails, got: {result:?}"
+        );
+    }
 }
