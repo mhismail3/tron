@@ -1637,6 +1637,105 @@ async fn reconstruct_before_sequence_zero_returns_empty() {
 }
 
 #[tokio::test]
+async fn reconstruct_oversized_limit_is_clamped() {
+    use crate::server::rpc::session_reconstruct::MAX_RECONSTRUCT_EVENTS;
+
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("m", "/tmp", Some("t"), None)
+        .unwrap();
+
+    // Ask for way more events than MAX_RECONSTRUCT_EVENTS. Even if the
+    // session had a million events, the response must not exceed the cap.
+    let result = ReconstructHandler
+        .handle(
+            Some(json!({"sessionId": sid, "limit": 1_000_000})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let events = result["events"].as_array().unwrap();
+    assert!(
+        events.len() <= MAX_RECONSTRUCT_EVENTS as usize,
+        "response must be capped at MAX_RECONSTRUCT_EVENTS, got {}",
+        events.len()
+    );
+}
+
+#[tokio::test]
+async fn reconstruct_none_limit_uses_max_cap() {
+    // When the client omits `limit`, the server uses the cap as the
+    // default — NOT unbounded. Regression guard: never accept `limit =
+    // None` as a license to load the whole table into memory.
+    use crate::server::rpc::session_reconstruct::MAX_RECONSTRUCT_EVENTS;
+
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("m", "/tmp", Some("t"), None)
+        .unwrap();
+
+    // Add more events than a reasonable session has (still below MAX so
+    // the test is fast).
+    for i in 0..50 {
+        let _ = ctx
+            .event_store
+            .append(&crate::events::AppendOptions {
+                session_id: &sid,
+                event_type: crate::events::EventType::MessageUser,
+                payload: json!({"text": format!("msg {i}")}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+    }
+
+    let result = ReconstructHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+
+    let events = result["events"].as_array().unwrap();
+    assert!(events.len() <= MAX_RECONSTRUCT_EVENTS as usize);
+    // For a session this small, we should get everything back under the cap.
+    assert!(events.len() >= 50);
+}
+
+#[tokio::test]
+async fn reconstruct_negative_limit_is_clamped_to_zero() {
+    // A malicious or buggy client passing -1 must not crash the server
+    // or be interpreted as "unlimited" by SQLite's LIMIT -1 semantics.
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("m", "/tmp", Some("t"), None)
+        .unwrap();
+
+    for i in 0..5 {
+        let _ = ctx
+            .event_store
+            .append(&crate::events::AppendOptions {
+                session_id: &sid,
+                event_type: crate::events::EventType::MessageUser,
+                payload: json!({"text": format!("msg {i}")}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+    }
+
+    let result = ReconstructHandler
+        .handle(Some(json!({"sessionId": sid, "limit": -1})), &ctx)
+        .await
+        .unwrap();
+
+    let events = result["events"].as_array().unwrap();
+    assert_eq!(events.len(), 0, "negative limit must clamp to 0");
+}
+
+#[tokio::test]
 async fn list_sessions_has_is_running_field() {
     let ctx = make_test_context();
     let _ = ctx

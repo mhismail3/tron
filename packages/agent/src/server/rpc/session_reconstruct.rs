@@ -35,6 +35,17 @@ use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::handlers::events::event_row_to_wire;
 use crate::server::rpc::prompt_queue::PromptQueueService;
 
+/// Hard ceiling on the number of events returned by a single
+/// `session.reconstruct` call, regardless of what the client asks for.
+///
+/// The RPC is a single synchronous load into memory followed by a single
+/// JSON serialization; letting a client request an unbounded window is a
+/// trivial self-DoS. 10k events is roughly 25–50 turns of history for a
+/// typical Tron session, which more than covers any UX that needs the full
+/// state up front. Clients that want older events paginate via
+/// `beforeSequence`.
+pub const MAX_RECONSTRUCT_EVENTS: i64 = 10_000;
+
 pub(crate) struct SessionReconstructService;
 
 impl SessionReconstructService {
@@ -46,6 +57,15 @@ impl SessionReconstructService {
         limit: Option<i64>,
         before_sequence: Option<i64>,
     ) -> Result<Value, RpcError> {
+        // INVARIANT: client-supplied `limit` is always clamped to
+        // [0, MAX_RECONSTRUCT_EVENTS]. `None` means "give me the default
+        // window" — the default IS the cap, not "unbounded". A negative
+        // value is coerced to 0 (returns empty).
+        let effective_limit: i64 = limit
+            .unwrap_or(MAX_RECONSTRUCT_EVENTS)
+            .clamp(0, MAX_RECONSTRUCT_EVENTS);
+        let limit = Some(effective_limit);
+
         let event_store = ctx.event_store.clone();
         let session_manager = ctx.session_manager.clone();
         let orchestrator = ctx.orchestrator.clone();
@@ -65,7 +85,7 @@ impl SessionReconstructService {
                         message: format!("Session '{sid}' not found"),
                     })?;
 
-                // Load events with pagination
+                // Load events with pagination (limit clamped above).
                 let events = if let Some(before_seq) = before_sequence {
                     event_store.get_events_before(&sid, before_seq, limit)
                 } else {
