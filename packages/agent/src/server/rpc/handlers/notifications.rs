@@ -64,20 +64,33 @@ impl MethodHandler for MarkReadHandler {
 
 // ── notifications.markAllRead ───────────────────────────────────────
 
-/// Mark all unread `NotifyApp` notifications as read.
+/// Mark unread `NotifyApp` notifications as read.
+///
+/// Optional `sessionId` param scopes the operation to a single session
+/// so the iOS session-open flow can clear unread badges for the session
+/// the user is entering without touching other sessions' state. Called
+/// globally (no param) from the notification-inbox "mark all read" UI.
 pub struct MarkAllReadHandler;
 
 #[async_trait]
 impl MethodHandler for MarkAllReadHandler {
     #[instrument(skip(self, ctx), fields(method = "notifications.markAllRead"))]
-    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        // `sessionId` is optional — missing / null / absent object params
+        // all mean "mark all sessions read".
+        let session_id: Option<String> = params
+            .as_ref()
+            .and_then(|v| v.get("sessionId"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+
         let pool = ctx.event_store.pool().clone();
 
         ctx.run_blocking("notifications.mark_all_read", move || {
             let conn = pool.get().map_err(|e| RpcError::Internal {
                 message: format!("Failed to get DB connection: {e}"),
             })?;
-            NotificationInboxService::mark_all_read(&conn)
+            NotificationInboxService::mark_all_read(&conn, session_id.as_deref())
         })
         .await
         .and_then(|result| to_json_value(&result))
@@ -617,5 +630,39 @@ mod tests {
         let ctx = make_test_context();
         let result = MarkAllReadHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["marked"], 0);
+    }
+
+    #[tokio::test]
+    async fn mark_all_read_with_session_id_scopes_to_that_session() {
+        let ctx = make_test_context();
+        setup_test_data(&ctx);
+        insert_notify_event(
+            &ctx,
+            "evt_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            "t",
+            "b",
+        );
+        insert_notify_event(
+            &ctx,
+            "evt_2",
+            "sess_cron",
+            "tc_2",
+            "2025-01-02T01:00:00Z",
+            "t",
+            "b",
+        );
+
+        let params = json!({"sessionId": "sess_user"});
+        let result = MarkAllReadHandler
+            .handle(Some(params), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["marked"], 1, "only sess_user's notification marked");
+
+        let list = ListHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(list["unreadCount"], 1, "sess_cron's remains unread");
     }
 }

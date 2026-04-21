@@ -17,9 +17,18 @@ final class NotificationClient: RPCDomainClient {
         return try await ws.send(method: "notifications.markRead", params: params)
     }
 
-    /// Mark all unread notifications as read.
-    func markAllRead() async throws -> NotificationMarkAllReadResult {
+    /// Mark unread notifications as read.
+    ///
+    /// Pass `sessionId` to scope the operation to a single session (used
+    /// on session-open from the sidebar / deep link). Pass `nil` (the
+    /// default) to mark every session's notifications read — used by the
+    /// notification-inbox "mark all read" affordance.
+    func markAllRead(sessionId: String? = nil) async throws -> NotificationMarkAllReadResult {
         let ws = try requireTransport().requireConnection()
+        if let sessionId {
+            let params = NotificationMarkAllReadParams(sessionId: sessionId)
+            return try await ws.send(method: "notifications.markAllRead", params: params)
+        }
         return try await ws.send(method: "notifications.markAllRead", params: EmptyParams())
     }
 }
@@ -32,6 +41,10 @@ private struct NotificationListParams: Encodable {
 
 private struct NotificationMarkReadParams: Encodable {
     let eventId: String
+}
+
+private struct NotificationMarkAllReadParams: Encodable {
+    let sessionId: String
 }
 
 // MARK: - Response DTOs

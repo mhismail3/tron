@@ -168,9 +168,27 @@ impl NotificationInboxService {
         Ok(MarkReadResult { success: true })
     }
 
-    pub(crate) fn mark_all_read(conn: &Connection) -> Result<MarkAllReadResult, RpcError> {
-        let marked = conn
-            .execute(
+    /// Mark unread notifications as read. When `session_id` is provided,
+    /// scope the operation to that session so opening one session from
+    /// the sidebar doesn't silently clear unread badges for others.
+    /// A `None` sessionId marks all sessions' notifications read.
+    pub(crate) fn mark_all_read(
+        conn: &Connection,
+        session_id: Option<&str>,
+    ) -> Result<MarkAllReadResult, RpcError> {
+        let marked = if let Some(sid) = session_id {
+            conn.execute(
+                "INSERT OR IGNORE INTO notification_read_state (event_id, read_at)
+                 SELECT e.id, datetime('now')
+                 FROM events e
+                 WHERE e.tool_name = 'NotifyApp'
+                   AND e.type = 'tool.call'
+                   AND e.session_id = ?1
+                   AND e.id NOT IN (SELECT event_id FROM notification_read_state)",
+                params![sid],
+            )
+        } else {
+            conn.execute(
                 "INSERT OR IGNORE INTO notification_read_state (event_id, read_at)
                  SELECT e.id, datetime('now')
                  FROM events e
@@ -179,9 +197,10 @@ impl NotificationInboxService {
                    AND e.id NOT IN (SELECT event_id FROM notification_read_state)",
                 params![],
             )
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to mark all notifications as read: {e}"),
-            })?;
+        }
+        .map_err(|e| RpcError::Internal {
+            message: format!("Failed to mark all notifications as read: {e}"),
+        })?;
 
         Ok(MarkAllReadResult { marked })
     }
@@ -261,12 +280,24 @@ mod tests {
         timestamp: &str,
         payload: &Value,
     ) {
+        // Per-session sequence derived from the caller-provided event_id —
+        // just use the current count of events for the session so the
+        // UNIQUE(session_id, sequence) constraint isn't hit when tests
+        // insert multiple events for the same session.
+        let seq: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM events WHERE session_id = ?1",
+                [session_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(1);
+
         let payload = serde_json::to_string(payload).unwrap();
         assert_eq!(
             conn.execute(
                 "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id, tool_name, tool_call_id)
-                 VALUES (?1, ?2, 1, 'tool.call', ?3, ?4, 'ws_1', 'NotifyApp', ?5)",
-                [event_id, session_id, timestamp, payload.as_str(), tool_call_id],
+                 VALUES (?1, ?2, ?3, 'tool.call', ?4, ?5, 'ws_1', 'NotifyApp', ?6)",
+                rusqlite::params![event_id, session_id, seq, timestamp, payload.as_str(), tool_call_id],
             )
             .unwrap(),
             1
@@ -356,7 +387,81 @@ mod tests {
         );
         let _ = NotificationInboxService::mark_read(&conn, "evt_1").unwrap();
 
-        let result = NotificationInboxService::mark_all_read(&conn).unwrap();
+        let result = NotificationInboxService::mark_all_read(&conn, None).unwrap();
         assert_eq!(result.marked, 1);
+    }
+
+    #[test]
+    fn mark_all_read_scoped_to_session_only_marks_that_session() {
+        let ctx = make_test_context();
+        let conn = ctx.event_store.pool().get().unwrap();
+        setup_test_data(&conn);
+        insert_notify_event(
+            &conn,
+            "evt_user_1",
+            "sess_user",
+            "tc_1",
+            "2025-01-01T01:00:00Z",
+            &json!({"arguments": {"title": "User 1", "body": "b"}}),
+        );
+        insert_notify_event(
+            &conn,
+            "evt_user_2",
+            "sess_user",
+            "tc_2",
+            "2025-01-01T01:01:00Z",
+            &json!({"arguments": {"title": "User 2", "body": "b"}}),
+        );
+        insert_notify_event(
+            &conn,
+            "evt_cron",
+            "sess_cron",
+            "tc_3",
+            "2025-01-01T01:02:00Z",
+            &json!({"arguments": {"title": "Cron 1", "body": "b"}}),
+        );
+
+        let result = NotificationInboxService::mark_all_read(
+            &conn,
+            Some("sess_user"),
+        )
+        .unwrap();
+        assert_eq!(result.marked, 2, "only sess_user's two events marked");
+
+        // Verify sess_cron's event is still unread.
+        let cron_read: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM notification_read_state WHERE event_id = 'evt_cron'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cron_read, 0, "cross-session notifications must not be marked");
+    }
+
+    #[test]
+    fn mark_all_read_unscoped_marks_every_session() {
+        let ctx = make_test_context();
+        let conn = ctx.event_store.pool().get().unwrap();
+        setup_test_data(&conn);
+        insert_notify_event(
+            &conn,
+            "evt_a",
+            "sess_user",
+            "tc_a",
+            "2025-01-01T01:00:00Z",
+            &json!({"arguments": {"title": "A", "body": "b"}}),
+        );
+        insert_notify_event(
+            &conn,
+            "evt_b",
+            "sess_cron",
+            "tc_b",
+            "2025-01-01T01:01:00Z",
+            &json!({"arguments": {"title": "B", "body": "b"}}),
+        );
+
+        let result = NotificationInboxService::mark_all_read(&conn, None).unwrap();
+        assert_eq!(result.marked, 2);
     }
 }
