@@ -13,13 +13,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 
 use crate::events::EventStore;
 use crate::llm::models::types::Provider as ProviderKind;
 use crate::llm::provider::{
     Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
 };
+use crate::runtime::memory::MemoryRegistry;
 use crate::runtime::orchestrator::orchestrator::Orchestrator;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::server::rpc::context::{AgentDeps, RpcContext};
@@ -136,6 +137,7 @@ pub fn make_test_context() -> RpcContext {
         session_manager: mgr,
         event_store: store,
         skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
+        memory_registry: Arc::new(Mutex::new(MemoryRegistry::new())),
         settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
         agent_deps: None,
         server_start_time: Instant::now(),

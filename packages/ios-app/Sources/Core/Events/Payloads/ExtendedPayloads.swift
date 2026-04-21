@@ -295,8 +295,9 @@ struct DetailedContextSnapshotResult: Codable {
     let addedSkills: [AddedSkillInfo]
     /// Rules files loaded for this session (immutable, cannot be removed)
     let rules: LoadedRules?
-    /// Memory loaded for this session (if auto-inject enabled)
-    let memory: LoadedMemory?
+    /// User-memory file (MEMORY.md + rules/ listing) auto-injected into the
+    /// LLM context every turn. Server-side: `runtime::memory::MemoryRegistry`.
+    let memory: UserMemorySnapshot?
     /// Session memories written during this session (auto or manual ledger)
     let sessionMemories: LoadedMemory?
     /// Task context summary (if tasks exist)
@@ -320,6 +321,32 @@ struct LoadedMemory: Codable {
     let count: Int
     let tokens: Int
     let entries: [LoadedMemoryEntry]?
+}
+
+/// User-memory wire format. Server populates this every turn from
+/// `~/.tron/workspace/memory/MEMORY.md` + the listing of `rules/*.md`.
+///
+/// See `runtime::memory::MemoryRegistry` for the load path and
+/// `Views/AgentControl/MemorySection.swift` for the UI that renders it.
+struct UserMemorySnapshot: Codable, Equatable {
+    /// Full content string injected into the LLM system prompt. When
+    /// `bootstrapped == false`, this is the server-generated bootstrap stub.
+    let content: String
+    /// Listing of `rules/*.md` files (not contents). Agent reads individual
+    /// files on demand via the `Read` tool.
+    let ruleFiles: [UserMemoryRuleFile]
+    /// True iff `MEMORY.md` exists on disk at read time.
+    let bootstrapped: Bool
+}
+
+/// One entry in the user-memory `rules/` listing.
+struct UserMemoryRuleFile: Codable, Equatable, Identifiable {
+    /// Filename relative to `rules/` (e.g. `"user-preferences.md"`).
+    let name: String
+    /// Single-line description from YAML frontmatter, if present.
+    let description: String?
+
+    var id: String { name }
 }
 
 /// Task context summary auto-injected into LLM context

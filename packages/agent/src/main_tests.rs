@@ -317,6 +317,9 @@ async fn server_boots_and_responds() {
         session_manager,
         event_store,
         skill_registry,
+        memory_registry: Arc::new(parking_lot::Mutex::new(
+            tron::runtime::memory::MemoryRegistry::new(),
+        )),
         settings_path,
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
@@ -509,6 +512,9 @@ async fn server_graceful_shutdown() {
         session_manager,
         event_store,
         skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
+        memory_registry: Arc::new(parking_lot::Mutex::new(
+            tron::runtime::memory::MemoryRegistry::new(),
+        )),
         settings_path: dir.path().join("settings.json"),
         agent_deps: None,
         server_start_time: std::time::Instant::now(),

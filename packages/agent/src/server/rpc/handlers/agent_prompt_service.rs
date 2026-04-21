@@ -45,6 +45,7 @@ struct PromptRunPlan {
     event_store: Arc<crate::events::EventStore>,
     context_artifacts: Arc<crate::server::rpc::session_context::ContextArtifactsService>,
     skill_registry: Arc<RwLock<SkillRegistry>>,
+    memory_registry: Arc<parking_lot::Mutex<crate::runtime::memory::MemoryRegistry>>,
     subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
@@ -145,6 +146,7 @@ pub fn spawn_prompt_run(
         event_store: ctx.event_store.clone(),
         context_artifacts: ctx.context_artifacts.clone(),
         skill_registry: ctx.skill_registry.clone(),
+        memory_registry: ctx.memory_registry.clone(),
         subagent_manager: ctx.subagent_manager.clone(),
         shutdown_token: ctx.shutdown_coordinator.as_ref().map(|coord| coord.token()),
         worktree_coordinator: ctx.worktree_coordinator.clone(),
@@ -193,6 +195,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         event_store,
         context_artifacts,
         skill_registry,
+        memory_registry,
         subagent_manager,
         shutdown_token,
         worktree_coordinator,
@@ -227,6 +230,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     let drain_health_tracker = health_tracker.clone();
     let drain_context_artifacts = context_artifacts.clone();
     let drain_skill_registry = skill_registry.clone();
+    let drain_memory_registry = memory_registry.clone();
     let drain_subagent_manager = subagent_manager.clone();
     let drain_shutdown_token = shutdown_token.clone();
     let drain_worktree_coordinator = worktree_coordinator.clone();
@@ -444,7 +448,17 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     let pre_activated_rules = prompt_artifacts.pre_activated_rules;
     let resolved_ws_id = prompt_artifacts.workspace_id;
 
-    let memory: Option<String> = None;
+    // Load user memory (MEMORY.md + rules/ listing) for this turn.
+    // Skipped for local models — ContextManager strips memory_content at turn
+    // time per the local-model policy. See `runtime::context::local_policy`.
+    let memory: Option<String> = if crate::llm::models::registry::detect_provider_from_model(&model)
+        .is_some_and(crate::runtime::context::local_policy::is_local_provider)
+    {
+        None
+    } else {
+        let mut reg = memory_registry.lock();
+        Some(reg.content(&crate::core::paths::home_dir()).to_string())
+    };
     // Merge subagent results, process results, and user job actions into unified context
     let mut job_parts: Vec<String> = Vec::new();
     if let Some(a) = prompt_bootstrap.subagent_results_context {
@@ -869,6 +883,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         drain_health_tracker,
         drain_context_artifacts,
         drain_skill_registry,
+        drain_memory_registry,
         drain_subagent_manager,
         drain_shutdown_token,
         drain_worktree_coordinator,
@@ -897,6 +912,7 @@ fn drain_prompt_queue(
     health_tracker: Arc<crate::llm::ProviderHealthTracker>,
     context_artifacts: Arc<crate::server::rpc::session_context::ContextArtifactsService>,
     skill_registry: Arc<RwLock<SkillRegistry>>,
+    memory_registry: Arc<parking_lot::Mutex<crate::runtime::memory::MemoryRegistry>>,
     subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
@@ -995,6 +1011,7 @@ fn drain_prompt_queue(
         event_store: event_store.clone(),
         context_artifacts,
         skill_registry,
+        memory_registry,
         subagent_manager,
         shutdown_token: shutdown_token.clone(),
         worktree_coordinator,

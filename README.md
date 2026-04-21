@@ -695,10 +695,14 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 +-- workspace/                    User working area (mounted into agent context)
     +-- vault/                    AES-256-CBC encrypted credential store (entries/, index.json, .master-key)
     +-- knowledge/                Long-term notes and research
-    +-- sessions/                 Auto-generated session compaction summaries
+    +-- memory/                   User-memory root (auto-injected into every session)
+    |   +-- MEMORY.md             Canonical single-file root (name, email, preferences)
+    |   +-- rules/                Detail files (listed in context, read on demand)
+    |   |   +-- SYSTEM.md         Optional global system-prompt override
+    |   |   +-- *.md              User-curated detail files (user-preferences.md, publish-website.md, ...)
+    |   +-- sessions/             Auto-generated session retain summaries
     +-- reports/                  Analysis and investigation reports
     +-- automations/              Cron job working directories + automations.json
-    +-- rules/                    Global rules (SYSTEM.md, CLAUDE.md, AGENTS.md)
     +-- scratch/                  Downloads, temp files, experiments
     +-- screenshots/              Saved screenshots from the computer-use tool
     +-- plans/                    Plan files written during plan mode

@@ -384,6 +384,9 @@ mod tests {
             session_manager: mgr,
             event_store: store,
             skill_registry: Arc::new(parking_lot::RwLock::new(SkillRegistry::new())),
+            memory_registry: Arc::new(parking_lot::Mutex::new(
+                crate::runtime::memory::MemoryRegistry::new(),
+            )),
             settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),

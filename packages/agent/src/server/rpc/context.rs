@@ -5,11 +5,12 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use metrics::{counter, histogram};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use crate::events::EventStore;
 use crate::llm::ProviderHealthTracker;
 use crate::llm::provider::ProviderFactory;
 use crate::runtime::guardrails::GuardrailEngine;
+use crate::runtime::memory::MemoryRegistry;
 use crate::runtime::orchestrator::orchestrator::Orchestrator;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::orchestrator::subagent_manager::SubagentManager;
@@ -43,6 +44,11 @@ pub struct RpcContext {
     pub event_store: Arc<EventStore>,
     /// Skill registry (read/write).
     pub skill_registry: Arc<RwLock<SkillRegistry>>,
+    /// User-memory registry. Loads `~/.tron/workspace/memory/MEMORY.md` + the
+    /// listing of `rules/*.md` files into every turn's context. `Mutex` (not
+    /// `RwLock`) because `content()` mutates the cache on fingerprint mismatch
+    /// — see `runtime::memory` module docs for the full invariant set.
+    pub memory_registry: Arc<Mutex<MemoryRegistry>>,
     /// Path to settings JSON file.
     pub settings_path: PathBuf,
     /// Agent execution dependencies (None = prompt handler returns error).

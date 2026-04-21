@@ -55,6 +55,9 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         session_manager,
         event_store,
         skill_registry,
+        memory_registry: Arc::new(parking_lot::Mutex::new(
+            tron::runtime::memory::MemoryRegistry::new(),
+        )),
         settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
@@ -337,6 +340,9 @@ async fn boot_server_with_provider_and_handles(
         session_manager,
         event_store,
         skill_registry,
+        memory_registry: Arc::new(parking_lot::Mutex::new(
+            tron::runtime::memory::MemoryRegistry::new(),
+        )),
         settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
         agent_deps: Some(AgentDeps {
             provider_factory: Arc::new(FixedProviderFactory(provider)),

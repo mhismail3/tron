@@ -910,8 +910,10 @@ mod tests {
             .await
             .unwrap();
 
-        // Manually build the same Context and compose — should match
-        let prepared = build_context_manager_for_session(
+        // Manually build the same Context and compose — should match.
+        // Mirror the production flow: also set memory_content via the
+        // memory_registry (build_detailed_snapshot_response does this too).
+        let mut prepared = build_context_manager_for_session(
             &sid,
             ctx.session_manager.as_ref(),
             ctx.event_store.as_ref(),
@@ -919,6 +921,11 @@ mod tests {
             tool_definitions(&ctx),
         )
         .unwrap();
+        if !prepared.context_manager.is_local_model() {
+            let mut reg = ctx.memory_registry.lock();
+            let content = reg.content(&crate::core::paths::home_dir()).to_string();
+            prepared.context_manager.set_memory_content(Some(content));
+        }
         let base = prepared.context_manager.build_base_context();
         let parts = crate::llm::compose_context_parts(&base);
         let expected = parts.join("\n\n");
@@ -951,6 +958,9 @@ mod tests {
             session_manager: mgr.clone(),
             event_store: store,
             skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
+            memory_registry: Arc::new(parking_lot::Mutex::new(
+                crate::runtime::memory::MemoryRegistry::new(),
+            )),
             settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),

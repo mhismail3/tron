@@ -7,6 +7,7 @@
 3. **Root cause fixes only.** Trace the real cause — no bandaid fixes.
 4. **Use `@self-inspect` skill** to investigate issues. Query `~/.tron/system/database/` directly — don't guess.
 5. **Follow established patterns.** Read the relevant module's `mod.rs` docs before implementing new features.
+6. **User info lives in `MEMORY.md`, secrets in vault.** Never hardcode personal info (names, emails, handles, domains) anywhere in code, tests, or skill docs. User-specific values belong in `~/.tron/workspace/memory/MEMORY.md` (auto-loaded into every session) or detail files under `~/.tron/workspace/memory/rules/`. Secrets go in the `vault` skill. Regression-guarded by `workspace_has_no_personal_info_literals` in `packages/agent/src/core/foundation/paths.rs`.
 
 ## Commands
 

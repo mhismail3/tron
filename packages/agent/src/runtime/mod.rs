@@ -7,6 +7,7 @@
 //! - **Tool executor**: Pre/post hooks, guardrails, cancellation token support
 //! - **Stream processor**: Consumes `Stream<StreamEvent>`, accumulates content blocks
 //! - **Agent runner**: High-level: skill injection, user content building, interrupt handling
+//! - **Memory**: User-memory loader for `~/.tron/workspace/memory/MEMORY.md` + `rules/*.md` (fingerprint-gated, per-turn).
 //! - **Orchestrator**: Multi-session management with event broadcasting
 //!
 //! ## Module Position
@@ -22,6 +23,7 @@ pub mod context;
 pub mod errors;
 pub mod guardrails;
 pub mod hooks;
+pub mod memory;
 pub mod orchestrator;
 pub mod pipeline;
 pub mod subagents;

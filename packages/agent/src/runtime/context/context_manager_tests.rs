@@ -458,6 +458,42 @@ fn session_memory_cleared() {
     assert!(cm.get_session_memories().is_empty());
 }
 
+/// Regression lock: compaction MUST preserve `memory_content`. Memory is a
+/// separate ContextManager field from `messages`, and the compaction engine
+/// only operates on messages — so this invariant holds by construction today.
+/// The test pins it so a future refactor can't silently drop memory during
+/// compaction (see [`crate::runtime::memory`] for why that would be bad).
+#[tokio::test]
+async fn compaction_preserves_memory_content() {
+    use crate::runtime::context::summarizer::KeywordSummarizer;
+
+    let mut cm = ContextManager::new(test_config());
+    cm.set_memory_content(Some(
+        "# User memory — MUST survive compaction\n- Name: Alice\n".into(),
+    ));
+
+    // Add enough messages that compaction has something to summarize. With
+    // preserve_recent_turns=5 and 8 turns, compaction will summarize 3 turns.
+    for i in 0..8 {
+        cm.add_message(Message::user(format!("user turn {i}")));
+        cm.add_message(Message::assistant(format!("assistant reply {i}")));
+    }
+    let summarizer = KeywordSummarizer::default();
+
+    let before = cm.get_full_memory_content();
+    cm.execute_compaction(&summarizer, None).await.unwrap();
+    let after = cm.get_full_memory_content();
+
+    assert_eq!(
+        before, after,
+        "compaction must not mutate memory_content"
+    );
+    assert!(
+        after.as_deref().unwrap_or("").contains("MUST survive compaction"),
+        "memory content intact after compaction"
+    );
+}
+
 // -- token tracking --
 
 #[test]

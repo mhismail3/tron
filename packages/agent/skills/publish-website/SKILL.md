@@ -1,25 +1,51 @@
 ---
 name: "Publish Website"
-description: "Write, update, and publish blog posts and portfolio entries to mhismail.com"
-version: "1.0.0"
+description: "Write, update, and publish blog posts and portfolio entries to the user's personal website"
+version: "2.0.0"
 tags: [writing, publishing, website]
 ---
 
-Write, update, and publish blog posts and portfolio project entries on [mhismail.com](https://mhismail.com). The site is a React SPA deployed via GitHub Pages from `https://github.com/mhismail3/mohsin-ismail`. Repo lives at `~/Workspace/mohsin-ismail`.
+Write, update, and publish blog posts and portfolio project entries to the user's personal website. The site is a React SPA deployed via GitHub Pages.
+
+## Required config
+
+This skill needs three values to know where your site lives:
+
+| Field | Meaning | Example |
+|---|---|---|
+| `domain` | Public URL of your site | `example.com` |
+| `local_repo` | Local clone path | `~/Workspace/my-website` |
+| `github_handle` | GitHub user/org that owns the repo | `your-username` |
+
+These live in `~/.tron/workspace/memory/rules/publish-website.md` (auto-listed in your memory footer). Workflow:
+
+1. Read `~/.tron/workspace/memory/rules/publish-website.md`.
+2. If the file doesn't exist or lacks any of the fields above, ask the user and save them. Write the file with YAML frontmatter:
+   ```yaml
+   ---
+   description: Publish-website config (domain, repo, GitHub handle)
+   ---
+   domain: example.com
+   local_repo: ~/Workspace/my-website
+   github_handle: your-username
+   ```
+3. Use the values throughout the workflow. NEVER hardcode them into scripts or other skills — always read from `rules/publish-website.md`.
+
+If the site's GitHub repo URL differs from `github.com/<github_handle>/<basename(local_repo)>`, add a `github_repo_url:` field.
 
 ## Workflow
 
 ### Creating new content
 
 1. **Understand the request** — Determine content type (blog long, blog mini, portfolio), topic, any references or links the user wants included.
-2. **Voice calibration** — Read 2-3 existing posts from the repo before drafting. This is mandatory. Pick posts topically close to the new content. Use `Read` on files in `~/Workspace/mohsin-ismail/public/posts/` or `~/Workspace/mohsin-ismail/public/projects/`.
+2. **Voice calibration** — Read 2-3 existing posts from the repo before drafting. This is mandatory. Pick posts topically close to the new content. Use `Read` on files in `<local_repo>/public/posts/` or `<local_repo>/public/projects/`.
 3. **Draft the content** — Write the full post following the style guide and templates below. Match the voice from the posts you just read.
 4. **Review gate** — Present the complete draft to the user. Iterate until they approve. Never commit or push without explicit approval.
 5. **Create the file** — Write to the correct path using the file naming conventions below. If the post references images, note which images are needed.
-6. **Commit and push** — From `~/Workspace/mohsin-ismail`, run `git add`, `git commit`, `git push origin main`.
+6. **Commit and push** — From `<local_repo>`, run `git add`, `git commit`, `git push origin main`.
 7. **Open the URL** — Use the `OpenURL` tool to open the published page:
-   - Blog: `https://mhismail.com/posts/YYYY-MM-DD-slug`
-   - Portfolio: `https://mhismail.com/portfolio/slug`
+   - Blog: `https://<domain>/posts/YYYY-MM-DD-slug`
+   - Portfolio: `https://<domain>/portfolio/slug`
 
 ### Updating existing content
 
@@ -29,7 +55,7 @@ Write, update, and publish blog posts and portfolio project entries on [mhismail
 4. **Draft the changes** — Show the user what will change. For small edits, present a before/after of the affected section. For large rewrites, present the full updated post.
 5. **Review gate** — Get explicit approval before writing. Same rule as new content: never commit without approval.
 6. **Apply the edit** — Use `Edit` for targeted changes, `Write` for full rewrites. Do not change the file path or folder name (the slug is part of the URL — renaming breaks links).
-7. **Commit and push** — From `~/Workspace/mohsin-ismail`, run `git add`, `git commit`, `git push origin main`.
+7. **Commit and push** — From `<local_repo>`, run `git add`, `git commit`, `git push origin main`.
 8. **Open the URL** — Same as new content.
 
 ## Blog post reference
@@ -86,7 +112,7 @@ title: Project Name
 slug: project-slug
 date: YYYY-MM-DD
 summary: One or two sentences describing the project and its key technical aspects.
-github: https://github.com/mhismail3/repo-name
+github: https://github.com/<github_handle>/repo-name
 live: https://live-url.com  # optional
 tags:
   - TypeScript
@@ -126,7 +152,7 @@ Body structure: Use `##` headings to break the project into sections. Explain th
 
 ### Formatting
 
-- **Bold** for key terms on first use (e.g., **Tron**, **Moose Tabs**).
+- **Bold** for key terms on first use.
 - `inline code` for technical terms, commands, file names, config values.
 - Code blocks with language tags (```bash, ```yaml, ```markdown, etc.).
 - Footnotes via `^[text]` for asides, citations, and tangential thoughts.
@@ -149,28 +175,21 @@ Never use these words or patterns:
 - No "Let's" constructions ("Let's take a look", "Let's dive in")
 - No "without further ado"
 
-### Voice examples
+### Voice calibration
 
-**Good hook** (from "Building my own Agent"):
-> About a month ago I wrote about trying to access Claude Code remotely through Telegram and Discord bots. That experiment didn't pan out, but it got me thinking - why was I fighting someone else's harness when I could just build my own?
-
-**Reflective passage** (from "Welcome - This is my website"):
-> As frontier models improve and become increasingly more capable software developers, maybe the important thing (at least for a couple of years) will be the ability to steer agents, have *taste* in design, and build something that stands out. If AI can design 98% of the entire product, that 2% that makes a product stand out will become the difference-maker.
-
-**Honest about limitations** (from "An experiment in remote Claude Code access"):
-> In the meantime, if I need remote Claude access, the practical path is just to SSH into a machine running Claude Code. It's not as elegant as a messaging bot, but it makes use of the subscription I'm already paying for.
-
-**Casual closing** (from "Building my own Agent"):
-> I'm still adding features, but the core is solid enough that I use it daily (though I still rely on Claude Code for the more complicated things that I need to work reliably). Code's on GitHub if you want to take a look!
-
-**Mini post voice** (from "Mini blog posts feature"):
-> AI news is moving at an increasingly rapid clip - so I added a feature to my blog that lets me write quick inline posts to comment on the latest news and developments without needing to formalize my thoughts into a "proper" blog post.
+Before drafting new content, read 2-3 existing posts from the user's repo to match their voice. The style guide above describes conventions, but voice calibration matters most — the posts you read are ground truth.
 
 ## Existing tag registry
 
-Blog tags (lowercase): `ai`, `agents`, `ios`, `swift`, `typescript`, `claude code`, `website update`, `design`, `opus 4.5`, `gemini 3`, `gpt 5.1`, `dotfiles`, `macos`, `automation`, `chrome extensions`, `tabs`, `superwhisper`, `asr`, `moose's toolbox`, `html tools`, `prompt engineering`, `context engineering`, `AGENTS.md`, `sonnet 4.5`, `movies`, `reviews`, `homebrew`, `cli`, `mistral ocr 3`, `quotes`, `claude agent sdk`, `discord`, `telegram`
+Tag registries (lowercase for blog, Title Case for portfolio) live in the user's repo, built up over time. List existing tags before drafting new content:
 
-Portfolio tags (Title Case): `TypeScript`, `Swift`, `SwiftUI`, `SQLite`, `WebSocket`, `AI Agents`, `Event Sourcing`, `iOS`, `React 18`, `JavaScript`, `Chrome Extension V3`, `react-dnd`, `Webpack`, `AI Integration`, `LLM`, `CSS`, `LESS`, `Brackets`, `Python`, `Ruby`, `Homebrew`, `CLI Tools`, `AI/ML`, `OCR`, `Firebase`, `MVVM`, `HTML5`, `CSS3`, `GitHub Pages`, `Browser APIs`, `Astro`, `Static site`, `Markdown`, `React 19`, `Vite`, `pdf-lib`, `pdfjs-dist`, `localforage`
+```bash
+# Blog
+ls <local_repo>/public/posts/*/post.md | xargs grep -h '^- ' | sort -u
+
+# Portfolio
+ls <local_repo>/public/projects/*/project.md | xargs grep -h '^  - ' | sort -u
+```
 
 Reuse existing tags before inventing new ones. If a genuinely new topic comes up, add a new tag in the matching case convention.
 

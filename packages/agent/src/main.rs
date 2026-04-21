@@ -367,6 +367,7 @@ struct ServiceState {
     session_manager: Arc<SessionManager>,
     orchestrator: Arc<Orchestrator>,
     skill_registry: Arc<RwLock<SkillRegistry>>,
+    memory_registry: Arc<parking_lot::Mutex<tron::runtime::memory::MemoryRegistry>>,
     agent_deps: Option<AgentDeps>,
     shared_subagent_manager: Option<Arc<SubagentManager>>,
     hook_abort_tracker: Arc<tron::runtime::hooks::abort_tracker::HookAbortTracker>,
@@ -398,6 +399,9 @@ async fn init_services(
     }
 
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
+    let memory_registry = Arc::new(parking_lot::Mutex::new(
+        tron::runtime::memory::MemoryRegistry::new(),
+    ));
 
     // Load Brave API key for web search
     let brave_api_key = tron::llm::auth::storage::get_service_api_keys(&auth_path(), "brave")
@@ -481,6 +485,7 @@ async fn init_services(
         session_manager,
         orchestrator,
         skill_registry,
+        memory_registry,
         agent_deps,
         shared_subagent_manager,
         hook_abort_tracker,
@@ -899,6 +904,7 @@ fn build_rpc_context(
         session_manager: services.session_manager.clone(),
         event_store: services.event_store.clone(),
         skill_registry: services.skill_registry,
+        memory_registry: services.memory_registry,
         settings_path,
         agent_deps: services.agent_deps,
         server_start_time: std::time::Instant::now(),

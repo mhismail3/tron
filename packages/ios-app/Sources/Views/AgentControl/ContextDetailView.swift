@@ -139,6 +139,13 @@ struct ContextDetailView: View {
                         content: snapshot.systemPromptContent
                     )
 
+                    if let memory = snapshot.memory {
+                        MemorySection(
+                            tokens: snapshot.breakdown.memory,
+                            memory: memory
+                        )
+                    }
+
                     ToolsSection(
                         toolsContent: snapshot.toolsContent,
                         tokens: snapshot.breakdown.tools

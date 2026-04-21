@@ -83,6 +83,12 @@ pub mod files {
     pub const SYSTEM_MD: &str = "SYSTEM.md";
     /// Container runtime configuration.
     pub const CONTAINERS_JSON: &str = "containers.json";
+    /// Canonical user-memory root file.
+    ///
+    /// Auto-injected into every session's context. Lightweight by design:
+    /// basic user identity (name, email) + pointers to detail files under
+    /// `rules/`. See [`memory_file()`] for the resolved path.
+    pub const MEMORY_MD: &str = "MEMORY.md";
 }
 
 // ── Core path functions ────────────────────────────────────────────────
@@ -250,6 +256,34 @@ pub fn memory_sessions_dir() -> PathBuf {
     memory_dir().join(dirs::SESSIONS)
 }
 
+/// `~/.tron/<workspace>/memory/MEMORY.md`
+///
+/// Canonical user-memory root file (auto-loaded into every session).
+pub fn memory_file() -> PathBuf {
+    memory_dir().join(files::MEMORY_MD)
+}
+
+/// Same as [`memory_dir`] but rooted at a caller-supplied home (test-only ergonomic).
+///
+/// Used by [`crate::runtime::memory`] tests to point fingerprint scans at a
+/// tempdir without manipulating `$HOME` (the workspace lints `unsafe_code = "deny"`).
+pub fn memory_dir_for_home(home: &str) -> PathBuf {
+    PathBuf::from(home)
+        .join(".tron")
+        .join(dirs::WORKSPACE)
+        .join(dirs::MEMORY)
+}
+
+/// Same as [`memory_file`] but rooted at a caller-supplied home (test-only ergonomic).
+pub fn memory_file_for_home(home: &str) -> PathBuf {
+    memory_dir_for_home(home).join(files::MEMORY_MD)
+}
+
+/// Same as [`memory_rules_dir`] but rooted at a caller-supplied home (test-only ergonomic).
+pub fn memory_rules_dir_for_home(home: &str) -> PathBuf {
+    memory_dir_for_home(home).join(dirs::RULES)
+}
+
 /// `~/.tron/<workspace>/memory/rules/`
 ///
 /// Alias for [`rules_dir()`] — both return the same path since rules
@@ -311,6 +345,120 @@ mod tests {
             !src.contains(&needle),
             "hardcoded user path leaked back into paths.rs"
         );
+    }
+
+    /// Regression guard: managed skill bundles (every `packages/agent/skills/*`
+    /// with a `.managed` sentinel) must contain no hardcoded personal-info
+    /// literals. Needles are constructed from parts so this test file itself
+    /// doesn't contain them.
+    #[test]
+    fn managed_skills_contain_no_personal_info_literals() {
+        let needles = [
+            format!("{}{}{}", "M", "oh", "sin"),
+            format!("{}{}{}", "Is", "ma", "il"),
+            format!("{}{}{}", "is", "ma", "il"),
+            format!("{}{}{}", "mh", "is", "mail"),
+        ];
+        let skills_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("skills");
+        let Ok(entries) = std::fs::read_dir(&skills_dir) else {
+            // No skills dir in this checkout — nothing to guard.
+            return;
+        };
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            // Only scan managed skills (sentinel present).
+            if !dir.join(".managed").exists() {
+                continue;
+            }
+            // Recursively scan every .md file under the managed skill.
+            scan_md_for_needles(&dir, &needles);
+        }
+    }
+
+    fn scan_md_for_needles(dir: &std::path::Path, needles: &[String]) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan_md_for_needles(&path, needles);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for needle in needles {
+                assert!(
+                    !content.contains(needle.as_str()),
+                    "{}: contains personal-info literal `{needle}` — route through MEMORY.md / rules/",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    /// Regression guard: no hardcoded personal info leaks into embedded system
+    /// prompts or critical skill/memory source files. Banned needles are
+    /// constructed from parts so this test file itself doesn't contain them.
+    ///
+    /// User info belongs in `~/.tron/workspace/memory/MEMORY.md` (auto-loaded
+    /// into every session's context). Hardcoded names/emails/handles are a
+    /// correctness bug — they assume one user and ship that assumption in the
+    /// binary. See [`crate::runtime::memory`] for the canonical load path.
+    #[test]
+    fn workspace_has_no_personal_info_literals() {
+        let needles = [
+            format!("{}{}{}", "M", "oh", "sin"),
+            format!("{}{}{}", "Is", "ma", "il"),
+            format!("{}{}{}", "is", "ma", "il"),
+            format!("{}{}{}", "mh", "is", "mail"),
+        ];
+        let offenders: &[(&str, &str)] = &[
+            ("paths.rs", include_str!("paths.rs")),
+            (
+                "system_prompts/core.md",
+                include_str!("../../runtime/context/system_prompts/core.md"),
+            ),
+            (
+                "system_prompts/chat.md",
+                include_str!("../../runtime/context/system_prompts/chat.md"),
+            ),
+            (
+                "system_prompts/local.md",
+                include_str!("../../runtime/context/system_prompts/local.md"),
+            ),
+            (
+                "runtime/memory/registry.rs",
+                include_str!("../../runtime/memory/registry.rs"),
+            ),
+            (
+                "runtime/memory/mod.rs",
+                include_str!("../../runtime/memory/mod.rs"),
+            ),
+            (
+                "skills/discovery/loader.rs",
+                include_str!("../../skills/discovery/loader.rs"),
+            ),
+            (
+                "skills/discovery/registry.rs",
+                include_str!("../../skills/discovery/registry.rs"),
+            ),
+        ];
+        for (name, src) in offenders {
+            for needle in &needles {
+                assert!(
+                    !src.contains(needle.as_str()),
+                    "{name}: contains personal-info literal `{needle}` — route through MEMORY.md instead"
+                );
+            }
+        }
     }
 
     /// Regression guard covering every production file this refactor touched.

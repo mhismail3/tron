@@ -26,6 +26,7 @@ impl ContextQueryService {
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
         let skill_registry = ctx.skill_registry.clone();
+        let memory_registry = ctx.memory_registry.clone();
         let tool_definitions = tool_definitions(ctx);
         let session_id_for_query = session_id.clone();
         ctx.run_blocking("context.get_snapshot", move || {
@@ -37,7 +38,7 @@ impl ContextQueryService {
                     context_artifacts.as_ref(),
                     tool_definitions.clone(),
                 )?;
-                // Skill index: skip for local models (index is stripped at turn time)
+                // Skill index + memory content: skip for local models (stripped at turn time)
                 if !prepared.context_manager.is_local_model() {
                     let skill_index_content = {
                         let mut registry = skill_registry.write();
@@ -47,6 +48,12 @@ impl ContextQueryService {
                         if index.is_empty() { None } else { Some(index) }
                     };
                     prepared.context_manager.set_skill_index_content(skill_index_content);
+
+                    let memory_content = {
+                        let mut reg = memory_registry.lock();
+                        Some(reg.content(&crate::core::paths::home_dir()).to_string())
+                    };
+                    prepared.context_manager.set_memory_content(memory_content);
                 }
 
                 // Reconstruct volatile token estimates from session state
@@ -78,6 +85,7 @@ impl ContextQueryService {
         let event_store = ctx.event_store.clone();
         let context_artifacts = ctx.context_artifacts.clone();
         let skill_registry = ctx.skill_registry.clone();
+        let memory_registry = ctx.memory_registry.clone();
         let tool_definitions = tool_definitions(ctx);
         let session_id_for_query = session_id.clone();
         ctx.run_blocking("context.get_detailed_snapshot", move || {
@@ -94,6 +102,7 @@ impl ContextQueryService {
                     &session_id_for_query,
                     prepared,
                     &skill_registry,
+                    &memory_registry,
                 )
             })
         })
@@ -249,6 +258,7 @@ fn build_detailed_snapshot_response(
     session_id: &str,
     prepared: PreparedSessionContext,
     skill_registry: &Arc<RwLock<SkillRegistry>>,
+    memory_registry: &Arc<parking_lot::Mutex<crate::runtime::memory::MemoryRegistry>>,
 ) -> Result<Value, RpcError> {
     let PreparedSessionContext {
         session,
@@ -256,8 +266,8 @@ fn build_detailed_snapshot_response(
         mut context_manager,
     } = prepared;
 
-    // Skill index: skip for local models (index is stripped at turn time)
-    if !context_manager.is_local_model() {
+    // Skill index + memory content: skip for local models (stripped at turn time)
+    let memory_wire_json = if !context_manager.is_local_model() {
         let skill_index_content = {
             let mut registry = skill_registry.write();
             let _ = registry.refresh_if_stale(&session.working_directory);
@@ -266,7 +276,33 @@ fn build_detailed_snapshot_response(
             if index.is_empty() { None } else { Some(index) }
         };
         context_manager.set_skill_index_content(skill_index_content);
-    }
+
+        // Load memory + build the iOS wire JSON. Uses a single lock acquisition
+        // so the cache refresh happens once per call path.
+        let mut reg = memory_registry.lock();
+        let home = crate::core::paths::home_dir();
+        let content = reg.content(&home).to_string();
+        let rule_files = reg.list_rule_files(&home);
+        let bootstrapped = reg.memory_md_exists(&home);
+        context_manager.set_memory_content(Some(content.clone()));
+        let rule_files_json: Vec<Value> = rule_files
+            .iter()
+            .map(|f| {
+                let mut obj = json!({ "name": f.name });
+                if let Some(desc) = &f.description {
+                    obj["description"] = json!(desc);
+                }
+                obj
+            })
+            .collect();
+        json!({
+            "content": content,
+            "ruleFiles": rule_files_json,
+            "bootstrapped": bootstrapped,
+        })
+    } else {
+        Value::Null
+    };
 
     // Reconstruct volatile token estimates from session state so the snapshot
     // reflects active skills even when queried between turns
@@ -307,7 +343,7 @@ fn build_detailed_snapshot_response(
         "toolsContent": detailed.tools_content,
         "addedSkills": added_skills,
         "rules": build_rules_info(event_store, session_id, &session, &artifacts, detailed.snapshot.breakdown.rules),
-        "memory": null,
+        "memory": memory_wire_json,
         "sessionMemories": build_session_memory_info(context_manager.get_session_memories()),
         "taskContext": null,
         "composedSystemPrompt": composed_system_prompt,
