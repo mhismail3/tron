@@ -11,12 +11,28 @@ struct HooksSettingsPage: View {
         ("builtin:suggest-prompts", "Suggest Follow-up Prompts", "Suggests short follow-up prompts when the agent finishes", "stop"),
     ]
 
+    @State private var showHooksModelPicker = false
+
     var body: some View {
         SettingsPageContainer(title: "Hooks") {
             builtinHooksCard
             modelCard
             errorPolicyCard
             userHooksCard
+        }
+        .sheet(isPresented: $showHooksModelPicker) {
+            if #available(iOS 26.0, *) {
+                ModelPickerSheet(
+                    models: settingsState.availableModels,
+                    currentModelId: settingsState.hooksLlmModel,
+                    onSelect: { model in
+                        settingsState.hooksLlmModel = model.id
+                        updateServerSetting {
+                            ServerSettingsUpdate(hooks: .init(llmModel: model.id))
+                        }
+                    }
+                )
+            }
         }
     }
 
@@ -70,16 +86,34 @@ struct HooksSettingsPage: View {
 
     // MARK: - Model Card
 
+    private var hooksModelDisplayName: String {
+        if let model = settingsState.availableModels.first(where: { $0.id == settingsState.hooksLlmModel }) {
+            return model.formattedModelName
+        }
+        return ModelNameFormatter.format(settingsState.hooksLlmModel, style: .short)
+    }
+
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "LLM Hook Model")
 
             SettingsCard {
-                SettingsRow(icon: "cpu", label: "Model") {
-                    Text(ModelNameFormatter.format(settingsState.hooksLlmModel, style: .short))
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.secondary)
+                Button {
+                    showHooksModelPicker = true
+                } label: {
+                    SettingsRow(icon: "cpu", label: "Model") {
+                        HStack(spacing: 4) {
+                            Text(hooksModelDisplayName)
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
                 }
+                .buttonStyle(.plain)
+                .accessibilityHint("Change the model used for built-in and prompt-based hooks")
             }
 
             SettingsCaption(text: "The model used for built-in and .prompt hooks. Defaults to Haiku for speed.")
