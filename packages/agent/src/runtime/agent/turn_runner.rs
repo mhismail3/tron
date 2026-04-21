@@ -219,12 +219,37 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         }
     };
 
-    // 6. Create streaming journal for crash recovery (best-effort — failure is non-fatal)
+    // 6. Create streaming journal for crash recovery.
+    //
+    // M7: failure is a turn error, not a warning. Without the journal, a
+    // mid-stream crash loses the partial assistant message and session
+    // reconstruction on restart is broken for that turn. Silently
+    // continuing masks the real problem (disk full, bad perms, missing
+    // directory) and defers the damage to the next crash — by which
+    // point the operator has no warning.
     let mut journal = match StreamingJournal::create(session_id, turn) {
         Ok(j) => Some(j),
         Err(e) => {
-            warn!(session_id, turn, error = %e, "failed to create streaming journal, continuing without crash recovery");
-            None
+            let error_msg = format!(
+                "failed to create streaming journal for crash recovery: {e}. \
+                 Check that ~/.tron/system/database/journals/ is writable."
+            );
+            error!(session_id, turn, error = %error_msg);
+            let _ = emitter.emit(TronEvent::TurnFailed {
+                base: BaseEvent::now(session_id),
+                turn,
+                error: error_msg.clone(),
+                code: Some("JOURNAL_CREATE_FAILED".into()),
+                category: Some("persistence".into()),
+                recoverable: false,
+                partial_content: None,
+            });
+            return TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
         }
     };
 
