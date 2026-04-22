@@ -67,6 +67,41 @@ mod tests {
     }
 
     #[test]
+    fn nfd_and_nfc_hash_to_same_value() {
+        // Regression for M20: visually-identical strings in NFC vs NFD
+        // forms MUST collide in the dedup hash. Without NFC normalization
+        // both prompts would persist and clutter history.
+        let nfc = "caf\u{00e9}";
+        let nfd = "cafe\u{0301}";
+        let a = hash_hex(normalize_for_hash(nfc).as_bytes());
+        let b = hash_hex(normalize_for_hash(nfd).as_bytes());
+        assert_eq!(a, b, "NFC and NFD of café must hash identically");
+
+        // And a second pair with a different precomposed character so the
+        // test isn't accidentally passing on something specific to é.
+        let nfc2 = "na\u{00ef}ve";
+        let nfd2 = "nai\u{0308}ve";
+        let c = hash_hex(normalize_for_hash(nfc2).as_bytes());
+        let d = hash_hex(normalize_for_hash(nfd2).as_bytes());
+        assert_eq!(c, d, "NFC and NFD of naïve must hash identically");
+    }
+
+    #[test]
+    fn nfkc_variants_remain_distinct() {
+        // Compatibility (NFKC) folds e.g. ﬁ ligature to fi; we use NFC,
+        // which preserves compatibility distinctions. This test pins
+        // that choice so the decision isn't silently changed later.
+        let ligature = "of\u{fb01}ce"; // of + ﬁ + ce
+        let plain = "office";
+        let a = hash_hex(normalize_for_hash(ligature).as_bytes());
+        let b = hash_hex(normalize_for_hash(plain).as_bytes());
+        assert_ne!(
+            a, b,
+            "NFC must NOT fold compatibility pairs; upgrade to NFKC requires an explicit decision"
+        );
+    }
+
+    #[test]
     fn case_sensitive_dedup() {
         let a = hash_hex(normalize_for_hash("Hello").as_bytes());
         let b = hash_hex(normalize_for_hash("hello").as_bytes());
