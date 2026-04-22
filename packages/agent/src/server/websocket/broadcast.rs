@@ -1,4 +1,27 @@
 //! Event fan-out to connected WebSocket clients.
+//!
+//! # INVARIANT: trusted-local client-claimed session_id
+//!
+//! [`BroadcastManager::broadcast_to_session`] routes events to every
+//! connection whose `session_id()` matches the target — and the value
+//! a connection reports is whatever it claimed via
+//! [`ClientConnection::bind_session`], which is driven by the client
+//! calling `session.create` or `session.resume`. Today the bind
+//! handler only validates that the session EXISTS in the event store;
+//! there is no cryptographic tie between the transport connection and
+//! the session owner.
+//!
+//! Under the trusted-local threat model this is safe: the only
+//! callers are the user's own devices over Tailscale, and every
+//! device is trusted to see every session. If the model shifts
+//! (shared Tailnet, multi-user host, compromised iOS build), an
+//! adversarial client could bind to any existing session_id and
+//! silently eavesdrop on broadcast events. The hardening path is a
+//! server-issued auth token in the WebSocket handshake that
+//! cryptographically scopes the bind to the session's owner.
+//!
+//! Regression guard:
+//! [`tests::cross_session_eavesdrop_requires_untrusted_mode`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -577,6 +600,44 @@ mod tests {
         assert_eq!(m1b.broadcast_seq, 2);
         assert_eq!(m2a.broadcast_seq, 1);
         assert_eq!(m2b.broadcast_seq, 2);
+    }
+
+    // ── M4: client-claimed session_id trust boundary ─────────────────
+
+    /// INTENT REGRESSION GUARD — M4.
+    ///
+    /// A connection that calls `bind_session("victim_sess")` receives
+    /// broadcasts for that session regardless of who "owns" it —
+    /// there is no cryptographic tie between the transport and the
+    /// session in the current implementation. This is intentional
+    /// under trusted-local: the user's own devices are the only
+    /// callers, and they should see all of their own sessions.
+    ///
+    /// If the threat model ever admits an adversarial or third-party
+    /// client, this test must be FLIPPED to assert the bind rejects
+    /// cross-session claims (auth token in handshake, per the
+    /// module-level INVARIANT). Do not delete — a silent deletion
+    /// would remove the intent signal entirely.
+    #[tokio::test]
+    async fn cross_session_eavesdrop_requires_untrusted_mode() {
+        let bm = BroadcastManager::new();
+
+        // Attacker connection claims the victim's session_id. Bind
+        // today is a client-controlled action with no ownership check.
+        let (attacker, mut attacker_rx) =
+            make_connection_with_rx("attacker", Some("victim_sess"));
+        bm.add(attacker).await;
+
+        // Victim's session emits an event.
+        let event = make_event("sensitive.event", Some("victim_sess"));
+        bm.broadcast_to_session("victim_sess", &event).await;
+
+        // Trusted-local behavior: attacker receives the broadcast.
+        assert!(
+            attacker_rx.try_recv().is_ok(),
+            "trusted-local MUST fan out to any connection claiming the session_id; \
+             flip this assertion when the threat model changes"
+        );
     }
 
     #[tokio::test]
