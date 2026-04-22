@@ -3,11 +3,21 @@
 //! Wraps [`McpServerManager`] and [`ToolIndex`] into a single struct shared
 //! via `Arc<tokio::sync::RwLock<McpRouter>>`. Provides search, call routing,
 //! server lifecycle management, and settings persistence.
+//!
+//! ## Schema-drift refresh (C8)
+//!
+//! MCP servers may update their tool set mid-session (feature flags, schema
+//! bumps, tool additions). The router proactively re-fetches `tools/list` on
+//! every `call` when the per-server cache is older than
+//! `schema_refresh_ttl_ms`. If a drift is detected, the [`ToolIndex`] is
+//! rebuilt for that server so the next `McpSearch` response to the LLM shows
+//! the live schema. TTL `0` disables proactive refresh entirely.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde_json::Value;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::mcp::client::McpError;
 use crate::mcp::server_manager::McpServerManager;
@@ -19,11 +29,20 @@ pub struct McpRouter {
     manager: McpServerManager,
     index: ToolIndex,
     settings_path: PathBuf,
+    /// Proactive schema-refresh TTL. `None` ⇒ disabled.
+    schema_refresh_ttl: Option<Duration>,
 }
 
 impl McpRouter {
     /// Create a new router, start all enabled servers, and index their tools.
-    pub async fn new(configs: Vec<McpServerConfig>, settings_path: PathBuf) -> Self {
+    ///
+    /// `schema_refresh_ttl_ms` of `0` disables proactive TTL-driven refresh.
+    /// See module docs for the refresh contract.
+    pub async fn new(
+        configs: Vec<McpServerConfig>,
+        settings_path: PathBuf,
+        schema_refresh_ttl_ms: u64,
+    ) -> Self {
         let mut manager = McpServerManager::new(configs);
         let discovered = manager.start_all().await;
 
@@ -32,11 +51,30 @@ impl McpRouter {
             index.add_server_tools(server, defs);
         }
 
+        let schema_refresh_ttl = (schema_refresh_ttl_ms > 0)
+            .then(|| Duration::from_millis(schema_refresh_ttl_ms));
+
         Self {
             manager,
             index,
             settings_path,
+            schema_refresh_ttl,
         }
+    }
+
+    /// Update the proactive schema-refresh TTL (in ms). Setting `0` disables.
+    ///
+    /// Used by `reload_from_settings` so a settings edit takes effect without
+    /// a daemon restart.
+    pub fn set_schema_refresh_ttl_ms(&mut self, ttl_ms: u64) {
+        self.schema_refresh_ttl = (ttl_ms > 0).then(|| Duration::from_millis(ttl_ms));
+    }
+
+    /// Current TTL in ms (0 if disabled). Used by tests and diagnostics.
+    pub fn schema_refresh_ttl_ms(&self) -> u64 {
+        self.schema_refresh_ttl
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
     }
 
     /// Search for tools matching keywords.
@@ -52,6 +90,13 @@ impl McpRouter {
 
     /// Call a tool on an MCP server.
     ///
+    /// Before forwarding, the server's tool schemas are re-fetched if the
+    /// per-server cache is older than `schema_refresh_ttl_ms` (C8). On drift,
+    /// the [`ToolIndex`] is rebuilt for that server so subsequent
+    /// `McpSearch` responses reflect the live schema. Refresh failures are
+    /// logged and the call proceeds with the cached schema — the actual tool
+    /// call will surface its own error if the server is truly unreachable.
+    ///
     /// On `ConnectionLost`, attempts one automatic restart + retry.
     pub async fn call(
         &mut self,
@@ -59,6 +104,33 @@ impl McpRouter {
         tool: &str,
         args: Value,
     ) -> Result<McpToolResult, McpError> {
+        // Proactive schema refresh (C8). Runs only when TTL is enabled and the
+        // server's cached schemas are older than the TTL. `refresh_schemas_if_stale`
+        // returns `Ok(None)` for unknown / failed / within-TTL servers and swallows
+        // transient list_tools errors (bumping the timestamp to avoid hammering).
+        if let Some(ttl) = self.schema_refresh_ttl {
+            match self.manager.refresh_schemas_if_stale(server, ttl).await {
+                Ok(Some(refresh)) if !refresh.diff.is_empty() => {
+                    info!(
+                        server,
+                        added = ?refresh.diff.added,
+                        removed = ?refresh.diff.removed,
+                        modified = ?refresh.diff.modified,
+                        "MCP schema drift detected; rebuilding tool index"
+                    );
+                    self.index.remove_server(server);
+                    self.index.add_server_tools(server, &refresh.tools);
+                }
+                Ok(Some(_)) => {
+                    debug!(server, "MCP schema refreshed; no drift");
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    warn!(server, error = %e, "schema refresh errored; proceeding with cached");
+                }
+            }
+        }
+
         let client = self.manager.client(server).ok_or_else(|| McpError {
             server: server.to_string(),
             kind: crate::mcp::client::McpErrorKind::Protocol("unknown server".into()),
@@ -178,6 +250,7 @@ impl McpRouter {
         let settings = crate::settings::load_settings_from_path(&self.settings_path)
             .unwrap_or_default();
         let new_configs = settings.mcp.servers;
+        let new_ttl_ms = settings.mcp.schema_refresh_ttl_ms;
 
         let current_names: Vec<String> = self.manager.configs().iter().map(|c| c.name.clone()).collect();
         let new_names: Vec<String> = new_configs.iter().map(|c| c.name.clone()).collect();
@@ -197,6 +270,10 @@ impl McpRouter {
                 warn!(server = %config.name, error = %e, "failed to add server during reload");
             }
         }
+
+        // Pick up any change to the refresh TTL without requiring a daemon
+        // restart. Setting it to 0 disables proactive refresh.
+        self.set_schema_refresh_ttl_ms(new_ttl_ms);
 
         Ok(self.manager.configs().len())
     }
@@ -236,7 +313,7 @@ mod tests {
     async fn new_with_empty_configs() {
         let dir = tempfile::tempdir().unwrap();
         let settings_path = dir.path().join("settings.json");
-        let router = McpRouter::new(Vec::new(), settings_path).await;
+        let router = McpRouter::new(Vec::new(), settings_path, 0).await;
         assert!(router.status().is_empty());
     }
 
@@ -244,7 +321,7 @@ mod tests {
     async fn search_delegates_to_index() {
         let dir = tempfile::tempdir().unwrap();
         let settings_path = dir.path().join("settings.json");
-        let mut router = McpRouter::new(Vec::new(), settings_path).await;
+        let mut router = McpRouter::new(Vec::new(), settings_path, 0).await;
 
         // Manually populate index for unit test
         let defs = vec![crate::mcp::types::McpToolDef {
@@ -263,7 +340,7 @@ mod tests {
     async fn call_unknown_server_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let settings_path = dir.path().join("settings.json");
-        let mut router = McpRouter::new(Vec::new(), settings_path).await;
+        let mut router = McpRouter::new(Vec::new(), settings_path, 0).await;
 
         let result = router.call("nonexistent", "tool", serde_json::json!({})).await;
         assert!(result.is_err());
@@ -274,7 +351,7 @@ mod tests {
     async fn status_returns_all_servers() {
         let dir = tempfile::tempdir().unwrap();
         let settings_path = dir.path().join("settings.json");
-        let router = McpRouter::new(Vec::new(), settings_path).await;
+        let router = McpRouter::new(Vec::new(), settings_path, 0).await;
         assert!(router.status().is_empty());
     }
 }

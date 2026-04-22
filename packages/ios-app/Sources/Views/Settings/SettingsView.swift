@@ -110,7 +110,10 @@ struct SettingsView: View {
                         )
                     }
                 case .mcpServers:
-                    MCPServersPage()
+                    MCPServersPage(
+                        settingsState: settingsState,
+                        updateServerSetting: updateServerSetting
+                    )
                 case .hooks:
                     HooksSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
                 case .gitWorkflow:

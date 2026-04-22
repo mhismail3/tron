@@ -69,6 +69,13 @@ final class SettingsState {
     /// Opportunistically prune on server startup.
     var promptHistoryAutoPrune: Bool = true
 
+    // MARK: - MCP
+
+    /// Proactive schema-refresh TTL in milliseconds. `0` disables.
+    /// Each `McpCall` re-fetches `tools/list` when the per-server cache is
+    /// older than this TTL, detecting drift and rebuilding the tool index.
+    var mcpSchemaRefreshTtlMs: UInt64 = 30_000
+
     // MARK: - Connection Presets
 
     var connectionPresets: [ConnectionPreset] = []
@@ -181,5 +188,7 @@ final class SettingsState {
         promptHistoryMaxEntries = settings.promptHistoryMaxEntries
         promptHistoryMaxAgeDays = settings.promptHistoryMaxAgeDays
         promptHistoryAutoPrune = settings.promptHistoryAutoPrune
+
+        mcpSchemaRefreshTtlMs = settings.mcpSchemaRefreshTtlMs
     }
 }

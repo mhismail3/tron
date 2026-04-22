@@ -292,7 +292,7 @@ mod tests {
     async fn status_with_empty_router() {
         let dir = tempfile::tempdir().unwrap();
         let settings_path = dir.path().join("settings.json");
-        let router = crate::mcp::router::McpRouter::new(Vec::new(), settings_path).await;
+        let router = crate::mcp::router::McpRouter::new(Vec::new(), settings_path, 0).await;
         let mut ctx = make_test_context();
         ctx.mcp_router = Some(std::sync::Arc::new(tokio::sync::RwLock::new(router)));
 

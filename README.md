@@ -474,6 +474,11 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
     "opTimeoutNetworkMs": 60000,                // Timeout for fetch / push / ls-remote
     "opTimeoutLocalMs": 30000,                  // Timeout for local git ops
     "subagentConflictResolutionEnabled": true   // Spawn a child subagent to resolve merge conflicts
+  },
+
+  "mcp": {
+    "servers": [],                              // MCP server configs
+    "schemaRefreshTtlMs": 30000                 // Proactive schema re-fetch TTL. 0 disables.
   }
 }
 ```

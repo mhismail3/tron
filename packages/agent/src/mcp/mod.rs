@@ -20,6 +20,7 @@
 //! - [`tool_bridge`] — Legacy adapter + result conversion helper
 //! - [`server_manager`] — Lifecycle management for MCP servers
 //! - [`tool_index`] — Searchable in-memory tool index
+//! - [`schemas`] — Pure drift-detection between two tool-definition sets
 //! - [`router`] — Central coordinator (`McpServerManager` + `ToolIndex`)
 //! - [`search_tool`] — `McpSearch` `TronTool` implementation
 //! - [`call_tool`] — `McpCall` `TronTool` implementation
@@ -27,6 +28,7 @@
 pub mod call_tool;
 pub mod client;
 pub mod router;
+pub mod schemas;
 pub mod search_tool;
 pub mod server_manager;
 pub mod tool_bridge;

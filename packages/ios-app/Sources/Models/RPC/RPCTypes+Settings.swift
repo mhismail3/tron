@@ -50,8 +50,16 @@ struct ServerSettings: Decodable {
     let promptHistoryMaxAgeDays: Int
     let promptHistoryAutoPrune: Bool
 
+    // MARK: - MCP
+
+    /// Proactive schema-refresh TTL in milliseconds. `0` disables.
+    /// When non-zero, each `McpCall` re-fetches `tools/list` from the target
+    /// server if its cached tool set is older than this TTL, detecting schema
+    /// drift and rebuilding the tool index.
+    let mcpSchemaRefreshTtlMs: UInt64
+
     private enum CodingKeys: String, CodingKey {
-        case models, server, context, session, hooks, skills, memory, git, promptLibrary
+        case models, server, context, session, hooks, skills, memory, git, promptLibrary, mcp
     }
 
     private enum GitKeys: String, CodingKey {
@@ -62,6 +70,10 @@ struct ServerSettings: Decodable {
 
     private enum PromptLibraryKeys: String, CodingKey {
         case historyEnabled, historyMaxEntries, historyMaxAgeDays, historyAutoPrune
+    }
+
+    private enum McpKeys: String, CodingKey {
+        case schemaRefreshTtlMs
     }
 
     private enum SkillsKeys: String, CodingKey {
@@ -202,6 +214,13 @@ struct ServerSettings: Decodable {
             promptHistoryMaxEntries = 10_000
             promptHistoryMaxAgeDays = 0
             promptHistoryAutoPrune = true
+        }
+
+        // mcp.*
+        if let mcpContainer = try? container.nestedContainer(keyedBy: McpKeys.self, forKey: .mcp) {
+            mcpSchemaRefreshTtlMs = (try? mcpContainer.decodeIfPresent(UInt64.self, forKey: .schemaRefreshTtlMs)) ?? 30_000
+        } else {
+            mcpSchemaRefreshTtlMs = 30_000
         }
     }
 
@@ -383,6 +402,12 @@ struct ServerSettingsUpdate: Encodable {
     }
 
     var promptLibrary: PromptLibraryUpdate?
+
+    struct McpUpdate: Encodable {
+        var schemaRefreshTtlMs: UInt64?
+    }
+
+    var mcp: McpUpdate?
 }
 
 /// Enable/disable toggle for a built-in hook.

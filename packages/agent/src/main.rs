@@ -395,6 +395,7 @@ async fn init_mcp(settings: &tron::settings::TronSettings, settings_path: &std::
     let router = tron::mcp::router::McpRouter::new(
         mcp_configs,
         settings_path.to_owned(),
+        settings.mcp.schema_refresh_ttl_ms,
     )
     .await;
     let statuses = router.status();

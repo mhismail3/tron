@@ -7,6 +7,8 @@ import SwiftUI
 
 struct MCPServersPage: View {
     @Environment(\.dependencies) var dependencies
+    @Bindable var settingsState: SettingsState
+    let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
     @State private var servers: [MCPServerStatus] = []
     @State private var loadError: String?
@@ -19,6 +21,25 @@ struct MCPServersPage: View {
 
     private var rpcClient: RPCClient { dependencies.rpcClient }
 
+    /// Display a refresh TTL as seconds, or "Disabled" when 0.
+    private var schemaRefreshDisplay: String {
+        if settingsState.mcpSchemaRefreshTtlMs == 0 {
+            return "Disabled"
+        }
+        let seconds = Double(settingsState.mcpSchemaRefreshTtlMs) / 1000.0
+        return String(format: "%.0fs", seconds)
+    }
+
+    private var schemaRefreshSeconds: Binding<Double> {
+        Binding(
+            get: { Double(settingsState.mcpSchemaRefreshTtlMs) / 1000.0 },
+            set: { newValue in
+                let clamped = max(0, min(600, newValue.rounded()))
+                settingsState.mcpSchemaRefreshTtlMs = UInt64(clamped * 1000)
+            }
+        )
+    }
+
     var body: some View {
         SettingsPageContainer(title: "MCP Servers") {
             Button { showAddSheet = true } label: {
@@ -27,6 +48,8 @@ struct MCPServersPage: View {
                     .foregroundStyle(.tronEmerald)
             }
         } content: {
+            schemaRefreshCard
+
             if servers.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "server.rack")
@@ -88,6 +111,39 @@ struct MCPServersPage: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .mcpStatusChanged)) { _ in
             Task { await loadStatus() }
+        }
+    }
+
+    // MARK: - Schema Refresh
+
+    /// Server-authoritative `mcp.schemaRefreshTtlMs`. Controls proactive
+    /// re-fetch of each server's `tools/list` before an `McpCall` so the LLM
+    /// sees live schemas when the server has updated its tool set.
+    private var schemaRefreshCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Schema Refresh")
+
+            SettingsCard {
+                SettingsRow(icon: "arrow.triangle.2.circlepath", label: "Refresh interval") {
+                    Text(schemaRefreshDisplay)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                        .frame(minWidth: 80, alignment: .trailing)
+                    TronStepper(
+                        value: schemaRefreshSeconds,
+                        range: 0...600,
+                        step: 5
+                    )
+                }
+                .onChange(of: settingsState.mcpSchemaRefreshTtlMs) { _, newValue in
+                    updateServerSetting {
+                        ServerSettingsUpdate(mcp: .init(schemaRefreshTtlMs: newValue))
+                    }
+                }
+            }
+
+            SettingsCaption(text: "How often to re-fetch tool schemas from each server. 0 disables automatic refresh.")
         }
     }
 

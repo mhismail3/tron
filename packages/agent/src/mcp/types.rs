@@ -149,11 +149,35 @@ fn default_enabled() -> bool {
 }
 
 /// MCP settings configuration.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct McpSettings {
     /// Configured MCP servers.
     #[serde(default)]
     pub servers: Vec<McpServerConfig>,
+    /// Proactive schema-refresh TTL in milliseconds.
+    ///
+    /// Each `McpCall` invocation re-fetches a server's tool list if more than
+    /// this many ms have elapsed since the previous refresh. On drift, the
+    /// tool index is rebuilt so subsequent `McpSearch` results — and therefore
+    /// the LLM's next call arguments — see the live schema.
+    ///
+    /// `0` disables proactive refresh entirely (cache is only rebuilt at
+    /// startup and on manual restart). Default: 30 seconds.
+    #[serde(default = "default_schema_refresh_ttl_ms")]
+    pub schema_refresh_ttl_ms: u64,
+}
+
+impl Default for McpSettings {
+    fn default() -> Self {
+        Self {
+            servers: Vec::new(),
+            schema_refresh_ttl_ms: default_schema_refresh_ttl_ms(),
+        }
+    }
+}
+
+fn default_schema_refresh_ttl_ms() -> u64 {
+    30_000
 }
 
 /// Health state for a single MCP server.
