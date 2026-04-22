@@ -23,6 +23,27 @@ final class EventRegistry: @unchecked Sendable {
     static let shared = EventRegistry()
 
     /// Registered plugins keyed by event type.
+    ///
+    /// INVARIANT: the registry MUST NOT hold strong references to
+    /// ViewModels, state objects, or any reference type that owns UI
+    /// state. Keys are strings, values are `any EventPluginBox` —
+    /// concrete boxes (`EventPluginBoxImpl<P>`, `DispatchablePluginBoxImpl<P>`)
+    /// are stateless structs carrying only static metadata about a
+    /// plugin type `P`. Plugins themselves are stateless (enums /
+    /// types with only static methods), and the dispatch context
+    /// (ChatViewModel) is passed as a method parameter per call,
+    /// never stored. This shape is deliberate: the registry is a
+    /// process-lifetime singleton, so any stored reference would
+    /// outlive the ViewModel and create a cycle (ChatViewModel →
+    /// EventDispatchCoordinator → EventRegistry → … →
+    /// ChatViewModel).
+    ///
+    /// Guard test: `EventRegistryReferenceCycleTests` in
+    /// `Tests/Core/Events/`. If you're about to add a closure or a
+    /// reference-typed property to an `EventPluginBox` impl, stop and
+    /// re-read this block — almost every such "just add a sidecar
+    /// here" change has been the root cause of a retain cycle in
+    /// similar event systems.
     private var plugins: [String: any EventPluginBox] = [:]
 
     /// Lock for thread-safe access to plugins dictionary.
