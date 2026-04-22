@@ -23,4 +23,8 @@ enum MessageBubbleTapAction {
     /// Handler should call `agent.activateSkill(skillName:)` to re-add the
     /// skill to the session's active set.
     case reactivateSkill(skillName: String)
+    /// User tapped the "Retry" button on a `turn.failed` notification (C7).
+    /// Handler re-issues the last user prompt so the agent tries the turn
+    /// again. Only surfaced when the server marked the failure recoverable.
+    case retryTurn
 }

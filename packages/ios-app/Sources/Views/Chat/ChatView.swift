@@ -522,6 +522,11 @@ struct ChatView: View {
             // `skill.activated` which the chip tracks via `SkillsClearedNotificationView`.
             // On failure, surface the error so the user knows the tap did nothing.
             viewModel.reactivateSkillWithUserErrorHandling(skillName)
+        case .retryTurn:
+            // C7: user tapped the "Retry" button on a recoverable
+            // `turn.failed` notification. Re-issues the last user prompt
+            // so the agent tries the turn again.
+            viewModel.retryLastTurn()
         }
     }
 

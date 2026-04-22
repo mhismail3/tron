@@ -446,10 +446,18 @@ struct WorkspaceDeletedNotificationView: View {
 
 // MARK: - Turn Failed Notification View
 
+/// Renders a `turn.failed` notification pill. When the server marked the
+/// failure `recoverable` AND the caller passes an `onRetry` closure, the
+/// pill surfaces a "Retry" button (C7) that re-issues the last user prompt.
+///
+/// Non-recoverable failures (or surfaces that don't want to offer retry,
+/// e.g. read-only history reconstruction) render the same pill without
+/// the button.
 struct TurnFailedNotificationView: View {
     let error: String
     let code: String?
     let recoverable: Bool
+    var onRetry: (() -> Void)? = nil
 
     var body: some View {
         NotificationPill(tint: .tronError) {
@@ -467,6 +475,29 @@ struct TurnFailedNotificationView: View {
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(2)
+                }
+
+                if recoverable, let onRetry {
+                    Spacer(minLength: 4)
+
+                    Button(action: onRetry) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(TronTypography.codeCaption)
+                            Text("Retry")
+                                .font(TronTypography.badge)
+                        }
+                        .foregroundStyle(.tronError)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(Color.tronError.opacity(0.4), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Retry failed turn")
+                    .accessibilityHint("Re-sends the last user prompt")
                 }
             }
         }

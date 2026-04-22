@@ -183,6 +183,78 @@ extension ChatViewModel {
         }
     }
 
+    // MARK: - Retry Turn (C7)
+
+    /// Re-issue the most recent user text prompt after a recoverable turn
+    /// failure (C7). Called when the user taps the "Retry" button on a
+    /// `turn.failed` notification.
+    ///
+    /// Semantics:
+    /// - Walks `messages` in reverse looking for the newest `role == .user`
+    ///   message with `.text(…)` content.
+    /// - If found, calls `rpcClient.agent.sendPrompt` with that text and
+    ///   the message's original attachments; the server emits a fresh
+    ///   `message.user` event and starts a new turn.
+    /// - If not found (empty history, or last user message is an image-only
+    ///   attachment with no text), surfaces a user-visible error rather
+    ///   than silently no-op'ing. Image-only retry would require
+    ///   re-uploading binary content we no longer hold, so we ask the user
+    ///   to re-compose.
+    ///
+    /// Limitation: the retry targets the LATEST user prompt, not the prompt
+    /// that failed. If the user queued a second prompt after the failed one,
+    /// this retries the second. In practice the send button is disabled
+    /// during a failed turn until the retry lands, so this is rarely
+    /// ambiguous — but we call it out here for future callers.
+    func retryLastTurn() {
+        guard let lastUserMessage = findLastUserTextMessage() else {
+            logError("Retry requested but no user text message found in history")
+            showError("Cannot retry: no previous message to re-send. Please type your message again.")
+            return
+        }
+
+        guard case .text(let prompt) = lastUserMessage.content, !prompt.isEmpty else {
+            // Defensive — findLastUserTextMessage already filters to .text
+            logError("Retry found a user message but its content was not plain text")
+            showError("Cannot retry: the previous message was not a text prompt.")
+            return
+        }
+
+        logInfo("Retrying last turn (\"\(prompt.prefix(50))...\")")
+
+        let fileAttachments: [FileAttachment]? = lastUserMessage.attachments?.map { attachment in
+            FileAttachment(attachment: attachment)
+        }
+
+        Task {
+            do {
+                try await sendPromptToServer(
+                    text: prompt,
+                    attachments: fileAttachments,
+                    reasoningLevel: nil
+                )
+            } catch {
+                logError("Retry failed: \(error.localizedDescription)")
+                showError("Could not retry: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Walk `messages` from newest to oldest returning the first user
+    /// message whose content is plain text. Used by `retryLastTurn`.
+    ///
+    /// Internal rather than private so unit tests (C7) can directly verify
+    /// the traversal order, skip semantics, and "no text prompt" fallback
+    /// without needing to wire a mock RPC client.
+    func findLastUserTextMessage() -> ChatMessage? {
+        for message in messages.reversed() where message.role == .user {
+            if case .text = message.content {
+                return message
+            }
+        }
+        return nil
+    }
+
     // MARK: - Message Queue (Server-Driven)
 
     /// Queue the current input text on the server for delivery when the agent becomes ready.

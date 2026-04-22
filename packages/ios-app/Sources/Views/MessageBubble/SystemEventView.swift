@@ -102,7 +102,15 @@ struct SystemEventView: View {
             CatchingUpNotificationView()
 
         case .turnFailed(let error, let code, let recoverable):
-            TurnFailedNotificationView(error: error, code: code, recoverable: recoverable)
+            // C7: when the server marked the failure recoverable, surface a
+            // "Retry" button that re-issues the last user prompt. Handler
+            // lives in `ChatView.handleBubbleTap` → `retryLastTurn`.
+            TurnFailedNotificationView(
+                error: error,
+                code: code,
+                recoverable: recoverable,
+                onRetry: recoverable ? { onTap?(.retryTurn) } : nil
+            )
 
         case .subagentResultAvailable(let subagentSessionId, let taskPreview, let success):
             // Legacy individual notification (from persisted events before consolidation)
