@@ -23,6 +23,11 @@
 //! - `record_prompt` never blocks the agent's prompt dispatch path — callers
 //!   invoke it from a fire-and-forget `spawn_blocking`. Write failures are
 //!   logged and swallowed.
+//! - `record_prompt_and_prune` is the canonical entry point for the RPC
+//!   `agent.prompt` handler: it folds insert + amortized retention prune into
+//!   a single call so the row count stays bounded without a separate
+//!   housekeeping job. Pruning only fires when the outcome is `Inserted`
+//!   AND at least one retention axis is enabled.
 //! - Capture is interactive-only: cron- and subagent-dispatched prompts are
 //!   never recorded (the handler's `source: "cron"` param gates this).
 

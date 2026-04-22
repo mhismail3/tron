@@ -86,6 +86,41 @@ pub fn record_prompt(pool: &ConnectionPool, text: &str) -> Result<RecordOutcome>
     })
 }
 
+/// Record a prompt and, when the insert grows the population past a cap,
+/// prune inline.
+///
+/// Mirrors [`record_prompt`] for the insert/dedup path. Additionally, when
+/// the outcome is [`RecordOutcome::Inserted`] AND at least one retention
+/// axis is enabled (`max_entries` or `max_age_days`), invokes
+/// [`prune_history`] in the same call so the row count stays bounded
+/// amortized across inserts.
+///
+/// Updates and skipped (blank) inputs do not trigger pruning — the
+/// population only grows on inserts, so dedups cannot cross the threshold.
+///
+/// Prune failures are propagated to the caller so fire-and-forget call
+/// sites can log (and swallow) uniformly with insert failures. The insert
+/// always commits before the prune runs; a failing prune does not unwind
+/// the insert.
+pub fn record_prompt_and_prune(
+    pool: &ConnectionPool,
+    text: &str,
+    max_entries: Option<u32>,
+    max_age_days: Option<u32>,
+) -> Result<RecordOutcome> {
+    let outcome = record_prompt(pool, text)?;
+
+    if matches!(outcome, RecordOutcome::Inserted { .. }) {
+        let cap_active = max_entries.is_some_and(|n| n > 0);
+        let age_active = max_age_days.is_some_and(|n| n > 0);
+        if cap_active || age_active {
+            let _ = prune_history(pool, max_age_days, max_entries)?;
+        }
+    }
+
+    Ok(outcome)
+}
+
 // ─── history: list ──────────────────────────────────────────────────────────
 
 /// Paginated list of history items, newest first. Optional case-sensitive

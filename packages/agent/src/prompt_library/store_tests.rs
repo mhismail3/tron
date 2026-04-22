@@ -288,6 +288,101 @@ fn prune_history_unlimited_when_zero() {
     assert_eq!(list_history(&pool, 100, None, None).unwrap().items.len(), 5);
 }
 
+// ─── history: record_prompt_and_prune ──────────────────────────────────────
+
+#[test]
+fn auto_prune_fires_on_threshold_crossing() {
+    // *** M21 regression test ***
+    //
+    // Inserting beyond `max_entries` must stabilize the row count at the
+    // cap — never accumulate past it — because the prune runs inline on
+    // every insert that grows the population.
+    let pool = setup_pool();
+    let cap: u32 = 5;
+
+    for i in 0..(cap + 3) {
+        record_prompt_and_prune(&pool, &format!("prompt {i:02}"), Some(cap), None).unwrap();
+        // Tiny stagger so last_used_at ordering is deterministic across rows.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+
+    let items = list_history(&pool, 100, None, None).unwrap().items;
+    assert_eq!(items.len(), cap as usize, "count must be clamped to cap");
+    // Newest `cap` entries survive; oldest three were pruned.
+    assert_eq!(items[0].text, format!("prompt {:02}", cap + 2));
+    assert_eq!(items[cap as usize - 1].text, "prompt 03");
+}
+
+#[test]
+fn auto_prune_does_not_fire_on_dedup() {
+    // Dedup → Updated, count unchanged, so no prune opportunity. Ensures
+    // a long conversation that repeatedly re-sends the same prompt does
+    // not churn DELETE queries against the table.
+    let pool = setup_pool();
+    let cap: u32 = 5;
+
+    for i in 0..cap {
+        record_prompt_and_prune(&pool, &format!("p {i:02}"), Some(cap), None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let outcome = record_prompt_and_prune(&pool, "p 00", Some(cap), None).unwrap();
+    assert!(
+        matches!(outcome, RecordOutcome::Updated { .. }),
+        "repeat must dedup, not insert"
+    );
+
+    let items = list_history(&pool, 100, None, None).unwrap().items;
+    assert_eq!(items.len(), cap as usize);
+}
+
+#[test]
+fn auto_prune_disabled_when_caps_none() {
+    // None/None → no prune, no cap enforcement.
+    let pool = setup_pool();
+    for i in 0..10 {
+        record_prompt_and_prune(&pool, &format!("p {i:02}"), None, None).unwrap();
+    }
+    let items = list_history(&pool, 100, None, None).unwrap().items;
+    assert_eq!(items.len(), 10);
+}
+
+#[test]
+fn auto_prune_applies_age_and_count_together() {
+    // Both axes active. Count-cap path is straightforward (covered above);
+    // this confirms age is honored as well when caller passes it.
+    let pool = setup_pool();
+    // Seed an expired row by back-dating its last_used_at.
+    record_prompt_and_prune(&pool, "old", None, None).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE prompt_history SET last_used_at = ?1, first_used_at = ?1 WHERE text = 'old'",
+            rusqlite::params!["2020-01-01T00:00:00Z"],
+        )
+        .unwrap();
+    }
+    // An insert with age_days=1 should sweep the old row via amortized prune.
+    record_prompt_and_prune(&pool, "fresh", Some(10), Some(1)).unwrap();
+    let items = list_history(&pool, 100, None, None).unwrap().items;
+    assert_eq!(items.len(), 1, "old row pruned by age");
+    assert_eq!(items[0].text, "fresh");
+}
+
+#[test]
+fn auto_prune_blank_input_does_not_prune() {
+    // Blank → Skipped, no insert, no prune.
+    let pool = setup_pool();
+    for i in 0..3 {
+        record_prompt_and_prune(&pool, &format!("p {i}"), Some(2), None).unwrap();
+    }
+    let before = list_history(&pool, 100, None, None).unwrap().items.len();
+    // Sending blank should not alter the population.
+    let outcome = record_prompt_and_prune(&pool, "   ", Some(2), None).unwrap();
+    assert_eq!(outcome, RecordOutcome::Skipped);
+    let after = list_history(&pool, 100, None, None).unwrap().items.len();
+    assert_eq!(before, after);
+}
+
 // ─── snippets ──────────────────────────────────────────────────────────────
 
 #[test]
