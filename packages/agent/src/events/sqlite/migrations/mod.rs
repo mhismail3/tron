@@ -51,6 +51,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Per-token APNs bundle ID (device_tokens.bundle_id)",
         sql: include_str!("v006_device_token_bundle_id.sql"),
     },
+    Migration {
+        version: 7,
+        description: "Workspace+bundle-scoped device_tokens identity",
+        sql: include_str!("v007_device_tokens_workspace_scope.sql"),
+    },
 ];
 
 /// Result of running migrations.
@@ -202,8 +207,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 6);
-        assert_eq!(result.max_version_applied, 6);
+        assert_eq!(result.applied, 7);
+        assert_eq!(result.max_version_applied, 7);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -272,7 +277,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 6);
+        assert_eq!(first.applied, 7);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -290,12 +295,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 6);
+        assert_eq!(current_version(&conn).unwrap(), 7);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 6);
+        assert_eq!(latest_version(), 7);
     }
 
     #[test]
@@ -807,10 +812,10 @@ mod tests {
         )
         .unwrap();
 
-        // Now run the full migrator — v2 through v6 should apply.
+        // Now run the full migrator — v2 through v7 should apply.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 5);
-        assert_eq!(result.max_version_applied, 6);
+        assert_eq!(result.applied, 6);
+        assert_eq!(result.max_version_applied, 7);
 
         // v1 data is intact.
         let count: i64 = conn
@@ -1011,8 +1016,8 @@ mod tests {
         .unwrap();
 
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 4);
-        assert_eq!(result.max_version_applied, 6);
+        assert_eq!(result.applied, 5);
+        assert_eq!(result.max_version_applied, 7);
 
         let spell_count: i64 = conn
             .query_row(
@@ -1060,8 +1065,8 @@ mod tests {
 
         // Upgrade.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 3);
-        assert_eq!(result.max_version_applied, 6);
+        assert_eq!(result.applied, 4);
+        assert_eq!(result.max_version_applied, 7);
 
         // Pre-existing row gets NULL for the new column.
         let use_worktree: Option<i64> = conn
@@ -1242,10 +1247,10 @@ mod tests {
         )
         .unwrap();
 
-        // Upgrade to v6.
+        // Upgrade to v7.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 2);
-        assert_eq!(result.max_version_applied, 6);
+        assert_eq!(result.applied, 3);
+        assert_eq!(result.max_version_applied, 7);
 
         // All three rows survive untouched.
         let count: i64 = conn
@@ -1379,6 +1384,213 @@ mod tests {
         assert!(bundle_id.is_none(), "legacy insert should have NULL bundle_id");
     }
 
+    // ── v007 workspace+bundle-scoped identity tests ───────────────────
+
+    /// Upgrading from v6 to v7 rebuilds the table but preserves every row
+    /// verbatim. Any tuple the old narrow UNIQUE accepted remains valid
+    /// under the new wider UNIQUE (superset), so the copy cannot fail.
+    #[test]
+    fn v007_upgrade_from_v6_preserves_existing_tokens() {
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        for migration in &MIGRATIONS[..6] {
+            apply_migration(&conn, migration).unwrap();
+        }
+        assert_eq!(current_version(&conn).unwrap(), 6);
+
+        conn.execute(
+            "INSERT INTO device_tokens (id, device_token, platform, environment, bundle_id,
+                                        created_at, last_used_at, is_active)
+             VALUES
+               ('dt_prod',   'aa', 'ios', 'production', 'com.tron.mobile',
+                '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1),
+               ('dt_beta',   'bb', 'ios', 'sandbox',    'com.tron.mobile.beta',
+                '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z', 1),
+               ('dt_legacy', 'cc', 'ios', 'production', NULL,
+                '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z', 1)",
+            [],
+        )
+        .unwrap();
+
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 7);
+
+        // Verify every pre-existing row is intact, including the NULL bundle legacy row.
+        let rows: Vec<(String, String, Option<String>, bool)> = conn
+            .prepare(
+                "SELECT id, device_token, bundle_id, is_active
+                 FROM device_tokens ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)? == 1,
+                ))
+            })
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].0, "dt_beta");
+        assert_eq!(rows[0].2.as_deref(), Some("com.tron.mobile.beta"));
+        assert_eq!(rows[1].0, "dt_legacy");
+        assert!(rows[1].2.is_none());
+        assert_eq!(rows[2].0, "dt_prod");
+        assert_eq!(rows[2].2.as_deref(), Some("com.tron.mobile"));
+        assert!(rows.iter().all(|r| r.3));
+    }
+
+    /// After v7 the wider unique allows the same (token, platform, bundle)
+    /// in two distinct workspaces.
+    #[test]
+    fn v007_unique_index_allows_same_token_across_workspaces() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/t1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+                    ('ws_2', '/t2', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO device_tokens (id, device_token, workspace_id, platform, environment,
+                                        bundle_id, created_at, last_used_at, is_active)
+             VALUES ('dt_a', 'zz', 'ws_1', 'ios', 'production', 'com.tron.mobile',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO device_tokens (id, device_token, workspace_id, platform, environment,
+                                        bundle_id, created_at, last_used_at, is_active)
+             VALUES ('dt_b', 'zz', 'ws_2', 'ios', 'production', 'com.tron.mobile',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .unwrap();
+
+        // Inserting a third row whose full identity collides is rejected.
+        let dup = conn.execute(
+            "INSERT INTO device_tokens (id, device_token, workspace_id, platform, environment,
+                                        bundle_id, created_at, last_used_at, is_active)
+             VALUES ('dt_dup', 'zz', 'ws_1', 'ios', 'production', 'com.tron.mobile',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        );
+        assert!(
+            dup.is_err(),
+            "duplicate (token, ios, ws_1, bundle) must be rejected by v007 unique index"
+        );
+    }
+
+    /// The COALESCE-widened identity index collapses NULL workspace_id and
+    /// NULL bundle_id to a single canonical key. Without COALESCE, SQLite
+    /// treats every NULL as distinct and lets unbounded duplicate legacy
+    /// rows accumulate.
+    #[test]
+    fn v007_unique_index_collapses_null_workspace_and_bundle() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO device_tokens (id, device_token, platform, environment,
+                                        created_at, last_used_at, is_active)
+             VALUES ('dt_null1', 'nn', 'ios', 'production',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .unwrap();
+
+        let dup = conn.execute(
+            "INSERT INTO device_tokens (id, device_token, platform, environment,
+                                        created_at, last_used_at, is_active)
+             VALUES ('dt_null2', 'nn', 'ios', 'production',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        );
+        assert!(
+            dup.is_err(),
+            "two (token, ios, NULL ws, NULL bundle) rows must be rejected by COALESCE index"
+        );
+    }
+
+    /// v007 removes the narrow `UNIQUE(device_token, platform)` — two
+    /// registrations with the same token+platform must succeed when
+    /// workspace_id differs. Paired with
+    /// [`v007_unique_index_allows_same_token_across_workspaces`], this
+    /// guards against the old constraint accidentally lingering.
+    #[test]
+    fn v007_old_narrow_unique_is_gone() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/t1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+                    ('ws_2', '/t2', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO device_tokens (id, device_token, workspace_id, platform, environment,
+                                        created_at, last_used_at, is_active)
+             VALUES ('dt_a', 'aa', 'ws_1', 'ios', 'production',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .unwrap();
+        // Same token+platform, different workspace → must succeed under v7.
+        conn.execute(
+            "INSERT INTO device_tokens (id, device_token, workspace_id, platform, environment,
+                                        created_at, last_used_at, is_active)
+             VALUES ('dt_b', 'aa', 'ws_2', 'ios', 'production',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .unwrap_or_else(|e| panic!("v007 must allow same token in two workspaces: {e}"));
+    }
+
+    /// v007 preserves the three auxiliary indexes the old schema carried.
+    /// The rebuild drops them implicitly (they follow the old table) so the
+    /// migration must explicitly recreate them.
+    #[test]
+    fn v007_preserves_device_tokens_auxiliary_indexes() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let indexes: Vec<String> = conn
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'index' AND tbl_name = 'device_tokens' ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        for expected in &[
+            "idx_device_tokens_identity",
+            "idx_device_tokens_session",
+            "idx_device_tokens_token",
+            "idx_device_tokens_workspace",
+        ] {
+            assert!(
+                indexes.contains(&expected.to_string()),
+                "missing {expected} after v007; found: {indexes:?}"
+            );
+        }
+    }
+
     #[test]
     fn v006_upgrade_from_v5_preserves_existing_tokens() {
         // Simulate a pre-v006 DB: run v1..v5 only, insert a token, then upgrade.
@@ -1399,8 +1611,8 @@ mod tests {
         .unwrap();
 
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 6);
+        assert_eq!(result.applied, 2);
+        assert_eq!(result.max_version_applied, 7);
 
         // Pre-existing row survives with NULL bundle_id.
         let (token, bundle_id): (String, Option<String>) = conn

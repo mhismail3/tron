@@ -562,7 +562,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 ## Database Schema
 
-All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Migrations live under `packages/agent/src/events/sqlite/migrations/` (`v001_schema.sql` — the core event store; `v002_schema.sql` — the prompt library tables; `v003_remove_spells.sql` — strips legacy spell events; `v004_session_use_worktree.sql` — adds `sessions.use_worktree` for the per-session worktree override; `v005_sessions_use_worktree_check.sql` — enforces `use_worktree IN (0, 1, NULL)` via triggers; `v006_device_token_bundle_id.sql` — adds `device_tokens.bundle_id` so the relay can route each token to the correct APNs topic per build) and are registered in `migrations/mod.rs`, which is the source of truth for schema versioning.
+All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Migrations live under `packages/agent/src/events/sqlite/migrations/` (`v001_schema.sql` — the core event store; `v002_schema.sql` — the prompt library tables; `v003_remove_spells.sql` — strips legacy spell events; `v004_session_use_worktree.sql` — adds `sessions.use_worktree` for the per-session worktree override; `v005_sessions_use_worktree_check.sql` — enforces `use_worktree IN (0, 1, NULL)` via triggers; `v006_device_token_bundle_id.sql` — adds `device_tokens.bundle_id` so the relay can route each token to the correct APNs topic per build; `v007_device_tokens_workspace_scope.sql` — widens the `device_tokens` identity from `(device_token, platform)` to `(device_token, platform, workspace_id, bundle_id)` via a rebuilt table + `COALESCE`-nullable unique index, so the same APNs push token can register across multiple workspaces or bundles without clobbering) and are registered in `migrations/mod.rs`, which is the source of truth for schema versioning.
 
 ### Tables
 
@@ -575,7 +575,7 @@ All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mo
 | `blobs` | Content-addressable deduplicated storage (hash, compressed content, MIME type, ref count) |
 | `branches` | Named positions in the event tree (root + head pointer per branch) |
 | `logs` | Application logs (level, component, message, error fields, trace IDs, origin) |
-| `device_tokens` | iOS push notification tokens — per-device, per-workspace, per-bundle (`bundle_id` column added in v006 so the relay can send Beta-scheme tokens to the correct APNs topic) |
+| `device_tokens` | iOS push notification tokens — identity is `(device_token, platform, workspace_id, bundle_id)` (v007 rebuild; `bundle_id` column added in v006 so the relay can send Beta-scheme tokens to the correct APNs topic; COALESCE-nullable unique index collapses NULL workspace/bundle to a single canonical row) |
 | `notification_read_state` | Per-event read receipts for client notifications |
 | `cron_jobs` | Cron job definitions: schedule, payload, delivery, overlap/misfire policies, runtime state (next/last run, consecutive failures) |
 | `cron_runs` | Per-run history for cron jobs (status, started/completed timestamps, output, exit code) |

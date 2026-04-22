@@ -191,23 +191,37 @@ pub(crate) fn process_send_results(
             if is_terminal_token_error(result) {
                 if let Ok(conn) = pool.get() {
                     match DeviceTokenRepo::deactivate(&conn, &result.device_token) {
-                        Ok(Some(info)) => {
-                            info!(
-                                token_prefix = token_prefix(&result.device_token),
-                                session_id = info.session_id.as_deref().unwrap_or("<none>"),
-                                bundle_id = info.bundle_id.as_deref().unwrap_or("<none>"),
-                                status = ?result.status_code,
-                                reason = ?result.reason,
-                                "deactivated device token after terminal APNs error"
-                            );
-                            drop(conn);
-                            maybe_emit_invalidated_event(event_store, result, &info);
-                        }
-                        Ok(None) => {
+                        Ok(infos) if infos.is_empty() => {
                             debug!(
                                 token_prefix = token_prefix(&result.device_token),
                                 "token already inactive — skipping duplicate deactivation"
                             );
+                        }
+                        Ok(infos) => {
+                            // Under the v007 workspace+bundle-scoped identity,
+                            // a single token may have multiple active rows
+                            // (one per workspace/bundle). Every affected
+                            // registration must log + emit its own event.
+                            info!(
+                                token_prefix = token_prefix(&result.device_token),
+                                rows_deactivated = infos.len(),
+                                status = ?result.status_code,
+                                reason = ?result.reason,
+                                "deactivated device token after terminal APNs error"
+                            );
+                            for info in &infos {
+                                info!(
+                                    token_prefix = token_prefix(&result.device_token),
+                                    session_id = info.session_id.as_deref().unwrap_or("<none>"),
+                                    workspace_id = info.workspace_id.as_deref().unwrap_or("<none>"),
+                                    bundle_id = info.bundle_id.as_deref().unwrap_or("<none>"),
+                                    "  ↳ row attributed"
+                                );
+                            }
+                            drop(conn);
+                            for info in infos {
+                                maybe_emit_invalidated_event(event_store, result, &info);
+                            }
                         }
                         Err(e) => {
                             warn!(

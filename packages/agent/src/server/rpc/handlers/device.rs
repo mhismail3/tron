@@ -341,10 +341,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn register_token_bundle_id_updates_on_reregister() {
-        // Token moves between bundles (Beta → Prod reinstall). The stored
-        // bundle_id must track the client's current build, otherwise the
-        // relay will route to the wrong APNs topic on the next send.
+    async fn register_token_with_different_bundle_creates_distinct_row() {
+        // M3: the same APNs push token registered twice with different
+        // bundle_ids is now TWO distinct rows (one per apns-topic). Before
+        // v007 the second register clobbered the first, so a device running
+        // both Prod and Beta schemes from the same iOS install had only the
+        // most-recently-registered bundle receiving pushes. Post-v007, both
+        // rows coexist and APNs can fan out to both topics.
         let ctx = make_test_context();
         let token = "4".repeat(64);
 
@@ -372,9 +375,79 @@ mod tests {
             .await
             .unwrap();
 
-        let rows = ctx.event_store.get_all_active_device_tokens().unwrap();
-        let row = rows.iter().find(|r| r.device_token == token).unwrap();
-        assert_eq!(row.bundle_id.as_deref(), Some("com.tron.mobile.beta"));
-        assert_eq!(row.environment, "sandbox");
+        let rows: Vec<_> = ctx
+            .event_store
+            .get_all_active_device_tokens()
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.device_token == token)
+            .collect();
+        assert_eq!(
+            rows.len(),
+            2,
+            "two distinct bundle_ids must produce two rows post-v007"
+        );
+
+        let prod = rows
+            .iter()
+            .find(|r| r.bundle_id.as_deref() == Some("com.tron.mobile"))
+            .expect("production-bundle row must be present and active");
+        assert_eq!(prod.environment, "production");
+        assert!(prod.is_active);
+
+        let beta = rows
+            .iter()
+            .find(|r| r.bundle_id.as_deref() == Some("com.tron.mobile.beta"))
+            .expect("beta-bundle row must be present and active");
+        assert_eq!(beta.environment, "sandbox");
+        assert!(beta.is_active);
+    }
+
+    #[tokio::test]
+    async fn register_token_same_bundle_is_idempotent_update() {
+        // Regression guard for the M3 happy path: re-registering the SAME
+        // (token, bundle_id, workspace_id) triple within the same identity
+        // is still a single-row update, not a new insert. Only cross-bundle
+        // or cross-workspace re-registers fan out into distinct rows.
+        let ctx = make_test_context();
+        let token = "5".repeat(64);
+
+        let first = RegisterTokenHandler
+            .handle(
+                Some(json!({
+                    "deviceToken": token,
+                    "environment": "sandbox",
+                    "bundleId": "com.tron.mobile.beta",
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(first["created"], true);
+
+        let second = RegisterTokenHandler
+            .handle(
+                Some(json!({
+                    "deviceToken": token,
+                    "environment": "sandbox",
+                    "bundleId": "com.tron.mobile.beta",
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(second["created"], false);
+        assert_eq!(first["id"], second["id"]);
+
+        let rows: Vec<_> = ctx
+            .event_store
+            .get_all_active_device_tokens()
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.device_token == token)
+            .collect();
+        assert_eq!(rows.len(), 1, "same-identity reregister must stay single-row");
+        assert_eq!(rows[0].bundle_id.as_deref(), Some("com.tron.mobile.beta"));
+        assert_eq!(rows[0].environment, "sandbox");
     }
 }
