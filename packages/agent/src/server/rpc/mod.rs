@@ -11,6 +11,21 @@
 //! - Settings: get, update
 //! - Skills: list, get, refresh, remove
 //! - Plus: browser, device, task, transcription, worktree, tree
+//!
+//! # INVARIANT: no per-client rate limiting (L7, trusted-local)
+//!
+//! The RPC layer does NOT rate-limit inbound calls per client,
+//! per-method, or per-connection. Under the trusted-local threat
+//! model that is intentional — the only callers are the user's own
+//! devices, and the 1 MB body cap + JSON depth check
+//! ([`validation`]) plus connection-level backpressure
+//! ([`crate::server::websocket::broadcast`] drop detection) are
+//! sufficient for accidental-runaway protection.
+//!
+//! Hardening path for a future threat-model shift: a
+//! [tower::limit::RateLimit]-style layer in
+//! `crate::server::websocket` keyed on `(connection_id, method)`,
+//! with per-method quotas loaded from settings.
 
 pub(crate) mod agent_commands;
 pub(crate) mod client_logs;

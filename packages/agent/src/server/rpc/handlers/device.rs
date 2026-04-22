@@ -1,4 +1,21 @@
 //! Device handlers: register, unregister.
+//!
+//! # INVARIANT: client-supplied `bundleId` is trusted (L8, trusted-local)
+//!
+//! [`RegisterTokenHandler`] accepts a caller-supplied `bundleId`
+//! (e.g. `com.tron.mobile`, `com.tron.mobile.beta`) with only a
+//! non-empty format check, and persists it alongside the APNs device
+//! token. APNs uses `bundleId` as the push `apns-topic`, so a client
+//! could register a token under a bundle it doesn't actually own —
+//! under trusted-local this is a non-issue (the only registrants are
+//! the user's own devices, and APNs itself rejects mismatched topics
+//! at delivery time). Under a shared or adversarial threat model, a
+//! malicious client could register under a Prod bundle from a Beta
+//! build and redirect notifications.
+//!
+//! Hardening path: tie `bundleId` to the authenticated caller via a
+//! server-issued device certificate, or validate against a fixed
+//! allow-list when `settings.devices.strictBundleId = true`.
 
 use async_trait::async_trait;
 use serde_json::Value;

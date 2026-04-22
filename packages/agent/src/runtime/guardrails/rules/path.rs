@@ -228,6 +228,21 @@ fn has_hidden_mkdir(command: &str) -> bool {
 /// Check if `test_path` is within `protected_path`.
 ///
 /// Handles `**` glob suffixes by stripping them before comparison.
+///
+/// INVARIANT (L14, trusted-local): this compares **lexical paths** via
+/// [`normalize_path`] — it does NOT resolve symlinks. A symlink
+/// `/tmp/bypass -> /Users/me/.tron/system` outside any protected-path
+/// prefix will slip past the check even though a write through the
+/// symlink ends up inside the protected path.
+///
+/// Under the trusted-local threat model this is acceptable: the agent
+/// is running as the user, any symlink the user plants is already in
+/// their own filesystem, and every realistic protected-path hit goes
+/// through the string form anyway. If the threat model ever changes
+/// (multi-tenant host, adversarial working directory), switch to
+/// `std::fs::canonicalize` before the prefix check — guard against
+/// canonicalize failure (non-existent targets) by keeping the lexical
+/// fallback.
 fn is_path_within(test_path: &str, protected_path: &str) -> bool {
     let effective = protected_path.trim_end_matches("**");
     let effective = effective.trim_end_matches('/');

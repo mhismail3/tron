@@ -288,6 +288,18 @@ run_bench_gate() {
 
 #=============================================================================
 # LAUNCHD PLIST
+#
+# INVARIANT (L3, trusted-local): the plist is written to
+# `$HOME/Library/LaunchAgents/` with the default user umask. macOS
+# LaunchAgents are per-user by design — a malicious local user on a
+# shared Mac could replace the plist and redirect the daemon's
+# `ProgramArguments`. Under the trusted-local threat model (single
+# Mac user, Tailnet-reachable daemon) this is a non-issue.
+#
+# Hardening path for a shared-host model: chmod 0700 the
+# LaunchAgents directory and 0600 the plist, and drop a checksum
+# sentinel that `tron dev` / `tron deploy` validate before trusting
+# the launchd-installed binary.
 #=============================================================================
 
 create_launchd_plist() {
