@@ -38,14 +38,25 @@ pub(super) fn append_event_in_tx(
         None => session.head_event_id.clone(),
     };
 
+    // INVARIANT: when `opts.sequence` is `None` (the default for most
+    // callers), the sequence is allocated here via `SELECT MAX(sequence) +
+    // 1` inside the open transaction. This is race-free because:
+    //   1. `EventStore::append` holds the per-session in-process write
+    //      lock (`with_session_write_lock`) for the entire read→insert
+    //      critical section.
+    //   2. C3's `AgentDbLock` flock on `log.db.lock` guarantees that only
+    //      one `tron` process at a time has write access to this database,
+    //      so no sibling daemon can allocate the same sequence.
+    //   3. SQLite's `UNIQUE(session_id, sequence)` constraint acts as the
+    //      final backstop: if a new path ever bypasses the invariants above
+    //      and produces a duplicate, the insert fails loudly rather than
+    //      silently corrupting the log.
+    // Callers that want to pre-allocate (e.g. to attach a sequence to an
+    // event before the transaction opens) can pass `Some(seq)` — no
+    // correctness difference, purely an ergonomic choice.
     let sequence = match opts.sequence {
         Some(seq) => seq,
         None => {
-            tracing::trace!(
-                session_id = opts.session_id,
-                event_type = %opts.event_type,
-                "sequence not pre-assigned, falling back to DB MAX+1"
-            );
             let max: Option<i64> = tx
                 .query_row(
                     "SELECT MAX(sequence) FROM events WHERE session_id = ?1",

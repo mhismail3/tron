@@ -50,7 +50,12 @@ pub struct AppendOptions<'a> {
     pub payload: Value,
     /// Explicit parent. If `None`, chains from session head.
     pub parent_id: Option<&'a str>,
-    /// Pre-assigned sequence number. If `None`, falls back to MAX(sequence)+1 from DB.
+    /// Pre-assigned sequence number. When `None` (the usual case), the
+    /// sequence is allocated inside the append transaction via
+    /// `SELECT MAX(sequence) + 1` — safe under the session write lock
+    /// (serializes within-process) and the C3 `AgentDbLock` flock
+    /// (serializes across-process). See the `INVARIANT:` block in
+    /// `append_event_in_tx` for the full correctness argument.
     pub sequence: Option<i64>,
 }
 
