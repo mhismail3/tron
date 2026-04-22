@@ -96,6 +96,14 @@ struct Cli {
     command: Option<Command>,
 
     /// Host to bind (server mode).
+    ///
+    /// INVARIANT: defaults to `0.0.0.0` under the trusted-local threat
+    /// model — the iOS app reaches the daemon over Tailscale from the
+    /// user's own devices. If that assumption shifts (shared network,
+    /// multi-user host), flip this default to `127.0.0.1` and gate
+    /// remote access behind explicit opt-in. The startup log line built
+    /// by `format_listening_log` names the bind address so the operator
+    /// can always see what network the server is exposed to.
     #[arg(long, default_value = "0.0.0.0", global = true)]
     host: String,
 
@@ -118,6 +126,36 @@ struct Cli {
 
 #[derive(clap::Subcommand, Debug)]
 enum Command {}
+
+/// Build the human-readable startup log line, naming the bind address
+/// and its trust assumption.
+///
+/// Extracted as a pure function so tests can pin the operator-visible
+/// message — a regression here means the operator can't tell which
+/// network the server is exposed to, which is the whole point of the
+/// trusted-local trust marker on the `host` arg.
+///
+/// * `0.0.0.0` — annotated with a pointer at the Tailscale ACL
+///   assumption.
+/// * `127.0.0.1` / `localhost` — annotated as loopback-only.
+/// * Any other explicit host — left bare, since the operator chose it
+///   deliberately.
+fn format_listening_log(
+    addr: &std::net::SocketAddr,
+    bind_host: &str,
+    method_count: usize,
+) -> String {
+    let trust_note = if bind_host == "0.0.0.0" || bind_host == "::" {
+        " — reachable on all interfaces (trusted-local threat model: ensure Tailscale ACLs or firewall gating is in place)"
+    } else if bind_host == "127.0.0.1" || bind_host == "::1" || bind_host == "localhost" {
+        " — loopback-only"
+    } else {
+        ""
+    };
+    format!(
+        "Tron agent listening on http://{addr} ({method_count} RPC methods registered){trust_note}"
+    )
+}
 
 fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -1085,6 +1123,7 @@ async fn main() -> Result<()> {
     let mut registry = MethodRegistry::new();
     tron::server::rpc::handlers::register_all(&mut registry);
     let method_count = registry.methods().len();
+    let bind_host_label = args.host.clone();
     let config = ServerConfig {
         host: args.host,
         port: args.port,
@@ -1135,7 +1174,7 @@ async fn main() -> Result<()> {
     run_deploy_self_test(&db_path, &settings_path_for_selftest);
 
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
-    tracing::info!("Tron agent listening on http://{addr} ({method_count} RPC methods registered)");
+    tracing::info!("{}", format_listening_log(&addr, &bind_host_label, method_count));
 
     process_deploy_sentinel(&push_for_deploy, &pool_for_deploy);
 

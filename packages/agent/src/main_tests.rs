@@ -22,6 +22,61 @@ fn cli_default_host() {
     assert_eq!(cli.host, "0.0.0.0");
 }
 
+// ── C2: startup log names bind address ──────────────────────────────
+
+/// Startup log for the default 0.0.0.0 bind MUST name the Tailscale /
+/// trusted-local assumption. Without this, an operator who accidentally
+/// bound on an untrusted network has no visible warning.
+#[test]
+fn startup_log_on_all_interfaces_names_trust_boundary() {
+    let addr: std::net::SocketAddr = "0.0.0.0:9847".parse().unwrap();
+    let msg = format_listening_log(&addr, "0.0.0.0", 42);
+    assert!(msg.contains("0.0.0.0:9847"), "bind address must appear: {msg}");
+    assert!(msg.contains("42 RPC methods"), "method count must appear: {msg}");
+    assert!(
+        msg.to_lowercase().contains("tailscale")
+            || msg.to_lowercase().contains("firewall"),
+        "0.0.0.0 bind must name the trust assumption, got: {msg}"
+    );
+}
+
+/// IPv6 catch-all (`::`) is the same trust boundary as `0.0.0.0`.
+#[test]
+fn startup_log_on_ipv6_all_interfaces_names_trust_boundary() {
+    let addr: std::net::SocketAddr = "[::]:9847".parse().unwrap();
+    let msg = format_listening_log(&addr, "::", 10);
+    assert!(
+        msg.to_lowercase().contains("tailscale")
+            || msg.to_lowercase().contains("firewall"),
+        "`::` bind must name the trust assumption, got: {msg}"
+    );
+}
+
+/// Loopback binds are explicitly safer; the log should say so.
+#[test]
+fn startup_log_on_loopback_is_annotated() {
+    for host in ["127.0.0.1", "::1", "localhost"] {
+        let addr: std::net::SocketAddr = "127.0.0.1:9847".parse().unwrap();
+        let msg = format_listening_log(&addr, host, 10);
+        assert!(
+            msg.to_lowercase().contains("loopback"),
+            "{host}-bound log must note loopback scope: {msg}"
+        );
+    }
+}
+
+/// A specific non-default host (e.g. a LAN IP the operator chose
+/// deliberately) is left bare — we don't second-guess intentional
+/// network selection, and the raw address is already in the message.
+#[test]
+fn startup_log_on_specific_host_is_bare() {
+    let addr: std::net::SocketAddr = "192.168.1.5:9847".parse().unwrap();
+    let msg = format_listening_log(&addr, "192.168.1.5", 10);
+    assert!(!msg.to_lowercase().contains("tailscale"));
+    assert!(!msg.to_lowercase().contains("loopback"));
+    assert!(msg.contains("192.168.1.5:9847"));
+}
+
 #[test]
 fn cli_default_port() {
     let cli = Cli::parse_from(["tron"]);
