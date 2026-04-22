@@ -211,6 +211,36 @@ fn decode_cursor(encoded: String) -> Result<(String, String)> {
     Ok((ts.to_string(), id.to_string()))
 }
 
+/// Escape the three SQL `LIKE` metacharacters so a user-supplied substring
+/// can be embedded inside a `LIKE '%…%'` pattern without turning stray `%`
+/// or `_` into wildcards.
+///
+/// The caller must pair the resulting pattern with `ESCAPE '\'` in the SQL
+/// (see `list_history` at the only call site). Using a different escape
+/// char on the Rust side and the SQL side would silently leak wildcards.
+///
+/// Escaped characters:
+/// - `\` → `\\`   (the escape char itself; a bare trailing `\` would
+///                 otherwise leave a dangling escape in the pattern and
+///                 SQLite would error at prepare time)
+/// - `%` → `\%`   (matches literal percent, not "anything")
+/// - `_` → `\_`   (matches literal underscore, not "exactly one character")
+///
+/// Everything else passes through unchanged. Notable edge cases:
+///
+/// - **Multi-byte code points** (emoji, CJK, accented Latin) iterate by
+///   Unicode scalar via `str::chars()`, so escaping never splits a
+///   grapheme. Only the three ASCII metacharacters are matched; `％`
+///   (full-width percent, U+FF05) is NOT a LIKE wildcard and is passed
+///   through untouched, matching SQLite's behavior.
+/// - **Empty input** returns an empty string. The only production caller
+///   (`list_history`) filters empty / whitespace-only queries via
+///   `query_trimmed`, so an empty pattern is never assembled. The
+///   function is still safe to call with `""`.
+/// - **Embedded `NUL` (`'\0'`)** passes through. SQLite's LIKE does not
+///   special-case NUL; pattern and target are compared as UTF-8 bytes.
+/// - **SQLite's default `LIKE` is case-insensitive over ASCII only.** That
+///   is a SQL-level property, orthogonal to this function.
 fn escape_like(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -223,6 +253,110 @@ fn escape_like(input: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod escape_like_tests {
+    use super::escape_like;
+
+    #[test]
+    fn empty_input_returns_empty() {
+        assert_eq!(escape_like(""), "");
+    }
+
+    #[test]
+    fn ascii_passthrough_unchanged() {
+        assert_eq!(
+            escape_like("search for a bug in handler"),
+            "search for a bug in handler"
+        );
+    }
+
+    #[test]
+    fn percent_is_escaped() {
+        assert_eq!(escape_like("100%"), "100\\%");
+    }
+
+    #[test]
+    fn underscore_is_escaped() {
+        assert_eq!(escape_like("snake_case"), "snake\\_case");
+    }
+
+    #[test]
+    fn backslash_itself_is_escaped() {
+        // Critical: a bare `\` in the user's query, combined with the SQL's
+        // `ESCAPE '\'`, would otherwise produce a dangling escape and a
+        // prepare-time error.
+        assert_eq!(escape_like("path\\to"), "path\\\\to");
+    }
+
+    #[test]
+    fn trailing_backslash_is_escaped() {
+        // Worst-case placement — the previous behavior without escaping
+        // would end the pattern on a dangling `\`.
+        assert_eq!(escape_like("trail\\"), "trail\\\\");
+    }
+
+    #[test]
+    fn all_three_metacharacters_escaped_in_one_string() {
+        assert_eq!(escape_like("a_b%c\\d"), "a\\_b\\%c\\\\d");
+    }
+
+    #[test]
+    fn multibyte_emoji_preserved_verbatim() {
+        // 💡 is 4 UTF-8 bytes but a single `char`. Only ASCII `%` / `_` /
+        // `\` are escaped; the emoji must survive intact.
+        assert_eq!(escape_like("idea 💡 %done"), "idea 💡 \\%done");
+    }
+
+    #[test]
+    fn cjk_and_accents_pass_through() {
+        assert_eq!(escape_like("café 漢字"), "café 漢字");
+    }
+
+    #[test]
+    fn fullwidth_percent_is_not_a_wildcard_and_passes_through() {
+        // U+FF05 FULLWIDTH PERCENT SIGN is not a LIKE wildcard in SQLite.
+        // Escaping it would change the matching semantics, so we don't.
+        assert_eq!(escape_like("９９％"), "９９％");
+    }
+
+    #[test]
+    fn nul_byte_passes_through() {
+        // SQLite LIKE has no special behavior for NUL; echo it through.
+        assert_eq!(escape_like("a\0b"), "a\0b");
+    }
+
+    #[test]
+    fn repeated_metacharacters_each_get_escaped() {
+        assert_eq!(escape_like("%%__\\\\"), "\\%\\%\\_\\_\\\\\\\\");
+    }
+
+    #[test]
+    fn output_preserves_input_order() {
+        // Regression guard: char-by-char iteration, no reordering.
+        let input = "x_y%z\\w";
+        let escaped = escape_like(input);
+        // Strip the escape backslashes inserted before each metacharacter
+        // and the original characters must reappear in the same order.
+        let stripped: String = {
+            let mut chars = escaped.chars().peekable();
+            let mut out = String::new();
+            while let Some(c) = chars.next() {
+                if c == '\\'
+                    && let Some(&next) = chars.peek()
+                    && matches!(next, '\\' | '%' | '_')
+                {
+                    // drop the escape and keep the escaped char
+                    out.push(chars.next().unwrap());
+                } else {
+                    out.push(c);
+                }
+            }
+            out
+        };
+        assert_eq!(stripped, input);
+    }
 }
 
 // ─── history: delete / clear / prune ───────────────────────────────────────
