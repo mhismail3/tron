@@ -2444,28 +2444,37 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(mode, .clearAll)
     }
 
-    /// Back-compat: pre-M6 events written without a `mode` field default to
-    /// `.askUser`. Mirrors the Rust `#[serde(default)]` / `Default = AskUser`
-    /// behavior so iOS doesn't drop existing on-disk history.
-    func testTransformSkillsClearedLegacyMissingModeDefaultsAskUser() {
+    /// Strict wire contract: the `mode` field is required. An event without
+    /// it must fail to decode and the transformer must drop it — mirrors the
+    /// Rust `SkillsClearedPayload` which no longer carries `#[serde(default)]`.
+    func testTransformSkillsClearedMissingModeReturnsNil() {
         let event = rawEvent(
             type: "skills.cleared",
             payload: [
                 "clearedSkills": AnyCodable(["old-skill"]),
                 "reason": AnyCodable("compaction")
-                // No mode field — legacy event
+                // No mode field — wire contract violation
             ]
         )
 
         let message = UnifiedEventTransformer.transformPersistedEvent(event)
 
-        XCTAssertNotNil(message)
-        guard case .systemEvent(let systemEvent) = message?.content,
-              case .skillsCleared(_, let mode) = systemEvent else {
-            XCTFail("Expected .skillsCleared system event")
-            return
-        }
-        XCTAssertEqual(mode, .askUser, "Legacy events without mode must default to .askUser")
+        XCTAssertNil(message, "Missing mode must drop the event, matching Rust decoder")
+    }
+
+    /// Strict wire contract: the `reason` field is required.
+    func testTransformSkillsClearedMissingReasonReturnsNil() {
+        let event = rawEvent(
+            type: "skills.cleared",
+            payload: [
+                "clearedSkills": AnyCodable(["x"]),
+                "mode": AnyCodable("askUser")
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNil(message, "Missing reason must drop the event")
     }
 
     /// Defense-in-depth: server suppresses emission on empty cleared_skills,

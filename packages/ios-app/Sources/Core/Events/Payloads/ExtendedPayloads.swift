@@ -210,6 +210,11 @@ enum SkillsClearedMode: String, Codable, Equatable, Hashable {
 /// on the first prompt after a `compact.boundary` under either ClearAll or
 /// AskUser compaction policy; AutoRestore never emits this event because it
 /// preserves active skills through the boundary.
+///
+/// All three fields (`clearedSkills`, `reason`, `mode`) are required on the
+/// wire. The server emits them unconditionally and enforces
+/// `deny_unknown_fields`. Missing fields here fail decoding (`return nil`)
+/// rather than falling back to defaults that would mis-render the event.
 struct SkillsClearedPayload {
     /// Names of the skills that were active at the boundary and are now
     /// cleared. May be empty only in pathological cases (concurrent
@@ -224,25 +229,16 @@ struct SkillsClearedPayload {
         guard let clearedSkills = payload.stringArray("clearedSkills") else {
             return nil
         }
-        self.clearedSkills = clearedSkills
-        self.reason = payload.string("reason") ?? "compaction"
-        // Mode decoding mirrors Rust's serde contract in
-        // `events/types/payloads/skill.rs`:
-        //  * Missing field → `.askUser` (back-compat for pre-M6 on-disk events
-        //    that only existed under the AskUser policy; Rust achieves the
-        //    same via `#[serde(default)]` + `impl Default`).
-        //  * Present but unknown string → return nil, dropping the event.
-        //    Rust's `serde_json::from_value::<SkillsClearedPayload>(...)`
-        //    errors on unknown variants (see `skills_cleared_mode_rejects_
-        //    unknown_variant` in skill.rs). Silently rendering a future mode
-        //    as `.askUser` would mis-render an informational event as an
-        //    interactive picker, so the two decoders must agree.
-        if let raw = payload.string("mode") {
-            guard let mode = SkillsClearedMode(rawValue: raw) else { return nil }
-            self.mode = mode
-        } else {
-            self.mode = .askUser
+        guard let reason = payload.string("reason") else {
+            return nil
         }
+        guard let rawMode = payload.string("mode"),
+              let mode = SkillsClearedMode(rawValue: rawMode) else {
+            return nil
+        }
+        self.clearedSkills = clearedSkills
+        self.reason = reason
+        self.mode = mode
     }
 }
 

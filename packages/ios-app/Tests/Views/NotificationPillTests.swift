@@ -260,21 +260,19 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertEqual(mode, .clearAll)
     }
 
-    // MARK: - SkillsClearedMode decoder semantics (M6)
+    // MARK: - SkillsClearedMode decoder semantics
 
-    /// Decoding a mode-less SkillsClearedPayload (legacy on-disk events) must
-    /// fall back to `askUser` — mirrors Rust `#[serde(default)]` +
-    /// `impl Default for SkillsClearedMode`. Pre-M6 events only ever existed
-    /// under the AskUser policy, so rendering them as an interactive picker
-    /// preserves the original UX.
-    func testSkillsClearedPayloadLegacyMissingModeDefaultsAskUser() {
+    /// `mode` is required by the wire contract — missing field must drop
+    /// the event rather than silently falling back to a default render mode.
+    /// Mirrors the Rust `deny_unknown_fields` + required-field schema in
+    /// `events/types/payloads/skill.rs`.
+    func testSkillsClearedPayloadMissingModeReturnsNil() {
         let payload: [String: AnyCodable] = [
             "clearedSkills": AnyCodable(["x"]),
             "reason": AnyCodable("compaction")
         ]
         let parsed = SkillsClearedPayload(from: payload)
-        XCTAssertNotNil(parsed)
-        XCTAssertEqual(parsed?.mode, .askUser)
+        XCTAssertNil(parsed)
     }
 
     /// Decoding with an unknown mode string must return nil, dropping the
@@ -293,25 +291,25 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertNil(parsed)
     }
 
-    /// Missing `clearedSkills` fails parse entirely — server never emits this
-    /// shape, but iOS must not crash on a malformed event.
+    /// Missing `clearedSkills` fails parse entirely.
     func testSkillsClearedPayloadMissingSkillsReturnsNil() {
         let payload: [String: AnyCodable] = [
-            "reason": AnyCodable("compaction")
+            "reason": AnyCodable("compaction"),
+            "mode": AnyCodable("askUser")
         ]
         let parsed = SkillsClearedPayload(from: payload)
         XCTAssertNil(parsed)
     }
 
-    /// `reason` defaults to "compaction" when absent — server always sets it,
-    /// but the parser is defensive.
-    func testSkillsClearedPayloadDefaultsReasonToCompaction() {
+    /// `reason` is required by the wire contract — missing field drops the
+    /// event rather than defaulting.
+    func testSkillsClearedPayloadMissingReasonReturnsNil() {
         let payload: [String: AnyCodable] = [
             "clearedSkills": AnyCodable(["x"]),
             "mode": AnyCodable("askUser")
         ]
         let parsed = SkillsClearedPayload(from: payload)
-        XCTAssertEqual(parsed?.reason, "compaction")
+        XCTAssertNil(parsed)
     }
 
     // MARK: - MessageBubbleTapAction.reactivateSkill (M6)

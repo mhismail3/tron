@@ -398,7 +398,7 @@ mod session_event_tests {
             ),
             (
                 EventType::SkillsCleared,
-                json!({"clearedSkills": ["s"], "reason": "compaction"}),
+                json!({"clearedSkills": ["s"], "reason": "compaction", "mode": "askUser"}),
             ),
             (
                 EventType::RulesLoaded,

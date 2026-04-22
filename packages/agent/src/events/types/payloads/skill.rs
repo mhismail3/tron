@@ -28,10 +28,7 @@ pub struct SkillDeactivatedPayload {
 /// - [`AskUser`](Self::AskUser): interactive picker chips; tapping a chip
 ///   calls the `skill.activate` RPC to re-add that skill to the session.
 ///
-/// Serializes as camelCase (`"clearAll"` / `"askUser"`). Defaults to `AskUser`
-/// on deserialization so on-disk events written before M6 (which only emitted
-/// under `AskUser` and had no mode field) continue to parse with correct
-/// semantics — see [`SkillsClearedPayload::mode`].
+/// Serializes as camelCase (`"clearAll"` / `"askUser"`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SkillsClearedMode {
@@ -41,14 +38,6 @@ pub enum SkillsClearedMode {
     AskUser,
 }
 
-impl Default for SkillsClearedMode {
-    fn default() -> Self {
-        // Back-compat: pre-M6 events only existed under AskUser policy and
-        // lacked this field. Defaulting to AskUser preserves their semantics.
-        Self::AskUser
-    }
-}
-
 /// Payload for `skills.cleared` events.
 ///
 /// Emitted by [`prepare_skill_context_from_session`] on the first prompt after
@@ -56,19 +45,14 @@ impl Default for SkillsClearedMode {
 /// The server-side bookkeeping is identical for both policies; the `mode` field
 /// discriminates the iOS render (informational vs interactive).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SkillsClearedPayload {
     /// Names of skills that were cleared.
     pub cleared_skills: Vec<String>,
     /// Reason for clearing: "compaction".
     pub reason: String,
     /// Render mode — controls whether iOS shows a notice (`ClearAll`) or an
-    /// interactive re-activation picker (`AskUser`).
-    ///
-    /// `#[serde(default)]` ensures pre-M6 events (which lacked this field and
-    /// were only ever emitted under AskUser) continue to deserialize with the
-    /// correct default.
-    #[serde(default)]
+    /// interactive re-activation picker (`AskUser`). Required on the wire.
     pub mode: SkillsClearedMode,
 }
 
@@ -103,29 +87,54 @@ mod tests {
     }
 
     #[test]
-    fn skills_cleared_payload_missing_mode_defaults_to_ask_user() {
-        // M6 back-compat: pre-M6 events lacked the `mode` field. Decoding must
-        // still succeed and default to AskUser, which was the only mode that
-        // emitted events before this change.
-        let legacy_json = serde_json::json!({
+    fn skills_cleared_payload_missing_mode_is_rejected() {
+        // Strict wire contract: `mode` is required. A payload without it
+        // must fail to deserialize so iOS cannot silently render a
+        // mis-classified event.
+        let missing_mode = serde_json::json!({
             "clearedSkills": ["x"],
             "reason": "compaction",
         });
-        let back: SkillsClearedPayload = serde_json::from_value(legacy_json).unwrap();
-        assert_eq!(back.mode, SkillsClearedMode::AskUser);
-        assert_eq!(back.cleared_skills, vec!["x".to_string()]);
-        assert_eq!(back.reason, "compaction");
+        let err = serde_json::from_value::<SkillsClearedPayload>(missing_mode).unwrap_err();
+        assert!(
+            err.to_string().contains("mode"),
+            "expected error naming `mode` field, got: {err}"
+        );
+    }
+
+    #[test]
+    fn skills_cleared_payload_missing_reason_is_rejected() {
+        // Strict wire contract: `reason` is required.
+        let missing_reason = serde_json::json!({
+            "clearedSkills": ["x"],
+            "mode": "askUser",
+        });
+        let err = serde_json::from_value::<SkillsClearedPayload>(missing_reason).unwrap_err();
+        assert!(
+            err.to_string().contains("reason"),
+            "expected error naming `reason` field, got: {err}"
+        );
     }
 
     #[test]
     fn skills_cleared_mode_rejects_unknown_variant() {
-        // Defense: serde's camelCase matching should reject an unknown mode
-        // string rather than silently defaulting. (The default only applies
-        // when the field is absent entirely.)
+        // Defense: serde's camelCase matching rejects unknown mode strings.
         let bad = serde_json::json!({
             "clearedSkills": [],
             "reason": "compaction",
             "mode": "someInvalid",
+        });
+        assert!(serde_json::from_value::<SkillsClearedPayload>(bad).is_err());
+    }
+
+    #[test]
+    fn skills_cleared_payload_rejects_unknown_fields() {
+        // `deny_unknown_fields` guards the schema against drift.
+        let bad = serde_json::json!({
+            "clearedSkills": [],
+            "reason": "compaction",
+            "mode": "askUser",
+            "future": "value",
         });
         assert!(serde_json::from_value::<SkillsClearedPayload>(bad).is_err());
     }

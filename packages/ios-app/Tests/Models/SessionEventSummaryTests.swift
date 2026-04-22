@@ -246,14 +246,16 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertEqual(event.summary, "Skills cleared (3)")
     }
 
-    /// Missing mode (pre-M6 on-disk events) treats as AskUser — mirrors the
-    /// back-compat default in `SkillsClearedPayload.init?(from:)`.
-    func testSkillsCleared_missingMode_legacyAskUserSummary() {
+    /// Missing `mode` surfaces a generic summary. The chat transformer drops
+    /// the event entirely (strict wire contract — `mode` is required), but the
+    /// summary path has no way to "drop" a list row, so it renders without the
+    /// interactive "re-activate?" affordance (which would be a UX lie).
+    func testSkillsCleared_missingMode_genericSummary() {
         let event = makeEvent(type: "skills.cleared", payload: [
             "clearedSkills": AnyCodable(["solo"]),
             "reason": AnyCodable("compaction"),
         ])
-        XCTAssertEqual(event.summary, "Skills cleared — re-activate? (1)")
+        XCTAssertEqual(event.summary, "Skills cleared (1)")
     }
 
     /// Unknown mode string produces a generic informational summary.
