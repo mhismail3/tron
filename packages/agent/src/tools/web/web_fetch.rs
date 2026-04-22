@@ -306,7 +306,7 @@ impl TronTool for WebFetchTool {
 
         // Raw HTTP mode
         self.execute_raw(&url, &method, &req_headers, cookie_header.as_deref(),
-                         body.as_deref(), auto_json_content_type, follow_redirects, max_size).await
+                         body.as_deref(), auto_json_content_type, follow_redirects, max_size, ctx).await
     }
 }
 
@@ -344,6 +344,7 @@ impl WebFetchTool {
         }
 
         // Fetch via simple GET
+        ctx.emit_progress(Some(format!("fetching {url}")), None).await;
         let response = match self.http.get(url).await {
             Ok(r) => r,
             Err(e) => return Ok(web_fetch_error(format!("HTTP request failed: {e}"), None)),
@@ -362,6 +363,12 @@ impl WebFetchTool {
                 None,
             ));
         }
+
+        ctx.emit_progress(
+            Some(format!("fetched {} bytes", response.body.len())),
+            Some(1.0),
+        )
+        .await;
 
         // Parse HTML
         let parsed = parse_html(&response.body, Some(url));
@@ -436,6 +443,7 @@ impl WebFetchTool {
         auto_json_content_type: bool,
         follow_redirects: bool,
         max_size: usize,
+        ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
         // Build header list
         let mut header_pairs: Vec<(&str, &str)> = headers
@@ -465,6 +473,7 @@ impl WebFetchTool {
             follow_redirects,
         };
 
+        ctx.emit_progress(Some(format!("{method} {url}")), None).await;
         let response = match self.http.request(&req).await {
             Ok(r) => r,
             Err(e) => return Ok(web_fetch_error(format!("HTTP request failed: {e}"), None)),
@@ -476,6 +485,12 @@ impl WebFetchTool {
                 Some(response.status),
             ));
         }
+
+        ctx.emit_progress(
+            Some(format!("HTTP {} ({} bytes)", response.status, response.body.len())),
+            Some(1.0),
+        )
+        .await;
 
         // Handle binary response: base64-encode if content-type is not text/*
         let is_binary = response.content_type.as_ref()
@@ -1816,5 +1831,107 @@ mod tests {
         let d = r.details.as_ref().unwrap();
         assert_eq!(d["httpStatus"], 200);
         assert!(d.get("status").is_none());
+    }
+
+    // ── Progress event tests ──
+
+    #[tokio::test]
+    async fn summarization_emits_fetch_start_and_completed_progress() {
+        let http = Arc::new(html_response("<html><body>hi</body></html>"));
+        let tool = WebFetchTool::new(http);
+        let (ctx, store, session_id) =
+            crate::tools::testutil::make_ctx_with_persister().await;
+
+        let _ = tool
+            .execute(
+                json!({"url": "https://example.com/", "prompt": "what is it?"}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let events = crate::tools::testutil::drain_progress_events(&store, &session_id).await;
+        let messages: Vec<String> = events
+            .iter()
+            .filter_map(|e| e["message"].as_str().map(String::from))
+            .collect();
+        assert!(
+            messages.iter().any(|m| m.starts_with("fetching ")),
+            "missing start message: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| m.starts_with("fetched ")),
+            "missing completed message: {messages:?}"
+        );
+        let completed = events
+            .iter()
+            .find(|e| e["message"].as_str().unwrap_or("").starts_with("fetched"))
+            .expect("completed event present");
+        assert_eq!(completed["percent"], serde_json::json!(1.0));
+    }
+
+    #[tokio::test]
+    async fn raw_mode_emits_start_and_completed_progress_with_status() {
+        let http = Arc::new(full_mock());
+        let tool = WebFetchTool::new(http);
+        let (ctx, store, session_id) =
+            crate::tools::testutil::make_ctx_with_persister().await;
+
+        let _ = tool
+            .execute(
+                json!({"url": "https://api.example.com/echo", "method": "POST", "body": {"x": 1}}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let events = crate::tools::testutil::drain_progress_events(&store, &session_id).await;
+        let messages: Vec<String> = events
+            .iter()
+            .filter_map(|e| e["message"].as_str().map(String::from))
+            .collect();
+        assert!(
+            messages.iter().any(|m| m.contains("POST ")),
+            "missing method-aware start message: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("HTTP 200")),
+            "missing HTTP-status completed message: {messages:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_http_error_skips_completed_progress() {
+        let http = Arc::new(MockHttp::get_only(|_| {
+            Ok(HttpResponse {
+                status: 500,
+                body: "internal error".into(),
+                content_type: Some("text/plain".into()),
+                headers: HashMap::new(),
+            })
+        }));
+        let tool = WebFetchTool::new(http);
+        let (ctx, store, session_id) =
+            crate::tools::testutil::make_ctx_with_persister().await;
+
+        let _ = tool
+            .execute(
+                json!({"url": "https://example.com/", "prompt": "q"}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let events = crate::tools::testutil::drain_progress_events(&store, &session_id).await;
+        let messages: Vec<String> = events
+            .iter()
+            .filter_map(|e| e["message"].as_str().map(String::from))
+            .collect();
+        // Start fired, but no "fetched" completion event on non-200.
+        assert!(messages.iter().any(|m| m.starts_with("fetching ")));
+        assert!(
+            !messages.iter().any(|m| m.starts_with("fetched ")),
+            "non-200 must not emit completion: {messages:?}"
+        );
     }
 }

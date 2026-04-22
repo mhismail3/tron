@@ -65,6 +65,11 @@ pub struct TurnParams<'a> {
     pub run_context: &'a RunContext,
     /// Optional event persister for inline event storage.
     pub persister: Option<&'a EventPersister>,
+    /// Borrowed `Arc<EventPersister>` for cheap cloning into tool contexts.
+    /// Must refer to the same persister as `persister`. Tools that emit
+    /// `tool.progress` clone this Arc into their `ToolContext` so they can
+    /// persist progress events durably.
+    pub persister_arc: Option<&'a Arc<EventPersister>>,
     /// Previous turn's context window token count (for delta tracking).
     pub previous_context_baseline: u64,
     /// Current subagent nesting depth.
@@ -106,6 +111,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         cancel,
         run_context,
         persister,
+        persister_arc,
         previous_context_baseline,
         subagent_depth,
         subagent_max_depth,
@@ -448,6 +454,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         subagent_max_depth,
         workspace_id,
         persister,
+        persister_arc,
         process_manager,
         job_manager,
         output_buffer_registry,

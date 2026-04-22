@@ -37,6 +37,11 @@ pub(super) struct ToolPhaseParams<'a> {
     pub subagent_max_depth: u32,
     pub workspace_id: Option<&'a str>,
     pub persister: Option<&'a EventPersister>,
+    /// Same persister as `persister`, but kept as a borrowed `Arc` so the tool
+    /// layer can clone it into `ToolContext` (for long-running tools that emit
+    /// `tool.progress` events). The dual surface avoids changing every existing
+    /// `Option<&EventPersister>` signature upstream.
+    pub persister_arc: Option<&'a Arc<EventPersister>>,
     pub process_manager: Option<&'a Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
     pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
@@ -135,6 +140,8 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     output_buffer_registry: params.output_buffer_registry,
                     sequence_counter: params.sequence_counter,
                     provider_type: params.provider_type,
+                    event_persister: params.persister_arc,
+                    turn: i64::from(params.turn),
                 };
                 async move {
                     let result = tool_executor::execute_tool(

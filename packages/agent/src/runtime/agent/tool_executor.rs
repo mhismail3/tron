@@ -65,6 +65,14 @@ pub struct ToolExecutionContext<'a> {
     /// Provider type of the active model. Used to enforce the local-model
     /// tool allow-list at the execution boundary (see `local_policy`).
     pub provider_type: Provider,
+    /// Optional persister for durable progress events. When `Some`, long-running
+    /// tools can call `ctx.emit_progress(...)` to surface incremental status
+    /// (Bash heartbeat, WebFetch bytes, subagent turn count) as persisted
+    /// `tool.progress` events visible through live stream and reconstruction.
+    pub event_persister: Option<&'a Arc<crate::runtime::orchestrator::event_persister::EventPersister>>,
+    /// Turn number this tool call belongs to. Copied into each progress event
+    /// so iOS can attribute progress after disconnect/reconnect.
+    pub turn: i64,
 }
 
 /// Execute a single tool call through the full pipeline.
@@ -273,6 +281,8 @@ pub async fn execute_tool(
         job_manager: ctx.job_manager.map(Arc::clone),
         output_buffer_registry: ctx.output_buffer_registry.map(Arc::clone),
         event_emitter: Some(Arc::clone(ctx.emitter)),
+        event_persister: ctx.event_persister.map(Arc::clone),
+        turn: ctx.turn,
         all_tool_names: ctx.registry.names(),
     };
 
@@ -456,6 +466,8 @@ mod tests {
                 output_buffer_registry: None,
                 sequence_counter: None,
                 provider_type: Provider::Anthropic,
+                event_persister: None,
+                turn: 0,
             }
         };
         ($registry:expr, $guardrails:expr, $hooks:expr, $emitter:expr, $cancel:expr, $provider:expr) => {
@@ -473,6 +485,8 @@ mod tests {
                 output_buffer_registry: None,
                 sequence_counter: None,
                 provider_type: $provider,
+                event_persister: None,
+                turn: 0,
             }
         };
     }

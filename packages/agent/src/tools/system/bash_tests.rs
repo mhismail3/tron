@@ -1307,3 +1307,143 @@ async fn backgrounded_details_carry_backgrounded_flag() {
     assert_eq!(details["backgrounded"], true);
     assert!(details.get("processId").is_some());
 }
+
+// ── Progress event tests ──
+
+#[test]
+fn last_stdout_line_picks_trimmed_last_nonempty() {
+    let chunk = "first line\nsecond line\n\n   ";
+    assert_eq!(last_stdout_line_for_progress(chunk), "second line");
+}
+
+#[test]
+fn last_stdout_line_truncates_with_ellipsis() {
+    let chunk = "x".repeat(500);
+    let out = last_stdout_line_for_progress(&chunk);
+    assert!(out.ends_with('…'));
+    assert!(out.chars().count() <= 201);
+}
+
+#[test]
+fn last_stdout_line_falls_back_to_raw_trim_when_all_empty() {
+    let chunk = "\n\n   \n";
+    assert_eq!(last_stdout_line_for_progress(chunk), "");
+}
+
+#[test]
+fn progress_throttle_emits_first_chunk_immediately() {
+    let mut throttle = ProgressThrottle::default();
+    let t0 = std::time::Instant::now();
+    assert!(throttle.ready(t0), "first call must be ready");
+}
+
+#[test]
+fn progress_throttle_blocks_within_1_second_window() {
+    let mut throttle = ProgressThrottle::default();
+    let t0 = std::time::Instant::now();
+    assert!(throttle.ready(t0));
+    assert!(!throttle.ready(t0 + std::time::Duration::from_millis(100)));
+    assert!(!throttle.ready(t0 + std::time::Duration::from_millis(500)));
+    assert!(!throttle.ready(t0 + std::time::Duration::from_millis(999)));
+}
+
+#[test]
+fn progress_throttle_opens_after_1_second() {
+    let mut throttle = ProgressThrottle::default();
+    let t0 = std::time::Instant::now();
+    assert!(throttle.ready(t0));
+    assert!(throttle.ready(t0 + std::time::Duration::from_millis(1_000)));
+    assert!(!throttle.ready(t0 + std::time::Duration::from_millis(1_500)));
+    assert!(throttle.ready(t0 + std::time::Duration::from_millis(2_001)));
+}
+
+/// Streams chunks to the caller's `output_tx` over a controlled interval so the
+/// forwarder task sees real message volume without spawning a real shell.
+struct StreamingRunner {
+    chunks: Vec<String>,
+    delay_ms: u64,
+}
+
+#[async_trait::async_trait]
+impl ProcessRunner for StreamingRunner {
+    async fn run_command(
+        &self,
+        _command: &str,
+        opts: &ProcessOptions,
+    ) -> Result<crate::tools::traits::ProcessOutput, ToolError> {
+        if let Some(tx) = opts.output_tx.as_ref() {
+            for chunk in &self.chunks {
+                let _ = tx.send(chunk.clone());
+                tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
+            }
+        }
+        Ok(crate::tools::traits::ProcessOutput {
+            stdout: self.chunks.join(""),
+            stderr: String::new(),
+            exit_code: 0,
+            duration_ms: self.chunks.len() as u64 * self.delay_ms,
+            timed_out: false,
+            interrupted: false,
+        })
+    }
+}
+
+#[tokio::test]
+async fn bash_forwarder_rate_limits_progress_events() {
+    // 5 chunks at 150ms intervals = 750ms total, below the 1s throttle window.
+    // Exactly one progress event should be persisted.
+    let runner = StreamingRunner {
+        chunks: vec![
+            "line 1\n".into(),
+            "line 2\n".into(),
+            "line 3\n".into(),
+            "line 4\n".into(),
+            "line 5\n".into(),
+        ],
+        delay_ms: 150,
+    };
+    let tool = BashTool::new(Arc::new(runner), None);
+    let (mut ctx, store, session_id) = crate::tools::testutil::make_ctx_with_persister().await;
+    ctx.process_manager = Some(Arc::new(
+        crate::runtime::orchestrator::process_manager::ProcessManager::new(),
+    ));
+
+    let _ = tool
+        .execute(json!({"command": "seq 1 5", "timeout": 10_000_u64}), &ctx)
+        .await
+        .unwrap();
+
+    let events = crate::tools::testutil::drain_progress_events(&store, &session_id).await;
+    assert_eq!(
+        events.len(),
+        1,
+        "sub-1s chunk burst should emit exactly one throttled progress event"
+    );
+    assert_eq!(events[0]["toolCallId"], "call-1");
+    assert!(
+        events[0]["message"].as_str().unwrap_or("").contains("line"),
+        "progress message should reflect stdout content: {events:?}"
+    );
+    assert_eq!(events[0]["turn"], 0);
+}
+
+#[tokio::test]
+async fn bash_forwarder_no_progress_when_persister_absent() {
+    // Default ctx has event_persister: None.
+    let runner = StreamingRunner {
+        chunks: vec!["hello\n".into()],
+        delay_ms: 10,
+    };
+    let tool = BashTool::new(Arc::new(runner), None);
+    let mut ctx = make_ctx();
+    ctx.process_manager = Some(Arc::new(
+        crate::runtime::orchestrator::process_manager::ProcessManager::new(),
+    ));
+
+    let r = tool
+        .execute(json!({"command": "echo hello", "timeout": 5_000_u64}), &ctx)
+        .await
+        .unwrap();
+    // Command runs normally; no panic from missing persister.
+    assert!(r.is_error.is_none());
+}

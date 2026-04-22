@@ -65,8 +65,50 @@ pub struct ToolContext {
     /// Event emitter for broadcasting tool events (used by managed processes
     /// to emit `ToolExecutionUpdate` events directly, bypassing `output_tx`).
     pub event_emitter: Option<Arc<crate::runtime::agent::event_emitter::EventEmitter>>,
+    /// Persister for durable `tool.progress` events emitted by long-running tools.
+    /// When `None`, progress is silently dropped (acceptable for tools that don't
+    /// emit progress at all; long-running tools should always receive a persister).
+    pub event_persister: Option<Arc<crate::runtime::orchestrator::event_persister::EventPersister>>,
+    /// Turn number this tool invocation is part of. Recorded on every
+    /// `tool.progress` event so iOS can attribute progress to the right turn
+    /// across resume/reconstruction.
+    pub turn: i64,
     /// All tool names available in the current registry (for `denyAllTools` resolution).
     pub all_tool_names: Vec<String>,
+}
+
+impl ToolContext {
+    /// Emit a `tool.progress` event durably.
+    ///
+    /// The tool carries the rate-limiting responsibility — callers must throttle
+    /// emissions themselves (e.g. Bash emits at most 1 Hz from its stdout
+    /// forwarder). This call uses the background persister path so it never
+    /// blocks the calling task on DB writes.
+    pub async fn emit_progress(&self, message: Option<String>, percent: Option<f64>) {
+        let Some(persister) = self.event_persister.as_ref() else {
+            return;
+        };
+        let mut obj = serde_json::Map::new();
+        let _ = obj.insert("toolCallId".into(), serde_json::Value::String(self.tool_call_id.clone()));
+        if let Some(msg) = message {
+            let _ = obj.insert("message".into(), serde_json::Value::String(msg));
+        }
+        if let Some(pct) = percent {
+            let _ = obj.insert(
+                "percent".into(),
+                serde_json::Number::from_f64(pct)
+                    .map_or(serde_json::Value::Null, serde_json::Value::Number),
+            );
+        }
+        let _ = obj.insert("turn".into(), serde_json::Value::Number(self.turn.into()));
+        let _ = persister
+            .append_background(
+                &self.session_id,
+                crate::events::EventType::ToolProgress,
+                serde_json::Value::Object(obj),
+            )
+            .await;
+    }
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -82,6 +124,8 @@ impl std::fmt::Debug for ToolContext {
             .field("job_manager", &self.job_manager.as_ref().map(|_| "..."))
             .field("output_buffer_registry", &self.output_buffer_registry.as_ref().map(|_| "..."))
             .field("event_emitter", &self.event_emitter.as_ref().map(|_| "..."))
+            .field("event_persister", &self.event_persister.as_ref().map(|_| "..."))
+            .field("turn", &self.turn)
             .finish_non_exhaustive()
     }
 }
@@ -793,6 +837,8 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            event_persister: None,
+            turn: 0,
             all_tool_names: vec![],
         };
         assert_eq!(ctx.tool_call_id, "call-1");
@@ -815,6 +861,8 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            event_persister: None,
+            turn: 0,
             all_tool_names: vec![],
         };
         assert_eq!(ctx.subagent_depth, 0);
@@ -836,6 +884,8 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            event_persister: None,
+            turn: 0,
             all_tool_names: vec![],
         };
         assert_eq!(ctx.subagent_depth, 2);
@@ -1011,6 +1061,8 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            event_persister: None,
+            turn: 0,
             all_tool_names: vec![],
         };
         assert!(ctx.process_manager.is_none());
@@ -1187,6 +1239,8 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            event_persister: None,
+            turn: 0,
             all_tool_names: vec![],
         };
         assert!(ctx.job_manager.is_none());

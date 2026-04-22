@@ -172,18 +172,44 @@ impl BashTool {
         // ToolExecutor, and cloning it would prevent its stream_handle from completing
         // when the tool returns. By emitting directly, the ToolExecutor's channel
         // stays unused and closes cleanly.
+        //
+        // Also emits durable `tool.progress` events, rate-limited to 1 Hz. Clients
+        // coalesce further on render. Rate-limiting here keeps persisted history
+        // for a 10-minute bash down to at most ~600 rows instead of thousands.
         let forwarder_emitter = ctx.event_emitter.clone();
+        let forwarder_persister = ctx.event_persister.clone();
         let forwarder_tool_call_id = ctx.tool_call_id.clone();
         let forwarder_session_id = ctx.session_id.clone();
+        let forwarder_turn = ctx.turn;
         let _ = tokio::spawn(async move {
+            let mut throttle = ProgressThrottle::default();
             while let Some(chunk) = output_rx.recv().await {
                 buffer_for_forwarder.push(chunk.clone());
                 if let Some(ref emitter) = forwarder_emitter {
                     let _ = emitter.emit(crate::core::events::TronEvent::ToolExecutionUpdate {
                         base: crate::core::events::BaseEvent::now(&forwarder_session_id),
                         tool_call_id: forwarder_tool_call_id.clone(),
-                        update: chunk,
+                        update: chunk.clone(),
                     });
+                }
+                if let Some(ref persister) = forwarder_persister
+                    && throttle.ready(std::time::Instant::now())
+                {
+                    let message = last_stdout_line_for_progress(&chunk);
+                    let mut obj = serde_json::Map::new();
+                    let _ = obj.insert(
+                        "toolCallId".into(),
+                        Value::String(forwarder_tool_call_id.clone()),
+                    );
+                    let _ = obj.insert("message".into(), Value::String(message));
+                    let _ = obj.insert("turn".into(), Value::Number(forwarder_turn.into()));
+                    let _ = persister
+                        .append_background(
+                            &forwarder_session_id,
+                            crate::events::EventType::ToolProgress,
+                            Value::Object(obj),
+                        )
+                        .await;
                 }
             }
             buffer_for_forwarder.close();
@@ -368,6 +394,56 @@ pub(crate) fn classify_bash_error(
         }
     }
     None
+}
+
+/// Minimum interval between persisted `tool.progress` events from a single
+/// bash forwarder. Clients may coalesce further on render.
+const PROGRESS_THROTTLE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Rate-limits persisted progress emissions so a fast-writing stdout doesn't
+/// produce thousands of `tool.progress` rows per command.
+///
+/// A 10-minute bash with no throttling could produce ~1 row per chunk; the
+/// 1 Hz cap keeps it to at most ~600 rows.
+#[derive(Default)]
+struct ProgressThrottle {
+    last_emit: Option<std::time::Instant>,
+}
+
+impl ProgressThrottle {
+    fn ready(&mut self, now: std::time::Instant) -> bool {
+        let ready = self
+            .last_emit
+            .is_none_or(|t| now.duration_since(t) >= PROGRESS_THROTTLE);
+        if ready {
+            self.last_emit = Some(now);
+        }
+        ready
+    }
+}
+
+/// Extract a concise single-line progress message from a raw stdout chunk.
+///
+/// Returns the last non-empty line, trimmed and truncated to 200 chars.
+/// iOS chips render this as a single-line subtitle; keeping it short prevents
+/// terminal escape sequences and multi-line output from bloating the DB
+/// or the chip itself. The 200-char cap matches the hook-block reason cap.
+fn last_stdout_line_for_progress(chunk: &str) -> String {
+    const MAX_LEN: usize = 200;
+    let candidate = chunk
+        .split('\n')
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or(chunk.trim());
+    if candidate.len() <= MAX_LEN {
+        candidate.to_owned()
+    } else {
+        let boundary = safe_char_boundary(candidate, MAX_LEN);
+        let mut truncated = candidate[..boundary].to_owned();
+        truncated.push('…');
+        truncated
+    }
 }
 
 /// Check if a PTY prompt string indicates sensitive input.

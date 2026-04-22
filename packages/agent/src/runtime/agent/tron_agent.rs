@@ -200,6 +200,7 @@ impl TronAgent {
                 cancel: &self.abort_token,
                 run_context: &ctx,
                 persister: self.persister.as_deref(),
+                persister_arc: self.persister.as_ref(),
                 previous_context_baseline,
                 subagent_depth: self.config.subagent_depth,
                 subagent_max_depth: self.config.subagent_max_depth,

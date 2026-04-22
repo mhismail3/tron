@@ -6,10 +6,12 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use crate::core::tools::{ToolResultBody, TronToolResult};
+use crate::events::EventStore;
+use crate::runtime::orchestrator::event_persister::EventPersister;
 
 use crate::tools::traits::{FileSystemOps, ToolContext};
 
@@ -28,8 +30,80 @@ pub fn make_ctx() -> ToolContext {
         job_manager: None,
         output_buffer_registry: None,
         event_emitter: None,
+        event_persister: None,
+        turn: 0,
         all_tool_names: vec![],
     }
+}
+
+/// Build a `ToolContext` backed by a real in-memory `EventPersister`.
+///
+/// Returns `(ctx, event_store, session_id)` so tests can assert on
+/// persisted `tool.progress` events after executing the tool.
+pub async fn make_ctx_with_persister() -> (ToolContext, Arc<EventStore>, String) {
+    let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default())
+        .expect("Failed to create in-memory pool");
+    {
+        let conn = pool.get().unwrap();
+        let _ = crate::events::run_migrations(&conn).unwrap();
+    }
+    let store = Arc::new(EventStore::new(pool));
+    let session = store
+        .create_session("test-model", "/tmp", Some("test"), None, None, None)
+        .expect("Failed to create session");
+    let persister = Arc::new(EventPersister::new(store.clone()));
+    let session_id = session.session.id.clone();
+    let ctx = ToolContext {
+        tool_call_id: "call-1".into(),
+        session_id: session_id.clone(),
+        working_directory: "/tmp".into(),
+        cancellation: tokio_util::sync::CancellationToken::new(),
+        subagent_depth: 0,
+        subagent_max_depth: 0,
+        workspace_id: None,
+        output_tx: None,
+        process_manager: None,
+        job_manager: None,
+        output_buffer_registry: None,
+        event_emitter: None,
+        event_persister: Some(persister),
+        turn: 0,
+        all_tool_names: vec![],
+    };
+    (ctx, store, session_id)
+}
+
+/// Drain all persisted `tool.progress` events for a session.
+///
+/// Polls until at least one progress event has landed, then waits a short
+/// grace period to collect late arrivals before returning.
+pub async fn drain_progress_events(
+    store: &EventStore,
+    session_id: &str,
+) -> Vec<serde_json::Value> {
+    let opts = crate::events::sqlite::repositories::event::ListEventsOptions {
+        limit: Some(1000),
+        offset: None,
+    };
+    let fetch = || {
+        store
+            .get_events_by_session(session_id, &opts)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e.event_type == "tool.progress")
+            .map(|e| serde_json::from_str::<serde_json::Value>(&e.payload)
+                .unwrap_or(serde_json::Value::Null))
+            .collect::<Vec<_>>()
+    };
+    for _ in 0..40 {
+        let progress = fetch();
+        if !progress.is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            return fetch();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    vec![]
 }
 
 /// Extract the text content from a `TronToolResult`, handling both

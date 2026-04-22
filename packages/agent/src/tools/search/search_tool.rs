@@ -242,6 +242,8 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            event_persister: None,
+            turn: 0,
             all_tool_names: vec![],
         }
     }

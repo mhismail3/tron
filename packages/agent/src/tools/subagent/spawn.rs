@@ -148,10 +148,20 @@ Returns (when completed within timeout):\n\
             tool_call_id: Some(ctx.tool_call_id.clone()),
         };
 
+        let task_preview = crate::core::text::truncate_str(&task, 120);
+        ctx.emit_progress(Some(format!("spawning subagent: {task_preview}")), None)
+            .await;
+
         match self.spawner.spawn(config).await {
             Ok(handle) => {
                 if let Some(output) = handle.output {
                     // Completed within blocking timeout.
+                    let turns = handle.turns_executed.unwrap_or(0);
+                    ctx.emit_progress(
+                        Some(format!("subagent completed ({turns} turns)")),
+                        Some(1.0),
+                    )
+                    .await;
                     Ok(TronToolResult {
                         content: ToolResultBody::Blocks(vec![
                             crate::core::content::ToolResultContent::text(&output),
@@ -159,7 +169,7 @@ Returns (when completed within timeout):\n\
                         details: Some(json!({
                             "sessionId": handle.session_id,
                             "success": handle.success.unwrap_or(true),
-                            "totalTurns": handle.turns_executed.unwrap_or(0),
+                            "totalTurns": turns,
                             "resultSummary": crate::core::text::truncate_str(&output, 200),
                             "tokenUsage": handle.token_usage,
                         })),
@@ -168,6 +178,11 @@ Returns (when completed within timeout):\n\
                     })
                 } else {
                     // Auto-backgrounded or non-blocking.
+                    ctx.emit_progress(
+                        Some(format!("subagent backgrounded: {}", handle.session_id)),
+                        None,
+                    )
+                    .await;
                     Ok(TronToolResult {
                         content: ToolResultBody::Blocks(vec![
                             crate::core::content::ToolResultContent::text(format!(
@@ -584,6 +599,8 @@ mod tests {
             job_manager: None,
             output_buffer_registry: None,
             event_emitter: None,
+            event_persister: None,
+            turn: 0,
             all_tool_names: vec![],
         }
     }
@@ -659,5 +676,75 @@ mod tests {
             Some("sess-1".to_string()),
             "parent_session_id should come from ToolContext.session_id"
         );
+    }
+
+    // ── Progress event tests ──
+
+    #[tokio::test]
+    async fn spawn_emits_start_and_completed_progress_events() {
+        let (ctx, store, session_id) = crate::tools::testutil::make_ctx_with_persister().await;
+        let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
+        let _ = tool
+            .execute(json!({"task": "investigate a thing"}), &ctx)
+            .await
+            .unwrap();
+
+        let events = crate::tools::testutil::drain_progress_events(&store, &session_id).await;
+        assert!(events.len() >= 2, "expected start + completed, got {events:?}");
+        let messages: Vec<String> = events
+            .iter()
+            .filter_map(|e| e["message"].as_str().map(String::from))
+            .collect();
+        assert!(
+            messages.iter().any(|m| m.starts_with("spawning subagent")),
+            "missing start message: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("completed")),
+            "missing completed message: {messages:?}"
+        );
+        // Completed event should carry percent=1.0.
+        let completed = events
+            .iter()
+            .find(|e| e["message"].as_str().unwrap_or("").contains("completed"))
+            .expect("completed event present");
+        assert_eq!(completed["percent"], serde_json::json!(1.0));
+    }
+
+    #[tokio::test]
+    async fn spawn_nonblocking_emits_backgrounded_progress() {
+        let (ctx, store, session_id) = crate::tools::testutil::make_ctx_with_persister().await;
+        let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
+        let _ = tool
+            .execute(json!({"task": "run later", "timeout": 0}), &ctx)
+            .await
+            .unwrap();
+
+        let events = crate::tools::testutil::drain_progress_events(&store, &session_id).await;
+        let messages: Vec<String> = events
+            .iter()
+            .filter_map(|e| e["message"].as_str().map(String::from))
+            .collect();
+        assert!(
+            messages.iter().any(|m| m.contains("backgrounded")),
+            "expected backgrounded progress: {messages:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn spawn_failure_emits_no_completion_progress() {
+        let (ctx, store, session_id) = crate::tools::testutil::make_ctx_with_persister().await;
+        let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::failing()));
+        let _ = tool.execute(json!({"task": "doomed"}), &ctx).await.unwrap();
+
+        let events = crate::tools::testutil::drain_progress_events(&store, &session_id).await;
+        // Start event fired before spawn(); no completed/backgrounded after failure.
+        for e in &events {
+            let msg = e["message"].as_str().unwrap_or("");
+            assert!(
+                !msg.contains("completed") && !msg.contains("backgrounded"),
+                "failure must not emit terminal progress: {msg}"
+            );
+        }
     }
 }
