@@ -55,19 +55,35 @@ struct WorkspaceSelector: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        selectedPath = currentPath
-                        dismiss()
-                    } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
+                    HStack(spacing: 16) {
+                        Button {
+                            showHidden.toggle()
+                        } label: {
+                            Image(systemName: showHidden ? "eye" : "eye.slash")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(showHidden ? .tronEmerald : .tronEmerald.opacity(0.4))
+                                .contentTransition(.symbolEffect(.replace.downUp))
+                        }
+                        .sensoryFeedback(.selection, trigger: showHidden)
+
+                        Button {
+                            selectedPath = currentPath
+                            dismiss()
+                        } label: {
+                            Image(systemName: "checkmark")
+                                .font(TronTypography.buttonSM)
+                        }
+                        .disabled(currentPath.isEmpty)
+                        .foregroundStyle(currentPath.isEmpty ? Color.tronOverlay(0.3) : .tronEmerald)
                     }
-                    .disabled(currentPath.isEmpty)
-                    .foregroundStyle(currentPath.isEmpty ? Color.tronOverlay(0.3) : .tronEmerald)
                 }
             }
             .task {
                 await loadHome()
+            }
+            .onChange(of: showHidden) {
+                guard !currentPath.isEmpty else { return }
+                Task { await loadDirectory(currentPath) }
             }
             .onChange(of: rpcClient.connectionState) { oldState, newState in
                 // React when connection transitions to connected
