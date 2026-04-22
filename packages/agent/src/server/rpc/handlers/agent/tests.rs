@@ -450,6 +450,74 @@ async fn abort_missing_param() {
     assert_eq!(err.code(), "INVALID_PARAMS");
 }
 
+// ── agent.abortTool ──
+
+#[tokio::test]
+async fn abort_tool_unknown_returns_false() {
+    let ctx = make_test_context();
+    let result = AbortToolHandler
+        .handle(
+            Some(json!({"sessionId": "any", "toolCallId": "nope"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["aborted"], false);
+}
+
+#[tokio::test]
+async fn abort_tool_missing_session_id_is_invalid_params() {
+    let ctx = make_test_context();
+    let err = AbortToolHandler
+        .handle(Some(json!({"toolCallId": "x"})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
+#[tokio::test]
+async fn abort_tool_missing_tool_call_id_is_invalid_params() {
+    let ctx = make_test_context();
+    let err = AbortToolHandler
+        .handle(Some(json!({"sessionId": "s1"})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
+#[tokio::test]
+async fn abort_tool_registered_call_returns_true_and_cancels_child() {
+    let ctx = make_test_context();
+    let registry = ctx.orchestrator.tool_abort_registry();
+    let parent = CancellationToken::new();
+    let child = registry.register("sess-1", "call-A", &parent);
+
+    let result = AbortToolHandler
+        .handle(
+            Some(json!({"sessionId": "sess-1", "toolCallId": "call-A"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result["aborted"], true);
+    assert!(child.is_cancelled());
+    assert!(
+        !parent.is_cancelled(),
+        "abort_tool must not cancel the turn-level parent token"
+    );
+
+    // Idempotent — second call returns false
+    let again = AbortToolHandler
+        .handle(
+            Some(json!({"sessionId": "sess-1", "toolCallId": "call-A"})),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(again["aborted"], false);
+}
+
 // ── Extra prompt params ──
 
 #[tokio::test]

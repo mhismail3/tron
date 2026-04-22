@@ -117,6 +117,21 @@ final class AgentClient: RPCDomainClient {
         logger.info("Aborted agent", category: .chat)
     }
 
+    /// Abort a single in-flight tool call without aborting the rest of the turn.
+    /// Returns `true` when the server cancelled a registered tool, `false` when
+    /// the tool had already finished or no call matched the id.
+    @discardableResult
+    func abortTool(toolCallId: String) async throws -> Bool {
+        let (ws, sessionId) = try requireTransport().requireSession()
+        let params = AgentAbortToolParams(sessionId: sessionId, toolCallId: toolCallId)
+        let result: AgentAbortToolResult = try await ws.send(method: "agent.abortTool", params: params)
+        logger.info(
+            "Aborted tool call \(toolCallId): aborted=\(result.aborted)",
+            category: .chat
+        )
+        return result.aborted
+    }
+
     // MARK: - Tool Result Methods
 
     /// Send a tool result for interactive tools like AskUserQuestion.

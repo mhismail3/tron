@@ -106,6 +106,15 @@ struct AgentAbortParams: Encodable {
     let sessionId: String
 }
 
+struct AgentAbortToolParams: Encodable {
+    let sessionId: String
+    let toolCallId: String
+}
+
+struct AgentAbortToolResult: Decodable {
+    let aborted: Bool
+}
+
 // MARK: - Prompt Queue RPCs
 
 struct QueuePromptParams: Encodable {

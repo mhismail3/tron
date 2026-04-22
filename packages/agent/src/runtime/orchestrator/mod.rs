@@ -16,6 +16,7 @@
 //! | `streaming_journal` | Per-turn append-only WAL for crash recovery of partial LLM output |
 //! | `recovery` | Startup crash recovery — persists orphaned journal content |
 //! | `tool_call_tracker` | Tracks in-flight tool calls for cancellation |
+//! | `tool_abort_registry` | Per-tool `CancellationToken` registry for `agent.abortTool` |
 //!
 //! ## Event Sequencing
 //!
@@ -54,5 +55,6 @@ pub mod session_manager;
 pub mod session_reconstructor;
 pub mod streaming_journal;
 pub mod subagent_manager;
+pub mod tool_abort_registry;
 pub mod tool_call_tracker;
 pub mod turn_accumulator;

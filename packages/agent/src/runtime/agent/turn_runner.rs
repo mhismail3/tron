@@ -37,6 +37,7 @@ use crate::runtime::agent::stream_processor;
 use crate::runtime::errors::StopReason;
 use crate::runtime::orchestrator::event_persister::EventPersister;
 use crate::runtime::orchestrator::streaming_journal::StreamingJournal;
+use crate::runtime::orchestrator::tool_abort_registry::ToolAbortRegistry;
 use crate::runtime::types::{RunContext, TurnResult};
 
 /// Parameters for a single turn of the agent loop.
@@ -92,6 +93,10 @@ pub struct TurnParams<'a> {
     pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     /// Optional per-session sequence counter for monotonic event ordering.
     pub sequence_counter: Option<&'a AtomicI64>,
+    /// Optional per-tool abort registry. Threaded into `ToolExecutionContext`
+    /// so each in-flight tool call registers a child `CancellationToken` that
+    /// `agent.abortTool` can cancel independently of the turn token.
+    pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
 }
 
 /// Execute a single turn of the agent loop.
@@ -123,6 +128,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         job_manager,
         output_buffer_registry,
         sequence_counter,
+        tool_abort_registry,
     } = params;
     let turn_start = Instant::now();
 
@@ -460,6 +466,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         output_buffer_registry,
         sequence_counter,
         provider_type: provider.provider_type(),
+        tool_abort_registry,
     })
     .await;
 

@@ -103,9 +103,11 @@ struct MessageBubble: View {
                 ToolResultRouter(tool: tool)
             default:
                 let chipData = CommandToolChipData(from: tool)
-                CommandToolChip(data: chipData) {
-                    onTap?(.commandTool(chipData))
-                }
+                CommandToolChip(
+                    data: chipData,
+                    onTap: { onTap?(.commandTool(chipData)) },
+                    onCancel: { onTap?(.cancelCommandTool(toolCallId: chipData.id)) }
+                )
             }
 
         case .toolResult(let result):

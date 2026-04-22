@@ -120,6 +120,19 @@ extension ChatViewModel {
         }
     }
 
+    /// Cooperatively abort a single in-flight tool call without stopping the turn.
+    /// The server cancels the per-tool CancellationToken so the tool can observe
+    /// cancellation and return an error result; the agent loop continues.
+    func abortTool(toolCallId: String) {
+        Task {
+            do {
+                _ = try await rpcClient.agent.abortTool(toolCallId: toolCallId)
+            } catch {
+                logError("Failed to abort tool \(toolCallId): \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Abort and discard all queued messages (server-side clear).
     func abortAndClearQueue() {
         Task {

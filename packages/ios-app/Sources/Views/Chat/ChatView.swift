@@ -516,6 +516,8 @@ struct ChatView: View {
             } else {
                 sheetCoordinator.showCommandToolDetail(data)
             }
+        case .cancelCommandTool(let toolCallId):
+            viewModel.abortTool(toolCallId: toolCallId)
         case .subagentResult(let sid):
             viewModel.subagentState.showDetails(for: sid)
         case .subagentResultsReady:

@@ -21,6 +21,7 @@ use crate::runtime::agent::compaction_handler::CompactionHandler;
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::errors::RuntimeError;
 use crate::runtime::orchestrator::session_manager::{SessionFilter, SessionManager};
+use crate::runtime::orchestrator::tool_abort_registry::ToolAbortRegistry;
 use crate::runtime::orchestrator::tool_call_tracker::ToolCallTracker;
 use crate::runtime::orchestrator::turn_accumulator::TurnAccumulatorMap;
 
@@ -149,6 +150,9 @@ pub struct Orchestrator {
     /// and producing duplicate `memory.retained` events. Held as `Arc<DashMap>`
     /// so background tasks can hold a reference independent of the orchestrator.
     retain_in_flight: Arc<DashMap<String, ()>>,
+    /// Per-tool cancellation tokens for `agent.abortTool`. Populated by the
+    /// tool executor on each call, consumed (cancelled) by the RPC layer.
+    tool_abort_registry: Arc<ToolAbortRegistry>,
 }
 
 impl Orchestrator {
@@ -163,7 +167,13 @@ impl Orchestrator {
             sequence_counters: Arc::new(DashMap::new()),
             compaction_handlers: Arc::new(DashMap::new()),
             retain_in_flight: Arc::new(DashMap::new()),
+            tool_abort_registry: Arc::new(ToolAbortRegistry::new()),
         }
+    }
+
+    /// Get a shared reference to the per-tool abort registry.
+    pub fn tool_abort_registry(&self) -> &Arc<ToolAbortRegistry> {
+        &self.tool_abort_registry
     }
 
     /// Get the session manager.

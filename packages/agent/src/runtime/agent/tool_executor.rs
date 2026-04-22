@@ -20,6 +20,7 @@ use metrics::{counter, histogram};
 use tracing::{debug, error, instrument, warn};
 
 use crate::runtime::agent::event_emitter::EventEmitter;
+use crate::runtime::orchestrator::tool_abort_registry::{ToolAbortGuard, ToolAbortRegistry};
 use crate::runtime::types::ToolExecutionResult;
 
 /// Convert a `Duration` to milliseconds, rounding up (ceiling).
@@ -73,6 +74,11 @@ pub struct ToolExecutionContext<'a> {
     /// Turn number this tool call belongs to. Copied into each progress event
     /// so iOS can attribute progress after disconnect/reconnect.
     pub turn: i64,
+    /// Optional per-tool abort registry. When `Some`, each tool call registers
+    /// a child `CancellationToken` so `agent.abortTool` can cancel a single
+    /// tool without aborting the whole turn. When `None`, the turn-level
+    /// `cancel` token is passed through unchanged.
+    pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
 }
 
 /// Execute a single tool call through the full pipeline.
@@ -267,12 +273,27 @@ pub async fn execute_tool(
     );
 
     // 5. Execute tool with streaming output channel
+    //
+    // When a `tool_abort_registry` is present, derive a child `CancellationToken`
+    // scoped to this single call. `agent.abortTool` cancels the child; parent
+    // (turn-level) cancellation still propagates to every child automatically.
+    // The RAII guard ensures the registry entry is removed on every exit path
+    // (normal return, error, panic).
+    let (per_tool_cancel, _abort_guard) = match ctx.tool_abort_registry {
+        Some(registry) => {
+            let child = registry.register(session_id, &tool_call_id, ctx.cancel);
+            let guard = ToolAbortGuard::new(Arc::clone(registry), session_id, &tool_call_id);
+            (child, Some(guard))
+        }
+        None => (ctx.cancel.clone(), None),
+    };
+
     let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let tool_ctx = ToolContext {
         tool_call_id: tool_call_id.clone(),
         session_id: session_id.to_owned(),
         working_directory: working_directory.to_owned(),
-        cancellation: ctx.cancel.clone(),
+        cancellation: per_tool_cancel.clone(),
         subagent_depth: ctx.subagent_depth,
         subagent_max_depth: ctx.subagent_max_depth,
         workspace_id: ctx.workspace_id.map(String::from),
@@ -300,12 +321,12 @@ pub async fn execute_tool(
         }
     });
 
-    let tool_result = if ctx.cancel.is_cancelled() {
+    let tool_result = if per_tool_cancel.is_cancelled() {
         crate::core::tools::error_result("Operation cancelled")
     } else {
         tokio::select! {
             biased;
-            () = ctx.cancel.cancelled() => {
+            () = per_tool_cancel.cancelled() => {
                 warn!(tool_name, "cancelled during execution");
                 crate::core::tools::error_result("Operation cancelled")
             }
@@ -468,6 +489,7 @@ mod tests {
                 provider_type: Provider::Anthropic,
                 event_persister: None,
                 turn: 0,
+                tool_abort_registry: None,
             }
         };
         ($registry:expr, $guardrails:expr, $hooks:expr, $emitter:expr, $cancel:expr, $provider:expr) => {
@@ -487,6 +509,7 @@ mod tests {
                 provider_type: $provider,
                 event_persister: None,
                 turn: 0,
+                tool_abort_registry: None,
             }
         };
     }
@@ -1255,5 +1278,159 @@ mod tests {
         let mut guard = guardrails.lock();
         let eval = guard.evaluate(&eval_ctx);
         assert!(eval.blocked);
+    }
+
+    // ── Per-tool abort registry tests (agent.abortTool backing) ──
+
+    fn tool_exec_ctx_with_registry<'a>(
+        registry: &'a ToolRegistry,
+        guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
+        hooks: &'a Option<Arc<HookEngine>>,
+        emitter: &'a Arc<EventEmitter>,
+        cancel: &'a CancellationToken,
+        abort_registry: &'a Arc<ToolAbortRegistry>,
+    ) -> ToolExecutionContext<'a> {
+        ToolExecutionContext {
+            registry,
+            guardrails,
+            hooks,
+            emitter,
+            cancel,
+            subagent_depth: 0,
+            subagent_max_depth: 0,
+            workspace_id: None,
+            process_manager: None,
+            job_manager: None,
+            output_buffer_registry: None,
+            sequence_counter: None,
+            provider_type: Provider::Anthropic,
+            event_persister: None,
+            turn: 0,
+            tool_abort_registry: Some(abort_registry),
+        }
+    }
+
+    #[tokio::test]
+    async fn abort_tool_cancels_only_target_leaves_siblings_running() {
+        let registry = make_registry(vec![Arc::new(SlowTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
+        let abort_registry = Arc::new(ToolAbortRegistry::new());
+
+        let tc_target = ToolCall::new("target-call", "slow", Map::new());
+        let tc_sibling = ToolCall::new("sibling-call", "slow", Map::new());
+
+        let ctx_a =
+            tool_exec_ctx_with_registry(&registry, &no_guardrails, &no_hooks, &emitter, &cancel, &abort_registry);
+        let ctx_b =
+            tool_exec_ctx_with_registry(&registry, &no_guardrails, &no_hooks, &emitter, &cancel, &abort_registry);
+
+        let abort_registry_clone = abort_registry.clone();
+        let aborter = async {
+            for _ in 0..100 {
+                if abort_registry_clone.len() >= 2 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(
+                abort_registry_clone.len(),
+                2,
+                "both tools should be registered before abort is called"
+            );
+            assert!(abort_registry_clone.abort("sess-1", "target-call"));
+        };
+
+        let target_future = execute_tool(&tc_target, "sess-1", "/tmp", &ctx_a);
+        // Sibling runs the 60s SlowTool — wrap it in a short timeout so the
+        // test asserts "still running" by observing the timeout fires. Dropping
+        // the timeout future cancels the inner future (good test cleanup).
+        let sibling_future = tokio::time::timeout(
+            Duration::from_millis(800),
+            execute_tool(&tc_sibling, "sess-1", "/tmp", &ctx_b),
+        );
+
+        let (target_result, sibling_timeout_result, ()) =
+            tokio::join!(target_future, sibling_future, aborter);
+
+        assert!(
+            target_result.result.is_error.unwrap_or(false),
+            "aborted target returns an error result"
+        );
+        assert!(
+            sibling_timeout_result.is_err(),
+            "sibling must still be running when the 800ms timeout fires — per-tool abort must not propagate to siblings"
+        );
+    }
+
+    #[tokio::test]
+    async fn abort_tool_unregisters_after_successful_completion() {
+        let registry = make_registry(vec![Arc::new(EchoTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
+        let abort_registry = Arc::new(ToolAbortRegistry::new());
+
+        let mut args = Map::new();
+        args.insert("text".into(), Value::String("hi".into()));
+        let tc = ToolCall::new("done-call", "echo", args);
+
+        let ctx = tool_exec_ctx_with_registry(
+            &registry,
+            &no_guardrails,
+            &no_hooks,
+            &emitter,
+            &cancel,
+            &abort_registry,
+        );
+        let result = execute_tool(&tc, "sess-1", "/tmp", &ctx).await;
+        assert!(!result.result.is_error.unwrap_or(false));
+        assert!(
+            abort_registry.is_empty(),
+            "RAII guard must unregister the tool on normal completion"
+        );
+    }
+
+    #[tokio::test]
+    async fn parent_cancel_still_cancels_tool_when_registry_present() {
+        let registry = make_registry(vec![Arc::new(SlowTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let no_guardrails = None;
+        let no_hooks = None;
+        let abort_registry = Arc::new(ToolAbortRegistry::new());
+
+        let tc = make_tool_call("slow", Map::new());
+        let ctx = tool_exec_ctx_with_registry(
+            &registry,
+            &no_guardrails,
+            &no_hooks,
+            &emitter,
+            &cancel,
+            &abort_registry,
+        );
+
+        let cancel2 = cancel.clone();
+        drop(tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            cancel2.cancel();
+        }));
+
+        let start = Instant::now();
+        let result = execute_tool(&tc, "sess-1", "/tmp", &ctx).await;
+        let elapsed = start.elapsed();
+
+        assert!(result.result.is_error.unwrap_or(false));
+        assert!(elapsed < Duration::from_secs(2));
+        assert!(abort_registry.is_empty(), "guard cleans up even on parent cancel");
+    }
+
+    #[tokio::test]
+    async fn abort_unknown_tool_call_is_noop() {
+        let abort_registry = Arc::new(ToolAbortRegistry::new());
+        assert!(!abort_registry.abort("sess-x", "does-not-exist"));
     }
 }

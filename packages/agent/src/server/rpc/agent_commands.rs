@@ -42,4 +42,23 @@ impl AgentCommandService {
 
         Ok(json!({ "aborted": aborted }))
     }
+
+    /// Abort a single in-flight tool call without aborting the surrounding turn.
+    ///
+    /// Returns `{ "aborted": true }` if the tool was in flight (its child
+    /// `CancellationToken` was cancelled) or `{ "aborted": false }` when
+    /// there is no matching tool — the call already finished, the id is
+    /// wrong, or the session has no per-tool registry. Callers treat both
+    /// as "nothing to do" rather than errors.
+    pub(crate) fn abort_tool(
+        ctx: &RpcContext,
+        session_id: &str,
+        tool_call_id: &str,
+    ) -> Result<Value, RpcError> {
+        let aborted = ctx
+            .orchestrator
+            .tool_abort_registry()
+            .abort(session_id, tool_call_id);
+        Ok(json!({ "aborted": aborted }))
+    }
 }

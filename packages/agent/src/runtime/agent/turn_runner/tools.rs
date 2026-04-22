@@ -17,6 +17,7 @@ use crate::runtime::context::context_manager::ContextManager;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
 use crate::runtime::orchestrator::event_persister::EventPersister;
+use crate::runtime::orchestrator::tool_abort_registry::ToolAbortRegistry;
 use crate::runtime::types::{StreamResult, ToolExecutionResult};
 use crate::events::EventType;
 
@@ -47,6 +48,8 @@ pub(super) struct ToolPhaseParams<'a> {
     pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     pub sequence_counter: Option<&'a AtomicI64>,
     pub provider_type: crate::core::messages::Provider,
+    /// Optional per-tool abort registry (see `TurnParams::tool_abort_registry`).
+    pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
 }
 
 #[derive(Default)]
@@ -142,6 +145,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     provider_type: params.provider_type,
                     event_persister: params.persister_arc,
                     turn: i64::from(params.turn),
+                    tool_abort_registry: params.tool_abort_registry,
                 };
                 async move {
                     let result = tool_executor::execute_tool(

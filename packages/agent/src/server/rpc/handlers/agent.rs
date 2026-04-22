@@ -158,6 +158,25 @@ impl MethodHandler for AbortHandler {
     }
 }
 
+/// Abort a single in-flight tool call without aborting the turn.
+///
+/// The tool observes cancellation through its per-tool `CancellationToken`
+/// child and returns an `Operation cancelled` result; the surrounding turn
+/// keeps running other tools and streaming text. If the tool has already
+/// finished (or was never registered) the response is
+/// `{ "aborted": false }` — callers treat that as "nothing to do".
+pub struct AbortToolHandler;
+
+#[async_trait]
+impl MethodHandler for AbortToolHandler {
+    #[instrument(skip(self, ctx), fields(method = "agent.abortTool", session_id, tool_call_id))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let tool_call_id = require_string_param(params.as_ref(), "toolCallId")?;
+        AgentCommandService::abort_tool(ctx, &session_id, &tool_call_id)
+    }
+}
+
 /// `agent.status` — inspect the in-flight state of a session.
 ///
 /// Returns a snapshot combining orchestrator run registry,

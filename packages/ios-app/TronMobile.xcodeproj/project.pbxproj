@@ -47,6 +47,7 @@
 		0B7B23992051EFEF043CCD59 /* GitActionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4259DA2296EAA363DF05CA2F /* GitActionSheet.swift */; };
 		0B819F80870C3FB99D8BF4B5 /* SessionUnarchivedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6F792E5D7EDBEAF9026E367 /* SessionUnarchivedPlugin.swift */; };
 		0B857E362E67738685D714B1 /* AuthUpdatedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91EA2C45B9DA5431E553CD1E /* AuthUpdatedPlugin.swift */; };
+		0B8D75D7210369AC91F61C61 /* CommandToolChipCancelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86903D38746952CEEE2353C8 /* CommandToolChipCancelTests.swift */; };
 		0BB47FACE2AC8EFBCDB4F82D /* EventDispatchCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49F9F43B38BAA24BC13D8929 /* EventDispatchCoordinatorTests.swift */; };
 		0BBBA0C6949E8B4A7D92C354 /* TurnLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0671B9F9EF8CC7E7486B77B6 /* TurnLifecycleCoordinator.swift */; };
 		0C1308EAACB24A6ECC6A5337 /* ThinkingDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABD345A78C7D80B1406300BF /* ThinkingDetailSheet.swift */; };
@@ -1225,6 +1226,7 @@
 		859B3AB41A56877B5D8EA994 /* GitClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitClient.swift; sourceTree = "<group>"; };
 		8631238374F0989089F9869D /* AgentControlPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentControlPill.swift; sourceTree = "<group>"; };
 		863E2816C971C19D29FEEBA9 /* WorktreeMergeStartedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeMergeStartedPlugin.swift; sourceTree = "<group>"; };
+		86903D38746952CEEE2353C8 /* CommandToolChipCancelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandToolChipCancelTests.swift; sourceTree = "<group>"; };
 		87370A5D814F48375236F358 /* Prod.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Prod.xcconfig; sourceTree = "<group>"; };
 		876D3BCA467E57145E1062AC /* SystemEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemEvent.swift; sourceTree = "<group>"; };
 		879251B0CFAE32083926A18E /* foreground-emerald.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "foreground-emerald.png"; sourceTree = "<group>"; };
@@ -3057,6 +3059,7 @@
 			isa = PBXGroup;
 			children = (
 				07FB8888F8A4A5A2BB76BD1B /* AccessibilityTests.swift */,
+				86903D38746952CEEE2353C8 /* CommandToolChipCancelTests.swift */,
 				FA626C705B9052B66955CC18 /* DecodedImageViewTests.swift */,
 				BD79522B85677C1B75E0C631 /* EventIconProviderTests.swift */,
 				D8CAAD30176960052D589E37 /* ForkButtonTests.swift */,
@@ -4249,6 +4252,7 @@
 				EC2522C84E6F3A711A14FA63 /* ChatViewModelProcessingIndicatorTests.swift in Sources */,
 				5497859023FABA670D768DE5 /* ChatViewModelSequenceDedupTests.swift in Sources */,
 				C7BA435955B6199C0A2B487C /* ChipStyleModifierTests.swift in Sources */,
+				0B8D75D7210369AC91F61C61 /* CommandToolChipCancelTests.swift in Sources */,
 				6855A8197F571DD7F96D9897 /* CommandToolTypesTests.swift in Sources */,
 				7903F16FCDE004E26B681AAC /* CompactionCoordinatorTests.swift in Sources */,
 				AA375C66F865224831AE7BBB /* ComputerUseToolDetailSheetTests.swift in Sources */,

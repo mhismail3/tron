@@ -8,6 +8,15 @@ import SwiftUI
 struct CommandToolChip: View {
     let data: CommandToolChipData
     let onTap: () -> Void
+    /// When set AND the chip is running, a trailing cancel button is rendered.
+    /// Tapping it invokes this closure instead of the chip's `onTap`.
+    var onCancel: (() -> Void)? = nil
+
+    /// Whether the trailing cancel button should be shown for this chip instance.
+    /// Visible iff the tool is running AND a cancel handler was supplied.
+    var showsCancelButton: Bool {
+        onCancel != nil && data.status == .running
+    }
 
     var body: some View {
         Button(action: onTap) {
@@ -33,9 +42,7 @@ struct CommandToolChip: View {
                         .transition(.blurReplace)
                 }
 
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(statusColor.opacity(0.5))
+                trailingAccessory
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -47,6 +54,25 @@ struct CommandToolChip: View {
         .buttonStyle(.plain)
         .chipStyle(statusColor, tintOpacity: 0.25, strokeOpacity: 0.3)
         .chipAccessibility(tool: data.displayName, status: data.status.label, summary: data.summary)
+    }
+
+    /// Trailing accessory — cancel button while running, chevron otherwise.
+    @ViewBuilder
+    private var trailingAccessory: some View {
+        if showsCancelButton, let onCancel {
+            Button(action: onCancel) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(statusColor.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel \(data.displayName)")
+            .accessibilityHint("Aborts this tool call without stopping the rest of the turn")
+        } else {
+            Image(systemName: "chevron.right")
+                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                .foregroundStyle(statusColor.opacity(0.5))
+        }
     }
 
     @ViewBuilder

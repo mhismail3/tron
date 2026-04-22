@@ -20,6 +20,7 @@ use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::agent::turn_runner;
 use crate::runtime::errors::StopReason;
 use crate::runtime::orchestrator::event_persister::EventPersister;
+use crate::runtime::orchestrator::tool_abort_registry::ToolAbortRegistry;
 use crate::runtime::types::{AgentConfig, RunContext, RunResult};
 
 /// RAII guard that resets `is_running` to `false` on drop (even on panic).
@@ -91,6 +92,10 @@ pub struct TronAgent {
     job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
     /// Optional output buffer registry for process output streaming.
     output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    /// Optional per-tool cancellation registry. Enables `agent.abortTool` to
+    /// cancel a single in-flight tool without aborting the whole turn. When
+    /// `None` (subagents, older code paths) tools share the turn-level token.
+    tool_abort_registry: Option<Arc<ToolAbortRegistry>>,
 }
 
 impl TronAgent {
@@ -122,6 +127,7 @@ impl TronAgent {
             external_abort_token: false,
             persister: None,
             sequence_counter: None,
+            tool_abort_registry: None,
         }
     }
 
@@ -212,6 +218,7 @@ impl TronAgent {
                 job_manager: self.job_manager.as_ref(),
                 output_buffer_registry: self.output_buffer_registry.as_ref(),
                 sequence_counter: self.sequence_counter.as_ref().map(|c| c.as_ref()),
+                tool_abort_registry: self.tool_abort_registry.as_ref(),
             })
             .await;
 
@@ -361,6 +368,13 @@ impl TronAgent {
     /// Set the per-session sequence counter for monotonic event ordering.
     pub fn set_sequence_counter(&mut self, counter: Arc<AtomicI64>) {
         self.sequence_counter = Some(counter);
+    }
+
+    /// Inject the per-tool cancellation registry (owned by the orchestrator).
+    /// Each in-flight tool call gets a child of `abort_token`; `agent.abortTool`
+    /// cancels that child without touching siblings or the turn itself.
+    pub fn set_tool_abort_registry(&mut self, registry: Arc<ToolAbortRegistry>) {
+        self.tool_abort_registry = Some(registry);
     }
 
     /// Abort the current run.
