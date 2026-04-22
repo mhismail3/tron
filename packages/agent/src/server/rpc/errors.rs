@@ -1,4 +1,26 @@
 //! RPC error codes and error type.
+//!
+//! # INVARIANT: not-found messages echo caller-supplied IDs under
+//! trusted-local
+//!
+//! `NotFound` errors today carry a human-readable `message` that
+//! includes the caller-supplied identifier, e.g. `"Session 'abc123' not
+//! found"`. This is deliberate: iOS surfaces the message directly in
+//! diagnostic UI, and under the trusted-local threat model (the only
+//! callers are the user's own devices over Tailscale) the identifier
+//! is already known to the caller.
+//!
+//! If the threat model ever changes (shared Tailnet, multi-user host,
+//! adversarial client), that echo becomes a low-value information
+//! leak. The forward-compat mechanism is [`format_not_found`] +
+//! [`ErrorRedactMode`] — flip [`current_redact_mode`] to `Redact` (or
+//! wire it to a `settings.errors.redactMode` setting), and every
+//! caller routed through the helper emits opaque `"Session not
+//! found"` messages instead. Call sites that format `NotFound`
+//! messages by hand today should migrate to the helper as a side
+//! effect of any touch.
+//!
+//! Regression guard: [`tests::error_messages_redact_mode_removes_user_input`].
 
 use crate::server::rpc::types::RpcErrorBody;
 
@@ -199,6 +221,54 @@ pub fn to_json_value<T: serde::Serialize>(val: &T) -> Result<serde_json::Value, 
     })
 }
 
+// ── NotFound message formatting (M1) ────────────────────────────────
+
+/// How `NotFound` error messages render caller-supplied identifiers.
+///
+/// See the module-level INVARIANT for why [`Echo`] is the current
+/// default and when to flip to [`Redact`].
+///
+/// [`Echo`]: ErrorRedactMode::Echo
+/// [`Redact`]: ErrorRedactMode::Redact
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorRedactMode {
+    /// Echo the caller-supplied identifier in the message — the
+    /// trusted-local default. Example: `"Session 'abc123' not found"`.
+    Echo,
+    /// Produce an opaque message with no caller-supplied content.
+    /// Example: `"Session not found"`.
+    Redact,
+}
+
+/// Current error-message redaction mode.
+///
+/// Today this always returns [`ErrorRedactMode::Echo`] by design — the
+/// trusted-local threat model permits echoing identifiers. When the
+/// threat model changes, route this through a
+/// `settings.errors.redactMode` setting (or equivalent runtime flag)
+/// and every call site using [`format_not_found`] flips at once.
+pub fn current_redact_mode() -> ErrorRedactMode {
+    ErrorRedactMode::Echo
+}
+
+/// Format a `NotFound` error message under the configured redact mode.
+///
+/// Call sites that construct `NotFound` messages via `format!(...)`
+/// with a user-supplied id should migrate to this helper — it is the
+/// single choke point that honors [`current_redact_mode`].
+pub fn format_not_found(kind: &str, id: &str) -> String {
+    format_not_found_with_mode(current_redact_mode(), kind, id)
+}
+
+/// Mode-parameterized variant of [`format_not_found`]. Exposed for
+/// tests that need to pin the rendering without mutating global state.
+pub fn format_not_found_with_mode(mode: ErrorRedactMode, kind: &str, id: &str) -> String {
+    match mode {
+        ErrorRedactMode::Echo => format!("{kind} '{id}' not found"),
+        ErrorRedactMode::Redact => format!("{kind} not found"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +393,50 @@ mod tests {
         ];
         let unique: std::collections::HashSet<_> = codes.iter().collect();
         assert_eq!(unique.len(), codes.len(), "import error codes must be distinct");
+    }
+
+    // ── M1: not-found message redaction contract ─────────────────────
+
+    /// Under the trusted-local threat model the helper echoes the
+    /// caller-supplied identifier — iOS diagnostic UI relies on it.
+    #[test]
+    fn format_not_found_echoes_id_under_trusted_local() {
+        assert_eq!(format_not_found("Session", "abc123"), "Session 'abc123' not found");
+        assert_eq!(current_redact_mode(), ErrorRedactMode::Echo);
+    }
+
+    /// Forward-compat contract: if the threat model ever shifts and
+    /// `current_redact_mode` flips to [`ErrorRedactMode::Redact`], no
+    /// caller-supplied content may leak into the message. Every single
+    /// ID passed in gets dropped — pin the contract here so a future
+    /// change to the formatter can't reintroduce the leak silently.
+    #[test]
+    fn error_messages_redact_mode_removes_user_input() {
+        let victims = [
+            ("Session", "abc123"),
+            ("Snippet", "../../etc/passwd"),
+            ("Event", "<script>alert(1)</script>"),
+            ("Workspace", "  leading-space-id  "),
+            ("Session", ""),
+        ];
+        for (kind, id) in victims {
+            let msg = format_not_found_with_mode(ErrorRedactMode::Redact, kind, id);
+            assert_eq!(msg, format!("{kind} not found"), "redact must drop id {id:?}");
+            assert!(
+                !msg.contains(id) || id.is_empty(),
+                "redact mode must not leak id {id:?} (got {msg:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn format_not_found_with_mode_is_pure() {
+        // Repeated calls with identical inputs return identical output
+        // — the formatter never consults global state other than the
+        // explicitly-passed mode.
+        let a = format_not_found_with_mode(ErrorRedactMode::Echo, "A", "1");
+        let b = format_not_found_with_mode(ErrorRedactMode::Echo, "A", "1");
+        assert_eq!(a, b);
     }
 
     #[test]
