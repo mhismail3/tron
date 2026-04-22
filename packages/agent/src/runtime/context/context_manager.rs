@@ -68,6 +68,19 @@ pub struct ContextManager {
     /// since those fields are stripped at turn time. Skill context/activation/removal
     /// tokens still flow through (users can manually activate skills).
     is_local_model: bool,
+    /// H15 invariant tracking: monotonic counter bumped by `begin_turn()` at
+    /// the start of each turn-entry path (currently only
+    /// `turn_runner::execute_turn`). `set_volatile_tokens` records the
+    /// generation it ran under; `get_snapshot` + `get_detailed_snapshot`
+    /// `debug_assert!` that the volatile estimate was refreshed during the
+    /// current generation. Catches regressions where a new turn-entry path
+    /// forgets to call `set_volatile_tokens` before reading a snapshot —
+    /// the bug that H15 was filed against.
+    turn_generation: u64,
+    /// Generation during which `set_volatile_tokens` was last invoked.
+    /// Starts at `None` (never refreshed) so the first snapshot check fires
+    /// unless the turn loop has already refreshed.
+    volatile_refreshed_at_generation: Option<u64>,
 }
 
 impl ContextManager {
@@ -120,7 +133,40 @@ impl ContextManager {
             volatile_skill_removal_tokens: 0,
             volatile_job_results_tokens: 0,
             is_local_model: is_local,
+            turn_generation: 0,
+            volatile_refreshed_at_generation: None,
         }
+    }
+
+    // ── H15: per-turn volatile-token refresh invariant ───────────────────
+
+    /// Bump the turn generation counter.
+    ///
+    /// INVARIANT: every turn-entry path MUST call `begin_turn()` before any
+    /// context-shape computation, followed by `set_volatile_tokens(..)` once
+    /// the runtime's current volatile estimates are available. Snapshot
+    /// readers (`get_snapshot`, `get_detailed_snapshot`) `debug_assert!` that
+    /// the refresh happened during the current generation. Today the only
+    /// turn-entry path is `turn_runner::execute_turn`, which calls this via
+    /// `build_turn_context`. Any new entry path must do the same.
+    pub fn begin_turn(&mut self) {
+        self.turn_generation = self.turn_generation.saturating_add(1);
+        // Do NOT touch volatile_refreshed_at_generation here — the caller is
+        // contractually required to call `set_volatile_tokens` next.
+    }
+
+    /// Current turn generation. Exposed for tests; production callers should
+    /// use `begin_turn()` to advance it.
+    #[must_use]
+    pub fn turn_generation(&self) -> u64 {
+        self.turn_generation
+    }
+
+    /// `true` iff `set_volatile_tokens` has been called during the current
+    /// turn generation. Used by the debug_assert in snapshot readers.
+    #[must_use]
+    pub fn volatile_tokens_fresh_for_current_turn(&self) -> bool {
+        self.volatile_refreshed_at_generation == Some(self.turn_generation)
     }
 
     // ── Message management ──────────────────────────────────────────────
@@ -503,6 +549,11 @@ impl ContextManager {
     /// context is stripped at turn time. Callers in the turn runner already
     /// pass 0; this guard ensures the invariant holds even if a future caller
     /// forgets to check.
+    ///
+    /// H15: records the current turn generation. Paired with `begin_turn()`
+    /// and the `debug_assert` in `get_snapshot` / `get_detailed_snapshot`, a
+    /// missed refresh on a new turn-entry path panics in debug builds and
+    /// proceeds with stale estimates (logged once) in release.
     pub fn set_volatile_tokens(
         &mut self,
         skill_context: u64,
@@ -519,13 +570,19 @@ impl ContextManager {
         } else {
             job_results
         };
+        self.volatile_refreshed_at_generation = Some(self.turn_generation);
     }
 
     // ── Snapshot & validation ───────────────────────────────────────────
 
     #[must_use]
     /// Build a context snapshot with token breakdown.
+    ///
+    /// H15: `debug_assert!`s that volatile tokens were refreshed this turn
+    /// (unless the generation is 0, i.e. we're outside the turn loop — RPC
+    /// status queries, tests, etc.). See `begin_turn()` / `set_volatile_tokens`.
     pub fn get_snapshot(&self) -> ContextSnapshot {
+        self.assert_volatile_fresh_for_snapshot("get_snapshot");
         let deps = ManagerSnapshotDeps { manager: self };
         let builder = ContextSnapshotBuilder::new(deps);
         builder.build()
@@ -533,10 +590,40 @@ impl ContextManager {
 
     #[must_use]
     /// Build a detailed snapshot including per-message breakdown.
+    ///
+    /// H15: see `get_snapshot` — same invariant check applies.
     pub fn get_detailed_snapshot(&self) -> DetailedContextSnapshot {
+        self.assert_volatile_fresh_for_snapshot("get_detailed_snapshot");
         let deps = ManagerSnapshotDeps { manager: self };
         let builder = ContextSnapshotBuilder::new(deps);
         builder.build_detailed()
+    }
+
+    /// H15 invariant check: inside an active turn (generation > 0), the
+    /// snapshot readers require `set_volatile_tokens` to have run during
+    /// the current generation. Outside a turn (generation 0), snapshots
+    /// are accepted as-is — RPC context queries, resume reconstructors,
+    /// and tests construct a ContextManager and take snapshots without
+    /// ever entering the turn loop, and forcing them to set dummy
+    /// volatile values would be pure noise.
+    fn assert_volatile_fresh_for_snapshot(&self, caller: &'static str) {
+        if self.turn_generation == 0 {
+            return;
+        }
+        if !self.volatile_tokens_fresh_for_current_turn() {
+            debug_assert!(
+                false,
+                "volatile tokens not refreshed for turn generation {} before {} — missing \
+                 set_volatile_tokens on a turn-entry path? Recorded generation: {:?}",
+                self.turn_generation, caller, self.volatile_refreshed_at_generation
+            );
+            tracing::warn!(
+                generation = self.turn_generation,
+                recorded = ?self.volatile_refreshed_at_generation,
+                caller,
+                "H15: volatile tokens stale for current turn; snapshot may under/over-estimate"
+            );
+        }
     }
 
     /// Check if a new turn can be accepted.

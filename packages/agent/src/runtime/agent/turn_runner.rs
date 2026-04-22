@@ -132,6 +132,14 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     } = params;
     let turn_start = Instant::now();
 
+    // H15 INVARIANT: every turn-entry path must advance the context
+    // manager's generation counter before any snapshot readers run, then
+    // refresh volatile tokens via set_volatile_tokens (called inside
+    // build_turn_context below). If a future refactor introduces a new
+    // turn-entry path that skips set_volatile_tokens, the debug_assert
+    // inside `get_snapshot` / `get_detailed_snapshot` will fire.
+    context_manager.begin_turn();
+
     // 1. Check context capacity (compact if needed)
     match compaction
         .check_and_compact(

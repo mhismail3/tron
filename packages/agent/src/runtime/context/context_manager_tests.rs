@@ -1053,3 +1053,87 @@ fn local_window_tool_result_sizer_floor_when_tight() {
     let budget = cm.get_max_tool_result_size();
     assert_eq!(budget, 10_000, "expected MIN floor, got {budget}");
 }
+
+// ── H15: per-turn volatile-token refresh invariant ────────────────────
+
+#[test]
+fn begin_turn_advances_generation_monotonically() {
+    let mut cm = ContextManager::new(test_config());
+    assert_eq!(cm.turn_generation(), 0);
+    cm.begin_turn();
+    assert_eq!(cm.turn_generation(), 1);
+    cm.begin_turn();
+    cm.begin_turn();
+    assert_eq!(cm.turn_generation(), 3);
+}
+
+#[test]
+fn volatile_fresh_tracks_current_generation() {
+    let mut cm = ContextManager::new(test_config());
+    // Generation 0 (outside turn loop) is always "fresh enough" — snapshot
+    // readers bypass the assert when turn_generation == 0.
+    assert!(!cm.volatile_tokens_fresh_for_current_turn());
+    cm.set_volatile_tokens(0, 0, 0);
+    assert!(cm.volatile_tokens_fresh_for_current_turn());
+
+    cm.begin_turn(); // generation -> 1
+    assert!(
+        !cm.volatile_tokens_fresh_for_current_turn(),
+        "new generation invalidates the previous refresh"
+    );
+    cm.set_volatile_tokens(100, 50, 25);
+    assert!(cm.volatile_tokens_fresh_for_current_turn());
+}
+
+#[test]
+fn snapshot_outside_turn_loop_is_accepted_without_refresh() {
+    // RPC paths construct a ContextManager and read a snapshot without
+    // ever entering a turn. The debug_assert is bypassed when
+    // turn_generation == 0 so these reads don't false-positive.
+    let cm = ContextManager::new(test_config());
+    let _snap = cm.get_snapshot(); // MUST NOT panic
+    let _detailed = cm.get_detailed_snapshot(); // MUST NOT panic
+}
+
+#[test]
+fn snapshot_inside_turn_after_refresh_is_accepted() {
+    let mut cm = ContextManager::new(test_config());
+    cm.begin_turn();
+    cm.set_volatile_tokens(0, 0, 0);
+    let _snap = cm.get_snapshot(); // MUST NOT panic
+    let _detailed = cm.get_detailed_snapshot(); // MUST NOT panic
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "volatile tokens not refreshed for turn generation")]
+fn snapshot_inside_turn_without_refresh_panics_in_debug() {
+    // Simulate a buggy new turn-entry path: bumps the generation but
+    // forgets to call set_volatile_tokens before reading a snapshot.
+    let mut cm = ContextManager::new(test_config());
+    cm.begin_turn();
+    let _ = cm.get_snapshot();
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "volatile tokens not refreshed for turn generation")]
+fn detailed_snapshot_inside_turn_without_refresh_panics_in_debug() {
+    let mut cm = ContextManager::new(test_config());
+    cm.begin_turn();
+    let _ = cm.get_detailed_snapshot();
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "volatile tokens not refreshed for turn generation")]
+fn previous_turn_refresh_does_not_count_for_new_turn() {
+    // Subtle regression: a single `set_volatile_tokens` in turn N does not
+    // satisfy turn N+1's invariant. Each turn must refresh independently.
+    let mut cm = ContextManager::new(test_config());
+    cm.begin_turn();
+    cm.set_volatile_tokens(10, 20, 30);
+    let _ = cm.get_snapshot(); // turn 1 — OK
+    cm.begin_turn(); // turn 2 without refresh
+    let _ = cm.get_snapshot(); // should panic
+}
