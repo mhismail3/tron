@@ -54,28 +54,26 @@ struct WorkspaceSelector: View {
                         .foregroundStyle(.tronEmerald)
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button {
-                            showHidden.toggle()
-                        } label: {
-                            Image(systemName: showHidden ? "eye" : "eye.slash")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(showHidden ? .tronEmerald : .tronEmerald.opacity(0.4))
-                                .contentTransition(.symbolEffect(.replace.downUp))
-                        }
-                        .sensoryFeedback(.selection, trigger: showHidden)
-
-                        Button {
-                            selectedPath = currentPath
-                            dismiss()
-                        } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                        }
-                        .disabled(currentPath.isEmpty)
-                        .foregroundStyle(currentPath.isEmpty ? Color.tronOverlay(0.3) : .tronEmerald)
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showHidden.toggle()
+                    } label: {
+                        Image(systemName: showHidden ? "eye" : "eye.slash")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronEmerald)
+                            .contentTransition(.symbolEffect(.replace.downUp))
                     }
+                    .sensoryFeedback(.selection, trigger: showHidden)
+
+                    Button {
+                        selectedPath = currentPath
+                        dismiss()
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                    }
+                    .disabled(currentPath.isEmpty)
+                    .foregroundStyle(currentPath.isEmpty ? Color.tronOverlay(0.3) : .tronEmerald)
                 }
             }
             .task {
