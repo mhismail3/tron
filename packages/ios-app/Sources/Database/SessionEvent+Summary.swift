@@ -161,13 +161,20 @@ extension SessionEvent {
             return "Skill deactivated"
 
         case .skillsCleared:
+            // Summary strings mirror the transformer's mode semantics in
+            // `Core/Events/Payloads/ExtendedPayloads.swift`: a missing field
+            // is legacy back-compat → AskUser ("re-activate?"), an unknown
+            // string is forward-compat the transformer rejects → generic
+            // summary. Keep these in sync or list views will disagree with
+            // the chat view.
             let count = payload.stringArray("clearedSkills")?.count ?? 0
-            let mode = payload.string("mode") ?? "askUser"
-            switch mode {
+            switch payload.string("mode") {
+            case nil, "askUser":
+                return "Skills cleared — re-activate? (\(count))"
             case "clearAll":
                 return "Skills cleared (\(count))"
             default:
-                return "Skills cleared — re-activate? (\(count))"
+                return "Skills cleared (\(count))"
             }
 
         case .sessionBranch:

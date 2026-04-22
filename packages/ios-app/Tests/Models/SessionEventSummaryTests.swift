@@ -220,4 +220,65 @@ final class SessionEventSummaryTests: XCTestCase {
         ])
         XCTAssertEqual(event.summary, "TIMEOUT: Request timed out")
     }
+
+    // MARK: - Skills Cleared (M6)
+
+    /// AskUser summary promises re-activation. Must track the transformer's
+    /// render mode in `Core/Events/Payloads/ExtendedPayloads.swift` and the
+    /// view wiring in `Views/MessageBubble/NotificationViews.swift`.
+    func testSkillsCleared_askUser_summary() {
+        let event = makeEvent(type: "skills.cleared", payload: [
+            "clearedSkills": AnyCodable(["a", "b"]),
+            "reason": AnyCodable("compaction"),
+            "mode": AnyCodable("askUser"),
+        ])
+        XCTAssertEqual(event.summary, "Skills cleared — re-activate? (2)")
+    }
+
+    /// ClearAll summary is informational — no re-activate suffix because
+    /// the banner view does not expose chips.
+    func testSkillsCleared_clearAll_summary() {
+        let event = makeEvent(type: "skills.cleared", payload: [
+            "clearedSkills": AnyCodable(["x", "y", "z"]),
+            "reason": AnyCodable("compaction"),
+            "mode": AnyCodable("clearAll"),
+        ])
+        XCTAssertEqual(event.summary, "Skills cleared (3)")
+    }
+
+    /// Missing mode (pre-M6 on-disk events) treats as AskUser — mirrors the
+    /// back-compat default in `SkillsClearedPayload.init?(from:)`.
+    func testSkillsCleared_missingMode_legacyAskUserSummary() {
+        let event = makeEvent(type: "skills.cleared", payload: [
+            "clearedSkills": AnyCodable(["solo"]),
+            "reason": AnyCodable("compaction"),
+        ])
+        XCTAssertEqual(event.summary, "Skills cleared — re-activate? (1)")
+    }
+
+    /// Unknown mode string produces a generic informational summary.
+    /// The chat transformer drops the event entirely under this shape
+    /// (see `testTransformSkillsClearedUnknownModeReturnsNil`); the
+    /// summary path has no way to "drop" a list row, so it renders
+    /// a neutral description without the interactive "re-activate?"
+    /// affordance (which would be a UX lie).
+    func testSkillsCleared_unknownMode_genericSummary() {
+        let event = makeEvent(type: "skills.cleared", payload: [
+            "clearedSkills": AnyCodable(["p", "q"]),
+            "reason": AnyCodable("compaction"),
+            "mode": AnyCodable("someFutureMode"),
+        ])
+        XCTAssertEqual(event.summary, "Skills cleared (2)")
+    }
+
+    /// Missing clearedSkills renders count of 0 — matches the defensive
+    /// default in the summary extension. Transformer drops this event in
+    /// chat; summary only surfaces in list views, so the zero-count render
+    /// is acceptable.
+    func testSkillsCleared_missingSkills_zeroCount() {
+        let event = makeEvent(type: "skills.cleared", payload: [
+            "mode": AnyCodable("askUser"),
+        ])
+        XCTAssertEqual(event.summary, "Skills cleared — re-activate? (0)")
+    }
 }

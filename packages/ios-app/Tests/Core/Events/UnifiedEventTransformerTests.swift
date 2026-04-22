@@ -2504,12 +2504,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertNil(message, "Missing clearedSkills must not produce a ChatMessage")
     }
 
-    /// Forward-compat: unknown `mode` strings (introduced server-side ahead of
-    /// iOS) fall back to the legacy default (`askUser`) instead of dropping
-    /// the event. Keeps the picker appearing when a future mode value is
-    /// emitted but not yet understood — erring on the side of surfacing the
-    /// prompt rather than hiding it.
-    func testTransformSkillsClearedUnknownModeFallsBackToAskUser() {
+    /// Forward-compat: unknown `mode` strings (introduced server-side ahead
+    /// of iOS) must cause the transformer to drop the event. Mirrors Rust's
+    /// `skills_cleared_mode_rejects_unknown_variant` test — if a future mode
+    /// value is emitted but not yet understood, dropping the event is
+    /// preferable to silently mis-rendering it as an interactive picker.
+    /// The user will instead see no pill until the iOS build catches up,
+    /// which matches the informational-event safety property.
+    func testTransformSkillsClearedUnknownModeReturnsNil() {
         let event = rawEvent(
             type: "skills.cleared",
             payload: [
@@ -2521,13 +2523,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         let message = UnifiedEventTransformer.transformPersistedEvent(event)
 
-        XCTAssertNotNil(message)
-        guard case .systemEvent(let systemEvent) = message?.content,
-              case .skillsCleared(_, let mode) = systemEvent else {
-            XCTFail("Expected .skillsCleared system event")
-            return
-        }
-        XCTAssertEqual(mode, .askUser)
+        XCTAssertNil(message, "Unknown mode must drop the event, matching Rust decoder")
     }
 
     /// SessionEvent overload: reconstruction uses the same handler path as

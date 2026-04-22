@@ -198,18 +198,10 @@ struct ContextClearedPayload {
 /// - `.askUser`: interactive picker — each cleared skill becomes a tappable
 ///   chip that re-adds it via the `skill.activate` RPC.
 ///
-/// Defaults to `.askUser` on decode so pre-M6 on-disk events (which lacked
-/// the `mode` field and were only emitted under AskUser) preserve their
-/// original semantics. Wire format is lowerCamelCase (`"clearAll"` /
-/// `"askUser"`).
+/// Wire format is lowerCamelCase (`"clearAll"` / `"askUser"`).
 enum SkillsClearedMode: String, Codable, Equatable, Hashable {
     case clearAll
     case askUser
-
-    /// Back-compat default for pre-M6 events that lacked the `mode` field.
-    /// Those events only existed under the AskUser policy, so decoding a
-    /// missing discriminator as `.askUser` preserves the original render.
-    static let legacyDefault: SkillsClearedMode = .askUser
 }
 
 /// Payload for `skills.cleared` event.
@@ -225,8 +217,7 @@ struct SkillsClearedPayload {
     let clearedSkills: [String]
     /// Always `"compaction"` today. Reserved for future reasons.
     let reason: String
-    /// Render mode — see `SkillsClearedMode`. Defaults to `.askUser` for
-    /// pre-M6 payloads that omitted this field.
+    /// Render mode — see `SkillsClearedMode`.
     let mode: SkillsClearedMode
 
     init?(from payload: [String: AnyCodable]) {
@@ -235,14 +226,22 @@ struct SkillsClearedPayload {
         }
         self.clearedSkills = clearedSkills
         self.reason = payload.string("reason") ?? "compaction"
-        if let raw = payload.string("mode"), let mode = SkillsClearedMode(rawValue: raw) {
+        // Mode decoding mirrors Rust's serde contract in
+        // `events/types/payloads/skill.rs`:
+        //  * Missing field → `.askUser` (back-compat for pre-M6 on-disk events
+        //    that only existed under the AskUser policy; Rust achieves the
+        //    same via `#[serde(default)]` + `impl Default`).
+        //  * Present but unknown string → return nil, dropping the event.
+        //    Rust's `serde_json::from_value::<SkillsClearedPayload>(...)`
+        //    errors on unknown variants (see `skills_cleared_mode_rejects_
+        //    unknown_variant` in skill.rs). Silently rendering a future mode
+        //    as `.askUser` would mis-render an informational event as an
+        //    interactive picker, so the two decoders must agree.
+        if let raw = payload.string("mode") {
+            guard let mode = SkillsClearedMode(rawValue: raw) else { return nil }
             self.mode = mode
         } else {
-            // Missing or unknown mode → legacy default. Unknown strings are
-            // treated as legacy to mirror the server's `#[serde(default)]`
-            // semantics; we do NOT want to drop the event just because a
-            // new mode was added on the server but not yet here.
-            self.mode = .legacyDefault
+            self.mode = .askUser
         }
     }
 }

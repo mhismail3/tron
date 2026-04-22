@@ -260,10 +260,13 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertEqual(mode, .clearAll)
     }
 
-    // MARK: - SkillsClearedMode back-compat (M6)
+    // MARK: - SkillsClearedMode decoder semantics (M6)
 
     /// Decoding a mode-less SkillsClearedPayload (legacy on-disk events) must
-    /// fall back to `askUser` — mirrors Rust `#[serde(default)]`.
+    /// fall back to `askUser` — mirrors Rust `#[serde(default)]` +
+    /// `impl Default for SkillsClearedMode`. Pre-M6 events only ever existed
+    /// under the AskUser policy, so rendering them as an interactive picker
+    /// preserves the original UX.
     func testSkillsClearedPayloadLegacyMissingModeDefaultsAskUser() {
         let payload: [String: AnyCodable] = [
             "clearedSkills": AnyCodable(["x"]),
@@ -272,20 +275,22 @@ final class NotificationPillTests: XCTestCase {
         let parsed = SkillsClearedPayload(from: payload)
         XCTAssertNotNil(parsed)
         XCTAssertEqual(parsed?.mode, .askUser)
-        XCTAssertEqual(parsed?.mode, SkillsClearedMode.legacyDefault)
     }
 
-    /// Decoding with an unknown mode string does NOT reject — falls back to
-    /// legacy default so forward-compat with server-added modes keeps the
-    /// picker visible rather than silently dropping the event.
-    func testSkillsClearedPayloadUnknownModeFallsBackToAskUser() {
+    /// Decoding with an unknown mode string must return nil, dropping the
+    /// event. Mirrors Rust's `serde_json::from_value::<SkillsClearedPayload>`
+    /// which errors on unknown variants (see
+    /// `skills_cleared_mode_rejects_unknown_variant` in skill.rs). Silently
+    /// rendering a future server mode as `.askUser` would mis-render an
+    /// informational event as an interactive picker.
+    func testSkillsClearedPayloadUnknownModeReturnsNil() {
         let payload: [String: AnyCodable] = [
             "clearedSkills": AnyCodable(["x"]),
             "reason": AnyCodable("compaction"),
             "mode": AnyCodable("someNewModeV2")
         ]
         let parsed = SkillsClearedPayload(from: payload)
-        XCTAssertEqual(parsed?.mode, .askUser)
+        XCTAssertNil(parsed)
     }
 
     /// Missing `clearedSkills` fails parse entirely — server never emits this
