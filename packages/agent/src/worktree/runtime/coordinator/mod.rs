@@ -103,6 +103,15 @@ pub(super) struct CoordinatorState {
     /// `finalize_session` is running in that repo. Keyed by canonical
     /// `repo_root`. All other per-session ops run freely in parallel.
     pub(super) repo_locks: HashMap<PathBuf, Arc<AsyncMutex<()>>>,
+    /// Per-main-repo async mutex serializing `git worktree add` calls
+    /// against the same main repository. Different from `repo_locks`:
+    /// this one is held *only* for the duration of the git command, is
+    /// never broadcast, and guards against the macOS-specific metadata
+    /// race where two concurrent `worktree add` invocations see each
+    /// other's in-progress `.git/worktrees/<id>/commondir` as missing.
+    /// Keyed by canonical main `repo_root` so parallel creates for the
+    /// same repo serialize, while different repos still parallelize.
+    pub(super) worktree_add_locks: HashMap<PathBuf, Arc<AsyncMutex<()>>>,
 }
 
 impl CoordinatorState {
@@ -233,6 +242,22 @@ impl WorktreeCoordinator {
             state: Mutex::new(CoordinatorState::default()),
             session_acquire_locks: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Return the per-main-repo async mutex used to serialize `git worktree
+    /// add` calls. Creates the entry lazily on first use. Canonicalises the
+    /// path so distinct referents to the same repo share the same mutex.
+    ///
+    /// Held across a single `git worktree add` invocation. Different repos
+    /// get different mutexes and never block each other.
+    pub(super) fn worktree_add_mutex(&self, repo_root: &std::path::Path) -> Arc<AsyncMutex<()>> {
+        let key = std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+        let mut state = self.state.lock();
+        state
+            .worktree_add_locks
+            .entry(key)
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone()
     }
 
     /// Return the per-session async mutex for `session_id`, creating it lazily.

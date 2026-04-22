@@ -100,6 +100,21 @@ impl WorktreeCoordinator {
             return Ok(AcquireResult::Deferred(DeferralReason::EmptyRepository));
         }
 
+        // Serialize `git worktree add` calls targeting the same main repo.
+        // On macOS, two concurrent invocations see each other's in-progress
+        // `.git/worktrees/<id>/commondir` file missing and fail with
+        // "fatal: failed to read .git/worktrees/<other>/commondir". Holding
+        // a per-repo mutex only for the duration of the git command is
+        // enough to eliminate the race without blocking unrelated repos.
+        let add_lock_root = self
+            .git
+            .repo_root(working_dir)
+            .await
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| working_dir.to_path_buf());
+        let add_mutex = self.worktree_add_mutex(&add_lock_root);
+        let _add_guard = add_mutex.lock().await;
+
         let info =
             crate::worktree::lifecycle::create(session_id, working_dir, &self.config, &self.git).await?;
 
