@@ -1,23 +1,20 @@
 //! API provider settings.
 //!
-//! Configuration for LLM provider endpoints. Cloud providers (Anthropic, `OpenAI`,
-//! Google) have OAuth URLs, client IDs, and scopes. Local providers (Ollama) only
-//! need a base URL.
+//! Configuration for LLM provider endpoints. Cloud providers (Anthropic,
+//! `OpenAI`) have OAuth URLs, client IDs, and scopes. Local providers
+//! (Ollama) only need a base URL.
 
 use serde::{Deserialize, Serialize};
 
 /// Container for all API provider settings.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ApiSettings {
     /// Anthropic/Claude API settings.
     pub anthropic: AnthropicApiSettings,
     /// `OpenAI` Codex API settings (optional — absent if not configured).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub openai_codex: Option<OpenAiCodexApiSettings>,
-    /// Google Gemini API settings (legacy — kept for serde compatibility, never read).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub google: Option<serde_json::Value>,
     /// `MiniMax` API settings (optional — absent if not configured).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minimax: Option<MiniMaxApiSettings>,
@@ -185,7 +182,6 @@ mod tests {
     fn api_defaults() {
         let api = ApiSettings::default();
         assert!(api.openai_codex.is_none());
-        assert!(api.google.is_none());
         assert_eq!(
             api.anthropic.client_id,
             "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
@@ -225,12 +221,34 @@ mod tests {
         assert_eq!(back, ReasoningEffort::Xhigh);
     }
 
+    /// R1: legacy `google` field was removed and `deny_unknown_fields` was
+    /// added — any settings.json that still carries `google: {...}` must
+    /// fail to load with an error naming the unknown field.
     #[test]
-    fn google_settings_not_in_api_settings() {
-        // GoogleApiSettings was removed — the `google` field on ApiSettings
-        // is kept as Option<serde_json::Value> for backward compat only
-        let api = ApiSettings::default();
-        assert!(api.google.is_none());
+    fn google_field_rejected_on_load() {
+        let json = serde_json::json!({
+            "anthropic": {},
+            "google": {
+                "clientId": "ignored"
+            }
+        });
+        let err = serde_json::from_value::<ApiSettings>(json).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("google"),
+            "error should name the unknown `google` field, got: {msg}"
+        );
+    }
+
+    /// Companion to `google_field_rejected_on_load`: totally-unknown fields
+    /// also fail, guarding against future back-compat shims sneaking in.
+    #[test]
+    fn unknown_provider_field_rejected() {
+        let json = serde_json::json!({
+            "anthropic": {},
+            "someFutureProvider": {}
+        });
+        assert!(serde_json::from_value::<ApiSettings>(json).is_err());
     }
 
     #[test]
@@ -322,7 +340,6 @@ mod tests {
         let api = ApiSettings::default();
         let json = serde_json::to_value(&api).unwrap();
         assert!(json.get("openaiCodex").is_none());
-        assert!(json.get("google").is_none());
         assert!(json.get("anthropic").is_some());
     }
 
