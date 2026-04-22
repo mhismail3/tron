@@ -518,6 +518,12 @@ async fn init_services(
     // Wire run-state probe so D4 notification routing can query parent
     // run state server-side (replaces iOS-side agentPhase check).
     subagent_manager.set_run_state_probe(orchestrator.run_state_probe());
+    // Wire skill registry so subagents spawned with `skills: [...]`
+    // honor each skill's frontmatter `deniedTools` / `allowedTools`
+    // via hard tool-registry removal. Without this, subagent skill
+    // restrictions would silently no-op (see
+    // `SubagentManager::compute_denied_tools`).
+    subagent_manager.set_skill_registry(skill_registry.clone());
 
     // Unified job manager (processes + subagents)
     let subagent_ops: Arc<dyn tron::tools::traits::SubagentOps> = subagent_manager.clone();

@@ -161,6 +161,12 @@ pub struct SubagentManager {
     >,
     /// Tracked subagents: `child_session_id` → `TrackedSubagent`.
     subagents: DashMap<String, Arc<TrackedSubagent>>,
+    /// Skill registry used to resolve `SubagentConfig.skills` names to
+    /// metadata so frontmatter `deniedTools` / `allowedTools` can be
+    /// enforced on the spawned child. INVARIANT: if unset, `skills` on a
+    /// `SubagentConfig` are silently ignored (documented as a wiring
+    /// pitfall — see `main.rs::build_services` for the canonical setup).
+    skill_registry: std::sync::OnceLock<Arc<parking_lot::RwLock<crate::skills::registry::SkillRegistry>>>,
 }
 
 impl SubagentManager {
@@ -185,6 +191,7 @@ impl SubagentManager {
             self_ref: std::sync::OnceLock::new(),
             run_state_probe: std::sync::OnceLock::new(),
             subagents: DashMap::new(),
+            skill_registry: std::sync::OnceLock::new(),
         }
     }
 
@@ -226,6 +233,57 @@ impl SubagentManager {
     /// Set the tool factory (breaks circular dependency with tool registry).
     pub fn set_tool_factory(&self, factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>) {
         let _ = self.tool_factory.set(factory);
+    }
+
+    /// Wire the skill registry so that `SubagentConfig.skills` names can be
+    /// resolved to frontmatter-derived tool denials at spawn time.
+    ///
+    /// INVARIANT: If this setter is not called, `SubagentConfig.skills` is
+    /// silently no-op'd (skills contribute no tool denials). This matches
+    /// the `Option<SkillRegistry>` contract in [`compute_denied_tools`] and
+    /// preserves legacy behavior for callers that pre-date skill wiring.
+    pub fn set_skill_registry(
+        &self,
+        registry: Arc<parking_lot::RwLock<crate::skills::registry::SkillRegistry>>,
+    ) {
+        let _ = self.skill_registry.set(registry);
+    }
+
+    /// Compute the full `denied_tools` list for a spawned subagent by
+    /// unioning explicit denials (from the LLM's `deniedTools` param) with
+    /// any denials implied by `skills[*]` frontmatter (`deniedTools` /
+    /// inverted `allowedTools`).
+    ///
+    /// Unknown skill names are silently skipped — the LLM may have
+    /// hallucinated one, and we should not fail the spawn for that.
+    /// Duplicates are deduplicated automatically (order is not preserved).
+    pub(crate) fn compute_denied_tools(
+        &self,
+        explicit_denied: &[String],
+        skills: Option<&[String]>,
+        all_tool_names: &[String],
+    ) -> Vec<String> {
+        let mut denied: std::collections::HashSet<String> =
+            explicit_denied.iter().cloned().collect();
+
+        if let (Some(skill_names), Some(registry_lock)) = (skills, self.skill_registry.get()) {
+            let registry = registry_lock.read();
+            for name in skill_names {
+                let Some(meta) = registry.get(name) else {
+                    continue;
+                };
+                if let Some(cfg) = crate::skills::denials::skill_frontmatter_to_denials(
+                    &meta.frontmatter,
+                    all_tool_names,
+                ) {
+                    for tool in cfg.denied_tools {
+                        let _ = denied.insert(tool);
+                    }
+                }
+            }
+        }
+
+        denied.into_iter().collect()
     }
 
     /// Spawn a system subsession for programmatic tasks (hooks, compaction, memory).
@@ -404,6 +462,25 @@ impl SubagentSpawner for SubagentManager {
             message: "SubagentManager tool factory not initialized".into(),
         })?;
 
+        // Build the initial registry once so we can observe the full tool
+        // universe (for allow-list inversion) before `spawn_tool_agent_task`
+        // mutates it via `AgentFactory::create_agent`.
+        let child_registry = tool_factory();
+        let all_tool_names: Vec<String> = child_registry.names();
+
+        // INVARIANT: subagent denied_tools = union(explicit_deniedTools,
+        // each skill's frontmatter denials). Enforced by registry removal
+        // inside `AgentFactory::create_agent`. Without this merge, skills
+        // with `deniedTools: [...]` or `allowedTools: [...]` frontmatter
+        // are honored only as soft XML hints on the main agent but leak
+        // into subagents that supposedly use them — the exact risk
+        // `skill_frontmatter_to_denials` exists to prevent.
+        let merged_denied_tools = self.compute_denied_tools(
+            &config.denied_tools,
+            config.skills.as_deref(),
+            &all_tool_names,
+        );
+
         let model = config
             .model
             .as_deref()
@@ -511,8 +588,8 @@ impl SubagentSpawner for SubagentManager {
             blocking_timeout_ms: config.blocking_timeout_ms,
             tracker: tracker.clone(),
             cancel,
-            tools: tool_factory(),
-            denied_tools: config.denied_tools.clone(),
+            tools: child_registry,
+            denied_tools: merged_denied_tools,
             run_state_probe: self.probe_clone(),
             spawn_type: SpawnType::ToolAgent.as_str().to_owned(),
         });
