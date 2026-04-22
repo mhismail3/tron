@@ -1034,4 +1034,183 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("invalid method"));
     }
+
+    // ── H18: retry re-reads job.enabled per iteration ───────────────
+    //
+    // Regression coverage for the plan-H18 fix. The production path
+    // (execute_with_retries, ~line 200) re-queries is_job_enabled from
+    // the DB at the top of every retry iteration so a mid-retry
+    // `jobs.setEnabled(false)` RPC causes the next attempt to abort
+    // with Cancelled/`"job disabled during retry"` rather than Failed.
+
+    fn insert_enabled_job_row(pool: &ConnectionPool, job_id: &str, enabled: bool) {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO cron_jobs (id, name, schedule_json, payload_json, enabled)
+             VALUES (?1, 'T', '{}', '{}', ?2)",
+            rusqlite::params![job_id, enabled],
+        )
+        .unwrap();
+    }
+
+    fn set_job_enabled(pool: &ConnectionPool, job_id: &str, enabled: bool) {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "UPDATE cron_jobs SET enabled = ?1 WHERE id = ?2",
+            rusqlite::params![enabled, job_id],
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn disable_between_retries_aborts_cleanly() {
+        // Job always fails; max_retries allows several attempts. Before
+        // execute_with_retries spins up, the row is enabled. Immediately
+        // after the first attempt returns, we flip it to disabled. The
+        // next iteration's pre-check (is_job_enabled) must short-circuit
+        // to RunStatus::Cancelled rather than continuing to retry.
+        let deps = make_test_deps();
+        let mut job = make_shell_job("exit 1");
+        job.id = "cron_disable_between".into();
+        job.max_retries = 5;
+        // Fast failure (exit 1) so we don't need long sleeps.
+        insert_enabled_job_row(&deps.pool, &job.id, true);
+
+        // Flip the row to disabled from a concurrent task. The first
+        // attempt takes a few ms; by the time the loop wakes for the
+        // second iteration, the row is already disabled.
+        let pool = deps.pool.clone();
+        let job_id = job.id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            set_job_enabled(&pool, &job_id, false);
+        });
+
+        let run = execute_with_retries(
+            &job,
+            &deps,
+            "run_h18_a",
+            chrono::Utc::now(),
+            chrono::Utc::now,
+            CancellationToken::new(),
+        )
+        .await;
+
+        assert_eq!(
+            run.status,
+            RunStatus::Cancelled,
+            "disabled mid-retry must yield Cancelled, not Failed/TimedOut: {run:?}"
+        );
+        assert_eq!(
+            run.error.as_deref(),
+            Some("job disabled during retry"),
+            "error distinguishes this from shutdown cancel: {run:?}"
+        );
+        // Must have aborted BEFORE exhausting max_retries. Exact attempt
+        // depends on backoff timing; what matters is we're below the cap.
+        assert!(
+            run.attempt < job.max_retries,
+            "aborted before exhaustion: attempt={} max={}",
+            run.attempt,
+            job.max_retries
+        );
+    }
+
+    #[tokio::test]
+    async fn abort_status_distinct_from_failure() {
+        // Two runs of the same failing command: one where the job stays
+        // enabled and exhausts retries (Failed), one where the job is
+        // disabled after the first attempt (Cancelled). Pins the
+        // abort-vs-fail distinction the plan calls out.
+        let deps = make_test_deps();
+
+        // Run A: stays enabled, exhausts retries → Failed
+        let mut job_a = make_shell_job("exit 1");
+        job_a.id = "cron_abort_a".into();
+        job_a.max_retries = 1;
+        insert_enabled_job_row(&deps.pool, &job_a.id, true);
+        let a = execute_with_retries(
+            &job_a,
+            &deps,
+            "run_h18_fail",
+            chrono::Utc::now(),
+            chrono::Utc::now,
+            CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(a.status, RunStatus::Failed, "enabled run exhausts → Failed");
+
+        // Run B: disabled mid-retry → Cancelled.
+        let mut job_b = make_shell_job("exit 1");
+        job_b.id = "cron_abort_b".into();
+        job_b.max_retries = 5;
+        insert_enabled_job_row(&deps.pool, &job_b.id, true);
+        let pool_disable = deps.pool.clone();
+        let job_id = job_b.id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            set_job_enabled(&pool_disable, &job_id, false);
+        });
+        let b = execute_with_retries(
+            &job_b,
+            &deps,
+            "run_h18_cancel",
+            chrono::Utc::now(),
+            chrono::Utc::now,
+            CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(b.status, RunStatus::Cancelled, "disabled run → Cancelled");
+
+        assert_ne!(
+            a.status, b.status,
+            "Cancelled and Failed must remain distinct"
+        );
+    }
+
+    #[tokio::test]
+    async fn disable_during_attempt_completes_attempt_then_aborts() {
+        // If the job is flipped to disabled WHILE attempt 0 is running,
+        // the current attempt is NOT interrupted (intentional: tools
+        // and subagent turns often have side effects; we don't kill
+        // them mid-run). Instead, the retry-loop pre-check on the NEXT
+        // iteration short-circuits to Cancelled. If the attempt
+        // happens to succeed, status is Completed — the attempt wins.
+        let deps = make_test_deps();
+        let mut job = make_shell_job("sleep 0.2; exit 1");
+        job.id = "cron_during_attempt".into();
+        job.max_retries = 5;
+        insert_enabled_job_row(&deps.pool, &job.id, true);
+
+        // Flip to disabled DURING attempt 0 (the command sleeps 200ms).
+        let pool_disable = deps.pool.clone();
+        let job_id = job.id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            set_job_enabled(&pool_disable, &job_id, false);
+        });
+
+        let run = execute_with_retries(
+            &job,
+            &deps,
+            "run_h18_during",
+            chrono::Utc::now(),
+            chrono::Utc::now,
+            CancellationToken::new(),
+        )
+        .await;
+
+        // The failing attempt completes (exit 1), then the retry-loop
+        // pre-check sees disabled and returns Cancelled.
+        assert_eq!(
+            run.status,
+            RunStatus::Cancelled,
+            "attempt ran to completion, next iteration aborted: {run:?}"
+        );
+        assert_eq!(run.error.as_deref(), Some("job disabled during retry"));
+        assert!(
+            run.attempt >= 1,
+            "must have completed at least attempt 0 before aborting: {run:?}"
+        );
+    }
 }
