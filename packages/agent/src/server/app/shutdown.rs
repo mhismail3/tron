@@ -33,7 +33,7 @@ use tracing::{info, warn};
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 const ABORT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 /// Per-hook budget so one slow subsystem can't starve the rest.
-/// Shorter than DEFAULT_SHUTDOWN_TIMEOUT/N so the full drain still
+/// Shorter than `DEFAULT_SHUTDOWN_TIMEOUT`/N so the full drain still
 /// finishes within the overall budget.
 const PER_HOOK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -68,7 +68,7 @@ pub enum ShutdownPhase {
 }
 
 impl ShutdownPhase {
-    fn as_str(&self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             Self::Agent => "agent",
             Self::Tools => "tools",
@@ -298,7 +298,7 @@ impl ShutdownCoordinator {
     /// Each hook is:
     /// - bounded by `PER_HOOK_TIMEOUT` so one slow subsystem can't block the rest
     /// - spawned on its own task so a panic terminates that task, not the coordinator
-    /// - logged with outcome (completed/timed_out/panicked)
+    /// - logged with outcome (`completed` / `timed_out` / `panicked`)
     async fn run_phase_hooks(&self) {
         let mut hooks: Vec<PhaseHook> = std::mem::take(&mut self.hooks.lock());
         if hooks.is_empty() {
