@@ -379,12 +379,10 @@ async fn init_mcp(settings: &tron::settings::TronSettings, settings_path: &std::
     let call = Arc::new(tron::mcp::call_tool::McpCallTool::new(router.clone()))
         as Arc<dyn tron::tools::traits::TronTool>;
 
-    // Register shutdown hook
-    let router_for_shutdown = router.clone();
-    let _shutdown_hook = tokio::spawn(async move {
-        let _ = tokio::signal::ctrl_c().await;
-        router_for_shutdown.write().await.shutdown_all().await;
-    });
+    // Shutdown is coordinated via `ShutdownCoordinator::register_phase_hook`
+    // in main after the server is built — see the `ShutdownPhase::Mcp`
+    // registration there. INVARIANT: there is exactly one place that drives
+    // `McpRouter::shutdown_all` and that place observes phase ordering.
 
     McpState {
         search: Some(search),
@@ -1053,6 +1051,7 @@ async fn main() -> Result<()> {
     let push_for_deploy = push_service.clone();
     let mcp = init_mcp(&settings, &settings_path).await;
     let mcp_router = mcp.router.clone();
+    let mcp_router_for_shutdown = mcp_router.clone();
     let services = init_services(event_store, &settings, &origin, push_service, mcp).await;
 
     // Phase 4: Cron, worktree, RPC context
@@ -1083,6 +1082,19 @@ async fn main() -> Result<()> {
     };
     let metrics_handle = tron::server::metrics::install_recorder();
     let server = TronServer::new(config, registry, rpc_context, metrics_handle);
+
+    // Register MCP shutdown as an ordered phase hook. Replaces the earlier
+    // standalone `ctrl_c` watcher in `init_mcp`, which raced with main's
+    // shutdown path (both could call `router.shutdown_all()` concurrently).
+    if let Some(router) = mcp_router_for_shutdown {
+        server.shutdown().register_phase_hook(
+            tron::server::shutdown::ShutdownPhase::Mcp,
+            "mcp",
+            move || async move {
+                router.write().await.shutdown_all().await;
+            },
+        );
+    }
 
     // Event bridge: orchestrator events -> WebSocket clients
     let bridge = EventBridge::new(
