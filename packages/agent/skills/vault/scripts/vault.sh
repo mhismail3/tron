@@ -1090,6 +1090,39 @@ for e in entries:
         python3 -c \"import json; entries=json.load(open('$V/index.json')); assert isinstance(entries, list)\"
     "
 
+    # 24. Key derivation matches spec (L4)
+    # Guards the documented crypto spec in SKILL.md#Cryptography:
+    #   - master key is 64 hex chars (256 bits of entropy)
+    #   - PBKDF2 iteration count is 100000 (OWASP floor)
+    #   - salt is random per-encryption (same plaintext -> different ciphertext)
+    #   - ciphertext uses openssl Salted__ framing (random salt per encryption)
+    run_test "key_derivation_matches_spec: master key + PBKDF2 params documented" bash -c "
+        # (a) master key is exactly 64 hex chars
+        key_len=\$(wc -c < '$V/.master-key' | tr -d ' ')
+        # wc counts the trailing newline from openssl rand -hex 32, so expect 65
+        [[ \"\$key_len\" == '65' ]] || { echo 'master key wrong length:' \$key_len >&2; exit 1; }
+        head -c 64 '$V/.master-key' | grep -Eq '^[0-9a-f]{64}$' || { echo 'master key not hex' >&2; exit 1; }
+
+        # (b) script pins iter=100000 — if someone lowers it silently this catches it
+        grep -q 'iter 100000' '$SCRIPT' || { echo 'PBKDF2 iteration count changed from 100000' >&2; exit 1; }
+
+        # (c) two encryptions of the same plaintext must produce different ciphertexts
+        # (proves a fresh random salt per encryption)
+        VAULT_DIR='$V' bash '$SCRIPT' set crypto-salt-a --type secret --field value=identical_plaintext >/dev/null
+        VAULT_DIR='$V' bash '$SCRIPT' set crypto-salt-b --type secret --field value=identical_plaintext >/dev/null
+        id_a=\$(python3 -c \"import json; es=json.load(open('$V/index.json')); print([e['id'] for e in es if e['name']=='crypto-salt-a'][0])\")
+        id_b=\$(python3 -c \"import json; es=json.load(open('$V/index.json')); print([e['id'] for e in es if e['name']=='crypto-salt-b'][0])\")
+        diff -q \"$V/entries/\$id_a.enc\" \"$V/entries/\$id_b.enc\" >/dev/null && { echo 'ciphertexts identical — salt not random' >&2; exit 1; } || true
+
+        # (d) ciphertext begins with openssl 'Salted__' framing (8-byte magic + 8-byte salt)
+        head -c 8 \"$V/entries/\$id_a.enc\" | grep -q 'Salted__' || { echo 'missing Salted__ framing' >&2; exit 1; }
+
+        # (e) roundtrip still works for both encryptions of identical plaintext
+        got_a=\$(VAULT_DIR='$V' bash '$SCRIPT' get crypto-salt-a --field value)
+        got_b=\$(VAULT_DIR='$V' bash '$SCRIPT' get crypto-salt-b --field value)
+        [[ \"\$got_a\" == 'identical_plaintext' && \"\$got_b\" == 'identical_plaintext' ]]
+    "
+
     echo ""
     echo "=== Results: $pass/$total passed, $fail failed ==="
 

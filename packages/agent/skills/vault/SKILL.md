@@ -191,4 +191,49 @@ Proactively offer to store credentials when:
 | Master key missing | Existing entries are unrecoverable. Warn user, back up `entries/`, then re-init |
 | Duplicate name | Use `update` to modify existing entries, not `set` |
 
+## Cryptography
+
+The vault is encrypted at rest with the following scheme. Run `vault.sh selftest` to verify the actual script matches this spec — the suite includes `key_derivation_matches_spec` which probes the implementation directly.
+
+### Master key
+
+```
+openssl rand -hex 32  →  64 hex chars (256 bits of entropy from /dev/urandom)
+```
+
+Stored at `~/.tron/workspace/vault/.master-key` with mode `0600`. A single master key protects every entry in the vault. Losing or deleting this file makes every `.enc` file unrecoverable — back it up if the secrets inside are not reproducible.
+
+The master key is the passphrase input to the per-entry key derivation below. It is NOT the AES key directly; it is a high-entropy password that gets stretched through PBKDF2 for each encryption.
+
+### Per-entry key derivation (PBKDF2)
+
+Every `set`/`update`/`rotate-key` call runs:
+
+```
+openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -pass file:.master-key
+```
+
+Which means:
+
+- **KDF:** PBKDF2-HMAC-SHA256 (openssl's default for `-pbkdf2`)
+- **Iterations:** 100 000 (OWASP floor for SHA-256 as of 2023)
+- **Salt:** 8 random bytes, generated fresh per encryption and prepended to the ciphertext (openssl `Salted__` framing)
+- **Derived material:** 48 bytes — 32-byte AES-256 key + 16-byte CBC IV
+- **Cipher:** AES-256-CBC with PKCS#7 padding
+
+Because the salt is fresh per call, encrypting the same plaintext twice produces two different ciphertexts — the regression test `key_derivation_matches_spec` asserts this.
+
+### Trust boundary
+
+The vault's security rests on two assumptions:
+
+1. **Filesystem-level access control** on `~/.tron/workspace/vault/`. An attacker who can read `.master-key` can decrypt everything. Mode `0600` + `0700` on the containing directories is the only barrier; the preflight auto-repairs permissions if they drift.
+2. **Local-only threat model** (see root README). The vault is not designed to resist an attacker with root on the machine; it is designed to resist casual inspection (e.g., the file sitting in a backup, another process reading `/tmp`, a shoulder-surfer glancing at the terminal).
+
+If those assumptions fail, the vault fails. Use a hardware-backed keystore for harder threats.
+
+### Key rotation
+
+`vault.sh rotate-key` generates a new master key and re-encrypts every `.enc` file in place. The old key is NOT retained — if the re-encryption loop fails midway, the script aborts with the old key still in place and no files modified. See `rotate_key: re-encrypt all entries, still readable` in `selftest`.
+
 ## Gotchas
