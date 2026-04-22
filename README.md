@@ -569,7 +569,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 ## Database Schema
 
-All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Migrations live under `packages/agent/src/events/sqlite/migrations/` (`v001_schema.sql` — the core event store; `v002_schema.sql` — the prompt library tables; `v003_remove_spells.sql` — strips legacy spell events; `v004_session_use_worktree.sql` — adds `sessions.use_worktree` for the per-session worktree override; `v005_sessions_use_worktree_check.sql` — enforces `use_worktree IN (0, 1, NULL)` via triggers; `v006_device_token_bundle_id.sql` — adds `device_tokens.bundle_id` so the relay can route each token to the correct APNs topic per build; `v007_device_tokens_workspace_scope.sql` — widens the `device_tokens` identity from `(device_token, platform)` to `(device_token, platform, workspace_id, bundle_id)` via a rebuilt table + `COALESCE`-nullable unique index, so the same APNs push token can register across multiple workspaces or bundles without clobbering) and are registered in `migrations/mod.rs`, which is the source of truth for schema versioning.
+All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. The schema is a single consolidated migration, `packages/agent/src/events/sqlite/migrations/v001_schema.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. There is no migration chain to replay — the project's policy is "develop against v001, delete `~/.tron/system/database/log.db` when the schema changes before release, add v002+ only after the first release." The runner verifies each applied migration with `PRAGMA foreign_key_check` and refuses to commit if any dangling reference would be left behind.
 
 ### Tables
 
@@ -582,12 +582,12 @@ All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mo
 | `blobs` | Content-addressable deduplicated storage (hash, compressed content, MIME type, ref count) |
 | `branches` | Named positions in the event tree (root + head pointer per branch) |
 | `logs` | Application logs (level, component, message, error fields, trace IDs, origin) |
-| `device_tokens` | iOS push notification tokens — identity is `(device_token, platform, workspace_id, bundle_id)` (v007 rebuild; `bundle_id` column added in v006 so the relay can send Beta-scheme tokens to the correct APNs topic; COALESCE-nullable unique index collapses NULL workspace/bundle to a single canonical row) |
+| `device_tokens` | iOS push notification tokens — identity is `(device_token, platform, workspace_id, bundle_id)` (COALESCE-nullable unique index collapses NULL workspace/bundle to a single canonical row; `bundle_id` lets the relay send Beta-scheme tokens to the correct APNs topic) |
 | `notification_read_state` | Per-event read receipts for client notifications |
 | `cron_jobs` | Cron job definitions: schedule, payload, delivery, overlap/misfire policies, runtime state (next/last run, consecutive failures) |
 | `cron_runs` | Per-run history for cron jobs (status, started/completed timestamps, output, exit code) |
-| `prompt_history` | Deduplicated interactive-prompt history keyed by normalized text hash (use_count, first/last_used_at, char_count). Added in v002 migration. |
-| `prompt_snippets` | User-authored reusable prompt snippets (`name`, `text`, timestamps). Added in v002 migration. |
+| `prompt_history` | Deduplicated interactive-prompt history keyed by normalized text hash (use_count, first/last_used_at, char_count) |
+| `prompt_snippets` | User-authored reusable prompt snippets (`name`, `text`, timestamps) |
 
 The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. There are no FTS5 virtual tables, and there is no PARA-style task table — task management is overlaid on the event log via tools.
 

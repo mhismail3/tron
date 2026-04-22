@@ -1,11 +1,26 @@
 //! Schema migration runner for the event store database.
 //!
-//! Migrations are embedded at compile time via [`include_str!`] and executed
-//! in version order. Each migration runs inside a transaction — a failure
-//! rolls back cleanly with no partial schema state.
+//! Tron ships a single consolidated `v001_schema.sql` — no step-by-step
+//! upgrade chain, no `requires_fk_off` table rebuilds, no backward-compat
+//! machinery. A fresh DB runs v001 once and never migrates again. If the
+//! schema ever needs to evolve, add a `v002_*.sql` and a second entry in
+//! [`MIGRATIONS`]; the runner will apply any pending versions in order.
 //!
 //! The `schema_version` table tracks which migrations have been applied.
 //! Running the migrator is idempotent: already-applied versions are skipped.
+//!
+//! Each migration runs inside a single transaction — a failure rolls back
+//! cleanly with no partial schema state. After the transaction commits,
+//! `PRAGMA foreign_key_check` runs as a belt-and-suspenders safety net that
+//! would surface any dangling references left by a future rebuild-style
+//! migration before they reach production.
+//!
+//! # INVARIANT
+//! Every migration SQL file stands alone: it must bring the schema from the
+//! state at version N-1 to version N. For the consolidated v001, that means
+//! "empty DB → full schema." Editing v001 after a DB has already recorded it
+//! as applied will produce inconsistent databases in the wild — add a new
+//! migration instead.
 
 use rusqlite::Connection;
 use tracing::{debug, info};
@@ -17,73 +32,17 @@ struct Migration {
     version: u32,
     description: &'static str,
     sql: &'static str,
-    /// If true, the migration rebuilds a table that is referenced by
-    /// foreign keys from other tables. SQLite's `DROP TABLE` + `RENAME`
-    /// sequence cannot proceed while FK enforcement is on — even with
-    /// `PRAGMA defer_foreign_keys = 1`, the commit-time recheck does not
-    /// re-resolve the renamed table for referring tables. The runner must
-    /// toggle `PRAGMA foreign_keys = OFF` *outside* the transaction (per
-    /// the documented SQLite procedure, see
-    /// <https://sqlite.org/lang_altertable.html#otheralter>), run the
-    /// rebuild, run `PRAGMA foreign_key_check` to verify correctness, then
-    /// restore FK enforcement.
-    requires_fk_off: bool,
 }
 
 /// All migrations in version order.
-const MIGRATIONS: &[Migration] = &[
-    Migration {
-        version: 1,
-        description: "Complete schema — core tables, FTS, indexes, triggers",
-        sql: include_str!("v001_schema.sql"),
-        requires_fk_off: false,
-    },
-    Migration {
-        version: 2,
-        description: "Prompt Library — history and snippets",
-        sql: include_str!("v002_schema.sql"),
-        requires_fk_off: false,
-    },
-    Migration {
-        version: 3,
-        description: "Remove legacy spell.cast / spell.consumed events",
-        sql: include_str!("v003_remove_spells.sql"),
-        requires_fk_off: false,
-    },
-    Migration {
-        version: 4,
-        description: "Per-session worktree override (sessions.use_worktree)",
-        sql: include_str!("v004_session_use_worktree.sql"),
-        requires_fk_off: false,
-    },
-    Migration {
-        version: 5,
-        description: "Add CHECK (use_worktree IN (0, 1)) to sessions",
-        sql: include_str!("v005_sessions_use_worktree_check.sql"),
-        requires_fk_off: false,
-    },
-    Migration {
-        version: 6,
-        description: "Per-token APNs bundle ID (device_tokens.bundle_id)",
-        sql: include_str!("v006_device_token_bundle_id.sql"),
-        requires_fk_off: false,
-    },
-    Migration {
-        version: 7,
-        description: "Workspace+bundle-scoped device_tokens identity",
-        sql: include_str!("v007_device_tokens_workspace_scope.sql"),
-        requires_fk_off: false,
-    },
-    Migration {
-        version: 8,
-        description: "CHECK (payload OR content_blob_id non-null) on events",
-        sql: include_str!("v008_events_payload_or_blob_check.sql"),
-        // The events table is referenced by `branches(*_event_id)` and by its
-        // own `parent_id`. Rebuilding it requires FK enforcement OFF outside
-        // the rebuild transaction.
-        requires_fk_off: true,
-    },
-];
+///
+/// Today this is a single consolidated v001. Future evolution appends new
+/// entries; never edit v001's SQL after the fact.
+const MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    description: "Consolidated schema — all core tables, indexes, and CHECK constraints",
+    sql: include_str!("v001_schema.sql"),
+}];
 
 /// Result of running migrations.
 #[derive(Debug)]
@@ -102,7 +61,8 @@ pub struct MigrationResult {
 ///
 /// # Errors
 ///
-/// Returns [`EventStoreError::Migration`] if any migration SQL fails.
+/// Returns [`EventStoreError::Migration`] if any migration SQL fails or if
+/// the post-migration FK check reports any violations.
 pub fn run_migrations(conn: &Connection) -> Result<MigrationResult> {
     ensure_version_table(conn)?;
     let current = current_version(conn)?;
@@ -177,44 +137,12 @@ fn ensure_version_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Run a single migration inside a transaction, then verify no foreign-key
+/// violations were introduced. The FK check is defense-in-depth: a
+/// fresh-schema migration cannot produce violations today, but a future
+/// rebuild-style migration could, and we want that to fail loudly at the
+/// migration point rather than silently ship corruption.
 fn apply_migration(conn: &Connection, migration: &Migration) -> Result<()> {
-    // `PRAGMA foreign_keys` is a no-op inside a transaction; a rebuild
-    // migration must toggle it outside the tx boundary. We flip it here,
-    // run the migration, then flip it back regardless of success so a
-    // failed rebuild can't leave FK enforcement off for the rest of the
-    // process.
-    if migration.requires_fk_off {
-        conn.execute_batch("PRAGMA foreign_keys = OFF")
-            .map_err(|e| EventStoreError::Migration {
-                message: format!(
-                    "failed to disable FK for v{}: {e}",
-                    migration.version
-                ),
-            })?;
-    }
-
-    let result = apply_migration_inner(conn, migration);
-
-    if migration.requires_fk_off {
-        // Restore FK even on error. If this re-enable itself fails we have
-        // bigger problems, but we surface the primary error first.
-        if let Err(e) = conn.execute_batch("PRAGMA foreign_keys = ON") {
-            tracing::error!(
-                version = migration.version,
-                error = %e,
-                "failed to re-enable foreign keys after migration"
-            );
-        }
-    }
-
-    result
-}
-
-/// The body of a migration application. Runs the SQL inside a transaction
-/// and records the applied version. For rebuild migrations, also runs
-/// `PRAGMA foreign_key_check` before commit to verify the rebuild did not
-/// leave any dangling references.
-fn apply_migration_inner(conn: &Connection, migration: &Migration) -> Result<()> {
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| EventStoreError::Migration {
@@ -232,49 +160,33 @@ fn apply_migration_inner(conn: &Connection, migration: &Migration) -> Result<()>
             ),
         })?;
 
-    let _ = tx.execute(
-        "INSERT INTO schema_version (version, applied_at, description) VALUES (?1, datetime('now'), ?2)",
-        rusqlite::params![migration.version, migration.description],
-    )
-    .map_err(|e| EventStoreError::Migration {
-        message: format!("failed to record v{} in schema_version: {e}", migration.version),
-    })?;
-
-    if migration.requires_fk_off {
-        // `PRAGMA foreign_key_check` returns zero rows when all FKs are
-        // satisfied. Any row indicates the rebuild left a dangling pointer.
-        let mut stmt = tx.prepare("PRAGMA foreign_key_check").map_err(|e| {
-            EventStoreError::Migration {
-                message: format!(
-                    "failed to prepare foreign_key_check for v{}: {e}",
-                    migration.version
-                ),
-            }
+    let _inserted = tx
+        .execute(
+            "INSERT INTO schema_version (version, applied_at, description) VALUES (?1, datetime('now'), ?2)",
+            rusqlite::params![migration.version, migration.description],
+        )
+        .map_err(|e| EventStoreError::Migration {
+            message: format!(
+                "failed to record v{} in schema_version: {e}",
+                migration.version
+            ),
         })?;
-        let violations: Vec<(String, i64, String, i64)> = stmt
-            .query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })
-            .map_err(|e| EventStoreError::Migration {
-                message: format!(
-                    "failed to read foreign_key_check for v{}: {e}",
-                    migration.version
-                ),
-            })?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        if !violations.is_empty() {
-            return Err(EventStoreError::Migration {
-                message: format!(
-                    "v{} produced {} FK violations: {:?}",
-                    migration.version,
-                    violations.len(),
-                    violations
-                ),
-            });
-        }
-        // Release the prepared statement before committing.
-        drop(stmt);
+
+    // FK sanity check: zero rows ⇒ every FK is satisfied. Any row signals a
+    // dangling reference the migration left behind. This is redundant for
+    // the consolidated v001 (fresh schema has no rows to point at anything)
+    // but is the first line of defense if a future migration rebuilds a
+    // table.
+    let violations = check_foreign_keys(&tx, migration.version)?;
+    if !violations.is_empty() {
+        return Err(EventStoreError::Migration {
+            message: format!(
+                "v{} left {} foreign-key violation(s): {:?}",
+                migration.version,
+                violations.len(),
+                violations
+            ),
+        });
     }
 
     tx.commit().map_err(|e| EventStoreError::Migration {
@@ -282,6 +194,30 @@ fn apply_migration_inner(conn: &Connection, migration: &Migration) -> Result<()>
     })?;
 
     Ok(())
+}
+
+/// Run `PRAGMA foreign_key_check` and collect any violations.
+///
+/// Each violation row is `(child_table, rowid, parent_table, fk_id)`.
+fn check_foreign_keys(
+    tx: &rusqlite::Transaction<'_>,
+    version: u32,
+) -> Result<Vec<(String, i64, String, i64)>> {
+    let mut stmt =
+        tx.prepare("PRAGMA foreign_key_check")
+            .map_err(|e| EventStoreError::Migration {
+                message: format!("failed to prepare foreign_key_check for v{version}: {e}"),
+            })?;
+    let violations: Vec<(String, i64, String, i64)> = stmt
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .map_err(|e| EventStoreError::Migration {
+            message: format!("failed to read foreign_key_check for v{version}: {e}"),
+        })?
+        .filter_map(std::result::Result::ok)
+        .collect();
+    Ok(violations)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -304,14 +240,32 @@ mod tests {
         conn
     }
 
+    fn seed_workspace_and_session(conn: &Connection, ws: &str, sess: &str) {
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES (?1, ?2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            rusqlite::params![ws, format!("/tmp/{ws}")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                   created_at, last_activity_at)
+             VALUES (?1, ?2, 'claude-3', '/tmp',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            rusqlite::params![sess, ws],
+        )
+        .unwrap();
+    }
+
+    // ── Migrator mechanics ────────────────────────────────────────────────
+
     #[test]
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 8);
-        assert_eq!(result.max_version_applied, 8);
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 1);
 
-        // Verify core tables exist
         let tables: Vec<String> = conn
             .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
             .unwrap()
@@ -344,11 +298,14 @@ mod tests {
     }
 
     #[test]
-    fn run_migrations_creates_fts_tables() {
+    fn run_migrations_creates_no_fts_tables() {
+        // FTS was in the original v001 draft; consolidated schema deliberately
+        // omits it. Guard against a future reintroduction without conscious
+        // decision.
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        let tables: Vec<String> = conn
+        let fts: Vec<String> = conn
             .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%_fts'")
             .unwrap()
             .query_map([], |row| row.get(0))
@@ -356,29 +313,14 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .collect();
 
-        assert!(
-            !tables.contains(&"events_fts".to_string()),
-            "events_fts should not exist"
-        );
-        assert!(
-            !tables.contains(&"logs_fts".to_string()),
-            "logs_fts should not exist"
-        );
-        assert!(
-            !tables.contains(&"tasks_fts".to_string()),
-            "tasks_fts should not exist"
-        );
-        assert!(
-            !tables.contains(&"areas_fts".to_string()),
-            "areas_fts should not exist"
-        );
+        assert!(fts.is_empty(), "no FTS tables should exist; found: {fts:?}");
     }
 
     #[test]
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 8);
+        assert_eq!(first.applied, 1);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -396,12 +338,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 8);
+        assert_eq!(current_version(&conn).unwrap(), 1);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 8);
+        assert_eq!(latest_version(), 1);
     }
 
     #[test]
@@ -418,18 +360,22 @@ mod tests {
             .unwrap();
 
         assert_eq!(version, 1);
-        assert!(desc.contains("Complete schema"));
-
-        let (v2, desc2): (u32, String) = conn
-            .query_row(
-                "SELECT version, description FROM schema_version WHERE version = 2",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(v2, 2);
-        assert!(desc2.contains("Prompt Library"));
+        assert!(
+            desc.contains("Consolidated"),
+            "description missing expected text: {desc}"
+        );
     }
+
+    #[test]
+    fn post_migration_fk_check_accepts_empty_schema() {
+        // The safety-net FK check must be a no-op on an empty fresh schema.
+        // If this ever regresses, run_migrations() will return Err and every
+        // downstream test will fail loudly.
+        let conn = open_memory();
+        run_migrations(&conn).unwrap(); // unwrap asserts the FK check passed
+    }
+
+    // ── Index presence ────────────────────────────────────────────────────
 
     #[test]
     fn indexes_are_created() {
@@ -444,27 +390,41 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .collect();
 
-        // Spot-check key indexes
         let expected = [
+            // events
             "idx_events_session_seq",
             "idx_events_session_sequence_unique",
+            // sessions
             "idx_sessions_workspace",
             "idx_sessions_created",
-            "idx_blobs_hash",
-            "idx_branches_session",
             "idx_sessions_origin",
             "idx_sessions_source",
+            // blobs / branches / workspaces
+            "idx_blobs_hash",
+            "idx_branches_session",
+            "idx_workspaces_path",
+            // logs
             "idx_logs_ios_client_dedup",
+            // device_tokens
+            "idx_device_tokens_identity",
+            "idx_device_tokens_session",
+            "idx_device_tokens_token",
+            "idx_device_tokens_workspace",
+            // cron
             "idx_cron_jobs_enabled_next",
             "idx_cron_runs_job_started",
             "idx_cron_runs_status",
             "idx_cron_runs_created",
+            // prompt library
+            "idx_prompt_history_last_used",
+            "idx_prompt_history_use_count",
+            "idx_prompt_snippets_updated",
         ];
         for idx in &expected {
             assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
         }
 
-        // Verify removed indexes are gone (logs query indexes and most events indexes stripped)
+        // Guard against the old (pre-consolidation) noisy indexes sneaking back
         let removed = [
             "idx_logs_timestamp",
             "idx_logs_trace_id",
@@ -491,7 +451,10 @@ mod tests {
     }
 
     #[test]
-    fn triggers_are_created() {
+    fn no_triggers_exist() {
+        // Fresh schema uses inline CHECK constraints instead of BEFORE
+        // triggers (which v005 used as a workaround for "SQLite cannot ALTER
+        // ADD CHECK"). Guard against triggers creeping back.
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -503,24 +466,33 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .collect();
 
-        // No triggers should exist after cleanup
-        let removed = [
-            "events_fts_insert",
-            "events_fts_delete",
-            "areas_fts_insert",
-            "areas_fts_update",
-            "areas_fts_delete",
-            "tasks_fts_insert",
-            "tasks_fts_update",
-            "tasks_fts_delete",
-        ];
-        for trigger in &removed {
+        assert!(triggers.is_empty(), "no triggers expected; found: {triggers:?}");
+    }
+
+    #[test]
+    fn legacy_v1_tables_absent() {
+        // Confirm removed tables from prior schema revisions don't leak back
+        // through copy-paste.
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        for removed in &["projects", "areas", "tasks", "task_dependencies"] {
             assert!(
-                !triggers.contains(&trigger.to_string()),
-                "{trigger} should not exist"
+                !tables.contains(&removed.to_string()),
+                "{removed} should not exist"
             );
         }
     }
+
+    // ── events table column shape + invariants ────────────────────────────
 
     #[test]
     fn events_table_has_expected_columns() {
@@ -569,6 +541,220 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn events_check_constraint_appears_in_schema() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'events'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(
+            sql.contains("CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)"),
+            "events table missing payload/content_blob CHECK; got: {sql}"
+        );
+    }
+
+    #[test]
+    fn events_null_payload_rejected() {
+        // Belt-and-suspenders: payload is NOT NULL at the column level today,
+        // so a literal NULL payload is caught by NOT NULL first. If a future
+        // change relaxes NOT NULL, the table-level CHECK becomes the binding
+        // enforcement. The test's role is that the row is rejected, not which
+        // constraint catches it.
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        seed_workspace_and_session(&conn, "ws_1", "s1");
+
+        let err = conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload,
+                                 content_blob_id, workspace_id)
+             VALUES ('e_empty', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', NULL,
+                     NULL, 'ws_1')",
+            [],
+        );
+        assert!(err.is_err(), "NULL payload + NULL content_blob_id must be rejected");
+    }
+
+    #[test]
+    fn events_unique_session_sequence_enforced() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        seed_workspace_and_session(&conn, "ws_1", "s1");
+
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('e1', 's1', 1, 'message.user', '2026-01-01T00:00:00Z',
+                     '{\"content\":\"hello\"}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+
+        let duplicate = conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('e2', 's1', 1, 'message.assistant', '2026-01-01T00:00:00Z',
+                     '{\"content\":\"world\"}', 'ws_1')",
+            [],
+        );
+        assert!(duplicate.is_err());
+    }
+
+    #[test]
+    fn events_turn_metadata_columns_are_nullable() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+        seed_workspace_and_session(&conn, "ws_1", "s1");
+
+        // Insert event WITHOUT the denormalized columns — they should default to NULL
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('evt_1', 's1', 1, 'message.user', '2025-01-01T00:00:00Z', '{}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+
+        let (model, latency, stop, thinking, provider, cost): (
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<f64>,
+        ) = conn
+            .query_row(
+                "SELECT model, latency_ms, stop_reason, has_thinking, provider_type, cost
+                 FROM events WHERE id = 'evt_1'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+
+        assert!(model.is_none());
+        assert!(latency.is_none());
+        assert!(stop.is_none());
+        assert!(thinking.is_none());
+        assert!(provider.is_none());
+        assert!(cost.is_none());
+    }
+
+    #[test]
+    fn events_turn_metadata_columns_can_be_populated() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+        seed_workspace_and_session(&conn, "ws_1", "s1");
+
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id,
+                                 model, latency_ms, stop_reason, has_thinking, provider_type, cost)
+             VALUES ('evt_1', 's1', 1, 'message.assistant', '2025-01-01T00:00:00Z', '{}', 'ws_1',
+                     'claude-opus-4-6', 1500, 'end_turn', 1, 'anthropic', 0.015)",
+            [],
+        )
+        .unwrap();
+
+        let (model, latency, stop, thinking, provider, cost): (
+            String, i64, String, i64, String, f64,
+        ) = conn
+            .query_row(
+                "SELECT model, latency_ms, stop_reason, has_thinking, provider_type, cost
+                 FROM events WHERE id = 'evt_1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+            )
+            .unwrap();
+
+        assert_eq!(model, "claude-opus-4-6");
+        assert_eq!(latency, 1500);
+        assert_eq!(stop, "end_turn");
+        assert_eq!(thinking, 1);
+        assert_eq!(provider, "anthropic");
+        assert!((cost - 0.015).abs() < f64::EPSILON);
+    }
+
+    // ── events FK behavior (replaces v008 rebuild tests with plain invariants) ─
+
+    #[test]
+    fn events_self_referential_parent_id_fk_enforced() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+        seed_workspace_and_session(&conn, "ws_1", "s1");
+
+        // root event, then child referencing root
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('e_root', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', '{}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO events (id, session_id, parent_id, sequence, type, timestamp,
+                                 payload, workspace_id)
+             VALUES ('e_child', 's1', 'e_root', 2, 'message.assistant', '2026-01-01T00:00:01Z',
+                     '{}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+
+        // parent_id pointing at a nonexistent row is rejected
+        let err = conn.execute(
+            "INSERT INTO events (id, session_id, parent_id, sequence, type, timestamp,
+                                 payload, workspace_id)
+             VALUES ('e_bad', 's1', 'e_missing', 3, 'message.user', '2026-01-01T00:00:02Z',
+                     '{}', 'ws_1')",
+            [],
+        );
+        assert!(err.is_err(), "events.parent_id FK must reject missing id");
+    }
+
+    #[test]
+    fn branches_fk_to_events_enforced() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+        seed_workspace_and_session(&conn, "ws_1", "s1");
+
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('e1', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', '{}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO branches (id, session_id, name, root_event_id, head_event_id,
+                                   created_at, last_activity_at)
+             VALUES ('b1', 's1', 'main', 'e1', 'e1',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        let err = conn.execute(
+            "INSERT INTO branches (id, session_id, name, root_event_id, head_event_id,
+                                   created_at, last_activity_at)
+             VALUES ('b_bad', 's1', 'orphan', 'e_missing', 'e_missing',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(err.is_err(), "branches FK to events must reject missing id");
+    }
+
+    // ── sessions shape + use_worktree CHECK ───────────────────────────────
 
     #[test]
     fn sessions_table_has_expected_columns() {
@@ -623,565 +809,38 @@ mod tests {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        // sessions.origin
-        let sessions_cols: Vec<String> = conn
-            .prepare("PRAGMA table_info(sessions)")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-        assert!(
-            sessions_cols.contains(&"origin".to_string()),
-            "sessions table missing origin column"
-        );
-
-        // logs.origin
-        let logs_cols: Vec<String> = conn
-            .prepare("PRAGMA table_info(logs)")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-        assert!(
-            logs_cols.contains(&"origin".to_string()),
-            "logs table missing origin column"
-        );
+        for (table, col) in &[("sessions", "origin"), ("logs", "origin")] {
+            let cols: Vec<String> = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .filter_map(std::result::Result::ok)
+                .collect();
+            assert!(
+                cols.contains(&(*col).to_string()),
+                "{table} table missing {col} column"
+            );
+        }
     }
 
     #[test]
-    fn foreign_keys_enforced() {
+    fn sessions_workspace_fk_enforced() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        // Attempting to insert a session with non-existent workspace should fail
         let result = conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
-             VALUES ('sess_1', 'nonexistent', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                   created_at, last_activity_at)
+             VALUES ('sess_1', 'nonexistent', 'claude-3', '/tmp',
+                     '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
             [],
         );
         assert!(result.is_err());
     }
 
     #[test]
-    fn turn_metadata_columns_are_nullable() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
-             VALUES ('sess_1', 'ws_1', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        // Insert event WITHOUT new columns — they should default to NULL
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('evt_1', 'sess_1', 1, 'message.user', '2025-01-01T00:00:00Z', '{}', 'ws_1')",
-            [],
-        )
-        .unwrap();
-
-        // Verify all new columns are NULL
-        let (model, latency, stop, thinking, provider, cost): (
-            Option<String>, Option<i64>, Option<String>, Option<i64>, Option<String>, Option<f64>,
-        ) = conn
-            .query_row(
-                "SELECT model, latency_ms, stop_reason, has_thinking, provider_type, cost FROM events WHERE id = 'evt_1'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
-            )
-            .unwrap();
-
-        assert!(model.is_none());
-        assert!(latency.is_none());
-        assert!(stop.is_none());
-        assert!(thinking.is_none());
-        assert!(provider.is_none());
-        assert!(cost.is_none());
-    }
-
-    #[test]
-    fn turn_metadata_columns_can_be_populated() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
-             VALUES ('sess_1', 'ws_1', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        // Insert event WITH all new columns populated
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id,
-                                 model, latency_ms, stop_reason, has_thinking, provider_type, cost)
-             VALUES ('evt_1', 'sess_1', 1, 'message.assistant', '2025-01-01T00:00:00Z', '{}', 'ws_1',
-                     'claude-opus-4-6', 1500, 'end_turn', 1, 'anthropic', 0.015)",
-            [],
-        )
-        .unwrap();
-
-        let (model, latency, stop, thinking, provider, cost): (
-            String, i64, String, i64, String, f64,
-        ) = conn
-            .query_row(
-                "SELECT model, latency_ms, stop_reason, has_thinking, provider_type, cost FROM events WHERE id = 'evt_1'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
-            )
-            .unwrap();
-
-        assert_eq!(model, "claude-opus-4-6");
-        assert_eq!(latency, 1500);
-        assert_eq!(stop, "end_turn");
-        assert_eq!(thinking, 1);
-        assert_eq!(provider, "anthropic");
-        assert!((cost - 0.015).abs() < f64::EPSILON);
-    }
-
-    // ── Consolidated schema tests ──────────────────────────────────────
-
-    #[test]
-    fn consolidated_schema_no_v1_tables() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let tables: Vec<String> = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-
-        for removed in &["projects", "areas", "task_dependencies"] {
-            assert!(
-                !tables.contains(&removed.to_string()),
-                "{removed} should not exist"
-            );
-        }
-    }
-
-
-    #[test]
-    fn unique_session_sequence_constraint_enforced() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
-             VALUES ('sess_1', 'ws_1', 'claude-3', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('evt_1', 'sess_1', 1, 'message.user', '2025-01-01T00:00:00Z',
-                     '{\"content\": \"hello\"}', 'ws_1')",
-            [],
-        )
-        .unwrap();
-
-        let duplicate = conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('evt_2', 'sess_1', 1, 'message.assistant', '2025-01-01T00:00:00Z',
-                     '{\"content\": \"world\"}', 'ws_1')",
-            [],
-        );
-
-        assert!(duplicate.is_err());
-    }
-
-    #[test]
-    fn notification_read_state_table_exists() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let tables: Vec<String> = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-
-        assert!(
-            tables.contains(&"notification_read_state".to_string()),
-            "missing table: notification_read_state"
-        );
-    }
-
-    #[test]
-    fn notification_read_state_insert_and_query() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        let (event_id, read_at): (String, String) = conn
-            .query_row(
-                "SELECT event_id, read_at FROM notification_read_state WHERE event_id = 'evt_1'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-
-        assert_eq!(event_id, "evt_1");
-        assert_eq!(read_at, "2026-01-01T00:00:00Z");
-    }
-
-    #[test]
-    fn ios_client_dedup_index_prevents_duplicates() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message, origin)
-             VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
-            [],
-        )
-        .unwrap();
-
-        // Exact duplicate should fail
-        let dup = conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message, origin)
-             VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
-            [],
-        );
-        assert!(dup.is_err());
-
-        // INSERT OR IGNORE should succeed silently
-        conn.execute(
-            "INSERT OR IGNORE INTO logs (timestamp, level, level_num, component, message, origin)
-             VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
-            [],
-        )
-        .unwrap();
-
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    // ── v002 prompt_library tests ─────────────────────────────────────
-
-    #[test]
-    fn v002_upgrade_from_v1_preserves_existing_data() {
-        // Simulate an existing v1 database: run only v1 and insert a row.
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        let v1 = &MIGRATIONS[0];
-        apply_migration(&conn, v1).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 1);
-
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp/v1', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        // Now run the full migrator — v2 through v8 should apply.
-        let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 7);
-        assert_eq!(result.max_version_applied, 8);
-
-        // v1 data is intact.
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM workspaces WHERE id = 'ws_1'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 1);
-
-        // v2 tables exist.
-        let tables: Vec<String> = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-        assert!(tables.contains(&"prompt_history".to_string()));
-        assert!(tables.contains(&"prompt_snippets".to_string()));
-    }
-
-    #[test]
-    fn v002_prompt_history_use_count_check_rejects_zero() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let err = conn.execute(
-            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at, use_count, char_count)
-             VALUES ('p1', 'hello', 'h1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, 5)",
-            [],
-        );
-        assert!(err.is_err(), "use_count = 0 should be rejected by CHECK");
-    }
-
-    #[test]
-    fn v002_prompt_history_char_count_check_rejects_zero() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let err = conn.execute(
-            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at, use_count, char_count)
-             VALUES ('p1', 'hello', 'h1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 0)",
-            [],
-        );
-        assert!(err.is_err(), "char_count = 0 should be rejected by CHECK");
-    }
-
-    #[test]
-    fn v002_prompt_history_text_hash_unique_enforced() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at, use_count, char_count)
-             VALUES ('p1', 'hello', 'hash1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 5)",
-            [],
-        )
-        .unwrap();
-
-        let dup = conn.execute(
-            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at, use_count, char_count)
-             VALUES ('p2', 'hello again', 'hash1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 11)",
-            [],
-        );
-        assert!(dup.is_err(), "duplicate text_hash should be rejected");
-    }
-
-    #[test]
-    fn v002_prompt_snippets_name_length_check() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        // Empty name rejected
-        let err_empty = conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s1', '', 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        );
-        assert!(err_empty.is_err(), "empty snippet name should be rejected");
-
-        // 101-char name rejected
-        let long = "a".repeat(101);
-        let err_long = conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s2', ?1, 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [&long],
-        );
-        assert!(err_long.is_err(), "101-char snippet name should be rejected");
-
-        // 100-char name accepted
-        let max = "a".repeat(100);
-        conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s3', ?1, 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [&max],
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn v002_prompt_snippets_text_non_empty_check() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let err = conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s1', 'n', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        );
-        assert!(err.is_err(), "empty snippet text should be rejected");
-    }
-
-    #[test]
-    fn v002_prompt_snippets_duplicate_names_allowed() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s1', 'Shared', 'a', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s2', 'Shared', 'b', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM prompt_snippets WHERE name = 'Shared'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 2);
-    }
-
-    #[test]
-    fn v002_prompt_library_indexes_exist() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let indexes: Vec<String> = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_prompt_%'")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-
-        for idx in &[
-            "idx_prompt_history_last_used",
-            "idx_prompt_history_use_count",
-            "idx_prompt_snippets_updated",
-        ] {
-            assert!(
-                indexes.contains(&idx.to_string()),
-                "missing index: {idx}"
-            );
-        }
-    }
-
-    // ── v003 spell cleanup tests ──────────────────────────────────────
-
-    #[test]
-    fn v003_deletes_legacy_spell_events() {
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        apply_migration(&conn, &MIGRATIONS[0]).unwrap();
-        apply_migration(&conn, &MIGRATIONS[1]).unwrap();
-
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
-             VALUES ('s1', 'ws1', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('sc1','s1',1,'spell.cast','2025-01-01T00:00:00Z','{}','ws1')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('sc2','s1',2,'spell.consumed','2025-01-01T00:00:00Z','{}','ws1')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('mu1','s1',3,'message.user','2025-01-01T00:00:00Z','{}','ws1')",
-            [],
-        )
-        .unwrap();
-
-        let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 6);
-        assert_eq!(result.max_version_applied, 8);
-
-        let spell_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM events WHERE type LIKE 'spell.%'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(spell_count, 0);
-
-        let preserved: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM events WHERE id = 'mu1'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(preserved, 1);
-    }
-
-    // ── v004 use_worktree tests ───────────────────────────────────────
-
-    #[test]
-    fn v004_upgrade_from_v3_adds_use_worktree_column_and_preserves_rows() {
-        // Simulate a pre-v004 DB by running v1..v3 only.
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        for migration in &MIGRATIONS[..3] {
-            apply_migration(&conn, migration).unwrap();
-        }
-        assert_eq!(current_version(&conn).unwrap(), 3);
-
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_legacy', '/tmp/legacy', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
-             VALUES ('sess_legacy', 'ws_legacy', 'claude-3', '/tmp/legacy', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        // Upgrade.
-        let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 5);
-        assert_eq!(result.max_version_applied, 8);
-
-        // Pre-existing row gets NULL for the new column.
-        let use_worktree: Option<i64> = conn
-            .query_row(
-                "SELECT use_worktree FROM sessions WHERE id = 'sess_legacy'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(use_worktree.is_none(), "legacy row should have NULL use_worktree");
-    }
-
-    #[test]
-    fn v004_use_worktree_round_trips_true_false_null() {
+    fn sessions_use_worktree_round_trips_true_false_null() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1192,12 +851,7 @@ mod tests {
         )
         .unwrap();
 
-        // Insert three sessions with use_worktree = NULL, 1, 0.
-        for (sid, value) in &[
-            ("sess_null", "NULL"),
-            ("sess_true", "1"),
-            ("sess_false", "0"),
-        ] {
+        for (sid, value) in &[("sess_null", "NULL"), ("sess_true", "1"), ("sess_false", "0")] {
             conn.execute(
                 &format!(
                     "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
@@ -1225,10 +879,8 @@ mod tests {
         assert_eq!(false_val, Some(0));
     }
 
-    // ── v005 use_worktree trigger-based check tests ──────────────────
-
     #[test]
-    fn v005_rejects_invalid_use_worktree_on_insert() {
+    fn sessions_use_worktree_check_rejects_invalid_on_insert() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1262,11 +914,11 @@ mod tests {
                      '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 2)",
             [],
         );
-        assert!(err.is_err(), "use_worktree = 2 should be rejected on INSERT");
+        assert!(err.is_err(), "use_worktree = 2 must be rejected on INSERT");
         let msg = err.unwrap_err().to_string();
         assert!(
-            msg.contains("use_worktree must be 0, 1, or NULL"),
-            "expected explicit trigger failure, got: {msg}"
+            msg.contains("CHECK constraint failed") && msg.contains("use_worktree"),
+            "expected CHECK failure mentioning use_worktree, got: {msg}"
         );
 
         // Negative values rejected.
@@ -1277,11 +929,11 @@ mod tests {
                      '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', -1)",
             [],
         );
-        assert!(err_neg.is_err(), "use_worktree = -1 should be rejected on INSERT");
+        assert!(err_neg.is_err(), "use_worktree = -1 must be rejected on INSERT");
     }
 
     #[test]
-    fn v005_rejects_invalid_use_worktree_on_update() {
+    fn sessions_use_worktree_check_rejects_invalid_on_update() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1300,94 +952,83 @@ mod tests {
         )
         .unwrap();
 
-        // Updating to a valid value works.
+        // Valid UPDATE succeeds.
         conn.execute("UPDATE sessions SET use_worktree = 1 WHERE id = 's1'", [])
             .unwrap();
 
-        // Updating to an invalid value is rejected.
+        // Invalid UPDATE rejected; pre-existing value preserved.
         let err = conn.execute("UPDATE sessions SET use_worktree = 99 WHERE id = 's1'", []);
         assert!(err.is_err(), "use_worktree = 99 must be rejected on UPDATE");
 
-        // The row's value remains unchanged after the rejected update.
         let val: Option<i64> = conn
             .query_row("SELECT use_worktree FROM sessions WHERE id = 's1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(val, Some(1), "row should retain pre-rejection value");
     }
 
+    // ── notification_read_state ───────────────────────────────────────────
+
     #[test]
-    fn v005_preserves_existing_session_data_on_upgrade_from_v4() {
-        // Simulate a populated v4 database, then upgrade to v5. v005 only
-        // adds triggers, so every existing row is untouched.
+    fn notification_read_state_insert_and_query() {
         let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        for migration in &MIGRATIONS[..4] {
-            apply_migration(&conn, migration).unwrap();
-        }
-        assert_eq!(current_version(&conn).unwrap(), 4);
+        run_migrations(&conn).unwrap();
 
         conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp/legacy', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (
-                id, workspace_id, latest_model, working_directory,
-                created_at, last_activity_at, use_worktree,
-                event_count, total_input_tokens, total_cost, tags, source
-             ) VALUES
-                ('s1','ws_1','m','/p','2025-01-01T00:00:00Z','2025-01-01T00:00:00Z',NULL,
-                  5, 1000, 0.50, '[\"a\",\"b\"]', 'project'),
-                ('s2','ws_1','m','/p','2025-01-02T00:00:00Z','2025-01-02T00:00:00Z',1,
-                  2, 500, 0.25, '[]', 'chat'),
-                ('s3','ws_1','m','/p','2025-01-03T00:00:00Z','2025-01-03T00:00:00Z',0,
-                  0, 0, 0.0, '[\"c\"]', 'project')",
+            "INSERT INTO notification_read_state (event_id, read_at)
+             VALUES ('evt_1', '2026-01-01T00:00:00Z')",
             [],
         )
         .unwrap();
 
-        // Upgrade to v8.
-        let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 4);
-        assert_eq!(result.max_version_applied, 8);
-
-        // All three rows survive untouched.
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 3);
-
-        let s1_tags: String = conn
-            .query_row("SELECT tags FROM sessions WHERE id = 's1'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(s1_tags, "[\"a\",\"b\"]");
-
-        let s2_use_worktree: Option<i64> = conn
-            .query_row("SELECT use_worktree FROM sessions WHERE id = 's2'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(s2_use_worktree, Some(1));
-
-        // The new triggers exist.
-        let triggers: Vec<String> = conn
-            .prepare(
-                "SELECT name FROM sqlite_master WHERE type = 'trigger'
-                 AND name LIKE 'trg_sessions_use_worktree%'
-                 ORDER BY name",
+        let (event_id, read_at): (String, String) = conn
+            .query_row(
+                "SELECT event_id, read_at FROM notification_read_state WHERE event_id = 'evt_1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-        assert_eq!(
-            triggers,
-            vec![
-                "trg_sessions_use_worktree_insert".to_string(),
-                "trg_sessions_use_worktree_update".to_string()
-            ]
+            .unwrap();
+
+        assert_eq!(event_id, "evt_1");
+        assert_eq!(read_at, "2026-01-01T00:00:00Z");
+    }
+
+    // ── iOS client log dedup ──────────────────────────────────────────────
+
+    #[test]
+    fn ios_client_dedup_index_prevents_duplicates() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message, origin)
+             VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
+            [],
+        )
+        .unwrap();
+
+        let dup = conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message, origin)
+             VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
+            [],
         );
+        assert!(dup.is_err());
+
+        // INSERT OR IGNORE is idempotent.
+        conn.execute(
+            "INSERT OR IGNORE INTO logs (timestamp, level, level_num, component, message, origin)
+             VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
+            [],
+        )
+        .unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]
@@ -1395,7 +1036,7 @@ mod tests {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        // Server logs with same timestamp+component+message should be fine
+        // Server logs with matching timestamp+component+message insert freely.
         for origin in &["localhost:9847", "localhost:9846"] {
             conn.execute(
                 "INSERT INTO logs (timestamp, level, level_num, component, message, origin)
@@ -1415,10 +1056,10 @@ mod tests {
         assert_eq!(count, 2);
     }
 
-    // ── v006 bundle_id tests ──────────────────────────────────────────
+    // ── device_tokens identity (bundle_id + COALESCE UNIQUE) ──────────────
 
     #[test]
-    fn v006_adds_bundle_id_column_to_device_tokens() {
+    fn device_tokens_has_bundle_id_column() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1430,14 +1071,11 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .collect();
 
-        assert!(
-            columns.contains(&"bundle_id".to_string()),
-            "device_tokens missing bundle_id column after v006"
-        );
+        assert!(columns.contains(&"bundle_id".to_string()));
     }
 
     #[test]
-    fn v006_bundle_id_round_trips() {
+    fn device_tokens_bundle_id_round_trips() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1451,21 +1089,18 @@ mod tests {
         .unwrap();
 
         let bundle_id: Option<String> = conn
-            .query_row(
-                "SELECT bundle_id FROM device_tokens WHERE id = 'dt_1'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT bundle_id FROM device_tokens WHERE id = 'dt_1'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(bundle_id.as_deref(), Some("com.tron.mobile.beta"));
     }
 
     #[test]
-    fn v006_bundle_id_is_nullable() {
+    fn device_tokens_bundle_id_is_nullable() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        // Omit bundle_id — should default to NULL.
         conn.execute(
             "INSERT INTO device_tokens (id, device_token, platform, environment,
                                         created_at, last_used_at, is_active)
@@ -1476,80 +1111,15 @@ mod tests {
         .unwrap();
 
         let bundle_id: Option<String> = conn
-            .query_row(
-                "SELECT bundle_id FROM device_tokens WHERE id = 'dt_2'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(bundle_id.is_none(), "legacy insert should have NULL bundle_id");
-    }
-
-    // ── v007 workspace+bundle-scoped identity tests ───────────────────
-
-    /// Upgrading from v6 to v7 rebuilds the table but preserves every row
-    /// verbatim. Any tuple the old narrow UNIQUE accepted remains valid
-    /// under the new wider UNIQUE (superset), so the copy cannot fail.
-    #[test]
-    fn v007_upgrade_from_v6_preserves_existing_tokens() {
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        for migration in &MIGRATIONS[..6] {
-            apply_migration(&conn, migration).unwrap();
-        }
-        assert_eq!(current_version(&conn).unwrap(), 6);
-
-        conn.execute(
-            "INSERT INTO device_tokens (id, device_token, platform, environment, bundle_id,
-                                        created_at, last_used_at, is_active)
-             VALUES
-               ('dt_prod',   'aa', 'ios', 'production', 'com.tron.mobile',
-                '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1),
-               ('dt_beta',   'bb', 'ios', 'sandbox',    'com.tron.mobile.beta',
-                '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z', 1),
-               ('dt_legacy', 'cc', 'ios', 'production', NULL,
-                '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z', 1)",
-            [],
-        )
-        .unwrap();
-
-        let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 2);
-        assert_eq!(result.max_version_applied, 8);
-
-        // Verify every pre-existing row is intact, including the NULL bundle legacy row.
-        let rows: Vec<(String, String, Option<String>, bool)> = conn
-            .prepare(
-                "SELECT id, device_token, bundle_id, is_active
-                 FROM device_tokens ORDER BY id",
-            )
-            .unwrap()
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, i64>(3)? == 1,
-                ))
+            .query_row("SELECT bundle_id FROM device_tokens WHERE id = 'dt_2'", [], |r| {
+                r.get(0)
             })
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-
-        assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].0, "dt_beta");
-        assert_eq!(rows[0].2.as_deref(), Some("com.tron.mobile.beta"));
-        assert_eq!(rows[1].0, "dt_legacy");
-        assert!(rows[1].2.is_none());
-        assert_eq!(rows[2].0, "dt_prod");
-        assert_eq!(rows[2].2.as_deref(), Some("com.tron.mobile"));
-        assert!(rows.iter().all(|r| r.3));
+            .unwrap();
+        assert!(bundle_id.is_none());
     }
 
-    /// After v7 the wider unique allows the same (token, platform, bundle)
-    /// in two distinct workspaces.
     #[test]
-    fn v007_unique_index_allows_same_token_across_workspaces() {
+    fn device_tokens_unique_allows_same_token_across_workspaces() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1578,7 +1148,7 @@ mod tests {
         )
         .unwrap();
 
-        // Inserting a third row whose full identity collides is rejected.
+        // Full-identity duplicate (same token, same workspace, same bundle) rejected.
         let dup = conn.execute(
             "INSERT INTO device_tokens (id, device_token, workspace_id, platform, environment,
                                         bundle_id, created_at, last_used_at, is_active)
@@ -1588,16 +1158,15 @@ mod tests {
         );
         assert!(
             dup.is_err(),
-            "duplicate (token, ios, ws_1, bundle) must be rejected by v007 unique index"
+            "duplicate (token, ios, ws_1, bundle) must be rejected by UNIQUE index"
         );
     }
 
-    /// The COALESCE-widened identity index collapses NULL workspace_id and
-    /// NULL bundle_id to a single canonical key. Without COALESCE, SQLite
-    /// treats every NULL as distinct and lets unbounded duplicate legacy
-    /// rows accumulate.
+    /// COALESCE(col, '') collapses NULL to a single canonical sentinel so a
+    /// pre-workspace legacy token can't register twice as "(token, ios,
+    /// NULL, NULL)" (SQLite's native UNIQUE treats NULL as distinct).
     #[test]
-    fn v007_unique_index_collapses_null_workspace_and_bundle() {
+    fn device_tokens_unique_collapses_null_workspace_and_bundle() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1623,13 +1192,11 @@ mod tests {
         );
     }
 
-    /// v007 removes the narrow `UNIQUE(device_token, platform)` — two
-    /// registrations with the same token+platform must succeed when
-    /// workspace_id differs. Paired with
-    /// [`v007_unique_index_allows_same_token_across_workspaces`], this
-    /// guards against the old constraint accidentally lingering.
+    /// The consolidated schema must NOT carry the legacy narrow
+    /// UNIQUE(device_token, platform): two registrations with the same token
+    /// and platform but distinct workspaces must both succeed.
     #[test]
-    fn v007_old_narrow_unique_is_gone() {
+    fn device_tokens_no_narrow_unique() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1649,7 +1216,6 @@ mod tests {
             [],
         )
         .unwrap();
-        // Same token+platform, different workspace → must succeed under v7.
         conn.execute(
             "INSERT INTO device_tokens (id, device_token, workspace_id, platform, environment,
                                         created_at, last_used_at, is_active)
@@ -1657,14 +1223,11 @@ mod tests {
                      '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
             [],
         )
-        .unwrap_or_else(|e| panic!("v007 must allow same token in two workspaces: {e}"));
+        .unwrap_or_else(|e| panic!("same token in two workspaces must succeed: {e}"));
     }
 
-    /// v007 preserves the three auxiliary indexes the old schema carried.
-    /// The rebuild drops them implicitly (they follow the old table) so the
-    /// migration must explicitly recreate them.
     #[test]
-    fn v007_preserves_device_tokens_auxiliary_indexes() {
+    fn device_tokens_auxiliary_indexes_exist() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -1687,397 +1250,130 @@ mod tests {
         ] {
             assert!(
                 indexes.contains(&expected.to_string()),
-                "missing {expected} after v007; found: {indexes:?}"
+                "missing {expected}; found: {indexes:?}"
             );
         }
     }
 
+    // ── prompt library ────────────────────────────────────────────────────
+
     #[test]
-    fn v006_upgrade_from_v5_preserves_existing_tokens() {
-        // Simulate a pre-v006 DB: run v1..v5 only, insert a token, then upgrade.
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        for migration in &MIGRATIONS[..5] {
-            apply_migration(&conn, migration).unwrap();
-        }
-        assert_eq!(current_version(&conn).unwrap(), 5);
-
-        conn.execute(
-            "INSERT INTO device_tokens (id, device_token, platform, environment,
-                                        created_at, last_used_at, is_active)
-             VALUES ('dt_legacy', 'cc', 'ios', 'sandbox',
-                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
-            [],
-        )
-        .unwrap();
-
-        let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 3);
-        assert_eq!(result.max_version_applied, 8);
-
-        // Pre-existing row survives with NULL bundle_id.
-        let (token, bundle_id): (String, Option<String>) = conn
-            .query_row(
-                "SELECT device_token, bundle_id FROM device_tokens WHERE id = 'dt_legacy'",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(token, "cc");
-        assert!(bundle_id.is_none(), "legacy token should have NULL bundle_id after v006");
-    }
-
-    // ── v008 payload-or-blob check tests ──────────────────────────────
-
-    /// The CHECK constraint text must appear in the `events` CREATE TABLE
-    /// statement in sqlite_master. This is defense-in-depth documentation of
-    /// the invariant at the DB level; it becomes load-bearing if a future
-    /// migration relaxes `payload` to nullable.
-    #[test]
-    fn v008_events_check_appears_in_schema() {
+    fn prompt_history_use_count_check_rejects_zero() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        let sql: String = conn
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'events'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        assert!(
-            sql.contains("CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)"),
-            "events table missing payload/content_blob CHECK after v008; got: {sql}"
+        let err = conn.execute(
+            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at,
+                                         use_count, char_count)
+             VALUES ('p1', 'hello', 'h1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, 5)",
+            [],
         );
+        assert!(err.is_err(), "use_count = 0 should be rejected by CHECK");
     }
 
-    /// Upgrading from v7 to v8 rebuilds the table but preserves every row
-    /// verbatim. Existing rows all have non-NULL payload (today's only write
-    /// path), so the new CHECK accepts them unconditionally.
     #[test]
-    fn v008_preserves_existing_events_on_upgrade_from_v7() {
-        // Simulate a pre-v008 DB: run v1..v7, populate, then upgrade.
-        let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        for migration in &MIGRATIONS[..7] {
-            apply_migration(&conn, migration).unwrap();
-        }
-        assert_eq!(current_version(&conn).unwrap(), 7);
-
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp/v7', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
-                                   created_at, last_activity_at)
-             VALUES ('s1', 'ws_1', 'claude-3', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id,
-                                 role, input_tokens, output_tokens)
-             VALUES ('e1', 's1', 1, 'message.user', '2026-01-01T00:00:00Z',
-                     '{\"content\":\"hello\"}', 'ws_1', 'user', 10, NULL),
-                    ('e2', 's1', 2, 'message.assistant', '2026-01-01T00:00:01Z',
-                     '{\"content\":\"hi\"}', 'ws_1', 'assistant', NULL, 5)",
-            [],
-        )
-        .unwrap();
-
-        let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 8);
-
-        // Both rows survived the rebuild with their denormalized columns intact.
-        let rows: Vec<(String, i64, String, String, Option<i64>, Option<i64>)> = conn
-            .prepare(
-                "SELECT id, sequence, type, payload, input_tokens, output_tokens
-                 FROM events WHERE session_id = 's1' ORDER BY sequence",
-            )
-            .unwrap()
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
-                    row.get::<_, Option<i64>>(5)?,
-                ))
-            })
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].0, "e1");
-        assert_eq!(rows[0].1, 1);
-        assert_eq!(rows[0].2, "message.user");
-        assert!(rows[0].3.contains("hello"));
-        assert_eq!(rows[0].4, Some(10));
-        assert_eq!(rows[0].5, None);
-
-        assert_eq!(rows[1].0, "e2");
-        assert_eq!(rows[1].2, "message.assistant");
-        assert!(rows[1].3.contains("hi"));
-        assert_eq!(rows[1].4, None);
-        assert_eq!(rows[1].5, Some(5));
-    }
-
-    /// The rebuild drops and recreates the events table, which takes its
-    /// indexes along with it. Both are recreated explicitly by the migration;
-    /// the UNIQUE is load-bearing for sequence-monotonicity invariants.
-    #[test]
-    fn v008_recreates_events_indexes_after_rebuild() {
+    fn prompt_history_char_count_check_rejects_zero() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        let indexes: Vec<String> = conn
-            .prepare(
-                "SELECT name FROM sqlite_master
-                 WHERE type = 'index' AND tbl_name = 'events' ORDER BY name",
-            )
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .collect();
-
-        assert!(
-            indexes.iter().any(|n| n == "idx_events_session_sequence_unique"),
-            "missing unique index after v008 rebuild; found: {indexes:?}"
+        let err = conn.execute(
+            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at,
+                                         use_count, char_count)
+             VALUES ('p1', 'hello', 'h1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 0)",
+            [],
         );
-        assert!(
-            indexes.iter().any(|n| n == "idx_events_session_seq"),
-            "missing session_seq index after v008 rebuild; found: {indexes:?}"
-        );
+        assert!(err.is_err(), "char_count = 0 should be rejected by CHECK");
+    }
 
-        // The UNIQUE is still enforced (sequence-monotonicity guard).
+    #[test]
+    fn prompt_history_text_hash_unique_enforced() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
         conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at,
+                                         use_count, char_count)
+             VALUES ('p1', 'hello', 'hash1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 5)",
             [],
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
-                                   created_at, last_activity_at)
-             VALUES ('s1', 'ws_1', 'claude-3', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('e1', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', '{}', 'ws_1')",
-            [],
-        )
-        .unwrap();
+
         let dup = conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('e2', 's1', 1, 'message.assistant', '2026-01-01T00:00:00Z', '{}', 'ws_1')",
+            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at,
+                                         use_count, char_count)
+             VALUES ('p2', 'hello again', 'hash1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 11)",
             [],
         );
-        assert!(
-            dup.is_err(),
-            "UNIQUE(session_id, sequence) must still reject duplicate sequence after v008"
-        );
+        assert!(dup.is_err());
     }
 
-    /// `branches(root_event_id)` and `branches(head_event_id)` reference
-    /// `events(id)`. The rebuild drops and recreates the events table — if
-    /// `PRAGMA defer_foreign_keys` weren't in the migration, branches FKs
-    /// would break during the DROP. Assert post-upgrade integrity by
-    /// inserting a branch that points at an event in the rebuilt table.
     #[test]
-    fn v008_branches_fk_to_events_survives_rebuild() {
+    fn prompt_snippets_name_length_check() {
         let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        for migration in &MIGRATIONS[..7] {
-            apply_migration(&conn, migration).unwrap();
-        }
+        run_migrations(&conn).unwrap();
 
-        // Pre-populate both events and branches before v008.
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
-                                   created_at, last_activity_at)
-             VALUES ('s1', 'ws_1', 'claude-3', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('e1', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', '{}', 'ws_1')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO branches (id, session_id, name, root_event_id, head_event_id,
-                                   created_at, last_activity_at)
-             VALUES ('b1', 's1', 'main', 'e1', 'e1',
-                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        // Upgrade through v008 — rebuilds events under the hood.
-        let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 8);
-
-        // Existing branch row still resolves to its event.
-        let (b_id, root, head): (String, String, String) = conn
-            .query_row(
-                "SELECT id, root_event_id, head_event_id FROM branches WHERE id = 'b1'",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(b_id, "b1");
-        assert_eq!(root, "e1");
-        assert_eq!(head, "e1");
-
-        // A fresh branch row pointing at a post-rebuild event id must succeed.
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('e2', 's1', 2, 'message.user', '2026-01-01T00:00:01Z', '{}', 'ws_1')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO branches (id, session_id, name, root_event_id, head_event_id,
-                                   created_at, last_activity_at)
-             VALUES ('b2', 's1', 'fork', 'e2', 'e2',
-                     '2026-01-01T00:00:01Z', '2026-01-01T00:00:01Z')",
-            [],
-        )
-        .unwrap_or_else(|e| panic!("FK to post-rebuild event must succeed: {e}"));
-
-        // FK violation against nonexistent id still rejected.
-        let err = conn.execute(
-            "INSERT INTO branches (id, session_id, name, root_event_id, head_event_id,
-                                   created_at, last_activity_at)
-             VALUES ('b3', 's1', 'orphan', 'e_missing', 'e_missing',
-                     '2026-01-01T00:00:01Z', '2026-01-01T00:00:01Z')",
+        // Empty name rejected.
+        let err_empty = conn.execute(
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s1', '', 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         );
-        assert!(err.is_err(), "FK into events must still reject missing id after v008");
+        assert!(err_empty.is_err());
+
+        // 101-char name rejected.
+        let long = "a".repeat(101);
+        let err_long = conn.execute(
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s2', ?1, 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [&long],
+        );
+        assert!(err_long.is_err());
+
+        // 100-char name accepted.
+        let max = "a".repeat(100);
+        conn.execute(
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s3', ?1, 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [&max],
+        )
+        .unwrap();
     }
 
-    /// `events.parent_id REFERENCES events(id)` is self-referential; the
-    /// rebuild's INSERT INTO events_new SELECT ... has child rows with
-    /// parent_id pointing at rows that haven't yet been copied. With
-    /// `defer_foreign_keys = 1` the entire statement commits atomically
-    /// without intermediate FK checks, so every parent is in place by the
-    /// time the outer transaction commits.
     #[test]
-    fn v008_self_referential_parent_id_survives_rebuild() {
+    fn prompt_snippets_text_non_empty_check() {
         let conn = open_memory();
-        ensure_version_table(&conn).unwrap();
-        for migration in &MIGRATIONS[..7] {
-            apply_migration(&conn, migration).unwrap();
-        }
+        run_migrations(&conn).unwrap();
 
-        conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
-                                   created_at, last_activity_at)
-             VALUES ('s1', 'ws_1', 'claude-3', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        // Chain of parent → child events under v007.
-        conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
-             VALUES ('e_root', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', '{}', 'ws_1')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO events (id, session_id, parent_id, sequence, type, timestamp,
-                                 payload, workspace_id)
-             VALUES ('e_child', 's1', 'e_root', 2, 'message.assistant', '2026-01-01T00:00:01Z',
-                     '{}', 'ws_1')",
-            [],
-        )
-        .unwrap();
-
-        // Upgrade — rebuild must preserve the parent pointer.
-        let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 8);
-
-        let parent: Option<String> = conn
-            .query_row(
-                "SELECT parent_id FROM events WHERE id = 'e_child'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(parent.as_deref(), Some("e_root"));
-
-        // Self-referential FK still rejects pointing at a nonexistent parent.
         let err = conn.execute(
-            "INSERT INTO events (id, session_id, parent_id, sequence, type, timestamp,
-                                 payload, workspace_id)
-             VALUES ('e_bad', 's1', 'e_missing', 3, 'message.user', '2026-01-01T00:00:02Z',
-                     '{}', 'ws_1')",
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s1', 'n', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         );
-        assert!(err.is_err(), "self-FK events.parent_id must still enforce after v008");
+        assert!(err.is_err());
     }
 
-    /// Belt-and-suspenders: even though the column-level `payload NOT NULL`
-    /// is the first line of defense, the CHECK constraint must reject a
-    /// row that slips past NOT NULL via literal NULL for content_blob_id
-    /// paired with a NULL payload. SQLite evaluates constraints in order:
-    /// NOT NULL fires first, so we expect ANY error — the test's role is
-    /// that the row is rejected, not which constraint catches it.
     #[test]
-    fn v008_null_payload_is_rejected() {
+    fn prompt_snippets_duplicate_names_allowed() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
         conn.execute(
-            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-             VALUES ('ws_1', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s1', 'Shared', 'a', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
-                                   created_at, last_activity_at)
-             VALUES ('s1', 'ws_1', 'claude-3', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
+             VALUES ('s2', 'Shared', 'b', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         )
         .unwrap();
-
-        let err = conn.execute(
-            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload,
-                                 content_blob_id, workspace_id)
-             VALUES ('e_empty', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', NULL,
-                     NULL, 'ws_1')",
-            [],
-        );
-        assert!(
-            err.is_err(),
-            "NULL payload + NULL content_blob_id must be rejected after v008"
-        );
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM prompt_snippets WHERE name = 'Shared'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 2);
     }
 }
