@@ -486,6 +486,98 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.deactivateSkillOnServerCallCount, 0)
     }
 
+    // MARK: - Activate-and-Send (pre-audit #2)
+
+    // Activation of staged skills happens at send time. The three call sites
+    // in `ChatView.swift` (share-payload, send-button tap, re-activate chip)
+    // previously used `try? await activateSkillOnServer(...)` and ignored
+    // failures entirely — the prompt was sent anyway, silently omitting the
+    // skill, which is the opposite of user intent. These tests pin the new
+    // coordinator-owned behavior: on activation failure, show an error and
+    // DO NOT send.
+
+    func testActivateAndSendActivatesAllSkillsInOrderBeforeSending() async {
+        // Given: Valid text and two staged skills
+        mockContext.inputText = "Do the thing"
+        let skills = [createTestSkill(name: "plan"), createTestSkill(name: "review")]
+
+        // When: Activating and sending
+        await coordinator.activateAndSend(
+            reasoningLevel: nil,
+            skills: skills,
+            context: mockContext
+        )
+
+        // Then: Both skills activated before the prompt was sent
+        XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 2)
+        XCTAssertEqual(mockContext.activateSkillOnServerNames, ["plan", "review"])
+        XCTAssertTrue(mockContext.sendPromptCalled)
+        XCTAssertEqual(mockContext.lastSentText, "Do the thing")
+        XCTAssertFalse(mockContext.showErrorAlertCalled)
+    }
+
+    func testActivateAndSendWithNoSkillsSendsImmediately() async {
+        // Given: Valid text and no skills
+        mockContext.inputText = "No skills needed"
+
+        // When: Activating and sending with empty skills array
+        await coordinator.activateAndSend(
+            reasoningLevel: nil,
+            skills: [],
+            context: mockContext
+        )
+
+        // Then: No activation calls, prompt was sent
+        XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 0)
+        XCTAssertTrue(mockContext.sendPromptCalled)
+    }
+
+    func testActivateAndSendActivationFailureSurfacesErrorAndDoesNotSend() async {
+        // Given: Valid text, one skill, server-side activation fails
+        mockContext.inputText = "Plan this"
+        mockContext.activateSkillShouldFail = true
+        let skills = [createTestSkill(name: "plan")]
+
+        // When: Activating and sending
+        await coordinator.activateAndSend(
+            reasoningLevel: nil,
+            skills: skills,
+            context: mockContext
+        )
+
+        // Then: Error surfaced to user; prompt NOT sent (user intent included
+        // the skill — silently sending without it would defeat their choice).
+        XCTAssertTrue(mockContext.showErrorAlertCalled)
+        XCTAssertFalse(mockContext.sendPromptCalled)
+        // Staged skills are preserved so the user can retry or edit before
+        // re-sending. Wiping the draft on failure would lose their selection.
+        XCTAssertFalse(mockContext.inputText.isEmpty)
+    }
+
+    func testActivateAndSendFailureHaltsAtFirstError() async {
+        // Given: Three skills, activation fails on the second
+        mockContext.inputText = "Do the thing"
+        mockContext.activateSkillShouldFailOnName = "review"
+        let skills = [
+            createTestSkill(name: "plan"),
+            createTestSkill(name: "review"),
+            createTestSkill(name: "test"),
+        ]
+
+        // When: Activating and sending
+        await coordinator.activateAndSend(
+            reasoningLevel: nil,
+            skills: skills,
+            context: mockContext
+        )
+
+        // Then: First succeeded, second failed; third never attempted
+        XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 2)
+        XCTAssertEqual(mockContext.activateSkillOnServerNames, ["plan", "review"])
+        XCTAssertTrue(mockContext.showErrorAlertCalled)
+        XCTAssertFalse(mockContext.sendPromptCalled)
+    }
+
     // MARK: - Helpers
 
     private func createTestAttachment() -> Attachment {
@@ -567,10 +659,17 @@ final class MockMessagingContext: MessagingContext {
     }
 
     var activateSkillOnServerCallCount = 0
+    var activateSkillOnServerNames: [String] = []
+    var activateSkillShouldFail = false
+    var activateSkillShouldFailOnName: String?
     var deactivateSkillOnServerCallCount = 0
 
     func activateSkillOnServer(_ skillName: String) async throws {
         activateSkillOnServerCallCount += 1
+        activateSkillOnServerNames.append(skillName)
+        if activateSkillShouldFail || activateSkillShouldFailOnName == skillName {
+            throw MessagingTestError.serverError
+        }
     }
     func deactivateSkillOnServer(_ skillName: String) async throws {
         deactivateSkillOnServerCallCount += 1

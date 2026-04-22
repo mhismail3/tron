@@ -110,6 +110,37 @@ extension ChatViewModel {
         }
     }
 
+    /// Activate staged skills server-side, then send the prompt.
+    ///
+    /// Fire-and-forget wrapper for use by SwiftUI button handlers. If
+    /// activation fails, the coordinator surfaces an error via `showError`
+    /// and does NOT send — see `MessagingCoordinator.activateAndSend`.
+    func activateSkillsAndSend(reasoningLevel: String? = nil, skills: [Skill]) {
+        Task {
+            await messagingCoordinator.activateAndSend(
+                reasoningLevel: reasoningLevel,
+                skills: skills,
+                context: self
+            )
+        }
+    }
+
+    /// Activate a single skill server-side with user-visible error handling.
+    ///
+    /// Used by chip re-activation (e.g. the skills-cleared "re-activate?" picker).
+    /// Unlike `activateSkillsAndSend`, this is not tied to a send — it's a
+    /// one-shot user gesture. On failure, surfaces an error via `showError`.
+    func reactivateSkillWithUserErrorHandling(_ skillName: String) {
+        Task {
+            do {
+                try await activateSkillOnServer(skillName)
+            } catch {
+                logError("Failed to re-activate skill '\(skillName)': \(error.localizedDescription)")
+                showError("Could not re-activate skill: \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Abort the currently running agent.
     /// If the message queue has items, shows a confirmation dialog instead.
     func abortAgent() {

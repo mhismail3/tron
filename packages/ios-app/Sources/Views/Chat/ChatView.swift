@@ -163,16 +163,9 @@ struct ChatView: View {
             guard let payload = notification.object as? ShareMessagePayload else { return }
             viewModel.inputText = payload.prompt
 
-            var skills: [Skill]?
             if let skillName = payload.skillName,
                let skill = skillStore?.skills.first(where: { $0.name.lowercased() == skillName }) {
-                skills = [skill]
-                Task {
-                    try? await viewModel.activateSkillOnServer(skill.name)
-                    await MainActor.run {
-                        viewModel.sendMessage(skills: skills)
-                    }
-                }
+                viewModel.activateSkillsAndSend(skills: [skill])
             } else {
                 viewModel.sendMessage()
             }
@@ -395,18 +388,14 @@ struct ChatView: View {
                                 let skillsToSend = viewModel.inputBarState.selectedSkills
                                 viewModel.inputBarState.selectedSkills = []
 
-                                // Activate skills on server before sending prompt
-                                Task {
-                                    for skill in skillsToSend {
-                                        try? await viewModel.activateSkillOnServer(skill.name)
-                                    }
-                                    await MainActor.run {
-                                        viewModel.sendMessage(
-                                            reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
-                                            skills: skillsToSend.isEmpty ? nil : skillsToSend
-                                        )
-                                    }
-                                }
+                                // Activate staged skills on server, then send.
+                                // Coordinator surfaces activation failures via
+                                // `showError` and aborts the send — silently
+                                // dropping a staged skill would defeat user intent.
+                                viewModel.activateSkillsAndSend(
+                                    reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
+                                    skills: skillsToSend
+                                )
                             } else {
                                 viewModel.enqueueCurrentInput()
                             }
@@ -531,7 +520,8 @@ struct ChatView: View {
             // Reuses the existing `skill.activate` RPC path used by sidebar
             // activation and @skill-name resolution — server emits
             // `skill.activated` which the chip tracks via `SkillsClearedNotificationView`.
-            Task { try? await viewModel.activateSkillOnServer(skillName) }
+            // On failure, surface the error so the user knows the tap did nothing.
+            viewModel.reactivateSkillWithUserErrorHandling(skillName)
         }
     }
 

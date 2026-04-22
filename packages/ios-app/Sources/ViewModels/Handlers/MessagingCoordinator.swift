@@ -180,6 +180,50 @@ final class MessagingCoordinator {
         }
     }
 
+    // MARK: - Activate-and-Send
+
+    /// Activate staged skills on the server, then send the prompt.
+    ///
+    /// Staged skills are purely local draft state until the user hits send —
+    /// at that moment we promote them to server-side activation via
+    /// `skill.activate` before the prompt flows. If ANY activation fails, we
+    /// surface the error to the user and abort the send: the user selected
+    /// those skills deliberately, and silently dropping them would change the
+    /// agent's behavior in a way they did not consent to. The input draft is
+    /// preserved so the user can retry or edit and re-send.
+    ///
+    /// INVARIANT: on activation failure, `sendPromptToServer` must NOT be
+    /// called. This is the whole reason the method exists — it replaces three
+    /// `try? await activateSkillOnServer(...)` sites in `ChatView.swift` that
+    /// used to swallow failures and send anyway.
+    ///
+    /// - Parameters:
+    ///   - reasoningLevel: Optional reasoning level for extended thinking
+    ///   - skills: Skills the user staged on the input bar. Empty/nil skips
+    ///     activation and sends immediately.
+    ///   - context: The context providing access to state and dependencies
+    func activateAndSend(
+        reasoningLevel: String? = nil,
+        skills: [Skill],
+        context: MessagingContext
+    ) async {
+        for skill in skills {
+            do {
+                try await context.activateSkillOnServer(skill.name)
+            } catch {
+                context.logError("Failed to activate skill '\(skill.name)': \(error.localizedDescription)")
+                context.showError("Could not activate skill “\(skill.displayName)”: \(error.localizedDescription)")
+                return
+            }
+        }
+
+        await sendMessage(
+            reasoningLevel: reasoningLevel,
+            skills: skills.isEmpty ? nil : skills,
+            context: context
+        )
+    }
+
     // MARK: - Abort Agent
 
     /// Abort the currently running agent.
