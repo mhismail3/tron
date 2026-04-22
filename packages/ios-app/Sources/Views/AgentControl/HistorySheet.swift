@@ -167,44 +167,36 @@ struct HistorySheet: View {
                     }
                 }
             } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        // Turn number badge
-                        Text("\(turn.turnNumber)")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .bold))
-                            .foregroundStyle(muted ? .tronTextMuted : .tronCoral)
-                            .frame(width: 24, height: 24)
-                            .background((muted ? Color.tronTextMuted : Color.tronCoral).opacity(0.2))
-                            .clipShape(Circle())
+                HStack(spacing: 8) {
+                    // Turn number badge
+                    Text("\(turn.turnNumber)")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .bold))
+                        .foregroundStyle(muted ? .tronTextMuted : .tronCoral)
+                        .frame(width: 24, height: 24)
+                        .background((muted ? Color.tronTextMuted : Color.tronCoral).opacity(0.2))
+                        .clipShape(Circle())
 
-                        // Role icon
-                        if !muted {
-                            if turn.turnNumber == 0 {
-                                Image(systemName: "rays")
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.tronTextMuted)
-                            } else {
-                                Image(systemName: turn.startsWithUserMessage ? "person.fill" : "cpu")
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(turn.startsWithUserMessage ? .tronBlue : .tronEmerald)
-                            }
+                    // Role icon
+                    if !muted {
+                        if turn.turnNumber == 0 {
+                            Image(systemName: "rays")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextMuted)
+                        } else {
+                            Image(systemName: turn.startsWithUserMessage ? "person.fill" : "cpu")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(turn.startsWithUserMessage ? .tronBlue : .tronEmerald)
                         }
-
-                        Text(turn.displayPreview ?? (turn.turnNumber == 0 ? "Pre-session activity" : "Tool use"))
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                            .foregroundStyle(muted ? .tronTextMuted : .tronTextPrimary)
-                            .lineLimit(1)
-
-                        Spacer()
-
-                        Image(systemName: "chevron.down")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                            .foregroundStyle(.tronTextMuted)
-                            .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     }
 
-                    // Stats pills
-                    if let data = turn.analyticsData {
+                    Text(turn.displayPreview ?? (turn.turnNumber == 0 ? "Pre-session activity" : "Tool use"))
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                        .foregroundStyle(muted ? .tronTextMuted : .tronTextPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if let data = turn.analyticsData, data.latency > 0 || data.toolCount > 0 || data.errorCount > 0 {
                         HStack(spacing: 8) {
                             if data.latency > 0 {
                                 HStack(spacing: 3) {
@@ -236,8 +228,13 @@ struct HistorySheet: View {
                                 .foregroundStyle(.tronError)
                             }
                         }
-                        .padding(.leading, 32)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
+
+                    Image(systemName: "chevron.down")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
                 }
                 .contentShape(Rectangle())
             }
