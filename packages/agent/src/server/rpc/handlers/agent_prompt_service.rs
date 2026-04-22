@@ -324,28 +324,29 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
 
     let mut freshly_acquired_worktree = false;
     let worktree_info: Option<crate::worktree::WorktreeInfo> = if is_chat {
-        // Chat sessions are conversational and never use worktrees — server-
-        // enforced invariant, independent of global IsolationMode, per-session
-        // `useWorktree` override, and any stale `state.worktree_path` from
-        // legacy rows predating this rule. See `should_acquire_worktree_for_source`.
+        // INVARIANT: Chat sessions never acquire a worktree. This is a
+        // server-enforced rule independent of the global IsolationMode
+        // and any per-session `useWorktree` override — chat sessions are
+        // conversational and have no working tree to isolate. See
+        // `should_acquire_worktree_for_source`.
         None
     } else if let Some(wt_path) = &state.worktree_path {
-        // The event log recorded a worktree path for this session,
-        // but the directory itself may have been deleted or moved
-        // out-of-band (user `rm -rf`'d it, external cleanup script,
-        // volume unmount). If so, treat the path as stale and fall
-        // through to the acquire branch so the session gets a fresh
-        // worktree instead of operating on a dead directory and
-        // failing every git op downstream.
+        // External-deletion recovery: the event log recorded a worktree
+        // path for this session, but the directory itself may have been
+        // deleted or moved out-of-band (user `rm -rf`'d it, external
+        // cleanup script, volume unmount, symlink target removed). When
+        // the recorded path no longer resolves to a directory, drop it
+        // and re-enter the acquire branch — otherwise every downstream
+        // git op operates on a dead directory and fails.
         let path_buf = std::path::PathBuf::from(wt_path);
         if !path_buf.is_dir() {
             warn!(
                 session_id = %session_id,
                 stale_path = %path_buf.display(),
-                "recorded worktree path no longer exists on disk; falling back to acquire"
+                "recorded worktree path no longer exists on disk; re-acquiring"
             );
-            // Drop the stale info and re-enter the acquire branch below by
-            // falling through with None. The `else if` chain handles it.
+            // Re-enter the acquire branch inline — the outer `else if`
+            // chain does not fall through on its own.
             if let Some(ref coordinator) = worktree_coordinator {
                 let use_worktree_override = event_store
                     .get_session(&session_id)
@@ -1194,7 +1195,7 @@ mod should_acquire_worktree_tests {
 
     #[test]
     fn missing_source_may_acquire_worktree() {
-        // Legacy sessions predating the source column default to project behavior.
+        // Rows without an explicit source default to non-chat behavior.
         assert!(should_acquire_worktree_for_source(None));
     }
 
