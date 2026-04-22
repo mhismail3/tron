@@ -735,12 +735,12 @@ Managed by the `com.tron.server` launchd plist. The entry point is the Rust bina
 
 ```bash
 cd packages/agent
-cargo test                   # Full suite (~5,795 tests in the single tron crate)
+cargo test                   # Full suite (single `tron` crate)
 cargo test paths::           # Filter by module path
 cargo test --quiet           # Quiet output
 ```
 
-The agent is a single `tron` crate, so `cargo test` runs everything (lib unit tests, integration tests, doc tests, the `main_tests.rs` binary tests). At the time of writing the suite is ~5,795 tests; concrete numbers should be re-derived from `cargo test` output, not hardcoded here.
+The agent is a single `tron` crate, so `cargo test` runs everything (lib unit tests, integration tests, doc tests, the `main_tests.rs` binary tests). Test counts are intentionally not hardcoded in this README — they drift within days and mislead readers. Re-derive from `cargo test --quiet` output when you need the current number.
 
 ### iOS Tests
 
