@@ -15,7 +15,7 @@
 //! | `transactions`  | `commit` (accepts `CommitOptions` for amend / signoff / stage-all), `merge` |
 //! | `queries`       | `list_active`, `list_for_repo`, `get_info`, `get_status`, `list_session_branches` |
 //! | `diff`          | `get_committed_diff`, `committed_diff_for_branch` |
-//! | `branch`        | `delete_session_branch`, `prune_session_branches` |
+//! | `branch`        | `delete_session_branch`, `prune_session_branches` — both gated by `preflight_delete_branch`, which refuses branches currently checked out in the main worktree so `remove_worktree_if_present` can never fall through to `remove_dir_all(repo_root)` |
 //! | `recovery`      | `rebuild_from_events`, `recover_orphans` |
 //! | `repo_lock`     | Per-repo async mutex for `sync_main` / `finalize_session` serialization |
 //! | `sync`          | `sync_main` — lock-guarded FF of local `main` from its upstream |

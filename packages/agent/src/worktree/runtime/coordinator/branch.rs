@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use tracing::{info, warn};
@@ -9,7 +9,77 @@ use crate::worktree::errors::{Result, WorktreeError};
 
 use super::WorktreeCoordinator;
 
+/// Canonicalize a path, falling back to the owned path on failure.
+///
+/// `git worktree list --porcelain` returns paths with symlinks resolved
+/// (e.g. `/private/var/folders/...` on macOS), while `repo_root` passed
+/// by callers is often the raw, symlinked form (`/var/folders/...`).
+/// Path equality must compare canonicalized forms.
+fn canonical_or_owned(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// Whether `entry_path` (from `git worktree list --porcelain`) refers
+/// to the main worktree of `repo_root`.
+fn is_main_worktree(entry_path: &str, repo_root: &Path) -> bool {
+    canonical_or_owned(Path::new(entry_path)) == canonical_or_owned(repo_root)
+}
+
 impl WorktreeCoordinator {
+    /// Validate that `branch` is safe to delete — runs BEFORE any
+    /// destructive step.
+    ///
+    /// Guarantees, in order:
+    ///
+    /// 1. Name matches `branch_prefix` (reject other branches outright).
+    /// 2. Branch is not tracked as active in the in-memory session map.
+    /// 3. Branch is not checked out in the MAIN worktree of `repo_root`.
+    ///    Without this guard, [`Self::remove_worktree_if_present`] would
+    ///    ask git to remove the primary worktree (which git refuses) and
+    ///    fall through to `remove_dir_all(repo_root)` — wiping the
+    ///    user's repository.
+    ///
+    /// The active-snapshot check (2) already catches linked worktrees
+    /// owned by a live session; check (3) catches the pathological case
+    /// of a user running `git checkout session/x` directly in their
+    /// primary working tree.
+    async fn preflight_delete_branch(
+        &self,
+        repo_root: &Path,
+        branch: &str,
+    ) -> Result<()> {
+        if !branch.starts_with(&self.config.branch_prefix) {
+            return Err(WorktreeError::Git(format!(
+                "branch '{branch}' does not match prefix '{}'",
+                self.config.branch_prefix
+            )));
+        }
+
+        if self
+            .state
+            .lock()
+            .active_branch_snapshot()
+            .contains_key(branch)
+        {
+            return Err(WorktreeError::BranchActive(branch.to_string()));
+        }
+
+        if let Ok(entries) = self.git.worktree_list(repo_root).await {
+            for entry in &entries {
+                if entry.branch.as_deref() == Some(branch)
+                    && is_main_worktree(&entry.path, repo_root)
+                {
+                    return Err(WorktreeError::BranchActive(format!(
+                        "{branch} is checked out in the main worktree; \
+                         switch off the branch before deleting"
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Remove a linked worktree for a branch, if one exists.
     ///
     /// Handles orphaned worktrees that were never properly released (e.g. after
@@ -17,7 +87,11 @@ impl WorktreeCoordinator {
     /// prevent data loss. Errors are logged but do not propagate — the caller
     /// should proceed with `branch_delete` regardless, which will fail with a
     /// clear git error if the worktree could not be removed.
-    async fn remove_worktree_if_present(&self, repo_root: &std::path::Path, branch: &str) {
+    ///
+    /// INVARIANT: never falls through to `remove_dir_all` on a path equal
+    /// to `repo_root`. Callers must gate destructive calls with
+    /// [`Self::preflight_delete_branch`]; this check is defense-in-depth.
+    async fn remove_worktree_if_present(&self, repo_root: &Path, branch: &str) {
         let entries = match self.git.worktree_list(repo_root).await {
             Ok(e) => e,
             Err(e) => {
@@ -32,6 +106,7 @@ impl WorktreeCoordinator {
         };
 
         let wt_path = PathBuf::from(&entry.path);
+        let is_main = is_main_worktree(&entry.path, repo_root);
 
         if wt_path.exists() {
             // Auto-commit dirty changes to prevent data loss
@@ -51,8 +126,20 @@ impl WorktreeCoordinator {
 
             // Remove the worktree
             if let Err(e) = self.git.worktree_remove(repo_root, &wt_path, true).await {
-                warn!(branch, error = %e, "failed to remove orphan worktree, trying manual cleanup");
-                let _ = tokio::fs::remove_dir_all(&wt_path).await;
+                if is_main {
+                    // Git correctly refuses to remove the main worktree;
+                    // the `remove_dir_all` fallback below would wipe the
+                    // entire repo. Preflight should have caught this —
+                    // log and bail.
+                    warn!(
+                        branch,
+                        error = %e,
+                        "refusing to force-remove main worktree (preflight should have rejected)"
+                    );
+                } else {
+                    warn!(branch, error = %e, "failed to remove orphan worktree, trying manual cleanup");
+                    let _ = tokio::fs::remove_dir_all(&wt_path).await;
+                }
             }
         }
 
@@ -69,7 +156,7 @@ impl WorktreeCoordinator {
         &self,
         branch: &str,
         sha: &str,
-        wt_path: &std::path::Path,
+        wt_path: &Path,
         branch_removed: bool,
     ) {
         let Some(session_id) = branch.strip_prefix(&self.config.branch_prefix) else {
@@ -111,27 +198,18 @@ impl WorktreeCoordinator {
 
     /// Delete a single session branch by name.
     ///
-    /// Refuses to delete branches with active worktrees. Returns info about
-    /// whether unmerged commits were lost.
+    /// Refuses to delete branches with active worktrees or branches
+    /// checked out in the main worktree (see
+    /// [`Self::preflight_delete_branch`]). Returns info about whether
+    /// unmerged commits were lost.
     pub async fn delete_session_branch(
         &self,
-        repo_root: &std::path::Path,
+        repo_root: &Path,
         branch: &str,
     ) -> Result<crate::worktree::types::DeleteBranchResult> {
         use crate::worktree::types::DeleteBranchResult;
 
-        if !branch.starts_with(&self.config.branch_prefix) {
-            return Err(WorktreeError::Git(format!(
-                "branch '{branch}' does not match prefix '{}'",
-                self.config.branch_prefix
-            )));
-        }
-
-        // Reject if the branch is active
-        let active = self.state.lock().active_branch_snapshot();
-        if active.contains_key(branch) {
-            return Err(WorktreeError::BranchActive(branch.to_string()));
-        }
+        self.preflight_delete_branch(repo_root, branch).await?;
 
         // Count unmerged commits
         let default_branch = self.detect_default_branch(repo_root).await;
@@ -157,7 +235,7 @@ impl WorktreeCoordinator {
     /// Prune all inactive session branches.
     pub async fn prune_session_branches(
         &self,
-        repo_root: &std::path::Path,
+        repo_root: &Path,
     ) -> Result<crate::worktree::types::PruneBranchesResult> {
         use crate::worktree::types::{PruneBranchesResult, PruneFailure};
 
@@ -167,6 +245,17 @@ impl WorktreeCoordinator {
 
         for info in &all {
             if info.is_active {
+                continue;
+            }
+
+            // Preflight catches the main-worktree-HEAD pathology that
+            // `is_active` (in-memory snapshot only) can miss. Record
+            // the refusal as a failure so callers can surface it.
+            if let Err(e) = self.preflight_delete_branch(repo_root, &info.branch).await {
+                failed.push(PruneFailure {
+                    branch: info.branch.clone(),
+                    error: e.to_string(),
+                });
                 continue;
             }
 
@@ -185,7 +274,7 @@ impl WorktreeCoordinator {
     }
 
     /// Detect the default branch for a repo (tries main, then master, then current).
-    pub(super) async fn detect_default_branch(&self, repo_root: &std::path::Path) -> String {
+    pub(super) async fn detect_default_branch(&self, repo_root: &Path) -> String {
         let branches = self
             .git
             .list_branches_matching(repo_root, "*")

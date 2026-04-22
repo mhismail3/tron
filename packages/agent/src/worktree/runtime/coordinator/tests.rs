@@ -1467,6 +1467,111 @@ async fn delete_branch_rejects_wrong_prefix() {
 }
 
 #[tokio::test]
+async fn delete_refuses_main_worktree_branch() {
+    // *** Regression test for H20. ***
+    //
+    // Pathology: a session/* branch is checked out in the MAIN worktree
+    // (e.g. user ran `git checkout session/x` by hand in their repo).
+    // It isn't in `active_by_session` because no session ever acquired
+    // it, so the prior `delete_session_branch` passed the active check,
+    // then called `remove_worktree_if_present`, which asked git to
+    // remove the MAIN worktree. Git refuses ("fatal: … is a main
+    // working tree"), so the code fell through to
+    // `remove_dir_all(&wt_path)` — which is `repo_root` in this case,
+    // nuking the entire repository.
+    //
+    // Preflight must refuse before any destructive step runs, and the
+    // safety guard in `remove_worktree_if_present` must refuse to
+    // `remove_dir_all` a path equal to `repo_root`.
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+    run_cmd(dir.path(), &["git", "branch", "session/pathological"]).await;
+    run_cmd(dir.path(), &["git", "checkout", "session/pathological"]).await;
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let err = coord
+        .delete_session_branch(dir.path(), "session/pathological")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::worktree::WorktreeError::BranchActive(_)),
+        "expected BranchActive, got {err:?}"
+    );
+
+    // Main repo must survive — this is the catastrophic-failure check.
+    assert!(dir.path().exists(), "repo dir was wiped");
+    assert!(dir.path().join(".git").exists(), ".git was wiped");
+    assert!(
+        dir.path().join("README.md").exists(),
+        "working-tree file was wiped",
+    );
+
+    // Branch must still exist since delete was refused.
+    let git = GitExecutor::new(30_000);
+    let branches = git
+        .list_branches_matching(dir.path(), "session/*")
+        .await
+        .unwrap();
+    assert!(
+        branches.contains(&"session/pathological".to_string()),
+        "branch must still exist after refused delete: {branches:?}",
+    );
+}
+
+#[tokio::test]
+async fn prune_refuses_main_worktree_branch() {
+    // Same pathology as `delete_refuses_main_worktree_branch`, reached
+    // via `prune_session_branches`. Without the preflight, prune would
+    // iterate over the inactive session/* branch and call
+    // remove_worktree_if_present on the main worktree — same
+    // remove_dir_all disaster.
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+    run_cmd(dir.path(), &["git", "branch", "session/main-head"]).await;
+    run_cmd(dir.path(), &["git", "checkout", "session/main-head"]).await;
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+
+    let result = coord.prune_session_branches(dir.path()).await.unwrap();
+
+    // Main repo must survive.
+    assert!(dir.path().exists(), "repo dir wiped by prune");
+    assert!(dir.path().join(".git").exists(), ".git wiped by prune");
+    assert!(
+        dir.path().join("README.md").exists(),
+        "working-tree file wiped by prune",
+    );
+
+    // The main-HEAD branch must not be in deleted, must be in failed.
+    assert!(
+        !result.deleted.contains(&"session/main-head".to_string()),
+        "prune must not delete main-worktree branch: {:?}",
+        result.deleted,
+    );
+    assert!(
+        result
+            .failed
+            .iter()
+            .any(|f| f.branch == "session/main-head"),
+        "prune must record main-worktree branch as a failure: {:?}",
+        result.failed,
+    );
+
+    let git = GitExecutor::new(30_000);
+    let branches = git
+        .list_branches_matching(dir.path(), "session/*")
+        .await
+        .unwrap();
+    assert!(
+        branches.contains(&"session/main-head".to_string()),
+        "branch must still exist after refused prune: {branches:?}",
+    );
+}
+
+#[tokio::test]
 async fn prune_removes_worktree_linked_branches() {
     let dir = tempdir().unwrap();
     init_repo(dir.path()).await;
