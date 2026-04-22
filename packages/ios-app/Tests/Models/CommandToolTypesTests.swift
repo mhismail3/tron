@@ -189,7 +189,7 @@ struct CommandToolTypesTests {
     func testRegistryFindConfig() {
         let config = CommandToolRegistry.config(for: "find")
 
-        #expect(config.icon == "doc.text.magnifyingglass")
+        #expect(config.icon == "magnifyingglass")
         #expect(config.displayName == "Find")
     }
 
@@ -197,7 +197,7 @@ struct CommandToolTypesTests {
     func testRegistrySearchConfig() {
         let config = CommandToolRegistry.config(for: "search")
 
-        #expect(config.icon == "magnifyingglass")
+        #expect(config.icon == "doc.text.magnifyingglass")
         #expect(config.displayName == "File Search")
     }
 

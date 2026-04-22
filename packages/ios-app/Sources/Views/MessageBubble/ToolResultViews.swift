@@ -47,7 +47,7 @@ struct StandaloneToolResultView: View {
         case "bash":
             return ("terminal", .tronEmerald)
         case "search":
-            return ("magnifyingglass", .purple)
+            return ("doc.text.magnifyingglass", .purple)
         case "glob":
             return ("doc.text.magnifyingglass", .cyan)
         default:

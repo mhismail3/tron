@@ -15,7 +15,7 @@ struct FindResultViewer: View {
         VStack(alignment: .leading, spacing: 0) {
             // File count header
             HStack {
-                Image(systemName: "doc.text.magnifyingglass")
+                Image(systemName: "magnifyingglass")
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.cyan)
 
@@ -96,7 +96,7 @@ struct SearchToolViewer: View {
         VStack(alignment: .leading, spacing: 0) {
             // Match count header
             HStack {
-                Image(systemName: "magnifyingglass")
+                Image(systemName: "doc.text.magnifyingglass")
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.purple)
 

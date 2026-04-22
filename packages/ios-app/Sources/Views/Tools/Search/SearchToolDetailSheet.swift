@@ -54,7 +54,7 @@ struct SearchToolDetailSheet: View {
     var body: some View {
         ToolDetailSheetContainer(
             toolName: "File Search",
-            iconName: "magnifyingglass",
+            iconName: "doc.text.magnifyingglass",
             accent: .purple,
         ) {
             contentBody
@@ -157,7 +157,7 @@ struct SearchToolDetailSheet: View {
     // MARK: - No Results Section
 
     private var noResultsSection: some View {
-        ToolEmptyState(title: "Results", icon: "magnifyingglass", message: "No matches found", accent: .purple, tint: tint, subtitle: "Pattern: \(pattern)")
+        ToolEmptyState(title: "Results", icon: "doc.text.magnifyingglass", message: "No matches found", accent: .purple, tint: tint, subtitle: "Pattern: \(pattern)")
     }
 
     // MARK: - Error Section
@@ -194,7 +194,7 @@ struct SearchToolDetailSheet: View {
             id: "call_s1",
             toolName: "Search",
             normalizedName: "search",
-            icon: "magnifyingglass",
+            icon: "doc.text.magnifyingglass",
             iconColor: .purple,
             displayName: "File Search",
             summary: "\"TODO\" in src",
@@ -214,7 +214,7 @@ struct SearchToolDetailSheet: View {
             id: "call_s3",
             toolName: "Search",
             normalizedName: "search",
-            icon: "magnifyingglass",
+            icon: "doc.text.magnifyingglass",
             iconColor: .purple,
             displayName: "File Search",
             summary: "\"nonexistent\"",
@@ -234,7 +234,7 @@ struct SearchToolDetailSheet: View {
             id: "call_s6",
             toolName: "Search",
             normalizedName: "search",
-            icon: "magnifyingglass",
+            icon: "doc.text.magnifyingglass",
             iconColor: .purple,
             displayName: "File Search",
             summary: "\"pattern\"",
@@ -254,7 +254,7 @@ struct SearchToolDetailSheet: View {
             id: "call_s7",
             toolName: "Search",
             normalizedName: "search",
-            icon: "magnifyingglass",
+            icon: "doc.text.magnifyingglass",
             iconColor: .purple,
             displayName: "File Search",
             summary: "\"[invalid\"",

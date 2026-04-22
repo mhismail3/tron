@@ -126,7 +126,7 @@ enum ToolRegistry {
             }
         ),
         "search": ToolDescriptor(
-            icon: "magnifyingglass",
+            icon: "doc.text.magnifyingglass",
             iconColor: .purple,
             iconColorName: "purple",
             displayName: "File Search",
@@ -147,7 +147,7 @@ enum ToolRegistry {
             }
         ),
         "find": ToolDescriptor(
-            icon: "doc.text.magnifyingglass",
+            icon: "magnifyingglass",
             iconColor: .cyan,
             iconColorName: "cyan",
             displayName: "Find",
@@ -338,7 +338,7 @@ enum ToolRegistry {
         ),
         // Aliases for tool names that differ between streaming events and registry
         "grep": ToolDescriptor(
-            icon: "magnifyingglass",
+            icon: "doc.text.magnifyingglass",
             iconColor: .purple,
             iconColorName: "purple",
             displayName: "Grep",

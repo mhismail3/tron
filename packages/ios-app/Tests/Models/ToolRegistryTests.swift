@@ -39,7 +39,7 @@ struct ToolRegistryTests {
     @Test("Search tool has correct icon and display name")
     func testSearchDescriptor() {
         let d = ToolRegistry.descriptor(for: "search")
-        #expect(d.icon == "magnifyingglass")
+        #expect(d.icon == "doc.text.magnifyingglass")
         #expect(d.displayName == "File Search")
     }
 
@@ -53,7 +53,7 @@ struct ToolRegistryTests {
     @Test("Find tool has correct icon and display name")
     func testFindDescriptor() {
         let d = ToolRegistry.descriptor(for: "find")
-        #expect(d.icon == "doc.text.magnifyingglass")
+        #expect(d.icon == "magnifyingglass")
         #expect(d.displayName == "Find")
     }
 
