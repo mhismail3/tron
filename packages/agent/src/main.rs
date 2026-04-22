@@ -826,9 +826,12 @@ fn process_deploy_sentinel(
             }
             for ((env, bundle_id), tokens) in &groups {
                 let bid = bundle_id.as_deref().unwrap_or("");
-                let _ = sender
-                    .send_to_many(tokens, &notification, env, bid)
-                    .await;
+                let batch = tron::server::platform::apns::ApnsBatch {
+                    device_tokens: tokens,
+                    environment: env,
+                    bundle_id: bid,
+                };
+                let _ = sender.send_to_many(&batch, &notification).await;
             }
         }));
     }

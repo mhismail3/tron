@@ -9,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::debug;
 use crate::events::{ConnectionPool, EventStore};
-use crate::server::platform::apns::{ApnsService, PushSender};
+use crate::server::platform::apns::{ApnsBatch, ApnsService, PushSender};
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{Notification, NotifyDelegate, NotifyResult};
 
@@ -76,10 +76,12 @@ impl NotifyDelegate for ApnsNotifyDelegate {
             // Legacy tokens with None fall back to the service's config
             // bundle_id — matches the pre-v006 behaviour.
             let bundle_id = group.bundle_id.unwrap_or_else(|| self.apns.default_bundle_id());
-            let results = self
-                .apns
-                .send_to_many(&owned, &apns_notif, group.environment, bundle_id)
-                .await;
+            let batch = ApnsBatch {
+                device_tokens: &owned,
+                environment: group.environment,
+                bundle_id,
+            };
+            let results = self.apns.send_to_many(&batch, &apns_notif).await;
             all_results.extend(results);
         }
         Ok(push_helpers::process_send_results(

@@ -48,6 +48,6 @@ mod service;
 mod types;
 
 pub use config::{ApnsConfig, load_apns_config, load_push_config, load_relay_config, PushConfig, RelayConfig};
-pub use sender::PushSender;
+pub use sender::{ApnsBatch, PushSender};
 pub use service::ApnsService;
 pub use types::{ApnsNotification, ApnsSendResult};

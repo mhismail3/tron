@@ -14,7 +14,7 @@ use crate::tools::errors::ToolError;
 use crate::tools::traits::{NotifyDelegate, NotifyResult};
 
 use super::push_helpers;
-use super::sender::PushSender;
+use super::sender::{ApnsBatch, PushSender};
 
 /// Relay-backed notification delegate.
 pub struct RelayNotifyDelegate {
@@ -82,10 +82,12 @@ impl NotifyDelegate for RelayNotifyDelegate {
                 count = group.tokens.len(),
                 "relay group"
             );
-            let results = self
-                .sender
-                .send_to_many(&owned, &apns_notif, group.environment, bundle_id)
-                .await;
+            let batch = ApnsBatch {
+                device_tokens: &owned,
+                environment: group.environment,
+                bundle_id,
+            };
+            let results = self.sender.send_to_many(&batch, &apns_notif).await;
             all_results.extend(results);
         }
         Ok(push_helpers::process_send_results(

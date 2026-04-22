@@ -11,7 +11,7 @@ use sha2::Sha256;
 use tracing::{debug, warn};
 
 use super::config::RelayConfig;
-use super::sender::PushSender;
+use super::sender::{ApnsBatch, PushSender};
 use super::types::{ApnsNotification, ApnsSendResult};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -115,11 +115,10 @@ impl RelayClient {
 impl PushSender for RelayClient {
     async fn send_to_many(
         &self,
-        device_tokens: &[String],
+        batch: &ApnsBatch<'_>,
         notification: &ApnsNotification,
-        environment: &str,
-        bundle_id: &str,
     ) -> Vec<ApnsSendResult> {
+        let device_tokens = batch.device_tokens;
         if device_tokens.is_empty() {
             return Vec::new();
         }
@@ -127,8 +126,8 @@ impl PushSender for RelayClient {
         let request = RelayRequest {
             device_tokens,
             notification,
-            environment,
-            bundle_id,
+            environment: batch.environment,
+            bundle_id: batch.bundle_id,
         };
 
         let body = match serde_json::to_string(&request) {
@@ -149,8 +148,8 @@ impl PushSender for RelayClient {
         debug!(
             url = %url,
             device_count = device_tokens.len(),
-            environment = %environment,
-            bundle_id = %bundle_id,
+            environment = %batch.environment,
+            bundle_id = %batch.bundle_id,
             "sending via relay"
         );
 
@@ -330,7 +329,13 @@ mod tests {
             thread_id: None,
         };
 
-        let results = client.send_to_many(&[], &notif, "sandbox", "").await;
+        let tokens: Vec<String> = Vec::new();
+        let batch = ApnsBatch {
+            device_tokens: &tokens,
+            environment: "sandbox",
+            bundle_id: "",
+        };
+        let results = client.send_to_many(&batch, &notif).await;
         assert!(results.is_empty());
     }
 

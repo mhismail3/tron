@@ -16,7 +16,7 @@ use crate::cron::types::{CronJob, CronRun};
 #[cfg(feature = "apns")]
 use crate::events::ConnectionPool;
 #[cfg(feature = "apns")]
-use crate::server::platform::apns::ApnsNotification;
+use crate::server::platform::apns::{ApnsBatch, ApnsNotification};
 use crate::server::rpc::types::RpcEvent;
 use crate::server::websocket::broadcast::BroadcastManager;
 // ── Agent Turn Execution ──────────────────────────────────────────────
@@ -365,10 +365,12 @@ impl crate::cron::executor::PushNotifier for CronPushNotifier {
         let mut total_sent = 0;
         for ((env, bundle_id), tokens) in &groups {
             let bid = bundle_id.as_deref().unwrap_or("");
-            let results = self
-                .sender
-                .send_to_many(tokens, &notification, env, bid)
-                .await;
+            let batch = ApnsBatch {
+                device_tokens: tokens,
+                environment: env,
+                bundle_id: bid,
+            };
+            let results = self.sender.send_to_many(&batch, &notification).await;
             total_sent += results.len();
             total_failed += results.iter().filter(|r| !r.success).count();
         }

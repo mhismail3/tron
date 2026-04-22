@@ -325,18 +325,17 @@ impl ApnsService {
 impl PushSender for ApnsService {
     async fn send_to_many(
         &self,
-        device_tokens: &[String],
+        batch: &super::sender::ApnsBatch<'_>,
         notification: &ApnsNotification,
-        _environment: &str,
-        bundle_id: &str,
     ) -> Vec<ApnsSendResult> {
         // Direct mode uses the environment from its own config (ApnsConfig),
         // not the per-token environment, since the host is fixed at init time.
         // `bundle_id` is threaded through so the delegate can override the
         // config default per group (Beta scheme → `com.tron.mobile.beta`).
-        let futures: Vec<_> = device_tokens
+        let futures: Vec<_> = batch
+            .device_tokens
             .iter()
-            .map(|token| self.send(token, notification, bundle_id))
+            .map(|token| self.send(token, notification, batch.bundle_id))
             .collect();
         futures::future::join_all(futures).await
     }
