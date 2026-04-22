@@ -2,16 +2,16 @@
 //!
 //! # INVARIANT: client-supplied `bundleId` is trusted (L8, trusted-local)
 //!
-//! [`RegisterTokenHandler`] accepts a caller-supplied `bundleId`
-//! (e.g. `com.tron.mobile`, `com.tron.mobile.beta`) with only a
-//! non-empty format check, and persists it alongside the APNs device
-//! token. APNs uses `bundleId` as the push `apns-topic`, so a client
-//! could register a token under a bundle it doesn't actually own —
-//! under trusted-local this is a non-issue (the only registrants are
-//! the user's own devices, and APNs itself rejects mismatched topics
-//! at delivery time). Under a shared or adversarial threat model, a
-//! malicious client could register under a Prod bundle from a Beta
-//! build and redirect notifications.
+//! [`RegisterTokenHandler`] requires a caller-supplied non-empty
+//! `bundleId` (e.g. `com.tron.mobile`, `com.tron.mobile.beta`) and
+//! persists it alongside the APNs device token. APNs uses `bundleId`
+//! as the push `apns-topic`, so a client could register a token under
+//! a bundle it doesn't actually own — under trusted-local this is a
+//! non-issue (the only registrants are the user's own devices, and
+//! APNs itself rejects mismatched topics at delivery time). Under a
+//! shared or adversarial threat model, a malicious client could
+//! register under a Prod bundle from a Beta build and redirect
+//! notifications.
 //!
 //! Hardening path: tie `bundleId` to the authenticated caller via a
 //! server-issued device certificate, or validate against a fixed
@@ -48,10 +48,10 @@ impl MethodHandler for RegisterTokenHandler {
         let session_id = opt_string(params.as_ref(), "sessionId");
         let workspace_id = opt_string(params.as_ref(), "workspaceId");
         let environment = opt_string(params.as_ref(), "environment");
-        let bundle_id = opt_string(params.as_ref(), "bundleId");
-        if let Some(ref bid) = bundle_id
-            && bid.is_empty()
-        {
+        // `bundleId` is required — `device_tokens.bundle_id` is NOT NULL
+        // and every client sends its bundle identifier at registration.
+        let bundle_id = require_string_param(params.as_ref(), "bundleId")?;
+        if bundle_id.is_empty() {
             return Err(RpcError::InvalidParams {
                 message: "bundleId must not be empty".into(),
             });
@@ -65,7 +65,7 @@ impl MethodHandler for RegisterTokenHandler {
                     session_id.as_deref(),
                     workspace_id.as_deref(),
                     environment.as_deref().unwrap_or("production"),
-                    bundle_id.as_deref(),
+                    &bundle_id,
                 )
                 .map_err(map_event_store_error)?;
 
@@ -130,6 +130,15 @@ mod tests {
     use crate::server::rpc::handlers::test_helpers::make_test_context;
     use serde_json::json;
 
+    /// Helper: every register test needs a `bundleId` now; this keeps the
+    /// per-test JSON focused on the parameter under test.
+    fn register_params(token: &str) -> Value {
+        json!({
+            "deviceToken": token,
+            "bundleId": "com.tron.mobile",
+        })
+    }
+
     #[tokio::test]
     async fn register_token_returns_id_and_created() {
         let ctx = make_test_context();
@@ -137,7 +146,8 @@ mod tests {
             .handle(
                 Some(json!({
                     "deviceToken": "a".repeat(64),
-                    "environment": "sandbox"
+                    "environment": "sandbox",
+                    "bundleId": "com.tron.mobile",
                 })),
                 &ctx,
             )
@@ -154,11 +164,11 @@ mod tests {
         let ctx = make_test_context();
         let token = "b".repeat(64);
         let first = RegisterTokenHandler
-            .handle(Some(json!({"deviceToken": token})), &ctx)
+            .handle(Some(register_params(&token)), &ctx)
             .await
             .unwrap();
         let second = RegisterTokenHandler
-            .handle(Some(json!({"deviceToken": token})), &ctx)
+            .handle(Some(register_params(&token)), &ctx)
             .await
             .unwrap();
 
@@ -185,7 +195,8 @@ mod tests {
             .handle(
                 Some(json!({
                     "deviceToken": "c".repeat(64),
-                    "environment": "production"
+                    "environment": "production",
+                    "bundleId": "com.tron.mobile",
                 })),
                 &ctx,
             )
@@ -199,7 +210,7 @@ mod tests {
     async fn register_token_default_environment() {
         let ctx = make_test_context();
         let result = RegisterTokenHandler
-            .handle(Some(json!({"deviceToken": "d".repeat(64)})), &ctx)
+            .handle(Some(register_params(&"d".repeat(64))), &ctx)
             .await
             .unwrap();
         // Should succeed with default "production" environment
@@ -212,7 +223,7 @@ mod tests {
         let token = "e".repeat(64);
         // Register first
         let _ = RegisterTokenHandler
-            .handle(Some(json!({"deviceToken": token})), &ctx)
+            .handle(Some(register_params(&token)), &ctx)
             .await
             .unwrap();
         // Then unregister
@@ -248,7 +259,7 @@ mod tests {
         // Wire format: { id: String, created: Bool }
         let ctx = make_test_context();
         let result = RegisterTokenHandler
-            .handle(Some(json!({"deviceToken": "f".repeat(64)})), &ctx)
+            .handle(Some(register_params(&"f".repeat(64))), &ctx)
             .await
             .unwrap();
 
@@ -263,7 +274,7 @@ mod tests {
     async fn register_rejects_too_long_token() {
         let ctx = make_test_context();
         let err = RegisterTokenHandler
-            .handle(Some(json!({"deviceToken": "a".repeat(160)})), &ctx)
+            .handle(Some(register_params(&"a".repeat(160))), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
@@ -273,7 +284,7 @@ mod tests {
     async fn register_rejects_too_short_token() {
         let ctx = make_test_context();
         let err = RegisterTokenHandler
-            .handle(Some(json!({"deviceToken": "abc123"})), &ctx)
+            .handle(Some(register_params("abc123")), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
@@ -284,7 +295,27 @@ mod tests {
         let ctx = make_test_context();
         let token = "g".repeat(64); // 'g' is not hex
         let err = RegisterTokenHandler
-            .handle(Some(json!({"deviceToken": token})), &ctx)
+            .handle(Some(register_params(&token)), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn register_rejects_missing_bundle_id() {
+        // `bundleId` is required — a request without it fails before the
+        // DB is touched. This is the structural guarantee that the
+        // `device_tokens.bundle_id` NOT NULL constraint can never be hit
+        // through the RPC path.
+        let ctx = make_test_context();
+        let err = RegisterTokenHandler
+            .handle(
+                Some(json!({
+                    "deviceToken": "a".repeat(64),
+                    "environment": "production",
+                })),
+                &ctx,
+            )
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
@@ -303,7 +334,7 @@ mod tests {
         assert!(result["success"].is_boolean(), "'success' must be Bool");
     }
 
-    // ── bundleId flow (v006) ─────────────────────────────────────────
+    // ── bundleId flow ────────────────────────────────────────────────
 
     #[tokio::test]
     async fn register_token_with_bundle_id_stores_it() {
@@ -323,22 +354,8 @@ mod tests {
 
         let rows = ctx.event_store.get_all_active_device_tokens().unwrap();
         let row = rows.iter().find(|r| r.device_token == token).unwrap();
-        assert_eq!(row.bundle_id.as_deref(), Some("com.tron.mobile.beta"));
+        assert_eq!(row.bundle_id, "com.tron.mobile.beta");
         assert_eq!(row.environment, "sandbox");
-    }
-
-    #[tokio::test]
-    async fn register_token_without_bundle_id_stores_null() {
-        let ctx = make_test_context();
-        let token = "2".repeat(64);
-        let _ = RegisterTokenHandler
-            .handle(Some(json!({"deviceToken": token})), &ctx)
-            .await
-            .unwrap();
-
-        let rows = ctx.event_store.get_all_active_device_tokens().unwrap();
-        let row = rows.iter().find(|r| r.device_token == token).unwrap();
-        assert!(row.bundle_id.is_none());
     }
 
     #[tokio::test]
@@ -407,14 +424,14 @@ mod tests {
 
         let prod = rows
             .iter()
-            .find(|r| r.bundle_id.as_deref() == Some("com.tron.mobile"))
+            .find(|r| r.bundle_id == "com.tron.mobile")
             .expect("production-bundle row must be present and active");
         assert_eq!(prod.environment, "production");
         assert!(prod.is_active);
 
         let beta = rows
             .iter()
-            .find(|r| r.bundle_id.as_deref() == Some("com.tron.mobile.beta"))
+            .find(|r| r.bundle_id == "com.tron.mobile.beta")
             .expect("beta-bundle row must be present and active");
         assert_eq!(beta.environment, "sandbox");
         assert!(beta.is_active);
@@ -464,7 +481,7 @@ mod tests {
             .filter(|r| r.device_token == token)
             .collect();
         assert_eq!(rows.len(), 1, "same-identity reregister must stay single-row");
-        assert_eq!(rows[0].bundle_id.as_deref(), Some("com.tron.mobile.beta"));
+        assert_eq!(rows[0].bundle_id, "com.tron.mobile.beta");
         assert_eq!(rows[0].environment, "sandbox");
     }
 }

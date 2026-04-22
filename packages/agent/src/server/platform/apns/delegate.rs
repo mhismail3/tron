@@ -73,13 +73,13 @@ impl NotifyDelegate for ApnsNotifyDelegate {
         let mut all_results = Vec::with_capacity(total);
         for group in &groups {
             let owned: Vec<String> = group.tokens.iter().map(|t| t.to_string()).collect();
-            // Legacy tokens with None fall back to the service's config
-            // bundle_id — matches the pre-v006 behaviour.
-            let bundle_id = group.bundle_id.unwrap_or_else(|| self.apns.default_bundle_id());
+            // INVARIANT: `device_tokens.bundle_id` is NOT NULL (v001 schema),
+            // so each grouped batch carries a concrete APNs topic directly
+            // from the row — no fallback to the service default is needed.
             let batch = ApnsBatch {
                 device_tokens: &owned,
                 environment: group.environment,
-                bundle_id,
+                bundle_id: group.bundle_id,
             };
             let results = self.apns.send_to_many(&batch, &apns_notif).await;
             all_results.extend(results);

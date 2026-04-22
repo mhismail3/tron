@@ -41,16 +41,17 @@ pub(crate) fn token_prefix(token: &str) -> &str {
 pub(crate) struct DeviceToken {
     pub token: String,
     pub environment: String,
-    /// APNs bundle ID (`apns-topic`). `None` for legacy tokens registered
-    /// before v006 — the send path falls back to the worker's default.
-    pub bundle_id: Option<String>,
+    /// APNs bundle ID (`apns-topic`). NOT NULL on the row — every active
+    /// registration carries its bundle identifier so the send path can
+    /// attach the correct `apns-topic` without a fallback.
+    pub bundle_id: String,
 }
 
 /// A group of tokens that share the same (environment, bundle_id) tuple —
 /// the natural unit of an APNs request.
 pub(crate) struct TokenGroup<'a> {
     pub environment: &'a str,
-    pub bundle_id: Option<&'a str>,
+    pub bundle_id: &'a str,
     pub tokens: Vec<&'a str>,
 }
 
@@ -81,10 +82,10 @@ pub(crate) fn active_tokens(pool: &ConnectionPool) -> Result<Vec<DeviceToken>, T
 ///
 /// `BTreeMap` gives deterministic ordering so tests don't flake.
 pub(crate) fn group_tokens(tokens: &[DeviceToken]) -> Vec<TokenGroup<'_>> {
-    let mut grouped: BTreeMap<(&str, Option<&str>), Vec<&str>> = BTreeMap::new();
+    let mut grouped: BTreeMap<(&str, &str), Vec<&str>> = BTreeMap::new();
     for dt in tokens {
         grouped
-            .entry((&dt.environment, dt.bundle_id.as_deref()))
+            .entry((&dt.environment, &dt.bundle_id))
             .or_default()
             .push(&dt.token);
     }
@@ -214,7 +215,7 @@ pub(crate) fn process_send_results(
                                     token_prefix = token_prefix(&result.device_token),
                                     session_id = info.session_id.as_deref().unwrap_or("<none>"),
                                     workspace_id = info.workspace_id.as_deref().unwrap_or("<none>"),
-                                    bundle_id = info.bundle_id.as_deref().unwrap_or("<none>"),
+                                    bundle_id = info.bundle_id.as_str(),
                                     "  ↳ row attributed"
                                 );
                             }
@@ -298,6 +299,7 @@ fn maybe_emit_invalidated_event(
         reason: result.reason.clone(),
         timestamp: chrono::Utc::now().to_rfc3339(),
     };
+    // bundle_id is now a plain String — NOT NULL on the row, always present.
 
     let Ok(value) = serde_json::to_value(&payload) else {
         warn!("failed to serialize DeviceTokenInvalidatedPayload");
@@ -472,24 +474,24 @@ mod tests {
 
     // ── group_tokens ─────────────────────────────────────────────────
 
-    fn dt(token: &str, env: &str, bundle: Option<&str>) -> DeviceToken {
+    fn dt(token: &str, env: &str, bundle: &str) -> DeviceToken {
         DeviceToken {
             token: token.to_string(),
             environment: env.to_string(),
-            bundle_id: bundle.map(String::from),
+            bundle_id: bundle.to_string(),
         }
     }
 
     #[test]
     fn group_tokens_same_env_same_bundle_together() {
         let tokens = vec![
-            dt("aa", "production", Some("com.tron.mobile")),
-            dt("bb", "production", Some("com.tron.mobile")),
+            dt("aa", "production", "com.tron.mobile"),
+            dt("bb", "production", "com.tron.mobile"),
         ];
         let groups = group_tokens(&tokens);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].environment, "production");
-        assert_eq!(groups[0].bundle_id, Some("com.tron.mobile"));
+        assert_eq!(groups[0].bundle_id, "com.tron.mobile");
         assert_eq!(groups[0].tokens, vec!["aa", "bb"]);
     }
 
@@ -499,13 +501,13 @@ mod tests {
         // If this fails, the Beta-scheme bug is back: two sandbox tokens
         // from different bundles got sent with the same apns-topic.
         let tokens = vec![
-            dt("aa", "sandbox", Some("com.tron.mobile")),
-            dt("bb", "sandbox", Some("com.tron.mobile.beta")),
+            dt("aa", "sandbox", "com.tron.mobile"),
+            dt("bb", "sandbox", "com.tron.mobile.beta"),
         ];
         let groups = group_tokens(&tokens);
         assert_eq!(groups.len(), 2, "distinct bundles must form distinct groups");
-        let beta = groups.iter().find(|g| g.bundle_id == Some("com.tron.mobile.beta")).unwrap();
-        let prod = groups.iter().find(|g| g.bundle_id == Some("com.tron.mobile")).unwrap();
+        let beta = groups.iter().find(|g| g.bundle_id == "com.tron.mobile.beta").unwrap();
+        let prod = groups.iter().find(|g| g.bundle_id == "com.tron.mobile").unwrap();
         assert_eq!(beta.tokens, vec!["bb"]);
         assert_eq!(prod.tokens, vec!["aa"]);
     }
@@ -513,35 +515,13 @@ mod tests {
     #[test]
     fn group_tokens_full_matrix_four_groups() {
         let tokens = vec![
-            dt("a1", "production", Some("com.tron.mobile")),
-            dt("a2", "production", Some("com.tron.mobile.beta")),
-            dt("a3", "sandbox", Some("com.tron.mobile")),
-            dt("a4", "sandbox", Some("com.tron.mobile.beta")),
+            dt("a1", "production", "com.tron.mobile"),
+            dt("a2", "production", "com.tron.mobile.beta"),
+            dt("a3", "sandbox", "com.tron.mobile"),
+            dt("a4", "sandbox", "com.tron.mobile.beta"),
         ];
         let groups = group_tokens(&tokens);
         assert_eq!(groups.len(), 4);
-    }
-
-    #[test]
-    fn group_tokens_null_bundle_forms_own_group() {
-        let tokens = vec![
-            dt("legacy", "production", None),
-            dt("legacy2", "production", None),
-        ];
-        let groups = group_tokens(&tokens);
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].bundle_id, None);
-        assert_eq!(groups[0].tokens.len(), 2);
-    }
-
-    #[test]
-    fn group_tokens_null_and_some_do_not_merge() {
-        let tokens = vec![
-            dt("legacy", "production", None),
-            dt("modern", "production", Some("com.tron.mobile")),
-        ];
-        let groups = group_tokens(&tokens);
-        assert_eq!(groups.len(), 2, "None and Some must not merge even if env matches");
     }
 
     #[test]
@@ -645,7 +625,8 @@ mod tests {
 
     fn register(pool: &crate::events::ConnectionPool, token: &str) {
         let conn = pool.get().unwrap();
-        DeviceTokenRepo::register(&conn, token, None, None, "sandbox", None).unwrap();
+        DeviceTokenRepo::register(&conn, token, None, None, "sandbox", "com.tron.mobile")
+            .unwrap();
     }
 
     fn is_active(pool: &crate::events::ConnectionPool, token: &str) -> bool {
@@ -834,7 +815,7 @@ mod tests {
             Some(session_id),
             Some("ws-h22"),
             "production",
-            Some("com.tron.mobile"),
+            "com.tron.mobile",
         )
         .unwrap();
     }
@@ -941,7 +922,8 @@ mod tests {
         // session_id = None — which ALSO skips emission even if a store were
         // passed. This asserts the None-store path.
         let conn = store.pool().get().unwrap();
-        DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        DeviceTokenRepo::register(&conn, &token, None, None, "production", "com.tron.mobile")
+            .unwrap();
         drop(conn);
 
         let results = vec![ApnsSendResult {
@@ -961,12 +943,13 @@ mod tests {
 
     #[test]
     fn skips_emission_when_token_has_no_session_binding() {
-        // Token registered via a legacy path with no session_id → no
-        // sensible attribution for the event. Deactivation still runs.
+        // Token registered without a session_id → no sensible attribution
+        // for the event. Deactivation still runs.
         let (store, _session_id) = event_store_with_session();
         let token = "e".repeat(64);
         let conn = store.pool().get().unwrap();
-        DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        DeviceTokenRepo::register(&conn, &token, None, None, "production", "com.tron.mobile")
+            .unwrap();
         drop(conn);
 
         let results = vec![ApnsSendResult {

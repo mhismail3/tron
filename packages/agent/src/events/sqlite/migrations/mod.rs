@@ -1088,34 +1088,47 @@ mod tests {
         )
         .unwrap();
 
-        let bundle_id: Option<String> = conn
+        let bundle_id: String = conn
             .query_row("SELECT bundle_id FROM device_tokens WHERE id = 'dt_1'", [], |r| {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(bundle_id.as_deref(), Some("com.tron.mobile.beta"));
+        assert_eq!(bundle_id, "com.tron.mobile.beta");
     }
 
+    /// Post-R5: `bundle_id` is NOT NULL — every registration carries its
+    /// APNs topic. An INSERT that omits bundle_id must be rejected by the
+    /// schema, so clients cannot register without a bundle and the send
+    /// path never needs a topic fallback.
     #[test]
-    fn device_tokens_bundle_id_is_nullable() {
+    fn device_tokens_bundle_id_is_not_null() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        conn.execute(
+        let err = conn.execute(
             "INSERT INTO device_tokens (id, device_token, platform, environment,
                                         created_at, last_used_at, is_active)
              VALUES ('dt_2', 'bb', 'ios', 'production',
                      '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
             [],
-        )
-        .unwrap();
+        );
+        assert!(
+            err.is_err(),
+            "INSERT without bundle_id must be rejected by NOT NULL constraint"
+        );
 
-        let bundle_id: Option<String> = conn
-            .query_row("SELECT bundle_id FROM device_tokens WHERE id = 'dt_2'", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert!(bundle_id.is_none());
+        // Also reject an explicit NULL.
+        let err_explicit = conn.execute(
+            "INSERT INTO device_tokens (id, device_token, platform, environment, bundle_id,
+                                        created_at, last_used_at, is_active)
+             VALUES ('dt_null', 'cc', 'ios', 'production', NULL,
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+            [],
+        );
+        assert!(
+            err_explicit.is_err(),
+            "INSERT with explicit NULL bundle_id must be rejected"
+        );
     }
 
     #[test]
@@ -1162,33 +1175,36 @@ mod tests {
         );
     }
 
-    /// COALESCE(col, '') collapses NULL to a single canonical sentinel so a
-    /// pre-workspace legacy token can't register twice as "(token, ios,
-    /// NULL, NULL)" (SQLite's native UNIQUE treats NULL as distinct).
+    /// COALESCE(workspace_id, '') collapses NULL to a single canonical
+    /// sentinel so a workspace-less token can't register twice as "(token,
+    /// ios, NULL, bundle)" (SQLite's native UNIQUE treats NULL as
+    /// distinct). `bundle_id` is NOT NULL so only workspace_id needs the
+    /// COALESCE widening; a concrete bundle participates in the index
+    /// directly.
     #[test]
-    fn device_tokens_unique_collapses_null_workspace_and_bundle() {
+    fn device_tokens_unique_collapses_null_workspace() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
         conn.execute(
-            "INSERT INTO device_tokens (id, device_token, platform, environment,
+            "INSERT INTO device_tokens (id, device_token, platform, environment, bundle_id,
                                         created_at, last_used_at, is_active)
-             VALUES ('dt_null1', 'nn', 'ios', 'production',
+             VALUES ('dt_null1', 'nn', 'ios', 'production', 'com.tron.mobile',
                      '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
             [],
         )
         .unwrap();
 
         let dup = conn.execute(
-            "INSERT INTO device_tokens (id, device_token, platform, environment,
+            "INSERT INTO device_tokens (id, device_token, platform, environment, bundle_id,
                                         created_at, last_used_at, is_active)
-             VALUES ('dt_null2', 'nn', 'ios', 'production',
+             VALUES ('dt_null2', 'nn', 'ios', 'production', 'com.tron.mobile',
                      '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
             [],
         );
         assert!(
             dup.is_err(),
-            "two (token, ios, NULL ws, NULL bundle) rows must be rejected by COALESCE index"
+            "two (token, ios, NULL ws, same bundle) rows must be rejected by COALESCE index"
         );
     }
 
@@ -1210,16 +1226,16 @@ mod tests {
 
         conn.execute(
             "INSERT INTO device_tokens (id, device_token, workspace_id, platform, environment,
-                                        created_at, last_used_at, is_active)
-             VALUES ('dt_a', 'aa', 'ws_1', 'ios', 'production',
+                                        bundle_id, created_at, last_used_at, is_active)
+             VALUES ('dt_a', 'aa', 'ws_1', 'ios', 'production', 'com.tron.mobile',
                      '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
             [],
         )
         .unwrap();
         conn.execute(
             "INSERT INTO device_tokens (id, device_token, workspace_id, platform, environment,
-                                        created_at, last_used_at, is_active)
-             VALUES ('dt_b', 'aa', 'ws_2', 'ios', 'production',
+                                        bundle_id, created_at, last_used_at, is_active)
+             VALUES ('dt_b', 'aa', 'ws_2', 'ios', 'production', 'com.tron.mobile',
                      '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
             [],
         )

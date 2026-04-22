@@ -212,10 +212,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_ios_client_dedup
 -- Identity is (device_token, platform, workspace_id, bundle_id). The same
 -- APNs token can be registered against multiple workspaces on the same
 -- device and against distinct APNs bundles (com.tron.mobile vs
--- com.tron.mobile.beta). The UNIQUE INDEX uses COALESCE(col, '') on the
--- nullable legs so NULL workspace/bundle collapses to a single canonical
--- key — without COALESCE, SQLite's native UNIQUE treats every NULL as
--- distinct and allows unbounded (token, NULL, NULL) duplicates.
+-- com.tron.mobile.beta). `bundle_id` is NOT NULL — every client sends its
+-- bundle identifier at registration time so the send path can set the
+-- correct `apns-topic` per row without a server-side fallback. The UNIQUE
+-- INDEX uses COALESCE on `workspace_id` only (workspace-less registrations
+-- remain legal, e.g. a user with no workspace ever selected); a workspace
+-- of NULL collapses to the canonical `''` so two (token, NULL, bundle)
+-- rows don't accumulate.
 
 CREATE TABLE IF NOT EXISTS device_tokens (
   id           TEXT PRIMARY KEY,
@@ -224,7 +227,7 @@ CREATE TABLE IF NOT EXISTS device_tokens (
   workspace_id TEXT REFERENCES workspaces(id),
   platform     TEXT NOT NULL DEFAULT 'ios',
   environment  TEXT NOT NULL DEFAULT 'production',
-  bundle_id    TEXT,
+  bundle_id    TEXT NOT NULL,
   created_at   TEXT NOT NULL,
   last_used_at TEXT NOT NULL,
   is_active    INTEGER NOT NULL DEFAULT 1
@@ -235,7 +238,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_device_tokens_identity
     device_token,
     platform,
     COALESCE(workspace_id, ''),
-    COALESCE(bundle_id, '')
+    bundle_id
   );
 
 CREATE INDEX IF NOT EXISTS idx_device_tokens_session   ON device_tokens(session_id)   WHERE is_active = 1;

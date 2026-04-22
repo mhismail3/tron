@@ -352,8 +352,9 @@ impl crate::cron::executor::PushNotifier for CronPushNotifier {
         // Group by (environment, bundle_id) — same key as push_helpers::group_tokens.
         // Mixing bundles in one send_to_many call would reproduce the
         // DeviceTokenNotForTopic bug since a single relay request carries
-        // one apns-topic for the whole batch.
-        let mut groups: HashMap<(String, Option<String>), Vec<String>> = HashMap::new();
+        // one apns-topic for the whole batch. `bundle_id` is NOT NULL on
+        // the row (v001 schema), so the key is always a concrete String.
+        let mut groups: HashMap<(String, String), Vec<String>> = HashMap::new();
         for row in &rows {
             groups
                 .entry((row.environment.clone(), row.bundle_id.clone()))
@@ -364,11 +365,10 @@ impl crate::cron::executor::PushNotifier for CronPushNotifier {
         let mut total_failed = 0;
         let mut total_sent = 0;
         for ((env, bundle_id), tokens) in &groups {
-            let bid = bundle_id.as_deref().unwrap_or("");
             let batch = ApnsBatch {
                 device_tokens: tokens,
                 environment: env,
-                bundle_id: bid,
+                bundle_id,
             };
             let results = self.sender.send_to_many(&batch, &notification).await;
             total_sent += results.len();

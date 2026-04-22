@@ -827,7 +827,7 @@ fn process_deploy_sentinel(
     #[cfg(feature = "apns")]
     fn active_device_tokens(
         pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
-    ) -> Vec<(String, String, Option<String>)> {
+    ) -> Vec<(String, String, String)> {
         pool.get()
             .ok()
             .and_then(|conn| {
@@ -840,7 +840,7 @@ fn process_deploy_sentinel(
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
-                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(2)?,
                         ))
                     })
                     .ok()
@@ -855,26 +855,26 @@ fn process_deploy_sentinel(
     /// Matches the grouping used by the main notify path in
     /// `server::platform::apns::push_helpers::group_tokens`. Without the
     /// bundle_id axis, Beta tokens go out with the production topic and
-    /// APNs rejects with `DeviceTokenNotForTopic`.
+    /// APNs rejects with `DeviceTokenNotForTopic`. `bundle_id` is NOT NULL
+    /// on the row (v001 schema) so every group carries a concrete topic.
     #[cfg(feature = "apns")]
     fn send_push(
         push: &PushService,
-        tokens_with_meta: Vec<(String, String, Option<String>)>,
+        tokens_with_meta: Vec<(String, String, String)>,
         notification: tron::server::platform::apns::ApnsNotification,
     ) {
         let sender = push.as_sender();
         drop(tokio::spawn(async move {
-            let mut groups: std::collections::HashMap<(String, Option<String>), Vec<String>> =
+            let mut groups: std::collections::HashMap<(String, String), Vec<String>> =
                 std::collections::HashMap::new();
             for (token, env, bundle_id) in tokens_with_meta {
                 groups.entry((env, bundle_id)).or_default().push(token);
             }
             for ((env, bundle_id), tokens) in &groups {
-                let bid = bundle_id.as_deref().unwrap_or("");
                 let batch = tron::server::platform::apns::ApnsBatch {
                     device_tokens: tokens,
                     environment: env,
-                    bundle_id: bid,
+                    bundle_id,
                 };
                 let _ = sender.send_to_many(&batch, &notification).await;
             }

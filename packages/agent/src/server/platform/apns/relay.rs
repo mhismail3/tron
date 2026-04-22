@@ -33,11 +33,10 @@ struct RelayRequest<'a> {
     device_tokens: &'a [String],
     notification: &'a ApnsNotification,
     environment: &'a str,
-    /// Optional APNs `apns-topic`. Omitted from the JSON entirely when
-    /// empty — the relay worker falls back to its configured default.
-    /// Callers upstream compose `(environment, bundle_id)` groups so all
-    /// tokens in a single request share one topic.
-    #[serde(skip_serializing_if = "str::is_empty")]
+    /// APNs `apns-topic` for every token in this request. Always present
+    /// — the `device_tokens.bundle_id` column is NOT NULL (v001 schema),
+    /// and upstream callers compose `(environment, bundle_id)` groups so
+    /// all tokens in one request share one topic.
     bundle_id: &'a str,
 }
 
@@ -333,7 +332,7 @@ mod tests {
         let batch = ApnsBatch {
             device_tokens: &tokens,
             environment: "sandbox",
-            bundle_id: "",
+            bundle_id: "com.tron.mobile",
         };
         let results = client.send_to_many(&batch, &notif).await;
         assert!(results.is_empty());
@@ -368,7 +367,11 @@ mod tests {
     }
 
     #[test]
-    fn request_serialization_includes_bundle_id_when_non_empty() {
+    fn request_serialization_always_includes_bundle_id() {
+        // Post-R5 invariant: `device_tokens.bundle_id` is NOT NULL, so the
+        // wire ALWAYS carries a concrete `bundle_id`. The relay worker
+        // uses it verbatim as `apns-topic` and no longer has a fallback
+        // path for a missing value.
         let tokens = vec!["aa".to_string()];
         let notification = ApnsNotification {
             title: "T".into(),
@@ -389,37 +392,7 @@ mod tests {
         let json = serde_json::to_string(&request).unwrap();
         assert!(
             json.contains("\"bundle_id\":\"com.tron.mobile.beta\""),
-            "non-empty bundle_id must serialize: {json}"
-        );
-    }
-
-    #[test]
-    fn request_serialization_omits_bundle_id_when_empty() {
-        // *** Backward-compat regression guard ***
-        // An empty bundle_id must NOT appear in the JSON. Older relay
-        // workers would otherwise see the field and choke, and it would
-        // waste bytes on every request.
-        let tokens = vec!["aa".to_string()];
-        let notification = ApnsNotification {
-            title: "T".into(),
-            body: "B".into(),
-            data: Default::default(),
-            priority: "high".into(),
-            sound: None,
-            badge: None,
-            thread_id: None,
-        };
-        let request = RelayRequest {
-            device_tokens: &tokens,
-            notification: &notification,
-            environment: "sandbox",
-            bundle_id: "",
-        };
-
-        let json = serde_json::to_string(&request).unwrap();
-        assert!(
-            !json.contains("bundle_id"),
-            "empty bundle_id must be omitted from wire: {json}"
+            "bundle_id must always serialize: {json}"
         );
     }
 

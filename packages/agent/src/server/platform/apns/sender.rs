@@ -17,17 +17,18 @@ use super::types::{ApnsNotification, ApnsSendResult};
 /// pre-grouping requirement structural — the compiler enforces it.
 ///
 /// Callers construct a batch per `TokenGroup` produced by
-/// `push_helpers::group_tokens`. Empty `bundle_id` (`""`) means "use the
-/// implementation's default" (relay → `env.APNS_BUNDLE_ID`; direct →
-/// `ApnsConfig.bundle_id`), preserved for pre-v006 legacy tokens that
-/// registered without a bundle_id.
+/// `push_helpers::group_tokens`. `bundle_id` is always a concrete APNs
+/// topic — `device_tokens.bundle_id` is NOT NULL (v001 schema), so
+/// there is no empty-string "use default" sentinel. The empty string is
+/// treated as an invalid topic by the transport.
 #[derive(Clone, Copy, Debug)]
 pub struct ApnsBatch<'a> {
     /// Device tokens that share the same (environment, bundle_id) tuple.
     pub device_tokens: &'a [String],
     /// APNs environment — "production" or "sandbox".
     pub environment: &'a str,
-    /// APNs `apns-topic` for the whole request.
+    /// APNs `apns-topic` for the whole request. Always a concrete bundle
+    /// identifier — never empty.
     pub bundle_id: &'a str,
 }
 
@@ -136,7 +137,7 @@ pub(crate) mod tests {
         let batch = ApnsBatch {
             device_tokens: &tokens,
             environment: "sandbox",
-            bundle_id: "",
+            bundle_id: "com.tron.mobile",
         };
         let results = mock.send_to_many(&batch, &test_notif()).await;
         assert_eq!(results.len(), 2);
@@ -161,7 +162,7 @@ pub(crate) mod tests {
         let batch = ApnsBatch {
             device_tokens: &tokens,
             environment: "sandbox",
-            bundle_id: "",
+            bundle_id: "com.tron.mobile",
         };
         let results = mock.send_to_many(&batch, &test_notif()).await;
         assert_eq!(results.len(), 1);
@@ -207,20 +208,6 @@ pub(crate) mod tests {
         assert_eq!(calls[1].0, vec!["tok2".to_string(), "tok3".to_string()]);
         assert_eq!(calls[1].2, "production");
         assert_eq!(calls[1].3, "com.tron.mobile");
-    }
-
-    #[tokio::test]
-    async fn mock_captures_empty_bundle_id_as_fallback_marker() {
-        let mock = MockPushSender::succeeding();
-        let tokens = vec!["tok".to_string()];
-        let batch = ApnsBatch {
-            device_tokens: &tokens,
-            environment: "production",
-            bundle_id: "",
-        };
-        mock.send_to_many(&batch, &test_notif()).await;
-        let calls = mock.calls.lock().unwrap();
-        assert_eq!(calls[0].3, "", "empty bundle_id signals 'use default'");
     }
 
     #[tokio::test]

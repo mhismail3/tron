@@ -215,10 +215,10 @@ pub struct DeviceTokenRow {
     pub platform: String,
     /// APNS environment ("sandbox" or "production").
     pub environment: String,
-    /// APNs bundle ID the token was registered against. Nullable for
-    /// legacy tokens registered before v006; those fall through to the
-    /// send path's default at delivery time.
-    pub bundle_id: Option<String>,
+    /// APNs bundle ID the token was registered against. NOT NULL — every
+    /// client sends its bundle identifier at registration time so the send
+    /// path can set the correct `apns-topic` per row without a fallback.
+    pub bundle_id: String,
     /// Creation timestamp.
     pub created_at: String,
     /// Last used timestamp.

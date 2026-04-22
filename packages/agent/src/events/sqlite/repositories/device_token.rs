@@ -7,10 +7,11 @@
 //! Since v007 (plan M3), a registration is uniquely identified by the tuple
 //! `(device_token, platform, workspace_id, bundle_id)`. The same APNs push
 //! token MAY coexist across two workspaces or two bundle IDs on the same
-//! device (e.g., Beta vs Prod installs after the Xcode scheme split). NULL
-//! workspace_id and NULL bundle_id collapse to canonical `''` via a
-//! COALESCE-widened unique index, so legacy rows with either field absent
-//! still dedup correctly.
+//! device (e.g., Beta vs Prod installs after the Xcode scheme split).
+//! `bundle_id` is NOT NULL; workspace_id remains nullable (workspace-less
+//! tokens are legal) and collapses to the canonical `''` via a COALESCE-
+//! widened unique index so two (token, NULL-ws, same-bundle) rows don't
+//! accumulate.
 //!
 //! `session_id` is NOT part of the identity key: re-registering the same
 //! `(token, platform, workspace, bundle)` with a new `session_id` updates
@@ -53,8 +54,9 @@ pub struct DeactivatedTokenInfo {
     /// Workspace the token was registered to. Useful for cross-session
     /// attribution when `session_id` is absent.
     pub workspace_id: Option<String>,
-    /// APNs `apns-topic` the token was issued against.
-    pub bundle_id: Option<String>,
+    /// APNs `apns-topic` the token was issued against. Always present
+    /// (NOT NULL since R5).
+    pub bundle_id: String,
 }
 
 /// Device token repository — stateless, every method takes `&Connection`.
@@ -69,35 +71,36 @@ impl DeviceTokenRepo {
     /// (session_id floats, environment refreshes, is_active → 1). When
     /// no match exists, a new row is inserted.
     ///
-    /// NULL workspace_id or bundle_id collapses to canonical `''` via
-    /// COALESCE so legacy rows (pre-v006 or pre-M3) dedup correctly rather
-    /// than each being treated as distinct-by-NULL.
+    /// NULL workspace_id collapses to canonical `''` via COALESCE so
+    /// workspace-less tokens dedup correctly. `bundle_id` is NOT NULL and
+    /// participates in the index directly.
     ///
     /// `bundle_id` is the APNs `apns-topic` this token was issued against
-    /// (e.g., `com.tron.mobile` vs `com.tron.mobile.beta`). Nullable for
-    /// callers that don't yet send it; the relay falls back to its env
-    /// default at delivery time.
+    /// (e.g., `com.tron.mobile` vs `com.tron.mobile.beta`). Required —
+    /// every client sends its bundle identifier so the send path never
+    /// needs a topic fallback.
     pub fn register(
         conn: &Connection,
         device_token: &str,
         session_id: Option<&str>,
         workspace_id: Option<&str>,
         environment: &str,
-        bundle_id: Option<&str>,
+        bundle_id: &str,
     ) -> Result<RegisterTokenResult> {
         let now = chrono::Utc::now().to_rfc3339();
         let platform = "ios";
 
         // Identity lookup: match the full (token, platform, workspace, bundle)
-        // tuple, COALESCE-collapsing NULLs so legacy rows dedup with present
-        // rows that carry the same empty-string-equivalent workspace/bundle.
+        // tuple. Only workspace_id needs COALESCE-widening (NULL workspace is
+        // still a legal identity; bundle_id is NOT NULL so it participates
+        // directly).
         let existing: Option<String> = conn
             .query_row(
                 "SELECT id FROM device_tokens
                  WHERE device_token = ?1
                    AND platform = ?2
                    AND COALESCE(workspace_id, '') = COALESCE(?3, '')
-                   AND COALESCE(bundle_id, '')    = COALESCE(?4, '')",
+                   AND bundle_id = ?4",
                 params![device_token, platform, workspace_id, bundle_id],
                 |row| row.get(0),
             )
@@ -118,8 +121,8 @@ impl DeviceTokenRepo {
             )?;
             Ok(RegisterTokenResult { id, created: false })
         } else {
-            // New identity — insert. The COALESCE-widened unique index on
-            // (device_token, platform, workspace_id, bundle_id) guarantees
+            // New identity — insert. The unique index on (device_token,
+            // platform, COALESCE(workspace_id, ''), bundle_id) guarantees
             // no duplicate-identity row survives even under racing callers.
             let id = Uuid::now_v7().to_string();
             let _ = conn.execute(
@@ -288,12 +291,21 @@ mod tests {
         conn
     }
 
+    const BUNDLE_PROD: &str = "com.tron.mobile";
+    const BUNDLE_BETA: &str = "com.tron.mobile.beta";
+
     #[test]
     fn register_new_token() {
         let conn = setup();
-        let result =
-            DeviceTokenRepo::register(&conn, "a".repeat(64).as_str(), None, None, "production", None)
-                .unwrap();
+        let result = DeviceTokenRepo::register(
+            &conn,
+            "a".repeat(64).as_str(),
+            None,
+            None,
+            "production",
+            BUNDLE_PROD,
+        )
+        .unwrap();
         assert!(!result.id.is_empty());
         assert!(result.created);
     }
@@ -302,8 +314,10 @@ mod tests {
     fn register_existing_token_returns_same_id() {
         let conn = setup();
         let token = "b".repeat(64);
-        let first = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
-        let second = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        let first =
+            DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
+        let second =
+            DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
         assert_eq!(first.id, second.id);
         assert!(first.created);
         assert!(!second.created);
@@ -345,7 +359,7 @@ mod tests {
             None,
             Some("ws_1"),
             "sandbox",
-            Some("com.tron.mobile"),
+            BUNDLE_PROD,
         )
         .unwrap();
         let r2 = DeviceTokenRepo::register(
@@ -354,7 +368,7 @@ mod tests {
             Some("sess_1"),
             Some("ws_1"),
             "production",
-            Some("com.tron.mobile"),
+            BUNDLE_PROD,
         )
         .unwrap();
 
@@ -372,7 +386,7 @@ mod tests {
                         row.get::<_, Option<String>>(0)?,
                         row.get::<_, Option<String>>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(3)?,
                     ))
                 },
             )
@@ -380,7 +394,7 @@ mod tests {
         assert_eq!(row.0.as_deref(), Some("sess_1"));
         assert_eq!(row.1.as_deref(), Some("ws_1"));
         assert_eq!(row.2, "production");
-        assert_eq!(row.3.as_deref(), Some("com.tron.mobile"));
+        assert_eq!(row.3, BUNDLE_PROD);
 
         // And there is exactly one row (the UNIQUE index held).
         let count: i64 = conn
@@ -410,7 +424,7 @@ mod tests {
             Some("sess_1"),
             Some("ws_1"),
             "sandbox",
-            None,
+            BUNDLE_PROD,
         )
         .unwrap();
         let r2 = DeviceTokenRepo::register(
@@ -419,7 +433,7 @@ mod tests {
             Some("sess_2"),
             Some("ws_2"),
             "production",
-            None,
+            BUNDLE_PROD,
         )
         .unwrap();
 
@@ -460,11 +474,11 @@ mod tests {
     fn register_reactivates_inactive_token() {
         let conn = setup();
         let token = "d".repeat(64);
-        DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
         DeviceTokenRepo::unregister(&conn, &token).unwrap();
 
         // Re-register should reactivate
-        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
         assert!(!result.created); // existing row
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
             .unwrap()
@@ -476,7 +490,7 @@ mod tests {
     fn unregister_existing_token() {
         let conn = setup();
         let token = "e".repeat(64);
-        DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
         let success = DeviceTokenRepo::unregister(&conn, &token).unwrap();
         assert!(success);
     }
@@ -492,7 +506,7 @@ mod tests {
     fn get_by_id_found() {
         let conn = setup();
         let token = "f".repeat(64);
-        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id).unwrap();
         assert!(row.is_some());
         let row = row.unwrap();
@@ -521,8 +535,8 @@ mod tests {
         let conn = setup();
         let token1 = "a".repeat(64);
         let token2 = "b".repeat(64);
-        DeviceTokenRepo::register(&conn, &token1, None, None, "production", None).unwrap();
-        DeviceTokenRepo::register(&conn, &token2, None, None, "production", None).unwrap();
+        DeviceTokenRepo::register(&conn, &token1, None, None, "production", BUNDLE_PROD).unwrap();
+        DeviceTokenRepo::register(&conn, &token2, None, None, "production", BUNDLE_PROD).unwrap();
         DeviceTokenRepo::unregister(&conn, &token1).unwrap();
 
         let active = DeviceTokenRepo::get_all_active(&conn).unwrap();
@@ -536,8 +550,8 @@ mod tests {
         insert_workspace_and_session(&conn);
         let token1 = "a".repeat(64);
         let token2 = "b".repeat(64);
-        DeviceTokenRepo::register(&conn, &token1, Some("sess_1"), None, "production", None).unwrap();
-        DeviceTokenRepo::register(&conn, &token2, Some("sess_2"), None, "production", None).unwrap();
+        DeviceTokenRepo::register(&conn, &token1, Some("sess_1"), None, "production", BUNDLE_PROD).unwrap();
+        DeviceTokenRepo::register(&conn, &token2, Some("sess_2"), None, "production", BUNDLE_PROD).unwrap();
 
         let session_tokens = DeviceTokenRepo::get_by_session(&conn, "sess_1").unwrap();
         assert_eq!(session_tokens.len(), 1);
@@ -555,7 +569,7 @@ mod tests {
             Some("sess_1"),
             Some("ws_1"),
             "production",
-            Some("com.tron.mobile"),
+            BUNDLE_PROD,
         )
         .unwrap();
 
@@ -564,7 +578,7 @@ mod tests {
         let info = &infos[0];
         assert_eq!(info.session_id.as_deref(), Some("sess_1"));
         assert_eq!(info.workspace_id.as_deref(), Some("ws_1"));
-        assert_eq!(info.bundle_id.as_deref(), Some("com.tron.mobile"));
+        assert_eq!(info.bundle_id, BUNDLE_PROD);
 
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
             .unwrap()
@@ -590,7 +604,7 @@ mod tests {
     fn deactivate_returns_empty_on_already_inactive_rows() {
         let conn = setup();
         let token = "g".repeat(64);
-        let _ = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        let _ = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
         let first = DeviceTokenRepo::deactivate(&conn, &token).unwrap();
         assert_eq!(first.len(), 1);
 
@@ -602,16 +616,16 @@ mod tests {
     }
 
     #[test]
-    fn deactivate_preserves_nullable_session_and_bundle() {
+    fn deactivate_preserves_nullable_session() {
         let conn = setup();
         let token = "h".repeat(64);
-        let _ = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
+        let _ = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
         let infos = DeviceTokenRepo::deactivate(&conn, &token).unwrap();
         assert_eq!(infos.len(), 1);
         let info = &infos[0];
         assert!(info.session_id.is_none());
         assert!(info.workspace_id.is_none());
-        assert!(info.bundle_id.is_none());
+        assert_eq!(info.bundle_id, BUNDLE_PROD);
     }
 
     /// When a single token has multiple active registrations (e.g., the
@@ -632,7 +646,7 @@ mod tests {
             Some("sess_1"),
             Some("ws_1"),
             "production",
-            Some("com.tron.mobile"),
+            BUNDLE_PROD,
         )
         .unwrap();
         DeviceTokenRepo::register(
@@ -641,7 +655,7 @@ mod tests {
             None,
             Some("ws_2"),
             "production",
-            Some("com.tron.mobile"),
+            BUNDLE_PROD,
         )
         .unwrap();
 
@@ -677,7 +691,7 @@ mod tests {
     fn register_preserves_platform_ios() {
         let conn = setup();
         let token = "h".repeat(64);
-        let result = DeviceTokenRepo::register(&conn, &token, None, None, "sandbox", None).unwrap();
+        let result = DeviceTokenRepo::register(&conn, &token, None, None, "sandbox", BUNDLE_PROD).unwrap();
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
             .unwrap()
             .unwrap();
@@ -685,7 +699,7 @@ mod tests {
         assert_eq!(row.environment, "sandbox");
     }
 
-    // ── bundle_id round-trip (v006) ─────────────────────────────────
+    // ── bundle_id round-trip ──────────────────────────────────────────
 
     #[test]
     fn register_with_bundle_id_stores_it() {
@@ -697,28 +711,13 @@ mod tests {
             None,
             None,
             "sandbox",
-            Some("com.tron.mobile.beta"),
+            BUNDLE_BETA,
         )
         .unwrap();
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
             .unwrap()
             .unwrap();
-        assert_eq!(row.bundle_id.as_deref(), Some("com.tron.mobile.beta"));
-    }
-
-    #[test]
-    fn register_without_bundle_id_stores_null() {
-        let conn = setup();
-        let token = "2".repeat(64);
-        let result =
-            DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
-        let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
-            .unwrap()
-            .unwrap();
-        assert!(
-            row.bundle_id.is_none(),
-            "register(..., None) should store NULL bundle_id"
-        );
+        assert_eq!(row.bundle_id, BUNDLE_BETA);
     }
 
     /// A different bundle is a different identity (plan M3, v007). The same
@@ -736,7 +735,7 @@ mod tests {
             None,
             None,
             "production",
-            Some("com.tron.mobile"),
+            BUNDLE_PROD,
         )
         .unwrap();
         let r2 = DeviceTokenRepo::register(
@@ -745,7 +744,7 @@ mod tests {
             None,
             None,
             "sandbox",
-            Some("com.tron.mobile.beta"),
+            BUNDLE_BETA,
         )
         .unwrap();
 
@@ -753,100 +752,19 @@ mod tests {
         assert!(r2.created, "distinct bundles must create distinct rows");
         assert_ne!(r1.id, r2.id);
 
-        let mut bundles: Vec<Option<String>> = conn
+        let mut bundles: Vec<String> = conn
             .prepare(
                 "SELECT bundle_id FROM device_tokens WHERE device_token = ?1 ORDER BY bundle_id",
             )
             .unwrap()
-            .query_map(params![token], |row| row.get::<_, Option<String>>(0))
+            .query_map(params![token], |row| row.get::<_, String>(0))
             .unwrap()
             .filter_map(std::result::Result::ok)
             .collect();
         bundles.sort();
         assert_eq!(bundles.len(), 2);
-        assert_eq!(bundles[0].as_deref(), Some("com.tron.mobile"));
-        assert_eq!(bundles[1].as_deref(), Some("com.tron.mobile.beta"));
-    }
-
-    /// NULL bundle_id is a distinct identity from any concrete bundle
-    /// string. A legacy client without a bundle remains its own row; it
-    /// cannot clobber a bundle-carrying registration.
-    #[test]
-    fn register_with_null_bundle_is_distinct_from_concrete_bundle() {
-        let conn = setup();
-        let token = "4".repeat(64);
-        let r1 = DeviceTokenRepo::register(
-            &conn,
-            &token,
-            None,
-            None,
-            "production",
-            Some("com.tron.mobile"),
-        )
-        .unwrap();
-        let r2 = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
-
-        assert!(r1.created);
-        assert!(
-            r2.created,
-            "re-register with None bundle is a different identity from a concrete bundle"
-        );
-        assert_ne!(r1.id, r2.id);
-
-        // Both rows present, each preserving its own bundle_id.
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM device_tokens WHERE device_token = ?1",
-                params![token],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 2);
-
-        let with_bundle: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM device_tokens
-                 WHERE device_token = ?1 AND bundle_id IS NOT NULL",
-                params![token],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let without_bundle: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM device_tokens
-                 WHERE device_token = ?1 AND bundle_id IS NULL",
-                params![token],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(with_bundle, 1);
-        assert_eq!(without_bundle, 1);
-    }
-
-    /// A legacy row (bundle_id NULL) is updated in place — not duplicated —
-    /// when the client re-registers with the same NULL bundle. The
-    /// COALESCE-widened unique index collapses (NULL, NULL) to a single
-    /// identity. Regression guard against the index accidentally being
-    /// built without COALESCE.
-    #[test]
-    fn register_twice_with_null_bundle_stays_single_row() {
-        let conn = setup();
-        let token = "5a".repeat(32);
-        let r1 = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
-        let r2 = DeviceTokenRepo::register(&conn, &token, None, None, "production", None).unwrap();
-
-        assert!(r1.created);
-        assert!(!r2.created, "repeat same-identity register must update, not insert");
-        assert_eq!(r1.id, r2.id);
-
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM device_tokens WHERE device_token = ?1",
-                params![token],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(bundles[0], BUNDLE_PROD);
+        assert_eq!(bundles[1], BUNDLE_BETA);
     }
 
     #[test]
@@ -854,14 +772,13 @@ mod tests {
         let conn = setup();
         let t_prod = "5".repeat(64);
         let t_beta = "6".repeat(64);
-        let t_legacy = "7".repeat(64);
         DeviceTokenRepo::register(
             &conn,
             &t_prod,
             None,
             None,
             "production",
-            Some("com.tron.mobile"),
+            BUNDLE_PROD,
         )
         .unwrap();
         DeviceTokenRepo::register(
@@ -870,20 +787,17 @@ mod tests {
             None,
             None,
             "sandbox",
-            Some("com.tron.mobile.beta"),
+            BUNDLE_BETA,
         )
         .unwrap();
-        DeviceTokenRepo::register(&conn, &t_legacy, None, None, "production", None).unwrap();
 
         let mut rows = DeviceTokenRepo::get_all_active(&conn).unwrap();
         rows.sort_by(|a, b| a.device_token.cmp(&b.device_token));
-        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].device_token, t_prod);
-        assert_eq!(rows[0].bundle_id.as_deref(), Some("com.tron.mobile"));
+        assert_eq!(rows[0].bundle_id, BUNDLE_PROD);
         assert_eq!(rows[1].device_token, t_beta);
-        assert_eq!(rows[1].bundle_id.as_deref(), Some("com.tron.mobile.beta"));
-        assert_eq!(rows[2].device_token, t_legacy);
-        assert!(rows[2].bundle_id.is_none());
+        assert_eq!(rows[1].bundle_id, BUNDLE_BETA);
     }
 
     #[test]
@@ -897,32 +811,13 @@ mod tests {
             Some("sess_1"),
             Some("ws_1"),
             "sandbox",
-            Some("com.tron.mobile.beta"),
+            BUNDLE_BETA,
         )
         .unwrap();
 
         let rows = DeviceTokenRepo::get_by_session(&conn, "sess_1").unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].bundle_id.as_deref(), Some("com.tron.mobile.beta"));
-    }
-
-
-    #[test]
-    fn map_row_handles_null_bundle_id() {
-        // Direct insert with explicit NULL (simulates legacy pre-v006 row).
-        let conn = setup();
-        conn.execute(
-            "INSERT INTO device_tokens (id, device_token, platform, environment,
-                                        created_at, last_used_at, is_active)
-             VALUES ('legacy_1', '9999', 'ios', 'production',
-                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
-            [],
-        )
-        .unwrap();
-
-        let row = DeviceTokenRepo::get_by_id(&conn, "legacy_1").unwrap().unwrap();
-        assert_eq!(row.device_token, "9999");
-        assert!(row.bundle_id.is_none());
+        assert_eq!(rows[0].bundle_id, BUNDLE_BETA);
     }
 
     // ── M3: workspace-scoped identity (v007) ───────────────────────────
@@ -953,7 +848,7 @@ mod tests {
             None,
             Some("ws_1"),
             "production",
-            Some("com.tron.mobile"),
+            "com.tron.mobile",
         )
         .unwrap();
         let r2 = DeviceTokenRepo::register(
@@ -962,7 +857,7 @@ mod tests {
             None,
             Some("ws_2"),
             "production",
-            Some("com.tron.mobile"),
+            "com.tron.mobile",
         )
         .unwrap();
 
@@ -990,7 +885,7 @@ mod tests {
         assert!(rows.iter().all(|r| r.device_token == token));
         assert!(
             rows.iter()
-                .all(|r| r.bundle_id.as_deref() == Some("com.tron.mobile"))
+                .all(|r| r.bundle_id == "com.tron.mobile")
         );
     }
 }

@@ -73,19 +73,20 @@ impl NotifyDelegate for RelayNotifyDelegate {
         let mut all_results = Vec::with_capacity(total);
         for group in &groups {
             let owned: Vec<String> = group.tokens.iter().map(|t| t.to_string()).collect();
-            // Empty string signals "use relay default" (env.APNS_BUNDLE_ID) for
-            // legacy tokens without a stored bundle_id.
-            let bundle_id = group.bundle_id.unwrap_or("");
+            // INVARIANT: `device_tokens.bundle_id` is NOT NULL (v001 schema),
+            // so every group carries a concrete APNs topic. The relay worker
+            // no longer has an `env.APNS_BUNDLE_ID` fallback path for this
+            // request — the per-token value is the one source of truth.
             debug!(
                 environment = group.environment,
-                bundle_id,
+                bundle_id = group.bundle_id,
                 count = group.tokens.len(),
                 "relay group"
             );
             let batch = ApnsBatch {
                 device_tokens: &owned,
                 environment: group.environment,
-                bundle_id,
+                bundle_id: group.bundle_id,
             };
             let results = self.sender.send_to_many(&batch, &apns_notif).await;
             all_results.extend(results);
@@ -124,7 +125,7 @@ mod tests {
         store: &EventStore,
         token: &str,
         env: &str,
-        bundle: Option<&str>,
+        bundle: &str,
     ) {
         let conn = store.pool().get().unwrap();
         DeviceTokenRepo::register(&conn, token, None, None, env, bundle).unwrap();
@@ -159,8 +160,8 @@ mod tests {
         // delegate collapses them, the Beta token hits production topic
         // and Apple rejects with DeviceTokenNotForTopic.
         let store = event_store_with_schema();
-        register(&store, &"1".repeat(64), "sandbox", Some("com.tron.mobile"));
-        register(&store, &"2".repeat(64), "sandbox", Some("com.tron.mobile.beta"));
+        register(&store, &"1".repeat(64), "sandbox", "com.tron.mobile");
+        register(&store, &"2".repeat(64), "sandbox", "com.tron.mobile.beta");
 
         let mock = Arc::new(MockPushSender::succeeding());
         let delegate = RelayNotifyDelegate::new(mock.clone(), store);
@@ -179,11 +180,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_token_with_null_bundle_passes_empty_string() {
-        // Legacy tokens registered before v006 must still send — they
-        // fall through to the relay worker's env.APNS_BUNDLE_ID default.
+    async fn every_sender_call_carries_a_non_empty_bundle_id() {
+        // INVARIANT: the transport never sees an empty `bundle_id`. The
+        // v001 schema enforces NOT NULL, and the relay worker no longer
+        // has a fallback APNS_BUNDLE_ID path — a missing topic would
+        // produce a server-side error, so we guard against regressions
+        // that might bypass the NOT NULL constraint through future
+        // direct SQL inserts.
         let store = event_store_with_schema();
-        register(&store, &"1".repeat(64), "production", None);
+        register(&store, &"1".repeat(64), "production", "com.tron.mobile");
+        register(&store, &"2".repeat(64), "sandbox", "com.tron.mobile.beta");
 
         let mock = Arc::new(MockPushSender::succeeding());
         let delegate = RelayNotifyDelegate::new(mock.clone(), store);
@@ -191,22 +197,27 @@ mod tests {
         delegate.send_notification(&notif()).await.unwrap();
 
         let calls = mock.calls.lock().unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].3, "", "NULL bundle_id → empty string to sender");
+        assert_eq!(calls.len(), 2);
+        for call in calls.iter() {
+            assert!(
+                !call.3.is_empty(),
+                "every relay call must carry a concrete bundle_id"
+            );
+        }
     }
 
     #[tokio::test]
     async fn deactivates_token_on_device_token_not_for_topic() {
-        // *** Full-stack regression test for the original bug. ***
+        // *** Full-stack regression test for the 2026-04-16 incident. ***
         //
-        // Scenario: Beta app registered a sandbox token before the fix,
-        // so DB has bundle_id = NULL. Server sends no bundle_id to relay;
-        // relay uses env.APNS_BUNDLE_ID = "com.tron.mobile" (production);
-        // APNs rejects with DeviceTokenNotForTopic. The DB must self-heal
-        // by deactivating the token so the Beta app re-registers cleanly.
+        // Even after the NOT NULL bundle_id change, APNs can still return
+        // `DeviceTokenNotForTopic` if (for example) a Prod-signed app was
+        // reinstalled as Beta and kept the old token row. The server must
+        // self-heal by deactivating the offending row so the iOS client
+        // re-registers with the correct bundle on next launch.
         let store = event_store_with_schema();
         let token = "b".repeat(64);
-        register(&store, &token, "sandbox", None);
+        register(&store, &token, "sandbox", "com.tron.mobile.beta");
 
         let mock = Arc::new(MockPushSender::with_results(vec![vec![ApnsSendResult {
             success: false,
@@ -225,7 +236,7 @@ mod tests {
         let active = DeviceTokenRepo::get_all_active(&conn).unwrap();
         assert!(
             active.is_empty(),
-            "token with DeviceTokenNotForTopic must be deactivated (original bug would leave it active)"
+            "token with DeviceTokenNotForTopic must be deactivated"
         );
     }
 
@@ -250,9 +261,9 @@ mod tests {
         // push, not just the ones "viewing" the session. This matches
         // the iPhone + iPad use case (two Prod devices → both pinged).
         let store = event_store_with_schema();
-        register(&store, &"1".repeat(64), "production", Some("com.tron.mobile"));
-        register(&store, &"2".repeat(64), "production", Some("com.tron.mobile"));
-        register(&store, &"3".repeat(64), "sandbox", Some("com.tron.mobile.beta"));
+        register(&store, &"1".repeat(64), "production", "com.tron.mobile");
+        register(&store, &"2".repeat(64), "production", "com.tron.mobile");
+        register(&store, &"3".repeat(64), "sandbox", "com.tron.mobile.beta");
 
         let mock = Arc::new(MockPushSender::succeeding());
         let delegate = RelayNotifyDelegate::new(mock.clone(), store);

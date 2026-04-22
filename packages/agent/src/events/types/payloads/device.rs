@@ -24,8 +24,9 @@ pub struct DeviceTokenInvalidatedPayload {
     /// `device_tokens` rows in the DB without leaking the full token.
     pub token_prefix: String,
     /// APNS `apns-topic` the token was issued against (e.g.,
-    /// `com.tron.mobile.beta`). `None` for legacy pre-v006 tokens.
-    pub bundle_id: Option<String>,
+    /// `com.tron.mobile.beta`). Always present — every token row carries
+    /// a NOT NULL `bundle_id` since the v001 consolidated schema.
+    pub bundle_id: String,
     /// HTTP status code returned by APNS (or relay-equivalent).
     /// Always present for terminal errors; `None` is reserved for
     /// transport-level failures that somehow classified as terminal.
