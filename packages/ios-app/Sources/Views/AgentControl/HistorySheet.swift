@@ -198,24 +198,24 @@ struct HistorySheet: View {
 
                     if let data = turn.analyticsData, data.latency > 0 || data.toolCount > 0 || data.errorCount > 0 {
                         HStack(spacing: 8) {
-                            if data.latency > 0 {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "clock")
-                                        .font(TronTypography.sans(size: TronTypography.sizeXS))
-                                    Text(DurationFormatter.format(data.latency, style: .compact))
-                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                }
-                                .foregroundStyle(muted ? .tronTextMuted : .tronSlate)
-                            }
-
                             if data.toolCount > 0 {
                                 HStack(spacing: 3) {
                                     Image(systemName: "hammer.fill")
-                                        .font(TronTypography.sans(size: TronTypography.sizeXS))
+                                        .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .bold))
                                     Text("\(data.toolCount)")
-                                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
                                 }
                                 .foregroundStyle(muted ? .tronTextMuted : .tronCyan)
+                            }
+
+                            if data.latency > 0 {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "clock")
+                                        .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .bold))
+                                    Text(DurationFormatter.format(data.latency, style: .compact))
+                                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                                }
+                                .foregroundStyle(muted ? .tronTextMuted : .tronSlate)
                             }
 
                             if data.errorCount > 0 {
