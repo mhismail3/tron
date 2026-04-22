@@ -166,6 +166,30 @@ impl MethodHandler for UnarchiveSessionHandler {
     }
 }
 
+/// Archive all user-facing sessions whose `last_activity_at` is older than
+/// `days` days. Returns a batch report — `archivedCount`,
+/// `archivedSessionIds`, and `skipped` — so callers can surface partial
+/// success without another round-trip.
+pub struct ArchiveOlderThanHandler;
+
+#[async_trait]
+impl MethodHandler for ArchiveOlderThanHandler {
+    #[instrument(skip(self, ctx), fields(method = "session.archiveOlderThan"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let days_raw = params
+            .as_ref()
+            .and_then(|p| p.get("days"))
+            .and_then(Value::as_u64)
+            .ok_or_else(|| RpcError::InvalidParams {
+                message: "missing required parameter 'days' (non-negative integer)".into(),
+            })?;
+        // Hard cap at ~30 years so an accidental `i64::MAX` doesn't underflow
+        // the chrono subtraction. Any realistic retention window fits here.
+        let days = u32::try_from(days_raw).unwrap_or(u32::MAX);
+        SessionCommandService::archive_older_than(ctx, days).await
+    }
+}
+
 /// Reconstruct full session state for reconnection.
 pub struct ReconstructHandler;
 

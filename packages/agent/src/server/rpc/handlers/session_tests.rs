@@ -592,6 +592,38 @@ async fn unarchive_session_emits_event() {
     assert_eq!(event.event_type(), "session_unarchived");
 }
 
+/// The `session.archiveOlderThan` handler must reject calls missing the
+/// required `days` parameter with a typed `INVALID_PARAMS` error — the
+/// bulk-archive RPC is destructive enough that we want no guesswork defaults.
+#[tokio::test]
+async fn archive_older_than_missing_days_is_invalid_params() {
+    let ctx = make_test_context();
+    let err = ArchiveOlderThanHandler
+        .handle(Some(json!({})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
+/// Empty store returns `archivedCount: 0` plus a valid RFC3339 cutoff.
+/// Exercises the handler → service wiring without requiring fixture setup.
+#[tokio::test]
+async fn archive_older_than_handler_returns_batch_report() {
+    let ctx = make_test_context();
+
+    let result = ArchiveOlderThanHandler
+        .handle(Some(json!({"days": 30})), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(result["archivedCount"].as_u64().unwrap(), 0);
+    assert!(result["archivedSessionIds"].as_array().unwrap().is_empty());
+    assert!(result["skipped"].as_array().unwrap().is_empty());
+    let cutoff = result["cutoff"].as_str().unwrap();
+    // RFC3339: must parse back out.
+    chrono::DateTime::parse_from_rfc3339(cutoff).unwrap();
+}
+
 #[tokio::test]
 async fn fork_session_emits_event() {
     let ctx = make_test_context();
