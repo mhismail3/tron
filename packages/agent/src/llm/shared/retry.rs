@@ -12,7 +12,7 @@
 //! 3. Emits [`StreamEvent::Retry`] events before each retry wait
 //! 4. Respects cancellation via `CancellationToken`
 //!
-//! [`StreamEvent`]: crate::core::StreamEvent
+//! [`StreamEvent`]: crate::core::events::StreamEvent
 
 use std::future::Future;
 use std::pin::Pin;

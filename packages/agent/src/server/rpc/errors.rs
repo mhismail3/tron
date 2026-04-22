@@ -20,7 +20,8 @@
 //! messages by hand today should migrate to the helper as a side
 //! effect of any touch.
 //!
-//! Regression guard: [`tests::error_messages_redact_mode_removes_user_input`].
+//! Regression guard: `tests::error_messages_redact_mode_removes_user_input`
+//! (in this file's `#[cfg(test)] mod tests`).
 
 use crate::server::rpc::types::RpcErrorBody;
 

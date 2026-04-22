@@ -20,8 +20,8 @@
 //! server-issued auth token in the WebSocket handshake that
 //! cryptographically scopes the bind to the session's owner.
 //!
-//! Regression guard:
-//! [`tests::cross_session_eavesdrop_requires_untrusted_mode`].
+//! Regression guard: `tests::cross_session_eavesdrop_requires_untrusted_mode`
+//! (in this file's `#[cfg(test)] mod tests`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
