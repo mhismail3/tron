@@ -208,7 +208,10 @@ pub struct DeviceTokenRow {
     pub session_id: Option<String>,
     /// Associated workspace ID.
     pub workspace_id: Option<String>,
-    /// Platform (always "ios" for now).
+    /// Platform. Device tokens are APNS-specific, so this is always the
+    /// literal `"ios"`. Kept as a column (not an enum) so that adding a
+    /// second platform — e.g. FCM for Android — does not require a
+    /// schema migration, only a new `APNS`-equivalent service module.
     pub platform: String,
     /// APNS environment ("sandbox" or "production").
     pub environment: String,
