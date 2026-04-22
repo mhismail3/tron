@@ -886,4 +886,85 @@ mod tests {
         assert!(!path.is_empty(), "login-shell PATH should not be empty");
         assert!(path.contains("/usr/bin"), "PATH should contain /usr/bin: {path}");
     }
+
+    // ── M27: write-after-death regression guard ─────────────
+    //
+    // The stdio transport wraps `ChildStdin` in a `BufWriter` with no internal
+    // queue beyond the buffer — `write_all` + `write_all(b"\n")` + `flush()`
+    // are synchronous against the kernel pipe. When the child process is dead,
+    // `flush()` must observe EPIPE and return an error. The client wrapper at
+    // `send_request` line 423–443 maps every write/flush error to
+    // `McpErrorKind::ConnectionLost`.
+    //
+    // This test pins that contract: after killing the child, the next
+    // `send_request` returns `ConnectionLost` within a bounded time rather
+    // than hanging (the failure mode the plan called out).
+    #[tokio::test]
+    async fn write_after_death_returns_connection_lost_not_hangs() {
+        use std::time::Duration;
+
+        // Spawn `cat` as a minimal stdio process. `cat` holds stdin open and
+        // echoes lines back, so it's a valid "alive" stdio peer we can then
+        // kill deterministically.
+        let mut child = Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn cat for test");
+
+        let stdin = child.stdin.take().expect("stdin");
+        let stdout = child.stdout.take().expect("stdout");
+
+        let client = McpClient {
+            name: "test-server-dead".to_string(),
+            transport: Mutex::new(Transport::Stdio(Box::new(StdioTransport {
+                child,
+                writer: tokio::io::BufWriter::new(stdin),
+                reader: BufReader::new(stdout),
+            }))),
+            next_id: AtomicU64::new(1),
+            tool_timeout_ms: 5_000,
+            negotiated_version: Mutex::new(None),
+        };
+
+        // Kill the child — simulates the MCP server crashing between requests.
+        {
+            let mut transport = client.transport.lock().await;
+            if let Transport::Stdio(stdio) = &mut *transport {
+                stdio.child.kill().await.expect("kill child");
+                // Wait for the OS to reap the process so pipe teardown is real
+                // rather than racing the next write.
+                let _ = stdio.child.wait().await;
+            } else {
+                panic!("expected stdio transport");
+            }
+        }
+
+        // Bound the overall wait so a regression (hang) produces a loud failure
+        // rather than a silent CI timeout. The write path is synchronous against
+        // the kernel pipe after a dead child, so 5s is a generous ceiling.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.send_request("tools/list", None),
+        )
+        .await;
+
+        let result = outcome.expect(
+            "send_request must return (error or success) within 5s after child death — \
+             hang means the write path is swallowing the broken pipe",
+        );
+
+        let err = result.expect_err("write to dead child must fail");
+        assert_eq!(
+            err.kind,
+            McpErrorKind::ConnectionLost,
+            "broken pipe after child death must map to ConnectionLost, got {:?}: {}",
+            err.kind, err.message,
+        );
+        assert!(
+            err.requires_restart(),
+            "ConnectionLost must signal restart-required to upstream callers"
+        );
+    }
 }
