@@ -586,7 +586,14 @@ impl CompactionHandler {
                 if compaction_result.success
                     && let Some(persister) = persister
                 {
-                    let reason_str = format!("{reason:?}");
+                    // INVARIANT: encode reason via serde so the wire string matches
+                    // the `#[serde(rename_all = "snake_case")]` contract on
+                    // `CompactionReason`. Debug formatting would leak
+                    // PascalCase variant names and drift from iOS expectations.
+                    let reason_str = serde_json::to_value(&reason)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_owned))
+                        .expect("CompactionReason serializes to a JSON string via snake_case");
                     let staging_timestamp = chrono::Utc::now().to_rfc3339();
 
                     // ── Phase 1: staging ─────────────────────────────────

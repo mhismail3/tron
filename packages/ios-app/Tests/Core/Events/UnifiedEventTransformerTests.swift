@@ -2388,6 +2388,89 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertTrue(maps.toolResults.isEmpty)
     }
 
+    // MARK: - compact.boundary Strict Decode Tests
+
+    /// Happy path: valid boundary payload produces a system `.compaction`
+    /// message. Mirrors the Rust `compact_boundary_minimal_payload_decodes`
+    /// test to verify both sides agree on the minimal required shape.
+    func testTransformCompactBoundaryMinimalPayloadProducesCompactionMessage() {
+        let event = rawEvent(
+            type: "compact.boundary",
+            payload: [
+                "originalTokens": AnyCodable(1000),
+                "compactedTokens": AnyCodable(100),
+                "reason": AnyCodable("manual")
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNotNil(message)
+        guard case .systemEvent(let systemEvent) = message?.content,
+              case .compaction(let tokensBefore, let tokensAfter, let reason, _, _, _) = systemEvent else {
+            XCTFail("Expected .compaction system event")
+            return
+        }
+        XCTAssertEqual(tokensBefore, 1000)
+        XCTAssertEqual(tokensAfter, 100)
+        XCTAssertEqual(reason, "manual")
+    }
+
+    /// Strict wire contract: `reason` is required. Mirrors the Rust
+    /// `compact_boundary_requires_reason` test — missing field must drop
+    /// the event rather than defaulting to "manual".
+    func testTransformCompactBoundaryMissingReasonReturnsNil() {
+        let event = rawEvent(
+            type: "compact.boundary",
+            payload: [
+                "originalTokens": AnyCodable(1000),
+                "compactedTokens": AnyCodable(100)
+                // No reason — wire contract violation
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNil(message, "Missing reason must drop the event, matching Rust decoder")
+    }
+
+    /// Empty-string `reason` is rejected as equivalent to missing — a
+    /// degenerate server emit should not render with an empty label in
+    /// the compaction pill.
+    func testTransformCompactBoundaryEmptyReasonReturnsNil() {
+        let event = rawEvent(
+            type: "compact.boundary",
+            payload: [
+                "originalTokens": AnyCodable(1000),
+                "compactedTokens": AnyCodable(100),
+                "reason": AnyCodable("")
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNil(message, "Empty reason must drop the event")
+    }
+
+    /// All four enumerated `reason` values from `CompactionReason` serde
+    /// encoding (plus the import-transformer sentinel) decode successfully.
+    /// Regression guard against the Rust emit path drifting from the
+    /// snake_case contract.
+    func testTransformCompactBoundaryAcceptsKnownReasonLabels() {
+        for reason in ["manual", "threshold_exceeded", "progress_signal", "imported"] {
+            let event = rawEvent(
+                type: "compact.boundary",
+                payload: [
+                    "originalTokens": AnyCodable(1000),
+                    "compactedTokens": AnyCodable(100),
+                    "reason": AnyCodable(reason)
+                ]
+            )
+            let message = UnifiedEventTransformer.transformPersistedEvent(event)
+            XCTAssertNotNil(message, "\(reason) should decode")
+        }
+    }
+
     // MARK: - skills.cleared Reconstruction Tests (M6)
 
     /// Reconstructs the `skills.cleared` event emitted on the first prompt

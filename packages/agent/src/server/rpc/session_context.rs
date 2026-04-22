@@ -669,7 +669,11 @@ mod tests {
         let _ = ctx.event_store.append(&AppendOptions {
             session_id: &session_id,
             event_type: EventType::CompactBoundary,
-            payload: serde_json::json!({}),
+            payload: serde_json::json!({
+                "originalTokens": 0,
+                "compactedTokens": 0,
+                "reason": "manual",
+            }),
             parent_id: None,
             sequence: None,
         });

@@ -258,6 +258,10 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                             payload: json!({
                                 "originalTokens": 0,
                                 "compactedTokens": 0,
+                                // Source logs don't carry the original trigger — tag as
+                                // `imported` so reconstruction can distinguish these
+                                // from native-emitted boundaries.
+                                "reason": "imported",
                             }),
                         });
                     }
@@ -412,6 +416,8 @@ fn emit_compact_from_user(
         payload: json!({
             "originalTokens": 0,
             "compactedTokens": 0,
+            // Source logs don't carry the original trigger — tag as `imported`.
+            "reason": "imported",
         }),
     });
 

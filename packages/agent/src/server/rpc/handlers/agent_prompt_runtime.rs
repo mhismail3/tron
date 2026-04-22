@@ -1049,7 +1049,11 @@ mod skills_cleared_emission_tests {
             store,
             session_id,
             crate::events::EventType::CompactBoundary,
-            serde_json::json!({}),
+            serde_json::json!({
+                "originalTokens": 0,
+                "compactedTokens": 0,
+                "reason": "manual",
+            }),
         );
     }
 

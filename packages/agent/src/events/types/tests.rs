@@ -197,7 +197,8 @@ mod session_event_tests {
             json!({
                 "range": {"from": "evt-1", "to": "evt-10"},
                 "originalTokens": 50000,
-                "compactedTokens": 5000
+                "compactedTokens": 5000,
+                "reason": "threshold_exceeded"
             }),
         );
         let payload = event.typed_payload().unwrap();
@@ -207,6 +208,7 @@ mod session_event_tests {
                 assert_eq!(range.from, "evt-1");
                 assert_eq!(range.to, "evt-10");
                 assert_eq!(p.original_tokens, 50000);
+                assert_eq!(p.reason, "threshold_exceeded");
             }
             other => panic!("expected CompactBoundary, got {other:?}"),
         }
@@ -378,7 +380,7 @@ mod session_event_tests {
             ),
             (
                 EventType::CompactBoundary,
-                json!({"range": {"from": "a", "to": "b"}, "originalTokens": 100, "compactedTokens": 10}),
+                json!({"range": {"from": "a", "to": "b"}, "originalTokens": 100, "compactedTokens": 10, "reason": "manual"}),
             ),
             (
                 EventType::CompactSummary,

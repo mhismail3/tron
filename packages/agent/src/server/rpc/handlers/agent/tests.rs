@@ -1606,7 +1606,7 @@ async fn gather_recent_events_since_boundary() {
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
         session_id: &sid,
         event_type: crate::events::EventType::CompactBoundary,
-        payload: json!({"range": {"from": "a", "to": "b"}, "originalTokens": 100, "compactedTokens": 10}),
+        payload: json!({"range": {"from": "a", "to": "b"}, "originalTokens": 100, "compactedTokens": 10, "reason": "manual"}),
         parent_id: None,
         sequence: None,
     });

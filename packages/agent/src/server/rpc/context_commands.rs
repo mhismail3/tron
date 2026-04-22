@@ -135,7 +135,8 @@ async fn execute_compaction(
                     "originalTokens": result.tokens_before,
                     "compactedTokens": result.tokens_after,
                     "compressionRatio": result.compression_ratio,
-                    "reason": "Manual",
+                    // snake_case mirrors `CompactionReason::Manual` serde encoding.
+                    "reason": "manual",
                     "summary": summary,
                     "estimatedContextTokens": total_context_after,
                     "preservedTurns": result.preserved_turns,
