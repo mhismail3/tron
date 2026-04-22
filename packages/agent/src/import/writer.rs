@@ -2,15 +2,21 @@
 //!
 //! Orchestrates the full import pipeline: parse → linearize → assemble →
 //! transform → write. Detects duplicate imports via a tag on the session.
+//!
+//! # M28 — dry-run validation
+//!
+//! The write path runs the pipeline via [`crate::import::validator::validate_and_prepare`],
+//! which produces BOTH the events the writer needs AND a validation
+//! report. The report is attached to the returned [`ImportResult`] so a
+//! caller sees the same warnings the dry-run surfaces (unparseable lines,
+//! orphan tool calls/results, missing model). No separate second pass —
+//! the validator is the single source of pipeline output.
 
 use std::path::Path;
 
 use crate::events::{EventStore, EventStoreError, ImportAtomicOptions, ImportEventSpec};
-use crate::import::assembler::assemble;
 use crate::import::errors::ImportError;
-use crate::import::parser::parse_session;
-use crate::import::transformer::transform;
-use crate::import::tree::linearize;
+use crate::import::validator::{self, ImportWarning};
 
 /// Result of a successful import.
 #[derive(Debug)]
@@ -29,6 +35,12 @@ pub struct ImportResult {
     pub model: String,
     /// Working directory.
     pub working_directory: String,
+    /// Non-fatal warnings surfaced by the pipeline (M28).
+    ///
+    /// Empty on a clean import. On a source file with issues, each entry
+    /// has a category ([`crate::import::ImportWarningKind`]) and a
+    /// human-readable message the caller can render to the user.
+    pub warnings: Vec<ImportWarning>,
 }
 
 /// Import a Claude Code session into Tron.
@@ -41,6 +53,11 @@ pub struct ImportResult {
 /// SQLite transaction. A failed import therefore never leaves a partial
 /// session in the store, and concurrent imports of the same source file
 /// race to a single winner.
+///
+/// Non-fatal issues (unparseable lines, orphan tool calls/results,
+/// missing model) are attached to the returned [`ImportResult::warnings`]
+/// via the shared validator. The same report is available before the
+/// write via [`crate::import::validate_session`].
 pub fn import_session(
     event_store: &EventStore,
     session_path: &Path,
@@ -54,29 +71,14 @@ pub fn import_session(
         .unwrap_or("unknown");
     let dedup_tag = format!("claude_code_import:{session_uuid}");
 
-    let records = parse_session(session_path)?;
-    let linear = linearize(records);
-    let assembled = assemble(linear);
+    let prepared = validator::validate_and_prepare(session_path)?;
+    let validator::ValidatedImport {
+        validation,
+        events,
+        model,
+    } = prepared;
 
-    if assembled.is_empty() {
-        return Err(ImportError::EmptySession);
-    }
-
-    let result = transform(assembled);
-
-    if result.events.is_empty() {
-        return Err(ImportError::EmptySession);
-    }
-
-    // Fallback when no assistant message carried a model ID
-    let model: &str = if result.model.is_empty() {
-        "claude-sonnet-4-20250514"
-    } else {
-        &result.model
-    };
-
-    let event_specs: Vec<ImportEventSpec<'_>> = result
-        .events
+    let event_specs: Vec<ImportEventSpec<'_>> = events
         .iter()
         .map(|spec| ImportEventSpec {
             event_type: spec.event_type,
@@ -86,9 +88,9 @@ pub fn import_session(
 
     let atomic = event_store
         .import_atomic(&ImportAtomicOptions {
-            model,
+            model: &model,
             workspace_path: working_directory,
-            title: result.title.as_deref(),
+            title: validation.preview.title.as_deref(),
             origin,
             source: Some("import"),
             events: &event_specs,
@@ -109,12 +111,13 @@ pub fn import_session(
         // The event_count on the public API reports events ADDED during import,
         // excluding the synthetic session.start event (preserves prior semantics:
         // caller sees `transformed_events + 1 dedup_tag + extra_tags`).
-        event_count: result.events.len() as i64 + 1 + extra_tags.len() as i64,
-        turn_count: result.turn_count,
-        message_count: result.message_count,
-        total_cost: result.total_cost,
-        model: model.to_string(),
+        event_count: events.len() as i64 + 1 + extra_tags.len() as i64,
+        turn_count: validation.preview.turn_count,
+        message_count: validation.preview.message_count,
+        total_cost: validation.preview.total_cost,
+        model,
         working_directory: working_directory.to_string(),
+        warnings: validation.warnings,
     })
 }
 

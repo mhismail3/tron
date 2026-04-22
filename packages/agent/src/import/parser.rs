@@ -157,11 +157,53 @@ pub fn discover_sessions(project_dir: &Path) -> Result<Vec<ClaudeSessionMeta>, I
     Ok(sessions)
 }
 
-/// Parse a full session file into records.
+/// A line that failed to parse during [`parse_session_detailed`].
+///
+/// Surfaced so a dry-run validation (see [`crate::import::validator`]) can
+/// report silent skips to the user instead of burying them in a debug log.
+#[derive(Debug, Clone)]
+pub struct ParseWarning {
+    /// 1-indexed source line number.
+    pub line_number: usize,
+    /// Human-readable reason (usually the serde_json error message).
+    pub reason: String,
+    /// First 120 characters of the offending line for context.
+    pub snippet: String,
+}
+
+/// Detailed parse result: both the records and the warnings.
+///
+/// `parse_session` keeps the original API by discarding warnings. Callers
+/// that want dry-run visibility (the validator, the `import.previewSession`
+/// RPC) use [`parse_session_detailed`] directly.
+#[derive(Debug)]
+pub struct ParseOutcome {
+    /// Records that parsed successfully.
+    pub records: Vec<ClaudeRecord>,
+    /// Warnings for every line that failed to parse.
+    pub warnings: Vec<ParseWarning>,
+    /// Total non-blank lines inspected (parsed + skipped).
+    pub total_non_blank_lines: usize,
+}
+
+/// Parse a full session file into records, discarding parse warnings.
 ///
 /// Skips lines that fail to parse (handles partial writes at tail of
-/// in-progress sessions).
+/// in-progress sessions). For the dry-run API that surfaces those skips,
+/// call [`parse_session_detailed`] instead.
 pub fn parse_session(path: &Path) -> Result<Vec<ClaudeRecord>, ImportError> {
+    Ok(parse_session_detailed(path)?.records)
+}
+
+/// Parse a full session file, tracking line numbers and collecting a
+/// [`ParseWarning`] for every line that failed to parse.
+///
+/// Invariants:
+/// - `records` and `warnings` together account for every non-blank line in
+///   the file; `total_non_blank_lines == records.len() + warnings.len()`.
+/// - Line numbers are 1-indexed and reflect the physical line in the source
+///   file (blank lines count toward the number, just not toward the total).
+pub fn parse_session_detailed(path: &Path) -> Result<ParseOutcome, ImportError> {
     if !path.is_file() {
         return Err(ImportError::SessionNotFound {
             path: path.to_path_buf(),
@@ -174,8 +216,10 @@ pub fn parse_session(path: &Path) -> Result<Vec<ClaudeRecord>, ImportError> {
     })?;
     let reader = BufReader::new(file);
     let mut records = Vec::new();
+    let mut warnings = Vec::new();
+    let mut total_non_blank_lines = 0usize;
 
-    for line in reader.lines() {
+    for (idx, line) in reader.lines().enumerate() {
         let line = line.map_err(|e| ImportError::Io {
             path: path.to_path_buf(),
             source: e,
@@ -184,16 +228,35 @@ pub fn parse_session(path: &Path) -> Result<Vec<ClaudeRecord>, ImportError> {
         if trimmed.is_empty() {
             continue;
         }
+        total_non_blank_lines += 1;
         match serde_json::from_str::<ClaudeRecord>(trimmed) {
             Ok(record) => records.push(record),
-            Err(_) => {
-                // Skip unparseable lines — handles partial writes at end of file.
-                tracing::debug!(path = %path.display(), "skipping unparseable JSONL line");
+            Err(err) => {
+                let snippet = if trimmed.len() > 120 {
+                    format!("{}…", &trimmed[..120])
+                } else {
+                    trimmed.to_string()
+                };
+                tracing::debug!(
+                    path = %path.display(),
+                    line = idx + 1,
+                    error = %err,
+                    "skipping unparseable JSONL line"
+                );
+                warnings.push(ParseWarning {
+                    line_number: idx + 1,
+                    reason: err.to_string(),
+                    snippet,
+                });
             }
         }
     }
 
-    Ok(records)
+    Ok(ParseOutcome {
+        records,
+        warnings,
+        total_non_blank_lines,
+    })
 }
 
 // ── Helpers ──

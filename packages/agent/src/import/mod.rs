@@ -19,6 +19,7 @@
 //! | `assembler`   | Chunk reassembly by `message.id` |
 //! | `transformer` | Record → Tron event mapping |
 //! | `cost`        | Cost estimation from tokens + model |
+//! | `validator`   | Dry-run validation / warning surfacing (M28) |
 //! | `writer`      | Transactional DB writer with dedup |
 //! | `errors`      | `ImportError` enum |
 
@@ -29,8 +30,12 @@ pub mod parser;
 pub mod transformer;
 pub mod tree;
 pub mod types;
+pub mod validator;
 pub mod writer;
 
 pub use errors::ImportError;
 pub use parser::{discover_projects, discover_sessions, ClaudeProject, ClaudeSessionMeta};
+pub use validator::{
+    validate_session, ImportPreview, ImportValidation, ImportWarning, ImportWarningKind,
+};
 pub use writer::{import_session, ImportResult};

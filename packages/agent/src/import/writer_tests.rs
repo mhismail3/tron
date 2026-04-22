@@ -471,6 +471,63 @@ fn import_produces_exactly_the_advertised_event_count() {
 }
 
 #[test]
+fn import_session_passes_warnings_through_result() {
+    // M28: the writer routes through the validator, so any warnings the
+    // dry-run surfaces must end up on ImportResult.warnings verbatim.
+    let store = setup();
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("with-orphan.jsonl");
+    let mut f = std::fs::File::create(&file).unwrap();
+
+    writeln!(f, "{}", json!({
+        "type": "user",
+        "uuid": "u1",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "promptId": "p1",
+        "message": { "role": "user", "content": "Q" }
+    })).unwrap();
+
+    writeln!(f, "{}", json!({
+        "type": "assistant",
+        "uuid": "a1",
+        "parentUuid": "u1",
+        "timestamp": "2026-01-01T00:00:01Z",
+        "message": {
+            "id": "msg_01",
+            "role": "assistant",
+            "content": [
+                { "type": "tool_use", "id": "toolu_orphan", "name": "Read", "input": { "path": "x.txt" } }
+            ],
+            "stop_reason": "tool_use",
+            "usage": { "input_tokens": 10, "output_tokens": 5 },
+            "model": "claude-opus-4-6"
+        }
+    })).unwrap();
+
+    let result = import_session(&store, &file, "/tmp/project", &[], None).unwrap();
+    assert!(result.warnings.iter().any(|w| matches!(
+        &w.kind,
+        crate::import::ImportWarningKind::OrphanToolUse { tool_call_id } if tool_call_id == "toolu_orphan"
+    )));
+}
+
+#[test]
+fn import_session_clean_source_has_no_warnings() {
+    // Regression guard: clean fixtures must not produce warnings —
+    // otherwise validator noise will train users to ignore the signal.
+    let store = setup();
+    let dir = tempdir().unwrap();
+    let path = write_sample_session(dir.path());
+
+    let result = import_session(&store, &path, "/tmp/project", &[], None).unwrap();
+    assert!(
+        result.warnings.is_empty(),
+        "clean import produced warnings: {:?}",
+        result.warnings
+    );
+}
+
+#[test]
 fn import_multiturn_session() {
     let store = setup();
     let dir = tempdir().unwrap();

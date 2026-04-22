@@ -152,3 +152,80 @@ fn discover_sessions_nonexistent_dir() {
     let result = discover_sessions(Path::new("/nonexistent"));
     assert!(matches!(result, Err(ImportError::SessionNotFound { .. })));
 }
+
+#[test]
+fn parse_session_detailed_tracks_line_numbers_for_unparseable_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("detailed.jsonl");
+    let mut f = fs::File::create(&file).unwrap();
+
+    // line 1: good user message
+    writeln!(
+        f,
+        r#"{{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{{"role":"user","content":"ok"}}}}"#
+    )
+    .unwrap();
+    // line 2: blank (not counted in total_non_blank_lines)
+    writeln!(f).unwrap();
+    // line 3: unparseable
+    writeln!(f, "NOT JSON").unwrap();
+    // line 4: good user message
+    writeln!(
+        f,
+        r#"{{"type":"user","uuid":"u2","timestamp":"2026-01-01T00:00:01Z","message":{{"role":"user","content":"ok2"}}}}"#
+    )
+    .unwrap();
+
+    let outcome = parse_session_detailed(&file).unwrap();
+    assert_eq!(outcome.records.len(), 2);
+    assert_eq!(outcome.warnings.len(), 1);
+    assert_eq!(outcome.warnings[0].line_number, 3);
+    assert_eq!(outcome.total_non_blank_lines, 3);
+    // Invariant: records + warnings == non-blank lines
+    assert_eq!(
+        outcome.records.len() + outcome.warnings.len(),
+        outcome.total_non_blank_lines
+    );
+}
+
+#[test]
+fn parse_session_detailed_warning_snippet_truncates_long_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("long.jsonl");
+    let mut f = fs::File::create(&file).unwrap();
+
+    // 200 x's — longer than the 120-char snippet cap.
+    let garbage: String = "x".repeat(200);
+    writeln!(f, "{garbage}").unwrap();
+
+    let outcome = parse_session_detailed(&file).unwrap();
+    assert_eq!(outcome.warnings.len(), 1);
+    let w = &outcome.warnings[0];
+    assert!(
+        w.snippet.ends_with('…'),
+        "long snippet should end with ellipsis; got: {}",
+        w.snippet
+    );
+    // The truncation includes 120 x's plus the ellipsis.
+    assert!(w.snippet.len() < garbage.len());
+}
+
+#[test]
+fn parse_session_wrapper_discards_warnings() {
+    // Regression guard: the legacy `parse_session` API must remain a thin
+    // wrapper that drops warnings; callers that want warnings use
+    // `parse_session_detailed`.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("mixed.jsonl");
+    let mut f = fs::File::create(&file).unwrap();
+    writeln!(f, "NOT JSON").unwrap();
+    writeln!(
+        f,
+        r#"{{"type":"user","uuid":"u1","message":{{"role":"user","content":"ok"}}}}"#
+    )
+    .unwrap();
+
+    let records = parse_session(&file).unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].record_type, "user");
+}

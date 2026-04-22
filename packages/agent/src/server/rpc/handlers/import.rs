@@ -118,6 +118,11 @@ impl MethodHandler for PreviewSessionHandler {
 
         ctx.run_blocking("import.previewSession", move || {
             let path = PathBuf::from(&session_path);
+
+            // Re-run the raw pipeline to extract the first N messages for
+            // UI preview. The validator (which we ALSO run below) discards
+            // per-event payloads to produce its report — we still need the
+            // events here to render the message list.
             let records = import::parser::parse_session(&path)
                 .map_err(map_import_error)?;
 
@@ -182,6 +187,17 @@ impl MethodHandler for PreviewSessionHandler {
                 e.event_type == crate::events::EventType::CompactBoundary
             });
 
+            // Dry-run validation — surfaces unparseable lines, orphan tool
+            // calls/results, missing model, etc. Warnings attached to the
+            // preview response so the iOS import sheet can render them
+            // before the user commits.
+            let validation = import::validate_session(&path).map_err(map_import_error)?;
+            let warnings_json = validation
+                .warnings
+                .iter()
+                .map(import_warning_to_json)
+                .collect::<Vec<_>>();
+
             Ok(json!({
                 "messages": messages,
                 "totalMessages": total_messages,
@@ -191,7 +207,13 @@ impl MethodHandler for PreviewSessionHandler {
                     "estimatedCost": result.total_cost,
                     "model": result.model,
                     "hasCompaction": has_compaction,
-                }
+                },
+                "warnings": warnings_json,
+                "validation": {
+                    "recordsParsed": validation.records_parsed,
+                    "linesTotal": validation.lines_total,
+                    "eventsReady": validation.events_ready,
+                },
             }))
         })
         .await
@@ -239,16 +261,24 @@ impl MethodHandler for ExecuteImportHandler {
             };
 
             match import::import_session(&event_store, &path, &wd, &tags, Some(&origin)) {
-                Ok(result) => Ok(json!({
-                    "sessionId": result.tron_session_id,
-                    "workingDirectory": result.working_directory,
-                    "model": result.model,
-                    "eventCount": result.event_count,
-                    "turnCount": result.turn_count,
-                    "messageCount": result.message_count,
-                    "cost": result.total_cost,
-                    "alreadyImported": false,
-                })),
+                Ok(result) => {
+                    let warnings_json = result
+                        .warnings
+                        .iter()
+                        .map(import_warning_to_json)
+                        .collect::<Vec<_>>();
+                    Ok(json!({
+                        "sessionId": result.tron_session_id,
+                        "workingDirectory": result.working_directory,
+                        "model": result.model,
+                        "eventCount": result.event_count,
+                        "turnCount": result.turn_count,
+                        "messageCount": result.message_count,
+                        "cost": result.total_cost,
+                        "alreadyImported": false,
+                        "warnings": warnings_json,
+                    }))
+                }
                 Err(import::ImportError::AlreadyImported { tron_session_id }) => Ok(json!({
                     "alreadyImported": true,
                     "existingSessionId": tron_session_id,
@@ -258,6 +288,36 @@ impl MethodHandler for ExecuteImportHandler {
         })
         .await
     }
+}
+
+/// Serialize an [`import::ImportWarning`] to the wire shape the iOS app
+/// consumes. The `kind` discriminator is kebab-case to match our other
+/// enum-on-the-wire conventions; the optional `details` object carries
+/// category-specific context (line number, tool_use_id, etc.).
+fn import_warning_to_json(warning: &import::ImportWarning) -> Value {
+    let (kind, details) = match &warning.kind {
+        import::ImportWarningKind::UnparseableLine { line_number } => (
+            "unparseable-line",
+            json!({ "lineNumber": line_number }),
+        ),
+        import::ImportWarningKind::OrphanToolResult { tool_call_id } => (
+            "orphan-tool-result",
+            json!({ "toolCallId": tool_call_id }),
+        ),
+        import::ImportWarningKind::OrphanToolUse { tool_call_id } => (
+            "orphan-tool-use",
+            json!({ "toolCallId": tool_call_id }),
+        ),
+        import::ImportWarningKind::AssistantMissingModel => (
+            "assistant-missing-model",
+            json!({}),
+        ),
+    };
+    json!({
+        "kind": kind,
+        "message": warning.message,
+        "details": details,
+    })
 }
 
 /// Check if a Claude Code session has already been imported.
