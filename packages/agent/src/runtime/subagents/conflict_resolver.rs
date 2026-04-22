@@ -32,9 +32,16 @@ use tracing::{info, warn};
 use crate::runtime::orchestrator::subagent_manager::{
     SpawnType, SubagentManager, SubsessionConfig,
 };
-use crate::tools::traits::SubagentOps;
+use crate::tools::traits::{SubagentOps, WaitMode};
 use crate::worktree::WorktreeCoordinator;
 use crate::worktree::types::ConflictedFile;
+
+/// Grace period (ms) granted to the subagent to drain its turn after
+/// wall-clock cancellation — the turn-abort path needs to unwind
+/// model/tool calls, emit the final event, and release the tracker
+/// notify before `reconcile_completed_merge` runs. Without this drain
+/// the reconciler may observe an in-flight merge state.
+const CANCEL_DRAIN_MS: u64 = 30_000;
 
 /// Restricted tool allowlist for the conflict resolver subagent.
 ///
@@ -245,6 +252,14 @@ pub async fn spawn(
         model: None, // inherit parent's configured subagent model
         system_prompt: prompt,
         working_directory,
+        // Wall-clock cap for the non-blocking spawn — enforced by the
+        // auto-abort watcher (see `schedule_auto_abort_watcher`). This
+        // is the only place `timeout_ms` does work on a non-blocking
+        // subsession, so keep the value in sync with the conflict-
+        // resolver's tolerance: 15 min is generous given max 40 turns
+        // at typical 15–20 s/turn, but still well below the prior
+        // hardcoded 30 min which allowed runaway resolvers to keep
+        // burning the model budget after they were clearly stuck.
         timeout_ms: 15 * 60 * 1000,
         blocking_timeout_ms: None, // non-blocking — RPC returns immediately
         max_turns: DEFAULT_MAX_TURNS,
@@ -256,6 +271,7 @@ pub async fn spawn(
         spawn_type: SpawnType::Subsession,
     };
 
+    let wall_clock_timeout_ms = config.timeout_ms;
     let outcome = match manager.spawn_subsession(config).await {
         Ok(out) => out,
         Err(error) => {
@@ -283,11 +299,17 @@ pub async fn spawn(
     // OR failure), check whether the merge is still pending on the
     // coordinator. If it is, the subagent gave up without committing —
     // auto-abort the merge so the worktree returns to a clean state.
+    //
+    // The watcher also enforces `wall_clock_timeout_ms` as an upper
+    // bound on the subagent's runtime: on timeout it calls
+    // `cancel_subagent` to stop the agent loop, drains the tracker,
+    // then runs the same reconcile flow.
     schedule_auto_abort_watcher(
         manager.clone(),
         coord.clone(),
         parent_session_id.to_string(),
         outcome.session_id.clone(),
+        wall_clock_timeout_ms,
     );
 
     SpawnOutcome {
@@ -297,6 +319,50 @@ pub async fn spawn(
     }
 }
 
+/// Wait for the subagent to finish within `wall_clock_timeout_ms`; on
+/// timeout, cancel it and briefly drain so the tracker reports
+/// completion before the caller reconciles coordinator state.
+///
+/// Returns `true` if the subagent completed on its own, `false` if the
+/// wall clock fired and the subagent was cancelled.
+///
+/// INVARIANT: on timeout, `cancel_subagent` is always called before the
+/// function returns. Without cancellation the agent loop would continue
+/// running in the background (burning turns/model budget) even after
+/// the watcher has already decided to abort the merge.
+async fn wait_or_cancel(
+    manager: &dyn SubagentOps,
+    subagent_session_id: &str,
+    wall_clock_timeout_ms: u64,
+) -> bool {
+    let session = [subagent_session_id.to_string()];
+    if manager
+        .wait_for_agents(&session, WaitMode::All, wall_clock_timeout_ms)
+        .await
+        .is_ok()
+    {
+        return true;
+    }
+    // Wall-clock fired — cancel the agent loop. Errors are logged but
+    // do not stop the drain: a "not found" here means the subagent
+    // already finished in the interim, which is fine.
+    if let Err(error) = manager.cancel_subagent(subagent_session_id) {
+        warn!(
+            subagent_session_id,
+            error = %error,
+            "cancel_subagent failed during conflict-resolver timeout handling"
+        );
+    }
+    // Drain: give the cancelled agent a bounded window to unwind the
+    // current turn and mark its tracker complete. Reconciliation needs
+    // a consistent view of the merge state, so races against an
+    // in-flight `git commit` are worth avoiding.
+    let _ = manager
+        .wait_for_agents(&session, WaitMode::All, CANCEL_DRAIN_MS)
+        .await;
+    false
+}
+
 /// Spawn a background task that waits for the subagent to finish and
 /// then auto-aborts the merge if it's still pending.
 fn schedule_auto_abort_watcher(
@@ -304,19 +370,24 @@ fn schedule_auto_abort_watcher(
     coord: Arc<WorktreeCoordinator>,
     parent_session_id: String,
     subagent_session_id: String,
+    wall_clock_timeout_ms: u64,
 ) {
     drop(tokio::spawn(async move {
-        // Wait up to 30 minutes for the subagent to finish. The
-        // per-turn model timeout + max_turns will converge on a bound
-        // much shorter than this — 30m is a belt-and-braces safety net.
-        let max_wait_ms = 30 * 60 * 1000;
-        let _ = manager
-            .wait_for_agents(
-                &[subagent_session_id.clone()],
-                crate::tools::traits::WaitMode::All,
-                max_wait_ms,
-            )
-            .await;
+        let manager_ops: Arc<dyn SubagentOps> = manager;
+        let completed = wait_or_cancel(
+            manager_ops.as_ref(),
+            &subagent_session_id,
+            wall_clock_timeout_ms,
+        )
+        .await;
+        if !completed {
+            warn!(
+                parent_session_id = %parent_session_id,
+                subagent_session_id = %subagent_session_id,
+                wall_clock_timeout_ms,
+                "conflict-resolver subagent exceeded wall-clock timeout and was cancelled"
+            );
+        }
 
         // Reconcile: the subagent drives git via raw shell, so the merge
         // may be complete on disk while the in-memory cache still tracks
@@ -428,5 +499,176 @@ mod tests {
         // Must NOT expose SpawnSubagent to prevent recursive resolver
         // spawning.
         assert!(!CONFLICT_RESOLVER_ALLOWED_TOOLS.contains(&"SpawnSubagent"));
+    }
+
+    // ─── wait_or_cancel: wall-clock timeout tests (M9) ─────────────────
+
+    use crate::tools::errors::ToolError;
+    use crate::tools::traits::{JobInfo, SubagentResult};
+    use async_trait::async_trait;
+
+    /// Mock `SubagentOps` that either always times out or always succeeds
+    /// on `wait_for_agents`, records every `cancel_subagent` call, and
+    /// keeps every other method as a no-op (unused by the code under
+    /// test).
+    struct MockOps {
+        should_timeout: parking_lot::Mutex<bool>,
+        cancel_calls: parking_lot::Mutex<Vec<String>>,
+        waits: parking_lot::Mutex<Vec<u64>>,
+    }
+
+    impl MockOps {
+        fn timing_out() -> Self {
+            Self {
+                should_timeout: parking_lot::Mutex::new(true),
+                cancel_calls: parking_lot::Mutex::new(Vec::new()),
+                waits: parking_lot::Mutex::new(Vec::new()),
+            }
+        }
+        fn succeeding() -> Self {
+            Self {
+                should_timeout: parking_lot::Mutex::new(false),
+                cancel_calls: parking_lot::Mutex::new(Vec::new()),
+                waits: parking_lot::Mutex::new(Vec::new()),
+            }
+        }
+        fn cancel_calls(&self) -> Vec<String> {
+            self.cancel_calls.lock().clone()
+        }
+        fn waits(&self) -> Vec<u64> {
+            self.waits.lock().clone()
+        }
+    }
+
+    #[async_trait]
+    impl SubagentOps for MockOps {
+        fn list_active_jobs(&self, _parent_session_id: &str) -> Vec<JobInfo> {
+            Vec::new()
+        }
+        fn cancel_subagent(&self, session_id: &str) -> Result<(), ToolError> {
+            self.cancel_calls.lock().push(session_id.to_owned());
+            // After cancel, flip the behavior so the drain wait succeeds
+            // promptly — simulates the subagent unwinding in response to
+            // the cancel token.
+            *self.should_timeout.lock() = false;
+            Ok(())
+        }
+        async fn wait_for_agents(
+            &self,
+            session_ids: &[String],
+            _mode: WaitMode,
+            timeout_ms: u64,
+        ) -> Result<Vec<SubagentResult>, ToolError> {
+            self.waits.lock().push(timeout_ms);
+            if *self.should_timeout.lock() {
+                // Sleep a tick so the test wall-clock advances a little
+                // (keeps the timing ordering realistic without waiting
+                // the full `timeout_ms`).
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                return Err(ToolError::Timeout { timeout_ms });
+            }
+            Ok(session_ids
+                .iter()
+                .map(|sid| SubagentResult {
+                    session_id: sid.clone(),
+                    output: String::new(),
+                    token_usage: None,
+                    duration_ms: 0,
+                    status: "completed".into(),
+                    turns_executed: 0,
+                })
+                .collect())
+        }
+        fn get_subagent_result(&self, _session_id: &str) -> Option<SubagentResult> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_interrupts_long_running_resolver() {
+        // *** M9 regression test. ***
+        //
+        // Before the fix, the watcher had a hardcoded 30-minute wait and
+        // never called cancel on timeout — a runaway resolver could keep
+        // spending turns until its own `max_turns` ran out. This test
+        // pins the new contract: on wall-clock timeout, the subagent is
+        // cancelled, and only then does the function return.
+        let mock = MockOps::timing_out();
+        let completed = wait_or_cancel(&mock, "sess-resolver", 50).await;
+
+        assert!(
+            !completed,
+            "expected wait_or_cancel to report not-completed on timeout"
+        );
+        assert_eq!(
+            mock.cancel_calls(),
+            vec!["sess-resolver".to_string()],
+            "subagent must be cancelled exactly once on timeout"
+        );
+        // Two waits: one with the wall-clock bound, one drain with
+        // `CANCEL_DRAIN_MS`. Both must target the same session.
+        let waits = mock.waits();
+        assert_eq!(waits.len(), 2);
+        assert_eq!(waits[0], 50, "first wait uses wall_clock_timeout_ms");
+        assert_eq!(waits[1], CANCEL_DRAIN_MS, "second wait is the drain");
+    }
+
+    #[tokio::test]
+    async fn fast_resolver_does_not_cancel() {
+        // The subagent finished before the wall clock fired — cancel
+        // must NOT be called, and there must be exactly one wait.
+        let mock = MockOps::succeeding();
+        let completed = wait_or_cancel(&mock, "sess-ok", 5_000).await;
+
+        assert!(completed, "expected wait_or_cancel to report completion");
+        assert!(
+            mock.cancel_calls().is_empty(),
+            "cancel must not be called on clean completion"
+        );
+        assert_eq!(mock.waits(), vec![5_000]);
+    }
+
+    #[tokio::test]
+    async fn drain_runs_even_when_cancel_fails() {
+        // Defensive: even if cancel_subagent returns an error (e.g. the
+        // subagent already completed between timeout and cancel), the
+        // drain wait must still run so a completed-but-not-yet-observed
+        // tracker can settle.
+        struct FailingCancelOps {
+            inner: MockOps,
+        }
+        #[async_trait]
+        impl SubagentOps for FailingCancelOps {
+            fn list_active_jobs(&self, _: &str) -> Vec<JobInfo> {
+                Vec::new()
+            }
+            fn cancel_subagent(&self, _: &str) -> Result<(), ToolError> {
+                Err(ToolError::Validation {
+                    message: "not found".into(),
+                })
+            }
+            async fn wait_for_agents(
+                &self,
+                session_ids: &[String],
+                mode: WaitMode,
+                timeout_ms: u64,
+            ) -> Result<Vec<SubagentResult>, ToolError> {
+                self.inner.wait_for_agents(session_ids, mode, timeout_ms).await
+            }
+            fn get_subagent_result(&self, _: &str) -> Option<SubagentResult> {
+                None
+            }
+        }
+        let mock = FailingCancelOps {
+            inner: MockOps::timing_out(),
+        };
+        let completed = wait_or_cancel(&mock, "sess-x", 20).await;
+        assert!(!completed);
+        // Both waits still happened — the first with the wall-clock
+        // bound, the second the drain.
+        let waits = mock.inner.waits();
+        assert_eq!(waits.len(), 2);
+        assert_eq!(waits[0], 20);
+        assert_eq!(waits[1], CANCEL_DRAIN_MS);
     }
 }

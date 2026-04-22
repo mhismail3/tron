@@ -12,7 +12,10 @@
 //! ## Submodules
 //!
 //! - **`conflict_resolver`** — drives git merge conflict resolution
-//!   inside a session's worktree (git workflow Phase 7).
+//!   inside a session's worktree (git workflow Phase 7). Non-blocking
+//!   subsession; a post-spawn auto-abort watcher enforces a wall-clock
+//!   bound (derived from `SubsessionConfig::timeout_ms`) by cancelling
+//!   the subagent before reconciling the merge state.
 //!
 //! ## Module Position
 //!
