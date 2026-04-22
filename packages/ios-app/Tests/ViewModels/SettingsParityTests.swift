@@ -62,6 +62,8 @@ final class SettingsParityTests: XCTestCase {
         "promptHistoryAutoPrune",
         // Connection presets
         "connectionPresets",
+        // MCP
+        "mcpSchemaRefreshTtlMs",
     ]
 
     /// Explicit waivers — fields that exist on SettingsState but are

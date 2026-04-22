@@ -30,12 +30,12 @@ struct MCPServersPage: View {
         return String(format: "%.0fs", seconds)
     }
 
-    private var schemaRefreshSeconds: Binding<Double> {
+    private var schemaRefreshSeconds: Binding<Int> {
         Binding(
-            get: { Double(settingsState.mcpSchemaRefreshTtlMs) / 1000.0 },
+            get: { Int(settingsState.mcpSchemaRefreshTtlMs / 1000) },
             set: { newValue in
-                let clamped = max(0, min(600, newValue.rounded()))
-                settingsState.mcpSchemaRefreshTtlMs = UInt64(clamped * 1000)
+                let clamped = max(0, min(600, newValue))
+                settingsState.mcpSchemaRefreshTtlMs = UInt64(clamped) * 1000
             }
         )
     }
