@@ -168,6 +168,63 @@ impl SessionQueryService {
         .await
     }
 
+    /// Full session dump for backup / inspection / offline analysis.
+    ///
+    /// Returns the `sessions` row and every `events` row belonging to the
+    /// session, ordered by sequence ascending, under a stable
+    /// `format: "tron.session.v1"` envelope. Blob references in events stay
+    /// as-is — callers resolve them via `blob.get`. The format version is
+    /// the compatibility contract: additions are backwards-compatible,
+    /// removals bump the version.
+    ///
+    /// This is a single round-trip snapshot with no pagination. For
+    /// sessions larger than ~50k events the export is large but not
+    /// unbounded — the payload is serialized in memory before being
+    /// returned, which matches how `session.reconstruct` already behaves.
+    pub(crate) async fn export(
+        ctx: &RpcContext,
+        session_id: String,
+    ) -> Result<Value, RpcError> {
+        let session_manager = ctx.session_manager.clone();
+        let event_store = ctx.event_store.clone();
+        let session_id_for_export = session_id.clone();
+        ctx.run_blocking("session.export", move || {
+            let session = session_manager
+                .get_session(&session_id_for_export)
+                .map_err(|error| RpcError::Internal {
+                    message: error.to_string(),
+                })?
+                .ok_or_else(|| RpcError::NotFound {
+                    code: errors::SESSION_NOT_FOUND.into(),
+                    message: format!("Session '{session_id_for_export}' not found"),
+                })?;
+
+            let opts = crate::events::sqlite::repositories::event::ListEventsOptions::default();
+            let events = event_store
+                .get_events_by_session(&session_id_for_export, &opts)
+                .map_err(|error| RpcError::Internal {
+                    message: error.to_string(),
+                })?;
+
+            let event_count = events.len();
+            let session_value = serde_json::to_value(&session).map_err(|error| RpcError::Internal {
+                message: format!("session serialization failed: {error}"),
+            })?;
+            let events_value = serde_json::to_value(&events).map_err(|error| RpcError::Internal {
+                message: format!("events serialization failed: {error}"),
+            })?;
+
+            Ok(json!({
+                "format": "tron.session.v1",
+                "exportedAt": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                "session": session_value,
+                "events": events_value,
+                "eventCount": event_count,
+            }))
+        })
+        .await
+    }
+
     pub(crate) async fn get_history(
         ctx: &RpcContext,
         session_id: String,
@@ -259,4 +316,143 @@ impl SessionQueryService {
         })
         .await
     }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Query-service unit tests. Handler-level coverage lives in
+    //! `handlers/session_tests.rs`; here we exercise the service methods
+    //! directly so invariants like "events ordered by sequence" and
+    //! "format: tron.session.v1" aren't tied to the handler wire-up.
+
+    use super::*;
+    use crate::events::{AppendOptions, EventType};
+    use crate::server::rpc::handlers::test_helpers::make_test_context;
+
+    /// A freshly-created session always has exactly one event — the
+    /// `session.start` event inserted inside the create transaction.
+    /// Export includes it, so the minimum payload is `eventCount: 1`.
+    /// If this ever regresses to 0 (or 2+), something has changed about
+    /// session creation and the export contract needs to be re-verified.
+    #[tokio::test]
+    async fn export_of_fresh_session_returns_session_start_event() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"), None)
+            .unwrap();
+
+        let result = SessionQueryService::export(ctx_ref(&ctx), sid.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(result["format"].as_str().unwrap(), "tron.session.v1");
+        assert_eq!(result["eventCount"].as_u64().unwrap(), 1);
+        let events = result["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["type"].as_str().unwrap(), "session.start");
+        assert_eq!(events[0]["sequence"].as_i64().unwrap(), 0);
+        assert_eq!(result["session"]["id"].as_str().unwrap(), sid);
+    }
+
+    /// Missing session → NotFound with SESSION_NOT_FOUND code. Downstream
+    /// iOS maps this to "session was deleted" rather than a retry loop.
+    #[tokio::test]
+    async fn export_of_nonexistent_session_is_not_found() {
+        let ctx = make_test_context();
+        let err = SessionQueryService::export(ctx_ref(&ctx), "sess_does_not_exist".to_string())
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "SESSION_NOT_FOUND");
+    }
+
+    /// Events in the export are ordered by sequence ASC. A downstream
+    /// import or replay tool relies on this; shuffling by insertion order
+    /// or ID would be a silent correctness bug.
+    #[tokio::test]
+    async fn export_events_are_ordered_by_sequence_asc() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"), None)
+            .unwrap();
+
+        // Append three user messages. Sequence auto-increments starting
+        // from 1 (the create transaction already claimed 0 for session.start).
+        for i in 0..3 {
+            ctx.event_store
+                .append(&AppendOptions {
+                    session_id: &sid,
+                    event_type: EventType::MessageUser,
+                    payload: serde_json::json!({ "content": format!("msg-{i}"), "turn": i }),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .unwrap();
+        }
+
+        let result = SessionQueryService::export(ctx_ref(&ctx), sid)
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        // session.start (seq 0) + 3 user messages (seq 1..=3) = 4.
+        assert_eq!(events.len(), 4);
+        let seqs: Vec<i64> = events
+            .iter()
+            .map(|e| e["sequence"].as_i64().unwrap())
+            .collect();
+        let mut sorted = seqs.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            seqs, sorted,
+            "export events must be sequence-ASC — export was {seqs:?}"
+        );
+        assert_eq!(seqs, vec![0, 1, 2, 3]);
+        assert_eq!(result["eventCount"].as_u64().unwrap(), 4);
+    }
+
+    /// `exportedAt` is an RFC3339 timestamp. Downstream tools parse it
+    /// as-is — if this regresses to a raw `SystemTime` or a broken format,
+    /// import tooling silently breaks.
+    #[tokio::test]
+    async fn export_exportedat_is_rfc3339() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"), None)
+            .unwrap();
+
+        let result = SessionQueryService::export(ctx_ref(&ctx), sid).await.unwrap();
+        let ts = result["exportedAt"].as_str().unwrap();
+        chrono::DateTime::parse_from_rfc3339(ts).unwrap_or_else(|e| {
+            panic!("exportedAt not RFC3339: value='{ts}' err={e}");
+        });
+    }
+
+    /// Export of a subagent session succeeds — unlike `archive_older_than`,
+    /// export does not filter by `source` or `spawning_session_id`. The
+    /// caller (iOS) is trusted to pass a real session ID. This test guards
+    /// against a future "helpful" filter hiding a child session's data
+    /// from the user.
+    #[tokio::test]
+    async fn export_of_subagent_session_succeeds() {
+        let ctx = make_test_context();
+        let parent = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("parent"), None)
+            .unwrap();
+        let subagent = ctx
+            .session_manager
+            .create_session_for_subagent("m", "/tmp", Some("sub"), &parent, "task", "desc")
+            .unwrap();
+
+        let result = SessionQueryService::export(ctx_ref(&ctx), subagent.clone())
+            .await
+            .unwrap();
+        assert_eq!(result["session"]["id"].as_str().unwrap(), subagent);
+    }
+
+    // Tiny helper so tests don't get cluttered with `&` every call.
+    fn ctx_ref<'a>(c: &'a RpcContext) -> &'a RpcContext { c }
 }

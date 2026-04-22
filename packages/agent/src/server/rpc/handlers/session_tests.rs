@@ -624,6 +624,53 @@ async fn archive_older_than_handler_returns_batch_report() {
     chrono::DateTime::parse_from_rfc3339(cutoff).unwrap();
 }
 
+/// `session.export` missing `sessionId` must 400 with INVALID_PARAMS.
+#[tokio::test]
+async fn export_session_missing_id_is_invalid_params() {
+    let ctx = make_test_context();
+    let err = ExportSessionHandler
+        .handle(Some(json!({})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_PARAMS");
+}
+
+/// `session.export` on an unknown session returns SESSION_NOT_FOUND.
+/// Regression guard: must not leak "Internal error" for the common case
+/// of the user selecting an already-deleted session in iOS.
+#[tokio::test]
+async fn export_session_unknown_returns_not_found() {
+    let ctx = make_test_context();
+    let err = ExportSessionHandler
+        .handle(Some(json!({"sessionId": "sess_none"})), &ctx)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "SESSION_NOT_FOUND");
+}
+
+/// End-to-end handler shape: the envelope fields match the format spec.
+/// This is the contract tests: any rename of these keys breaks
+/// downstream import tooling, so lock them here explicitly.
+#[tokio::test]
+async fn export_session_handler_envelope_shape() {
+    let ctx = make_test_context();
+    let sid = ctx
+        .session_manager
+        .create_session("m", "/tmp", Some("t"), None)
+        .unwrap();
+
+    let result = ExportSessionHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(result["format"].as_str().unwrap(), "tron.session.v1");
+    assert!(result["exportedAt"].is_string());
+    assert!(result["session"].is_object());
+    assert!(result["events"].is_array());
+    assert!(result["eventCount"].is_u64());
+}
+
 #[tokio::test]
 async fn fork_session_emits_event() {
     let ctx = make_test_context();

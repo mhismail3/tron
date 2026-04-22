@@ -94,6 +94,7 @@ fn register_core(registry: &mut MethodRegistry) {
         "session.archiveOlderThan",
         session::ArchiveOlderThanHandler,
     );
+    registry.register("session.export", session::ExportSessionHandler);
     // Agent
     registry.register("agent.prompt", agent::PromptHandler);
     registry.register("agent.abort", agent::AbortHandler);
@@ -406,8 +407,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            160,
-            "expected 160 methods, got {}",
+            161,
+            "expected 161 methods, got {}",
             reg.methods().len()
         );
     }

@@ -190,6 +190,21 @@ impl MethodHandler for ArchiveOlderThanHandler {
     }
 }
 
+/// Full session dump — session row plus every event — under a stable
+/// `format: "tron.session.v1"` envelope. Backs the "Export" user action
+/// so users can back up or inspect a session offline without touching
+/// `~/.tron/system/database/` directly.
+pub struct ExportSessionHandler;
+
+#[async_trait]
+impl MethodHandler for ExportSessionHandler {
+    #[instrument(skip(self, ctx), fields(method = "session.export", session_id))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        SessionQueryService::export(ctx, session_id).await
+    }
+}
+
 /// Reconstruct full session state for reconnection.
 pub struct ReconstructHandler;
 
