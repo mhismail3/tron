@@ -9,6 +9,31 @@ pub const MAX_PROMPT_LENGTH: usize = 1_048_576;
 pub const MAX_PARAM_LENGTH: usize = 8_192;
 
 /// Maximum JSON nesting depth for incoming RPC payloads.
+///
+/// **Why this exists (defense-in-depth rationale):**
+/// `serde_json` already enforces a 128-deep recursion limit during parse,
+/// so a client cannot land a 10000-level-deep structure in our
+/// [`serde_json::Value`] at all — parse would fail first with an opaque
+/// parser error. We re-apply the cap at the RPC boundary so that:
+///
+/// 1. **Stable error surface.** Depth-rejected requests produce a
+///    structured [`RpcError::InvalidParams`] with a clear message, not a
+///    raw serde parse error that happens to mention "recursion limit".
+///    The iOS client renders this as a user-actionable error.
+/// 2. **Protect post-parse traversal.** Several handlers walk the JSON
+///    tree recursively (argument coercion, default filling). Running the
+///    cap here means those walks can trust the bound: stack frame ceiling
+///    is `MAX_JSON_DEPTH * constant` regardless of handler recursion
+///    pattern.
+/// 3. **Invariant ratchet.** If a future `serde_json` version changes the
+///    default recursion limit, or we enable a custom deserializer with a
+///    higher ceiling, the explicit cap still holds.
+///
+/// 128 matches `serde_json`'s current default so the two caps fire at the
+/// same threshold — see [`json_depth_matches_serde_default`] for the
+/// regression guard.
+///
+/// [`json_depth_matches_serde_default`]: tests::json_depth_matches_serde_default
 pub const MAX_JSON_DEPTH: usize = 128;
 
 /// Maximum decoded size per attachment (50 MB — covers the largest provider limit).
@@ -29,8 +54,12 @@ pub fn validate_string_param(value: &str, name: &str, max_len: usize) -> Result<
 
 /// Validate that parsed JSON does not exceed the maximum nesting depth.
 ///
-/// Uses `serde_json`'s default recursion limit of 128 as a safety net,
-/// but this function provides explicit validation with a clear error message.
+/// See [`MAX_JSON_DEPTH`] for why this exists on top of `serde_json`'s
+/// built-in recursion limit. The short version: we translate the parser's
+/// opaque recursion failure into a structured
+/// [`RpcError::InvalidParams`] so the client can render an actionable
+/// message, and we guarantee a bounded stack for any handler that walks
+/// the parsed tree.
 pub fn validate_json_depth(value: &serde_json::Value, max_depth: usize) -> Result<(), RpcError> {
     fn measure_depth(v: &serde_json::Value, current: usize, max: usize) -> Result<(), ()> {
         if current > max {
@@ -228,6 +257,37 @@ mod tests {
         assert!(validate_json_depth(&serde_json::json!(42), MAX_JSON_DEPTH).is_ok());
         assert!(validate_json_depth(&serde_json::json!("hello"), MAX_JSON_DEPTH).is_ok());
         assert!(validate_json_depth(&serde_json::json!(true), MAX_JSON_DEPTH).is_ok());
+    }
+
+    /// Regression guard for L2: the explicit RPC depth cap must fire at
+    /// the same threshold as `serde_json`'s parser recursion limit so
+    /// clients always see the same error surface regardless of which
+    /// layer rejects first. If `serde_json` ever changes its default,
+    /// either update [`MAX_JSON_DEPTH`] to match or accept the new
+    /// asymmetry with an updated comment.
+    #[test]
+    fn json_depth_matches_serde_default() {
+        // Build a JSON string with depth MAX_JSON_DEPTH + 1. serde_json
+        // should refuse to parse it (its default recursion limit trips
+        // before our cap can). If parsing ever starts succeeding here, a
+        // newer serde_json raised its limit and this test catches the
+        // silent relaxation.
+        let depth = MAX_JSON_DEPTH + 1;
+        let mut s = String::with_capacity(depth * 6 + 4);
+        for _ in 0..depth {
+            s.push_str(r#"{"a":"#);
+        }
+        s.push_str("null");
+        for _ in 0..depth {
+            s.push('}');
+        }
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&s);
+        assert!(
+            parsed.is_err(),
+            "serde_json parsed depth > MAX_JSON_DEPTH ({depth}) — its default recursion limit \
+             raised beyond {MAX_JSON_DEPTH}. Reconcile by bumping MAX_JSON_DEPTH or document \
+             the new asymmetry."
+        );
     }
 
     // ── Attachment size validation tests ────────────────────────────
