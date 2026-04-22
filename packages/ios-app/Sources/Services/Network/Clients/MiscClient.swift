@@ -126,5 +126,19 @@ final class MiscClient: RPCDomainClient {
         logger.info("Ingested \(result.inserted) log entries into server database", category: .general)
         return result
     }
+
+    // MARK: - Diagnostics (debug / beta only)
+
+    /// Fetch a structured snapshot of server identity, session counts,
+    /// and the full RPC method surface. Debug-only — the production
+    /// binary has no UI that consumes it.
+    func getDiagnostics() async throws -> SystemDiagnosticsResult {
+        let ws = try requireTransport().requireConnection()
+
+        return try await ws.send(
+            method: "system.getDiagnostics",
+            params: EmptyParams()
+        )
+    }
     #endif
 }

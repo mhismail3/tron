@@ -33,8 +33,16 @@ struct SettingsView: View {
     @State private var cardsVisible = false
 
     /// Settings sub-pages, driven by a single `.sheet(item:)`.
+    ///
+    /// `diagnostics` is only reachable in DEBUG / BETA builds — the
+    /// categories card hides its entry behind `#if DEBUG || BETA`, and
+    /// the sheet dispatch does too, so a mis-set `activePage` in a
+    /// production build falls through cleanly.
     enum SettingsPage: String, Identifiable {
         case server, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary
+        #if DEBUG || BETA
+        case diagnostics
+        #endif
         var id: String { rawValue }
     }
 
@@ -67,9 +75,9 @@ struct SettingsView: View {
         } content: {
             categoriesCard
             dangerZoneCard
-                .cardEntrance(visible: cardsVisible, index: 8)
-            footerView
                 .cardEntrance(visible: cardsVisible, index: 9)
+            footerView
+                .cardEntrance(visible: cardsVisible, index: 10)
         }
         #if DEBUG || BETA
         .sheet(isPresented: $showLogViewer) {
@@ -124,6 +132,10 @@ struct SettingsView: View {
                         updateServerSetting: updateServerSetting,
                         rpcClient: rpcClient
                     )
+                #if DEBUG || BETA
+                case .diagnostics:
+                    DiagnosticsPage(rpcClient: rpcClient)
+                #endif
                 }
             }
             .adaptivePresentationDetents([.medium, .large])
@@ -220,6 +232,15 @@ struct SettingsView: View {
                 }
                 .cardEntrance(visible: cardsVisible, index: 7)
             }
+
+            #if DEBUG || BETA
+            SettingsCard(interactive: true) {
+                categoryRow(icon: "stethoscope", label: "Diagnostics", subtitle: "Inspect server identity, session counts, and RPC surface") {
+                    activePage = .diagnostics
+                }
+            }
+            .cardEntrance(visible: cardsVisible, index: 8)
+            #endif
         }
     }
 
