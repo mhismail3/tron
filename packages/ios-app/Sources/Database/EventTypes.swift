@@ -185,7 +185,3 @@ struct EventTreeNode: Identifiable, Sendable {
     let isBranchPoint: Bool
     let isHead: Bool
 }
-
-// MARK: - Session State
-// NOTE: Legacy types (ReconstructedSessionState, ReconstructedMessage)
-// have been removed. Use ReconstructedState from Core/Events/Transformer/Reconstruction/.
