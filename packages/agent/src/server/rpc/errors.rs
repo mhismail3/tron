@@ -146,6 +146,19 @@ pub const IMPORT_EMPTY_SESSION: &str = "IMPORT_EMPTY_SESSION";
 /// No Claude Code projects directory found.
 pub const IMPORT_NO_CLAUDE_DIRECTORY: &str = "IMPORT_NO_CLAUDE_DIRECTORY";
 
+// ── Version handshake (L6) ──────────────────────────────────────────
+//
+// `system.ping` accepts an optional `protocolVersion` from the client
+// and returns the server's current version plus a compatibility
+// verdict. Version numbers are monotonic integers bumped only on
+// breaking wire-format changes — field adds that old clients can
+// safely ignore do NOT bump the protocol version.
+
+/// Client advertised a protocol version below
+/// [`MIN_CLIENT_PROTOCOL_VERSION`]. The server refuses to serve
+/// requests; the client must upgrade.
+pub const CLIENT_VERSION_UNSUPPORTED: &str = "CLIENT_VERSION_UNSUPPORTED";
+
 /// RPC error type returned by handlers.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {

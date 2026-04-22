@@ -287,8 +287,10 @@ All messages use JSON-RPC 2.0 framing:
 
 ```json
 {"jsonrpc":"2.0","method":"system.ping","id":1}
-{"jsonrpc":"2.0","result":"pong","id":1}
+{"jsonrpc":"2.0","result":{"pong":true,"timestamp":"…","serverVersion":"0.1.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true},"id":1}
 ```
+
+`system.ping` accepts optional `{"protocolVersion": <u32>, "clientVersion": <str>}` params. Clients that advertise a `protocolVersion` below `minClientProtocolVersion` receive a `CLIENT_VERSION_UNSUPPORTED` error with details naming both versions; clients that omit the field are accepted as pre-handshake (legacy).
 
 ### Core (57)
 
