@@ -1,17 +1,18 @@
 import SwiftUI
 
 /// Pill-style cycle picker used by settings rows that toggle between a
-/// short fixed list of String-encoded values (queue drain mode, skills
-/// compaction policy, merge strategy, isolation mode, branch policy, …).
+/// short fixed list of raw values (queue drain mode, skills compaction
+/// policy, merge strategy, isolation mode, branch policy, …).
 ///
 /// Tapping the pill advances to the next option and invokes `onCycle`
 /// with the new raw value. Use parallel `[(value, label)]` tuples so the
 /// raw value (sent to the server) and the visible label can't drift
-/// apart by indexing into mismatched arrays.
-struct SettingsCycleToggle: View {
-    let options: [(value: String, label: String)]
-    let current: String
-    let onCycle: (String) -> Void
+/// apart by indexing into mismatched arrays. `Value` is any `Hashable`
+/// raw type — typically `String`, but also `UInt32` for numeric presets.
+struct SettingsCycleToggle<Value: Hashable>: View {
+    let options: [(value: Value, label: String)]
+    let current: Value
+    let onCycle: (Value) -> Void
 
     var body: some View {
         // Empty `options` would index-trap `options[idx]` and divide by

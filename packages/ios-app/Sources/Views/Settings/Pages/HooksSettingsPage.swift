@@ -129,20 +129,15 @@ struct HooksSettingsPage: View {
 
             SettingsCard {
                 SettingsRow(icon: "exclamationmark.shield", label: "On error or timeout") {
-                    Picker("", selection: Binding(
-                        get: { settingsState.hooksErrorPolicy },
-                        set: { newValue in
-                            settingsState.hooksErrorPolicy = newValue
-                            updateServerSetting {
-                                ServerSettingsUpdate(hooks: .init(errorPolicy: newValue))
-                            }
+                    SettingsCycleToggle(
+                        options: [("continue", "Continue"), ("block", "Block")],
+                        current: settingsState.hooksErrorPolicy
+                    ) { newValue in
+                        settingsState.hooksErrorPolicy = newValue
+                        updateServerSetting {
+                            ServerSettingsUpdate(hooks: .init(errorPolicy: newValue))
                         }
-                    )) {
-                        Text("Continue").tag("continue")
-                        Text("Block").tag("block")
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
                 }
             }
 
@@ -170,21 +165,15 @@ struct HooksSettingsPage: View {
 
             SettingsCard {
                 SettingsRow(icon: "text.insert", label: "Maximum injected context") {
-                    Picker("", selection: Binding(
-                        get: { settingsState.hooksMaxAddedContextChars },
-                        set: { newValue in
-                            settingsState.hooksMaxAddedContextChars = newValue
-                            updateServerSetting {
-                                ServerSettingsUpdate(hooks: .init(maxAddedContextChars: newValue))
-                            }
-                        }
-                    )) {
-                        ForEach(addedContextOptions, id: \.value) { opt in
-                            Text(opt.label).tag(opt.value)
+                    SettingsCycleToggle(
+                        options: addedContextOptions.map { (value: $0.value, label: $0.label) },
+                        current: settingsState.hooksMaxAddedContextChars
+                    ) { newValue in
+                        settingsState.hooksMaxAddedContextChars = newValue
+                        updateServerSetting {
+                            ServerSettingsUpdate(hooks: .init(maxAddedContextChars: newValue))
                         }
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
                 }
             }
 
