@@ -130,7 +130,20 @@ struct SystemEventView: View {
                 }
             )
 
-        default:
+        case .compactionInProgress,
+             .compaction,
+             .memoryRetainInProgress,
+             .memoryAutoRetainInProgress,
+             .memoryAutoRetainFailed,
+             .memoryRetained,
+             .memoryRetainedNothingNew:
+            // Unreachable by construction — these cases are intercepted by
+            // the parent `body`'s if/else-if on `isCompactionNotification` /
+            // `isMemoryRetainNotification` before `eventView` is ever
+            // evaluated. We enumerate them explicitly (rather than a
+            // `default:` catch-all) so the compiler flags any new
+            // `SystemEvent` case that lacks a rendering here instead of
+            // silently rendering an empty pill.
             EmptyView()
         }
     }
