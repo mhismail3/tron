@@ -60,8 +60,10 @@ final class ThinkingRepositoryTests: XCTestCase {
         try await database.events.insert(event)
     }
 
-    /// Insert a stream.thinking_complete event (legacy format).
-    private func insertLegacyThinkingEvent(
+    /// Insert a client-side synthetic `stream.thinking_complete` event — the
+    /// flat format emitted by `ChatViewModel+TurnLifecycleContext` when a turn
+    /// finishes, distinct from thinking blocks embedded in assistant messages.
+    private func insertSyntheticThinkingCompleteEvent(
         id: String,
         sessionId: String = "sess-1",
         content: String,
@@ -222,23 +224,23 @@ final class ThinkingRepositoryTests: XCTestCase {
         XCTAssertNil(content)
     }
 
-    // MARK: - getContent: Legacy Events
+    // MARK: - getContent: Client-side synthetic stream.thinking_complete events
 
-    func testGetContentLegacyThinkingCompleteEvent() async throws {
-        try await insertLegacyThinkingEvent(id: "legacy-evt", content: "Legacy thinking text")
+    func testGetContentSyntheticThinkingCompleteEvent() async throws {
+        try await insertSyntheticThinkingCompleteEvent(id: "synth-evt", content: "Turn-end thinking text")
 
-        let content = try await database.thinking.getContent(eventId: "legacy-evt")
-        XCTAssertEqual(content, "Legacy thinking text")
+        let content = try await database.thinking.getContent(eventId: "synth-evt")
+        XCTAssertEqual(content, "Turn-end thinking text")
     }
 
-    /// Documents intentional behavior: getEvents() only queries message.assistant events,
-    /// so legacy stream.thinking_complete events won't appear in the listing.
-    /// However, getContent() still supports loading them by direct ID.
-    func testLegacyEventsNotReturnedByGetEvents() async throws {
-        try await insertLegacyThinkingEvent(id: "legacy-evt", content: "Legacy thinking")
+    /// `getEvents()` only queries `message.assistant` events, so client-side
+    /// synthetic `stream.thinking_complete` rows are not indexed by the listing.
+    /// `getContent()` still resolves them when callers hold their event IDs.
+    func testSyntheticThinkingCompleteEventsNotReturnedByGetEvents() async throws {
+        try await insertSyntheticThinkingCompleteEvent(id: "synth-evt", content: "Turn-end thinking")
 
         let blocks = try await database.thinking.getEvents(sessionId: "sess-1")
-        XCTAssertTrue(blocks.isEmpty, "Legacy stream.thinking_complete events are not indexed by getEvents()")
+        XCTAssertTrue(blocks.isEmpty, "Synthetic stream.thinking_complete events are not indexed by getEvents()")
     }
 
     // MARK: - getContent: Event with no thinking

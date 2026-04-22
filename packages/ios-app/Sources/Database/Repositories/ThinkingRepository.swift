@@ -135,7 +135,10 @@ final class ThinkingRepository: @unchecked Sendable {
             return nil
         }
 
-        // Legacy: stream.thinking_complete events
+        // Client-side synthetic stream.thinking_complete events emitted by
+        // `ChatViewModel+TurnLifecycleContext.persistThinkingPayload` when a
+        // turn finishes. These store the full thinking content flat under
+        // `content` rather than nested in an assistant message's content blocks.
         if event.type == PersistedEventType.streamThinkingComplete.rawValue {
             return event.payload.string("content")
         }
