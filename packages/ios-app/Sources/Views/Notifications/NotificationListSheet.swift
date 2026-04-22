@@ -1,5 +1,35 @@
 import SwiftUI
 
+/// Filter mode for the inbox sheet.
+///
+/// Kept as a top-level enum (not nested) so unit tests can reference it
+/// without needing the SwiftUI view type, and so future surfaces
+/// (widgets, notification detail) can share the same predicate.
+@available(iOS 26.0, *)
+enum NotificationInboxFilter: String, CaseIterable, Identifiable {
+    case all
+    case unread
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all: return "All"
+        case .unread: return "Unread"
+        }
+    }
+
+    /// Pure filter predicate so the sheet's list is derivable from
+    /// `(notifications, filter)`. Exposed as static so
+    /// `NotificationFilterTests` can hit it without a live store.
+    static func apply(_ notifications: [NotificationDTO], filter: NotificationInboxFilter) -> [NotificationDTO] {
+        switch filter {
+        case .all: return notifications
+        case .unread: return notifications.filter { !$0.isRead }
+        }
+    }
+}
+
 /// Sheet listing all recent notifications (last 50) with unread ones visually distinguished.
 ///
 /// Supports an optional `autoOpenToolCallId` for deep link auto-open — when set,
@@ -13,11 +43,16 @@ struct NotificationListSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedNotification: NotificationDTO?
     @State private var didAutoOpen = false
+    @State private var filter: NotificationInboxFilter = .all
+
+    private var visibleNotifications: [NotificationDTO] {
+        NotificationInboxFilter.apply(notificationStore.notifications, filter: filter)
+    }
 
     var body: some View {
         NavigationStack {
             Group {
-                if notificationStore.notifications.isEmpty && !notificationStore.isLoading {
+                if visibleNotifications.isEmpty && !notificationStore.isLoading {
                     emptyState
                 } else {
                     notificationList
@@ -48,6 +83,9 @@ struct NotificationListSheet: View {
                     SheetDismissButton(color: .tronEmerald)
                 }
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                filterBar
+            }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -74,15 +112,29 @@ struct NotificationListSheet: View {
         }
     }
 
+    // MARK: - Filter Bar
+
+    @ViewBuilder
+    private var filterBar: some View {
+        Picker("Filter", selection: $filter) {
+            ForEach(NotificationInboxFilter.allCases) { option in
+                Text(option.label).tag(option)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
     // MARK: - Empty State
 
     @ViewBuilder
     private var emptyState: some View {
         VStack(spacing: 16) {
-            Image(systemName: "bell.slash")
+            Image(systemName: filter == .unread ? "checkmark.circle" : "bell.slash")
                 .font(TronTypography.sans(size: 40))
                 .foregroundStyle(.tronTextMuted)
-            Text("No notifications")
+            Text(filter == .unread ? "No unread notifications" : "No notifications")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronTextMuted)
         }
@@ -94,7 +146,7 @@ struct NotificationListSheet: View {
     @ViewBuilder
     private var notificationList: some View {
         List {
-            ForEach(notificationStore.notifications) { notification in
+            ForEach(visibleNotifications) { notification in
                 NotificationRow(notification: notification)
                     .contentShape(Rectangle())
                     .onTapGesture {
