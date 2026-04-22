@@ -200,7 +200,9 @@ pub async fn load_server_auth_with_client(
     credential_override: Option<&super::types::ActiveCredential>,
     client: &reqwest::Client,
 ) -> Result<Option<GoogleAuth>, AuthError> {
-    let gpa = super::storage::get_google_provider_auth(auth_path);
+    // Strict parse: a legacy `endpoint` field or any other unknown key
+    // surfaces as `AuthError::MalformedProviderAuth` with re-auth guidance.
+    let gpa = super::storage::try_get_google_provider_auth(auth_path)?;
     let Some(ref gpa) = gpa else {
         return Ok(None);
     };
@@ -426,29 +428,50 @@ mod tests {
         assert!(err.contains("client_id"), "error should mention client_id: {err}");
     }
 
+    /// R3: legacy auth.json files with `endpoint: "antigravity"` (from the
+    /// pre-CCA era) must fail to load. The strict `GoogleProviderAuth`
+    /// deserializer rejects unknown fields, and `load_server_auth`
+    /// surfaces that as `AuthError::MalformedProviderAuth` with re-auth
+    /// guidance. The old "silently ignores endpoint and uses CCA anyway"
+    /// behavior is gone.
     #[tokio::test]
-    async fn load_server_auth_legacy_antigravity_auth_json() {
+    async fn load_server_auth_rejects_legacy_antigravity_auth_json() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        // Save OAuth tokens
-        let tokens = OAuthTokens {
-            access_token: "ya29.legacy".to_string(),
-            refresh_token: "ref".to_string(),
-            expires_at: now_ms() + 3_600_000,
-        };
-        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
+        // Write a raw auth.json with the legacy antigravity shape. We
+        // can't go through `save_google_provider_auth` because that type
+        // no longer serializes `endpoint`.
+        let raw = serde_json::json!({
+            "version": 1,
+            "providers": {
+                "google": {
+                    "clientId": "legacy-client",
+                    "endpoint": "antigravity",
+                    "accounts": [{
+                        "label": "(test)",
+                        "oauth": {
+                            "accessToken": "ya29.legacy",
+                            "refreshToken": "ref",
+                            "expiresAt": now_ms() + 3_600_000,
+                        }
+                    }]
+                }
+            },
+            "lastUpdated": "2025-01-01T00:00:00Z"
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&raw).unwrap()).unwrap();
 
-        // Simulate legacy auth.json with endpoint field by writing raw JSON
-        let mut gpa = crate::llm::auth::storage::get_google_provider_auth(&path)
-            .unwrap_or_default();
-        gpa.client_id = Some("legacy-client".to_string());
-        crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
-
-        // Should load successfully — CCA is used regardless of any legacy endpoint value
-        let result = load_server_auth(&path).await.unwrap();
-        let auth = result.unwrap();
-        assert_eq!(auth.auth.token(), "ya29.legacy");
+        let err = load_server_auth(&path).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("endpoint"),
+            "error must name the legacy `endpoint` field, got: {msg}"
+        );
+        assert!(
+            msg.contains("tron auth google"),
+            "error must include re-auth guidance, got: {msg}"
+        );
     }
 
     #[test]

@@ -273,6 +273,16 @@ pub(crate) fn map_auth_error(e: AuthError) -> RpcError {
             message: format!("OAuth error ({status}): {message}"),
             details: None,
         },
+        // Stored auth.json carries an unknown/legacy field — not a
+        // configuration gap, but the user has to act (re-authenticate).
+        // Mapped to NotFound so the iOS settings page nudges them to the
+        // sign-in screen rather than showing an opaque internal error.
+        A::MalformedProviderAuth { provider, details } => RpcError::NotFound {
+            code: codes::AUTH_NOT_CONFIGURED.into(),
+            message: format!(
+                "Malformed auth for {provider}: {details}. Re-authenticate via `tron auth {provider}`."
+            ),
+        },
         // Genuinely internal — IO / JSON / HTTP transport failures.
         // The Display impl preserves the underlying detail for logs.
         A::Http(_) | A::Json(_) | A::Io(_) => RpcError::Internal {
@@ -608,6 +618,23 @@ mod tests {
         let serde_err = serde_json::from_str::<String>("not json").unwrap_err();
         let rpc = map_auth_error(A::Json(serde_err));
         assert_eq!(rpc.code(), "INTERNAL_ERROR");
+    }
+
+    /// R3: malformed provider auth (e.g. legacy Google `endpoint` field)
+    /// surfaces to the iOS settings page as AUTH_NOT_CONFIGURED so the
+    /// user is nudged to the sign-in screen, and the message preserves
+    /// the re-auth command.
+    #[test]
+    fn auth_malformed_provider_auth_is_not_configured() {
+        let rpc = map_auth_error(A::MalformedProviderAuth {
+            provider: "google".into(),
+            details: "unknown field `endpoint`".into(),
+        });
+        assert_eq!(rpc.code(), "AUTH_NOT_CONFIGURED");
+        let msg = rpc.to_string();
+        assert!(msg.contains("google"));
+        assert!(msg.contains("endpoint"));
+        assert!(msg.contains("tron auth google"));
     }
 
     // ── map_import_error per-variant coverage ──

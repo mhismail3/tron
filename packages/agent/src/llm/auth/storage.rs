@@ -99,6 +99,24 @@ pub fn get_google_provider_auth(path: &Path) -> Option<GoogleProviderAuth> {
     load_auth_storage(path)?.get_google_auth()
 }
 
+/// Strict Google provider auth getter — returns `Err` when the stored
+/// shape fails to deserialize (e.g. legacy `endpoint` field). Used by
+/// `load_server_auth` to surface `MalformedProviderAuth` with re-auth
+/// guidance instead of silently falling back to "not configured".
+pub fn try_get_google_provider_auth(
+    path: &Path,
+) -> Result<Option<GoogleProviderAuth>, AuthError> {
+    let Some(storage) = load_auth_storage(path) else {
+        return Ok(None);
+    };
+    storage
+        .try_get_google_auth()
+        .map_err(|e| AuthError::MalformedProviderAuth {
+            provider: "google".into(),
+            details: e.to_string(),
+        })
+}
+
 /// Get service auth from storage file.
 pub fn get_service_auth(path: &Path, service: &str) -> Option<ServiceAuth> {
     load_auth_storage(path)?.get_service_auth(service).cloned()

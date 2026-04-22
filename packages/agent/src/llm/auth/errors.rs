@@ -31,6 +31,17 @@ pub enum AuthError {
     /// No authentication configured for the given provider.
     #[error("no auth configured for provider: {0}")]
     NotConfigured(String),
+
+    /// Stored provider auth carries unknown fields (e.g. legacy `endpoint`
+    /// from the pre-CCA Google era). The user must re-authenticate so the
+    /// stale shape is rewritten.
+    #[error("malformed auth for provider '{provider}': {details}. Re-authenticate via `tron auth {provider}`.")]
+    MalformedProviderAuth {
+        /// Provider identifier (e.g. "google").
+        provider: String,
+        /// Underlying deserialization error.
+        details: String,
+    },
 }
 
 impl AuthError {
@@ -44,7 +55,11 @@ impl AuthError {
                         .is_some_and(|s| s.is_server_error() || s == reqwest::StatusCode::TOO_MANY_REQUESTS)
             }
             Self::OAuth { status, .. } => matches!(status, 408 | 429 | 502 | 503 | 504),
-            Self::TokenExpired(_) | Self::NotConfigured(_) | Self::Json(_) | Self::Io(_) => false,
+            Self::TokenExpired(_)
+            | Self::NotConfigured(_)
+            | Self::MalformedProviderAuth { .. }
+            | Self::Json(_)
+            | Self::Io(_) => false,
         }
     }
 }

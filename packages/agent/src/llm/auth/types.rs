@@ -72,22 +72,83 @@ pub struct ProviderAuth {
     pub active_credential: Option<ActiveCredential>,
 }
 
-/// Google-specific provider auth with endpoint metadata.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// Google-specific provider auth with Cloud Code Assist metadata.
+///
+/// Serializes and deserializes through `GoogleProviderAuthWire`, which
+/// carries `#[serde(deny_unknown_fields)]`. A legacy `endpoint` field
+/// (left over from the pre-CCA "antigravity" era) fails to load with an
+/// error naming the unknown field — users must re-authenticate via
+/// `tron auth google`.
+#[derive(Clone, Debug, Default)]
 pub struct GoogleProviderAuth {
     /// Base provider auth fields.
-    #[serde(flatten)]
     pub base: ProviderAuth,
     /// OAuth client ID (stored for refresh).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
     /// OAuth client secret (stored for refresh).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_secret: Option<String>,
     /// Google Cloud project ID (required for Cloud Code Assist).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+}
+
+/// Flat wire shape for `GoogleProviderAuth`. Exists purely so we can use
+/// `deny_unknown_fields` alongside the combined (base + Google-specific)
+/// fields — `#[serde(flatten)]` is incompatible with deny_unknown_fields.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GoogleProviderAuthWire {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accounts: Option<Vec<AccountEntry>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_keys: Option<Vec<ApiKeyEntry>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active_credential: Option<ActiveCredential>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_secret: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
+}
+
+impl From<GoogleProviderAuth> for GoogleProviderAuthWire {
+    fn from(g: GoogleProviderAuth) -> Self {
+        Self {
+            accounts: g.base.accounts,
+            api_keys: g.base.api_keys,
+            active_credential: g.base.active_credential,
+            client_id: g.client_id,
+            client_secret: g.client_secret,
+            project_id: g.project_id,
+        }
+    }
+}
+
+impl From<GoogleProviderAuthWire> for GoogleProviderAuth {
+    fn from(w: GoogleProviderAuthWire) -> Self {
+        Self {
+            base: ProviderAuth {
+                accounts: w.accounts,
+                api_keys: w.api_keys,
+                active_credential: w.active_credential,
+            },
+            client_id: w.client_id,
+            client_secret: w.client_secret,
+            project_id: w.project_id,
+        }
+    }
+}
+
+impl Serialize for GoogleProviderAuth {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        GoogleProviderAuthWire::from(self.clone()).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for GoogleProviderAuth {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        GoogleProviderAuthWire::deserialize(deserializer).map(Into::into)
+    }
 }
 
 /// API key auth for external services.
@@ -168,11 +229,26 @@ impl AuthStorage {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
-    /// Get Google-specific provider auth.
+    /// Get Google-specific provider auth. Returns `None` if no `google`
+    /// block exists OR if it fails to deserialize.
+    ///
+    /// For strict error surfacing (e.g. legacy `endpoint` field), prefer
+    /// [`Self::try_get_google_auth`], which returns the serde error.
     pub fn get_google_auth(&self) -> Option<GoogleProviderAuth> {
         self.providers
             .get("google")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
+    }
+
+    /// Get Google-specific provider auth, surfacing deserialization errors.
+    /// Used by `load_server_auth` so a malformed `google` block produces an
+    /// actionable `AuthError::MalformedProviderAuth` with re-auth guidance,
+    /// rather than silently resembling an unconfigured provider.
+    pub fn try_get_google_auth(&self) -> Result<Option<GoogleProviderAuth>, serde_json::Error> {
+        match self.providers.get("google") {
+            None => Ok(None),
+            Some(v) => serde_json::from_value::<GoogleProviderAuth>(v.clone()).map(Some),
+        }
     }
 
     /// Set provider auth (replaces the entire provider entry).
@@ -402,17 +478,33 @@ mod tests {
         assert_eq!(gpa.base.accounts.as_ref().unwrap()[0].label, "test");
     }
 
+    /// R3: legacy auth.json files carrying `endpoint: "antigravity"` (from
+    /// before the CCA migration) must fail to load with an error naming
+    /// the unknown field. The user has to re-authenticate.
     #[test]
-    fn google_provider_auth_ignores_legacy_endpoint() {
-        // Legacy auth.json files may have "endpoint": "antigravity" — serde ignores it
+    fn google_provider_auth_rejects_legacy_endpoint() {
         let json = r#"{
             "clientId": "cid",
             "endpoint": "antigravity",
             "projectId": "proj"
         }"#;
-        let gpa: GoogleProviderAuth = serde_json::from_str(json).unwrap();
-        assert_eq!(gpa.client_id.as_deref(), Some("cid"));
-        assert_eq!(gpa.project_id.as_deref(), Some("proj"));
+        let err = serde_json::from_str::<GoogleProviderAuth>(json).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("endpoint"),
+            "error should name the legacy `endpoint` field, got: {msg}"
+        );
+    }
+
+    /// R3 companion: completely unknown fields — not just `endpoint` — also
+    /// fail to load, so no other legacy shape can slip through.
+    #[test]
+    fn google_provider_auth_rejects_arbitrary_unknown_field() {
+        let json = r#"{
+            "clientId": "cid",
+            "somethingMadeUp": true
+        }"#;
+        assert!(serde_json::from_str::<GoogleProviderAuth>(json).is_err());
     }
 
     /// R2: `api_keys` is the canonical shape. Multiple keys are returned
