@@ -539,6 +539,72 @@ mod tests {
         assert_eq!(registry.size(), initial_count + 1);
     }
 
+    // M22: mid-session skill EDIT regression guard.
+    //
+    // `refresh_if_stale_detects_new_skill` above covers skill ADDITION, but
+    // editing an existing skill's content (description or body) is a distinct
+    // code path — the fingerprint must re-key on the SKILL.md's mtime, the
+    // registry must re-load the file, and callers consuming `get()` must see
+    // the new description.
+    //
+    // Without this guard: a user editing a project skill mid-session would
+    // have @skill-name resolution silently serve the stale description to the
+    // model, diverging from what the file on disk says.
+    #[test]
+    fn refresh_if_stale_detects_skill_content_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join(".tron/skills");
+        let skill_dir = skills_dir.join("edited-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let skill_md = skill_dir.join("SKILL.md");
+        std::fs::write(
+            &skill_md,
+            "---\nname: Edited Skill\ndescription: Original description\n---\n# Original body\n",
+        )
+        .unwrap();
+
+        let wd = dir.path().to_str().unwrap();
+        let mut registry = SkillRegistry::new();
+        registry.refresh_if_stale(wd);
+
+        // Baseline: registry reflects the original file contents.
+        let initial = registry
+            .get("edited-skill")
+            .expect("skill registered before edit")
+            .clone();
+        assert_eq!(initial.description, "Original description");
+        assert!(initial.content.contains("Original body"));
+
+        // Subsequent unchanged check must be a no-op (fingerprint-cached).
+        assert!(!registry.refresh_if_stale(wd));
+
+        // Simulate an on-disk edit. Second-granularity mtime requires we
+        // advance past the initial stat's whole-second boundary; 1100ms is
+        // the project-wide convention used by `fingerprint_changes_when_skill_md_modified`.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(
+            &skill_md,
+            "---\nname: Edited Skill\ndescription: Updated description\n---\n# Updated body\n",
+        )
+        .unwrap();
+
+        // Refresh must report it did work and the registry must expose the
+        // new file contents — not the stale cached copy.
+        assert!(
+            registry.refresh_if_stale(wd),
+            "refresh_if_stale must detect SKILL.md mtime change"
+        );
+        let updated = registry
+            .get("edited-skill")
+            .expect("skill still registered after edit");
+        assert_eq!(updated.description, "Updated description");
+        assert!(
+            updated.content.contains("Updated body"),
+            "updated content expected; got: {:?}",
+            updated.content
+        );
+    }
+
     #[test]
     fn refresh_if_stale_detects_working_dir_change() {
         let dir1 = tempfile::tempdir().unwrap();
