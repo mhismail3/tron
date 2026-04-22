@@ -73,6 +73,7 @@ fn register_core(registry: &mut MethodRegistry) {
     // System
     registry.register("system.ping", system::PingHandler);
     registry.register("system.getInfo", system::GetInfoHandler);
+    registry.register("system.getDiagnostics", system::GetDiagnosticsHandler);
     registry.register("system.shutdown", system::ShutdownHandler);
 
     // Blob
@@ -407,8 +408,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            161,
-            "expected 161 methods, got {}",
+            162,
+            "expected 162 methods, got {}",
             reg.methods().len()
         );
     }

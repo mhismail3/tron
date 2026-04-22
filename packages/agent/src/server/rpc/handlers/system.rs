@@ -1,4 +1,6 @@
-//! System handlers: ping, getInfo, shutdown.
+//! System handlers: ping, getInfo, shutdown, getDiagnostics.
+
+use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -6,7 +8,7 @@ use tracing::instrument;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{CLIENT_VERSION_UNSUPPORTED, RpcError};
-use crate::server::rpc::registry::MethodHandler;
+use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
 
 /// Current RPC wire-protocol version.
 ///
@@ -101,6 +103,68 @@ impl MethodHandler for GetInfoHandler {
             "platform": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
             "runtime": "agent",
+        }))
+    }
+}
+
+/// Returns a structured snapshot of server state for the debug-only iOS
+/// Diagnostics page. Includes server identity (version, protocol, pid,
+/// uptime, origin), orchestrator counters (active sessions, active runs),
+/// and the full RPC method registry grouped by prefix.
+///
+/// Intentionally more detailed than `system.getInfo` — the iOS settings
+/// page exposes this only behind a `#if DEBUG` gate so production users
+/// don't see it, but the shape is stable so a support engineer can ask
+/// "send me the diagnostics JSON" and get something actionable.
+pub struct GetDiagnosticsHandler;
+
+#[async_trait]
+impl MethodHandler for GetDiagnosticsHandler {
+    #[instrument(skip(self, ctx), fields(method = "system.getDiagnostics"))]
+    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let uptime = ctx.server_start_time.elapsed().as_secs();
+        let active_sessions = ctx.orchestrator.active_session_count();
+        let active_runs = ctx.orchestrator.active_run_count();
+
+        // Build a registry on demand so the method list stays in
+        // lockstep with `register_all` without any static duplication.
+        // Cost: ~160 HashMap inserts. The diagnostic endpoint is called
+        // manually from the debug page, not on a hot path.
+        let mut reg = MethodRegistry::new();
+        super::register_all(&mut reg);
+        let all_methods = reg.methods();
+        let total_methods = all_methods.len();
+
+        // Group by the prefix before the first dot so the page can
+        // render "session: 13, agent: 10, ..." without re-parsing.
+        // BTreeMap so the groups serialize in deterministic order.
+        let mut by_group: BTreeMap<String, usize> = BTreeMap::new();
+        for method in &all_methods {
+            let prefix = method.split('.').next().unwrap_or(method).to_string();
+            *by_group.entry(prefix).or_insert(0) += 1;
+        }
+
+        Ok(serde_json::json!({
+            "server": {
+                "version": env!("CARGO_PKG_VERSION"),
+                "protocolVersion": CURRENT_PROTOCOL_VERSION,
+                "minClientProtocolVersion": MIN_CLIENT_PROTOCOL_VERSION,
+                "platform": std::env::consts::OS,
+                "arch": std::env::consts::ARCH,
+                "pid": std::process::id(),
+                "uptimeSeconds": uptime,
+                "origin": ctx.origin.clone(),
+            },
+            "sessions": {
+                "active": active_sessions,
+                "activeRuns": active_runs,
+            },
+            "rpc": {
+                "totalMethods": total_methods,
+                "methodsByGroup": by_group,
+                "methods": all_methods,
+            },
+            "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         }))
     }
 }
@@ -305,5 +369,115 @@ mod tests {
         let result = PingHandler.handle(Some(params), &ctx).await.unwrap();
         assert_eq!(result["pong"], true);
         assert_eq!(result["compatible"], true);
+    }
+
+    // ── L11: diagnostics ────────────────────────────────────────────
+
+    /// The envelope contract the iOS debug page relies on: `server`,
+    /// `sessions`, `rpc`, `timestamp` at top level. If any of these
+    /// change, the debug page breaks silently in DEBUG builds — so
+    /// lock them explicitly.
+    #[tokio::test]
+    async fn get_diagnostics_envelope_shape() {
+        let ctx = make_test_context();
+        let result = GetDiagnosticsHandler.handle(None, &ctx).await.unwrap();
+
+        assert!(result["server"].is_object());
+        assert!(result["sessions"].is_object());
+        assert!(result["rpc"].is_object());
+        assert!(result["timestamp"].is_string());
+    }
+
+    /// The RPC subsection lists every registered method. Count must
+    /// match `register_all`'s method count test. If they diverge,
+    /// one of them is reading a stale snapshot.
+    #[tokio::test]
+    async fn get_diagnostics_rpc_method_count_matches_registry() {
+        let ctx = make_test_context();
+        let result = GetDiagnosticsHandler.handle(None, &ctx).await.unwrap();
+
+        let total = result["rpc"]["totalMethods"].as_u64().unwrap();
+        let methods = result["rpc"]["methods"].as_array().unwrap();
+        assert_eq!(
+            total as usize,
+            methods.len(),
+            "totalMethods must equal methods[].len"
+        );
+        // The diagnostics page renders this number as-is — a regression
+        // in either count would show a wrong number to the support
+        // engineer.
+        let mut reg = MethodRegistry::new();
+        super::super::register_all(&mut reg);
+        assert_eq!(total as usize, reg.methods().len());
+    }
+
+    /// `methodsByGroup` sums to `totalMethods`. Keeps the grouping in
+    /// sync with the raw list — if a regex or parser change produces
+    /// "session" and "Session" as separate groups, this will fire.
+    #[tokio::test]
+    async fn get_diagnostics_methods_by_group_sum_matches_total() {
+        let ctx = make_test_context();
+        let result = GetDiagnosticsHandler.handle(None, &ctx).await.unwrap();
+
+        let total = result["rpc"]["totalMethods"].as_u64().unwrap();
+        let groups = result["rpc"]["methodsByGroup"].as_object().unwrap();
+        let sum: u64 = groups.values().map(|v| v.as_u64().unwrap()).sum();
+        assert_eq!(
+            sum, total,
+            "sum of methodsByGroup values must equal totalMethods"
+        );
+    }
+
+    /// `sessions.active` and `sessions.activeRuns` are non-negative
+    /// integers. Regression guard against a future signed / null
+    /// representation that iOS would crash on.
+    #[tokio::test]
+    async fn get_diagnostics_session_counts_are_u64() {
+        let ctx = make_test_context();
+        let _ = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"), None)
+            .unwrap();
+        let result = GetDiagnosticsHandler.handle(None, &ctx).await.unwrap();
+
+        assert_eq!(result["sessions"]["active"].as_u64().unwrap(), 1);
+        // No runs without an agent prompt — must be 0, not null.
+        assert_eq!(result["sessions"]["activeRuns"].as_u64().unwrap(), 0);
+    }
+
+    /// Server identity fields must all be present and the right shape.
+    /// The debug page shows these unaltered; nulls here would confuse
+    /// support.
+    #[tokio::test]
+    async fn get_diagnostics_server_identity_fields() {
+        let ctx = make_test_context();
+        let result = GetDiagnosticsHandler.handle(None, &ctx).await.unwrap();
+        let server = &result["server"];
+
+        assert!(server["version"].is_string());
+        assert!(server["protocolVersion"].is_u64());
+        assert!(server["minClientProtocolVersion"].is_u64());
+        assert!(server["platform"].is_string());
+        assert!(server["arch"].is_string());
+        assert!(server["pid"].is_u64());
+        assert!(server["uptimeSeconds"].is_u64());
+        assert!(server["origin"].is_string());
+    }
+
+    /// The diagnostics list includes `system.getDiagnostics` itself —
+    /// i.e. the list is computed *after* all handlers register, so it
+    /// catches handlers that registered but forgot to be added to a
+    /// grouping map.
+    #[tokio::test]
+    async fn get_diagnostics_lists_itself() {
+        let ctx = make_test_context();
+        let result = GetDiagnosticsHandler.handle(None, &ctx).await.unwrap();
+        let methods = result["rpc"]["methods"].as_array().unwrap();
+        assert!(
+            methods
+                .iter()
+                .any(|m| m.as_str() == Some("system.getDiagnostics")),
+            "diagnostics method list must include the diagnostics method itself"
+        );
     }
 }
