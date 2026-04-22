@@ -415,8 +415,10 @@
 		82A4EF229FA040A968B1866B /* ContentLineParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D8FFEFE3AFC29958CF8D47 /* ContentLineParserTests.swift */; };
 		82C31213C045E0C35B2F425D /* MergeChangesSubSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A76B4B85A29E6A02017875C /* MergeChangesSubSheet.swift */; };
 		82D6F4D85424A4B055CDB3FC /* QuickSessionWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E74A9066D59DC82C19821D08 /* QuickSessionWorkspaceTests.swift */; };
+		83026D96A48834FB14025872 /* ToolKindBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EDB2104EBEFEF70D6A8607E /* ToolKindBadge.swift */; };
 		8367D183709D508D1AE2F4F1 /* ThinkingIndicatorStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C0AAC17B82B515311CC11E /* ThinkingIndicatorStyle.swift */; };
 		839937925AA1269987230D66 /* ChatViewModel+Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5699A58C211B11D08B6C7737 /* ChatViewModel+Transcription.swift */; };
+		83E65C3B215059FD973798B2 /* ToolKindBadgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B462725B36B56FEB26F06459 /* ToolKindBadgeTests.swift */; };
 		83FB61D99E6A64AC55F2C362 /* ChatViewModel+ProcessEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDA1991FA3B154D4147D8650 /* ChatViewModel+ProcessEvents.swift */; };
 		8422B64795775442F93B3036 /* foreground-emerald.png in Resources */ = {isa = PBXBuildFile; fileRef = 879251B0CFAE32083926A18E /* foreground-emerald.png */; };
 		843248DC166F1C7E0C499F6E /* AutomationRunDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41D57DD6FF464C8855554DF5 /* AutomationRunDetailSheet.swift */; };
@@ -1258,6 +1260,7 @@
 		8D8256453ECE1FD6C98F65F4 /* AppearanceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettings.swift; sourceTree = "<group>"; };
 		8E689E779C8C57917FB8E8C5 /* SourceChangesSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceChangesSheetTests.swift; sourceTree = "<group>"; };
 		8E7B1DF04A2FBDD66BDBA33E /* ToolEndPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolEndPluginTests.swift; sourceTree = "<group>"; };
+		8EDB2104EBEFEF70D6A8607E /* ToolKindBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolKindBadge.swift; sourceTree = "<group>"; };
 		8F16751D1FEA670D1739E5AE /* ManageProcessDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageProcessDetailSheet.swift; sourceTree = "<group>"; };
 		8F75B251C76013187BEF047F /* UIUpdateQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIUpdateQueueTests.swift; sourceTree = "<group>"; };
 		8F821172AA4F0D061E7ECC24 /* ToolHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolHandlers.swift; sourceTree = "<group>"; };
@@ -1372,6 +1375,7 @@
 		B269B581A09C3A38550D932C /* EventSyncClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventSyncClientTests.swift; sourceTree = "<group>"; };
 		B2A91A0F33B2C429B2442B45 /* InputAreaDragModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputAreaDragModifier.swift; sourceTree = "<group>"; };
 		B3E729EBF19BB143F74A6C41 /* EventTypeRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTypeRegistryTests.swift; sourceTree = "<group>"; };
+		B462725B36B56FEB26F06459 /* ToolKindBadgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolKindBadgeTests.swift; sourceTree = "<group>"; };
 		B474F56DF5573C102B41B7FA /* ImageContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageContent.swift; sourceTree = "<group>"; };
 		B478FD27FC82E5A327E552C0 /* InputTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputTextField.swift; sourceTree = "<group>"; };
 		B4831D2ADEDA260364F63294 /* RPCRetryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCRetryPolicy.swift; sourceTree = "<group>"; };
@@ -2220,6 +2224,7 @@
 				E1675D6A6F5BE8851558EC5E /* ToolErrorView.swift */,
 				8A22A2E8D9A23C5BDBDB8D7C /* ToolFileInfoSection.swift */,
 				9F421AE1A927C2459265C712 /* ToolInfoPill.swift */,
+				8EDB2104EBEFEF70D6A8607E /* ToolKindBadge.swift */,
 				89A21F2C8295D305E962466F /* ToolResultNote.swift */,
 				D4F9A6992BA712B1D7BC0A63 /* ToolRunningSpinner.swift */,
 				76D2AA71A53690FDFB7416F0 /* ToolStatusBadge.swift */,
@@ -3085,6 +3090,7 @@
 				8E689E779C8C57917FB8E8C5 /* SourceChangesSheetTests.swift */,
 				4791D6A3F98EE49411BC7869 /* SubagentChipVariantTests.swift */,
 				FCA7437FC583F0F161B4DB24 /* TextContentLayoutTests.swift */,
+				B462725B36B56FEB26F06459 /* ToolKindBadgeTests.swift */,
 				909E84C398239617CB2ABBB5 /* TurnGroupingTests.swift */,
 				73F11AA5B7763CF597F396C0 /* TypewriterAnimationStateTests.swift */,
 				C940E394586353E994B37A82 /* WebToolViewerTests.swift */,
@@ -4155,6 +4161,7 @@
 				1D7F9424F20DDFA46E34FE80 /* ToolHandlers.swift in Sources */,
 				92D6C89A20B36949273671D1 /* ToolInfoPill.swift in Sources */,
 				B5E89668A89E30FFD5CC1472 /* ToolKind.swift in Sources */,
+				83026D96A48834FB14025872 /* ToolKindBadge.swift in Sources */,
 				3A7F3EED85425108E1E8F048 /* ToolOutputPlugin.swift in Sources */,
 				45547C33D9EC4977CC374547 /* ToolPayloads.swift in Sources */,
 				E2869CDA68F1F9C18917E5C0 /* ToolProgressPlugin.swift in Sources */,
@@ -4413,6 +4420,7 @@
 				D80A41AD9F10A4CA2678E474 /* ToolEndPluginTests.swift in Sources */,
 				6B5AA7C596E4C1B5902B4D00 /* ToolEventCoordinatorTests.swift in Sources */,
 				0FCB41B96A3A96F7C99ABFBC /* ToolGeneratingPluginTests.swift in Sources */,
+				83E65C3B215059FD973798B2 /* ToolKindBadgeTests.swift in Sources */,
 				E9534EC415AB0BF59E6A5D01 /* ToolOutputPluginTests.swift in Sources */,
 				1CB6632A703C236EB9CE68F6 /* ToolRegistryTests.swift in Sources */,
 				4ABA7EF5C28D04DAF3C82F2E /* ToolResultParserNotifyAppTests.swift in Sources */,

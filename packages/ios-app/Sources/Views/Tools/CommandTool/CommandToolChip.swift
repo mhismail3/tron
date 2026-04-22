@@ -27,6 +27,11 @@ struct CommandToolChip: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(statusColor)
 
+                if isBashBackgrounded {
+                    ToolKindBadge(text: "BG", color: statusColor)
+                        .accessibilityLabel("Backgrounded")
+                }
+
                 if let subtitle = chipSubtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(TronTypography.codeContent)
@@ -107,6 +112,15 @@ struct CommandToolChip: View {
     private var chipSubtitle: String? {
         if let live = data.runningSubtitle { return live }
         return data.summary.isEmpty ? nil : data.summary
+    }
+
+    /// Bash tool calls that the server auto-backgrounded (long-running,
+    /// tailing logs) look identical to any other Bash chip otherwise —
+    /// the BG badge makes it unambiguous so the user knows the chip
+    /// will remain "running" until explicitly stopped via ManageJob.
+    var isBashBackgrounded: Bool {
+        guard data.normalizedName == "bash" else { return false }
+        return data.details?.bool("backgrounded") ?? false
     }
 }
 

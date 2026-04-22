@@ -45,6 +45,23 @@ struct SubagentChip: View {
         }
     }
 
+    /// Tiny uppercase kind badge — "SUB" (Spawn) or "WAIT". Keeps the
+    /// two subagent variants visually distinct from a Bash-BG chip even
+    /// when all three share a running spinner + amber color.
+    var kindBadgeText: String {
+        switch variant {
+        case .spawn: return "SUB"
+        case .wait:  return "WAIT"
+        }
+    }
+
+    var kindBadgeAccessibilityLabel: String {
+        switch variant {
+        case .spawn: return "Subagent"
+        case .wait:  return "Waiting for subagent"
+        }
+    }
+
     /// Short prefix of the target subagent session id. Only shown on
     /// the Wait variant — Spawn doesn't need it because the chip IS
     /// the origin of that id.
@@ -66,6 +83,13 @@ struct SubagentChip: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(data.status.color)
                     .lineLimit(1)
+
+                // Kind badge — "SUB" for spawn, "WAIT" for wait_for. A
+                // user seeing three running chips (Bash BG, Spawn,
+                // Wait) can tell them apart at a glance without
+                // reading each title.
+                ToolKindBadge(text: kindBadgeText, color: data.status.color)
+                    .accessibilityLabel(kindBadgeAccessibilityLabel)
 
                 if let targetIdBadge {
                     Text("#\(targetIdBadge)")
