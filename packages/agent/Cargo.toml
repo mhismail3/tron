@@ -92,6 +92,9 @@ resvg = "0.44"
 # Concurrency
 parking_lot = "0.12"
 dashmap = "6"
+# ArcSwap: lock-free atomic Arc swap for the global settings singleton.
+# Reads resolve in a handful of ns with no blocking; writers swap in O(1).
+arc-swap = "1"
 
 # Zero-copy
 bytemuck = { version = "1", features = ["derive"] }

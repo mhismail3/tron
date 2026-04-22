@@ -2691,7 +2691,7 @@ async fn stale_git_push_excluded_after_boundary() {
 
 /// Shared reload lock used by every test that mutates the global settings
 /// singleton (see `server/rpc/handlers/settings.rs` for the other user).
-fn history_capture_lock() -> &'static tokio::sync::Mutex<()> {
+fn history_capture_lock() -> &'static std::sync::Mutex<()> {
     crate::server::rpc::settings_service::settings_reload_lock()
 }
 
@@ -2736,7 +2736,9 @@ async fn confirm_no_history_after_tick(ctx: &RpcContext) {
 
 #[tokio::test]
 async fn prompt_records_history_on_interactive_call() {
-    let _guard = history_capture_lock().lock().await;
+    let _guard = history_capture_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     crate::settings::init_settings(crate::settings::TronSettings::default());
     let ctx = make_text_context("Done.");
     let sid = ctx
@@ -2759,7 +2761,9 @@ async fn prompt_records_history_on_interactive_call() {
 
 #[tokio::test]
 async fn prompt_history_dedups_on_repeat() {
-    let _guard = history_capture_lock().lock().await;
+    let _guard = history_capture_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     crate::settings::init_settings(crate::settings::TronSettings::default());
     let ctx = make_text_context("Done.");
     let sid1 = ctx
@@ -2804,7 +2808,9 @@ async fn prompt_history_dedups_on_repeat() {
 
 #[tokio::test]
 async fn prompt_with_cron_source_does_not_record_history() {
-    let _guard = history_capture_lock().lock().await;
+    let _guard = history_capture_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     crate::settings::init_settings(crate::settings::TronSettings::default());
     let ctx = make_text_context("Done.");
     let sid = ctx
@@ -2829,7 +2835,9 @@ async fn prompt_with_cron_source_does_not_record_history() {
 
 #[tokio::test]
 async fn prompt_with_history_disabled_does_not_record() {
-    let _guard = history_capture_lock().lock().await;
+    let _guard = history_capture_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut disabled = crate::settings::TronSettings::default();
     disabled.prompt_library.history_enabled = false;
     crate::settings::init_settings(disabled);
@@ -2853,7 +2861,9 @@ async fn prompt_with_history_disabled_does_not_record() {
 
 #[tokio::test]
 async fn prompt_validation_failure_does_not_record_history() {
-    let _guard = history_capture_lock().lock().await;
+    let _guard = history_capture_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     crate::settings::init_settings(crate::settings::TronSettings::default());
     let ctx = make_text_context("Done.");
     let sid = ctx

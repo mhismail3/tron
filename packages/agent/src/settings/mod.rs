@@ -44,17 +44,27 @@ pub use loader::{
 pub use types::*;
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-use parking_lot::RwLock;
+use arc_swap::ArcSwapOption;
 
-/// Global settings singleton.
+/// Global settings singleton (M31).
 ///
-/// Uses `RwLock<Option<Arc<TronSettings>>>` instead of `OnceLock` so the
-/// cached value can be swapped after `settings.update` RPC calls.
-/// Reads are cheap (shared lock + `Arc::clone`), writes only happen on
-/// reload which is rare (settings changes from iOS).
-static SETTINGS: RwLock<Option<Arc<TronSettings>>> = RwLock::new(None);
+/// `ArcSwapOption<TronSettings>` is lock-free for readers: `get_settings()`
+/// is a few atomic ops with no blocking, even while a reload is in flight.
+/// Writers (reload / init) swap the new `Arc` atomically; readers with an
+/// older `Arc` keep a consistent snapshot until they drop it. Exactly the
+/// pattern `arc-swap` was designed for — a rarely-updated singleton read by
+/// many hot paths (every RPC, every turn, every tool).
+///
+/// `OnceLock` defers allocation until first access; inside that slot we keep
+/// the `ArcSwapOption` that carries the current value (or `None` until the
+/// first load lands).
+static SETTINGS: OnceLock<ArcSwapOption<TronSettings>> = OnceLock::new();
+
+fn settings_slot() -> &'static ArcSwapOption<TronSettings> {
+    SETTINGS.get_or_init(ArcSwapOption::empty)
+}
 
 /// Get the global settings instance.
 ///
@@ -62,33 +72,30 @@ static SETTINGS: RwLock<Option<Arc<TronSettings>>> = RwLock::new(None);
 /// overrides. On subsequent calls, returns the cached value. If loading
 /// fails, returns compiled defaults.
 ///
-/// Returns an `Arc` so callers can hold a consistent snapshot even if
-/// another thread reloads settings concurrently.
+/// Returns an `Arc` so callers hold a consistent snapshot even if another
+/// thread reloads settings concurrently. The underlying read is lock-free
+/// (arc-swap) — hot-path callers (every RPC, every turn) pay only an atomic
+/// load + `Arc` clone.
 pub fn get_settings() -> Arc<TronSettings> {
-    // Fast path: read lock
-    {
-        let guard = SETTINGS.read();
-        if let Some(ref s) = *guard {
-            return Arc::clone(s);
-        }
+    let slot = settings_slot();
+    // Fast path: already initialized.
+    if let Some(existing) = slot.load_full() {
+        return existing;
     }
 
-    // Slow path: first access, take write lock
-    let mut guard = SETTINGS.write();
-    // Double-check after acquiring write lock (another thread may have initialized)
-    if let Some(ref s) = *guard {
-        return Arc::clone(s);
-    }
-
-    let settings = Arc::new(match load_settings() {
+    // Slow path: compute defaults-or-file and install them. If two threads
+    // race here, both will produce a valid Arc from the same deterministic
+    // source (file or defaults) and one's store overwrites the other; both
+    // return a valid snapshot. The loser's Arc is dropped. No lock involved.
+    let fresh = Arc::new(match load_settings() {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(error = %e, "failed to load settings, using defaults");
             TronSettings::default()
         }
     });
-    *guard = Some(Arc::clone(&settings));
-    settings
+    slot.store(Some(Arc::clone(&fresh)));
+    fresh
 }
 
 /// Initialize the global settings with a specific value.
@@ -96,8 +103,7 @@ pub fn get_settings() -> Arc<TronSettings> {
 /// Replaces any previously cached settings. Useful for tests and
 /// server startup where the settings path is known.
 pub fn init_settings(settings: TronSettings) {
-    let mut guard = SETTINGS.write();
-    *guard = Some(Arc::new(settings));
+    settings_slot().store(Some(Arc::new(settings)));
 }
 
 /// Reload settings from a specific file path.
@@ -115,8 +121,7 @@ pub fn reload_settings_from_path(path: &Path) {
             TronSettings::default()
         }
     });
-    let mut guard = SETTINGS.write();
-    *guard = Some(new);
+    settings_slot().store(Some(new));
     tracing::debug!(?path, "settings reloaded from disk");
 }
 
@@ -127,8 +132,26 @@ pub fn reload_settings_from_path(path: &Path) {
 /// global is `static`.
 #[cfg(test)]
 pub(crate) fn reset_settings() {
-    let mut guard = SETTINGS.write();
-    *guard = None;
+    settings_slot().store(None);
+}
+
+/// Shared test-time lock for the global settings singleton.
+///
+/// Any test that mutates the global must hold this mutex for its whole
+/// body to prevent races with other parallel tests. Since settings live
+/// in a process-global, any parallel test that writes to it (directly
+/// via `init_settings` or indirectly via RPC handlers like
+/// `update_settings`) can corrupt a concurrent test's state unless they
+/// all synchronize through a single lock.
+///
+/// Returns a `std::sync::Mutex` so it can be acquired from both sync
+/// (`#[test]`) and async (`#[tokio::test]`) tests; tokio tests may hold
+/// the lock briefly across `.await` points since contention is tiny.
+#[cfg(test)]
+pub(crate) fn test_settings_lock() -> &'static std::sync::Mutex<()> {
+    use std::sync::OnceLock;
+    static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -139,9 +162,14 @@ pub(crate) fn reset_settings() {
 mod tests {
     use super::*;
 
-    /// Tests that mutate the global SETTINGS static must hold this lock
-    /// to avoid racing with each other (Rust runs tests in parallel threads).
-    static SETTINGS_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// Acquire the shared test-time settings lock. Poison-tolerant:
+    /// if a prior test panicked while holding the lock, recover the
+    /// inner guard rather than cascading panics to every sibling test.
+    fn lock_settings() -> std::sync::MutexGuard<'static, ()> {
+        test_settings_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     #[test]
     fn re_exports_work() {
@@ -176,7 +204,7 @@ mod tests {
 
     #[test]
     fn init_settings_sets_custom_value() {
-        let _lock = SETTINGS_MUTEX.lock().unwrap();
+        let _lock = lock_settings();
         reset_settings();
         let mut custom = TronSettings::default();
         custom.server.heartbeat_interval_ms = 99_000;
@@ -188,7 +216,7 @@ mod tests {
 
     #[test]
     fn init_settings_replaces_previous() {
-        let _lock = SETTINGS_MUTEX.lock().unwrap();
+        let _lock = lock_settings();
         reset_settings();
         let mut first = TronSettings::default();
         first.server.heartbeat_interval_ms = 11_000;
@@ -204,7 +232,7 @@ mod tests {
 
     #[test]
     fn reload_settings_from_path_updates_cached_value() {
-        let _lock = SETTINGS_MUTEX.lock().unwrap();
+        let _lock = lock_settings();
         reset_settings();
 
         // Start with defaults
@@ -236,7 +264,7 @@ mod tests {
 
     #[test]
     fn reload_from_nonexistent_path_falls_back_to_defaults() {
-        let _lock = SETTINGS_MUTEX.lock().unwrap();
+        let _lock = lock_settings();
         reset_settings();
 
         let mut custom = TronSettings::default();
@@ -258,7 +286,7 @@ mod tests {
 
     #[test]
     fn reload_settings_simulates_settings_update_rpc_flow() {
-        let _lock = SETTINGS_MUTEX.lock().unwrap();
+        let _lock = lock_settings();
         reset_settings();
 
         // Simulate server startup: standalone files enabled by default
@@ -294,7 +322,7 @@ mod tests {
 
     #[test]
     fn get_settings_returns_arc_for_snapshot_isolation() {
-        let _lock = SETTINGS_MUTEX.lock().unwrap();
+        let _lock = lock_settings();
         reset_settings();
         init_settings(TronSettings::default());
 
@@ -312,6 +340,98 @@ mod tests {
         // New get should see new value
         assert_eq!(get_settings().server.heartbeat_interval_ms, 55_000);
 
+        reset_settings();
+    }
+
+    // ── M31: ArcSwap lock-free semantics ────────────────────────────
+
+    /// Readers concurrent with a reload must never observe a partially
+    /// swapped value. Each `get_settings()` call returns either the old
+    /// snapshot or the new one, never a torn mix. This is the core
+    /// guarantee of `ArcSwapOption` vs the previous `RwLock` wrapping.
+    #[test]
+    fn in_flight_read_sees_consistent_snapshot_under_reload() {
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let _lock = lock_settings();
+        reset_settings();
+
+        let mut base = TronSettings::default();
+        base.server.heartbeat_interval_ms = 10_000;
+        init_settings(base);
+
+        // Writer thread swaps between two distinct configurations for a
+        // short window; reader threads pull snapshots on a tight loop and
+        // assert every single one is one of the two known configurations.
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done_writer = Arc::clone(&done);
+        let writer = thread::spawn(move || {
+            let start = Instant::now();
+            let mut flip = 0u8;
+            while start.elapsed() < Duration::from_millis(80) {
+                let mut s = TronSettings::default();
+                s.server.heartbeat_interval_ms = if flip.is_multiple_of(2) { 10_000 } else { 20_000 };
+                init_settings(s);
+                flip = flip.wrapping_add(1);
+            }
+            done_writer.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let mut reader_handles = Vec::new();
+        for _ in 0..4 {
+            let done_reader = Arc::clone(&done);
+            reader_handles.push(thread::spawn(move || {
+                let mut observed_values = std::collections::BTreeSet::new();
+                while !done_reader.load(std::sync::atomic::Ordering::SeqCst) {
+                    let snap = get_settings();
+                    let hb = snap.server.heartbeat_interval_ms;
+                    assert!(
+                        hb == 10_000 || hb == 20_000,
+                        "reader observed torn value: {hb}"
+                    );
+                    observed_values.insert(hb);
+                }
+                // Each reader should have seen at least one value; both
+                // are fine but tearing is the failure we guard against.
+                assert!(!observed_values.is_empty());
+            }));
+        }
+
+        writer.join().unwrap();
+        for h in reader_handles {
+            h.join().unwrap();
+        }
+
+        reset_settings();
+    }
+
+    /// A snapshot taken before a reload stays internally consistent even
+    /// after many subsequent reloads — `ArcSwapOption` holds the old Arc
+    /// alive as long as any reader holds it. Regression guard against a
+    /// future refactor replacing `ArcSwap` with a `Mutex<TronSettings>`
+    /// (which would require .lock() on every access and defeat the point).
+    #[test]
+    fn snapshot_remains_valid_across_many_reloads() {
+        let _lock = lock_settings();
+        reset_settings();
+
+        let mut first = TronSettings::default();
+        first.server.heartbeat_interval_ms = 33_333;
+        init_settings(first);
+
+        let held_snapshot = get_settings();
+        assert_eq!(held_snapshot.server.heartbeat_interval_ms, 33_333);
+
+        // Thrash the cache.
+        for n in 0u64..32 {
+            let mut s = TronSettings::default();
+            s.server.heartbeat_interval_ms = 40_000 + n * 100;
+            init_settings(s);
+        }
+
+        // Our originally-held snapshot is untouched.
+        assert_eq!(held_snapshot.server.heartbeat_interval_ms, 33_333);
         reset_settings();
     }
 }

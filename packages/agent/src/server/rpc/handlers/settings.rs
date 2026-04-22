@@ -73,12 +73,11 @@ impl MethodHandler for UpdateSettingsHandler {
 mod tests {
     use super::*;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
-    use crate::server::rpc::settings_service::settings_reload_lock;
     use serde_json::json;
     use std::path::PathBuf;
 
     struct SettingsTestGuard {
-        _guard: tokio::sync::MutexGuard<'static, ()>,
+        _guard: std::sync::MutexGuard<'static, ()>,
     }
 
     impl Drop for SettingsTestGuard {
@@ -87,8 +86,15 @@ mod tests {
         }
     }
 
+    // M31: use the shared `crate::settings::test_settings_lock()` so async
+    // handler tests here serialize with the sync tests in `settings::tests`
+    // against the single process-global `SETTINGS`. Before M31 these two
+    // test surfaces used disjoint mutexes, which caused sporadic races
+    // (observable as poisoned mutexes when any parallel test failed).
     async fn settings_test_guard() -> SettingsTestGuard {
-        let guard = settings_reload_lock().lock().await;
+        let guard = crate::settings::test_settings_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         crate::settings::init_settings(crate::settings::TronSettings::default());
         SettingsTestGuard { _guard: guard }
     }

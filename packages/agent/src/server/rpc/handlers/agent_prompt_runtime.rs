@@ -1002,7 +1002,7 @@ mod skills_cleared_emission_tests {
     use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::settings::types::CompactionPolicy;
 
-    fn settings_lock() -> &'static tokio::sync::Mutex<()> {
+    fn settings_lock() -> &'static std::sync::Mutex<()> {
         crate::server::rpc::settings_service::settings_reload_lock()
     }
 
@@ -1073,7 +1073,9 @@ mod skills_cleared_emission_tests {
             .unwrap();
         seed_skill_activated_then_boundary(&ctx.event_store, &session_id);
 
-        let _guard = settings_lock().lock().await;
+        let _guard = settings_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         crate::settings::init_settings(settings_with_policy(policy));
         let _ = prepare_skill_context_from_session(
             ctx.skill_registry.clone(),
@@ -1137,7 +1139,9 @@ mod skills_cleared_emission_tests {
             serde_json::json!({ "skillName": "a", "source": "global" }),
         );
 
-        let _guard = settings_lock().lock().await;
+        let _guard = settings_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         crate::settings::init_settings(settings_with_policy(CompactionPolicy::ClearAll));
         let _ = prepare_skill_context_from_session(
             ctx.skill_registry.clone(),
@@ -1204,7 +1208,9 @@ mod skills_cleared_emission_tests {
             .unwrap();
         seed_skill_activated_then_boundary(&ctx.event_store, &session_id);
 
-        let _guard = settings_lock().lock().await;
+        let _guard = settings_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         crate::settings::init_settings(settings_with_policy(CompactionPolicy::AskUser));
         let _ = prepare_skill_context_from_session(
             ctx.skill_registry.clone(),
