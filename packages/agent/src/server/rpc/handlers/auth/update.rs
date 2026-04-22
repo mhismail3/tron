@@ -200,14 +200,10 @@ fn update_service(
         if api_key_val.is_null() {
             // Clear the service key
             let _ = services.remove(service);
-        } else if let Some(key) = api_key_val.as_str() {
-            let _ = services.insert(
-                service.to_string(),
-                ServiceAuth {
-                    api_key: Some(key.to_string()),
-                    api_keys: None,
-                },
-            );
+        } else if let Some(key) = api_key_val.as_str()
+            && !key.is_empty()
+        {
+            let _ = services.insert(service.to_string(), ServiceAuth::from_single(key));
         }
     }
 

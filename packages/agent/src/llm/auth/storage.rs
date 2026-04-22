@@ -666,10 +666,7 @@ mod tests {
         let mut services = std::collections::HashMap::new();
         let _ = services.insert(
             "brave".to_string(),
-            ServiceAuth {
-                api_key: Some("key1".to_string()),
-                api_keys: None,
-            },
+            ServiceAuth::from_single("key1"),
         );
         storage.services = Some(services);
         save_auth_storage(&path, &mut storage).unwrap();

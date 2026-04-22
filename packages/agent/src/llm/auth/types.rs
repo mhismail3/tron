@@ -91,15 +91,44 @@ pub struct GoogleProviderAuth {
 }
 
 /// API key auth for external services.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+///
+/// INVARIANT: `api_keys` is non-empty. An entry with zero keys is
+/// indistinguishable from an unconfigured service and is rejected at
+/// deserialization time via `deserialize_non_empty_keys`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ServiceAuth {
-    /// Single API key (legacy).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
-    /// Multiple API keys (takes precedence over single).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub api_keys: Option<Vec<String>>,
+    /// Configured API keys. The provider selects the first key by default
+    /// and rotates on rate-limit / auth failures.
+    #[serde(deserialize_with = "deserialize_non_empty_keys")]
+    pub api_keys: Vec<String>,
+}
+
+impl ServiceAuth {
+    /// Build a `ServiceAuth` from a single key. Panics if `key` is empty —
+    /// callers should validate before construction.
+    pub fn from_single(key: impl Into<String>) -> Self {
+        let key = key.into();
+        assert!(!key.is_empty(), "ServiceAuth::from_single requires a non-empty key");
+        Self { api_keys: vec![key] }
+    }
+}
+
+fn deserialize_non_empty_keys<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    let keys = Vec::<String>::deserialize(deserializer)?;
+    if keys.is_empty() {
+        return Err(D::Error::custom(
+            "apiKeys must contain at least one key; remove the service entry to clear it",
+        ));
+    }
+    if keys.iter().any(String::is_empty) {
+        return Err(D::Error::custom("apiKeys entries must be non-empty"));
+    }
+    Ok(keys)
 }
 
 /// Top-level auth storage schema (`~/.tron/system/auth.json`).
@@ -186,20 +215,14 @@ impl AuthStorage {
         self.services.as_ref()?.get(service)
     }
 
-    /// Get API keys for a service (prefers `api_keys` over single `api_key`).
+    /// Get API keys for a service. Returns the stored `api_keys` vec, or
+    /// an empty vec if the service isn't configured. Deserialization
+    /// enforces non-empty keys so a present service always has ≥1 key.
     pub fn get_service_api_keys(&self, service: &str) -> Vec<String> {
-        let Some(svc) = self.get_service_auth(service) else {
-            return Vec::new();
-        };
-        if let Some(keys) = &svc.api_keys
-            && !keys.is_empty()
-        {
-            return keys.clone();
+        match self.get_service_auth(service) {
+            Some(svc) => svc.api_keys.clone(),
+            None => Vec::new(),
         }
-        if let Some(key) = &svc.api_key {
-            return vec![key.clone()];
-        }
-        Vec::new()
     }
 }
 
@@ -357,17 +380,6 @@ mod tests {
     }
 
     #[test]
-    fn provider_auth_ignores_unknown_legacy_fields() {
-        // Old auth.json files may contain "oauth" and "apiKey" fields.
-        // Since ProviderAuth doesn't use deny_unknown_fields, these are silently ignored.
-        let json = r#"{"oauth":{"accessToken":"tok","refreshToken":"ref","expiresAt":123},"apiKey":"sk-old"}"#;
-        let pa: ProviderAuth = serde_json::from_str(json).unwrap();
-        assert!(pa.accounts.is_none());
-        assert!(pa.api_keys.is_none());
-        assert!(pa.active_credential.is_none());
-    }
-
-    #[test]
     fn provider_auth_with_accounts() {
         let json = r#"{"accounts":[{"label":"work","oauth":{"accessToken":"a","refreshToken":"r","expiresAt":0}}]}"#;
         let pa: ProviderAuth = serde_json::from_str(json).unwrap();
@@ -403,44 +415,69 @@ mod tests {
         assert_eq!(gpa.project_id.as_deref(), Some("proj"));
     }
 
+    /// R2: `api_keys` is the canonical shape. Multiple keys are returned
+    /// in the order they were configured — the provider picks the first
+    /// by default and rotates on failure.
     #[test]
-    fn service_auth_keys_priority() {
+    fn service_auth_returns_all_api_keys() {
         let mut storage = AuthStorage::new();
         let mut services = HashMap::new();
         let _ = services.insert(
             "brave".to_string(),
             ServiceAuth {
-                api_key: Some("single".to_string()),
-                api_keys: Some(vec!["multi1".to_string(), "multi2".to_string()]),
+                api_keys: vec!["first".to_string(), "second".to_string()],
             },
         );
         storage.services = Some(services);
 
         let keys = storage.get_service_api_keys("brave");
-        assert_eq!(keys, vec!["multi1", "multi2"]);
-    }
-
-    #[test]
-    fn service_auth_single_key_fallback() {
-        let mut storage = AuthStorage::new();
-        let mut services = HashMap::new();
-        let _ = services.insert(
-            "exa".to_string(),
-            ServiceAuth {
-                api_key: Some("single".to_string()),
-                api_keys: None,
-            },
-        );
-        storage.services = Some(services);
-
-        let keys = storage.get_service_api_keys("exa");
-        assert_eq!(keys, vec!["single"]);
+        assert_eq!(keys, vec!["first", "second"]);
     }
 
     #[test]
     fn service_auth_missing_returns_empty() {
         let storage = AuthStorage::new();
         assert!(storage.get_service_api_keys("nonexistent").is_empty());
+    }
+
+    /// R2: legacy `apiKey` single field is gone. An auth.json with only
+    /// `apiKey: "..."` fails to load with an error naming the unknown
+    /// field. Users must rewrite their auth.json to `apiKeys: ["..."]`.
+    #[test]
+    fn service_auth_rejects_legacy_api_key_field() {
+        let json = r#"{"apiKey":"sk-legacy"}"#;
+        let err = serde_json::from_str::<ServiceAuth>(json).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("apiKey") || msg.contains("apiKeys"),
+            "error should name the problematic field, got: {msg}"
+        );
+    }
+
+    /// R2: `apiKeys: []` is indistinguishable from an unconfigured service
+    /// and is explicitly rejected.
+    #[test]
+    fn service_auth_rejects_empty_api_keys_array() {
+        let json = r#"{"apiKeys":[]}"#;
+        let err = serde_json::from_str::<ServiceAuth>(json).unwrap_err();
+        assert!(err.to_string().contains("apiKeys"));
+    }
+
+    /// R2: a single-element `apiKeys` array loads cleanly — this is the
+    /// canonical replacement for the old `apiKey` single-field shape.
+    #[test]
+    fn service_auth_accepts_single_element_api_keys() {
+        let json = r#"{"apiKeys":["sk-one"]}"#;
+        let svc: ServiceAuth = serde_json::from_str(json).unwrap();
+        assert_eq!(svc.api_keys, vec!["sk-one"]);
+    }
+
+    /// R2: empty-string entries inside `apiKeys` are rejected (they would
+    /// silently authenticate as anonymous).
+    #[test]
+    fn service_auth_rejects_empty_string_entry() {
+        let json = r#"{"apiKeys":[""]}"#;
+        assert!(serde_json::from_str::<ServiceAuth>(json).is_err());
     }
 
     #[test]

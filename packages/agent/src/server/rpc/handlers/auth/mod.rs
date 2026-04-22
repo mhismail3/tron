@@ -205,16 +205,12 @@ fn build_masked_state(auth_path: &Path) -> Value {
 
         let mut info = serde_json::Map::new();
         if let Some(svc) = svc {
-            let has_key = svc.api_key.is_some()
-                || svc.api_keys.as_ref().is_some_and(|k| !k.is_empty());
-            let _ = info.insert("hasApiKey".into(), json!(has_key));
-            if let Some(ref key) = svc.api_key {
-                let _ = info.insert("apiKeyHint".into(), json!(mask_key(key)));
-            } else if let Some(ref keys) = svc.api_keys
-                && let Some(first) = keys.first()
-            {
-                let _ = info.insert("apiKeyHint".into(), json!(mask_key(first)));
-            }
+            // INVARIANT: svc.api_keys is non-empty (enforced by ServiceAuth
+            // deserializer — empty arrays and single-field legacy shapes
+            // are rejected at auth.json load time).
+            let first = svc.api_keys.first().expect("ServiceAuth.api_keys non-empty invariant");
+            let _ = info.insert("hasApiKey".into(), json!(true));
+            let _ = info.insert("apiKeyHint".into(), json!(mask_key(first)));
         } else {
             let _ = info.insert("hasApiKey".into(), json!(false));
         }

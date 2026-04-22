@@ -177,10 +177,7 @@ async fn auth_get_services_returns_brave_key() {
     let mut services = HashMap::new();
     let _ = services.insert(
         "brave".to_string(),
-        ServiceAuth {
-            api_key: Some("BSA-abcdefghijklmnop".into()),
-            api_keys: None,
-        },
+        ServiceAuth::from_single("BSA-abcdefghijklmnop"),
     );
     storage.services = Some(services);
     save_auth_storage(&ctx.auth_path, &mut storage).unwrap();
@@ -454,10 +451,7 @@ async fn auth_clear_service() {
     let mut services = HashMap::new();
     let _ = services.insert(
         "brave".to_string(),
-        ServiceAuth {
-            api_key: Some("BSA-key123456789012".into()),
-            api_keys: None,
-        },
+        ServiceAuth::from_single("BSA-key123456789012"),
     );
     storage.services = Some(services);
     save_auth_storage(&ctx.auth_path, &mut storage).unwrap();
