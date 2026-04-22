@@ -26,8 +26,20 @@ use crate::cron::schedule::compute_next_run;
 use crate::cron::store;
 use crate::cron::types::{CronJob, JobRuntimeState, MisfirePolicy, OverlapPolicy, RunStatus};
 
-/// Default global execution concurrency limit.
+/// Concurrency limit for heavyweight payloads (`AgentTurn`, `ShellCommand`).
+///
+/// Keeps enough budget that a concurrent flood of lightweight webhook /
+/// system-event jobs cannot starve agent work — see [`DEFAULT_DELIVERY_LIMIT`]
+/// and [`CronScheduler::semaphore_for_payload`].
 const DEFAULT_EXECUTION_LIMIT: usize = 10;
+
+/// Concurrency limit for lightweight delivery payloads (`Webhook`,
+/// `SystemEvent`).
+///
+/// Larger than [`DEFAULT_EXECUTION_LIMIT`] because HTTP callouts and
+/// single-event injections are cheap and mostly I/O-bound, so a wider pool
+/// absorbs bursts (e.g. fan-out webhooks) without back-pressuring agent work.
+const DEFAULT_DELIVERY_LIMIT: usize = 20;
 
 /// Shared in-memory runtime state map, accessible from spawned tasks.
 type RuntimeMap = Arc<parking_lot::RwLock<HashMap<String, JobRuntimeState>>>;
@@ -49,8 +61,19 @@ pub struct CronScheduler {
     reschedule_notify: Arc<tokio::sync::Notify>,
     /// Shutdown signal.
     cancel: CancellationToken,
-    /// Global execution concurrency limiter.
+    /// Concurrency limiter for heavyweight payloads (`AgentTurn`,
+    /// `ShellCommand`).
+    ///
+    /// INVARIANT: acquired only via [`Self::semaphore_for_payload`]; never
+    /// shared with lightweight delivery jobs so a webhook burst cannot
+    /// starve agent work.
     execution_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Concurrency limiter for lightweight delivery payloads (`Webhook`,
+    /// `SystemEvent`).
+    ///
+    /// Sized independently from [`Self::execution_semaphore`] — see
+    /// [`DEFAULT_DELIVERY_LIMIT`].
+    delivery_semaphore: Arc<tokio::sync::Semaphore>,
     /// Executor dependencies.
     deps: Arc<ExecutorDeps>,
     /// Path to `automations.json`.
@@ -79,6 +102,7 @@ impl CronScheduler {
             reschedule_notify: Arc::new(tokio::sync::Notify::new()),
             cancel,
             execution_semaphore: Arc::new(tokio::sync::Semaphore::new(DEFAULT_EXECUTION_LIMIT)),
+            delivery_semaphore: Arc::new(tokio::sync::Semaphore::new(DEFAULT_DELIVERY_LIMIT)),
             deps: Arc::new(deps),
             config_path,
             backup_path,
@@ -178,9 +202,33 @@ impl CronScheduler {
             .min()
     }
 
-    /// Count currently running executions.
+    /// Count currently running executions across both the execution and
+    /// delivery pools.
     pub fn active_run_count(&self) -> usize {
-        DEFAULT_EXECUTION_LIMIT - self.execution_semaphore.available_permits()
+        (DEFAULT_EXECUTION_LIMIT - self.execution_semaphore.available_permits())
+            + (DEFAULT_DELIVERY_LIMIT - self.delivery_semaphore.available_permits())
+    }
+
+    /// Pick the right concurrency pool for a payload.
+    ///
+    /// `AgentTurn` and `ShellCommand` spawn child processes / model calls
+    /// that can dominate compute for minutes — they share the
+    /// [execution](`Self::execution_semaphore`) pool so we can bound the
+    /// total heavyweight work in flight.
+    ///
+    /// `Webhook` and `SystemEvent` are fast I/O — they share the
+    /// [delivery](`Self::delivery_semaphore`) pool so a burst of them cannot
+    /// eat every execution permit and starve agent work.
+    fn semaphore_for_payload(&self, payload: &crate::cron::types::Payload) -> Arc<tokio::sync::Semaphore> {
+        use crate::cron::types::Payload;
+        match payload {
+            Payload::AgentTurn { .. } | Payload::ShellCommand { .. } => {
+                self.execution_semaphore.clone()
+            }
+            Payload::Webhook { .. } | Payload::SystemEvent { .. } => {
+                self.delivery_semaphore.clone()
+            }
+        }
     }
 
     /// Start the scheduler and config watcher. Returns join handles.
@@ -389,9 +437,17 @@ impl CronScheduler {
                                     continue;
                                 }
 
-                        // Acquire execution semaphore
-                        let Ok(permit) = self.execution_semaphore.clone().try_acquire_owned() else {
-                            tracing::warn!(job_id = %job.id, "global execution limit reached, skipping");
+                        // Acquire the pool matching this payload kind —
+                        // heavyweight (AgentTurn, ShellCommand) and
+                        // lightweight delivery (Webhook, SystemEvent) have
+                        // separate budgets so neither starves the other.
+                        let sem = self.semaphore_for_payload(&job.payload);
+                        let Ok(permit) = sem.try_acquire_owned() else {
+                            tracing::warn!(
+                                job_id = %job.id,
+                                payload_kind = job.payload.kind_name(),
+                                "concurrency pool saturated, skipping"
+                            );
                             continue;
                         };
 
@@ -1397,6 +1453,100 @@ mod tests {
         let scheduler = CronScheduler::new(pool, clock, deps, config_path, backup_path, cancel);
 
         assert!(scheduler.get_job("nonexistent").is_none());
+    }
+
+    /// INVARIANT: a flood of webhook / system-event jobs must not exhaust the
+    /// execution budget used by agent / shell work. We split the global
+    /// semaphore into two pools so an AgentTurn or ShellCommand always has
+    /// dedicated capacity even when every delivery-pool slot is claimed.
+    #[tokio::test]
+    async fn agent_job_bypasses_delivery_queue() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let deps = make_deps(&pool);
+        let scheduler = CronScheduler::new(pool, clock, deps, config_path, backup_path, cancel);
+
+        // Saturate the delivery pool — simulate a webhook flood that has
+        // claimed every lightweight-delivery permit.
+        let delivery_sema = scheduler.delivery_semaphore.clone();
+        let mut held_delivery = Vec::new();
+        while let Ok(permit) = delivery_sema.clone().try_acquire_owned() {
+            held_delivery.push(permit);
+        }
+        assert_eq!(
+            delivery_sema.available_permits(),
+            0,
+            "test precondition: delivery pool must be fully saturated"
+        );
+
+        // An AgentTurn job acquires from the EXECUTION pool, which is
+        // independent of the delivery pool — it must still get a permit.
+        let agent_payload = Payload::AgentTurn {
+            prompt: "diagnose".into(),
+            model: None,
+            workspace_id: None,
+            system_prompt: None,
+        };
+        let agent_sema = scheduler.semaphore_for_payload(&agent_payload);
+        let agent_permit = agent_sema
+            .try_acquire_owned()
+            .expect("agent job must not be starved by saturated delivery queue");
+
+        // ShellCommand shares the execution pool with AgentTurn — also unblocked.
+        let shell_payload = Payload::ShellCommand {
+            command: "echo hi".into(),
+            working_directory: None,
+            timeout_secs: 300,
+        };
+        let shell_sema = scheduler.semaphore_for_payload(&shell_payload);
+        let shell_permit = shell_sema
+            .try_acquire_owned()
+            .expect("shell command must not be starved by saturated delivery queue");
+
+        // Webhook and SystemEvent both draw from the delivery pool — BOTH
+        // must resolve to the same semaphore as the saturated one.
+        let webhook_payload = Payload::Webhook {
+            url: "https://example.invalid/hook".into(),
+            method: "POST".into(),
+            headers: None,
+            body: None,
+            timeout_secs: 30,
+        };
+        let system_event_payload = Payload::SystemEvent {
+            session_id: "sess_x".into(),
+            message: "note".into(),
+        };
+        assert!(
+            Arc::ptr_eq(
+                &scheduler.semaphore_for_payload(&webhook_payload),
+                &scheduler.delivery_semaphore
+            ),
+            "Webhook must route to the delivery semaphore"
+        );
+        assert!(
+            Arc::ptr_eq(
+                &scheduler.semaphore_for_payload(&system_event_payload),
+                &scheduler.delivery_semaphore
+            ),
+            "SystemEvent must route to the delivery semaphore"
+        );
+        assert!(
+            Arc::ptr_eq(
+                &scheduler.semaphore_for_payload(&agent_payload),
+                &scheduler.execution_semaphore
+            ),
+            "AgentTurn must route to the execution semaphore"
+        );
+        assert!(
+            Arc::ptr_eq(
+                &scheduler.semaphore_for_payload(&shell_payload),
+                &scheduler.execution_semaphore
+            ),
+            "ShellCommand must route to the execution semaphore"
+        );
+
+        drop(agent_permit);
+        drop(shell_permit);
+        drop(held_delivery);
     }
 
     #[test]

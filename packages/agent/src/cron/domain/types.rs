@@ -124,6 +124,21 @@ pub enum Payload {
     },
 }
 
+impl Payload {
+    /// Static identifier for this payload variant, useful in structured
+    /// logs where emitting the full payload would be noisy or privacy-
+    /// sensitive.
+    #[must_use]
+    pub const fn kind_name(&self) -> &'static str {
+        match self {
+            Self::AgentTurn { .. } => "agentTurn",
+            Self::ShellCommand { .. } => "shellCommand",
+            Self::Webhook { .. } => "webhook",
+            Self::SystemEvent { .. } => "systemEvent",
+        }
+    }
+}
+
 // ── Delivery ────────────────────────────────────────────────────────
 
 /// How to deliver the result of a cron job run.
