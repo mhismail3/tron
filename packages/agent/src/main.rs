@@ -556,6 +556,13 @@ async fn init_provider_factory(
 ///
 /// Adds subagent spawning, job management, and LLM-summarizer-backed WebFetch
 /// on top of the base registry from `create_tool_registry()`.
+///
+/// INVARIANT: `SubagentManager` and `JobManager` are created once at startup
+/// (`main.rs` bootstrap) and are NEVER swapped. The closure below captures
+/// `Arc` clones of each and relies on this invariant — if either becomes
+/// swap-capable later, the closure's captured `Arc` would pin the old
+/// instance and the factory would silently diverge from new subagent/job
+/// work. Revisit M33 in the audit plan if introducing a swap path.
 fn build_tool_factory(
     tool_config: &Arc<ToolRegistryConfig>,
     subagent_manager: &Arc<SubagentManager>,
