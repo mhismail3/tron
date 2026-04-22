@@ -276,6 +276,79 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertTrue(viewModel.askUserQuestionCalledInTurn)
     }
 
+    // MARK: - Tool Progress Routing Tests
+
+    func test_toolProgress_updatesChipProgressFields() {
+        let toolCallId = "toolu_progress1"
+        let startResult = makeToolStartResult(
+            toolName: "Bash",
+            toolCallId: toolCallId,
+            arguments: ["command": AnyCodable("long-task")]
+        )
+        viewModel.handleToolStart(startResult)
+
+        let progress = ToolProgressPlugin.Result(
+            toolCallId: toolCallId,
+            message: "downloading chunk 3/5",
+            percent: 0.6
+        )
+        viewModel.handleToolProgress(progress)
+
+        guard let index = viewModel.messages.lastIndex(where: {
+            if case .toolUse(let t) = $0.content { return t.toolCallId == toolCallId }
+            return false
+        }) else { return XCTFail("Tool message not found") }
+
+        if case .toolUse(let tool) = viewModel.messages[index].content {
+            XCTAssertEqual(tool.progressMessage, "downloading chunk 3/5")
+            XCTAssertEqual(tool.progressPercent, 0.6)
+        } else {
+            XCTFail("Unexpected content type")
+        }
+    }
+
+    func test_toolProgress_unknownToolCallId_isNoop() {
+        let initialCount = viewModel.messages.count
+        let progress = ToolProgressPlugin.Result(
+            toolCallId: "not-found",
+            message: "ignored",
+            percent: nil
+        )
+        viewModel.handleToolProgress(progress)
+        XCTAssertEqual(viewModel.messages.count, initialCount)
+    }
+
+    func test_toolEnd_clearsProgressFields() {
+        let toolCallId = "toolu_progress_end"
+        viewModel.handleToolStart(makeToolStartResult(
+            toolName: "Bash",
+            toolCallId: toolCallId,
+            arguments: nil
+        ))
+        viewModel.handleToolProgress(ToolProgressPlugin.Result(
+            toolCallId: toolCallId,
+            message: "in-flight",
+            percent: 0.4
+        ))
+        viewModel.handleToolEnd(makeToolEndResult(
+            toolCallId: toolCallId,
+            success: true,
+            result: "done",
+            durationMs: 10
+        ))
+        viewModel.flushUIUpdateQueue()
+
+        guard let index = viewModel.messages.lastIndex(where: {
+            if case .toolUse(let t) = $0.content { return t.toolCallId == toolCallId }
+            return false
+        }) else { return XCTFail("Tool message not found") }
+
+        if case .toolUse(let tool) = viewModel.messages[index].content {
+            XCTAssertNil(tool.progressMessage)
+            XCTAssertNil(tool.progressPercent)
+        }
+    }
+
     // MARK: - Tool End Routing Tests
 
     func test_toolEnd_updatesTrackedToolCall() {

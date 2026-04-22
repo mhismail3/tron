@@ -694,6 +694,7 @@
 		E2225FD792EF550888014183 /* ContextClearedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F02C32D8D43B7DC9E958BAC /* ContextClearedPlugin.swift */; };
 		E249AEF5320780D03E8E6826 /* DraftMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EDF11BB0D40F2F4AA98112A /* DraftMetadata.swift */; };
 		E27712970A4F45154C2C6033 /* SessionEventForkableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56DBF3E3294B1C9584BDA7DC /* SessionEventForkableTests.swift */; };
+		E2869CDA68F1F9C18917E5C0 /* ToolProgressPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14E3526F55BC0D6E377C5F4E /* ToolProgressPlugin.swift */; };
 		E330D9929BE835934F4443AC /* DisplayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B994C686C0032857E8F2A222 /* DisplayClient.swift */; };
 		E3353F8B1501D3D364CB70F8 /* StreamingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A33D515C7609324FFC2A6A60 /* StreamingManager.swift */; };
 		E3CE42970E695E8F4AD05D1F /* ChatViewModel+SubagentEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9E80A3C9B4AB98E571F2B1 /* ChatViewModel+SubagentEvents.swift */; };
@@ -888,6 +889,7 @@
 		1463E6DC7D278EF388E3BFD2 /* SessionCreatedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCreatedPlugin.swift; sourceTree = "<group>"; };
 		149661EBE1315B91F970FB61 /* GoogleCloudRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleCloudRows.swift; sourceTree = "<group>"; };
 		149F27377773C5AADC991D16 /* TokenStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenStateManager.swift; sourceTree = "<group>"; };
+		14E3526F55BC0D6E377C5F4E /* ToolProgressPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolProgressPlugin.swift; sourceTree = "<group>"; };
 		15AF65BE58A3F1A16E6CC5D0 /* MessageExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageExtensions.swift; sourceTree = "<group>"; };
 		15CF76420D8EE386C929B714 /* foreground-gray.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "foreground-gray.png"; sourceTree = "<group>"; };
 		162ECA57B2866663AEBF52E0 /* AnimationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimationCoordinator.swift; sourceTree = "<group>"; };
@@ -1897,6 +1899,7 @@
 				99A74BC20146AF6AD09D808C /* ToolEndPlugin.swift */,
 				83B75C105FF237A8DBB8961B /* ToolGeneratingPlugin.swift */,
 				0DED44B4A59265FAC1C1E7EA /* ToolOutputPlugin.swift */,
+				14E3526F55BC0D6E377C5F4E /* ToolProgressPlugin.swift */,
 				7C77AFC2422FCDB7A086FB2A /* ToolStartPlugin.swift */,
 			);
 			path = Tool;
@@ -4141,6 +4144,7 @@
 				B5E89668A89E30FFD5CC1472 /* ToolKind.swift in Sources */,
 				3A7F3EED85425108E1E8F048 /* ToolOutputPlugin.swift in Sources */,
 				45547C33D9EC4977CC374547 /* ToolPayloads.swift in Sources */,
+				E2869CDA68F1F9C18917E5C0 /* ToolProgressPlugin.swift in Sources */,
 				A8DF365AA74313FA722F0B49 /* ToolResultNote.swift in Sources */,
 				7873152FDCFC6E9258BF9F1F /* ToolResultParser.swift in Sources */,
 				F2AF817FC04D5E7A67A18827 /* ToolResultRouter.swift in Sources */,

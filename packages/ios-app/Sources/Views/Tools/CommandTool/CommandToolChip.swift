@@ -18,8 +18,8 @@ struct CommandToolChip: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(statusColor)
 
-                if !data.summary.isEmpty {
-                    Text(data.summary)
+                if let subtitle = chipSubtitle, !subtitle.isEmpty {
+                    Text(subtitle)
                         .font(TronTypography.codeContent)
                         .foregroundStyle(statusColor.opacity(0.7))
                         .lineLimit(1)
@@ -41,7 +41,7 @@ struct CommandToolChip: View {
             .padding(.vertical, 6)
             .clipShape(Capsule())
             .contentShape(Capsule())
-            .animation(.smooth(duration: 0.3), value: data.summary)
+            .animation(.smooth(duration: 0.3), value: chipSubtitle)
             .animation(.smooth(duration: 0.3), value: data.formattedDuration)
         }
         .buttonStyle(.plain)
@@ -75,6 +75,12 @@ struct CommandToolChip: View {
         case .success: return data.iconColor
         case .error: return .tronError
         }
+    }
+
+    /// While running, prefer the live progress message; otherwise fall back to the static summary.
+    private var chipSubtitle: String? {
+        if let live = data.runningSubtitle { return live }
+        return data.summary.isEmpty ? nil : data.summary
     }
 }
 

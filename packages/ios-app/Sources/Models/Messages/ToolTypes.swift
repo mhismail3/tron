@@ -13,6 +13,11 @@ struct ToolUseData: Equatable {
     var details: [String: AnyCodable]?
     /// Streaming output accumulated while tool is running (ephemeral, cleared on tool_end)
     var streamingOutput: String?
+    /// Latest human-readable progress message from a `tool.progress` event.
+    /// Rendered as the chip subtitle; cleared on tool_end.
+    var progressMessage: String?
+    /// Latest completion fraction (0.0–1.0) from a `tool.progress` event.
+    var progressPercent: Double?
 
     static func == (lhs: ToolUseData, rhs: ToolUseData) -> Bool {
         lhs.toolName == rhs.toolName &&
@@ -21,7 +26,9 @@ struct ToolUseData: Equatable {
         lhs.status == rhs.status &&
         lhs.result == rhs.result &&
         lhs.durationMs == rhs.durationMs &&
-        lhs.streamingOutput == rhs.streamingOutput
+        lhs.streamingOutput == rhs.streamingOutput &&
+        lhs.progressMessage == rhs.progressMessage &&
+        lhs.progressPercent == rhs.progressPercent
     }
 
     var displayName: String {

@@ -1262,6 +1262,49 @@ fn tool_output_wire_type_and_data() {
     assert!(data.get("update").is_none());
 }
 
+#[test]
+fn tool_progress_wire_type_and_data() {
+    let event = TronEvent::ToolExecutionProgress {
+        base: BaseEvent::now("s1"),
+        tool_call_id: "tc_1".into(),
+        message: Some("fetched 1024 bytes".into()),
+        percent: Some(0.5),
+    };
+    let rpc = tron_event_to_rpc(&event);
+    assert_eq!(rpc.event_type, "agent.tool_progress");
+    let data = rpc.data.unwrap();
+    assert_eq!(data["toolCallId"], "tc_1");
+    assert_eq!(data["message"], "fetched 1024 bytes");
+    assert_eq!(data["percent"], 0.5);
+}
+
+#[test]
+fn tool_progress_omits_missing_optional_fields() {
+    let event = TronEvent::ToolExecutionProgress {
+        base: BaseEvent::now("s1"),
+        tool_call_id: "tc_1".into(),
+        message: None,
+        percent: None,
+    };
+    let rpc = tron_event_to_rpc(&event);
+    let data = rpc.data.unwrap();
+    assert_eq!(data["toolCallId"], "tc_1");
+    assert!(data.get("message").is_none());
+    assert!(data.get("percent").is_none());
+}
+
+#[test]
+fn tool_progress_stays_session_scoped() {
+    let event = TronEvent::ToolExecutionProgress {
+        base: BaseEvent::now("s1"),
+        tool_call_id: "tc_1".into(),
+        message: Some("tick".into()),
+        percent: None,
+    };
+    let bridged = tron_event_to_bridged(&event);
+    assert_eq!(bridged.scope, BroadcastScope::Session("s1".into()));
+}
+
 // ── Compaction event chain verification ──
 
 #[test]

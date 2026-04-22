@@ -455,6 +455,7 @@ final class MockEventDispatchContext: EventDispatchTarget {
     // MARK: - Tools
     var handleToolGeneratingCalledWith: ToolGeneratingPlugin.Result?
     var handleToolStartCalledWith: ToolStartPlugin.Result?
+    var handleToolProgressCalledWith: ToolProgressPlugin.Result?
     var handleToolEndCalledWith: ToolEndPlugin.Result?
 
     // MARK: - Turn Lifecycle
@@ -501,6 +502,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
     }
 
     func handleToolOutput(_ result: ToolOutputPlugin.Result) {}
+
+    func handleToolProgress(_ result: ToolProgressPlugin.Result) {
+        handleToolProgressCalledWith = result
+    }
 
     func handleToolEnd(_ result: ToolEndPlugin.Result) {
         handleToolEndCalledWith = result

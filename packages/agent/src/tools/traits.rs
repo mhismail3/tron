@@ -78,13 +78,23 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
-    /// Emit a `tool.progress` event durably.
+    /// Emit a `tool.progress` event durably and broadcast to live subscribers.
     ///
-    /// The tool carries the rate-limiting responsibility — callers must throttle
-    /// emissions themselves (e.g. Bash emits at most 1 Hz from its stdout
-    /// forwarder). This call uses the background persister path so it never
-    /// blocks the calling task on DB writes.
+    /// Persists via the background persister (so reconstructed sessions include
+    /// progress) AND broadcasts a `TronEvent::ToolExecutionProgress` so the
+    /// currently-connected iOS client updates in real time. Tools carry the
+    /// rate-limiting responsibility — callers must throttle emissions themselves
+    /// (e.g. Bash emits at most 1 Hz from its stdout forwarder).
     pub async fn emit_progress(&self, message: Option<String>, percent: Option<f64>) {
+        if let Some(emitter) = self.event_emitter.as_ref() {
+            let _ = emitter.emit(crate::core::events::TronEvent::ToolExecutionProgress {
+                base: crate::core::events::BaseEvent::now(self.session_id.clone()),
+                tool_call_id: self.tool_call_id.clone(),
+                message: message.clone(),
+                percent,
+            });
+        }
+
         let Some(persister) = self.event_persister.as_ref() else {
             return;
         };
@@ -890,6 +900,66 @@ mod tests {
         };
         assert_eq!(ctx.subagent_depth, 2);
         assert_eq!(ctx.subagent_max_depth, 5);
+    }
+
+    #[tokio::test]
+    async fn emit_progress_broadcasts_tron_event_when_emitter_present() {
+        let emitter = Arc::new(crate::runtime::agent::event_emitter::EventEmitter::new());
+        let mut rx = emitter.subscribe();
+        let ctx = ToolContext {
+            tool_call_id: "call-1".into(),
+            session_id: "sess-1".into(),
+            working_directory: "/tmp".into(),
+            cancellation: CancellationToken::new(),
+            subagent_depth: 0,
+            subagent_max_depth: 0,
+            workspace_id: None,
+            output_tx: None,
+            process_manager: None,
+            job_manager: None,
+            output_buffer_registry: None,
+            event_emitter: Some(emitter.clone()),
+            event_persister: None,
+            turn: 2,
+            all_tool_names: vec![],
+        };
+
+        ctx.emit_progress(Some("downloading".into()), Some(0.25)).await;
+
+        let event = rx.try_recv().expect("progress event should broadcast");
+        match event {
+            crate::core::events::TronEvent::ToolExecutionProgress {
+                tool_call_id, message, percent, base,
+            } => {
+                assert_eq!(tool_call_id, "call-1");
+                assert_eq!(message.as_deref(), Some("downloading"));
+                assert_eq!(percent, Some(0.25));
+                assert_eq!(base.session_id, "sess-1");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn emit_progress_is_noop_when_neither_emitter_nor_persister_present() {
+        let ctx = ToolContext {
+            tool_call_id: "call-1".into(),
+            session_id: "sess-1".into(),
+            working_directory: "/tmp".into(),
+            cancellation: CancellationToken::new(),
+            subagent_depth: 0,
+            subagent_max_depth: 0,
+            workspace_id: None,
+            output_tx: None,
+            process_manager: None,
+            job_manager: None,
+            output_buffer_registry: None,
+            event_emitter: None,
+            event_persister: None,
+            turn: 0,
+            all_tool_names: vec![],
+        };
+        ctx.emit_progress(Some("msg".into()), None).await;
     }
 
     #[test]

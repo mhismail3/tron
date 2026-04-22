@@ -97,6 +97,17 @@ extension ChatViewModel {
         }
     }
 
+    func handleToolProgress(_ result: ToolProgressPlugin.Result) {
+        guard let index = messageIndex.index(forToolCallId: result.toolCallId)
+            ?? MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) else { return }
+
+        if case .toolUse(var tool) = messages[index].content {
+            if let msg = result.message { tool.progressMessage = msg }
+            if let pct = result.percent { tool.progressPercent = pct }
+            messages[index].content = .toolUse(tool)
+        }
+    }
+
     func handleToolEnd(_ pluginResult: ToolEndPlugin.Result) {
         // Delegate directly to coordinator
         toolEventCoordinator.handleToolEnd(pluginResult, context: self)

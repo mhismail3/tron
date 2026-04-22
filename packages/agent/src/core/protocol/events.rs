@@ -458,6 +458,19 @@ tron_events! {
         update: String,
     } => "tool_execution_update",
 
+    /// Long-running tool progress heartbeat.
+    ///
+    /// Carries an optional human-readable status message (shown as chip
+    /// subtitle) and an optional 0.0–1.0 completion fraction.
+    ToolExecutionProgress {
+        #[serde(rename = "toolCallId")]
+        tool_call_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        percent: Option<f64>,
+    } => "tool_execution_progress",
+
     /// Tool execution completed.
     ToolExecutionEnd {
         #[serde(rename = "toolCallId")]
@@ -1280,6 +1293,7 @@ impl TronEvent {
             self,
             Self::ToolExecutionStart { .. }
                 | Self::ToolExecutionUpdate { .. }
+                | Self::ToolExecutionProgress { .. }
                 | Self::ToolExecutionEnd { .. }
         )
     }
@@ -1800,6 +1814,12 @@ mod tests {
                 base: base.clone(),
                 tool_call_id: "id".into(),
                 update: "u".into(),
+            },
+            TronEvent::ToolExecutionProgress {
+                base: base.clone(),
+                tool_call_id: "id".into(),
+                message: Some("msg".into()),
+                percent: Some(0.5),
             },
             TronEvent::ToolExecutionEnd {
                 base: base.clone(),

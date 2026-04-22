@@ -70,6 +70,17 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "output": update,
             })),
         )),
+        TronEvent::ToolExecutionProgress {
+            tool_call_id,
+            message,
+            percent,
+            ..
+        } => {
+            let mut data = json!({ "toolCallId": tool_call_id });
+            set_opt(&mut data, "message", message);
+            set_opt(&mut data, "percent", percent);
+            Some(session_scoped(event, "agent.tool_progress", Some(data)))
+        }
         TronEvent::ToolUseBatch { tool_calls, .. } => Some(session_scoped(
             event,
             "agent.tool_use_batch",

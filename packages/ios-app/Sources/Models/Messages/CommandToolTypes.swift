@@ -100,6 +100,10 @@ struct CommandToolChipData: Equatable, Identifiable {
     var streamingOutput: String?
     /// Tool-specific structured metadata (e.g. WebFetch: fromCache, status, method)
     var details: [String: AnyCodable]?
+    /// Latest tool.progress message, rendered as chip subtitle while running
+    var progressMessage: String?
+    /// Latest tool.progress completion fraction (0.0-1.0)
+    var progressPercent: Double?
 
     /// Formatted duration for display
     var formattedDuration: String? {
@@ -109,6 +113,16 @@ struct CommandToolChipData: Equatable, Identifiable {
         } else {
             return String(format: "%.1fs", Double(ms) / 1000.0)
         }
+    }
+
+    /// Progress message shown as chip subtitle (preferred over static summary while running).
+    var runningSubtitle: String? {
+        guard status == .running, let msg = progressMessage, !msg.isEmpty else { return nil }
+        if let pct = progressPercent {
+            let clamped = max(0, min(1, pct))
+            return "\(Int(clamped * 100))% — \(msg)"
+        }
+        return msg
     }
 
 }
@@ -162,6 +176,8 @@ extension CommandToolChipData {
         self.isResultTruncated = wasTruncated
         self.streamingOutput = tool.streamingOutput
         self.details = tool.details
+        self.progressMessage = tool.progressMessage
+        self.progressPercent = tool.progressPercent
     }
 
     /// Map ToolStatus to CommandToolStatus

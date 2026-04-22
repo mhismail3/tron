@@ -431,6 +431,8 @@ final class ChatViewModel {
                 tool.durationMs = data.durationMs
                 tool.details = data.details
                 tool.streamingOutput = nil
+                tool.progressMessage = nil
+                tool.progressPercent = nil
                 messages[index].content = .toolUse(tool)
                 messageIndex.didUpdate(messages[index], at: index)
 
