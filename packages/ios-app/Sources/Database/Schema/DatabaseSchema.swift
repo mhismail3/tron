@@ -8,7 +8,7 @@ enum DatabaseSchema {
     /// Current schema version. Stored as `PRAGMA user_version` after a
     /// successful migration so subsequent app launches can short-circuit
     /// the create-table / column-add IF-NOT-EXISTS dance.
-    static let version: Int32 = 10
+    static let version: Int32 = 11
 
     // MARK: - Public API
 
@@ -128,8 +128,11 @@ enum DatabaseSchema {
         try addColumnIfNotExists(db: db, table: "sessions", column: "server_origin", definition: "TEXT")
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(server_origin)")
 
-        // Migration: Add is_chat column for persistent chat session
-        try addColumnIfNotExists(db: db, table: "sessions", column: "is_chat", definition: "INTEGER DEFAULT 0")
+        // Migration (v11): Drop is_chat column. It was always written as 0,
+        // always read and discarded — dead column, removed with schema v11.
+        if try columnExists(table: "sessions", column: "is_chat", db: db) {
+            try execute(db: db, "ALTER TABLE sessions DROP COLUMN is_chat")
+        }
 
         // Migration: Remove provider, status columns; rename model to latest_model
         // Only needed for very old databases with the provider column

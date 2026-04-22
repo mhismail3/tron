@@ -25,9 +25,9 @@ final class SessionRepository: @unchecked Sendable {
                 (id, workspace_id, root_event_id, head_event_id, title, latest_model,
                  working_directory, created_at, last_activity_at, archived_at, event_count,
                  message_count, input_tokens, output_tokens, last_turn_input_tokens,
-                 cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin, is_chat,
+                 cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
                  activity_lines_json, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
 
             var stmt: OpaquePointer?
@@ -56,17 +56,16 @@ final class SessionRepository: @unchecked Sendable {
             sqlite3_bind_double(stmt, 18, session.cost)
             sqlite3_bind_int(stmt, 19, Int32(session.isFork == true ? 1 : 0))
             sqliteBindOptionalText(stmt, 20, session.serverOrigin)
-            sqlite3_bind_int(stmt, 21, 0) // is_chat column (legacy, always 0)
 
             // Persist activity lines as JSON
             if let lines = session.lastActivityLines,
                let data = try? JSONEncoder().encode(lines),
                let json = String(data: data, encoding: .utf8) {
-                sqlite3_bind_text(stmt, 22, json, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+                sqlite3_bind_text(stmt, 21, json, -1, SQLITE_TRANSIENT_DESTRUCTOR)
             } else {
-                sqlite3_bind_null(stmt, 22)
+                sqlite3_bind_null(stmt, 21)
             }
-            sqliteBindOptionalText(stmt, 23, session.source)
+            sqliteBindOptionalText(stmt, 22, session.source)
 
             guard sqlite3_step(stmt) == SQLITE_DONE else {
                 throw EventDatabaseError.insertFailed(sqliteErrorMessage(db))
@@ -88,7 +87,7 @@ final class SessionRepository: @unchecked Sendable {
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                       is_chat, activity_lines_json, source
+                       activity_lines_json, source
                 FROM sessions WHERE id = ?
             """
 
@@ -120,7 +119,7 @@ final class SessionRepository: @unchecked Sendable {
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                       is_chat, activity_lines_json, source
+                       activity_lines_json, source
                 FROM sessions ORDER BY last_activity_at DESC
             """
 
@@ -157,7 +156,7 @@ final class SessionRepository: @unchecked Sendable {
                            working_directory, created_at, last_activity_at, archived_at, event_count,
                            message_count, input_tokens, output_tokens, last_turn_input_tokens,
                            cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                           is_chat, activity_lines_json, source
+                           activity_lines_json, source
                     FROM sessions
                     WHERE server_origin = ?
                     ORDER BY last_activity_at DESC
@@ -168,7 +167,7 @@ final class SessionRepository: @unchecked Sendable {
                            working_directory, created_at, last_activity_at, archived_at, event_count,
                            message_count, input_tokens, output_tokens, last_turn_input_tokens,
                            cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                           is_chat, activity_lines_json, source
+                           activity_lines_json, source
                     FROM sessions ORDER BY last_activity_at DESC
                 """
             }
@@ -342,16 +341,15 @@ final class SessionRepository: @unchecked Sendable {
         let cost = sqlite3_column_double(stmt, 17)
         let isFork = sqlite3_column_int(stmt, 18) != 0
         let serverOrigin = sqliteGetOptionalText(stmt, 19)
-        _ = sqlite3_column_int(stmt, 20) // is_chat column (legacy, always 0)
 
         // Decode persisted activity lines from JSON
         var activityLines: [ActivityLine]?
-        if let jsonStr = sqliteGetOptionalText(stmt, 21),
+        if let jsonStr = sqliteGetOptionalText(stmt, 20),
            let data = jsonStr.data(using: .utf8) {
             activityLines = try? JSONDecoder().decode([ActivityLine].self, from: data)
         }
 
-        let source = sqliteGetOptionalText(stmt, 22)
+        let source = sqliteGetOptionalText(stmt, 21)
 
         var session = CachedSession(
             id: id,
