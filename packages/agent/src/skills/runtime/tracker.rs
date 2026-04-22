@@ -13,11 +13,18 @@
 //! - `skill.activated` — adds skill to active set
 //! - `skill.deactivated` — removes skill, adds to pending removal notices
 //! - `compact.boundary` — behavior depends on `CompactionPolicy`:
-//!   - `ClearAll` (default): clears all state, sets `skills_cleared_by_compaction`
-//!     if skills were active at boundary time
-//!   - `AutoRestore`: clears ephemeral state but keeps active skills
-//!   - `AskUser`: records cleared skill names, then clears all state, sets
-//!     `skills_cleared_by_compaction` if skills were active
+//!   - `ClearAll` (default): records the active skill names into
+//!     `cleared_at_boundary` (so iOS can render an informational notice),
+//!     clears all state, sets `skills_cleared_by_compaction` if skills were
+//!     active at boundary time.
+//!   - `AutoRestore`: clears ephemeral state but keeps active skills; does
+//!     NOT populate `cleared_at_boundary` (there's nothing cleared).
+//!   - `AskUser`: records the active skill names into `cleared_at_boundary`
+//!     (so iOS can render an interactive re-activation picker), clears all
+//!     state, sets `skills_cleared_by_compaction` if skills were active.
+//!
+//!   `ClearAll` and `AskUser` differ only in iOS render mode (carried on the
+//!   emitted `skills.cleared` event's `mode` field), not in server bookkeeping.
 //! - `context.cleared` — always clears all state regardless of policy
 //! - `skills.cleared` — resets `cleared_at_boundary` to prevent duplicate emission
 //! - `skill.activated` (post-boundary) — resets `skills_cleared_by_compaction`
@@ -282,17 +289,21 @@ impl SkillTracker {
                 "compact.boundary" => {
                     let had_skills = tracker.count() > 0;
                     match policy {
-                        CompactionPolicy::ClearAll => {
-                            tracker.clear();
-                            tracker.skills_cleared_by_compaction = had_skills;
-                        }
-                        CompactionPolicy::AutoRestore => tracker.clear_ephemeral(),
-                        CompactionPolicy::AskUser => {
+                        // ClearAll and AskUser share a branch: both clear active
+                        // skills AND record the names so a user-visible notice
+                        // (informational for ClearAll, interactive re-activation
+                        // picker for AskUser) can be emitted on the next prompt.
+                        // See M6 in the audit plan: the only difference is iOS
+                        // render mode, not server bookkeeping. AutoRestore never
+                        // populates `cleared_at_boundary` because it preserves
+                        // active skills through the boundary.
+                        CompactionPolicy::ClearAll | CompactionPolicy::AskUser => {
                             let names = tracker.active_skill_names();
                             tracker.clear();
                             tracker.cleared_at_boundary = names;
                             tracker.skills_cleared_by_compaction = had_skills;
                         }
+                        CompactionPolicy::AutoRestore => tracker.clear_ephemeral(),
                     }
                 }
                 "skills.cleared" => {
@@ -863,7 +874,11 @@ mod tests {
     }
 
     #[test]
-    fn test_policy_clear_all_cleared_at_boundary_is_empty() {
+    fn test_policy_clear_all_records_cleared_names() {
+        // M6: ClearAll must record cleared-at-boundary names so iOS can render
+        // a user-visible "previously active" notice (mode="clearAll"). This
+        // parallels the AskUser code path but is not the same UX: the iOS
+        // render is informational, not an interactive picker.
         let events = vec![
             serde_json::json!({
                 "type": "skill.activated",
@@ -871,9 +886,144 @@ mod tests {
                 "payload": { "skillName": "browser", "source": "global" }
             }),
             serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-2",
+                "payload": { "skillName": "code", "source": "project" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        let mut cleared = tracker.cleared_at_boundary().to_vec();
+        cleared.sort();
+        assert_eq!(cleared, vec!["browser", "code"]);
+        assert_eq!(tracker.count(), 0, "ClearAll still zeroes active skills");
+    }
+
+    #[test]
+    fn test_policy_clear_all_empty_skills_no_cleared_names() {
+        let events = vec![serde_json::json!({
+            "type": "compact.boundary",
+            "id": "evt-1",
+            "payload": {}
+        })];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert!(tracker.cleared_at_boundary().is_empty());
+    }
+
+    #[test]
+    fn test_policy_clear_all_deactivated_before_boundary_not_in_cleared() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "skill.deactivated",
+                "id": "evt-2",
+                "payload": { "skillName": "a" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-3",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert!(tracker.cleared_at_boundary().is_empty());
+    }
+
+    #[test]
+    fn test_policy_clear_all_multiple_boundaries_resets_cleared() {
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
                 "type": "compact.boundary",
                 "id": "evt-2",
                 "payload": {}
+            }),
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-3",
+                "payload": { "skillName": "b", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-4",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        // Each boundary replaces the prior cleared set — no bleed-through.
+        assert_eq!(tracker.cleared_at_boundary(), &["b"]);
+    }
+
+    #[test]
+    fn test_policy_clear_all_context_cleared_no_cleared_names() {
+        // context.cleared is a user-initiated hard reset distinct from compaction.
+        // It clears active skills but does NOT populate cleared_at_boundary,
+        // because there's no pending "previously active" notice to show — the
+        // user just told us to wipe everything.
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "context.cleared",
+                "id": "evt-2",
+                "payload": {}
+            }),
+        ];
+        let tracker = SkillTracker::from_events_with_policy(
+            &events,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
+        assert_eq!(tracker.count(), 0);
+        assert!(tracker.cleared_at_boundary().is_empty());
+    }
+
+    #[test]
+    fn test_policy_clear_all_skills_cleared_event_suppresses_repeat() {
+        // Once a `skills.cleared` event is appended, the tracker must
+        // forget the pending names so a subsequent reconstruction doesn't
+        // re-emit the notice.
+        let events = vec![
+            serde_json::json!({
+                "type": "skill.activated",
+                "id": "evt-1",
+                "payload": { "skillName": "a", "source": "global" }
+            }),
+            serde_json::json!({
+                "type": "compact.boundary",
+                "id": "evt-2",
+                "payload": {}
+            }),
+            serde_json::json!({
+                "type": "skills.cleared",
+                "id": "evt-3",
+                "payload": { "clearedSkills": ["a"], "reason": "compaction", "mode": "clearAll" }
             }),
         ];
         let tracker = SkillTracker::from_events_with_policy(

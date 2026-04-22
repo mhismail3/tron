@@ -788,10 +788,18 @@ pub async fn persist_user_message_event(
 }
 
 /// Prepare skill context for a prompt: reconstructs the [`SkillTracker`]
-/// from events, **emits a `skills.cleared` event** under the `AskUser`
-/// compaction policy if any skills were cleared at the last boundary,
-/// looks up active skills in the registry, and builds the `<skills>`
-/// XML block.
+/// from events, **emits a `skills.cleared` event** under either the
+/// `ClearAll` or `AskUser` compaction policy if any skills were cleared at
+/// the last boundary, looks up active skills in the registry, and builds
+/// the `<skills>` XML block.
+///
+/// The payload's `mode` field discriminates the iOS render:
+/// - `ClearAll` → informational notice listing the previously-active skills.
+/// - `AskUser` → interactive picker chips that call `skill.activate` on tap.
+///
+/// `AutoRestore` never reaches this emission branch because its tracker
+/// preserves active skills through the boundary and leaves `cleared_at_boundary`
+/// empty. See `SkillTracker::from_events_with_policy`.
 ///
 /// The `prepare_*` prefix (vs `build_*`) signals that this writes to the
 /// event store as a side effect — callers that want a pure formatter
@@ -814,10 +822,16 @@ pub async fn prepare_skill_context_from_session(
             &policy,
         );
 
-        // Side effect: under AskUser policy, persist a `skills.cleared`
-        // event so the iOS client can prompt the user to re-activate.
-        // Documented in the doc-comment above.
-        if matches!(policy, crate::settings::types::CompactionPolicy::AskUser) {
+        // Side effect: under ClearAll OR AskUser policy, persist a
+        // `skills.cleared` event so the iOS client can render the correct
+        // banner or picker. Documented in the doc-comment above.
+        // AutoRestore skips this branch by construction (cleared_at_boundary
+        // is always empty under AutoRestore). See M6.
+        if let Some(mode) = match policy {
+            crate::settings::types::CompactionPolicy::ClearAll => Some("clearAll"),
+            crate::settings::types::CompactionPolicy::AskUser => Some("askUser"),
+            crate::settings::types::CompactionPolicy::AutoRestore => None,
+        } {
             let cleared = tracker.cleared_at_boundary();
             if !cleared.is_empty() {
                 let _ = event_store.append(&crate::events::AppendOptions {
@@ -826,6 +840,7 @@ pub async fn prepare_skill_context_from_session(
                     payload: serde_json::json!({
                         "clearedSkills": cleared,
                         "reason": "compaction",
+                        "mode": mode,
                     }),
                     parent_id: None,
                     sequence: None,
@@ -958,4 +973,206 @@ pub async fn load_session_update_data(
         Ok(Some(SessionUpdateData { session, preview, activity_lines }))
     })
     .await
+}
+
+#[cfg(test)]
+mod skills_cleared_emission_tests {
+    //! Integration tests for the `skills.cleared` emission side effect in
+    //! [`prepare_skill_context_from_session`]. See M6 in the audit plan.
+    //!
+    //! These tests mutate the global settings singleton and MUST hold the
+    //! shared `settings_reload_lock()` to serialize with other settings-
+    //! mutating tests.
+
+    use super::*;
+    use crate::events::types::payloads::skill::{SkillsClearedMode, SkillsClearedPayload};
+    use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::settings::types::CompactionPolicy;
+
+    fn settings_lock() -> &'static tokio::sync::Mutex<()> {
+        crate::server::rpc::settings_service::settings_reload_lock()
+    }
+
+    fn settings_with_policy(policy: CompactionPolicy) -> crate::settings::TronSettings {
+        let mut s = crate::settings::TronSettings::default();
+        s.skills.compaction_policy = policy;
+        s
+    }
+
+    fn append(
+        store: &Arc<crate::events::EventStore>,
+        session_id: &str,
+        event_type: crate::events::EventType,
+        payload: serde_json::Value,
+    ) {
+        store
+            .append(&crate::events::AppendOptions {
+                session_id,
+                event_type,
+                payload,
+                parent_id: None,
+                sequence: None,
+            })
+            .expect("append must succeed");
+    }
+
+    fn seed_skill_activated_then_boundary(
+        store: &Arc<crate::events::EventStore>,
+        session_id: &str,
+    ) {
+        append(
+            store,
+            session_id,
+            crate::events::EventType::SkillActivated,
+            serde_json::json!({ "skillName": "browser", "source": "global" }),
+        );
+        append(
+            store,
+            session_id,
+            crate::events::EventType::SkillActivated,
+            serde_json::json!({ "skillName": "code", "source": "project" }),
+        );
+        append(
+            store,
+            session_id,
+            crate::events::EventType::CompactBoundary,
+            serde_json::json!({}),
+        );
+    }
+
+    fn read_skills_cleared_events(
+        store: &crate::events::EventStore,
+        session_id: &str,
+    ) -> Vec<SkillsClearedPayload> {
+        store
+            .get_events_by_type(session_id, &["skills.cleared"], None)
+            .unwrap()
+            .into_iter()
+            .map(|row| serde_json::from_str::<SkillsClearedPayload>(&row.payload).unwrap())
+            .collect()
+    }
+
+    async fn run_with_policy(policy: CompactionPolicy) -> Vec<SkillsClearedPayload> {
+        let ctx = make_test_context();
+        let session_id = ctx
+            .session_manager
+            .create_session("test-model", "/tmp", Some("t"), None)
+            .unwrap();
+        seed_skill_activated_then_boundary(&ctx.event_store, &session_id);
+
+        let _guard = settings_lock().lock().await;
+        crate::settings::init_settings(settings_with_policy(policy));
+        let _ = prepare_skill_context_from_session(
+            ctx.skill_registry.clone(),
+            ctx.event_store.clone(),
+            session_id.clone(),
+        )
+        .await
+        .unwrap();
+        // Restore defaults before releasing the lock.
+        crate::settings::init_settings(crate::settings::TronSettings::default());
+        drop(_guard);
+
+        read_skills_cleared_events(&ctx.event_store, &session_id)
+    }
+
+    #[tokio::test]
+    async fn emits_skills_cleared_under_clear_all_with_mode_clear_all() {
+        let events = run_with_policy(CompactionPolicy::ClearAll).await;
+        assert_eq!(events.len(), 1, "exactly one skills.cleared event expected");
+        let payload = &events[0];
+        assert_eq!(payload.mode, SkillsClearedMode::ClearAll);
+        assert_eq!(payload.reason, "compaction");
+        let mut names = payload.cleared_skills.clone();
+        names.sort();
+        assert_eq!(names, vec!["browser", "code"]);
+    }
+
+    #[tokio::test]
+    async fn emits_skills_cleared_under_ask_user_with_mode_ask_user() {
+        let events = run_with_policy(CompactionPolicy::AskUser).await;
+        assert_eq!(events.len(), 1, "exactly one skills.cleared event expected");
+        let payload = &events[0];
+        assert_eq!(payload.mode, SkillsClearedMode::AskUser);
+        assert_eq!(payload.reason, "compaction");
+        let mut names = payload.cleared_skills.clone();
+        names.sort();
+        assert_eq!(names, vec!["browser", "code"]);
+    }
+
+    #[tokio::test]
+    async fn does_not_emit_under_auto_restore() {
+        // AutoRestore preserves active skills through the boundary, so there's
+        // nothing cleared to notify about.
+        let events = run_with_policy(CompactionPolicy::AutoRestore).await;
+        assert!(events.is_empty(), "AutoRestore must never emit skills.cleared");
+    }
+
+    #[tokio::test]
+    async fn no_emission_when_no_boundary_yet() {
+        // Even under ClearAll/AskUser, if no compact.boundary has happened
+        // the cleared list is empty and we must not emit.
+        let ctx = make_test_context();
+        let session_id = ctx
+            .session_manager
+            .create_session("test-model", "/tmp", Some("t"), None)
+            .unwrap();
+        append(
+            &ctx.event_store,
+            &session_id,
+            crate::events::EventType::SkillActivated,
+            serde_json::json!({ "skillName": "a", "source": "global" }),
+        );
+
+        let _guard = settings_lock().lock().await;
+        crate::settings::init_settings(settings_with_policy(CompactionPolicy::ClearAll));
+        let _ = prepare_skill_context_from_session(
+            ctx.skill_registry.clone(),
+            ctx.event_store.clone(),
+            session_id.clone(),
+        )
+        .await
+        .unwrap();
+        crate::settings::init_settings(crate::settings::TronSettings::default());
+        drop(_guard);
+
+        let events = read_skills_cleared_events(&ctx.event_store, &session_id);
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn emission_is_suppressed_on_second_call() {
+        // Double-dispatch guard: once skills.cleared has been appended, the
+        // tracker resets cleared_at_boundary on its `skills.cleared` branch, so
+        // a second call to prepare_skill_context_from_session must not emit a
+        // duplicate event.
+        let ctx = make_test_context();
+        let session_id = ctx
+            .session_manager
+            .create_session("test-model", "/tmp", Some("t"), None)
+            .unwrap();
+        seed_skill_activated_then_boundary(&ctx.event_store, &session_id);
+
+        let _guard = settings_lock().lock().await;
+        crate::settings::init_settings(settings_with_policy(CompactionPolicy::AskUser));
+        let _ = prepare_skill_context_from_session(
+            ctx.skill_registry.clone(),
+            ctx.event_store.clone(),
+            session_id.clone(),
+        )
+        .await
+        .unwrap();
+        let _ = prepare_skill_context_from_session(
+            ctx.skill_registry.clone(),
+            ctx.event_store.clone(),
+            session_id.clone(),
+        )
+        .await
+        .unwrap();
+        crate::settings::init_settings(crate::settings::TronSettings::default());
+        drop(_guard);
+
+        let events = read_skills_cleared_events(&ctx.event_store, &session_id);
+        assert_eq!(events.len(), 1, "duplicate emission suppressed");
+    }
 }
