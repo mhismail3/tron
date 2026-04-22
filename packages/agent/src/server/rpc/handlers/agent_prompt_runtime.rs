@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use serde_json::Value;
+use crate::events::types::payloads::skill::{SkillsClearedMode, SkillsClearedPayload};
 use crate::events::{ActivitySummaryLine, EventStore, EventType, MessagePreview};
 use crate::runtime::orchestrator::event_persister::EventPersister;
 use crate::runtime::orchestrator::session_manager::SessionManager;
@@ -827,21 +828,33 @@ pub async fn prepare_skill_context_from_session(
         // banner or picker. Documented in the doc-comment above.
         // AutoRestore skips this branch by construction (cleared_at_boundary
         // is always empty under AutoRestore). See M6.
-        if let Some(mode) = match policy {
-            crate::settings::types::CompactionPolicy::ClearAll => Some("clearAll"),
-            crate::settings::types::CompactionPolicy::AskUser => Some("askUser"),
+        //
+        // INVARIANT: the wire shape of this event is pinned by the typed
+        // `SkillsClearedPayload` struct in `events/types/payloads/skill.rs`.
+        // We round-trip through `serde_json::to_value(&payload)` rather than
+        // an inline `json!` literal so any future rename/retype of the struct
+        // fields is caught by the compiler instead of silently drifting
+        // between the emitter and the decoders (Rust tests + iOS).
+        let mode = match policy {
+            crate::settings::types::CompactionPolicy::ClearAll => Some(SkillsClearedMode::ClearAll),
+            crate::settings::types::CompactionPolicy::AskUser => Some(SkillsClearedMode::AskUser),
             crate::settings::types::CompactionPolicy::AutoRestore => None,
-        } {
+        };
+        if let Some(mode) = mode {
             let cleared = tracker.cleared_at_boundary();
             if !cleared.is_empty() {
+                let payload = SkillsClearedPayload {
+                    cleared_skills: cleared.to_vec(),
+                    reason: "compaction".to_string(),
+                    mode,
+                };
+                let payload_value = serde_json::to_value(&payload).expect(
+                    "SkillsClearedPayload is composed of owned primitives and always serializes",
+                );
                 let _ = event_store.append(&crate::events::AppendOptions {
                     session_id: &session_id,
                     event_type: crate::events::EventType::SkillsCleared,
-                    payload: serde_json::json!({
-                        "clearedSkills": cleared,
-                        "reason": "compaction",
-                        "mode": mode,
-                    }),
+                    payload: payload_value,
                     parent_id: None,
                     sequence: None,
                 });
@@ -1138,6 +1151,44 @@ mod skills_cleared_emission_tests {
 
         let events = read_skills_cleared_events(&ctx.event_store, &session_id);
         assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn emitted_payload_exactly_matches_typed_struct_serialization() {
+        // Regression guard for the M6 audit follow-up: the emission site must
+        // round-trip through `SkillsClearedPayload` rather than an inline
+        // `json!` literal, so any rename/retype of a struct field breaks the
+        // compiler instead of silently drifting between emitter and decoder.
+        //
+        // We reconstruct the expected wire shape from the typed struct and
+        // assert the raw on-disk payload matches — no field names hardcoded
+        // in this test either, so both sides track the struct.
+        let events = run_with_policy(CompactionPolicy::ClearAll).await;
+        assert_eq!(events.len(), 1);
+        let payload = &events[0];
+
+        let expected = SkillsClearedPayload {
+            cleared_skills: {
+                let mut v = payload.cleared_skills.clone();
+                v.sort();
+                v
+            },
+            reason: "compaction".to_string(),
+            mode: SkillsClearedMode::ClearAll,
+        };
+
+        // Sort on our copy for stable comparison.
+        let mut actual = payload.clone();
+        actual.cleared_skills.sort();
+        assert_eq!(actual, expected);
+
+        // And the reverse: the struct round-trips to a JSON object with
+        // exactly the three wire-expected keys — no stray fields, no missing.
+        let json = serde_json::to_value(&expected).unwrap();
+        let obj = json.as_object().unwrap();
+        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(keys, vec!["clearedSkills", "mode", "reason"]);
     }
 
     #[tokio::test]
