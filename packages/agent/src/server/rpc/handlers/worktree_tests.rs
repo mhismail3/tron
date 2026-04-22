@@ -595,19 +595,32 @@ async fn get_diff_not_git_repo() {
     assert_eq!(result["isGitRepo"], false);
 }
 
+/// Regression: a session whose working directory does not exist on disk
+/// (e.g. freshly created on a machine where the cwd hasn't been provisioned
+/// yet) must not surface as INTERNAL_ERROR to the iOS client — iOS opens
+/// the agent-control sheet with a parallel `worktree.getDiff` and a failure
+/// there blocks the entire sheet. Treat it the same as "not a git repo".
 #[tokio::test]
-async fn get_diff_nonexistent_directory() {
+async fn get_diff_nonexistent_directory_is_not_internal_error() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
         .create_session("m", "/nonexistent/path/xyz", None, None)
         .unwrap();
 
-    let err = GetDiffHandler
+    let result = GetDiffHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
         .await
-        .unwrap_err();
-    assert!(err.to_string().contains("does not exist"));
+        .unwrap();
+    assert_eq!(result["isGitRepo"], false);
+    assert!(
+        result.get("branch").is_none(),
+        "nonexistent dir has no branch to report"
+    );
+    assert!(
+        result.get("files").is_none(),
+        "nonexistent dir has no files to report"
+    );
 }
 
 #[tokio::test]

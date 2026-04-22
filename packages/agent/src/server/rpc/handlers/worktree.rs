@@ -460,11 +460,12 @@ impl MethodHandler for GetDiffHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let dir = resolve_diff_dir(ctx, &session_id)?;
 
-        // Verify directory exists
+        // A session whose working directory is missing (never existed, or
+        // deleted between creation and this call) has no diff to show. Return
+        // the same lenient shape as "not a git repo" so the iOS agent-control
+        // sheet renders an empty state instead of propagating INTERNAL_ERROR.
         if !std::path::Path::new(&dir).is_dir() {
-            return Err(RpcError::Internal {
-                message: format!("Working directory does not exist: {dir}"),
-            });
+            return Ok(serde_json::json!({ "isGitRepo": false }));
         }
 
         // Check if this is a git repo
