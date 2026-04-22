@@ -259,3 +259,30 @@ pub struct WorktreePostRebaseStashConflictPayload {
     /// Paths reported as unmerged after the pop.
     pub paths: Vec<String>,
 }
+
+/// Emitted when orphaned dirty changes in a worktree were auto-committed
+/// during recovery or branch deletion. The commit SHA is preserved so
+/// iOS can surface a notice and the user can recover the work by name
+/// (e.g. `git cherry-pick <sha>`).
+///
+/// There are two emission sites:
+/// - Startup orphan sweep (`worktree::recovery::recover_repo`) — the
+///   branch is kept when it has commits, so the SHA is reachable by
+///   checking out the branch. `branch_removed = false`.
+/// - User-initiated branch delete / prune
+///   (`coordinator::branch::remove_worktree_if_present`) — both the
+///   worktree and the branch are destroyed after the auto-commit, so
+///   the SHA is only reachable via reflog. `branch_removed = true`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeAutoRecoveredCommitsPayload {
+    /// Branch the commit was made on.
+    pub branch: String,
+    /// SHA of the auto-recovery commit.
+    pub commit_hash: String,
+    /// Worktree path at the time of recovery (may no longer exist).
+    pub path: String,
+    /// Whether the branch itself was removed after the commit. When
+    /// `true` the commit is only reachable via reflog.
+    pub branch_removed: bool,
+}

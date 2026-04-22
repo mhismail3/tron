@@ -29,6 +29,11 @@ pub struct RecoveredWorktree {
     pub branch: String,
     /// Whether changes were auto-committed before removal.
     pub auto_committed: bool,
+    /// SHA of the auto-recovery commit, when [`Self::auto_committed`]
+    /// is `true`. `None` otherwise. Surfaces through the
+    /// `worktree.auto_recovered_commits` event so iOS can offer the
+    /// user a recoverable-commit notice.
+    pub auto_committed_sha: Option<String>,
     /// Whether the branch was deleted (no commits over base).
     pub branch_deleted: bool,
 }
@@ -88,6 +93,7 @@ pub async fn recover_repo(
 
         let wt_path = PathBuf::from(&entry.path);
         let mut auto_committed = false;
+        let mut auto_committed_sha: Option<String> = None;
 
         // Auto-commit any changes
         if wt_path.exists()
@@ -100,6 +106,7 @@ pub async fn recover_repo(
                 Ok(sha) => {
                     info!(branch, commit = %sha, "auto-committed orphan changes");
                     auto_committed = true;
+                    auto_committed_sha = Some(sha);
                 }
                 Err(e) => {
                     warn!(branch, error = %e, "failed to auto-commit orphan");
@@ -156,6 +163,7 @@ pub async fn recover_repo(
             path: entry.path.clone(),
             branch: branch.clone(),
             auto_committed,
+            auto_committed_sha,
             branch_deleted,
         });
     }
@@ -432,7 +440,48 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert!(result[0].auto_committed);
+        let sha = result[0]
+            .auto_committed_sha
+            .as_deref()
+            .expect("auto_committed_sha must be populated when auto_committed is true");
+        assert_eq!(sha.len(), 40, "expected a full-length git sha, got {sha:?}");
+        assert!(
+            sha.chars().all(|c| c.is_ascii_hexdigit()),
+            "sha must be hexadecimal: {sha:?}"
+        );
         assert!(!result[0].branch_deleted, "branch with auto-committed work should be preserved");
+    }
+
+    #[tokio::test]
+    async fn recover_leaves_sha_none_when_no_dirty_changes() {
+        // Clean orphan: no commit is made, so the SHA must remain None
+        // regardless of branch_deleted outcome. Prevents a regression
+        // where a callsite forgets to guard on `auto_committed` and
+        // emits a ghost event with an empty sha.
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let config = WorktreeConfig::default();
+
+        let wt_path = dir
+            .path()
+            .join(".worktrees")
+            .join("session")
+            .join("clean-orphan");
+        git.worktree_add(dir.path(), &wt_path, "session/clean-orphan", "HEAD")
+            .await
+            .unwrap();
+
+        let active: HashSet<String> = HashSet::new();
+        let result = recover_repo(dir.path(), &active, &config, &git)
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].auto_committed);
+        assert!(
+            result[0].auto_committed_sha.is_none(),
+            "no commit made, sha must be None"
+        );
     }
 
     #[tokio::test]

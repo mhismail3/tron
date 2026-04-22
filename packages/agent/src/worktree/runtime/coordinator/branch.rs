@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
+use serde_json::json;
 use tracing::{info, warn};
 
+use crate::core::events::{BaseEvent, TronEvent};
+use crate::events::{AppendOptions, EventType};
 use crate::worktree::errors::{Result, WorktreeError};
 
 use super::WorktreeCoordinator;
@@ -38,7 +41,10 @@ impl WorktreeCoordinator {
                     .commit_all(&wt_path, "[auto-recovered] orphaned session changes")
                     .await
                 {
-                    Ok(sha) => info!(branch, commit = %sha, "auto-committed orphan changes"),
+                    Ok(sha) => {
+                        info!(branch, commit = %sha, "auto-committed orphan changes");
+                        self.emit_auto_recovered(branch, &sha, &wt_path, true);
+                    }
                     Err(e) => warn!(branch, error = %e, "failed to auto-commit orphan"),
                 }
             }
@@ -52,6 +58,55 @@ impl WorktreeCoordinator {
 
         // Clean stale refs regardless
         let _ = self.git.worktree_prune(repo_root).await;
+    }
+
+    /// Record a `worktree.auto_recovered_commits` event for a branch
+    /// whose dirty changes were auto-committed before destruction.
+    /// No-ops when the branch doesn't carry a resolvable session id or
+    /// when no session row exists for it — the event is an iOS notice,
+    /// and there's no timeline to attach to when the session is gone.
+    fn emit_auto_recovered(
+        &self,
+        branch: &str,
+        sha: &str,
+        wt_path: &std::path::Path,
+        branch_removed: bool,
+    ) {
+        let Some(session_id) = branch.strip_prefix(&self.config.branch_prefix) else {
+            return;
+        };
+        if session_id.is_empty() {
+            return;
+        }
+        if self
+            .event_store
+            .get_session(session_id)
+            .ok()
+            .flatten()
+            .is_none()
+        {
+            return;
+        }
+        let path_str = wt_path.to_string_lossy().to_string();
+        let _ = self.event_store.append(&AppendOptions {
+            session_id,
+            event_type: EventType::WorktreeAutoRecoveredCommits,
+            payload: json!({
+                "branch": branch,
+                "commitHash": sha,
+                "path": path_str,
+                "branchRemoved": branch_removed,
+            }),
+            parent_id: None,
+            sequence: None,
+        });
+        self.broadcast(TronEvent::WorktreeAutoRecoveredCommits {
+            base: BaseEvent::now(session_id),
+            branch: branch.to_string(),
+            commit_hash: sha.to_string(),
+            path: path_str,
+            branch_removed,
+        });
     }
 
     /// Delete a single session branch by name.

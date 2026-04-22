@@ -2120,3 +2120,292 @@ async fn acquire_releases_lock_after_return() {
         "second acquire must not have waited on a stuck lock"
     );
 }
+
+// ── worktree.auto_recovered_commits emission (M24) ────────────────
+
+/// Helper: fetch every persisted `worktree.auto_recovered_commits`
+/// event for a session, decoded as JSON. Using the event log directly
+/// (not broadcast) makes the assertion equivalent to what iOS sees on
+/// reconstruction — the whole point of M24.
+fn fetch_auto_recovered_events(
+    store: &EventStore,
+    session_id: &str,
+) -> Vec<serde_json::Value> {
+    store
+        .get_events_by_type(session_id, &["worktree.auto_recovered_commits"], None)
+        .unwrap()
+        .into_iter()
+        .map(|e| serde_json::from_str(&e.payload).unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn auto_recovered_commits_emit_event_on_delete_branch() {
+    // Full regression test for M24: `delete_session_branch` on a
+    // dirty worktree must persist a `worktree.auto_recovered_commits`
+    // event carrying the auto-commit SHA so iOS can surface a notice.
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let session = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("recov-1"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let session_id = session.session.id.clone();
+    let branch = format!("session/{session_id}");
+
+    // Create the worktree at a session-id-aligned path and branch so
+    // `emit_auto_recovered` can strip the prefix and find the row.
+    let git = GitExecutor::new(30_000);
+    let wt_path = dir
+        .path()
+        .join(".worktrees")
+        .join("session")
+        .join(&session_id);
+    git.worktree_add(dir.path(), &wt_path, &branch, "HEAD")
+        .await
+        .unwrap();
+    std::fs::write(wt_path.join("unsaved.txt"), "uncommitted work").unwrap();
+
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store.clone());
+    coord
+        .delete_session_branch(dir.path(), &branch)
+        .await
+        .expect("delete should succeed");
+
+    let events = fetch_auto_recovered_events(&store, &session_id);
+    assert_eq!(events.len(), 1, "exactly one event expected: {events:?}");
+    let payload = &events[0];
+    assert_eq!(payload["branch"], branch);
+    assert_eq!(
+        payload["branchRemoved"], true,
+        "delete path destroys the branch after commit"
+    );
+    let sha = payload["commitHash"].as_str().expect("commitHash present");
+    assert_eq!(sha.len(), 40, "commitHash must be full-length git sha: {sha:?}");
+    assert!(
+        sha.chars().all(|c| c.is_ascii_hexdigit()),
+        "sha must be hex: {sha:?}"
+    );
+    // The SHA must exist in reflog even after branch delete.
+    let cat = tokio::process::Command::new("git")
+        .args(["cat-file", "-e", sha])
+        .current_dir(dir.path())
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        cat.status.success(),
+        "auto-commit SHA must be reachable via reflog after branch delete"
+    );
+    // Event carries the worktree path exactly as reported by
+    // `git worktree list`, which canonicalises symlinks (e.g.
+    // /var → /private/var on macOS). Assert by suffix so the test is
+    // portable.
+    let event_path = payload["path"].as_str().unwrap();
+    assert!(
+        event_path.ends_with(&format!(
+            ".worktrees/session/{session_id}",
+        )),
+        "unexpected event path {event_path:?}"
+    );
+    assert!(!wt_path.exists(), "worktree dir must be removed after delete");
+}
+
+#[tokio::test]
+async fn auto_recovered_commits_skips_clean_delete() {
+    // Clean worktree → no auto-commit → no event. Regression guard
+    // against a callsite emitting a bogus event with an empty SHA.
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+    let git = GitExecutor::new(30_000);
+
+    let store = make_store();
+    let session = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("clean-del"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let session_id = session.session.id.clone();
+    let branch = format!("session/{session_id}");
+    let wt_path = dir
+        .path()
+        .join(".worktrees")
+        .join("session")
+        .join(&session_id);
+    git.worktree_add(dir.path(), &wt_path, &branch, "HEAD")
+        .await
+        .unwrap();
+    // No dirty changes written — worktree is clean.
+
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store.clone());
+    coord
+        .delete_session_branch(dir.path(), &branch)
+        .await
+        .unwrap();
+
+    let events = fetch_auto_recovered_events(&store, &session_id);
+    assert!(
+        events.is_empty(),
+        "clean worktree must not emit auto-recovered event: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn auto_recovered_commits_skips_when_session_missing() {
+    // If the session row is gone, we have no timeline to attach to —
+    // the emit helper must short-circuit instead of producing an
+    // orphan event. Exercised via delete_session_branch with a
+    // synthetic dirty orphan whose session_id matches NO session row.
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+    let git = GitExecutor::new(30_000);
+
+    let branch = "session/ghost-1234";
+    let wt_path = dir
+        .path()
+        .join(".worktrees")
+        .join("session")
+        .join("ghost-1234");
+    git.worktree_add(dir.path(), &wt_path, branch, "HEAD")
+        .await
+        .unwrap();
+    std::fs::write(wt_path.join("x.txt"), "dirt").unwrap();
+
+    let store = make_store();
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store.clone());
+
+    // Delete succeeds — the auto-commit + branch destruction still
+    // runs, we just don't emit an event because there's no session
+    // row to hang it off of.
+    coord.delete_session_branch(dir.path(), branch).await.unwrap();
+
+    let events = fetch_auto_recovered_events(&store, "ghost-1234");
+    assert!(
+        events.is_empty(),
+        "missing session row must not produce a ghost event: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn auto_recovered_commits_from_prune() {
+    // Prune path also emits per dirty orphan. Attributes one event
+    // per sessionful branch that had dirty changes.
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+    let git = GitExecutor::new(30_000);
+
+    let store = make_store();
+    // Two sessions, each with a dirty worktree.
+    let ses1 = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("prune-1"),
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .session
+        .id;
+    let ses2 = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("prune-2"),
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .session
+        .id;
+    let b1 = format!("session/{ses1}");
+    let b2 = format!("session/{ses2}");
+    let wt1 = dir.path().join(".worktrees/session").join(&ses1);
+    let wt2 = dir.path().join(".worktrees/session").join(&ses2);
+    git.worktree_add(dir.path(), &wt1, &b1, "HEAD").await.unwrap();
+    git.worktree_add(dir.path(), &wt2, &b2, "HEAD").await.unwrap();
+    std::fs::write(wt1.join("a.txt"), "dirt-1").unwrap();
+    std::fs::write(wt2.join("b.txt"), "dirt-2").unwrap();
+
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store.clone());
+    let result = coord.prune_session_branches(dir.path()).await.unwrap();
+    assert_eq!(result.deleted.len(), 2, "both should prune: {result:?}");
+    assert!(result.failed.is_empty());
+
+    for sid in [&ses1, &ses2] {
+        let events = fetch_auto_recovered_events(&store, sid);
+        assert_eq!(events.len(), 1, "one event per session: {events:?}");
+        assert_eq!(events[0]["branchRemoved"], true);
+        let sha = events[0]["commitHash"].as_str().unwrap();
+        assert_eq!(sha.len(), 40);
+    }
+}
+
+#[tokio::test]
+async fn auto_recovered_commits_from_startup_sweep() {
+    // Startup orphan sweep: the branch is preserved when it has
+    // commits, so `branchRemoved = false`. iOS uses this flag to tell
+    // the user whether the SHA is reachable directly (false) or only
+    // via reflog (true).
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+    let git = GitExecutor::new(30_000);
+
+    let store = make_store();
+    let sid = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("sweep-1"),
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .session
+        .id;
+    store
+        .get_or_create_workspace(&dir.path().to_string_lossy(), Some("sweep"))
+        .unwrap();
+    let branch = format!("session/{sid}");
+    let wt_path = dir.path().join(".worktrees/session").join(&sid);
+    git.worktree_add(dir.path(), &wt_path, &branch, "HEAD")
+        .await
+        .unwrap();
+    std::fs::write(wt_path.join("work.txt"), "orphan").unwrap();
+
+    let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store.clone());
+    // active_branches is empty — coordinator has no in-memory state
+    // for this branch, so the sweep treats it as an orphan.
+    let total = coord.recover_orphans().await;
+    assert!(total >= 1, "expected at least one recovered worktree, got {total}");
+
+    let events = fetch_auto_recovered_events(&store, &sid);
+    assert_eq!(events.len(), 1, "sweep should emit exactly one event: {events:?}");
+    assert_eq!(events[0]["branchRemoved"], false, "branch preserved for recoverability");
+    let sha = events[0]["commitHash"].as_str().unwrap();
+    assert_eq!(sha.len(), 40);
+    // Since the branch is preserved, cat-file should resolve the SHA.
+    let cat = tokio::process::Command::new("git")
+        .args(["cat-file", "-e", sha])
+        .current_dir(dir.path())
+        .output()
+        .await
+        .unwrap();
+    assert!(cat.status.success(), "SHA must be reachable post-sweep");
+}

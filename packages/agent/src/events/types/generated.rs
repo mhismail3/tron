@@ -163,6 +163,8 @@ define_events! {
         WorktreeRebasedOnMain => "worktree.rebased_on_main" => payloads::worktree::WorktreeRebasedOnMainPayload,
         /// `git stash pop` after a successful rebase produced unmerged paths.
         WorktreePostRebaseStashConflict => "worktree.post_rebase_stash_conflict" => payloads::worktree::WorktreePostRebaseStashConflictPayload,
+        /// Auto-committed orphan changes during worktree recovery/deletion.
+        WorktreeAutoRecoveredCommits => "worktree.auto_recovered_commits" => payloads::worktree::WorktreeAutoRecoveredCommitsPayload,
         /// Per-repo lock acquired by a session.
         RepoLockAcquired => "repo.lock_acquired" => payloads::repo::RepoLockAcquiredPayload,
         /// Per-repo lock released.
@@ -194,7 +196,7 @@ define_events! {
             WorktreeMergeStarted, WorktreeConflictDetected, WorktreeConflictResolved,
             WorktreeMergeContinued, WorktreeMergeAborted, WorktreePushed,
             WorktreePendingMergeDetected, WorktreeRebasedOnMain,
-            WorktreePostRebaseStashConflict
+            WorktreePostRebaseStashConflict, WorktreeAutoRecoveredCommits
         ],
         /// Whether this is a repo-wide event (`repo.*`).
         is_repo_type => [RepoLockAcquired, RepoLockReleased, RepoMainAdvanced],
@@ -217,7 +219,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 78] = [
+    const EXPECTED: [(EventType, &str); 79] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -343,6 +345,10 @@ mod tests {
             EventType::WorktreePostRebaseStashConflict,
             "worktree.post_rebase_stash_conflict",
         ),
+        (
+            EventType::WorktreeAutoRecoveredCommits,
+            "worktree.auto_recovered_commits",
+        ),
         (EventType::RepoLockAcquired, "repo.lock_acquired"),
         (EventType::RepoLockReleased, "repo.lock_released"),
         (EventType::RepoMainAdvanced, "repo.main_advanced"),
@@ -354,7 +360,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 78);
+        assert_eq!(ALL_EVENT_TYPES.len(), 79);
     }
 
     #[test]

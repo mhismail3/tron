@@ -1143,6 +1143,19 @@ tron_events! {
         paths: Vec<String>,
     } => "worktree.post_rebase_stash_conflict",
 
+    /// Auto-committed orphan changes in a session worktree during
+    /// recovery or branch deletion. The SHA is preserved so the user
+    /// can recover the work (via `git cherry-pick <sha>` or by checking
+    /// out the branch if `branch_removed` is `false`).
+    WorktreeAutoRecoveredCommits {
+        branch: String,
+        #[serde(rename = "commitHash")]
+        commit_hash: String,
+        path: String,
+        #[serde(rename = "branchRemoved")]
+        branch_removed: bool,
+    } => "worktree.auto_recovered_commits",
+
     /// Per-repo lock acquired by a session.
     RepoLockAcquired {
         #[serde(rename = "repoRoot")]
@@ -2257,6 +2270,13 @@ mod tests {
                 base: base.clone(),
                 stash_ref: "stash@{0}".into(),
                 paths: vec!["f.txt".into()],
+            },
+            TronEvent::WorktreeAutoRecoveredCommits {
+                base: base.clone(),
+                branch: "session/abc".into(),
+                commit_hash: "cafebabe".into(),
+                path: "/repo/.worktrees/session/abc".into(),
+                branch_removed: true,
             },
             TronEvent::RepoLockAcquired {
                 base: base.clone(),

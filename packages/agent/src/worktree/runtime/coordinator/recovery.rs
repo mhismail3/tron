@@ -115,7 +115,56 @@ impl WorktreeCoordinator {
             match crate::worktree::recovery::recover_repo(&repo_root, &active_branches, &self.config, &self.git)
                 .await
             {
-                Ok(recovered) => total += recovered.len(),
+                Ok(recovered) => {
+                    // Surface auto-commit SHAs so iOS can offer the
+                    // user a notice with a recoverable commit. Only
+                    // orphaned sessions with a parseable session_id
+                    // and a persisted session row get the event —
+                    // branches whose session was fully removed from
+                    // the DB have no timeline to attach to.
+                    for rec in &recovered {
+                        let Some(ref sha) = rec.auto_committed_sha else {
+                            continue;
+                        };
+                        let Some(session_id) =
+                            rec.branch.strip_prefix(&self.config.branch_prefix)
+                        else {
+                            continue;
+                        };
+                        if session_id.is_empty() {
+                            continue;
+                        }
+                        if self
+                            .event_store
+                            .get_session(session_id)
+                            .ok()
+                            .flatten()
+                            .is_none()
+                        {
+                            continue;
+                        }
+                        let _ = self.event_store.append(&AppendOptions {
+                            session_id,
+                            event_type: EventType::WorktreeAutoRecoveredCommits,
+                            payload: json!({
+                                "branch": rec.branch,
+                                "commitHash": sha,
+                                "path": rec.path,
+                                "branchRemoved": rec.branch_deleted,
+                            }),
+                            parent_id: None,
+                            sequence: None,
+                        });
+                        self.broadcast(TronEvent::WorktreeAutoRecoveredCommits {
+                            base: BaseEvent::now(session_id),
+                            branch: rec.branch.clone(),
+                            commit_hash: sha.clone(),
+                            path: rec.path.clone(),
+                            branch_removed: rec.branch_deleted,
+                        });
+                    }
+                    total += recovered.len();
+                }
                 Err(e) => {
                     warn!(repo = %repo_root.display(), error = %e, "orphan recovery failed");
                 }
