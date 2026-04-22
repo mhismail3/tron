@@ -103,6 +103,7 @@ enum SessionEventType: String, Codable, Sendable {
     // Skills
     case skillActivated = "skill.activated"
     case skillDeactivated = "skill.deactivated"
+    case skillsCleared = "skills.cleared"
 
     case compactBoundary = "compact.boundary"
     case compactSummary = "compact.summary"

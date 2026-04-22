@@ -19,4 +19,8 @@ enum MessageBubbleTapAction {
     case subagentResultsReady(results: [SubagentResultEntry])
     case providerError(ProviderErrorDetailData)
     case memoryRetainDetail(title: String, summary: String?)
+    /// User tapped a skill chip in the `skills.cleared` AskUser picker (M6).
+    /// Handler should call `agent.activateSkill(skillName:)` to re-add the
+    /// skill to the session's active set.
+    case reactivateSkill(skillName: String)
 }

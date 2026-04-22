@@ -67,6 +67,14 @@ enum MessageContent: Equatable {
     static func skillDeactivated(skillName: String) -> MessageContent {
         .systemEvent(.skillDeactivated(skillName: skillName))
     }
+    /// In-chat notification that active skills were cleared by compaction (M6).
+    ///
+    /// - `.clearAll` mode renders an informational banner.
+    /// - `.askUser` mode renders a tappable picker that re-activates each
+    ///   skill via `skill.activate` RPC.
+    static func skillsCleared(clearedSkills: [String], mode: SkillsClearedMode) -> MessageContent {
+        .systemEvent(.skillsCleared(clearedSkills: clearedSkills, mode: mode))
+    }
     /// In-chat notification for memory retain in progress
     static var memoryRetainInProgress: MessageContent {
         .systemEvent(.memoryRetainInProgress)

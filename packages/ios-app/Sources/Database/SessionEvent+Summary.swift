@@ -160,6 +160,16 @@ extension SessionEvent {
             }
             return "Skill deactivated"
 
+        case .skillsCleared:
+            let count = payload.stringArray("clearedSkills")?.count ?? 0
+            let mode = payload.string("mode") ?? "askUser"
+            switch mode {
+            case "clearAll":
+                return "Skills cleared (\(count))"
+            default:
+                return "Skills cleared — re-activate? (\(count))"
+            }
+
         case .sessionBranch:
             return "Branch created"
 

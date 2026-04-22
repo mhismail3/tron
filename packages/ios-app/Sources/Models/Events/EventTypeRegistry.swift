@@ -47,6 +47,7 @@ enum PersistedEventType: String, CaseIterable {
     // Skills
     case skillActivated = "skill.activated"
     case skillDeactivated = "skill.deactivated"
+    case skillsCleared = "skills.cleared"
 
     // Rules
     case rulesLoaded = "rules.loaded"
@@ -138,6 +139,7 @@ enum PersistedEventType: String, CaseIterable {
         // Skills
         case .skillActivated:          return .init(false,   false,   false,   false,  "Skill activated")
         case .skillDeactivated:        return .init(true,    false,   false,   false,  "Skill deactivated")
+        case .skillsCleared:           return .init(true,    false,   false,   false,  "Skills cleared")
         // Rules
         case .rulesLoaded:             return .init(true,    false,   false,   false,  "Rules loaded")
         case .rulesActivated:          return .init(true,    false,   false,   false,  "Rules activated")

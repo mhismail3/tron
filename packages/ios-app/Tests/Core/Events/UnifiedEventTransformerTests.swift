@@ -2387,4 +2387,165 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         XCTAssertTrue(maps.toolResults.isEmpty)
     }
+
+    // MARK: - skills.cleared Reconstruction Tests (M6)
+
+    /// Reconstructs the `skills.cleared` event emitted on the first prompt
+    /// after a compaction with `askUser` policy: the picker renders with a
+    /// chip per cleared skill.
+    func testTransformSkillsClearedAskUser() {
+        let event = rawEvent(
+            type: "skills.cleared",
+            payload: [
+                "clearedSkills": AnyCodable(["browser", "code-review", "memory"]),
+                "reason": AnyCodable("compaction"),
+                "mode": AnyCodable("askUser")
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNotNil(message)
+        XCTAssertEqual(message?.role, .system)
+
+        guard case .systemEvent(let systemEvent) = message?.content else {
+            XCTFail("Expected systemEvent content, got \(String(describing: message?.content))")
+            return
+        }
+        guard case .skillsCleared(let names, let mode) = systemEvent else {
+            XCTFail("Expected .skillsCleared system event, got \(systemEvent)")
+            return
+        }
+        XCTAssertEqual(names, ["browser", "code-review", "memory"])
+        XCTAssertEqual(mode, .askUser)
+    }
+
+    /// Reconstructs the `skills.cleared` event emitted under `clearAll` policy:
+    /// informational banner (no picker affordance), names preserved in order.
+    func testTransformSkillsClearedClearAll() {
+        let event = rawEvent(
+            type: "skills.cleared",
+            payload: [
+                "clearedSkills": AnyCodable(["alpha", "beta"]),
+                "reason": AnyCodable("compaction"),
+                "mode": AnyCodable("clearAll")
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNotNil(message)
+        guard case .systemEvent(let systemEvent) = message?.content,
+              case .skillsCleared(let names, let mode) = systemEvent else {
+            XCTFail("Expected .skillsCleared system event")
+            return
+        }
+        XCTAssertEqual(names, ["alpha", "beta"])
+        XCTAssertEqual(mode, .clearAll)
+    }
+
+    /// Back-compat: pre-M6 events written without a `mode` field default to
+    /// `.askUser`. Mirrors the Rust `#[serde(default)]` / `Default = AskUser`
+    /// behavior so iOS doesn't drop existing on-disk history.
+    func testTransformSkillsClearedLegacyMissingModeDefaultsAskUser() {
+        let event = rawEvent(
+            type: "skills.cleared",
+            payload: [
+                "clearedSkills": AnyCodable(["old-skill"]),
+                "reason": AnyCodable("compaction")
+                // No mode field — legacy event
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNotNil(message)
+        guard case .systemEvent(let systemEvent) = message?.content,
+              case .skillsCleared(_, let mode) = systemEvent else {
+            XCTFail("Expected .skillsCleared system event")
+            return
+        }
+        XCTAssertEqual(mode, .askUser, "Legacy events without mode must default to .askUser")
+    }
+
+    /// Defense-in-depth: server suppresses emission on empty cleared_skills,
+    /// but if a malformed/manually-written event ever reaches the client the
+    /// transformer drops it rather than rendering an empty picker.
+    func testTransformSkillsClearedEmptyReturnsNil() {
+        let event = rawEvent(
+            type: "skills.cleared",
+            payload: [
+                "clearedSkills": AnyCodable([] as [String]),
+                "reason": AnyCodable("compaction"),
+                "mode": AnyCodable("askUser")
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNil(message, "Empty clearedSkills must not produce a ChatMessage")
+    }
+
+    /// If `clearedSkills` is missing entirely (payload corruption), the
+    /// transformer returns nil and logs a warning rather than crashing or
+    /// rendering an empty pill. Regression guard against optional-field
+    /// drift between server payload and iOS parser.
+    func testTransformSkillsClearedMissingSkillsReturnsNil() {
+        let event = rawEvent(
+            type: "skills.cleared",
+            payload: [
+                "reason": AnyCodable("compaction"),
+                "mode": AnyCodable("askUser")
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNil(message, "Missing clearedSkills must not produce a ChatMessage")
+    }
+
+    /// Forward-compat: unknown `mode` strings (introduced server-side ahead of
+    /// iOS) fall back to the legacy default (`askUser`) instead of dropping
+    /// the event. Keeps the picker appearing when a future mode value is
+    /// emitted but not yet understood — erring on the side of surfacing the
+    /// prompt rather than hiding it.
+    func testTransformSkillsClearedUnknownModeFallsBackToAskUser() {
+        let event = rawEvent(
+            type: "skills.cleared",
+            payload: [
+                "clearedSkills": AnyCodable(["x"]),
+                "reason": AnyCodable("compaction"),
+                "mode": AnyCodable("someFutureMode")
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNotNil(message)
+        guard case .systemEvent(let systemEvent) = message?.content,
+              case .skillsCleared(_, let mode) = systemEvent else {
+            XCTFail("Expected .skillsCleared system event")
+            return
+        }
+        XCTAssertEqual(mode, .askUser)
+    }
+
+    /// SessionEvent overload: reconstruction uses the same handler path as
+    /// RawEvent, so both overloads must produce the same message shape for
+    /// the same wire payload.
+    func testTransformSkillsClearedSessionEventParity() {
+        let payload: [String: AnyCodable] = [
+            "clearedSkills": AnyCodable(["a", "b"]),
+            "reason": AnyCodable("compaction"),
+            "mode": AnyCodable("clearAll")
+        ]
+
+        let raw = rawEvent(type: "skills.cleared", payload: payload)
+        let sess = sessionEvent(type: "skills.cleared", payload: payload)
+
+        let rawMessage = UnifiedEventTransformer.transformPersistedEvent(raw)
+        let sessMessage = UnifiedEventTransformer.transformPersistedEvent(sess)
+
+        XCTAssertEqual(rawMessage?.content, sessMessage?.content)
+    }
 }

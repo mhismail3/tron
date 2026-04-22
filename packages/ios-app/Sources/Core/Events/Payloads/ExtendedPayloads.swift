@@ -185,6 +185,68 @@ struct ContextClearedPayload {
     }
 }
 
+// MARK: - Skill Compaction Payloads
+
+/// Render mode carried on `skills.cleared` events.
+///
+/// Mirrors the Rust `SkillsClearedMode` enum in
+/// `packages/agent/src/events/types/payloads/skill.rs`. The discriminator tells
+/// iOS how to render the pill:
+///
+/// - `.clearAll`: informational banner listing the cleared skill names. The
+///   user can re-activate manually via `@skill-name` mention or the sidebar.
+/// - `.askUser`: interactive picker — each cleared skill becomes a tappable
+///   chip that re-adds it via the `skill.activate` RPC.
+///
+/// Defaults to `.askUser` on decode so pre-M6 on-disk events (which lacked
+/// the `mode` field and were only emitted under AskUser) preserve their
+/// original semantics. Wire format is lowerCamelCase (`"clearAll"` /
+/// `"askUser"`).
+enum SkillsClearedMode: String, Codable, Equatable, Hashable {
+    case clearAll
+    case askUser
+
+    /// Back-compat default for pre-M6 events that lacked the `mode` field.
+    /// Those events only existed under the AskUser policy, so decoding a
+    /// missing discriminator as `.askUser` preserves the original render.
+    static let legacyDefault: SkillsClearedMode = .askUser
+}
+
+/// Payload for `skills.cleared` event.
+///
+/// Server: `SkillsClearedPayload` in `events/types/payloads/skill.rs`. Emitted
+/// on the first prompt after a `compact.boundary` under either ClearAll or
+/// AskUser compaction policy; AutoRestore never emits this event because it
+/// preserves active skills through the boundary.
+struct SkillsClearedPayload {
+    /// Names of the skills that were active at the boundary and are now
+    /// cleared. May be empty only in pathological cases (concurrent
+    /// re-activation); the server suppresses emission when the set is empty.
+    let clearedSkills: [String]
+    /// Always `"compaction"` today. Reserved for future reasons.
+    let reason: String
+    /// Render mode — see `SkillsClearedMode`. Defaults to `.askUser` for
+    /// pre-M6 payloads that omitted this field.
+    let mode: SkillsClearedMode
+
+    init?(from payload: [String: AnyCodable]) {
+        guard let clearedSkills = payload.stringArray("clearedSkills") else {
+            return nil
+        }
+        self.clearedSkills = clearedSkills
+        self.reason = payload.string("reason") ?? "compaction"
+        if let raw = payload.string("mode"), let mode = SkillsClearedMode(rawValue: raw) {
+            self.mode = mode
+        } else {
+            // Missing or unknown mode → legacy default. Unknown strings are
+            // treated as legacy to mirror the server's `#[serde(default)]`
+            // semantics; we do NOT want to drop the event just because a
+            // new mode was added on the server but not yet here.
+            self.mode = .legacyDefault
+        }
+    }
+}
+
 // MARK: - Context Snapshot Payloads
 
 /// Parameters for context.getSnapshot RPC method

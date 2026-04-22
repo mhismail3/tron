@@ -646,3 +646,154 @@ struct MemoryRetainedNotificationView: View {
     }
 }
 
+// MARK: - Skills Cleared Notification View (M6)
+
+/// Renders the `skills.cleared` event emitted on the first prompt after a
+/// compaction boundary when active skills were cleared.
+///
+/// The `mode` discriminator controls layout:
+///
+/// - `.clearAll`: informational banner — single horizontal pill listing the
+///   cleared skill names. Non-interactive; user can re-add skills manually
+///   via `@skill-name` or the sidebar. Flat styling to mirror the other
+///   informational pills (compaction, rules).
+///
+/// - `.askUser`: interactive picker — a header line ("Re-activate N skills?")
+///   above a wrapped row of tappable chips. Tapping a chip fires
+///   `onReactivate(skillName)` which percolates up as
+///   `MessageBubbleTapAction.reactivateSkill` and ultimately invokes the
+///   `skill.activate` RPC. Tapped chips greying-out is tracked locally via
+///   `activatedSkills` — the server-emitted `skill.activated` event is the
+///   source of truth, but local feedback is needed for tap responsiveness.
+///
+/// Empty `clearedSkills` is not rendered (caller drops the message), so the
+/// view always has at least one skill to display.
+struct SkillsClearedNotificationView: View {
+    let clearedSkills: [String]
+    let mode: SkillsClearedMode
+    /// Invoked when the user taps a skill chip (AskUser mode only). Nil in
+    /// ClearAll mode; the informational banner has no interaction.
+    var onReactivate: ((String) -> Void)? = nil
+
+    /// Skills the user has tapped this render cycle. Kept local to the view
+    /// so the chip greys out immediately; the authoritative state comes back
+    /// via the server-emitted `skill.activated` event, which clears the
+    /// skill from the `inputBarState.selectedSkills` set elsewhere.
+    @State private var activatedSkills: Set<String> = []
+
+    var body: some View {
+        switch mode {
+        case .clearAll:
+            clearAllBanner
+        case .askUser:
+            askUserPicker
+        }
+    }
+
+    // MARK: ClearAll — informational banner
+
+    private var clearAllBanner: some View {
+        NotificationPill(tint: .tronCyan) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronCyan)
+
+                Text(clearAllPrefix)
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(Color.tronCyan.opacity(0.9))
+
+                Text(clearedSkills.joined(separator: ", "))
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(Color.tronCyan.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+    }
+
+    private var clearAllPrefix: String {
+        let noun = clearedSkills.count == 1 ? "skill" : "skills"
+        return "Cleared \(clearedSkills.count) \(noun) on compaction:"
+    }
+
+    // MARK: AskUser — interactive picker
+
+    private var askUserPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronCyan)
+                Text(askUserHeader)
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(Color.tronCyan.opacity(0.9))
+            }
+
+            // Wrapping row of chips. `FlowLayout` would be nicer but SwiftUI
+            // doesn't ship one — fall back to horizontal ScrollView to avoid
+            // pulling in a third-party layout for a rare UI element.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(clearedSkills, id: \.self) { name in
+                        chip(for: name)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.tronCyan.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.tronCyan.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var askUserHeader: String {
+        let noun = clearedSkills.count == 1 ? "skill" : "skills"
+        return "Re-activate \(clearedSkills.count) \(noun)?"
+    }
+
+    @ViewBuilder
+    private func chip(for name: String) -> some View {
+        let isActivated = activatedSkills.contains(name)
+        Button {
+            guard !isActivated else { return }
+            activatedSkills.insert(name)
+            onReactivate?(name)
+        } label: {
+            HStack(spacing: 4) {
+                if isActivated {
+                    Image(systemName: "checkmark")
+                        .font(TronTypography.codeSM)
+                        .transition(.blurReplace)
+                } else {
+                    Image(systemName: "plus")
+                        .font(TronTypography.codeSM)
+                        .transition(.blurReplace)
+                }
+                Text(name)
+                    .font(TronTypography.codeCaption)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .foregroundStyle(isActivated ? Color.tronCyan.opacity(0.5) : .tronCyan)
+            .background(Color.tronCyan.opacity(isActivated ? 0.05 : 0.15))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(Color.tronCyan.opacity(isActivated ? 0.2 : 0.4), lineWidth: 0.5)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(isActivated)
+        .animation(.smooth(duration: 0.25), value: isActivated)
+    }
+}
+

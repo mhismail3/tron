@@ -526,6 +526,12 @@ struct ChatView: View {
             sheetCoordinator.showProviderErrorDetail(data)
         case .memoryRetainDetail(let title, let summary):
             sheetCoordinator.showMemoryRetainDetail(title: title, summary: summary)
+        case .reactivateSkill(let skillName):
+            // M6: user tapped a chip in the skills-cleared AskUser picker.
+            // Reuses the existing `skill.activate` RPC path used by sidebar
+            // activation and @skill-name resolution — server emits
+            // `skill.activated` which the chip tracks via `SkillsClearedNotificationView`.
+            Task { try? await viewModel.activateSkillOnServer(skillName) }
         }
     }
 

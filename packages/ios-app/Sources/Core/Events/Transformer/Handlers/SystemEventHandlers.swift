@@ -82,6 +82,48 @@ enum SystemEventHandlers {
         )
     }
 
+    /// Transform `skills.cleared` event into a ChatMessage.
+    ///
+    /// Emitted on the first prompt after a compaction boundary when the
+    /// active skill set was non-empty. The `mode` discriminator controls
+    /// rendering:
+    ///
+    /// - `.clearAll`: informational banner. The user can re-add skills
+    ///   manually via `@skill-name`.
+    /// - `.askUser`: interactive picker — each cleared skill becomes a
+    ///   tappable chip that re-activates it via the `skill.activate` RPC.
+    ///
+    /// Returns `nil` (drops the message) when:
+    /// - the payload is malformed (missing `clearedSkills`), OR
+    /// - `clearedSkills` is empty — the server never emits this shape, but
+    ///   rendering an empty picker / banner would be dead UI.
+    ///
+    /// Paired with M6 in the audit plan. The Rust emitter lives at
+    /// `packages/agent/src/server/rpc/handlers/agent_prompt_runtime.rs`.
+    static func transformSkillsCleared(
+        _ payload: [String: AnyCodable],
+        timestamp: Date,
+        logger: TronLogger = TronLogger.shared
+    ) -> ChatMessage? {
+        guard let parsed = SkillsClearedPayload(from: payload) else {
+            logger.warning("skills.cleared event missing clearedSkills in payload", category: .events)
+            return nil
+        }
+        guard !parsed.clearedSkills.isEmpty else {
+            // Defensive: the server suppresses emission when the set would be
+            // empty, but a future regression would otherwise render an empty
+            // picker. Drop the message instead.
+            logger.debug("skills.cleared event had empty clearedSkills; dropping", category: .events)
+            return nil
+        }
+
+        return ChatMessage(
+            role: .system,
+            content: .skillsCleared(clearedSkills: parsed.clearedSkills, mode: parsed.mode),
+            timestamp: timestamp
+        )
+    }
+
     /// Transform rules.loaded event into a ChatMessage.
     ///
     /// Rules loaded events indicate when CLAUDE.md or other rules files were loaded.

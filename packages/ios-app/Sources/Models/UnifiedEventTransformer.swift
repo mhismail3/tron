@@ -171,6 +171,8 @@ struct UnifiedEventTransformer {
             return SystemEventHandlers.transformCompactBoundary(payload, timestamp: ts)
         case .skillDeactivated:
             return SystemEventHandlers.transformSkillDeactivated(payload, timestamp: ts)
+        case .skillsCleared:
+            return SystemEventHandlers.transformSkillsCleared(payload, timestamp: ts)
         case .rulesLoaded:
             return SystemEventHandlers.transformRulesLoaded(payload, timestamp: ts)
         case .rulesActivated:
@@ -363,7 +365,8 @@ extension UnifiedEventTransformer {
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .notificationSubagentResult,
                  .configModelSwitch, .configReasoningLevel,
-                 .contextCleared, .skillDeactivated, .rulesLoaded, .rulesActivated,
+                 .contextCleared, .skillDeactivated, .skillsCleared,
+                 .rulesLoaded, .rulesActivated,
                  .errorAgent, .errorTool, .errorProvider,
                  .memoryRetained:
                 if var message = transformPersistedEvent(event) {

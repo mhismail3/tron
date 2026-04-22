@@ -26,6 +26,14 @@ enum SystemEvent: Equatable, Hashable {
     case messageDeleted(targetType: String)
     /// A skill was deactivated from context
     case skillDeactivated(skillName: String)
+    /// Active skills were cleared by compaction (M6).
+    ///
+    /// `mode` controls rendering:
+    /// - `.clearAll`: informational banner listing the cleared skill names.
+    ///   The user can re-add via `@skill-name` or the sidebar picker.
+    /// - `.askUser`: interactive picker — each skill becomes a tappable chip
+    ///   that re-activates it via the `skill.activate` RPC.
+    case skillsCleared(clearedSkills: [String], mode: SkillsClearedMode)
     /// Rules were loaded on session start
     case rulesLoaded(count: Int)
     /// Dynamic scoped rules were activated by file access
@@ -66,6 +74,7 @@ enum SystemEvent: Equatable, Hashable {
         case .contextCleared:             return .tronSky
         case .messageDeleted:             return .tronSky
         case .skillDeactivated:            return .tronCyan
+        case .skillsCleared:              return .tronCyan
         case .rulesLoaded:                return .tronIndigo
         case .rulesActivated:             return .tronIndigo
         case .catchingUp:                 return .tronSlate
@@ -111,6 +120,14 @@ enum SystemEvent: Equatable, Hashable {
             return "Deleted \(typeLabel) from context"
         case .skillDeactivated(let skillName):
             return "\(skillName) deactivated from context"
+        case .skillsCleared(let clearedSkills, let mode):
+            let noun = clearedSkills.count == 1 ? "skill" : "skills"
+            switch mode {
+            case .clearAll:
+                return "Cleared \(clearedSkills.count) \(noun) on compaction"
+            case .askUser:
+                return "Re-activate \(clearedSkills.count) \(noun)?"
+            }
         case .rulesLoaded(let count):
             return "Loaded \(count) \(count == 1 ? "rule" : "rules")"
         case .rulesActivated(let rules, _):
