@@ -1,7 +1,7 @@
 //! `WebFetch` tool — universal HTTP client with HTML summarization.
 //!
 //! Two modes:
-//! 1. **Summarization** (legacy): GET + prompt → fetch HTML → parse → summarize → cache
+//! 1. **Summarization**: GET + prompt → fetch HTML → parse → summarize → cache
 //! 2. **Raw HTTP**: Any method, headers, body → return raw response with status/headers
 //!
 //! Mode selection:
@@ -311,7 +311,7 @@ impl TronTool for WebFetchTool {
 }
 
 impl WebFetchTool {
-    /// Execute in summarization mode (legacy behavior).
+    /// Execute in summarization mode.
     async fn execute_summarization(
         &self,
         url: &str,
