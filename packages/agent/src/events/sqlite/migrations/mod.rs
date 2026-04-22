@@ -17,6 +17,17 @@ struct Migration {
     version: u32,
     description: &'static str,
     sql: &'static str,
+    /// If true, the migration rebuilds a table that is referenced by
+    /// foreign keys from other tables. SQLite's `DROP TABLE` + `RENAME`
+    /// sequence cannot proceed while FK enforcement is on — even with
+    /// `PRAGMA defer_foreign_keys = 1`, the commit-time recheck does not
+    /// re-resolve the renamed table for referring tables. The runner must
+    /// toggle `PRAGMA foreign_keys = OFF` *outside* the transaction (per
+    /// the documented SQLite procedure, see
+    /// <https://sqlite.org/lang_altertable.html#otheralter>), run the
+    /// rebuild, run `PRAGMA foreign_key_check` to verify correctness, then
+    /// restore FK enforcement.
+    requires_fk_off: bool,
 }
 
 /// All migrations in version order.
@@ -25,36 +36,52 @@ const MIGRATIONS: &[Migration] = &[
         version: 1,
         description: "Complete schema — core tables, FTS, indexes, triggers",
         sql: include_str!("v001_schema.sql"),
+        requires_fk_off: false,
     },
     Migration {
         version: 2,
         description: "Prompt Library — history and snippets",
         sql: include_str!("v002_schema.sql"),
+        requires_fk_off: false,
     },
     Migration {
         version: 3,
         description: "Remove legacy spell.cast / spell.consumed events",
         sql: include_str!("v003_remove_spells.sql"),
+        requires_fk_off: false,
     },
     Migration {
         version: 4,
         description: "Per-session worktree override (sessions.use_worktree)",
         sql: include_str!("v004_session_use_worktree.sql"),
+        requires_fk_off: false,
     },
     Migration {
         version: 5,
         description: "Add CHECK (use_worktree IN (0, 1)) to sessions",
         sql: include_str!("v005_sessions_use_worktree_check.sql"),
+        requires_fk_off: false,
     },
     Migration {
         version: 6,
         description: "Per-token APNs bundle ID (device_tokens.bundle_id)",
         sql: include_str!("v006_device_token_bundle_id.sql"),
+        requires_fk_off: false,
     },
     Migration {
         version: 7,
         description: "Workspace+bundle-scoped device_tokens identity",
         sql: include_str!("v007_device_tokens_workspace_scope.sql"),
+        requires_fk_off: false,
+    },
+    Migration {
+        version: 8,
+        description: "CHECK (payload OR content_blob_id non-null) on events",
+        sql: include_str!("v008_events_payload_or_blob_check.sql"),
+        // The events table is referenced by `branches(*_event_id)` and by its
+        // own `parent_id`. Rebuilding it requires FK enforcement OFF outside
+        // the rebuild transaction.
+        requires_fk_off: true,
     },
 ];
 
@@ -151,6 +178,43 @@ fn ensure_version_table(conn: &Connection) -> Result<()> {
 }
 
 fn apply_migration(conn: &Connection, migration: &Migration) -> Result<()> {
+    // `PRAGMA foreign_keys` is a no-op inside a transaction; a rebuild
+    // migration must toggle it outside the tx boundary. We flip it here,
+    // run the migration, then flip it back regardless of success so a
+    // failed rebuild can't leave FK enforcement off for the rest of the
+    // process.
+    if migration.requires_fk_off {
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .map_err(|e| EventStoreError::Migration {
+                message: format!(
+                    "failed to disable FK for v{}: {e}",
+                    migration.version
+                ),
+            })?;
+    }
+
+    let result = apply_migration_inner(conn, migration);
+
+    if migration.requires_fk_off {
+        // Restore FK even on error. If this re-enable itself fails we have
+        // bigger problems, but we surface the primary error first.
+        if let Err(e) = conn.execute_batch("PRAGMA foreign_keys = ON") {
+            tracing::error!(
+                version = migration.version,
+                error = %e,
+                "failed to re-enable foreign keys after migration"
+            );
+        }
+    }
+
+    result
+}
+
+/// The body of a migration application. Runs the SQL inside a transaction
+/// and records the applied version. For rebuild migrations, also runs
+/// `PRAGMA foreign_key_check` before commit to verify the rebuild did not
+/// leave any dangling references.
+fn apply_migration_inner(conn: &Connection, migration: &Migration) -> Result<()> {
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| EventStoreError::Migration {
@@ -175,6 +239,43 @@ fn apply_migration(conn: &Connection, migration: &Migration) -> Result<()> {
     .map_err(|e| EventStoreError::Migration {
         message: format!("failed to record v{} in schema_version: {e}", migration.version),
     })?;
+
+    if migration.requires_fk_off {
+        // `PRAGMA foreign_key_check` returns zero rows when all FKs are
+        // satisfied. Any row indicates the rebuild left a dangling pointer.
+        let mut stmt = tx.prepare("PRAGMA foreign_key_check").map_err(|e| {
+            EventStoreError::Migration {
+                message: format!(
+                    "failed to prepare foreign_key_check for v{}: {e}",
+                    migration.version
+                ),
+            }
+        })?;
+        let violations: Vec<(String, i64, String, i64)> = stmt
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .map_err(|e| EventStoreError::Migration {
+                message: format!(
+                    "failed to read foreign_key_check for v{}: {e}",
+                    migration.version
+                ),
+            })?
+            .filter_map(std::result::Result::ok)
+            .collect();
+        if !violations.is_empty() {
+            return Err(EventStoreError::Migration {
+                message: format!(
+                    "v{} produced {} FK violations: {:?}",
+                    migration.version,
+                    violations.len(),
+                    violations
+                ),
+            });
+        }
+        // Release the prepared statement before committing.
+        drop(stmt);
+    }
 
     tx.commit().map_err(|e| EventStoreError::Migration {
         message: format!("failed to commit v{}: {e}", migration.version),
@@ -207,8 +308,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 7);
-        assert_eq!(result.max_version_applied, 7);
+        assert_eq!(result.applied, 8);
+        assert_eq!(result.max_version_applied, 8);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -277,7 +378,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 7);
+        assert_eq!(first.applied, 8);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -295,12 +396,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 7);
+        assert_eq!(current_version(&conn).unwrap(), 8);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 7);
+        assert_eq!(latest_version(), 8);
     }
 
     #[test]
@@ -812,10 +913,10 @@ mod tests {
         )
         .unwrap();
 
-        // Now run the full migrator — v2 through v7 should apply.
+        // Now run the full migrator — v2 through v8 should apply.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 6);
-        assert_eq!(result.max_version_applied, 7);
+        assert_eq!(result.applied, 7);
+        assert_eq!(result.max_version_applied, 8);
 
         // v1 data is intact.
         let count: i64 = conn
@@ -1016,8 +1117,8 @@ mod tests {
         .unwrap();
 
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 5);
-        assert_eq!(result.max_version_applied, 7);
+        assert_eq!(result.applied, 6);
+        assert_eq!(result.max_version_applied, 8);
 
         let spell_count: i64 = conn
             .query_row(
@@ -1065,8 +1166,8 @@ mod tests {
 
         // Upgrade.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 4);
-        assert_eq!(result.max_version_applied, 7);
+        assert_eq!(result.applied, 5);
+        assert_eq!(result.max_version_applied, 8);
 
         // Pre-existing row gets NULL for the new column.
         let use_worktree: Option<i64> = conn
@@ -1247,10 +1348,10 @@ mod tests {
         )
         .unwrap();
 
-        // Upgrade to v7.
+        // Upgrade to v8.
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 3);
-        assert_eq!(result.max_version_applied, 7);
+        assert_eq!(result.applied, 4);
+        assert_eq!(result.max_version_applied, 8);
 
         // All three rows survive untouched.
         let count: i64 = conn
@@ -1413,8 +1514,8 @@ mod tests {
         .unwrap();
 
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 7);
+        assert_eq!(result.applied, 2);
+        assert_eq!(result.max_version_applied, 8);
 
         // Verify every pre-existing row is intact, including the NULL bundle legacy row.
         let rows: Vec<(String, String, Option<String>, bool)> = conn
@@ -1611,8 +1712,8 @@ mod tests {
         .unwrap();
 
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 2);
-        assert_eq!(result.max_version_applied, 7);
+        assert_eq!(result.applied, 3);
+        assert_eq!(result.max_version_applied, 8);
 
         // Pre-existing row survives with NULL bundle_id.
         let (token, bundle_id): (String, Option<String>) = conn
@@ -1624,5 +1725,359 @@ mod tests {
             .unwrap();
         assert_eq!(token, "cc");
         assert!(bundle_id.is_none(), "legacy token should have NULL bundle_id after v006");
+    }
+
+    // ── v008 payload-or-blob check tests ──────────────────────────────
+
+    /// The CHECK constraint text must appear in the `events` CREATE TABLE
+    /// statement in sqlite_master. This is defense-in-depth documentation of
+    /// the invariant at the DB level; it becomes load-bearing if a future
+    /// migration relaxes `payload` to nullable.
+    #[test]
+    fn v008_events_check_appears_in_schema() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'events'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(
+            sql.contains("CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)"),
+            "events table missing payload/content_blob CHECK after v008; got: {sql}"
+        );
+    }
+
+    /// Upgrading from v7 to v8 rebuilds the table but preserves every row
+    /// verbatim. Existing rows all have non-NULL payload (today's only write
+    /// path), so the new CHECK accepts them unconditionally.
+    #[test]
+    fn v008_preserves_existing_events_on_upgrade_from_v7() {
+        // Simulate a pre-v008 DB: run v1..v7, populate, then upgrade.
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        for migration in &MIGRATIONS[..7] {
+            apply_migration(&conn, migration).unwrap();
+        }
+        assert_eq!(current_version(&conn).unwrap(), 7);
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp/v7', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                   created_at, last_activity_at)
+             VALUES ('s1', 'ws_1', 'claude-3', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id,
+                                 role, input_tokens, output_tokens)
+             VALUES ('e1', 's1', 1, 'message.user', '2026-01-01T00:00:00Z',
+                     '{\"content\":\"hello\"}', 'ws_1', 'user', 10, NULL),
+                    ('e2', 's1', 2, 'message.assistant', '2026-01-01T00:00:01Z',
+                     '{\"content\":\"hi\"}', 'ws_1', 'assistant', NULL, 5)",
+            [],
+        )
+        .unwrap();
+
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 8);
+
+        // Both rows survived the rebuild with their denormalized columns intact.
+        let rows: Vec<(String, i64, String, String, Option<i64>, Option<i64>)> = conn
+            .prepare(
+                "SELECT id, sequence, type, payload, input_tokens, output_tokens
+                 FROM events WHERE session_id = 's1' ORDER BY sequence",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                ))
+            })
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "e1");
+        assert_eq!(rows[0].1, 1);
+        assert_eq!(rows[0].2, "message.user");
+        assert!(rows[0].3.contains("hello"));
+        assert_eq!(rows[0].4, Some(10));
+        assert_eq!(rows[0].5, None);
+
+        assert_eq!(rows[1].0, "e2");
+        assert_eq!(rows[1].2, "message.assistant");
+        assert!(rows[1].3.contains("hi"));
+        assert_eq!(rows[1].4, None);
+        assert_eq!(rows[1].5, Some(5));
+    }
+
+    /// The rebuild drops and recreates the events table, which takes its
+    /// indexes along with it. Both are recreated explicitly by the migration;
+    /// the UNIQUE is load-bearing for sequence-monotonicity invariants.
+    #[test]
+    fn v008_recreates_events_indexes_after_rebuild() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let indexes: Vec<String> = conn
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'index' AND tbl_name = 'events' ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        assert!(
+            indexes.iter().any(|n| n == "idx_events_session_sequence_unique"),
+            "missing unique index after v008 rebuild; found: {indexes:?}"
+        );
+        assert!(
+            indexes.iter().any(|n| n == "idx_events_session_seq"),
+            "missing session_seq index after v008 rebuild; found: {indexes:?}"
+        );
+
+        // The UNIQUE is still enforced (sequence-monotonicity guard).
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                   created_at, last_activity_at)
+             VALUES ('s1', 'ws_1', 'claude-3', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('e1', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', '{}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+        let dup = conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('e2', 's1', 1, 'message.assistant', '2026-01-01T00:00:00Z', '{}', 'ws_1')",
+            [],
+        );
+        assert!(
+            dup.is_err(),
+            "UNIQUE(session_id, sequence) must still reject duplicate sequence after v008"
+        );
+    }
+
+    /// `branches(root_event_id)` and `branches(head_event_id)` reference
+    /// `events(id)`. The rebuild drops and recreates the events table — if
+    /// `PRAGMA defer_foreign_keys` weren't in the migration, branches FKs
+    /// would break during the DROP. Assert post-upgrade integrity by
+    /// inserting a branch that points at an event in the rebuilt table.
+    #[test]
+    fn v008_branches_fk_to_events_survives_rebuild() {
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        for migration in &MIGRATIONS[..7] {
+            apply_migration(&conn, migration).unwrap();
+        }
+
+        // Pre-populate both events and branches before v008.
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                   created_at, last_activity_at)
+             VALUES ('s1', 'ws_1', 'claude-3', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('e1', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', '{}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO branches (id, session_id, name, root_event_id, head_event_id,
+                                   created_at, last_activity_at)
+             VALUES ('b1', 's1', 'main', 'e1', 'e1',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        // Upgrade through v008 — rebuilds events under the hood.
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 8);
+
+        // Existing branch row still resolves to its event.
+        let (b_id, root, head): (String, String, String) = conn
+            .query_row(
+                "SELECT id, root_event_id, head_event_id FROM branches WHERE id = 'b1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(b_id, "b1");
+        assert_eq!(root, "e1");
+        assert_eq!(head, "e1");
+
+        // A fresh branch row pointing at a post-rebuild event id must succeed.
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('e2', 's1', 2, 'message.user', '2026-01-01T00:00:01Z', '{}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO branches (id, session_id, name, root_event_id, head_event_id,
+                                   created_at, last_activity_at)
+             VALUES ('b2', 's1', 'fork', 'e2', 'e2',
+                     '2026-01-01T00:00:01Z', '2026-01-01T00:00:01Z')",
+            [],
+        )
+        .unwrap_or_else(|e| panic!("FK to post-rebuild event must succeed: {e}"));
+
+        // FK violation against nonexistent id still rejected.
+        let err = conn.execute(
+            "INSERT INTO branches (id, session_id, name, root_event_id, head_event_id,
+                                   created_at, last_activity_at)
+             VALUES ('b3', 's1', 'orphan', 'e_missing', 'e_missing',
+                     '2026-01-01T00:00:01Z', '2026-01-01T00:00:01Z')",
+            [],
+        );
+        assert!(err.is_err(), "FK into events must still reject missing id after v008");
+    }
+
+    /// `events.parent_id REFERENCES events(id)` is self-referential; the
+    /// rebuild's INSERT INTO events_new SELECT ... has child rows with
+    /// parent_id pointing at rows that haven't yet been copied. With
+    /// `defer_foreign_keys = 1` the entire statement commits atomically
+    /// without intermediate FK checks, so every parent is in place by the
+    /// time the outer transaction commits.
+    #[test]
+    fn v008_self_referential_parent_id_survives_rebuild() {
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        for migration in &MIGRATIONS[..7] {
+            apply_migration(&conn, migration).unwrap();
+        }
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                   created_at, last_activity_at)
+             VALUES ('s1', 'ws_1', 'claude-3', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        // Chain of parent → child events under v007.
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('e_root', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', '{}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO events (id, session_id, parent_id, sequence, type, timestamp,
+                                 payload, workspace_id)
+             VALUES ('e_child', 's1', 'e_root', 2, 'message.assistant', '2026-01-01T00:00:01Z',
+                     '{}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+
+        // Upgrade — rebuild must preserve the parent pointer.
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.max_version_applied, 8);
+
+        let parent: Option<String> = conn
+            .query_row(
+                "SELECT parent_id FROM events WHERE id = 'e_child'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(parent.as_deref(), Some("e_root"));
+
+        // Self-referential FK still rejects pointing at a nonexistent parent.
+        let err = conn.execute(
+            "INSERT INTO events (id, session_id, parent_id, sequence, type, timestamp,
+                                 payload, workspace_id)
+             VALUES ('e_bad', 's1', 'e_missing', 3, 'message.user', '2026-01-01T00:00:02Z',
+                     '{}', 'ws_1')",
+            [],
+        );
+        assert!(err.is_err(), "self-FK events.parent_id must still enforce after v008");
+    }
+
+    /// Belt-and-suspenders: even though the column-level `payload NOT NULL`
+    /// is the first line of defense, the CHECK constraint must reject a
+    /// row that slips past NOT NULL via literal NULL for content_blob_id
+    /// paired with a NULL payload. SQLite evaluates constraints in order:
+    /// NOT NULL fires first, so we expect ANY error — the test's role is
+    /// that the row is rejected, not which constraint catches it.
+    #[test]
+    fn v008_null_payload_is_rejected() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
+                                   created_at, last_activity_at)
+             VALUES ('s1', 'ws_1', 'claude-3', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        let err = conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload,
+                                 content_blob_id, workspace_id)
+             VALUES ('e_empty', 's1', 1, 'message.user', '2026-01-01T00:00:00Z', NULL,
+                     NULL, 'ws_1')",
+            [],
+        );
+        assert!(
+            err.is_err(),
+            "NULL payload + NULL content_blob_id must be rejected after v008"
+        );
     }
 }
