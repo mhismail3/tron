@@ -145,7 +145,7 @@ final class ChatViewModel {
 
     /// Show error to user (required by LoggingContext, used by all coordinators)
     func showError(_ message: String) {
-        showErrorAlert(message)
+        handleError(message, severity: .fatal)
     }
 
     // MARK: - Internal State (accessible to extensions)
@@ -585,11 +585,6 @@ final class ChatViewModel {
         }
     }
 
-    /// Show error alert (legacy, prefer handleError with severity)
-    func showErrorAlert(_ message: String) {
-        handleError(message, severity: .fatal)
-    }
-
     func clearError() {
         errorMessage = nil
     }
@@ -623,21 +618,18 @@ final class ChatViewModel {
     /// The message will be filtered out during two-pass reconstruction.
     func deleteMessage(_ message: ChatMessage) async {
         guard let sessionId = rpcClient.currentSessionId else {
-            logger.error("Cannot delete message - no active session", category: .session)
-            showErrorAlert("No active session")
+            handleError("No active session", severity: .fatal)
             return
         }
 
         guard let eventId = message.eventId else {
-            logger.error("Cannot delete message - no event ID", category: .session)
-            showErrorAlert("Cannot delete this message")
+            handleError("Cannot delete this message", severity: .fatal)
             return
         }
 
         // Only allow deleting user and assistant messages
         guard message.role == .user || message.role == .assistant else {
-            logger.error("Cannot delete message - invalid role: \(message.role)", category: .session)
-            showErrorAlert("Cannot delete this type of message")
+            handleError("Cannot delete this type of message: invalid role \(message.role)", severity: .fatal)
             return
         }
 
@@ -655,8 +647,7 @@ final class ChatViewModel {
                 }
             }
         } catch {
-            logger.error("Failed to delete message: \(error)", category: .session)
-            showErrorAlert("Failed to delete message: \(error.localizedDescription)")
+            handleError("Failed to delete message: \(error.localizedDescription)", severity: .fatal)
         }
     }
 

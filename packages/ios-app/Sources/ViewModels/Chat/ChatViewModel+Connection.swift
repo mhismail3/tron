@@ -145,7 +145,7 @@ extension ChatViewModel: ConnectionContext {
 
     // Note: The following methods are already defined in other extensions:
     // - setSessionProcessing(_:) in ChatViewModel+TurnLifecycleContext.swift
-    // - showErrorAlert(_:) in ChatViewModel.swift
+    // - showError(_:) in ChatViewModel.swift
     // - logVerbose/Debug/Info/Warning/Error in ChatViewModel.swift
     // ConnectionContext conformance uses those existing implementations.
 }

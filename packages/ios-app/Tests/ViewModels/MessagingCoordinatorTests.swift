@@ -360,7 +360,7 @@ final class MessagingCoordinatorTests: XCTestCase {
         await coordinator.abortAgent(context: mockContext)
 
         // Then: Error should be shown
-        XCTAssertTrue(mockContext.showErrorAlertCalled)
+        XCTAssertTrue(mockContext.showErrorCalled)
     }
 
     // MARK: - Attachment Management Tests
@@ -513,7 +513,7 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.activateSkillOnServerNames, ["plan", "review"])
         XCTAssertTrue(mockContext.sendPromptCalled)
         XCTAssertEqual(mockContext.lastSentText, "Do the thing")
-        XCTAssertFalse(mockContext.showErrorAlertCalled)
+        XCTAssertFalse(mockContext.showErrorCalled)
     }
 
     func testActivateAndSendWithNoSkillsSendsImmediately() async {
@@ -547,7 +547,7 @@ final class MessagingCoordinatorTests: XCTestCase {
 
         // Then: Error surfaced to user; prompt NOT sent (user intent included
         // the skill — silently sending without it would defeat their choice).
-        XCTAssertTrue(mockContext.showErrorAlertCalled)
+        XCTAssertTrue(mockContext.showErrorCalled)
         XCTAssertFalse(mockContext.sendPromptCalled)
         // Staged skills are preserved so the user can retry or edit before
         // re-sending. Wiping the draft on failure would lose their selection.
@@ -574,7 +574,7 @@ final class MessagingCoordinatorTests: XCTestCase {
         // Then: First succeeded, second failed; third never attempted
         XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 2)
         XCTAssertEqual(mockContext.activateSkillOnServerNames, ["plan", "review"])
-        XCTAssertTrue(mockContext.showErrorAlertCalled)
+        XCTAssertTrue(mockContext.showErrorCalled)
         XCTAssertFalse(mockContext.sendPromptCalled)
     }
 
@@ -635,7 +635,7 @@ final class MockMessagingContext: MessagingContext {
     var abortAgentCalled = false
     var finalizeStreamingMessageCalled = false
     var cancelActiveDeviceRequestsCalled = false
-    var showErrorAlertCalled = false
+    var showErrorCalled = false
 
     // MARK: - Test Configuration
     var sendPromptShouldFail = false
@@ -746,12 +746,8 @@ final class MockMessagingContext: MessagingContext {
         handleAgentErrorCalled = true
     }
 
-    func showErrorAlert(_ message: String) {
-        showErrorAlertCalled = true
-    }
-
     func showError(_ message: String) {
-        showErrorAlertCalled = true
+        showErrorCalled = true
     }
 
     // MARK: - Logging (no-op for tests)

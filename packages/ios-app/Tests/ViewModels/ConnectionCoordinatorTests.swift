@@ -49,7 +49,7 @@ final class ConnectionCoordinatorTests: XCTestCase {
         mockContext.resumeSessionError = ConnectionTestError.sessionNotFound
         await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertTrue(mockContext.shouldDismiss)
-        XCTAssertTrue(mockContext.showErrorAlertCalled)
+        XCTAssertTrue(mockContext.showErrorCalled)
     }
 
     func testConnectAndReconstructDoesNotDismissOnOtherErrors() async {
@@ -192,7 +192,7 @@ final class MockConnectionContext: ConnectionContext {
     var processReconstructionResultCalled = false
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
-    var showErrorAlertCalled = false
+    var showErrorCalled = false
     var cleanUpStreamingStateCalled = false
     var drainEventBufferCalled = false
     var captureReconstructingDuringConnect = false
@@ -275,7 +275,7 @@ final class MockConnectionContext: ConnectionContext {
     }
 
     func showError(_ message: String) {
-        showErrorAlertCalled = true
+        showErrorCalled = true
     }
 
     // MARK: - Logging (no-op)

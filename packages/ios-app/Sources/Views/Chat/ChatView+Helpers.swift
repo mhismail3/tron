@@ -38,7 +38,7 @@ extension ChatView {
                     if let revertModel {
                         viewModel?.contextState.currentContextWindow = revertModel.contextWindow
                     }
-                    viewModel?.showErrorAlert("Failed to switch model: \(errorMessage)")
+                    viewModel?.handleError("Failed to switch model: \(errorMessage)", severity: .fatal)
                 },
                 onContextRefresh: { [weak viewModel] in
                     // Refresh context from server to ensure accuracy after model switch
