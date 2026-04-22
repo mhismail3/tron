@@ -2111,6 +2111,75 @@ async fn concurrent_acquire_different_sessions_not_serialized() {
     assert_eq!(coord.list_active().len(), 3);
 }
 
+/// `git worktree add` writes metadata files under
+/// `.git/worktrees/<name>/` (HEAD, commondir, gitdir, etc.) and, while
+/// doing so, reads the same metadata files belonging to every OTHER
+/// worktree on that main repo (git internally calls `get_worktrees()`
+/// to validate the new addition). Two concurrent `git worktree add`
+/// invocations against the same main repo therefore race on the
+/// commondir file of each other's in-progress worktree:
+///   "fatal: failed to read .git/worktrees/<other>/commondir: Undefined error: 0"
+///
+/// The coordinator's per-session lock (H4) does NOT prevent this
+/// because the race is across different sessions, and the heavy
+/// `repo_locks` ("syncMain" / "finalizeSession" / "rebaseOnMain") are
+/// only held during those named ops — they are NOT held during
+/// `maybe_acquire_with_override`.
+///
+/// This regression test runs 12 concurrent acquires against a single
+/// main repo. With the main-repo-scoped `worktree_add_locks` guard in
+/// place every call succeeds; without it, the test reliably hits the
+/// commondir race on macOS. The test's shape (cross-session, same
+/// repo, high fan-out) mirrors the original failure observed during
+/// Sprint 2 audit.
+#[tokio::test]
+async fn parallel_acquire_different_sessions_same_repo_no_git_race() {
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    // Fan-out large enough to reliably trigger the git metadata race
+    // in the absence of main-repo serialization.
+    const FANOUT: usize = 24;
+    let mut sids: Vec<String> = Vec::with_capacity(FANOUT);
+    for i in 0..FANOUT {
+        let r = store
+            .create_session(
+                "model",
+                &dir.path().to_string_lossy(),
+                Some(&format!("s{i}")),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        sids.push(r.session.id);
+    }
+    let coord = Arc::new(WorktreeCoordinator::new(
+        WorktreeConfig::default(),
+        store,
+    ));
+
+    let mut handles = Vec::new();
+    for sid in sids {
+        let coord = coord.clone();
+        let path = dir.path().to_path_buf();
+        handles.push(tokio::spawn(async move {
+            coord.maybe_acquire_with_override(&sid, &path, None).await
+        }));
+    }
+
+    // Every acquire must succeed — no Git metadata errors.
+    for h in handles {
+        let result = h.await.unwrap();
+        result
+            .expect("acquire must not fail due to git metadata race");
+    }
+
+    // Every session's worktree must be tracked.
+    assert_eq!(coord.list_active().len(), FANOUT);
+}
+
 /// After an acquire that RETURNS AN ERROR, the per-session lock must
 /// still be released (RAII on `_guard`). Otherwise one failed acquire
 /// would stall every subsequent prompt for that session.
