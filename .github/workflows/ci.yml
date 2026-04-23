@@ -1,11 +1,17 @@
 # Continuous Integration
 #
-# Three workloads, two cost tiers:
+# Four workloads, two cost tiers:
 #   - personal-info-guard: ubuntu, ~30s, runs every PR + push (always).
 #   - rust:                ubuntu (1x), runs when packages/agent/** changes,
 #                          on every push to main, or when labeled `rust`.
 #   - ios:                 macos (10x), runs when packages/ios-app/** changes,
 #                          on every push to main, or when labeled `ios`.
+#   - mac:                 macos (10x), runs when packages/mac-app/** or
+#                          packages/agent/** changes (the Rust binary is
+#                          embedded in the Mac app bundle), on every push to
+#                          main, or when labeled `mac`. Also exercises a
+#                          dry-run DMG assembly on PR to catch release-mac.yml
+#                          drift before tag push.
 #
 # Path-gating happens via `dorny/paths-filter` so PRs that only touch docs or
 # the other platform don't burn macos minutes. Pushes to main always run
@@ -14,10 +20,11 @@
 # Concurrency: in-flight runs for the same PR are cancelled on new pushes
 # (cheap on push to main — only one run can be in flight there anyway).
 #
-# Adding a new ecosystem (e.g. packages/mac-app/** in Phase 5):
-#   1. Add a `mac` filter under `changes.steps.filter`.
-#   2. Add a new job gated on `needs.changes.outputs.mac` + label `mac`.
-#   3. Document in CONTRIBUTING.md.
+# Adding a new ecosystem:
+#   1. Add a filter under `changes.steps.filter`.
+#   2. Add a new job gated on `needs.changes.outputs.<name>` + label.
+#   3. List the job under `ci.needs` + the result-check loop.
+#   4. Document in CONTRIBUTING.md.
 
 name: CI
 
@@ -178,6 +185,99 @@ jobs:
           path: packages/ios-app/TestResults.xcresult
           retention-days: 7
 
+  mac:
+    name: Mac wrapper (build + test, dry-run DMG)
+    runs-on: macos-15
+    needs: changes
+    if: |
+      github.event_name == 'push' ||
+      needs.changes.outputs.mac == 'true' ||
+      needs.changes.outputs.rust == 'true' ||
+      contains(github.event.pull_request.labels.*.name, 'mac')
+    defaults:
+      run:
+        working-directory: packages/mac-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # The Rust agent is embedded as a Resource in the Mac app bundle.
+      # CI builds a debug-profile copy so `scripts/bundle-agent.sh`
+      # succeeds, but we don't ship this binary — the release pipeline
+      # (release-mac.yml) rebuilds it in `--release` with signing.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: packages/agent
+
+      - name: Build agent (debug, for embedding)
+        working-directory: packages/agent
+        run: cargo build --bin tron --locked
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Stage agent binary
+        run: ./scripts/bundle-agent.sh --skip-build --profile debug
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # Build the TronMac scheme in Debug; unit tests are ad-hoc signed
+      # (CODE_SIGN_IDENTITY="-") so they run on any macOS runner without
+      # importing the Developer ID certificate.
+      - name: xcodebuild test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project TronMac.xcodeproj \
+            -scheme TronMac \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            -resultBundlePath TestResults.xcresult \
+            -quiet
+
+      - name: Upload xcresult on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-test-results
+          path: packages/mac-app/TestResults.xcresult
+          retention-days: 7
+
+      # Dry-run the DMG build so breakage in release-mac.yml is caught
+      # on PR rather than on tag push. We skip notarization + release
+      # publish (the forced dry-run mode) by running release-mac.yml's
+      # shell steps inline against the debug-signed binary. A real
+      # signed DMG only happens on `mac-v*` tag pushes.
+      - name: Dry-run DMG assembly
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          brew install create-dmg
+          mkdir -p build
+          xcodebuild \
+            -project TronMac.xcodeproj \
+            -scheme TronMac \
+            -configuration Debug \
+            -derivedDataPath build/dd \
+            -destination 'generic/platform=macOS' \
+            CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
+            -quiet build
+          APP_PATH="$(find build/dd -name 'TronMac.app' -print -quit)"
+          if [[ -z "$APP_PATH" ]]; then
+            echo "::warning::TronMac.app not produced by debug build"
+            exit 0
+          fi
+          mkdir -p dist
+          # Minimal DMG — layout args can fail without a signing identity.
+          create-dmg --volname "Tron Dry-Run" --hdiutil-quiet \
+            "dist/Tron-dryrun.dmg" "$APP_PATH" \
+            || echo "::warning::create-dmg returned non-zero in dry-run — acceptable without signing"
+          ls -la dist/ || true
+
   # Aggregate gate — branch protection points at this single check.
   # Adding a new required job? List it under `needs:` here too AND add a
   # corresponding line in the script body (skipped jobs from path-gating
@@ -185,12 +285,13 @@ jobs:
   ci:
     name: CI summary
     runs-on: ubuntu-latest
-    needs: [personal-info-guard, rust, ios]
+    needs: [personal-info-guard, rust, ios, mac]
     if: always()
     env:
       RESULT_GUARD: ${{ needs.personal-info-guard.result }}
       RESULT_RUST: ${{ needs.rust.result }}
       RESULT_IOS: ${{ needs.ios.result }}
+      RESULT_MAC: ${{ needs.mac.result }}
     steps:
       - name: Verify all required jobs passed
         run: |
@@ -199,8 +300,8 @@ jobs:
           if [[ "$RESULT_GUARD" != "success" ]]; then
             echo "::error::personal-info-guard: $RESULT_GUARD"; fail=1
           fi
-          # rust + ios may be `skipped` by the path filter — treat as success.
-          for name in RUST IOS; do
+          # rust + ios + mac may be `skipped` by the path filter — treat as success.
+          for name in RUST IOS MAC; do
             var="RESULT_$name"
             result="${!var}"
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then

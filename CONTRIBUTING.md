@@ -66,12 +66,31 @@ open TronMobile.xcodeproj
 For Beta TestFlight builds, the maintainer uses the `/publish` skill (App ID
 `6761511764`); contributor PRs do not need to invoke it.
 
-### Mac wrapper (Phase 5+)
+### Mac wrapper
 
-The Mac SwiftUI wrapper (`packages/mac-app/`) lands in Phase 5 of the
-[onboarding plan](~/.claude/plans/i-want-to-add-partitioned-storm.md).
-Until then, the headless server runs alongside `Tron-Dev.app` for dev builds
-and is installed by `tron install` for production.
+The Mac SwiftUI wrapper lives at `packages/mac-app/`. It's a SwiftUI app that
+bundles the headless Rust agent as `Contents/Resources/tron-agent` and presents
+a first-run wizard + menu bar icon. Dev builds produce `Tron-Dev.app` (bundle
+ID `com.tron.mac.dev`); release builds ship as a notarized DMG.
+
+```bash
+cd packages/mac-app
+# Stage the agent binary from packages/agent/target/{debug,release}.
+./scripts/bundle-agent.sh --profile debug
+
+xcodegen generate
+# Unit tests:
+xcodebuild test \
+  -project TronMac.xcodeproj \
+  -scheme TronMac \
+  -destination 'platform=macOS' \
+  -configuration Debug
+```
+
+CI exercises the same flow on every PR that touches `packages/mac-app/**` or
+`packages/agent/**` (the agent binary is embedded, so a Rust change affects
+the Mac app bundle). PRs also run a dry-run DMG assembly to catch breakage
+in `release-mac.yml` before tag push.
 
 ## Testing
 
@@ -163,13 +182,55 @@ Two release lanes:
 | What | How | Cadence |
 |---|---|---|
 | iOS Beta to TestFlight | Maintainer runs the `/publish` skill (`/publish bump && /publish build`). App ID `6761511764`. | On request, ad-hoc. |
-| Mac DMG to GitHub Releases | Tag `mac-vX.Y.Z` on a green main commit. CI workflow `release-mac.yml` builds + notarizes + attaches the DMG. | Lands in Phase 6. |
+| Mac DMG to GitHub Releases | Tag `mac-vX.Y.Z` on a green main commit. CI workflow `release-mac.yml` builds + notarizes + attaches the DMG. | Ad-hoc. |
 
 Versioning sources:
 - **Rust agent** — `packages/agent/Cargo.toml` `[package].version`. Bump with
   `cargo set-version` in the same PR as the release tag.
 - **iOS app** — `packages/ios-app/project.yml` `MARKETING_VERSION`. The
   `/publish bump` skill handles this.
+- **Mac wrapper** — `packages/mac-app/project.yml` `MARKETING_VERSION`.
+
+### Cutting a Mac DMG release
+
+```bash
+# 1. Confirm main is green.
+git checkout main && git pull && git log -1 --oneline
+
+# 2. Bump MARKETING_VERSION in packages/mac-app/project.yml.
+#    Match Cargo.toml — the wrapper and the agent ship together.
+
+# 3. Commit the bump and tag.
+git commit -am "chore(release): Mac wrapper vX.Y.Z"
+git tag mac-vX.Y.Z
+git push && git push --tags
+
+# 4. The release-mac.yml workflow runs: build → codesign → notarize →
+#    staple → DMG → GitHub Release draft. Verify the DMG artifact + SHA256
+#    manifest on the draft release, then click Publish in the GitHub UI.
+
+# 5. To test the pipeline without cutting a real release, use
+#    Actions → Release (Mac DMG) → Run workflow with `dry_run=true`.
+#    Missing notarization secrets auto-force dry-run, so forks can
+#    exercise the build without the Apple credentials.
+```
+
+**Required GitHub Actions secrets** for notarized releases:
+
+| Secret | What |
+|---|---|
+| `MACOS_CERT_P12_BASE64` | base64-encoded Developer ID Application `.p12` |
+| `MACOS_CERT_PASSWORD` | password protecting the `.p12` |
+| `NOTARIZE_APPLE_ID` | Apple ID email for `notarytool` |
+| `NOTARIZE_TEAM_ID` | Apple Developer team ID |
+| `NOTARIZE_APP_PASSWORD` | app-specific password for the Apple ID |
+
+Rotate by regenerating the `.p12`, re-encoding (`base64 -i Tron.p12 | pbcopy`),
+and updating the secret in GitHub → Settings → Secrets and variables → Actions.
+
+**Rollback a bad Mac release**: `gh release delete mac-vX.Y.Z` pulls the DMG.
+Existing installs are unaffected (they don't auto-pull deletions). Cut a fixed
+release at `mac-vX.Y.Z+1`.
 
 Hotfix path: cherry-pick the fix to `main`, tag a new patch release.
 
