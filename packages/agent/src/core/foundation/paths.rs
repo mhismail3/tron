@@ -347,6 +347,23 @@ mod tests {
         );
     }
 
+    /// Regression guard: `Cargo.toml` `repository` URL must not contain the
+    /// developer's personal GitHub handle. The actual repo lives at
+    /// `mhismail3/tron`; an older draft pointed at `moose/tron` (a non-existent
+    /// path that would 404 for any user trying to follow the link from
+    /// crates.io / docs.rs / IDE pop-ups).
+    ///
+    /// Needle constructed from parts so this test doesn't self-match.
+    #[test]
+    fn cargo_pkg_repository_has_no_personal_handle() {
+        let repo = env!("CARGO_PKG_REPOSITORY");
+        let needle = format!("/{}/", "moose");
+        assert!(
+            !repo.contains(&needle),
+            "Cargo.toml `repository` field points at a personal handle: {repo}"
+        );
+    }
+
     /// Regression guard: managed skill bundles (every `packages/agent/skills/*`
     /// with a `.managed` sentinel) must contain no hardcoded personal-info
     /// literals. Needles are constructed from parts so this test file itself
