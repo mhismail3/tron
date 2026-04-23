@@ -1,0 +1,71 @@
+name: Feature request
+description: Suggest a new capability or improvement.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an idea. The most useful feature requests describe
+        a real problem you're hitting, not just a solution. We'll often find a
+        better fix than you'd thought of once we understand the underlying need.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        What are you doing today that's painful, slow, or impossible?
+        Concrete scenarios beat abstract wishes.
+      placeholder: |
+        When I'm doing X, I have to do Y manually, which is slow and error-prone.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: How do you imagine this working? UI sketches, command names, or just a paragraph are fine.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you think about? Why aren't they good enough?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      description: Where would this live?
+      multiple: true
+      options:
+        - Rust agent (server)
+        - iOS app
+        - Mac app (Tron.app wrapper)
+        - CLI (`tron …`)
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Links, related projects, prior art.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues for this idea.
+          required: true
