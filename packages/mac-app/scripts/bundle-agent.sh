@@ -78,9 +78,12 @@ resolve_source() {
         return
     fi
 
+    # Cargo workspace lives entirely inside packages/agent/, so `cargo
+    # build` from there writes to `packages/agent/target/`, NOT the repo
+    # root. Resolve against $AGENT_DIR to match.
     case "$profile" in
-        release) printf '%s/target/release/tron\n' "$REPO_ROOT" ;;
-        debug)   printf '%s/target/debug/tron\n' "$REPO_ROOT" ;;
+        release) printf '%s/target/release/tron\n' "$AGENT_DIR" ;;
+        debug)   printf '%s/target/debug/tron\n' "$AGENT_DIR" ;;
         *) echo "error: unknown --profile '$profile' (expected release|debug)" >&2; exit 64 ;;
     esac
 }
