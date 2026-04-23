@@ -20,12 +20,12 @@ struct SkillChip: View {
                 .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                 .foregroundStyle(tint.accent)
 
+            SkillBadges(skill: skill, style: .icon)
+
             Text(skill.name)
                 .font(TronTypography.filePath)
                 .foregroundStyle(tint.name)
                 .lineLimit(1)
-
-            SkillBadges(skill: skill, style: .icon)
 
             if showRemoveButton {
                 Button {

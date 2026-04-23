@@ -147,6 +147,28 @@ struct SkillDetailSheet: View {
                             .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
+                    // Service badge (coral) — orthogonal to source; only shown for claude skills.
+                    if metadata.serviceTag == .claude {
+                        HStack(spacing: 4) {
+                            Image("IconAnthropic")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 12, height: 12)
+                            Text("Claude")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        }
+                        .foregroundStyle(.tronCoral)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(.clear)
+                                .glassEffect(.regular.tint(Color.tronCoral.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("From Claude skills directory")
+                    }
+
                     Spacer()
 
                     // Tags (purple for visual distinction)

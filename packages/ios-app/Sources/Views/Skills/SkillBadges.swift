@@ -68,21 +68,31 @@ private struct ProjectIcon: View {
 
 private struct ClaudeCapsule: View {
     var body: some View {
-        Text("claude")
-            .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-            .foregroundStyle(.tronCoral)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(Color.tronCoral.opacity(0.15))
-            .clipShape(Capsule())
-            .accessibilityLabel("From Claude skills directory")
+        HStack(spacing: 3) {
+            Image("IconAnthropic")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 9, height: 9)
+                .foregroundStyle(.tronCoral)
+            Text("claude")
+                .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+                .foregroundStyle(.tronCoral)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 1)
+        .background(Color.tronCoral.opacity(0.15))
+        .clipShape(Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("From Claude skills directory")
     }
 }
 
 private struct ClaudeIcon: View {
     var body: some View {
-        Image(systemName: "c.circle.fill")
-            .font(TronTypography.sans(size: TronTypography.sizeXXS))
+        Image("IconAnthropic")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 10, height: 10)
             .foregroundStyle(.tronCoral.opacity(0.7))
             .accessibilityLabel("From Claude skills directory")
     }
