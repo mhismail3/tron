@@ -44,9 +44,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::Parser;
 use parking_lot::RwLock;
-use tron::settings::db_path_policy::resolve_production_db_path;
-use tron::llm::factory as provider_factory;
 use tron::events::{ConnectionConfig, EventStore};
+use tron::llm::factory as provider_factory;
 use tron::llm::provider::ProviderFactory;
 use tron::runtime::orchestrator::orchestrator::Orchestrator;
 use tron::runtime::orchestrator::session_manager::SessionManager;
@@ -56,6 +55,7 @@ use tron::server::rpc::context::{AgentDeps, RpcContext};
 use tron::server::rpc::registry::MethodRegistry;
 use tron::server::server::TronServer;
 use tron::server::websocket::event_bridge::EventBridge;
+use tron::settings::db_path_policy::resolve_production_db_path;
 use tron::skills::registry::SkillRegistry;
 use tron::tools::registry::ToolRegistry;
 
@@ -125,7 +125,55 @@ struct Cli {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum Command {}
+enum Command {
+    /// Bearer-token administration for the WebSocket auth gate.
+    ///
+    /// Currently exposes a single `rotate` subcommand. Future operator
+    /// surface (status, revoke-device, etc.) will live here so we don't
+    /// pollute the top-level `tron` namespace.
+    Auth {
+        #[command(subcommand)]
+        action: AuthAction,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum AuthAction {
+    /// Generate a fresh bearer token, persist it to
+    /// `~/.tron/system/auth-token.json` (atomic, 0o600), and print it to
+    /// stdout. After this completes, every paired iOS device must
+    /// re-pair (their cached token is invalidated).
+    ///
+    /// Safe to run while the server is up — `BearerTokenStore`'s mtime
+    /// cache picks the new value up within a few seconds and starts
+    /// rejecting upgrade requests carrying the old token with HTTP 401.
+    Rotate,
+}
+
+/// Dispatch a CLI subcommand and return `true` if a subcommand consumed
+/// the invocation (caller should exit without starting the server).
+///
+/// Kept separate from `main` so the dispatch + side-effect surface stays
+/// small and unit-testable. Each branch is responsible for printing a
+/// human-readable result on stdout (the user is at a terminal) and a
+/// single-line summary on stderr (so `--quiet` redirection still leaves
+/// the audit trail visible).
+fn run_subcommand(cmd: &Command) -> Result<()> {
+    match cmd {
+        Command::Auth { action } => match action {
+            AuthAction::Rotate => rotate_bearer_token_cli(),
+        },
+    }
+}
+
+fn rotate_bearer_token_cli() -> Result<()> {
+    let path = tron::server::onboarding::bearer_token_path();
+    let token = tron::server::onboarding::rotate_bearer_token(&path)
+        .with_context(|| format!("Failed to rotate bearer token at {}", path.display()))?;
+    eprintln!("Bearer token rotated. All paired iOS devices must re-pair with the new token.");
+    println!("{token}");
+    Ok(())
+}
 
 /// Build the human-readable startup log line, naming the bind address
 /// and its trust assumption.
@@ -170,8 +218,6 @@ fn auth_path() -> PathBuf {
     tron::settings::loader::auth_path()
 }
 
-
-
 /// INVARIANT: Deploy crash-loop protection runs FIRST (pure filesystem, no dependencies).
 /// If the previous deploy crashed the process before self-test could run, this catches it
 /// after `MAX_DEPLOY_STARTUP_ATTEMPTS` and auto-rolls back to the backup binary.
@@ -214,9 +260,7 @@ fn init_directories() {
     for subdir in &[dirs::DB, dirs::DEPLOYMENT] {
         let _ = std::fs::create_dir_all(system.join(subdir));
     }
-    let _ = std::fs::create_dir_all(
-        system.join(dirs::APP_BUNDLE).join("Contents").join("MacOS"),
-    );
+    let _ = std::fs::create_dir_all(system.join(dirs::APP_BUNDLE).join("Contents").join("MacOS"));
     for subdir in &[
         dirs::KNOWLEDGE,
         dirs::REPORTS,
@@ -250,7 +294,10 @@ fn init_database(
     // `tron dev` alongside the launchd service aborts at startup
     // instead of silently racing on (session_id, sequence).
     let db_lock = tron::events::acquire_database_lock(&db_path).map_err(|e| match e {
-        tron::events::LockError::AlreadyLocked { db_path, holder_pid } => anyhow::anyhow!(
+        tron::events::LockError::AlreadyLocked {
+            db_path,
+            holder_pid,
+        } => anyhow::anyhow!(
             "Another Tron process (PID {holder_pid}) is already using {}. \
              Stop it (e.g. `launchctl stop com.tron.server` or `kill {holder_pid}`) and retry.",
             db_path.display()
@@ -287,7 +334,10 @@ fn init_logging(
     log_level_override: Option<&str>,
     origin: &str,
     stderr_enabled: bool,
-) -> Result<(tron::core::logging::TransportHandle, tokio::task::JoinHandle<()>)> {
+) -> Result<(
+    tron::core::logging::TransportHandle,
+    tokio::task::JoinHandle<()>,
+)> {
     // Dedicated connection, separate from pool. Must set WAL + busy_timeout to match
     // pool connections — without busy_timeout, concurrent writes cause SQLITE_BUSY errors.
     let log_conn =
@@ -384,11 +434,18 @@ struct McpState {
 }
 
 /// Create MCP router, discover tools, and register meta-tools.
-async fn init_mcp(settings: &tron::settings::TronSettings, settings_path: &std::path::Path) -> McpState {
+async fn init_mcp(
+    settings: &tron::settings::TronSettings,
+    settings_path: &std::path::Path,
+) -> McpState {
     let mcp_configs = settings.mcp.servers.clone();
     if mcp_configs.is_empty() {
         tracing::debug!("no MCP servers configured");
-        return McpState { search: None, call: None, router: None };
+        return McpState {
+            search: None,
+            call: None,
+            router: None,
+        };
     }
 
     tracing::info!(count = mcp_configs.len(), "starting MCP servers");
@@ -462,7 +519,10 @@ async fn init_services(
     // Crash recovery: recover partial LLM output from orphaned streaming journals
     let recovered = tron::runtime::orchestrator::recovery::recover_incomplete_turns(&event_store);
     if !recovered.is_empty() {
-        tracing::info!(count = recovered.len(), "recovered sessions from crash journals");
+        tracing::info!(
+            count = recovered.len(),
+            "recovered sessions from crash journals"
+        );
     } else {
         tracing::debug!("no orphaned journals found, clean startup");
     }
@@ -484,8 +544,7 @@ async fn init_services(
         tracing::info!("Brave API key loaded — WebSearch tool enabled");
     }
 
-    let (provider_factory, shared_http_client) =
-        init_provider_factory(settings).await;
+    let (provider_factory, shared_http_client) = init_provider_factory(settings).await;
 
     // Process manager for background tool execution
     let process_manager: Arc<dyn tron::tools::traits::ProcessManagerOps> = Arc::new(
@@ -494,9 +553,8 @@ async fn init_services(
             event_store.clone(),
         ),
     );
-    let output_buffer_registry = Arc::new(
-        tron::runtime::orchestrator::output_buffer::OutputBufferRegistry::new(),
-    );
+    let output_buffer_registry =
+        Arc::new(tron::runtime::orchestrator::output_buffer::OutputBufferRegistry::new());
 
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
@@ -532,18 +590,13 @@ async fn init_services(
 
     // Unified job manager (processes + subagents)
     let subagent_ops: Arc<dyn tron::tools::traits::SubagentOps> = subagent_manager.clone();
-    let job_manager: Arc<dyn tron::tools::traits::JobManagerOps> = Arc::new(
-        tron::runtime::orchestrator::job_manager::JobManager::new(
+    let job_manager: Arc<dyn tron::tools::traits::JobManagerOps> =
+        Arc::new(tron::runtime::orchestrator::job_manager::JobManager::new(
             process_manager.clone(),
             subagent_ops,
-        ),
-    );
+        ));
 
-    let tool_factory = build_tool_factory(
-        &tool_config,
-        &subagent_manager,
-        &job_manager,
-    );
+    let tool_factory = build_tool_factory(&tool_config, &subagent_manager, &job_manager);
 
     // Break circular dep: SubagentManager needs tool_factory to spawn children
     subagent_manager.set_tool_factory(tool_factory.clone());
@@ -554,8 +607,7 @@ async fn init_services(
         guardrails: None,
     });
     let shared_subagent_manager = Some(subagent_manager) as Option<Arc<SubagentManager>>;
-    let hook_abort_tracker =
-        Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new());
+    let hook_abort_tracker = Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new());
 
     let transcription_engine = spawn_transcription_sidecar();
 
@@ -631,9 +683,9 @@ fn build_tool_factory(
         registry.register(Arc::new(
             tron::tools::system::manage_process::ManageJobTool::new(jm_for_tools.clone()),
         ));
-        registry.register(Arc::new(
-            tron::tools::system::wait::WaitTool::new(jm_for_tools.clone()),
-        ));
+        registry.register(Arc::new(tron::tools::system::wait::WaitTool::new(
+            jm_for_tools.clone(),
+        )));
 
         // Re-register WebFetch with LLM summarizer (overrides the basic version)
         let summarizer: Arc<dyn tron::tools::traits::ContentSummarizer> = Arc::new(
@@ -711,11 +763,9 @@ fn init_cron(services: &ServiceState, origin: &str) -> CronState {
                 None
             }
         },
-        event_injector: Some(
-            Arc::new(tron::cron::impls::CronSystemEventInjector::new(
-                services.event_store.clone(),
-            )) as _,
-        ),
+        event_injector: Some(Arc::new(tron::cron::impls::CronSystemEventInjector::new(
+            services.event_store.clone(),
+        )) as _),
         http_client: services.tool_config.http_client.clone(),
         pool: services.event_store.pool().clone(),
     };
@@ -822,10 +872,10 @@ fn run_deploy_self_test(db_path: &std::path::Path, settings_path: &std::path::Pa
 
 /// Process deploy sentinel completion and send APNS notifications.
 fn process_deploy_sentinel(
-    #[cfg_attr(not(feature = "apns"), allow(unused_variables))]
-    push_for_deploy: &PushServiceOption,
-    #[cfg_attr(not(feature = "apns"), allow(unused_variables))]
-    pool_for_deploy: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    #[cfg_attr(not(feature = "apns"), allow(unused_variables))] push_for_deploy: &PushServiceOption,
+    #[cfg_attr(not(feature = "apns"), allow(unused_variables))] pool_for_deploy: &r2d2::Pool<
+        r2d2_sqlite::SqliteConnectionManager,
+    >,
 ) {
     /// Fetch all active device tokens with their environments from the database.
     #[cfg(feature = "apns")]
@@ -893,9 +943,7 @@ fn process_deploy_sentinel(
                 previous = sentinel.previous_commit.as_str(),
                 "post-deploy restart completed successfully"
             );
-            if let Err(e) =
-                tron::server::deploy::write_last_deployment(&deploy_dir, &sentinel)
-            {
+            if let Err(e) = tron::server::deploy::write_last_deployment(&deploy_dir, &sentinel) {
                 tracing::warn!(error = %e, "failed to write last-deployment.json");
             }
 
@@ -926,18 +974,22 @@ fn process_deploy_sentinel(
                 };
                 let tokens = active_device_tokens(pool_for_deploy);
                 if !tokens.is_empty() {
-                    send_push(push, tokens, tron::server::platform::apns::ApnsNotification {
-                        title: "Deploy Complete".into(),
-                        body,
-                        data: std::collections::HashMap::from([
-                            ("type".into(), "deploy.completed".into()),
-                            ("commit".into(), sentinel.commit.clone()),
-                        ]),
-                        priority: "high".into(),
-                        sound: None,
-                        badge: None,
-                        thread_id: None,
-                    });
+                    send_push(
+                        push,
+                        tokens,
+                        tron::server::platform::apns::ApnsNotification {
+                            title: "Deploy Complete".into(),
+                            body,
+                            data: std::collections::HashMap::from([
+                                ("type".into(), "deploy.completed".into()),
+                                ("commit".into(), sentinel.commit.clone()),
+                            ]),
+                            priority: "high".into(),
+                            sound: None,
+                            badge: None,
+                            thread_id: None,
+                        },
+                    );
                 }
             }
         }
@@ -957,22 +1009,26 @@ fn process_deploy_sentinel(
             if !tokens.is_empty() {
                 let ntype = data["type"].as_str().unwrap_or("deploy.rolled_back");
                 let reason = data["reason"].as_str().unwrap_or("unknown");
-                send_push(push, tokens, tron::server::platform::apns::ApnsNotification {
-                    title: "Deploy Rolled Back".into(),
-                    body: format!("Tron restored: {reason}"),
-                    data: std::collections::HashMap::from([
-                        ("type".into(), ntype.into()),
-                        (
-                            "commit".into(),
-                            data["commit"].as_str().unwrap_or("unknown").into(),
-                        ),
-                        ("reason".into(), reason.into()),
-                    ]),
-                    priority: "high".into(),
-                    sound: None,
-                    badge: None,
-                    thread_id: None,
-                });
+                send_push(
+                    push,
+                    tokens,
+                    tron::server::platform::apns::ApnsNotification {
+                        title: "Deploy Rolled Back".into(),
+                        body: format!("Tron restored: {reason}"),
+                        data: std::collections::HashMap::from([
+                            ("type".into(), ntype.into()),
+                            (
+                                "commit".into(),
+                                data["commit"].as_str().unwrap_or("unknown").into(),
+                            ),
+                            ("reason".into(), reason.into()),
+                        ]),
+                        priority: "high".into(),
+                        sound: None,
+                        badge: None,
+                        thread_id: None,
+                    },
+                );
             }
         }
         let _ = std::fs::remove_file(&pending_path);
@@ -1017,6 +1073,11 @@ fn build_rpc_context(
         job_manager: Some(services.job_manager.clone()),
         output_buffer_registry: Some(services.output_buffer_registry.clone()),
         hook_abort_tracker: services.hook_abort_tracker.clone(),
+        // Provisional defaults; `TronServer::new` overwrites both with the
+        // actual `ServerConfig::port` and the canonical onboarded marker path
+        // so handlers see the live values from the start of the first request.
+        ws_port: 0,
+        onboarded_marker_path: tron::server::onboarding::onboarded_marker_path(),
     }
 }
 
@@ -1060,6 +1121,16 @@ fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronSe
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Cli::parse();
+
+    // CLI subcommands short-circuit before touching the database, the
+    // logging subsystem, or the network. They do their own minimal
+    // filesystem work (e.g. atomic writes under `~/.tron/system/`) and
+    // exit. This keeps `tron auth rotate` safe to invoke while the
+    // server is running — the daemon's own `init_*` calls stay
+    // confined to the long-running process.
+    if let Some(ref cmd) = args.command {
+        return run_subcommand(cmd);
+    }
 
     // Phase 1: Pre-database filesystem operations
     init_crash_recovery();
@@ -1166,9 +1237,10 @@ async fn main() -> Result<()> {
     let bridge_handle = tokio::spawn(bridge.run());
 
     // Wire cron broadcaster and shutdown forwarding
-    cron.scheduler.set_broadcaster(Arc::new(
-        tron::cron::impls::CronEventBroadcaster::new(server.broadcast().clone()),
-    ));
+    cron.scheduler
+        .set_broadcaster(Arc::new(tron::cron::impls::CronEventBroadcaster::new(
+            server.broadcast().clone(),
+        )));
     {
         let cron_cancel = cron.cancel.clone();
         let shutdown_token = server.shutdown().token();
@@ -1185,7 +1257,10 @@ async fn main() -> Result<()> {
     run_deploy_self_test(&db_path, &settings_path_for_selftest);
 
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
-    tracing::info!("{}", format_listening_log(&addr, &bind_host_label, method_count));
+    tracing::info!(
+        "{}",
+        format_listening_log(&addr, &bind_host_label, method_count)
+    );
 
     process_deploy_sentinel(&push_for_deploy, &pool_for_deploy);
 

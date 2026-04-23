@@ -12,6 +12,15 @@ struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
     let connectionPresets: [ConnectionPreset]
+    /// Whether the server enforces bearer-token WebSocket auth.
+    /// `false` (default) means iOS may connect without an `Authorization`
+    /// header. `true` means a header must be present and match
+    /// `~/.tron/system/auth-token.json`. iOS reads this purely so the
+    /// Settings UI can display the current state and let the user toggle it.
+    let authEnforced: Bool
+    /// Cached Tailscale IP (e.g. `100.x.y.z`) the server reported. Populated by
+    /// the Mac wrapper / install scripts. Optional — older servers don't set it.
+    let tailscaleIp: String?
     let compaction: CompactionSettings
     let rules: RulesSettings
     let isolationMode: String
@@ -101,7 +110,11 @@ struct ServerSettings: Decodable {
     }
 
     private enum ServerKeys: String, CodingKey {
-        case defaultWorkspace, connectionPresets
+        case defaultWorkspace, connectionPresets, auth, tailscaleIp
+    }
+
+    private enum AuthKeys: String, CodingKey {
+        case enforced
     }
 
     private enum ContextKeys: String, CodingKey {
@@ -122,9 +135,19 @@ struct ServerSettings: Decodable {
         if let serverContainer = try? container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server) {
             defaultWorkspace = try? serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
             connectionPresets = (try? serverContainer.decodeIfPresent([ConnectionPreset].self, forKey: .connectionPresets)) ?? []
+            tailscaleIp = try? serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
+            // server.auth.enforced — defaults to false (Phase 2 default-off
+            // rollout). Older servers don't send the `auth` block at all.
+            if let authContainer = try? serverContainer.nestedContainer(keyedBy: AuthKeys.self, forKey: .auth) {
+                authEnforced = (try? authContainer.decodeIfPresent(Bool.self, forKey: .enforced)) ?? false
+            } else {
+                authEnforced = false
+            }
         } else {
             defaultWorkspace = nil
             connectionPresets = []
+            authEnforced = false
+            tailscaleIp = nil
         }
 
         // context.*
@@ -335,6 +358,16 @@ struct ServerSettingsUpdate: Encodable {
     struct ServerUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
+        /// Optional bearer-auth block — present only when the user toggles
+        /// the "Enforce bearer auth" control. Encoded as `{ "auth": { "enforced": true } }`.
+        var auth: AuthUpdate?
+        /// Updated Tailscale IP. Mac wrapper writes this on first launch; the
+        /// iOS UI lets the user override / clear if needed.
+        var tailscaleIp: String?
+
+        struct AuthUpdate: Encodable {
+            var enforced: Bool?
+        }
     }
 
     struct ContextUpdate: Encodable {

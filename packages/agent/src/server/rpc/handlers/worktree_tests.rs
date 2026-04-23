@@ -1258,6 +1258,8 @@ async fn commit_test_context_async() -> (
         hook_abort_tracker: Arc::new(
             crate::runtime::hooks::abort_tracker::HookAbortTracker::new(),
         ),
+        ws_port: 9847,
+        onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
     };
 
     (tmp, ctx, coord, sid, wt_path)

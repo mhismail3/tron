@@ -219,6 +219,7 @@ The `scripts/tron` CLI manages the full development and deployment lifecycle. Th
 | `tron status` | Show service status, PID, port |
 | `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm) |
 | `tron login` | Authenticate with a provider (`--label <name>` for multi-account) |
+| `tron auth rotate` | Rotate the WebSocket bearer token (forces every paired iOS device to re-pair) |
 | `tron logs` | Query database logs (`-h` for filter options) |
 | `tron errors` | Show recent errors |
 
@@ -291,6 +292,14 @@ All messages use JSON-RPC 2.0 framing:
 ```
 
 `system.ping` accepts optional `{"protocolVersion": <u32>, "clientVersion": <str>}` params. Clients that advertise a `protocolVersion` below `minClientProtocolVersion` receive a `CLIENT_VERSION_UNSUPPORTED` error with details naming both versions; clients that omit the field are accepted as pre-handshake (legacy).
+
+`system.getInfo` returns the running daemon's `version`, `uptime` (seconds), `activeSessions` count, `platform` / `arch`, plus three additive fields used by the iOS pairing flow:
+
+- `port` — WebSocket listening port (mirrors the `--port` CLI flag).
+- `tailscaleIp` — value of `server.tailscaleIp` from `settings.json`, or `null` if unset. iOS uses this to pre-fill the host field when scanning a QR code that omits it.
+- `paired` — `true` once `~/.tron/system/.onboarded` exists. The sentinel is touched by the Mac wizard at the end of its install flow OR on the first successful WS auth.
+
+These fields are additive; older clients that ignore them continue to work unchanged.
 
 ### Core (60)
 
@@ -418,7 +427,11 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
     "defaultProvider": "anthropic",
     "defaultModel": "claude-sonnet-4-6",
     "transcription": { "enabled": true },
-    "connectionPresets": []         // iOS quick-connect host/port presets
+    "connectionPresets": [],        // iOS quick-connect host/port presets
+    "tailscaleIp": null,            // Surfaced via system.getInfo so iOS pairing UI can pre-fill
+    "auth": {
+      "enforced": false             // Phase 2 flag: when true, every WS upgrade requires `Authorization: Bearer <token>`
+    }
   },
 
   "agent": {
@@ -519,6 +532,27 @@ tron login --label personal
 2. The provider's first non-active OAuth account
 3. The provider's first non-active API key
 4. Environment variable fallback (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+
+### WebSocket Bearer Token
+
+**Storage:** `~/.tron/system/auth-token.json` (mode 600, atomic writes)
+
+Distinct from provider auth above. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request when `server.auth.enforced` is `true`. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
+
+The token is generated lazily on first server start and stored alongside `auth.json` under `~/.tron/system/`. The Mac onboarding wizard (Phase 5) and iOS pairing flow (Phase 4) both display it for the user to copy into the iOS app's connection settings.
+
+```bash
+# Rotate the token (forces every paired iOS device to re-pair)
+tron auth rotate
+
+# The new token prints to stdout; copy it into iOS Settings → Server → Re-pair.
+```
+
+Rotation is serialized through a process-wide mutex and the on-disk write is atomic (`tempfile + sync_all + rename`), so a concurrent rotate from the menu bar and CLI cannot corrupt the file. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
+
+The first-run sentinel `~/.tron/system/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported to iOS via the `paired` field of `system.getInfo` (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
+
+See [`packages/agent/src/server/onboarding/mod.rs`](packages/agent/src/server/onboarding/mod.rs) for the full token + sentinel lifecycle.
 
 ---
 
@@ -690,6 +724,8 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   +-- Tron.app/                 macOS app bundle (Contents/MacOS/tron is the server binary)
 |   +-- settings.json             User settings (deep-merged over defaults)
 |   +-- auth.json                 LLM provider OAuth tokens + API keys (mode 600)
+|   +-- auth-token.json           WebSocket bearer token (mode 600, atomic writes; rotated by `tron auth rotate`)
+|   +-- .onboarded                First-run sentinel; presence drives `system.getInfo.paired` (Phase 2)
 |   +-- defaults/                 Seed copies of settings.json and auth.json (used on first install)
 |   +-- database/                 SQLite event store
 |   |   +-- log.db                Events, sessions, tasks, journals, cron state

@@ -4,8 +4,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
-use metrics::{counter, histogram};
-use parking_lot::{Mutex, RwLock};
 use crate::events::EventStore;
 use crate::llm::ProviderHealthTracker;
 use crate::llm::provider::ProviderFactory;
@@ -17,6 +15,8 @@ use crate::runtime::orchestrator::subagent_manager::SubagentManager;
 use crate::skills::registry::SkillRegistry;
 use crate::tools::registry::ToolRegistry;
 use crate::transcription::MlxEngine;
+use metrics::{counter, histogram};
+use parking_lot::{Mutex, RwLock};
 
 use crate::server::device::DeviceRequestBroker;
 use crate::server::rpc::errors::RpcError;
@@ -78,7 +78,11 @@ pub struct RpcContext {
     /// Broadcast manager for pushing events to WebSocket clients.
     pub broadcast_manager: Option<Arc<BroadcastManager>>,
     /// Pending OAuth flows keyed by flow ID (in-memory, TTL 10 min).
-    pub oauth_flows: Arc<tokio::sync::Mutex<std::collections::HashMap<String, crate::server::rpc::handlers::auth::PendingOAuthFlow>>>,
+    pub oauth_flows: Arc<
+        tokio::sync::Mutex<
+            std::collections::HashMap<String, crate::server::rpc::handlers::auth::PendingOAuthFlow>,
+        >,
+    >,
     /// MCP router for managing MCP servers (None = no MCP servers configured).
     pub mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
     /// Active display stream registry (shared with DisplayTool for on-demand cancellation).
@@ -88,9 +92,19 @@ pub struct RpcContext {
     /// Unified job manager for waiting on and managing processes + subagents.
     pub job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
     /// Output buffer registry for on-demand process output streaming.
-    pub output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    pub output_buffer_registry:
+        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     /// Shared abort tracker for cancelling stale hook subsessions across prompts.
     pub hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
+    /// WebSocket listening port. Surfaced via `system.getInfo` so iOS clients
+    /// can render the connection display ("Tailscale 100.x:9847") without
+    /// re-parsing user input. Set by `TronServer::new` from `ServerConfig::port`.
+    pub ws_port: u16,
+    /// Path to the first-run sentinel (`~/.tron/system/.onboarded`). Stored on
+    /// the context so tests can inject a temp path; production sets it to
+    /// [`crate::server::onboarding::onboarded_marker_path`]. Drives the `paired`
+    /// field returned by `system.getInfo`.
+    pub onboarded_marker_path: PathBuf,
 }
 
 impl RpcContext {

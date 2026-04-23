@@ -38,8 +38,7 @@ pub mod types;
 
 pub use errors::{Result, SettingsError};
 pub use loader::{
-    deep_merge, deploy_dir, load_settings, load_settings_from_path, settings_path,
-    tron_home_dir,
+    deep_merge, deploy_dir, load_settings, load_settings_from_path, settings_path, tron_home_dir,
 };
 pub use types::*;
 
@@ -371,7 +370,11 @@ mod tests {
             let mut flip = 0u8;
             while start.elapsed() < Duration::from_millis(80) {
                 let mut s = TronSettings::default();
-                s.server.heartbeat_interval_ms = if flip.is_multiple_of(2) { 10_000 } else { 20_000 };
+                s.server.heartbeat_interval_ms = if flip.is_multiple_of(2) {
+                    10_000
+                } else {
+                    20_000
+                };
                 init_settings(s);
                 flip = flip.wrapping_add(1);
             }

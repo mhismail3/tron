@@ -27,6 +27,14 @@ pub struct ServerSettings {
     /// Quick-connect connection presets for iOS clients.
     #[serde(default)]
     pub connection_presets: Vec<ConnectionPreset>,
+    /// Bearer-token authentication settings.
+    #[serde(default)]
+    pub auth: AuthSettings,
+    /// Cached Tailscale IP address. Populated by the Mac wrapper / install
+    /// scripts (or manually) so iOS clients can display "your Mac is at
+    /// 100.x.y.z" without shelling out to the `tailscale` binary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tailscale_ip: Option<String>,
 }
 
 impl Default for ServerSettings {
@@ -39,8 +47,28 @@ impl Default for ServerSettings {
             default_workspace: None,
             transcription: TranscriptionSettings::default(),
             connection_presets: Vec::new(),
+            auth: AuthSettings::default(),
+            tailscale_ip: None,
         }
     }
+}
+
+/// Bearer-token authentication settings.
+///
+/// When `enforced` is `false` (the default during the Phase 2 rollout),
+/// the WebSocket gate ignores the `Authorization` header entirely; clients
+/// may send a bearer or omit it freely. This is the safe default while iOS
+/// clients catch up to the new model.
+///
+/// When `enforced` is `true`, every WS upgrade must present a matching
+/// `Authorization: Bearer <token>` header or get a `401`. The token lives
+/// in `~/.tron/system/auth-token.json` and is rotatable via
+/// `tron auth rotate`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AuthSettings {
+    /// Whether the WebSocket bearer-token check is enforced.
+    pub enforced: bool,
 }
 
 /// A connection preset for quick-connect from iOS clients.
@@ -359,6 +387,58 @@ mod tests {
         assert_eq!(s.default_model, "claude-sonnet-4-6");
         assert!(s.default_workspace.is_none());
         assert!(s.connection_presets.is_empty());
+        // Phase 2: bearer auth defaults OFF so existing clients keep working.
+        assert!(!s.auth.enforced);
+        // Phase 2: tailscaleIp defaults absent (populated by installer scripts).
+        assert!(s.tailscale_ip.is_none());
+    }
+
+    #[test]
+    fn auth_settings_serde_camel_case() {
+        let s = ServerSettings::default();
+        let json = serde_json::to_value(&s).unwrap();
+        // `auth` key always present (camelCase, nested struct serialized).
+        assert!(json.get("auth").is_some());
+        assert_eq!(json["auth"]["enforced"], false);
+    }
+
+    #[test]
+    fn auth_settings_roundtrip_when_enforced() {
+        let json = serde_json::json!({
+            "auth": { "enforced": true }
+        });
+        let s: ServerSettings = serde_json::from_value(json).unwrap();
+        assert!(s.auth.enforced);
+        let back = serde_json::to_value(&s).unwrap();
+        assert_eq!(back["auth"]["enforced"], true);
+    }
+
+    #[test]
+    fn auth_settings_default_when_section_missing() {
+        // Existing settings.json files don't have an `auth` block; they
+        // must continue to deserialize without error and end up with the
+        // safe (off) default.
+        let s: ServerSettings = serde_json::from_str("{}").unwrap();
+        assert!(!s.auth.enforced);
+    }
+
+    #[test]
+    fn tailscale_ip_roundtrip_when_present() {
+        let json = serde_json::json!({
+            "tailscaleIp": "100.64.213.113"
+        });
+        let s: ServerSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(s.tailscale_ip.as_deref(), Some("100.64.213.113"));
+        let back = serde_json::to_value(&s).unwrap();
+        assert_eq!(back["tailscaleIp"], "100.64.213.113");
+    }
+
+    #[test]
+    fn tailscale_ip_omitted_when_absent() {
+        let s = ServerSettings::default();
+        let json = serde_json::to_value(&s).unwrap();
+        // skip_serializing_if = "Option::is_none" — the key shouldn't appear.
+        assert!(json.get("tailscaleIp").is_none());
     }
 
     #[test]
@@ -405,16 +485,17 @@ mod tests {
         // Users upgrading from older releases may have these keys in their
         // settings.json. Deserialization must ignore them cleanly (serde's
         // default behavior) rather than fail the load.
-        //   wsPort / healthPort / host / tailscaleIp / sessionTimeoutMs /
+        //   wsPort / healthPort / host / sessionTimeoutMs /
         //   anthropicAccount: never existed in ServerSettings as a real field.
         //   maxSessions / cacheTtl: removed in 754cbc6d (settings consolidation).
         //   maxConcurrentSessions: bogus default written by old tron-lib.sh
         //     (never decoded, purged from install template in this release).
+        // `tailscaleIp` is now a real field (Phase 2); covered separately
+        // in `tailscale_ip_roundtrip_when_present`.
         let json = serde_json::json!({
             "wsPort": 8082,
             "healthPort": 8083,
             "host": "0.0.0.0",
-            "tailscaleIp": "100.64.213.113",
             "sessionTimeoutMs": 3600000,
             "anthropicAccount": "personal",
             "maxSessions": 20,
@@ -542,10 +623,14 @@ mod tests {
 
     #[test]
     fn builtin_hook_is_enabled_lookup() {
-        let settings = vec![
-            BuiltinHookSetting { id: "builtin:title-gen".into(), enabled: false },
-        ];
-        assert!(!BuiltinHookSetting::is_enabled(&settings, "builtin:title-gen"));
+        let settings = vec![BuiltinHookSetting {
+            id: "builtin:title-gen".into(),
+            enabled: false,
+        }];
+        assert!(!BuiltinHookSetting::is_enabled(
+            &settings,
+            "builtin:title-gen"
+        ));
         assert!(BuiltinHookSetting::is_enabled(&settings, "builtin:unknown")); // not found → default true
     }
 

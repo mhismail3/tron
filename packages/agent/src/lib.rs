@@ -13,13 +13,13 @@ pub mod skills;
 pub mod transcription;
 
 // Services (depend on core/settings)
+pub mod cron;
 pub mod events;
 pub mod import;
 pub mod llm;
 pub mod mcp;
-pub mod tools;
-pub mod cron;
 pub mod prompt_library;
+pub mod tools;
 pub mod worktree;
 
 // Orchestration (depends on services)
@@ -27,4 +27,3 @@ pub mod runtime;
 
 // Interface (depends on everything)
 pub mod server;
-

@@ -1351,3 +1351,72 @@ _show_provider_login_status() {
         echo -e "  ${DIM}(not configured)${NC}"
     fi
 }
+
+# ─────────────────────────────────────────────────────────────────────
+# WebSocket bearer-token administration (Phase 2.7)
+#
+# `tron auth rotate` shells out to the installed binary (or the
+# dev-server build, falling back to a workspace `cargo run`) so that
+# rotation always uses the same on-disk path resolver as the daemon
+# itself. We don't reach into `$AUTH_FILE` here — that JSON holds OAuth
+# provider credentials, not the WebSocket bearer token, which lives at
+# `$TRON_HOME/system/auth-token.json` and is owned by
+# `crate::server::onboarding`.
+# ─────────────────────────────────────────────────────────────────────
+cmd_auth() {
+    local action="${1:-}"
+    case "$action" in
+        rotate)
+            shift
+            cmd_auth_rotate "$@"
+            ;;
+        ""|-h|--help)
+            echo ""
+            echo "Usage: tron auth <action>"
+            echo ""
+            echo "Actions:"
+            echo "  rotate    Generate a fresh WebSocket bearer token (forces iOS re-pair)"
+            echo ""
+            echo "After rotation every paired iOS device shows the .unauthorized state"
+            echo "and must re-pair using the new token. The token file lives at"
+            echo "  $TRON_HOME/system/auth-token.json"
+            echo "with mode 0o600."
+            echo ""
+            return 0
+            ;;
+        *)
+            print_error "Unknown auth action: $action"
+            cmd_auth --help
+            return 1
+            ;;
+    esac
+}
+
+cmd_auth_rotate() {
+    # Pick the freshest binary in priority order: installed deployment >
+    # dev-server build > workspace `cargo run`. This mirrors how
+    # cmd_status / cmd_rollback select binaries — keeping a single
+    # source of truth means the rotated token always lands at the path
+    # the running daemon will actually consult.
+    local binary=""
+    if [[ -x "$INSTALLED_BINARY" ]]; then
+        binary="$INSTALLED_BINARY"
+    elif [[ -x "$DEV_BINARY" ]]; then
+        binary="$DEV_BINARY"
+    elif [[ -x "$RELEASE_BINARY" ]]; then
+        binary="$RELEASE_BINARY"
+    elif [[ -x "$DEV_SERVER_BINARY" ]]; then
+        binary="$DEV_SERVER_BINARY"
+    fi
+
+    if [[ -n "$binary" ]]; then
+        "$binary" auth rotate "$@"
+    else
+        # Workspace fallback — dev tree, no built binary on disk yet.
+        if ! command -v cargo >/dev/null 2>&1; then
+            print_error "No tron binary found and cargo is unavailable. Build with 'cargo build' first."
+            return 1
+        fi
+        ( cd "$RUST_WORKSPACE" && cargo run --quiet --bin tron -- auth rotate "$@" )
+    fi
+}

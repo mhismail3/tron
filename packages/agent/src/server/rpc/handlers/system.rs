@@ -87,6 +87,22 @@ impl MethodHandler for PingHandler {
 }
 
 /// Returns server version, platform, and capability information.
+///
+/// Phase 2.6 added three new fields used by the iOS pairing UI:
+///
+/// - `port` — the server's WebSocket listening port. iOS displays
+///   `host:port` together; previously the port had to be inferred from the
+///   active preset, which broke when the user typed the host without a port.
+/// - `tailscaleIp` — the cached Tailscale IPv4 from
+///   `~/.tron/system/settings.json:server.tailscaleIp`. Surfaced as a
+///   recommended host on the iOS pairing screen. Optional — `null` when the
+///   server hasn't been wrapped by `Tron.app` yet.
+/// - `paired` — `true` once the `~/.tron/system/.onboarded` sentinel
+///   exists. Lets iOS distinguish "fresh server, run wizard" from
+///   "established server, just verify the bearer token."
+///
+/// All three are additive — older iOS clients that don't decode them are
+/// unaffected.
 pub struct GetInfoHandler;
 
 #[async_trait]
@@ -95,6 +111,8 @@ impl MethodHandler for GetInfoHandler {
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let uptime = ctx.server_start_time.elapsed().as_secs();
         let active_sessions = ctx.orchestrator.active_session_count();
+        let tailscale_ip = crate::settings::get_settings().server.tailscale_ip.clone();
+        let paired = crate::server::onboarding::is_onboarded(&ctx.onboarded_marker_path);
 
         Ok(serde_json::json!({
             "version": env!("CARGO_PKG_VERSION"),
@@ -103,6 +121,10 @@ impl MethodHandler for GetInfoHandler {
             "platform": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
             "runtime": "agent",
+            // ── Phase 2.6 additive fields (see struct docs) ──
+            "port": ctx.ws_port,
+            "tailscaleIp": tailscale_ip,
+            "paired": paired,
         }))
     }
 }
@@ -236,6 +258,104 @@ mod tests {
         assert_eq!(result["runtime"], "agent");
     }
 
+    // ── Phase 2.6: getInfo additive fields (port, tailscaleIp, paired) ──
+
+    /// `port` mirrors whatever the WebSocket listener bound. iOS uses this
+    /// to render `host:port` together so the user never has to type the
+    /// port — this test pins the contract: `port` is a number, present,
+    /// and reflects whatever was wired into `RpcContext::ws_port`.
+    #[tokio::test]
+    async fn get_info_returns_port() {
+        let mut ctx = make_test_context();
+        ctx.ws_port = 19_847;
+        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(
+            result["port"].as_u64(),
+            Some(19_847),
+            "port must echo ctx.ws_port (got: {:?})",
+            result["port"]
+        );
+    }
+
+    /// `tailscaleIp` is sourced from `settings.server.tailscaleIp` and is
+    /// `null` when unset. The iOS pairing screen treats `null` as "no
+    /// recommendation" rather than rendering the literal string — this
+    /// test pins that nullable contract so a future refactor that
+    /// accidentally substitutes `""` for `None` fails fast.
+    ///
+    /// Serializes against the process-global settings singleton via
+    /// `test_settings_lock`. The pattern follows
+    /// `server::rpc::handlers::settings`'s `SettingsTestGuard` — never
+    /// call `reset_settings` mid-test (a parallel test calling
+    /// `get_settings` would slow-load the *user's* real
+    /// `settings.json`, contaminating the cache with whatever
+    /// `tailscale_ip` is configured on the dev machine). Instead we
+    /// hold the lock for the whole body and call `init_settings`
+    /// directly so the slot is never `None`.
+    #[tokio::test]
+    async fn get_info_tailscale_ip_reflects_settings() {
+        let _lock = crate::settings::test_settings_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+
+        let ctx = make_test_context();
+
+        // Case 1: setting absent → null (Option::None serializes to JSON null).
+        crate::settings::init_settings(crate::settings::TronSettings::default());
+        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        assert!(
+            result.get("tailscaleIp").is_some(),
+            "tailscaleIp key must always be present (was: {result:?})"
+        );
+        assert!(
+            result["tailscaleIp"].is_null(),
+            "absent setting must serialize to JSON null, got: {:?}",
+            result["tailscaleIp"]
+        );
+
+        // Case 2: setting populated → string value echoed verbatim.
+        let mut populated = crate::settings::TronSettings::default();
+        populated.server.tailscale_ip = Some("100.64.213.113".into());
+        crate::settings::init_settings(populated);
+        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(
+            result["tailscaleIp"].as_str(),
+            Some("100.64.213.113"),
+            "populated setting must round-trip verbatim"
+        );
+
+        // Restore defaults so any subsequent test inheriting the cache
+        // sees a clean baseline (mirrors `SettingsTestGuard::drop`).
+        crate::settings::init_settings(crate::settings::TronSettings::default());
+    }
+
+    /// `paired` is `true` exactly when the `.onboarded` sentinel exists at
+    /// `ctx.onboarded_marker_path`. Sentinel existence is the entire signal
+    /// (the file's contents are deliberately empty) — this test pins that
+    /// contract end-to-end through the handler.
+    #[tokio::test]
+    async fn get_info_paired_reflects_sentinel() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join(".onboarded");
+        let mut ctx = make_test_context();
+        ctx.onboarded_marker_path = marker.clone();
+
+        // Sentinel absent → paired:false.
+        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(
+            result["paired"], false,
+            "missing sentinel must report paired:false"
+        );
+
+        // Sentinel present → paired:true.
+        crate::server::onboarding::mark_onboarded(&marker).expect("mark");
+        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(
+            result["paired"], true,
+            "present sentinel must report paired:true"
+        );
+    }
+
     #[tokio::test]
     async fn shutdown_acknowledged() {
         let ctx = make_test_context();
@@ -311,7 +431,10 @@ mod tests {
 
         // Human-readable message names both numbers.
         assert!(body.message.contains("0"));
-        assert!(body.message.contains(&MIN_CLIENT_PROTOCOL_VERSION.to_string()));
+        assert!(
+            body.message
+                .contains(&MIN_CLIENT_PROTOCOL_VERSION.to_string())
+        );
         assert!(body.message.to_lowercase().contains("upgrade"));
     }
 

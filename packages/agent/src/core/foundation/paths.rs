@@ -77,6 +77,16 @@ pub mod files {
     pub const SETTINGS_JSON: &str = "settings.json";
     /// Authentication credentials (API keys, tokens).
     pub const AUTH_JSON: &str = "auth.json";
+    /// WebSocket bearer token used by iOS clients to authenticate the
+    /// `Authorization: Bearer <token>` header on the WS upgrade request.
+    /// Stored in `~/.tron/system/auth-token.json` with mode `0o600`,
+    /// generated lazily on first server start when the file is absent.
+    pub const BEARER_TOKEN_JSON: &str = "auth-token.json";
+    /// First-run sentinel: empty marker file at `~/.tron/system/.onboarded`.
+    /// Touched by the Mac wizard at the end of its install flow OR on
+    /// the first successful WS authentication from any iOS device. The
+    /// `system.getInfo` RPC reports `paired: true` once it exists.
+    pub const ONBOARDED_MARKER: &str = ".onboarded";
     /// Canonical cron job definitions.
     pub const AUTOMATIONS_JSON: &str = "automations.json";
     /// Global system prompt override.
@@ -307,6 +317,25 @@ pub fn settings_path() -> PathBuf {
 /// `~/.tron/system/auth.json`
 pub fn auth_path() -> PathBuf {
     system_dir().join(files::AUTH_JSON)
+}
+
+/// `~/.tron/system/auth-token.json` — WebSocket bearer-token storage.
+///
+/// See [`files::BEARER_TOKEN_JSON`] for purpose. Read by the WS upgrade
+/// handler when `server.auth.enforced` is true; written by
+/// `server::onboarding::load_or_create_bearer_token` and
+/// `server::onboarding::rotate_bearer_token`.
+pub fn bearer_token_path() -> PathBuf {
+    system_dir().join(files::BEARER_TOKEN_JSON)
+}
+
+/// `~/.tron/system/.onboarded` — first-run sentinel marker.
+///
+/// See [`files::ONBOARDED_MARKER`] for purpose. Existence-checked by
+/// `system.getInfo` to populate the `paired` field; created by the Mac
+/// wizard or `server::onboarding::mark_onboarded`.
+pub fn onboarded_marker_path() -> PathBuf {
+    system_dir().join(files::ONBOARDED_MARKER)
 }
 
 /// `~/.tron/<workspace>/automations/automations.json`
@@ -624,7 +653,12 @@ mod tests {
     #[test]
     fn automations_path_correct() {
         let p = automations_path();
-        assert!(p.ends_with(format!("{}/{}/{}", dirs::WORKSPACE, dirs::CRON, files::AUTOMATIONS_JSON)));
+        assert!(p.ends_with(format!(
+            "{}/{}/{}",
+            dirs::WORKSPACE,
+            dirs::CRON,
+            files::AUTOMATIONS_JSON
+        )));
     }
 
     #[test]
@@ -636,7 +670,11 @@ mod tests {
     #[test]
     fn tron_binary_path_correct() {
         let p = tron_binary_path();
-        assert!(p.ends_with(format!("{}/{}/Contents/MacOS/tron", dirs::SYSTEM, dirs::APP_BUNDLE)));
+        assert!(p.ends_with(format!(
+            "{}/{}/Contents/MacOS/tron",
+            dirs::SYSTEM,
+            dirs::APP_BUNDLE
+        )));
     }
 
     #[test]
@@ -668,7 +706,11 @@ mod tests {
     #[test]
     fn transcription_worker_script_correct() {
         let p = transcription_worker_script();
-        assert!(p.ends_with(format!("{}/{}/worker.py", dirs::SYSTEM, dirs::TRANSCRIPTION)));
+        assert!(p.ends_with(format!(
+            "{}/{}/worker.py",
+            dirs::SYSTEM,
+            dirs::TRANSCRIPTION
+        )));
     }
 
     #[test]
@@ -727,7 +769,8 @@ mod tests {
     fn tron_rules_relative_matches_constants() {
         let expected = format!(".tron/{}/{}/{}", dirs::WORKSPACE, dirs::MEMORY, dirs::RULES);
         assert_eq!(
-            dirs::TRON_RULES_RELATIVE, expected,
+            dirs::TRON_RULES_RELATIVE,
+            expected,
             "TRON_RULES_RELATIVE is out of sync with WORKSPACE/MEMORY/RULES constants"
         );
     }

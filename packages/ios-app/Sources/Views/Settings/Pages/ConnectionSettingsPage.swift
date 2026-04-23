@@ -84,6 +84,77 @@ struct ConnectionSettingsPage: View {
                     .onTapGesture { focusedField = .port }
                 }
             }
+
+            // Authentication (server.auth.enforced)
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsSectionHeader(title: "Authentication")
+
+                SettingsCard {
+                    HStack {
+                        Image(systemName: "lock.shield")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.tronEmerald)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Require bearer token")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            Text("Reject /ws upgrades without a matching Authorization header.")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextSecondary)
+                        }
+                        Spacer()
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { settingsState.authEnforced },
+                                set: { newValue in
+                                    settingsState.authEnforced = newValue
+                                    updateServerSetting {
+                                        var update = ServerSettingsUpdate()
+                                        update.server = ServerSettingsUpdate.ServerUpdate(
+                                            auth: ServerSettingsUpdate.ServerUpdate.AuthUpdate(enforced: newValue)
+                                        )
+                                        return update
+                                    }
+                                }
+                            )
+                        )
+                        .labelsHidden()
+                        .tint(.tronEmerald)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 14)
+                }
+
+                SettingsCaption(text: "Tokens live in `~/.tron/system/auth-token.json` on your Mac. Rotate from the menu bar or with `tron auth rotate`.")
+            }
+
+            // Tailscale identity (read-only display when populated)
+            if let ip = settingsState.tailscaleIp, !ip.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    SettingsSectionHeader(title: "Tailscale")
+
+                    SettingsCard {
+                        HStack {
+                            Image(systemName: "network")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                .foregroundStyle(.tronEmerald)
+                                .frame(width: 18)
+                            Text("Tailscale IP")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            Spacer()
+                            Text(ip)
+                                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextSecondary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 14)
+                    }
+
+                    SettingsCaption(text: "Reported by your Mac. iOS uses this to display the recommended host on the pairing screen.")
+                }
+            }
         }
     }
 

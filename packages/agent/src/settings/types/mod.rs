@@ -359,7 +359,10 @@ mod tests {
             }
         });
         let settings: TronSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(settings.session.queue_drain_mode, QueueDrainMode::Sequential);
+        assert_eq!(
+            settings.session.queue_drain_mode,
+            QueueDrainMode::Sequential
+        );
     }
 
     #[test]
@@ -368,7 +371,10 @@ mod tests {
             "session": {}
         });
         let settings: TronSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(settings.session.queue_drain_mode, QueueDrainMode::Sequential);
+        assert_eq!(
+            settings.session.queue_drain_mode,
+            QueueDrainMode::Sequential
+        );
     }
 
     #[test]

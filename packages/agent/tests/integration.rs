@@ -81,6 +81,8 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         job_manager: None,
         output_buffer_registry: None,
         hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
+        ws_port: 0,
+        onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
     };
 
     let mut registry = MethodRegistry::new();
@@ -370,6 +372,8 @@ async fn boot_server_with_provider_and_handles(
         job_manager: None,
         output_buffer_registry: None,
         hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
+        ws_port: 0,
+        onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
     };
 
     let mut registry = MethodRegistry::new();

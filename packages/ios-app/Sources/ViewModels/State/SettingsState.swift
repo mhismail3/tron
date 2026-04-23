@@ -80,6 +80,17 @@ final class SettingsState {
 
     var connectionPresets: [ConnectionPreset] = []
 
+    // MARK: - Server Auth + Tailscale
+
+    /// Whether the server requires a bearer token on `/ws` upgrades. Default
+    /// `false` matches the Phase 2 "ship-but-not-enforced" rollout. iOS sends
+    /// the header unconditionally so flipping this is instantly safe.
+    var authEnforced: Bool = false
+    /// Cached Tailscale IP reported by the server. `nil` if the server hasn't
+    /// been configured yet (older installs or fresh deployment without the
+    /// Mac wrapper).
+    var tailscaleIp: String? = nil
+
     // MARK: - Preset Cache
 
     private static let presetsKey = "cachedConnectionPresets"
@@ -190,5 +201,8 @@ final class SettingsState {
         promptHistoryAutoPrune = settings.promptHistoryAutoPrune
 
         mcpSchemaRefreshTtlMs = settings.mcpSchemaRefreshTtlMs
+
+        authEnforced = settings.authEnforced
+        tailscaleIp = settings.tailscaleIp
     }
 }
