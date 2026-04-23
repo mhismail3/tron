@@ -278,6 +278,11 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                             payload: json!({
                                 "provider": "anthropic",
                                 "error": error_msg,
+                                // Imported api_error records don't carry the
+                                // original classification — mark as "unknown"
+                                // so iOS renders a generic-icon pill instead
+                                // of falling back to plain error text.
+                                "category": "unknown",
                                 "retryable": false,
                             }),
                         });

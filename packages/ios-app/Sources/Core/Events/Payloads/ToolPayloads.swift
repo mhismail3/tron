@@ -139,11 +139,17 @@ struct ToolErrorPayload {
 
 /// Payload for error.provider event
 /// Server: ErrorProviderEvent.payload
+///
+/// `category` is REQUIRED. The Rust schema is `deny_unknown_fields` and emits
+/// `"unknown"` literally when the classification layer couldn't narrow further
+/// (e.g. legacy imported api_error records). Missing category → decode fails
+/// → event is dropped from reconstruction, never silently rendered as
+/// plain text.
 struct ProviderErrorPayload {
     let provider: String
     let error: String
     let code: String?
-    let category: String?
+    let category: String
     let suggestion: String?
     let retryable: Bool
     let retryAfter: Int?
@@ -153,14 +159,15 @@ struct ProviderErrorPayload {
 
     init?(from payload: [String: AnyCodable]) {
         guard let provider = payload.string("provider"),
-              let error = payload.string("error") else {
+              let error = payload.string("error"),
+              let category = payload.string("category") else {
             return nil
         }
 
         self.provider = provider
         self.error = error
         self.code = payload.string("code")
-        self.category = payload.string("category")
+        self.category = category
         self.suggestion = payload.string("suggestion")
         self.retryable = payload.bool("retryable") ?? false
         self.retryAfter = payload.int("retryAfter")

@@ -615,7 +615,9 @@ final class EventDatabaseTests: XCTestCase {
                 "turn": AnyCodable(1)
             ]),
             SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "error.provider", timestamp: "2024-01-01T00:02:00Z", sequence: 4, payload: [
+                "provider": AnyCodable("anthropic"),
                 "error": AnyCodable("Rate limit exceeded"),
+                "category": AnyCodable("rate_limit"),
                 "retryable": AnyCodable(true),
                 "turn": AnyCodable(1)
             ])
@@ -820,7 +822,11 @@ final class EventDatabaseTests: XCTestCase {
                 "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 200, outputTokens: 100, turn: 1))
             ]),
             SessionEvent(id: "b2", parentId: "b1", sessionId: "s1", workspaceId: "/test", type: "error.provider", timestamp: "2024-01-01T00:02:01Z", sequence: 4, payload: [
-                "error": AnyCodable("Rate limit"), "turn": AnyCodable(1)
+                "provider": AnyCodable("openai"),
+                "error": AnyCodable("Rate limit"),
+                "category": AnyCodable("rate_limit"),
+                "retryable": AnyCodable(true),
+                "turn": AnyCodable(1)
             ])
         ]
 

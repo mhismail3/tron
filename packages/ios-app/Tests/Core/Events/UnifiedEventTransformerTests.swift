@@ -336,11 +336,16 @@ final class UnifiedEventTransformerTests: XCTestCase {
     }
 
     func testTransformProviderError() {
+        // I6 scorched-earth: category is required on error.provider.
+        // The handler renders every well-formed event as a system-role
+        // provider-error pill — the old assistant-role plain-text fallback
+        // is gone.
         let event = rawEvent(
             type: "error.provider",
             payload: [
                 "provider": AnyCodable("anthropic"),
                 "error": AnyCodable("Rate limit exceeded"),
+                "category": AnyCodable("rate_limit"),
                 "retryable": AnyCodable(true),
                 "retryAfter": AnyCodable(5000)
             ]
@@ -349,15 +354,30 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let message = UnifiedEventTransformer.transformPersistedEvent(event)
 
         XCTAssertNotNil(message)
-        XCTAssertEqual(message?.role, .assistant)
+        XCTAssertEqual(message?.role, .system)
 
-        if case .error(let text) = message?.content {
-            XCTAssertTrue(text.contains("anthropic"))
-            XCTAssertTrue(text.contains("Rate limit exceeded"))
-            XCTAssertTrue(text.contains("retrying"))
+        if case .systemEvent(.providerError(let data)) = message?.content {
+            XCTAssertEqual(data.provider, "anthropic")
+            XCTAssertEqual(data.message, "Rate limit exceeded")
+            XCTAssertEqual(data.category, "rate_limit")
+            XCTAssertTrue(data.retryable)
         } else {
-            XCTFail("Expected error content")
+            XCTFail("Expected provider-error pill content, got \(String(describing: message?.content))")
         }
+    }
+
+    func testTransformProviderError_missingCategoryDropsEvent() {
+        // Regression guard: the old code path silently fell back to a plain
+        // assistant-role error. Strict decoding drops the event instead.
+        let event = rawEvent(
+            type: "error.provider",
+            payload: [
+                "provider": AnyCodable("anthropic"),
+                "error": AnyCodable("Rate limit exceeded"),
+                "retryable": AnyCodable(true)
+            ]
+        )
+        XCTAssertNil(UnifiedEventTransformer.transformPersistedEvent(event))
     }
 
     // MARK: - Event Filtering Tests
@@ -816,6 +836,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(type: "error.provider", payload: [
                 "provider": AnyCodable("anthropic"),
                 "error": AnyCodable("Rate limited"),
+                "category": AnyCodable("rate_limit"),
                 "retryable": AnyCodable(true)
             ], timestamp: timestamp(3))
         ]

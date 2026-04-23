@@ -51,45 +51,30 @@ enum ErrorHandlers {
 
     /// Transform error.provider event into a ChatMessage.
     ///
-    /// Provider errors with a category are rendered as interactive notification pills.
-    /// Legacy events (no category) fall back to plain error text.
+    /// All provider errors render as interactive notification pills. The
+    /// payload's `category` is required — when the originating layer couldn't
+    /// classify, it emits `"unknown"` literally. `ErrorCategoryDisplay` maps
+    /// `"unknown"` to a generic-icon pill, so every category (including
+    /// `"unknown"`) takes the same rendering path.
     static func transformProviderError(
         _ payload: [String: AnyCodable],
         timestamp: Date
     ) -> ChatMessage? {
         guard let parsed = ProviderErrorPayload(from: payload) else { return nil }
 
-        // Enriched: render as provider error pill
-        if let category = parsed.category, category != "unknown" {
-            let data = ProviderErrorDetailData(
-                provider: parsed.provider,
-                category: category,
-                message: parsed.error,
-                suggestion: parsed.suggestion,
-                retryable: parsed.retryable,
-                statusCode: parsed.statusCode,
-                errorType: parsed.errorType,
-                model: parsed.model
-            )
-            return ChatMessage(
-                role: .system,
-                content: .providerError(data),
-                timestamp: timestamp
-            )
-        }
-
-        // Legacy fallback: plain error text
-        var errorText = "\(parsed.provider) error: \(parsed.error)"
-        if let code = parsed.code {
-            errorText = "[\(code)] \(errorText)"
-        }
-        if parsed.retryable, let retryAfter = parsed.retryAfter {
-            errorText += " (retrying in \(retryAfter)ms)"
-        }
-
+        let data = ProviderErrorDetailData(
+            provider: parsed.provider,
+            category: parsed.category,
+            message: parsed.error,
+            suggestion: parsed.suggestion,
+            retryable: parsed.retryable,
+            statusCode: parsed.statusCode,
+            errorType: parsed.errorType,
+            model: parsed.model
+        )
         return ChatMessage(
-            role: .assistant,
-            content: .error(errorText),
+            role: .system,
+            content: .providerError(data),
             timestamp: timestamp
         )
     }

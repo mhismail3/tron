@@ -276,6 +276,7 @@ mod session_event_tests {
             json!({
                 "provider": "anthropic",
                 "error": "rate limited",
+                "category": "rate_limit",
                 "retryable": true
             }),
         );
@@ -283,6 +284,7 @@ mod session_event_tests {
         match payload {
             SessionEventPayload::ErrorProvider(p) => {
                 assert_eq!(p.provider, "anthropic");
+                assert_eq!(p.category, "rate_limit");
                 assert!(p.retryable);
             }
             other => panic!("expected ErrorProvider, got {other:?}"),
@@ -458,7 +460,7 @@ mod session_event_tests {
             ),
             (
                 EventType::ErrorProvider,
-                json!({"provider": "p", "error": "e", "retryable": false}),
+                json!({"provider": "p", "error": "e", "category": "unknown", "retryable": false}),
             ),
             (
                 EventType::SubagentSpawned,

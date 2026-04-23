@@ -335,6 +335,10 @@ fn system_api_error() {
     assert_eq!(result.events[0].event_type, EventType::ErrorProvider);
     assert_eq!(result.events[0].payload["provider"], "anthropic");
     assert_eq!(result.events[0].payload["retryable"], false);
+    // Imported api_error records carry no original classification; emit
+    // "unknown" so the strict iOS decoder still accepts the event and the
+    // renderer shows a generic-icon pill.
+    assert_eq!(result.events[0].payload["category"], "unknown");
 }
 
 #[test]
