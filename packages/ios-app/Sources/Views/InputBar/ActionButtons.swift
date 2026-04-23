@@ -244,22 +244,24 @@ struct GlassAttachmentButton: View {
                         Label("Choose File", systemImage: "folder")
                     }
 
-                    if skillStore != nil {
-                        Divider()
+                    Divider()
 
+                    if skillStore != nil {
                         Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "skills") } label: {
                             Label("Add Skill", systemImage: "sparkles")
                         }
+                    }
+
+                    Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "promptLibrary") } label: {
+                        Label("Prompt Library", systemImage: "text.book.closed")
+                    }
+
+                    if skillStore != nil {
+                        Divider()
 
                         Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "draftPlan") } label: {
                             Label("Draft a Plan", systemImage: "list.clipboard")
                         }
-                    }
-
-                    Divider()
-
-                    Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "promptLibrary") } label: {
-                        Label("Prompt Library", systemImage: "text.book.closed")
                     }
                 } label: {
                     Color.clear
