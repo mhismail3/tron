@@ -21,8 +21,8 @@ use serde_json::{Value, json};
 use tracing::instrument;
 
 use crate::llm::auth::storage::{
-    acquire_auth_file_lock, clear_provider_auth, load_auth_storage, save_auth_storage,
-    save_named_api_key,
+    acquire_auth_file_lock, clear_provider_auth, load_auth_storage, load_or_init_for_write,
+    save_auth_storage, save_named_api_key,
 };
 use crate::llm::auth::types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, OAuthTokens, ProviderAuth, ServiceAuth,
@@ -134,8 +134,13 @@ fn build_provider_info(pa: &ProviderAuth) -> serde_json::Map<String, Value> {
 }
 
 /// Build the masked auth state response from raw storage.
-fn build_masked_state(auth_path: &Path) -> Value {
-    let storage = load_auth_storage(auth_path);
+///
+/// Returns `Err` if the auth file exists but is malformed — callers surface
+/// the error to the client rather than silently showing an empty auth state
+/// (which would lead a user to believe they have no credentials when they
+/// really have a broken file on disk).
+fn build_masked_state(auth_path: &Path) -> Result<Value, crate::llm::auth::errors::AuthError> {
+    let storage = load_auth_storage(auth_path)?;
 
     let mut providers = serde_json::Map::new();
 
@@ -169,7 +174,9 @@ fn build_masked_state(auth_path: &Path) -> Value {
 
             let _ = providers.insert(provider.to_string(), Value::Object(info));
         } else {
-            let pa = crate::llm::auth::storage::get_provider_auth(auth_path, provider);
+            let pa = storage
+                .as_ref()
+                .and_then(|s| s.get_provider_auth(provider));
 
             let info = if let Some(ref pa) = pa {
                 let mut info = build_provider_info(pa);
@@ -217,10 +224,10 @@ fn build_masked_state(auth_path: &Path) -> Value {
         let _ = services.insert(service.to_string(), Value::Object(info));
     }
 
-    json!({
+    Ok(json!({
         "providers": Value::Object(providers),
         "services": Value::Object(services),
-    })
+    }))
 }
 
 /// Build accounts list from provider auth (masked).

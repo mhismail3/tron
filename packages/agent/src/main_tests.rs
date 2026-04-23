@@ -318,6 +318,7 @@ async fn create_google_with_oauth_from_file() {
 
     // Set client_id (required for OAuth)
     let mut gpa = tron::llm::auth::storage::get_google_provider_auth(&path)
+        .unwrap()
         .unwrap_or_default();
     gpa.client_id = Some("test-client-id".to_string());
     tron::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();

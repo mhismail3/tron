@@ -283,6 +283,16 @@ pub(crate) fn map_auth_error(e: AuthError) -> RpcError {
                 "Malformed auth for {provider}: {details}. Re-authenticate via `tron auth {provider}`."
             ),
         },
+        // The top-level auth.json failed to parse. This is an operator-level
+        // issue: legacy single-field service shape, stray unknown key, or a
+        // version bump. Surface the actionable detail so the iOS settings
+        // page renders it verbatim instead of masking every provider as
+        // "not configured" — which was the previous (silent-swallow) bug.
+        A::MalformedAuthFile { path, details } => RpcError::Internal {
+            message: format!(
+                "Malformed auth file at '{path}': {details}. Fix the file or run `tron auth reset` to wipe and re-authenticate."
+            ),
+        },
         // Genuinely internal — IO / JSON / HTTP transport failures.
         // The Display impl preserves the underlying detail for logs.
         A::Http(_) | A::Json(_) | A::Io(_) => RpcError::Internal {

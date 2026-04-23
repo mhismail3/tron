@@ -183,7 +183,7 @@ pub async fn load_server_auth_with_client(
     credential_override: Option<&ActiveCredential>,
     client: &reqwest::Client,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    let Some(pa) = super::storage::get_provider_auth(auth_path, "anthropic") else {
+    let Some(pa) = super::storage::get_provider_auth(auth_path, "anthropic")? else {
         return Ok(None);
     };
 
@@ -210,11 +210,21 @@ pub async fn load_server_auth_with_client(
 }
 
 /// Read the current tokens for a specific account from auth.json.
+///
+/// Returns `None` both when the provider is not configured and when the
+/// account does not exist. A malformed auth file surfaces as `None` here —
+/// the caller is the refresh path, where the outer `maybe_refresh_tokens`
+/// flow already holds tokens in-memory and treats a missing on-disk copy
+/// as "other process didn't update", so masking a parse error is OK in
+/// this narrow branch. Top-level load paths use `get_provider_auth`
+/// directly and propagate the error.
 fn read_tokens_from_disk(
     auth_path: &std::path::Path,
     account_label: &str,
 ) -> Option<OAuthTokens> {
-    let pa = super::storage::get_provider_auth(auth_path, "anthropic")?;
+    let pa = super::storage::get_provider_auth(auth_path, "anthropic")
+        .ok()
+        .flatten()?;
     pa.accounts?
         .into_iter()
         .find(|a| a.label == account_label)

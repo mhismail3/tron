@@ -42,6 +42,23 @@ pub enum AuthError {
         /// Underlying deserialization error.
         details: String,
     },
+
+    /// The on-disk auth file failed top-level deserialization — a legacy
+    /// single-field service shape (`services.x.apiKey: "k"` instead of the
+    /// current `services.x.apiKeys: ["k"]`), a stray unknown key, or a
+    /// version bump. The whole file is unusable until the user repairs it;
+    /// surfacing as a hard error prevents silently masking every configured
+    /// provider.
+    #[error(
+        "malformed auth file at '{path}': {details}. Fix the file or run \
+         `tron auth reset` to wipe and re-authenticate."
+    )]
+    MalformedAuthFile {
+        /// Absolute path of the bad file.
+        path: String,
+        /// Underlying parse error.
+        details: String,
+    },
 }
 
 impl AuthError {
@@ -58,6 +75,7 @@ impl AuthError {
             Self::TokenExpired(_)
             | Self::NotConfigured(_)
             | Self::MalformedProviderAuth { .. }
+            | Self::MalformedAuthFile { .. }
             | Self::Json(_)
             | Self::Io(_) => false,
         }

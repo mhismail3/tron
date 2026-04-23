@@ -454,7 +454,7 @@ async fn init_services(
     origin: &str,
     push_service: PushServiceOption,
     mcp: McpState,
-) -> ServiceState {
+) -> anyhow::Result<ServiceState> {
     let session_manager =
         Arc::new(SessionManager::new(event_store.clone()).with_origin(origin.to_owned()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
@@ -472,10 +472,14 @@ async fn init_services(
         tron::runtime::memory::MemoryRegistry::new(),
     ));
 
-    // Load Brave API key for web search
-    let brave_api_key = tron::llm::auth::storage::get_service_api_keys(&auth_path(), "brave")
-        .into_iter()
-        .next();
+    // Load Brave API key for web search. A malformed auth.json surfaces as
+    // a hard startup error rather than silently dropping the key and disabling
+    // the tool — the user needs to know the file is broken.
+    let brave_api_key: Option<String> =
+        tron::llm::auth::storage::get_service_api_keys(&auth_path(), "brave")
+            .map_err(|e| anyhow::anyhow!("failed to load Brave auth: {e}"))?
+            .into_iter()
+            .next();
     if brave_api_key.is_some() {
         tracing::info!("Brave API key loaded — WebSearch tool enabled");
     }
@@ -555,7 +559,7 @@ async fn init_services(
 
     let transcription_engine = spawn_transcription_sidecar();
 
-    ServiceState {
+    Ok(ServiceState {
         event_store,
         session_manager,
         orchestrator,
@@ -569,7 +573,7 @@ async fn init_services(
         job_manager,
         output_buffer_registry,
         transcription_engine,
-    }
+    })
 }
 
 /// Create provider factory and check startup auth availability.
@@ -1107,7 +1111,7 @@ async fn main() -> Result<()> {
     let mcp = init_mcp(&settings, &settings_path).await;
     let mcp_router = mcp.router.clone();
     let mcp_router_for_shutdown = mcp_router.clone();
-    let services = init_services(event_store, &settings, &origin, push_service, mcp).await;
+    let services = init_services(event_store, &settings, &origin, push_service, mcp).await?;
 
     // Phase 4: Cron, worktree, RPC context
     let cron = init_cron(&services, &origin);

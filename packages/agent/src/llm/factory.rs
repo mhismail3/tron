@@ -294,8 +294,10 @@ impl DefaultProviderFactory {
         // token refresh. Without this, ensure_valid_tokens() would fail after
         // the access token expires (~1 hour).
         let provider_settings = if google_auth_is_oauth {
-            let gpa =
-                crate::llm::auth::storage::get_google_provider_auth(&self.auth_path);
+            let gpa = crate::llm::auth::storage::get_google_provider_auth(&self.auth_path)
+                .map_err(|e| ProviderError::Auth {
+                    message: e.to_string(),
+                })?;
             crate::llm::google::types::GoogleApiSettings {
                 token_url: None,
                 client_id: gpa.as_ref().and_then(|g| g.client_id.clone()),
@@ -324,9 +326,14 @@ impl DefaultProviderFactory {
         ))
     }
     fn create_minimax(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let api_key = if let Some(pa) =
-            crate::llm::auth::storage::get_provider_auth(&self.auth_path, "minimax")
-        {
+        let provider_auth = crate::llm::auth::storage::get_provider_auth(
+            &self.auth_path,
+            "minimax",
+        )
+        .map_err(|e| ProviderError::Auth {
+            message: e.to_string(),
+        })?;
+        let api_key = if let Some(pa) = provider_auth {
             if let Some(key) = pa.api_keys.as_ref().and_then(|k| k.first()).map(|k| k.key.clone()) {
                 info!("using MiniMax API key from auth.json");
                 key
@@ -367,9 +374,14 @@ impl DefaultProviderFactory {
     }
 
     fn create_kimi(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let api_key = if let Some(pa) =
-            crate::llm::auth::storage::get_provider_auth(&self.auth_path, "kimi")
-        {
+        let provider_auth = crate::llm::auth::storage::get_provider_auth(
+            &self.auth_path,
+            "kimi",
+        )
+        .map_err(|e| ProviderError::Auth {
+            message: e.to_string(),
+        })?;
+        let api_key = if let Some(pa) = provider_auth {
             if let Some(key) = pa.api_keys.as_ref().and_then(|k| k.first()).map(|k| k.key.clone()) {
                 info!("using Kimi API key from auth.json");
                 key

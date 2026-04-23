@@ -187,7 +187,7 @@ pub async fn load_server_auth_with_client(
     credential_override: Option<&ActiveCredential>,
     client: &reqwest::Client,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    let Some(pa) = super::storage::get_provider_auth(auth_path, PROVIDER_KEY) else {
+    let Some(pa) = super::storage::get_provider_auth(auth_path, PROVIDER_KEY)? else {
         return Ok(None);
     };
 
@@ -213,11 +213,17 @@ pub async fn load_server_auth_with_client(
 }
 
 /// Read the current tokens for a specific account from auth.json.
+///
+/// Returns `None` both when the provider is not configured and when the
+/// account does not exist. A malformed auth file surfaces as `None` here —
+/// see the mirror doc comment in `anthropic.rs` for the rationale.
 fn read_tokens_from_disk(
     auth_path: &std::path::Path,
     account_label: &str,
 ) -> Option<OAuthTokens> {
-    let pa = super::storage::get_provider_auth(auth_path, PROVIDER_KEY)?;
+    let pa = super::storage::get_provider_auth(auth_path, PROVIDER_KEY)
+        .ok()
+        .flatten()?;
     pa.accounts?
         .into_iter()
         .find(|a| a.label == account_label)
@@ -719,7 +725,9 @@ mod tests {
 
         // Set active to a non-existent account (simulates deletion without clearing active)
         // Manually write the active_credential since set_active_credential validates
-        let mut storage = crate::llm::auth::storage::load_auth_storage(&path).unwrap();
+        let mut storage = crate::llm::auth::storage::load_auth_storage(&path)
+            .unwrap()
+            .expect("auth storage written in test setup");
         let mut pa = storage.get_provider_auth(PROVIDER_KEY).unwrap();
         pa.active_credential = Some(ActiveCredential::OAuth { label: "deleted".to_string() });
         storage.set_provider_auth(PROVIDER_KEY, &pa);

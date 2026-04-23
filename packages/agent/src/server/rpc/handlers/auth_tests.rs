@@ -216,7 +216,9 @@ async fn auth_update_sets_api_key() {
     assert!(hint.contains("..."));
 
     // Verify on disk
-    let pa = crate::llm::auth::storage::get_provider_auth(&ctx.auth_path, "anthropic").unwrap();
+    let pa = crate::llm::auth::storage::get_provider_auth(&ctx.auth_path, "anthropic")
+        .unwrap()
+        .expect("provider auth written by test setup");
     let api_keys = pa.api_keys.unwrap();
     assert_eq!(api_keys[0].key, "sk-ant-api03-newkey123456789");
 }

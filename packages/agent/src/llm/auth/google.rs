@@ -291,15 +291,24 @@ pub fn save_oauth_credentials(
     client_id: &str,
     client_secret: &str,
 ) -> Result<(), AuthError> {
-    let mut gpa = super::storage::get_google_provider_auth(auth_path).unwrap_or_default();
+    let mut gpa = super::storage::get_google_provider_auth(auth_path)?
+        .unwrap_or_default();
     gpa.client_id = Some(client_id.to_string());
     gpa.client_secret = Some(client_secret.to_string());
     super::storage::save_google_provider_auth(auth_path, &gpa)
 }
 
 /// Get stored Google OAuth credentials.
+///
+/// Returns `None` when auth.json is missing, when Google is not configured,
+/// or when either `clientId`/`clientSecret` is absent. A malformed auth file
+/// also surfaces as `None` here — this is a best-effort getter used only by
+/// the OAuth UI flow to pre-populate fields; the top-level load path
+/// (`load_server_auth`) propagates parse errors via `try_get_google_provider_auth`.
 pub fn get_oauth_credentials(auth_path: &std::path::Path) -> Option<(String, String)> {
-    let gpa = super::storage::get_google_provider_auth(auth_path)?;
+    let gpa = super::storage::get_google_provider_auth(auth_path)
+        .ok()
+        .flatten()?;
     let id = gpa.client_id?;
     let secret = gpa.client_secret?;
     Some((id, secret))
@@ -366,6 +375,7 @@ mod tests {
 
         // Set client_id (required for OAuth)
         let mut gpa = crate::llm::auth::storage::get_google_provider_auth(&path)
+            .unwrap()
             .unwrap_or_default();
         gpa.client_id = Some("test-client-id".to_string());
         crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
@@ -400,6 +410,7 @@ mod tests {
 
         // Set client_id (required for OAuth)
         let mut gpa = crate::llm::auth::storage::get_google_provider_auth(&path)
+            .unwrap()
             .unwrap_or_default();
         gpa.client_id = Some("test-client-id".to_string());
         crate::llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();

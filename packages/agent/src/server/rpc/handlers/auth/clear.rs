@@ -32,7 +32,7 @@ impl MethodHandler for ClearAuthHandler {
                     clear_service_auth(&auth_path, service).map_err(map_auth_error)?;
                 }
 
-                Ok(build_masked_state(&auth_path))
+                build_masked_state(&auth_path).map_err(map_auth_error)
             })
             .await?;
 
@@ -42,11 +42,11 @@ impl MethodHandler for ClearAuthHandler {
 }
 
 fn clear_service_auth(auth_path: &Path, service: &str) -> Result<(), crate::llm::auth::errors::AuthError> {
-    let Some(mut storage) = load_auth_storage(auth_path) else {
+    let Some(mut storage) = load_auth_storage(auth_path)? else {
         return Ok(());
     };
     if let Some(ref mut services) = storage.services {
-        let _ = services.remove(service);
+        let _: Option<_> = services.remove(service);
     }
     save_auth_storage(auth_path, &mut storage)
 }

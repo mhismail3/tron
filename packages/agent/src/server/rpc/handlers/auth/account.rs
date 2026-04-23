@@ -23,7 +23,7 @@ impl MethodHandler for RenameAccountHandler {
                 )
                 .map_err(map_auth_error)?;
 
-                Ok(build_masked_state(&auth_path))
+                build_masked_state(&auth_path).map_err(map_auth_error)
             })
             .await?;
 
@@ -74,7 +74,7 @@ impl MethodHandler for SetActiveCredentialHandler {
                         message: format!("Failed to set active credential: {e}"),
                     })?;
 
-                Ok(build_masked_state(&auth_path))
+                build_masked_state(&auth_path).map_err(map_auth_error)
             })
             .await?;
 
@@ -105,7 +105,7 @@ impl MethodHandler for RemoveAccountHandler {
                 crate::llm::auth::storage::remove_account(&auth_path, &provider, &label)
                     .map_err(map_auth_error)?;
 
-                Ok(build_masked_state(&auth_path))
+                build_masked_state(&auth_path).map_err(map_auth_error)
             })
             .await?;
 
@@ -136,7 +136,7 @@ impl MethodHandler for RemoveApiKeyHandler {
                 crate::llm::auth::storage::remove_named_api_key(&auth_path, &provider, &label)
                     .map_err(map_auth_error)?;
 
-                Ok(build_masked_state(&auth_path))
+                build_masked_state(&auth_path).map_err(map_auth_error)
             })
             .await?;
 

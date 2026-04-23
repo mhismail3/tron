@@ -20,28 +20,50 @@ pub fn auth_file_path(data_dir: &Path) -> PathBuf {
 
 /// Load auth storage from file (sync).
 ///
-/// Returns `None` if the file doesn't exist or is invalid.
-pub fn load_auth_storage(path: &Path) -> Option<AuthStorage> {
+/// * `Ok(None)`     — file does not exist (first-use on a clean machine).
+/// * `Ok(Some(..))` — file exists, parsed successfully, version matches.
+/// * `Err(..)`      — read I/O failure, parse failure, or unsupported version.
+///
+/// INVARIANT: A parse error surfaces as [`AuthError::MalformedAuthFile`] and
+/// is **never** silently treated as "no auth configured". Earlier versions
+/// returned `Option<AuthStorage>` and logged a `warn!` on parse failure,
+/// which silently masked the entire file and made a single malformed
+/// provider or service block look like a global "no auth" state. Callers
+/// must distinguish "not configured" (`Ok(None)`) from "broken on disk"
+/// (`Err(_)`) — especially writers, which would otherwise `unwrap_or_default()`
+/// and overwrite the user's real file with an empty default.
+pub fn load_auth_storage(path: &Path) -> Result<Option<AuthStorage>, AuthError> {
     let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => {
-            tracing::warn!("failed to read auth file: {e}");
-            return None;
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(AuthError::Io(e)),
     };
 
     match serde_json::from_str::<AuthStorage>(&data) {
-        Ok(storage) if storage.version == 1 => Some(storage),
-        Ok(storage) => {
-            tracing::warn!("unsupported auth storage version: {}", storage.version);
-            None
-        }
-        Err(e) => {
-            tracing::warn!("failed to parse auth file: {e}");
-            None
-        }
+        Ok(storage) if storage.version == 1 => Ok(Some(storage)),
+        Ok(storage) => Err(AuthError::MalformedAuthFile {
+            path: path.display().to_string(),
+            details: format!(
+                "unsupported auth storage version: {} (expected 1)",
+                storage.version
+            ),
+        }),
+        Err(e) => Err(AuthError::MalformedAuthFile {
+            path: path.display().to_string(),
+            details: e.to_string(),
+        }),
     }
+}
+
+/// Load auth storage for a write path.
+///
+/// Returns the parsed storage if the file exists, a fresh default if the file
+/// is missing (legitimate first-use), or an error if the file is present but
+/// malformed. Writers must use this helper to avoid the historical
+/// `load_auth_storage(path).unwrap_or_default()` footgun, which silently
+/// replaced a corrupt file with an empty default and destroyed user data.
+pub fn load_or_init_for_write(path: &Path) -> Result<AuthStorage, AuthError> {
+    Ok(load_auth_storage(path)?.unwrap_or_default())
 }
 
 /// Save auth storage to file (sync).
@@ -90,13 +112,23 @@ fn atomic_write_0600(parent: &Path, final_path: &Path, contents: &[u8]) -> Resul
 }
 
 /// Get provider auth from storage file.
-pub fn get_provider_auth(path: &Path, provider: &str) -> Option<ProviderAuth> {
-    load_auth_storage(path)?.get_provider_auth(provider)
+///
+/// * `Ok(None)`      — auth file missing, or the provider is not configured.
+/// * `Ok(Some(..))`  — provider is configured.
+/// * `Err(..)`       — auth file is malformed on disk (propagated from
+///   [`load_auth_storage`]).
+pub fn get_provider_auth(
+    path: &Path,
+    provider: &str,
+) -> Result<Option<ProviderAuth>, AuthError> {
+    Ok(load_auth_storage(path)?.and_then(|s| s.get_provider_auth(provider)))
 }
 
 /// Get Google provider auth from storage file.
-pub fn get_google_provider_auth(path: &Path) -> Option<GoogleProviderAuth> {
-    load_auth_storage(path)?.get_google_auth()
+pub fn get_google_provider_auth(
+    path: &Path,
+) -> Result<Option<GoogleProviderAuth>, AuthError> {
+    Ok(load_auth_storage(path)?.and_then(|s| s.get_google_auth()))
 }
 
 /// Strict Google provider auth getter — returns `Err` when the stored
@@ -106,7 +138,7 @@ pub fn get_google_provider_auth(path: &Path) -> Option<GoogleProviderAuth> {
 pub fn try_get_google_provider_auth(
     path: &Path,
 ) -> Result<Option<GoogleProviderAuth>, AuthError> {
-    let Some(storage) = load_auth_storage(path) else {
+    let Some(storage) = load_auth_storage(path)? else {
         return Ok(None);
     };
     storage
@@ -118,15 +150,22 @@ pub fn try_get_google_provider_auth(
 }
 
 /// Get service auth from storage file.
-pub fn get_service_auth(path: &Path, service: &str) -> Option<ServiceAuth> {
-    load_auth_storage(path)?.get_service_auth(service).cloned()
+pub fn get_service_auth(
+    path: &Path,
+    service: &str,
+) -> Result<Option<ServiceAuth>, AuthError> {
+    Ok(load_auth_storage(path)?.and_then(|s| s.get_service_auth(service).cloned()))
 }
 
 /// Get service API keys from storage file.
-pub fn get_service_api_keys(path: &Path, service: &str) -> Vec<String> {
-    load_auth_storage(path)
+///
+/// Returns an empty vec when the file is missing or the service is not
+/// configured; propagates [`AuthError::MalformedAuthFile`] when the file
+/// exists but fails to parse.
+pub fn get_service_api_keys(path: &Path, service: &str) -> Result<Vec<String>, AuthError> {
+    Ok(load_auth_storage(path)?
         .map(|s| s.get_service_api_keys(service))
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 /// Save OAuth tokens for a named account.
@@ -136,7 +175,7 @@ pub fn save_account_oauth_tokens(
     label: &str,
     tokens: &OAuthTokens,
 ) -> Result<(), AuthError> {
-    let mut storage = load_auth_storage(path).unwrap_or_default();
+    let mut storage = load_or_init_for_write(path)?;
     let mut pa = storage.get_provider_auth(provider).unwrap_or_default();
 
     let accounts = pa.accounts.get_or_insert_with(Vec::new);
@@ -162,7 +201,7 @@ pub fn rename_account(
     old_label: &str,
     new_label: &str,
 ) -> Result<(), AuthError> {
-    let mut storage = load_auth_storage(path).unwrap_or_default();
+    let mut storage = load_or_init_for_write(path)?;
     let mut pa = storage.get_provider_auth(provider).unwrap_or_default();
 
     let accounts = pa.accounts.get_or_insert_with(Vec::new);
@@ -191,13 +230,14 @@ pub fn rename_account(
 }
 
 /// Get account labels for a provider.
-pub fn get_account_labels(path: &Path, provider: &str) -> Vec<String> {
-    let Some(pa) = get_provider_auth(path, provider) else {
-        return Vec::new();
+pub fn get_account_labels(path: &Path, provider: &str) -> Result<Vec<String>, AuthError> {
+    let Some(pa) = get_provider_auth(path, provider)? else {
+        return Ok(Vec::new());
     };
-    pa.accounts
+    Ok(pa
+        .accounts
         .map(|accts| accts.iter().map(|a| a.label.clone()).collect())
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 /// Save a named API key for a provider.
@@ -216,7 +256,7 @@ pub fn save_named_api_key(
         )));
     }
 
-    let mut storage = load_auth_storage(path).unwrap_or_default();
+    let mut storage = load_or_init_for_write(path)?;
     let mut pa = storage.get_provider_auth(provider).unwrap_or_default();
 
     let api_keys = pa.api_keys.get_or_insert_with(Vec::new);
@@ -237,7 +277,7 @@ pub fn save_named_api_key(
 ///
 /// If the removed key was the active credential, clears `active_credential`.
 pub fn remove_named_api_key(path: &Path, provider: &str, label: &str) -> Result<(), AuthError> {
-    let Some(mut storage) = load_auth_storage(path) else {
+    let Some(mut storage) = load_auth_storage(path)? else {
         return Ok(());
     };
     let Some(mut pa) = storage.get_provider_auth(provider) else {
@@ -267,7 +307,7 @@ pub fn remove_named_api_key(path: &Path, provider: &str, label: &str) -> Result<
 ///
 /// If the removed account was the active credential, clears `active_credential`.
 pub fn remove_account(path: &Path, provider: &str, label: &str) -> Result<(), AuthError> {
-    let Some(mut storage) = load_auth_storage(path) else {
+    let Some(mut storage) = load_auth_storage(path)? else {
         return Ok(());
     };
     let Some(mut pa) = storage.get_provider_auth(provider) else {
@@ -301,7 +341,7 @@ pub fn set_active_credential(
     provider: &str,
     credential: &ActiveCredential,
 ) -> Result<(), AuthError> {
-    let mut storage = load_auth_storage(path).unwrap_or_default();
+    let mut storage = load_or_init_for_write(path)?;
     let mut pa = storage.get_provider_auth(provider).unwrap_or_default();
 
     // Validate the credential exists
@@ -339,7 +379,7 @@ pub fn set_active_credential(
 
 /// Clear the active credential for a provider (falls back to default priority).
 pub fn clear_active_credential(path: &Path, provider: &str) -> Result<(), AuthError> {
-    let Some(mut storage) = load_auth_storage(path) else {
+    let Some(mut storage) = load_auth_storage(path)? else {
         return Ok(());
     };
     let Some(mut pa) = storage.get_provider_auth(provider) else {
@@ -352,20 +392,23 @@ pub fn clear_active_credential(path: &Path, provider: &str) -> Result<(), AuthEr
 }
 
 /// Get the active credential for a provider.
-pub fn get_active_credential(path: &Path, provider: &str) -> Option<ActiveCredential> {
-    get_provider_auth(path, provider)?.active_credential
+pub fn get_active_credential(
+    path: &Path,
+    provider: &str,
+) -> Result<Option<ActiveCredential>, AuthError> {
+    Ok(get_provider_auth(path, provider)?.and_then(|pa| pa.active_credential))
 }
 
 /// Save Google-specific provider auth.
 pub fn save_google_provider_auth(path: &Path, auth: &GoogleProviderAuth) -> Result<(), AuthError> {
-    let mut storage = load_auth_storage(path).unwrap_or_default();
+    let mut storage = load_or_init_for_write(path)?;
     storage.set_google_auth(auth);
     save_auth_storage(path, &mut storage)
 }
 
 /// Clear auth for a specific provider.
 pub fn clear_provider_auth(path: &Path, provider: &str) -> Result<(), AuthError> {
-    let Some(mut storage) = load_auth_storage(path) else {
+    let Some(mut storage) = load_auth_storage(path)? else {
         return Ok(());
     };
     let _ = storage.providers.remove(provider);
@@ -451,21 +494,26 @@ mod tests {
     }
 
     #[test]
-    fn load_missing_file_returns_none() {
+    fn load_missing_file_returns_ok_none() {
         let dir = TempDir::new().unwrap();
-        assert!(load_auth_storage(&test_path(&dir)).is_none());
+        let result = load_auth_storage(&test_path(&dir)).unwrap();
+        assert!(result.is_none(), "missing file must be Ok(None), not an error");
     }
 
     #[test]
-    fn load_invalid_json_returns_none() {
+    fn load_invalid_json_returns_malformed_error() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
         std::fs::write(&path, "not json").unwrap();
-        assert!(load_auth_storage(&path).is_none());
+        let err = load_auth_storage(&path).expect_err("must surface parse error, not None");
+        assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
+        let msg = err.to_string();
+        assert!(msg.contains("malformed auth file"), "message: {msg}");
+        assert!(msg.contains(&path.display().to_string()), "message: {msg}");
     }
 
     #[test]
-    fn load_wrong_version_returns_none() {
+    fn load_wrong_version_returns_malformed_error() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
         std::fs::write(
@@ -473,7 +521,9 @@ mod tests {
             r#"{"version":2,"providers":{},"lastUpdated":"2024-01-01T00:00:00Z"}"#,
         )
         .unwrap();
-        assert!(load_auth_storage(&path).is_none());
+        let err = load_auth_storage(&path).expect_err("version mismatch must be a hard error");
+        assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
+        assert!(err.to_string().contains("version: 2"));
     }
 
     #[test]
@@ -483,10 +533,71 @@ mod tests {
 
         save_named_api_key(&path, "anthropic", "(default)", "sk-123").unwrap();
 
-        let loaded = load_auth_storage(&path).unwrap();
+        let loaded = load_auth_storage(&path).unwrap().unwrap();
         assert_eq!(loaded.version, 1);
         let restored = loaded.get_provider_auth("anthropic").unwrap();
         assert_eq!(restored.api_keys.as_ref().unwrap()[0].key, "sk-123");
+    }
+
+    /// Regression guard: a legacy `services.{name}.apiKey` shape (singular
+    /// string field) no longer silently wipes all configured providers — it
+    /// produces a loud, actionable error naming the bad file. Prior to this
+    /// change, R2 removed the singular field from `ServiceAuth` but
+    /// `load_auth_storage` kept swallowing parse errors with a `warn!` and
+    /// returning `None`, which made every provider appear unconfigured.
+    #[test]
+    fn load_legacy_services_apikey_singular_shape_surfaces_error() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+        std::fs::write(
+            &path,
+            r#"{
+                "version": 1,
+                "providers": {},
+                "services": {
+                    "brave": { "apiKey": "legacy-key-value" }
+                },
+                "lastUpdated": "2026-04-22T00:00:00Z"
+            }"#,
+        )
+        .unwrap();
+
+        let err = load_auth_storage(&path).expect_err(
+            "legacy singular `apiKey` shape must surface as a hard error, \
+             not silently wipe all providers",
+        );
+        assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown field") || msg.contains("apiKey") || msg.contains("missing field"),
+            "error must name the offending field. got: {msg}"
+        );
+    }
+
+    /// Regression guard: a parse failure must NOT be silently absorbed by
+    /// writers using `load_or_init_for_write` — otherwise saving new tokens
+    /// would overwrite a broken-but-recoverable auth file with an empty
+    /// default, destroying user data.
+    #[test]
+    fn load_or_init_for_write_refuses_to_overwrite_malformed_file() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+        std::fs::write(&path, "{ corrupt").unwrap();
+
+        let err = load_or_init_for_write(&path)
+            .expect_err("writer helper must refuse a malformed file to prevent data loss");
+        assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
+    }
+
+    /// Missing file is a legitimate first-use case — `load_or_init_for_write`
+    /// returns a fresh default so the caller can write for the first time.
+    #[test]
+    fn load_or_init_for_write_returns_default_for_missing_file() {
+        let dir = TempDir::new().unwrap();
+        let path = test_path(&dir);
+        let storage = load_or_init_for_write(&path).unwrap();
+        assert_eq!(storage.version, 1);
+        assert!(storage.providers.is_empty());
     }
 
     #[test]
@@ -634,7 +745,7 @@ mod tests {
         let tokens = make_tokens();
         save_account_oauth_tokens(&path, "anthropic", "main", &tokens).unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         let api_keys = pa.api_keys.unwrap();
         assert_eq!(api_keys[0].label, "work");
         assert_eq!(api_keys[0].key, "sk-123");
@@ -651,7 +762,7 @@ mod tests {
         let tokens = make_tokens();
         save_account_oauth_tokens(&path, "anthropic", "work", &tokens).unwrap();
 
-        let labels = get_account_labels(&path, "anthropic");
+        let labels = get_account_labels(&path, "anthropic").unwrap();
         assert_eq!(labels, vec!["work"]);
     }
 
@@ -669,7 +780,7 @@ mod tests {
         };
         save_account_oauth_tokens(&path, "anthropic", "work", &tokens2).unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         let accounts = pa.accounts.unwrap();
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].oauth.access_token, "new-tok");
@@ -689,7 +800,7 @@ mod tests {
         storage.services = Some(services);
         save_auth_storage(&path, &mut storage).unwrap();
 
-        let keys = get_service_api_keys(&path, "brave");
+        let keys = get_service_api_keys(&path, "brave").unwrap();
         assert_eq!(keys, vec!["key1"]);
     }
 
@@ -703,8 +814,8 @@ mod tests {
 
         clear_provider_auth(&path, "anthropic").unwrap();
 
-        assert!(get_provider_auth(&path, "anthropic").is_none());
-        assert!(get_provider_auth(&path, "openai").is_some());
+        assert!(get_provider_auth(&path, "anthropic").unwrap().is_none());
+        assert!(get_provider_auth(&path, "openai").unwrap().is_some());
     }
 
     #[test]
@@ -745,7 +856,7 @@ mod tests {
         };
         save_google_provider_auth(&path, &gpa).unwrap();
 
-        let loaded = get_google_provider_auth(&path).unwrap();
+        let loaded = get_google_provider_auth(&path).unwrap().unwrap();
         assert_eq!(loaded.project_id.as_deref(), Some("proj-123"));
     }
 
@@ -793,7 +904,7 @@ mod tests {
 
         save_named_api_key(&path, "anthropic", "work", "sk-work-123").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         let keys = pa.api_keys.unwrap();
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].label, "work");
@@ -808,7 +919,7 @@ mod tests {
         save_named_api_key(&path, "anthropic", "work", "sk-old").unwrap();
         save_named_api_key(&path, "anthropic", "work", "sk-new").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         let keys = pa.api_keys.unwrap();
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].key, "sk-new");
@@ -822,7 +933,7 @@ mod tests {
         save_named_api_key(&path, "anthropic", "work", "sk-w").unwrap();
         save_named_api_key(&path, "anthropic", "personal", "sk-p").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         let keys = pa.api_keys.unwrap();
         assert_eq!(keys.len(), 2);
     }
@@ -846,7 +957,7 @@ mod tests {
 
         remove_named_api_key(&path, "anthropic", "work").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         let keys = pa.api_keys.unwrap();
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].label, "personal");
@@ -860,7 +971,7 @@ mod tests {
         save_named_api_key(&path, "anthropic", "work", "sk-w").unwrap();
         remove_named_api_key(&path, "anthropic", "nonexistent").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         assert_eq!(pa.api_keys.unwrap().len(), 1);
     }
 
@@ -881,7 +992,7 @@ mod tests {
 
         remove_named_api_key(&path, "anthropic", "work").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         assert!(pa.active_credential.is_none());
     }
 
@@ -903,7 +1014,7 @@ mod tests {
 
         remove_named_api_key(&path, "anthropic", "work").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         assert_eq!(
             pa.active_credential,
             Some(ActiveCredential::ApiKey {
@@ -924,7 +1035,7 @@ mod tests {
 
         remove_account(&path, "anthropic", "acct1").unwrap();
 
-        let labels = get_account_labels(&path, "anthropic");
+        let labels = get_account_labels(&path, "anthropic").unwrap();
         assert_eq!(labels, vec!["acct2"]);
     }
 
@@ -945,7 +1056,7 @@ mod tests {
 
         remove_account(&path, "anthropic", "main").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         assert!(pa.active_credential.is_none());
     }
 
@@ -967,7 +1078,7 @@ mod tests {
 
         remove_account(&path, "anthropic", "acct1").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         assert_eq!(
             pa.active_credential,
             Some(ActiveCredential::OAuth {
@@ -993,7 +1104,7 @@ mod tests {
 
         rename_account(&path, "anthropic", "old-name", "new-name").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         assert_eq!(
             pa.active_credential,
             Some(ActiveCredential::OAuth {
@@ -1021,7 +1132,7 @@ mod tests {
         rename_account(&path, "anthropic", "acct1", "renamed").unwrap();
 
         // acct2 should still be active
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         assert_eq!(
             pa.active_credential,
             Some(ActiveCredential::OAuth {
@@ -1038,7 +1149,7 @@ mod tests {
         save_account_oauth_tokens(&path, "anthropic", "main", &make_tokens()).unwrap();
         remove_account(&path, "anthropic", "nonexistent").unwrap();
 
-        assert_eq!(get_account_labels(&path, "anthropic"), vec!["main"]);
+        assert_eq!(get_account_labels(&path, "anthropic").unwrap(), vec!["main"]);
     }
 
     // ── Active credential ──
@@ -1058,7 +1169,7 @@ mod tests {
         )
         .unwrap();
 
-        let active = get_active_credential(&path, "anthropic").unwrap();
+        let active = get_active_credential(&path, "anthropic").unwrap().unwrap();
         assert_eq!(
             active,
             ActiveCredential::OAuth {
@@ -1082,7 +1193,7 @@ mod tests {
         )
         .unwrap();
 
-        let active = get_active_credential(&path, "anthropic").unwrap();
+        let active = get_active_credential(&path, "anthropic").unwrap().unwrap();
         assert_eq!(
             active,
             ActiveCredential::ApiKey {
@@ -1154,7 +1265,7 @@ mod tests {
         .unwrap();
 
         clear_active_credential(&path, "anthropic").unwrap();
-        assert!(get_active_credential(&path, "anthropic").is_none());
+        assert!(get_active_credential(&path, "anthropic").unwrap().is_none());
     }
 
     #[test]
@@ -1170,7 +1281,7 @@ mod tests {
         let path = test_path(&dir);
 
         save_account_oauth_tokens(&path, "anthropic", "main", &make_tokens()).unwrap();
-        assert!(get_active_credential(&path, "anthropic").is_none());
+        assert!(get_active_credential(&path, "anthropic").unwrap().is_none());
     }
 
     #[cfg(unix)]
@@ -1218,7 +1329,7 @@ mod tests {
         let path = test_path(&dir);
         write_raw_auth(&path, AUTH_WITH_RELAY);
 
-        let mut storage = load_auth_storage(&path).unwrap();
+        let mut storage = load_auth_storage(&path).unwrap().unwrap();
         save_auth_storage(&path, &mut storage).unwrap();
 
         let raw = read_raw_auth(&path);
@@ -1233,7 +1344,7 @@ mod tests {
         write_raw_auth(&path, AUTH_WITH_RELAY);
 
         for _ in 0..3 {
-            let mut storage = load_auth_storage(&path).unwrap();
+            let mut storage = load_auth_storage(&path).unwrap().unwrap();
             save_auth_storage(&path, &mut storage).unwrap();
         }
 
@@ -1258,7 +1369,7 @@ mod tests {
             }"#,
         );
 
-        let mut storage = load_auth_storage(&path).unwrap();
+        let mut storage = load_auth_storage(&path).unwrap().unwrap();
         save_auth_storage(&path, &mut storage).unwrap();
 
         let raw = read_raw_auth(&path);
@@ -1402,7 +1513,7 @@ mod tests {
             r#"{"version": 1, "providers": {}, "lastUpdated": "2026-01-01T00:00:00Z"}"#,
         );
 
-        let storage = load_auth_storage(&path).unwrap();
+        let storage = load_auth_storage(&path).unwrap().unwrap();
         assert!(storage.extra.is_empty());
         assert_eq!(storage.version, 1);
     }
@@ -1425,7 +1536,7 @@ mod tests {
             }"#,
         );
 
-        let mut storage = load_auth_storage(&path).unwrap();
+        let mut storage = load_auth_storage(&path).unwrap().unwrap();
         save_auth_storage(&path, &mut storage).unwrap();
 
         let raw = read_raw_auth(&path);
@@ -1446,7 +1557,7 @@ mod tests {
             }"#,
         );
 
-        let mut storage = load_auth_storage(&path).unwrap();
+        let mut storage = load_auth_storage(&path).unwrap().unwrap();
         save_auth_storage(&path, &mut storage).unwrap();
 
         let raw = read_raw_auth(&path);
@@ -1468,7 +1579,7 @@ mod tests {
             }"#,
         );
 
-        let mut storage = load_auth_storage(&path).unwrap();
+        let mut storage = load_auth_storage(&path).unwrap().unwrap();
         save_auth_storage(&path, &mut storage).unwrap();
 
         let raw = read_raw_auth(&path);
@@ -1501,7 +1612,9 @@ mod tests {
     }
 
     fn assert_google_fields_intact(path: &std::path::Path) {
-        let gpa = get_google_provider_auth(path).expect("GoogleProviderAuth should exist");
+        let gpa = get_google_provider_auth(path)
+            .expect("auth file parses")
+            .expect("GoogleProviderAuth should exist");
         assert_eq!(gpa.client_id.as_deref(), Some("test-cid"), "client_id lost");
         assert_eq!(gpa.client_secret.as_deref(), Some("test-csec"), "client_secret lost");
         assert_eq!(gpa.project_id.as_deref(), Some("test-proj"), "project_id lost");
@@ -1516,7 +1629,7 @@ mod tests {
         save_account_oauth_tokens(&path, "google", "work", &make_tokens()).unwrap();
 
         assert_google_fields_intact(&path);
-        let gpa = get_google_provider_auth(&path).unwrap();
+        let gpa = get_google_provider_auth(&path).unwrap().unwrap();
         assert_eq!(gpa.base.accounts.unwrap().len(), 1);
     }
 
@@ -1536,7 +1649,7 @@ mod tests {
         save_account_oauth_tokens(&path, "google", "work", &new_tokens).unwrap();
 
         assert_google_fields_intact(&path);
-        let gpa = get_google_provider_auth(&path).unwrap();
+        let gpa = get_google_provider_auth(&path).unwrap().unwrap();
         let acct = &gpa.base.accounts.unwrap()[0];
         assert_eq!(acct.oauth.access_token, "new-tok");
     }
@@ -1551,7 +1664,7 @@ mod tests {
         rename_account(&path, "google", "old-name", "new-name").unwrap();
 
         assert_google_fields_intact(&path);
-        let gpa = get_google_provider_auth(&path).unwrap();
+        let gpa = get_google_provider_auth(&path).unwrap().unwrap();
         assert_eq!(gpa.base.accounts.unwrap()[0].label, "new-name");
     }
 
@@ -1564,7 +1677,7 @@ mod tests {
         save_named_api_key(&path, "google", "my-key", "AIza-test").unwrap();
 
         assert_google_fields_intact(&path);
-        let gpa = get_google_provider_auth(&path).unwrap();
+        let gpa = get_google_provider_auth(&path).unwrap().unwrap();
         assert_eq!(gpa.base.api_keys.unwrap()[0].key, "AIza-test");
     }
 
@@ -1647,7 +1760,7 @@ mod tests {
         rename_account(&path, "google", "acct2", "main").unwrap();
 
         assert_google_fields_intact(&path);
-        let gpa = get_google_provider_auth(&path).unwrap();
+        let gpa = get_google_provider_auth(&path).unwrap().unwrap();
         assert_eq!(gpa.base.accounts.as_ref().unwrap().len(), 1);
         assert_eq!(gpa.base.accounts.as_ref().unwrap()[0].label, "main");
         assert_eq!(gpa.base.api_keys.as_ref().unwrap().len(), 1);
@@ -1661,7 +1774,7 @@ mod tests {
         save_account_oauth_tokens(&path, "anthropic", "work", &make_tokens()).unwrap();
         save_named_api_key(&path, "anthropic", "key1", "sk-123").unwrap();
 
-        let pa = get_provider_auth(&path, "anthropic").unwrap();
+        let pa = get_provider_auth(&path, "anthropic").unwrap().unwrap();
         assert_eq!(pa.accounts.unwrap().len(), 1);
         assert_eq!(pa.api_keys.unwrap()[0].key, "sk-123");
     }

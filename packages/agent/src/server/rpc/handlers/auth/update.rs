@@ -46,7 +46,7 @@ impl MethodHandler for UpdateAuthHandler {
                     update_service(&auth_path, service, params_clone.as_ref())?;
                 }
 
-                Ok(build_masked_state(&auth_path))
+                build_masked_state(&auth_path).map_err(map_auth_error)
             })
             .await?;
 
@@ -67,8 +67,10 @@ fn update_standard_provider(
     // Handle API key: present string = set, null = clear, absent = preserve
     if let Some(api_key_val) = params.get("apiKey") {
         if api_key_val.is_null() {
-            // Clear all API keys
-            let mut storage = load_auth_storage(auth_path).unwrap_or_default();
+            // Clear all API keys. Use load_or_init_for_write so a malformed
+            // file surfaces an error rather than silently overwriting the
+            // user's real file with an empty default.
+            let mut storage = load_or_init_for_write(auth_path).map_err(map_auth_error)?;
             if let Some(mut pa) = storage.get_provider_auth(provider) {
                 pa.api_keys = None;
                 // Clear active if it pointed to an API key
@@ -92,7 +94,7 @@ fn update_standard_provider(
     if let Some(oauth) = params.get("oauth") {
         if oauth.is_null() {
             // Clear all OAuth accounts
-            let mut storage = load_auth_storage(auth_path).unwrap_or_default();
+            let mut storage = load_or_init_for_write(auth_path).map_err(map_auth_error)?;
             if let Some(mut pa) = storage.get_provider_auth(provider) {
                 pa.accounts = None;
                 if matches!(pa.active_credential, Some(ActiveCredential::OAuth { .. })) {
@@ -122,8 +124,8 @@ fn update_google_provider(
         message: "Missing parameters".into(),
     })?;
 
-    // Load existing or default
-    let mut storage = load_auth_storage(auth_path).unwrap_or_default();
+    // Load existing or init for write. Refuses to continue on malformed file.
+    let mut storage = load_or_init_for_write(auth_path).map_err(map_auth_error)?;
     let mut google = storage.get_google_auth().unwrap_or_default();
 
     // API key
@@ -193,17 +195,17 @@ fn update_service(
         message: "Missing parameters".into(),
     })?;
 
-    let mut storage = load_auth_storage(auth_path).unwrap_or_default();
+    let mut storage = load_or_init_for_write(auth_path).map_err(map_auth_error)?;
     let services = storage.services.get_or_insert_with(HashMap::new);
 
     if let Some(api_key_val) = params.get("apiKey") {
         if api_key_val.is_null() {
             // Clear the service key
-            let _ = services.remove(service);
+            let _: Option<_> = services.remove(service);
         } else if let Some(key) = api_key_val.as_str()
             && !key.is_empty()
         {
-            let _ = services.insert(service.to_string(), ServiceAuth::from_single(key));
+            let _: Option<_> = services.insert(service.to_string(), ServiceAuth::from_single(key));
         }
     }
 

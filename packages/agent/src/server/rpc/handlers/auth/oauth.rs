@@ -41,7 +41,8 @@ impl MethodHandler for OAuthBeginHandler {
                 (url, pair.verifier)
             }
             "google" => {
-                let gpa = crate::llm::auth::storage::get_google_provider_auth(&ctx.auth_path);
+                let gpa = crate::llm::auth::storage::get_google_provider_auth(&ctx.auth_path)
+                    .map_err(map_auth_error)?;
                 let client_id = gpa
                     .as_ref()
                     .and_then(|g| g.client_id.clone())
@@ -142,7 +143,8 @@ impl MethodHandler for OAuthCompleteHandler {
                 .await
             }
             "google" => {
-                let gpa = crate::llm::auth::storage::get_google_provider_auth(&ctx.auth_path);
+                let gpa = crate::llm::auth::storage::get_google_provider_auth(&ctx.auth_path)
+                    .map_err(map_auth_error)?;
                 let client_id = gpa
                     .as_ref()
                     .and_then(|g| g.client_id.clone())
@@ -191,7 +193,7 @@ impl MethodHandler for OAuthCompleteHandler {
                 )
                 .map_err(map_auth_error)?;
 
-                Ok(build_masked_state(&auth_path))
+                build_masked_state(&auth_path).map_err(map_auth_error)
             })
             .await?;
 
