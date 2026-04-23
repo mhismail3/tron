@@ -16,15 +16,23 @@ struct ToolCallPayload {
     let rawPayload: [String: AnyCodable]
 
     init?(from payload: [String: AnyCodable]) {
-        // toolCallId can be "toolCallId" or "id"
+        // toolCallId can be "toolCallId" or "id".
+        // `turn` is always emitted by `ToolCallPayload` on the server
+        // (non-optional `i64`) — dropping the back-compat `?? 1` default
+        // keeps reconstruction from silently pinning a stray event to turn 1.
         guard let id = payload.string("toolCallId") ?? payload.string("id"),
-              let name = payload.string("name") else {
+              let name = payload.string("name"),
+              let turn = payload.int("turn") else {
+            TronLogger.shared.warning(
+                "tool.call event missing required field(s) toolCallId/name/turn; dropping",
+                category: .events
+            )
             return nil
         }
 
         self.toolCallId = id
         self.name = name
-        self.turn = payload.int("turn") ?? 1
+        self.turn = turn
         self.rawPayload = payload
 
         // Arguments can be dict or string
@@ -59,14 +67,27 @@ struct ToolResultPayload {
     let details: [String: AnyCodable]?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let toolCallId = payload.string("toolCallId") else {
+        // `content`, `isError`, `duration` are all non-optional on the
+        // server's `ToolResultPayload`. Empty string is a legitimate
+        // `content` value (tools that return no text); missing the key
+        // entirely is a schema violation.
+        guard
+            let toolCallId = payload.string("toolCallId"),
+            let content = payload.string("content"),
+            let isError = payload.bool("isError"),
+            let durationMs = payload.int("duration")
+        else {
+            TronLogger.shared.warning(
+                "tool.result event missing required field(s) toolCallId/content/isError/duration; dropping",
+                category: .events
+            )
             return nil
         }
 
         self.toolCallId = toolCallId
-        self.content = payload.string("content") ?? ""
-        self.isError = payload.bool("isError") ?? false
-        self.durationMs = payload.int("duration") ?? 0
+        self.content = content
+        self.isError = isError
+        self.durationMs = durationMs
         self.affectedFiles = payload.stringArray("affectedFiles")
         self.truncated = payload.bool("truncated")
         self.blobId = payload.string("blobId")
@@ -104,14 +125,23 @@ struct AgentErrorPayload {
     let recoverable: Bool
 
     init?(from payload: [String: AnyCodable]) {
+        // `recoverable` is non-optional on the server's `ErrorAgentPayload`.
+        // Dropping the `?? false` default catches the case where a malformed
+        // importer forgets to classify the error — we'd rather drop the
+        // breadcrumb than silently mislabel it as unrecoverable.
         guard let error = payload.string("error")
-                ?? payload.string("message") else {
+                ?? payload.string("message"),
+              let recoverable = payload.bool("recoverable") else {
+            TronLogger.shared.warning(
+                "error.agent event missing required field(s) error/recoverable; dropping",
+                category: .events
+            )
             return nil
         }
 
         self.error = error
         self.code = payload.string("code")
-        self.recoverable = payload.bool("recoverable") ?? false
+        self.recoverable = recoverable
     }
 }
 
@@ -158,9 +188,18 @@ struct ProviderErrorPayload {
     let model: String?
 
     init?(from payload: [String: AnyCodable]) {
+        // `retryable` is non-optional on the server's `ErrorProviderPayload`.
+        // Dropping the `?? false` default keeps a network-timeout event from
+        // silently looking "non-retryable" to the UI just because the
+        // emitter forgot the field.
         guard let provider = payload.string("provider"),
               let error = payload.string("error"),
-              let category = payload.string("category") else {
+              let category = payload.string("category"),
+              let retryable = payload.bool("retryable") else {
+            TronLogger.shared.warning(
+                "error.provider event missing required field(s) provider/error/category/retryable; dropping",
+                category: .events
+            )
             return nil
         }
 
@@ -169,7 +208,7 @@ struct ProviderErrorPayload {
         self.code = payload.string("code")
         self.category = category
         self.suggestion = payload.string("suggestion")
-        self.retryable = payload.bool("retryable") ?? false
+        self.retryable = retryable
         self.retryAfter = payload.int("retryAfter")
         self.statusCode = payload.int("statusCode")
         self.errorType = payload.string("errorType")
@@ -187,15 +226,25 @@ struct TurnFailedPayload {
     let recoverable: Bool
 
     init?(from payload: [String: AnyCodable]) {
+        // `turn` and `recoverable` are both non-optional on the server's
+        // `TurnFailedPayload`. The server emits `turn: 0` for failures that
+        // happened before a turn was assigned — a decoded `0` is meaningful,
+        // a missing field is not.
         guard let error = payload.string("error")
-                ?? payload.string("message") else {
+                ?? payload.string("message"),
+              let turn = payload.int("turn"),
+              let recoverable = payload.bool("recoverable") else {
+            TronLogger.shared.warning(
+                "turn.failed event missing required field(s) error/turn/recoverable; dropping",
+                category: .events
+            )
             return nil
         }
 
-        self.turn = payload.int("turn") ?? 0
+        self.turn = turn
         self.error = error
         self.code = payload.string("code")
         self.category = payload.string("category")
-        self.recoverable = payload.bool("recoverable") ?? false
+        self.recoverable = recoverable
     }
 }

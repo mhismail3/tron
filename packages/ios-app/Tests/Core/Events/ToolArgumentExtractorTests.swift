@@ -9,7 +9,8 @@ final class ToolArgumentExtractorTests: XCTestCase {
         ToolCallPayload(from: [
             "toolCallId": AnyCodable("tc1"),
             "name": AnyCodable("Read"),
-            "arguments": AnyCodable(arguments)
+            "arguments": AnyCodable(arguments),
+            "turn": AnyCodable(1)
         ])
     }
 

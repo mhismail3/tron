@@ -218,7 +218,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
             payload: [
                 "toolCallId": AnyCodable("call_456"),
                 "content": AnyCodable("File not found"),
-                "isError": AnyCodable(true)
+                "isError": AnyCodable(true),
+                "duration": AnyCodable(42)
             ]
         )
 
@@ -427,7 +428,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             sessionEvent(type: "session.start", payload: ["model": AnyCodable("claude-sonnet-4")], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "message.user", payload: ["content": AnyCodable("Hi")], timestamp: timestamp(1), sequence: 2),
             sessionEvent(type: "tool.call", payload: ["name": AnyCodable("Read"), "toolCallId": AnyCodable("c1"), "arguments": AnyCodable([:]), "turn": AnyCodable(1)], timestamp: timestamp(2), sequence: 3),
-            sessionEvent(type: "tool.result", payload: ["toolCallId": AnyCodable("c1"), "content": AnyCodable("result")], timestamp: timestamp(3), sequence: 4),
+            sessionEvent(type: "tool.result", payload: ["toolCallId": AnyCodable("c1"), "content": AnyCodable("result"), "isError": AnyCodable(false), "duration": AnyCodable(10)], timestamp: timestamp(3), sequence: 4),
             // message.assistant content blocks reflect exact streaming order: tool_use then text
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -478,7 +479,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(1), sequence: 2),
             sessionEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tool1"),
-                "content": AnyCodable("")
+                "content": AnyCodable(""),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(2), sequence: 3),
             sessionEvent(type: "tool.call", payload: [
                 "name": AnyCodable("Bash"),
@@ -488,7 +491,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(3), sequence: 4),
             sessionEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tool2"),
-                "content": AnyCodable("")
+                "content": AnyCodable(""),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(4), sequence: 5),
             // message.assistant has content blocks in EXACT streaming order
             sessionEvent(type: "message.assistant", payload: [
@@ -1495,12 +1500,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
             sessionEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_a"),
                 "content": AnyCodable("Done"),
-                "isError": AnyCodable(false)
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(20000)
             ], sequence: 8),
             sessionEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_b"),
                 "content": AnyCodable("Failed"),
-                "isError": AnyCodable(true)
+                "isError": AnyCodable(true),
+                "duration": AnyCodable(5000)
             ], sequence: 9)
         ]
 
@@ -1642,7 +1649,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(2), sequence: 3),
             rawEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_1"),
-                "content": AnyCodable("9")
+                "content": AnyCodable("9"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(3), sequence: 4),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -1715,7 +1724,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(2), sequence: 3),
             rawEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_1"),
-                "content": AnyCodable("const app = express();")
+                "content": AnyCodable("const app = express();"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(3), sequence: 4),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -1733,7 +1744,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(5), sequence: 6),
             rawEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_2"),
-                "content": AnyCodable("{\"compilerOptions\": {}}")
+                "content": AnyCodable("{\"compilerOptions\": {}}"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(6), sequence: 7),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -1812,7 +1825,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_1"),
                 "content": AnyCodable("File not found"),
-                "isError": AnyCodable(true)
+                "isError": AnyCodable(true),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(3), sequence: 4),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -1873,7 +1887,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_1"),
-                "content": AnyCodable("Found 3 results")
+                "content": AnyCodable("Found 3 results"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(1), sequence: 2),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -1937,7 +1953,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_a"),
-                "content": AnyCodable("file a contents")
+                "content": AnyCodable("file a contents"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(1), sequence: 2),
             sessionEvent(type: "tool.call", payload: [
                 "name": AnyCodable("Read"),
@@ -1947,7 +1965,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(2), sequence: 3),
             sessionEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_b"),
-                "content": AnyCodable("file b contents")
+                "content": AnyCodable("file b contents"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(3), sequence: 4),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -2017,7 +2037,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_x"),
-                "content": AnyCodable("hello")
+                "content": AnyCodable("hello"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(1), sequence: 2),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -2088,7 +2110,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             ], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "tool.result", payload: [
                 "toolCallId": AnyCodable("tc_meta"),
-                "content": AnyCodable("contents")
+                "content": AnyCodable("contents"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(10)
             ], timestamp: timestamp(1), sequence: 2),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -2155,7 +2179,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "arguments": AnyCodable(["file_path": "/a.ts"]), "turn": AnyCodable(1)
             ], timestamp: timestamp(1), sequence: 2),
             sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_1"), "content": AnyCodable("contents")
+                "toolCallId": AnyCodable("tc_1"), "content": AnyCodable("contents"),
+                "isError": AnyCodable(false), "duration": AnyCodable(10)
             ], timestamp: timestamp(2), sequence: 3),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -2171,7 +2196,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "arguments": AnyCodable(["file_path": "/a.ts"]), "turn": AnyCodable(2)
             ], timestamp: timestamp(4), sequence: 5),
             sessionEvent(type: "tool.result", payload: [
-                "toolCallId": AnyCodable("tc_2"), "content": AnyCodable("edited")
+                "toolCallId": AnyCodable("tc_2"), "content": AnyCodable("edited"),
+                "isError": AnyCodable(false), "duration": AnyCodable(10)
             ], timestamp: timestamp(5), sequence: 6),
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
@@ -2297,7 +2323,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 payload: [
                     "toolCallId": AnyCodable("tc1"),
                     "name": AnyCodable("Read"),
-                    "arguments": AnyCodable("{\"path\":\"/test\"}")
+                    "arguments": AnyCodable("{\"path\":\"/test\"}"),
+                    "turn": AnyCodable(1)
                 ],
                 sequence: 1
             ),
@@ -2369,7 +2396,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 payload: [
                     "toolCallId": AnyCodable("tc1"),
                     "name": AnyCodable("Read"),
-                    "arguments": AnyCodable("{}")
+                    "arguments": AnyCodable("{}"),
+                    "turn": AnyCodable(1)
                 ],
                 sequence: 1
             ),
@@ -2379,7 +2407,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 payload: [
                     "toolCallId": AnyCodable("tc1"),
                     "name": AnyCodable("Write"),
-                    "arguments": AnyCodable("{}")
+                    "arguments": AnyCodable("{}"),
+                    "turn": AnyCodable(1)
                 ],
                 sequence: 2
             )
