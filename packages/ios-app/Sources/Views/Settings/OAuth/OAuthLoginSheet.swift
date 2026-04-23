@@ -140,7 +140,7 @@ struct OAuthLoginSheet: View {
                 .padding(.horizontal, TronSpacing.large)
 
             VStack(alignment: .leading, spacing: TronSpacing.sm) {
-                TextField("e.g. moose@iphone", text: $accountLabel)
+                TextField("e.g. work-laptop", text: $accountLabel)
                     .textFieldStyle(.plain)
                     .font(TronTypography.input)
                     .foregroundStyle(.tronTextPrimary)
