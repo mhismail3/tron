@@ -93,17 +93,21 @@ final class SettingsState {
 
     // MARK: - Preset Cache
 
-    private static let presetsKey = "cachedConnectionPresets"
+    /// UserDefaults key for the cached `[ConnectionPreset]`. Internal so the
+    /// `DependencyContainer` bearer-token resolver can read it directly on
+    /// the WS-upgrade synchronous path (avoids a round-trip through the
+    /// async `SettingsState.load`).
+    static let cachedPresetsKey = "cachedConnectionPresets"
 
     private func loadCachedPresets() {
-        guard let data = UserDefaults.standard.data(forKey: Self.presetsKey),
+        guard let data = UserDefaults.standard.data(forKey: Self.cachedPresetsKey),
               let cached = try? JSONDecoder().decode([ConnectionPreset].self, from: data) else { return }
         connectionPresets = cached
     }
 
     private func cachePresets(_ presets: [ConnectionPreset]) {
         guard let data = try? JSONEncoder().encode(presets) else { return }
-        UserDefaults.standard.set(data, forKey: Self.presetsKey)
+        UserDefaults.standard.set(data, forKey: Self.cachedPresetsKey)
     }
 
     // MARK: - Load State

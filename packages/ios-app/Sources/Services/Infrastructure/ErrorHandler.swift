@@ -154,6 +154,11 @@ final class ErrorHandler {
                 return "connection.transient"
             case .invalidResponse, .encodingError, .decodingError:
                 return nil
+            case .unauthorized:
+                // Re-pair is a single, distinct CTA — keep it on its own
+                // key so the toast doesn't collapse into the transient
+                // connection bucket and lose its specific copy.
+                return "connection.unauthorized"
             }
         }
         if let rpc = error as? RPCClientError {

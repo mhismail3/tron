@@ -64,6 +64,9 @@ final class SettingsParityTests: XCTestCase {
         "connectionPresets",
         // MCP
         "mcpSchemaRefreshTtlMs",
+        // Server auth + Tailscale identity (ConnectionSettingsPage:88-156)
+        "authEnforced",
+        "tailscaleIp",
     ]
 
     /// Explicit waivers — fields that exist on SettingsState but are

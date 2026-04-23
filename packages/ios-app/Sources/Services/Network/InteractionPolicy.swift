@@ -49,6 +49,13 @@ final class InteractionPolicy {
         return false
     }
 
+    /// True when the server rejected the upgrade with HTTP 401 — the user
+    /// must re-pair before mutations resume.
+    var isUnauthorized: Bool {
+        if case .unauthorized = state { return true }
+        return false
+    }
+
     /// Localized text for banners/tooltips explaining why writes are blocked.
     /// Returns `nil` when connected.
     var readOnlyReason: String? {
@@ -69,6 +76,7 @@ final class InteractionPolicy {
                 return "Server is restarting"
             }
         case .failed(let reason): return reason
+        case .unauthorized: return "Re-pair this server to continue"
         }
     }
 

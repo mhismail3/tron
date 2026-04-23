@@ -7,11 +7,20 @@ import SwiftUI
 /// When nil → pill is hidden. When non-nil → pill is shown with that state's content.
 /// `.animation(.smooth, value: displayedState)` smooths both show/hide transitions
 /// AND content changes (text, color, countdown) in a single unified animation pass.
+///
+/// **`.unauthorized` handling:** when the WS upgrade returns 401 the pill enters a
+/// distinct red state with the "Re-pair this server (Tap to fix)" copy. Tapping
+/// invokes `onRePair` (preferred) when supplied so the host view can present the
+/// re-pair sheet; otherwise falls through to `onRetry` for legacy call sites.
 @available(iOS 26.0, *)
 struct ConnectionStatusPill: View {
     let connectionState: ConnectionState
     let isReady: Bool
     let onRetry: () async -> Void
+    /// Optional CTA invoked when the user taps the pill in `.unauthorized`
+    /// state. Host view presents the per-preset re-pair sheet from here.
+    /// Falls back to `onRetry` when nil.
+    let onRePair: (() -> Void)?
 
     /// Tracks if we've ever seen a non-connected state in this session
     @State private var hasSeenDisconnect: Bool
@@ -26,9 +35,15 @@ struct ConnectionStatusPill: View {
     /// Debounce task for disconnected→show transition (avoids flash on foreground return)
     @State private var disconnectDebounceTask: Task<Void, Never>?
 
-    init(connectionState: ConnectionState, isReady: Bool = true, onRetry: @escaping () async -> Void) {
+    init(
+        connectionState: ConnectionState,
+        isReady: Bool = true,
+        onRePair: (() -> Void)? = nil,
+        onRetry: @escaping () async -> Void
+    ) {
         self.connectionState = connectionState
         self.isReady = isReady
+        self.onRePair = onRePair
         self.onRetry = onRetry
         let notConnected = !connectionState.isConnected
         _hasSeenDisconnect = State(initialValue: notConnected)
@@ -56,7 +71,14 @@ struct ConnectionStatusPill: View {
     private func pillContent(for state: ConnectionState) -> some View {
         let color = statusColor(for: state)
         Button {
-            Task { await onRetry() }
+            // .unauthorized routes to the host view's re-pair sheet when
+            // available, falling back to the legacy retry path so older
+            // callers without an onRePair closure stay functional.
+            if case .unauthorized = state, let onRePair {
+                onRePair()
+            } else {
+                Task { await onRetry() }
+            }
         } label: {
             HStack(spacing: 6) {
                 statusIcon(for: state)
@@ -116,6 +138,13 @@ struct ConnectionStatusPill: View {
                 .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(color)
                 .offset(y: -0.5)
+        case .unauthorized:
+            // Padlock conveys "auth problem, needs re-pair" — visually
+            // distinct from the network-loss `wifi.slash` so users know
+            // tapping leads to a re-pair flow, not a retry.
+            Image(systemName: "lock.slash")
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
+                .foregroundStyle(color)
         }
     }
 
@@ -131,6 +160,11 @@ struct ConnectionStatusPill: View {
         case .deployRestarting:
             return "Server Deploying"
         case .connected: return "Connected"
+        case .unauthorized:
+            // Locked-in copy — `WebSocketAuthTests.unauthorizedDisplayCopy`
+            // asserts the lowercased text contains "re-pair" so accidental
+            // refactors are caught.
+            return "Re-pair this server (Tap to fix)"
         }
     }
 
@@ -139,7 +173,7 @@ struct ConnectionStatusPill: View {
         case .connected: return .tronEmerald
         case .connecting, .reconnecting: return .tronWarning
         case .deployRestarting: return .tronInfo
-        case .disconnected, .failed: return .tronError
+        case .disconnected, .failed, .unauthorized: return .tronError
         }
     }
 
@@ -176,12 +210,14 @@ struct ConnectionStatusPill: View {
                 displayedState = nil
             }
 
-        case .disconnected, .failed:
-            // If pill is already showing a non-connected state, update immediately
+        case .disconnected, .failed, .unauthorized:
+            // .unauthorized shares the same state-machine treatment as
+            // disconnect/failed — both park awaiting user action and both
+            // benefit from the 300ms debounce (avoids flash on foreground
+            // return when the WS upgrade gets a quick 401).
             if let current = displayedState, !current.isConnected {
                 displayedState = newState
             } else {
-                // Debounce: delay showing disconnected by 300ms to avoid flash on foreground return
                 disconnectDebounceTask?.cancel()
                 disconnectDebounceTask = Task {
                     try? await Task.sleep(for: .milliseconds(300))
@@ -213,6 +249,10 @@ struct ConnectionStatusPill: View {
         ConnectionStatusPill(connectionState: .deployRestarting(remainingSeconds: 8)) { }
         ConnectionStatusPill(connectionState: .connected) { }
         ConnectionStatusPill(connectionState: .failed(reason: "Connection lost")) { }
+        ConnectionStatusPill(
+            connectionState: .unauthorized(reason: "Server rejected authentication"),
+            onRePair: { }
+        ) { }
     }
     .padding()
     .background(Color.tronBackground)

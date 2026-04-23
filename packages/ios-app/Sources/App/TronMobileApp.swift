@@ -146,6 +146,12 @@ struct TronMobileApp: App {
                             // cancels any lingering task before spawning a new one.
                             TronLogger.shared.info("Triggering manualRetry on foreground return (state: \(container.rpcClient.connectionState))", category: .rpc)
                             await container.manualRetry()
+                        case .unauthorized:
+                            // .unauthorized is a parked state — auto-retrying on
+                            // foreground would just re-trigger 401. The user must
+                            // tap the pill (or open the re-pair sheet) to provide
+                            // a fresh token first; only then does manualRetry fire.
+                            TronLogger.shared.info("Skipping foreground auto-retry while unauthorized — awaiting user re-pair", category: .rpc)
                         }
                     }
                 }

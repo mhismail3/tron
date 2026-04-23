@@ -135,6 +135,13 @@ final class RPCClient: RPCTransport {
 
     private let serverURL: URL
 
+    /// Bearer-token resolver passed through to the underlying `WebSocketService`
+    /// on every `connect()`. Re-evaluated at upgrade time, so token rotations
+    /// (e.g. user re-pairs after `.unauthorized`) flow through without
+    /// recreating the RPCClient.
+    @ObservationIgnored
+    private let bearerTokenProvider: BearerTokenProvider?
+
     /// Server origin string (host:port) for tagging sessions
     var serverOrigin: String {
         let host = serverURL.host ?? "localhost"
@@ -142,8 +149,9 @@ final class RPCClient: RPCTransport {
         return "\(host):\(port)"
     }
 
-    init(serverURL: URL) {
+    init(serverURL: URL, bearerTokenProvider: BearerTokenProvider? = nil) {
         self.serverURL = serverURL
+        self.bearerTokenProvider = bearerTokenProvider
     }
 
     deinit {
@@ -185,7 +193,9 @@ final class RPCClient: RPCTransport {
         case .connected, .connecting, .reconnecting, .deployRestarting:
             logger.debug("Connection already in progress (\(connectionState)), skipping", category: .rpc)
             return
-        case .disconnected, .failed:
+        case .disconnected, .failed, .unauthorized:
+            // .unauthorized → user re-paired; allow a fresh connect with the
+            // new bearer token resolved by the provider closure on upgrade.
             break
         }
 
@@ -196,7 +206,7 @@ final class RPCClient: RPCTransport {
 
         logger.info("Initializing connection to \(self.serverURL.absoluteString)", category: .rpc)
 
-        let ws = WebSocketService(serverURL: serverURL)
+        let ws = WebSocketService(serverURL: serverURL, bearerTokenProvider: bearerTokenProvider)
         self.webSocket = ws
 
         // Observe connection state via @Observable property

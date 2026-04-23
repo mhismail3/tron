@@ -564,9 +564,22 @@ struct ChatView: View {
                         // Connection status pill - appears when not connected.
                         // Retry routes through ConnectionManager so manual retry shares the
                         // same codepath as the dashboard toast/banner retry button.
+                        //
+                        // .unauthorized taps go through `onRePair`: open the Settings sheet
+                        // (via the existing `.showSettingsAction` notification) and post
+                        // `.rePairCurrentServer` on the next runloop tick so
+                        // `ConnectionSettingsPage` is mounted (and observing) by the time
+                        // the notification fires. Without the deferral the page wouldn't
+                        // exist yet and would miss the post.
                         ConnectionStatusPill(
                             connectionState: rpcClient.connectionState,
                             isReady: initialLoadComplete,
+                            onRePair: {
+                                NotificationCenter.default.post(name: .showSettingsAction, object: nil)
+                                DispatchQueue.main.async {
+                                    NotificationCenter.default.post(name: .rePairCurrentServer, object: nil)
+                                }
+                            },
                             onRetry: dependencies.connectionManager.manualRetry
                         )
                         .id("connectionStatusPill")

@@ -14,6 +14,10 @@ enum ConnectionState: Equatable, Sendable {
     case reconnecting(attempt: Int, nextRetrySeconds: Int)  // Enhanced with countdown
     case deployRestarting(remainingSeconds: Int)  // Server deploying, patient reconnection
     case failed(reason: String)
+    /// Server rejected the WS upgrade with HTTP 401 — bearer token is missing,
+    /// expired, or rotated. Read-only state; user must re-pair via the
+    /// `ConnectionStatusPill` CTA before reconnect can resume.
+    case unauthorized(reason: String)
 
     var isConnected: Bool {
         if case .connected = self { return true }
@@ -28,10 +32,21 @@ enum ConnectionState: Equatable, Sendable {
     }
 
     /// Whether the user can interact with the session (send messages, etc.)
-    /// Only true when fully connected - reconnecting is read-only mode
+    /// Only true when fully connected - reconnecting is read-only mode.
+    /// `.unauthorized` is read-only — user must re-pair before interacting.
     var canInteract: Bool {
         if case .connected = self { return true }
         return false
+    }
+
+    /// True when no further automatic reconnect is in flight and the user
+    /// must take action (manual retry or re-pair). Used by the
+    /// `ConnectionStatusPill` to surface tap-to-fix CTAs.
+    var requiresUserAction: Bool {
+        switch self {
+        case .failed, .unauthorized: return true
+        default: return false
+        }
     }
 
     var displayText: String {
@@ -42,6 +57,7 @@ enum ConnectionState: Equatable, Sendable {
         case .reconnecting(let attempt, let seconds): return "Reconnecting (\(attempt)) in \(seconds)s..."
         case .deployRestarting(let seconds): return "Server deploying... \(seconds)s"
         case .failed(let reason): return "Failed: \(reason)"
+        case .unauthorized: return "Re-pair this server (Tap to fix)"
         }
     }
 }
@@ -55,6 +71,9 @@ enum WebSocketError: Error, LocalizedError, Sendable, Equatable {
     case connectionFailed(String)
     case encodingError
     case decodingError(String)
+    /// Server returned HTTP 401 on the WS upgrade — bearer token missing,
+    /// wrong, or rotated. Surfaces as `ConnectionState.unauthorized`.
+    case unauthorized(String)
 
     var errorDescription: String? {
         switch self {
@@ -64,9 +83,18 @@ enum WebSocketError: Error, LocalizedError, Sendable, Equatable {
         case .connectionFailed(let reason): return "Connection failed: \(reason)"
         case .encodingError: return "Failed to encode request"
         case .decodingError(let detail): return "Failed to decode response: \(detail)"
+        case .unauthorized(let reason): return "Unauthorized: \(reason)"
         }
     }
 }
+
+// MARK: - Bearer Token Provider
+
+/// Strategy for resolving a bearer token to attach to the WebSocket upgrade
+/// request. Returns `nil` if no token is available — the request goes out
+/// without an Authorization header, the server returns 401 in enforced mode,
+/// and `WebSocketService` transitions to `ConnectionState.unauthorized`.
+typealias BearerTokenProvider = @MainActor () -> String?
 
 // MARK: - WebSocket Service
 
@@ -118,8 +146,65 @@ final class WebSocketService {
     /// Expected total restart time in milliseconds (from server event).
     private var deployRestartExpectedMs: Int = 0
 
-    init(serverURL: URL) {
+    /// Bearer token resolver invoked on every WS upgrade. `nil` means "send
+    /// no Authorization header" — used by legacy / un-paired presets that
+    /// haven't completed the bearer pairing flow.
+    private let bearerTokenProvider: BearerTokenProvider?
+
+    /// URLSession delegate that notices HTTP 401 on the upgrade and routes
+    /// to `markUnauthorized(reason:)`. Held strong here because URLSession
+    /// keeps a strong reference to its delegate; we own the lifetime so the
+    /// session can be torn down cleanly on disconnect.
+    private var sessionDelegate: WebSocketSessionDelegate?
+
+    init(serverURL: URL, bearerTokenProvider: BearerTokenProvider? = nil) {
         self.serverURL = serverURL
+        self.bearerTokenProvider = bearerTokenProvider
+    }
+
+    /// Build the URLRequest used for the WS upgrade. Internal so unit tests
+    /// can verify the Authorization header. Re-evaluates `bearerTokenProvider`
+    /// on every call so token rotations propagate without re-instantiating
+    /// the service.
+    func makeUpgradeRequest() -> URLRequest {
+        var request = URLRequest(url: serverURL)
+        request.timeoutInterval = 30
+        if let token = bearerTokenProvider?() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    /// Force the state machine into `.unauthorized(reason:)`. Cancels any
+    /// in-flight reconnect, tears down the socket, and parks the service
+    /// until the user re-pairs (which surfaces via `manualRetry()` after
+    /// the bearer provider returns a fresh token).
+    ///
+    /// Safe to call from any URLSession delegate callback via `await
+    /// MainActor.run` — the actual mutation happens on the main actor.
+    func markUnauthorized(reason: String) {
+        logger.warning("WS upgrade rejected (401): \(reason)", category: .websocket)
+
+        // Cancel reconnect bookkeeping so we don't immediately re-attempt
+        // and burn cycles against a server that will keep returning 401.
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectAttempts = 0
+        isDeployRestarting = false
+        deployRestartExpectedMs = 0
+
+        isConnectedFlag = false
+        webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        webSocketTask = nil
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
+        sessionDelegate = nil
+        pingTask?.cancel(); pingTask = nil
+        receiveTask?.cancel(); receiveTask = nil
+
+        failPendingRequests(error: WebSocketError.unauthorized(reason))
+
+        connectionState = .unauthorized(reason: reason)
     }
 
     // MARK: - Connection Management
@@ -149,11 +234,21 @@ final class WebSocketService {
         configuration.timeoutIntervalForResource = 300
         logger.verbose("URLSession config: requestTimeout=30s, resourceTimeout=300s", category: .websocket)
 
-        let session = URLSession(configuration: configuration)
+        // Install a delegate so we can detect HTTP 401 on the upgrade — the
+        // delegate routes to `markUnauthorized(reason:)` when it sees a 401
+        // response code on the failed task. URLSession retains its delegate,
+        // so we hold our own strong reference for symmetric teardown.
+        let delegate = WebSocketSessionDelegate(owner: self)
+        sessionDelegate = delegate
+
+        let session = URLSession(
+            configuration: configuration,
+            delegate: delegate,
+            delegateQueue: nil
+        )
         urlSession = session
 
-        var request = URLRequest(url: serverURL)
-        request.timeoutInterval = 30
+        let request = makeUpgradeRequest()
 
         logger.verbose("Creating WebSocket task...", category: .websocket)
         webSocketTask = session.webSocketTask(with: request)
@@ -232,7 +327,9 @@ final class WebSocketService {
                 reconnectTask = nil
                 reconnectAttempts = 0
                 connectionState = .disconnected
-            case .connected, .disconnected, .failed, .deployRestarting:
+            case .connected, .disconnected, .failed, .deployRestarting, .unauthorized:
+                // .unauthorized is a parked state — backgrounding doesn't
+                // change it; the user must re-pair when they return.
                 break
             }
         } else {
@@ -660,6 +757,47 @@ final class WebSocketService {
             reconnectTask = Task { [weak self] in
                 await self?.startReconnection()
             }
+        }
+    }
+}
+
+// MARK: - URLSession Delegate
+
+/// `URLSession` + `URLSessionWebSocket` delegate that detects HTTP 401 on
+/// the WS upgrade and routes the failure to `WebSocketService.markUnauthorized`.
+///
+/// URLSession retains its delegate; `WebSocketService` holds a strong
+/// reference here so the delegate's lifetime tracks the session — and
+/// `urlSession(_:didBecomeInvalidWithError:)` clears that reference when the
+/// session is torn down (manual disconnect, retry, unauthorized).
+final class WebSocketSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+    /// Stored as `weak` to avoid the URLSession ↔ delegate ↔ service retain
+    /// cycle. `@unchecked Sendable` because Swift can't reason about the
+    /// `weak` storage being safely accessed across actor boundaries — we
+    /// hop to MainActor inside every callback before touching `owner`.
+    private weak var ownerRef: WebSocketService?
+
+    init(owner: WebSocketService) {
+        self.ownerRef = owner
+    }
+
+    /// Snapshot the weak ref; the only caller is the `MainActor.run` body
+    /// inside the URLSession callbacks below.
+    @MainActor
+    private func owner() -> WebSocketService? { ownerRef }
+
+    /// On any task completion (including failed upgrades), inspect the HTTP
+    /// response. A 401 means the bearer token is wrong/missing/rotated —
+    /// route to `markUnauthorized` so the state machine parks for re-pair.
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard
+            let httpResponse = task.response as? HTTPURLResponse,
+            httpResponse.statusCode == 401
+        else {
+            return
+        }
+        Task { @MainActor in
+            owner()?.markUnauthorized(reason: "Server rejected authentication")
         }
     }
 }

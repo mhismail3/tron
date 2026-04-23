@@ -8,7 +8,10 @@ struct ConnectionSettingsPage: View {
     let onPortChange: (String) -> Void
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
+    @Environment(\.dependencies) private var dependencies
     @FocusState private var focusedField: Field?
+    @State private var sheetMode: AddOrEditServerSheet.Mode?
+    @State private var presetPendingRemoval: ConnectionPreset?
 
     private enum Field {
         case host, port
@@ -17,15 +20,15 @@ struct ConnectionSettingsPage: View {
     var body: some View {
         SettingsPageContainer(title: "Server") {
             // Presets
-            if !settingsState.connectionPresets.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    SettingsSectionHeader(title: "Presets")
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsSectionHeader(title: "Presets")
 
-                    VStack(spacing: 8) {
-                        ForEach(settingsState.connectionPresets) { preset in
-                            presetRow(preset)
-                        }
+                VStack(spacing: 8) {
+                    ForEach(settingsState.connectionPresets) { preset in
+                        presetRow(preset)
                     }
+
+                    addPresetRow
                 }
             }
 
@@ -156,6 +159,33 @@ struct ConnectionSettingsPage: View {
                 }
             }
         }
+        // Add-or-edit server sheet — single sheet drives both flows.
+        .sheet(item: $sheetMode) { mode in
+            AddOrEditServerSheet(
+                mode: mode,
+                existingPresets: settingsState.connectionPresets,
+                onCommit: { updatedPresets, activePreset in
+                    handleSheetCommit(presets: updatedPresets, active: activePreset)
+                }
+            )
+            .adaptivePresentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
+        }
+        .alert("Remove preset?", isPresented: removalAlertBinding, presenting: presetPendingRemoval) { preset in
+            Button("Remove", role: .destructive) { handleRemove(preset) }
+            Button("Cancel", role: .cancel) {}
+        } message: { preset in
+            Text("Removes \(preset.label) from your presets and deletes its bearer token from this device. The Mac server is unaffected.")
+        }
+        // Listen for re-pair-this-server requests from the chat-side
+        // ConnectionStatusPill (`.unauthorized` tap). The notification
+        // carries the active host:port pair; we resolve it to the matching
+        // preset and open the sheet in edit mode. If no preset matches
+        // (e.g. legacy direct-connect users), we fall back to add-mode
+        // pre-filled with the current host/port.
+        .onReceive(NotificationCenter.default.publisher(for: .rePairCurrentServer)) { _ in
+            openRePairForActiveServer()
+        }
     }
 
     // MARK: - Preset Row
@@ -179,9 +209,26 @@ struct ConnectionSettingsPage: View {
 
             Spacer()
 
-            Image(systemName: "server.rack")
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronEmerald.opacity(0.6))
+            Menu {
+                Button {
+                    sheetMode = .edit(preset)
+                } label: {
+                    Label("Re-pair", systemImage: "key.fill")
+                }
+                Button(role: .destructive) {
+                    presetPendingRemoval = preset
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronTextSecondary)
+                    .padding(8)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Manage \(preset.label)")
+            .accessibilityIdentifier("preset.\(preset.id).menu")
         }
         .padding(10)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -194,6 +241,30 @@ struct ConnectionSettingsPage: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
+    private var addPresetRow: some View {
+        Button {
+            sheetMode = .add
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "plus.circle")
+                    .font(TronTypography.sans(size: TronTypography.sizeXL))
+                    .foregroundStyle(.tronEmerald)
+
+                Text("Add server")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                    .foregroundStyle(.tronTextPrimary)
+
+                Spacer()
+            }
+            .padding(10)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .sectionFill(.tronEmerald)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("preset.add")
+    }
+
     // MARK: - Actions
 
     private func applyPreset(_ preset: ConnectionPreset) {
@@ -203,4 +274,91 @@ struct ConnectionSettingsPage: View {
         onPortChange(portString)
         onHostSubmit()
     }
+
+    /// Pop the re-pair sheet for the preset whose host:port match the
+    /// active server. Falls back to add-mode (pre-filled with current
+    /// host/port) when no matching preset exists yet.
+    private func openRePairForActiveServer() {
+        if let active = settingsState.connectionPresets.first(where: {
+            $0.host == serverHost && String($0.port) == serverPort
+        }) {
+            sheetMode = .edit(active)
+        } else {
+            sheetMode = .add
+        }
+    }
+
+    /// Commit handler for the sheet. Persists the updated preset list to
+    /// the server, switches the active host/port to the just-saved preset,
+    /// and triggers a manual reconnect so the new bearer token is exercised.
+    private func handleSheetCommit(presets: [ConnectionPreset], active: ConnectionPreset) {
+        // 1. Update the cached SettingsState immediately so the UI doesn't
+        //    flicker waiting for the server round-trip.
+        settingsState.connectionPresets = presets
+
+        // 2. Persist to the server.
+        updateServerSetting {
+            var update = ServerSettingsUpdate()
+            update.server = ServerSettingsUpdate.ServerUpdate(connectionPresets: presets)
+            return update
+        }
+
+        // 3. Switch active host/port to the just-saved preset.
+        let portString = String(active.port)
+        if serverHost != active.host || serverPort != portString {
+            serverHost = active.host
+            serverPort = portString
+            onPortChange(portString)
+            onHostSubmit()
+        } else {
+            // Same preset, just refreshed token — kick a manual retry so
+            // the WS reconnect picks up the new token from Keychain.
+            Task { await dependencies.connectionManager.manualRetry() }
+        }
+    }
+
+    private func handleRemove(_ preset: ConnectionPreset) {
+        let updated = settingsState.connectionPresets.filter { $0.id != preset.id }
+        settingsState.connectionPresets = updated
+
+        updateServerSetting {
+            var update = ServerSettingsUpdate()
+            update.server = ServerSettingsUpdate.ServerUpdate(connectionPresets: updated)
+            return update
+        }
+
+        // Drop the bearer token from Keychain. Best-effort — failures here
+        // would leave a dangling Keychain entry but don't affect correctness.
+        try? dependencies.presetTokenStore.remove(presetId: preset.id)
+
+        presetPendingRemoval = nil
+    }
+
+    private var removalAlertBinding: Binding<Bool> {
+        Binding(
+            get: { presetPendingRemoval != nil },
+            set: { if !$0 { presetPendingRemoval = nil } }
+        )
+    }
+}
+
+// MARK: - Sheet mode Identifiable
+
+extension AddOrEditServerSheet.Mode: Identifiable {
+    public var id: String {
+        switch self {
+        case .add: return "add"
+        case .edit(let preset): return "edit:\(preset.id)"
+        }
+    }
+}
+
+// MARK: - Notification
+
+extension Notification.Name {
+    /// Posted when the user taps the `.unauthorized` ConnectionStatusPill.
+    /// The active settings sheet (if open) reacts by opening the re-pair
+    /// sheet for the active server. If no settings sheet is open, the chat
+    /// view first posts `.showSettingsAction` to bring it up.
+    static let rePairCurrentServer = Notification.Name("rePairCurrentServer")
 }

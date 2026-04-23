@@ -60,6 +60,12 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Shared audio recorder — starts on-demand when user taps mic
     let audioRecorder = AudioRecorder()
 
+    /// Per-preset bearer-token storage backed by Keychain. Owned here because
+    /// the bearer-token resolver closure captures a reference; same instance
+    /// is shared with `ConnectionSettingsPage` for re-pair / preset-add flows.
+    @ObservationIgnored
+    let presetTokenStore = PresetTokenStore()
+
     // MARK: - Recreatable Services (When Server Changes)
 
     /// RPC client for server communication - recreated when server settings change
@@ -160,8 +166,16 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         // Build initial server URL
         let url = Self.buildServerURL(host: host, port: port)
 
-        // Initialize RPC client
-        let client = RPCClient(serverURL: url)
+        // Initialize RPC client. Bearer resolver closes over a copy of the
+        // (struct-valued) PresetTokenStore so there's no retain cycle on
+        // the container, and reads the active host/port from UserDefaults
+        // at upgrade time so the resolver tracks server-switching without
+        // re-instantiation.
+        let tokenStore = presetTokenStore
+        let client = RPCClient(
+            serverURL: url,
+            bearerTokenProvider: { Self.resolveBearerToken(presetTokenStore: tokenStore) }
+        )
         rpcClient = client
 
         // Initialize centralized connection policy layer
@@ -249,9 +263,15 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         _serverHost = host
         _serverPort = port
 
-        // Recreate RPC client with new URL
+        // Recreate RPC client with new URL — same bearer-resolver wiring as
+        // initial init so the per-preset token lookup keeps working after
+        // a server switch.
         let url = Self.buildServerURL(host: host, port: port)
-        let newClient = RPCClient(serverURL: url)
+        let tokenStore = presetTokenStore
+        let newClient = RPCClient(
+            serverURL: url,
+            bearerTokenProvider: { Self.resolveBearerToken(presetTokenStore: tokenStore) }
+        )
         rpcClient = newClient
 
         // Rebuild connection policy layer against the new client
@@ -352,5 +372,33 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             return AppConstants.fallbackServerURL
         }
         return url
+    }
+
+    /// Static helper invoked by the bearer-token provider closure on every WS
+    /// upgrade. Reads the active host:port from `@AppStorage` (UserDefaults),
+    /// matches against the cached connection-presets list, and looks up the
+    /// per-preset token in Keychain.
+    ///
+    /// Returns `nil` when no preset matches (legacy un-paired install). The
+    /// server in `auth.enforced=false` mode still accepts; in `enforced=true`
+    /// mode the server returns 401 → `WebSocketService` parks in
+    /// `.unauthorized` → user re-pairs via `ConnectionStatusPill` CTA.
+    @MainActor
+    private static func resolveBearerToken(presetTokenStore: PresetTokenStore) -> String? {
+        let host = UserDefaults.standard.string(forKey: "serverHost") ?? AppConstants.defaultHost
+        let port = UserDefaults.standard.string(forKey: "serverPort") ?? AppConstants.prodPort
+
+        // Cached presets are written by `SettingsState.cachePresets` on every
+        // successful `settings.get` and are durable across launches — safe to
+        // read synchronously on the WS-upgrade path even before the first
+        // server settings round-trip in this process.
+        guard let data = UserDefaults.standard.data(forKey: SettingsState.cachedPresetsKey),
+              let presets = try? JSONDecoder().decode([ConnectionPreset].self, from: data),
+              let match = presets.first(where: { $0.host == host && String($0.port) == port })
+        else {
+            return nil
+        }
+
+        return presetTokenStore.token(forPresetId: match.id)
     }
 }

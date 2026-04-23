@@ -224,6 +224,12 @@ struct ConnectionIndicator: View {
             Circle()
                 .fill(Color.tronError)
                 .frame(width: 8, height: 8)
+        case .unauthorized:
+            // Same red dot as `.failed` — both signal "needs user action" at
+            // a glance. Specific re-pair copy lives in the pill.
+            Circle()
+                .fill(Color.tronError)
+                .frame(width: 8, height: 8)
         }
     }
 }

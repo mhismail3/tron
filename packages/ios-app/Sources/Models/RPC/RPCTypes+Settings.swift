@@ -364,6 +364,11 @@ struct ServerSettingsUpdate: Encodable {
         /// Updated Tailscale IP. Mac wrapper writes this on first launch; the
         /// iOS UI lets the user override / clear if needed.
         var tailscaleIp: String?
+        /// Replace the entire `connectionPresets` array on the server. The
+        /// settings deep-merge replaces arrays wholesale (see
+        /// `settings/storage/loader.rs::deep_merge`) so iOS sends the full
+        /// post-edit list whenever it adds, removes, or renames a preset.
+        var connectionPresets: [ConnectionPreset]?
 
         struct AuthUpdate: Encodable {
             var enforced: Bool?
@@ -450,7 +455,12 @@ struct BuiltinHookSetting: Codable, Identifiable, Equatable {
 }
 
 /// A connection preset for quick-connect from the Connections settings page.
-struct ConnectionPreset: Codable, Identifiable {
+///
+/// `Equatable` + `Hashable` so the iOS layer can pass it through SwiftUI's
+/// `.sheet(item:)` / `.alert(presenting:)` modifiers and compare list deltas
+/// without manual reduction. The Codable shape stays identical to what the
+/// server emits.
+struct ConnectionPreset: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let label: String
     let host: String
