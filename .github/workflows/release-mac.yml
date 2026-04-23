@@ -103,10 +103,12 @@ jobs:
             mode="project.yml"
           fi
           if [[ -z "$v" ]]; then echo "::error::could not resolve version"; exit 1; fi
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "mode=$mode"  >> "$GITHUB_OUTPUT"
-          echo "tag=mac-v$v" >> "$GITHUB_OUTPUT"
-          echo "dmg_name=${DMG_BASENAME}-v${v}.dmg" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$v"
+            echo "mode=$mode"
+            echo "tag=mac-v$v"
+            echo "dmg_name=${DMG_BASENAME}-v${v}.dmg"
+          } >> "$GITHUB_OUTPUT"
           echo "Resolved version=$v (from $mode)"
 
       - name: Resolve dry-run flag
