@@ -1,0 +1,9 @@
+// Base.xcconfig - Shared settings for all configurations
+
+// Deployment
+MACOSX_DEPLOYMENT_TARGET = 14.0
+SWIFT_VERSION = 6.0
+
+// App info
+MARKETING_VERSION = 0.5.0
+CURRENT_PROJECT_VERSION = 1

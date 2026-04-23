@@ -872,103 +872,159 @@ SENTINEL
 }
 
 cmd_install() {
+    # --gui-helper: machine-readable mode invoked from the Mac wizard's
+    # fallback path. Emits one JSON event per line on stdout, keeping
+    # stderr for anything else. Suppresses decorative banners and
+    # interactive prompts so the wizard can render its own UI.
+    #
+    # Event shape: {"phase":"<name>","status":"start|ok|fail","detail":"..."}
+    # Phases (ordered): dirs, configs, build, bundle, sidecar, skills,
+    #                   plist, cli, symlink, launchd
+    # The wizard typically short-circuits after bundle+plist+launchd
+    # because it performs copy/load natively via BinaryInstaller; this
+    # mode exists as a CLI-equivalent for contributors / headless CI.
+    local gui_helper=0
+    local skip_service_start=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --gui-helper)       gui_helper=1; shift ;;
+            --skip-service-start) skip_service_start=1; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    _emit_event() {
+        # $1=phase $2=status $3=detail
+        if [ "$gui_helper" -eq 1 ]; then
+            # JSON-escape detail: backslash + double-quote.
+            local detail="${3:-}"
+            detail="${detail//\\/\\\\}"
+            detail="${detail//\"/\\\"}"
+            printf '{"phase":"%s","status":"%s","detail":"%s"}\n' \
+                "$1" "$2" "$detail"
+        fi
+    }
+
     require_project_dir
 
-    print_header "Installing Tron Service"
-    echo "  Workspace: $PROJECT_DIR"
-    echo ""
+    if [ "$gui_helper" -eq 0 ]; then
+        print_header "Installing Tron Service"
+        echo "  Workspace: $PROJECT_DIR"
+        echo ""
+    fi
 
-    # Ensure directories exist
+    _emit_event dirs start ""
     mkdir -p "$BIN_DIR"
     mkdir -p "$TRON_HOME/system/deployment"
     mkdir -p "$HOME/Library/LaunchAgents"
+    _emit_event dirs ok "$BIN_DIR,$TRON_HOME/system/deployment,$HOME/Library/LaunchAgents"
 
-    # Create default config files if missing
+    _emit_event configs start ""
     ensure_default_configs
+    _emit_event configs ok ""
 
-    # Build if needed
     if [ ! -f "$RELEASE_BINARY" ]; then
-        build_rust
+        _emit_event build start "cargo build --release"
+        if ! build_rust; then
+            _emit_event build fail "cargo build exited non-zero"
+            return 1
+        fi
+        _emit_event build ok "$RELEASE_BINARY"
+    else
+        _emit_event build ok "prebuilt: $RELEASE_BINARY"
     fi
 
-    # Create app bundle with binary, sign, and notarize (if credentials set up)
-    print_status "Creating app bundle..."
+    _emit_event bundle start "$INSTALLED_BUNDLE"
+    [ "$gui_helper" -eq 0 ] && print_status "Creating app bundle..."
     create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
     sign_and_notarize "$INSTALLED_BUNDLE"
-    print_success "Installed app bundle"
+    [ "$gui_helper" -eq 0 ] && print_success "Installed app bundle"
+    _emit_event bundle ok "$INSTALLED_BUNDLE"
 
-    # Deploy transcription sidecar
-    print_status "Deploying transcription sidecar..."
+    _emit_event sidecar start ""
+    [ "$gui_helper" -eq 0 ] && print_status "Deploying transcription sidecar..."
     deploy_transcription_sidecar
-    print_success "Deployed transcription sidecar"
+    [ "$gui_helper" -eq 0 ] && print_success "Deployed transcription sidecar"
+    _emit_event sidecar ok ""
 
-    # Sync managed skills from repo
-    print_status "Syncing managed skills..."
+    _emit_event skills start ""
+    [ "$gui_helper" -eq 0 ] && print_status "Syncing managed skills..."
     sync_managed_skills
+    _emit_event skills ok ""
 
-    # Create launchd plist
-    print_status "Creating launchd service..."
+    _emit_event plist start "$PLIST_PATH"
+    [ "$gui_helper" -eq 0 ] && print_status "Creating launchd service..."
     create_launchd_plist
-    print_success "Created: $PLIST_PATH"
+    [ "$gui_helper" -eq 0 ] && print_success "Created: $PLIST_PATH"
+    _emit_event plist ok "$PLIST_PATH"
 
-    # Install runtime CLI, shared library, and entitlements
+    _emit_event cli start ""
     cp "$SCRIPT_DIR/tron-lib.sh" "$DEPLOY_DIR/tron-lib.sh"
     cp "$SCRIPT_DIR/tron-cli" "$DEPLOY_DIR/tron-cli"
     cp "$SCRIPT_DIR/tron-agent.entitlements" "$DEPLOY_DIR/tron-agent.entitlements"
     cp "$SCRIPT_DIR/AppIcon.icns" "$DEPLOY_DIR/AppIcon.icns" 2>/dev/null || true
     chmod +x "$DEPLOY_DIR/tron-cli"
-    print_success "Installed runtime CLI"
-
-    # Record workspace path so tron-cli can delegate dev commands
+    [ "$gui_helper" -eq 0 ] && print_success "Installed runtime CLI"
     echo "$PROJECT_DIR" > "$DEPLOY_DIR/workspace-path"
+    _emit_event cli ok "$DEPLOY_DIR/tron-cli"
 
-    # Symlink global tron command to runtime CLI
-    print_status "Installing tron CLI..."
+    _emit_event symlink start "$BIN_DIR/tron"
+    [ "$gui_helper" -eq 0 ] && print_status "Installing tron CLI..."
     ln -sf "$DEPLOY_DIR/tron-cli" "$BIN_DIR/tron"
-    print_success "Installed: $BIN_DIR/tron -> $DEPLOY_DIR/tron-cli"
-
-    # Check PATH
+    [ "$gui_helper" -eq 0 ] && print_success "Installed: $BIN_DIR/tron -> $DEPLOY_DIR/tron-cli"
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-        print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
+        [ "$gui_helper" -eq 0 ] && print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
+        _emit_event symlink ok "path-missing:$BIN_DIR"
+    else
+        _emit_event symlink ok ""
     fi
 
-    # Record initial deploy
     local current_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
     echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
 
-    # Start service
-    print_status "Starting service..."
-    launchd_start "$PLIST_NAME"
-    sleep 2
-
-    if service_is_running; then
-        local pid=$(get_service_pid)
-        print_success "Service started (PID: ${pid:-unknown})"
+    # The Mac wizard performs launchd load itself via LaunchAgentManaging,
+    # so --gui-helper defaults to skipping the launchctl step. Contributors
+    # using the CLI-install path keep the full behavior.
+    if [ "$skip_service_start" -eq 0 ] && [ "$gui_helper" -eq 0 ]; then
+        _emit_event launchd start ""
+        print_status "Starting service..."
+        launchd_start "$PLIST_NAME"
+        sleep 2
+        if service_is_running; then
+            local pid=$(get_service_pid)
+            print_success "Service started (PID: ${pid:-unknown})"
+            _emit_event launchd ok "pid=${pid:-unknown}"
+        else
+            print_warning "Service not running — check: tron errors"
+            _emit_event launchd fail "no-pid-after-bootstrap"
+        fi
     else
-        print_warning "Service not running — check: tron errors"
+        _emit_event launchd ok "skipped (gui-helper or --skip-service-start)"
     fi
 
-    echo ""
-    echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}                    Tron Installation Complete!${NC}"
-    echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-    echo ""
-    echo "  Server:  http://localhost:$PROD_PORT"
-    echo "  Health:  http://localhost:$PROD_PORT/health"
-    echo "  Binary:  $INSTALLED_BINARY"
-    echo "  CLI:     $BIN_DIR/tron"
-    echo ""
-    echo "  Next steps:"
-    echo "    tron login       # Authenticate with a provider"
-    echo "    tron dev         # Start dev server"
-    echo "    tron status      # Check service status"
-    echo ""
-    echo "  Code signing (one-time, only if you will deploy or distribute):"
-    echo "    xcrun notarytool store-credentials \"$NOTARIZE_PROFILE\" \\"
-    echo "      --apple-id <email> --team-id <TEAM_ID>"
-    echo ""
-    echo "  Get an app-specific password at: https://appleid.apple.com"
-    echo ""
+    if [ "$gui_helper" -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${GREEN}                    Tron Installation Complete!${NC}"
+        echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo "  Server:  http://localhost:$PROD_PORT"
+        echo "  Health:  http://localhost:$PROD_PORT/health"
+        echo "  Binary:  $INSTALLED_BINARY"
+        echo "  CLI:     $BIN_DIR/tron"
+        echo ""
+        echo "  Next steps:"
+        echo "    tron login       # Authenticate with a provider"
+        echo "    tron dev         # Start dev server"
+        echo "    tron status      # Check service status"
+        echo ""
+        echo "  Code signing (one-time, only if you will deploy or distribute):"
+        echo "    xcrun notarytool store-credentials \"$NOTARIZE_PROFILE\" \\"
+        echo "      --apple-id <email> --team-id <TEAM_ID>"
+        echo ""
+        echo "  Get an app-specific password at: https://appleid.apple.com"
+        echo ""
+    fi
 }
 
 cmd_uninstall() {
@@ -1522,7 +1578,7 @@ case "$1" in
     bench)     shift; cmd_bench "$@" ;;
     preflight) cmd_preflight ;;
     deploy)    shift; cmd_deploy "$@" ;;
-    install)   cmd_install ;;
+    install)   shift; cmd_install "$@" ;;
     rollback)  shift; cmd_rollback "$@" ;;
     setup)     shift; cmd_setup "$@" ;;
     status)    cmd_status ;;

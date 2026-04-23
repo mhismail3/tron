@@ -1,0 +1,13 @@
+// Release.xcconfig - Release build for DMG distribution
+#include "Base.xcconfig"
+
+// Release settings
+DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
+SWIFT_OPTIMIZATION_LEVEL = -O
+SWIFT_COMPILATION_MODE = wholemodule
+COPY_PHASE_STRIP = NO
+ENABLE_NS_ASSERTIONS = NO
+MTL_ENABLE_DEBUG_INFO = NO
+
+// Production variant - DMG installs to /Applications/Tron.app
+PRODUCT_BUNDLE_IDENTIFIER = com.tron.mac

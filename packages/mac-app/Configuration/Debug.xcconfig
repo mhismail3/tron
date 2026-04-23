@@ -1,0 +1,14 @@
+// Debug.xcconfig - Development build with dev bundle ID
+#include "Base.xcconfig"
+
+// Debug settings
+DEBUG_INFORMATION_FORMAT = dwarf
+GCC_OPTIMIZATION_LEVEL = 0
+SWIFT_OPTIMIZATION_LEVEL = -Onone
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG
+ENABLE_TESTABILITY = YES
+ONLY_ACTIVE_ARCH = YES
+MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE
+
+// Dev variant — bundle ID matches scripts/tron-lib.sh DEV_BUNDLE pattern
+PRODUCT_BUNDLE_IDENTIFIER = com.tron.mac.dev

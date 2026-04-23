@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        com.apple.security.app-sandbox is INTENTIONALLY OMITTED.
+
+        Tron's Mac wrapper installs the headless server, manages a
+        LaunchAgent in ~/Library/LaunchAgents/, runs `launchctl` and
+        `tailscale` subprocesses, reads/writes ~/.tron/ outside the
+        app's container, and probes Full Disk Access by stat'ing
+        protected paths. None of those are possible inside the App
+        Sandbox. The app is distributed as a notarized DMG via
+        GitHub Releases, NOT the Mac App Store, so sandboxing is
+        not a distribution requirement.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!--
+        disable-library-validation is REQUIRED so the bundled
+        Resources/tron-agent helper binary can be launched by our
+        signed process without separately signing every Rust dylib
+        it links to. The bundled binary is itself codesigned with
+        the same hardened runtime by the release pipeline before
+        notarization.
+    -->
+</dict>
+</plist>

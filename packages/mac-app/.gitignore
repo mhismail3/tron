@@ -1,0 +1,20 @@
+# XcodeGen-generated project; regenerate with `xcodegen generate`
+TronMac.xcodeproj/
+
+# Build artifacts
+build/
+DerivedData/
+*.xcarchive
+*.dmg
+
+# The Rust agent binary is bundled at release-time by CI, never committed
+Sources/Resources/tron-agent
+
+# macOS / Xcode
+.DS_Store
+*.swp
+*.xcuserstate
+xcuserdata/
+
+# Sentry artifacts
+.sentryclirc

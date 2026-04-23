@@ -1,0 +1,96 @@
+name: TronMac
+options:
+  bundleIdPrefix: com.tron
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: en
+  generateEmptyDirectories: true
+  createIntermediateGroups: true
+
+configFiles:
+  Debug: Configuration/Debug.xcconfig
+  Release: Configuration/Release.xcconfig
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: false
+    DEVELOPMENT_TEAM: MYGKXH6TY4
+    CODE_SIGN_STYLE: Automatic
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+
+targets:
+  TronMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+        createIntermediateGroups: true
+        excludes:
+          - "Resources/**"
+      # Resources get added as individual file references (not a folder
+      # reference), so each file lands at the top level of
+      # `Tron.app/Contents/Resources/` — required by the wizard's
+      # `Bundle.main.url(forResource: "tron-agent")` lookup in
+      # Sources/Wizard/Steps/InstallStep.swift:137.
+      - path: Sources/Resources
+        createIntermediateGroups: true
+        buildPhase: resources
+        optional: true
+    settings:
+      base:
+        INFOPLIST_FILE: Sources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: TronMac.entitlements
+        MARKETING_VERSION: "0.5.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_EMIT_LOC_STRINGS: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.dev
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac
+
+  TronMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+        createIntermediateGroups: true
+        optional: true
+    dependencies:
+      - target: TronMac
+    settings:
+      base:
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TronMac.app/Contents/MacOS/TronMac"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_RUNNER_WAIT_FOR_DEBUGGER: NO
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.tests
+        CODE_SIGN_IDENTITY: "-"
+
+schemes:
+  TronMac:
+    build:
+      targets:
+        TronMac: all
+        TronMacTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - TronMacTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

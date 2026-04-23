@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Tron</string>
+    <key>CFBundleDisplayName</key>
+    <string>Tron</string>
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+    <!--
+        LSUIElement: when YES, the app does not appear in the Dock
+        and has no menu bar. Toggled at runtime via
+        NSApp.setActivationPolicy(.accessory) once the wizard is
+        complete - we start as .regular so the wizard window has
+        focus and a menu, then transform to .accessory for the
+        steady-state menu-bar mode.
+    -->
+    <key>LSUIElement</key>
+    <false/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Tron. All rights reserved.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Tron uses AppleEvents to verify Full Disk Access during onboarding.</string>
+    <key>NSSystemAdministrationUsageDescription</key>
+    <string>Tron installs a LaunchAgent so the headless server starts at login.</string>
+</dict>
+</plist>
