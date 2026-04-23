@@ -10,13 +10,23 @@ struct ModelSwitchPayload {
     let reason: String?
 
     init?(from payload: [String: AnyCodable]) {
-        guard let previousModel = payload.string("previousModel") else {
+        // Both `previousModel` and `newModel` are required — the server
+        // always emits both. The prior `payload.string("model") ?? ""`
+        // fallback was back-compat for a field that hasn't been emitted
+        // since pre-beta and is now forbidden by the no-legacy policy.
+        guard
+            let previousModel = payload.string("previousModel"),
+            let newModel = payload.string("newModel")
+        else {
+            TronLogger.shared.warning(
+                "config.model_switch event missing previousModel or newModel; dropping",
+                category: .events
+            )
             return nil
         }
 
         self.previousModel = previousModel
-        self.newModel = payload.string("newModel")
-            ?? payload.string("model") ?? ""
+        self.newModel = newModel
         self.reason = payload.string("reason")
     }
 }

@@ -179,7 +179,9 @@ enum SystemEventHandlers {
         _ payload: [String: AnyCodable],
         timestamp: Date
     ) -> ChatMessage? {
-        let parsed = ThinkingCompletePayload(from: payload)
+        guard let parsed = ThinkingCompletePayload(from: payload) else {
+            return nil
+        }
 
         // Use preview for initial display; full content loaded lazily on tap
         let displayText = parsed.preview.isEmpty ? parsed.content : parsed.preview

@@ -18,19 +18,46 @@ struct SessionStartPayload {
         let eventId: String
     }
 
-    init(from payload: [String: AnyCodable]) {
-        self.workingDirectory = payload.string("workingDirectory") ?? ""
-        self.model = payload.string("model") ?? ""
-        self.provider = payload.string("provider") ?? ""
+    /// Failable decode from a persisted `session.start` payload.
+    ///
+    /// `workingDirectory`, `model`, and `provider` are required — the server
+    /// always emits them and the UI relies on them for routing/display.
+    /// A missing field silently defaulting to "" used to paper over schema
+    /// drift and leave the UI showing a blank session; instead we now refuse
+    /// to decode and drop the event with a log entry.
+    init?(from payload: [String: AnyCodable]) {
+        guard
+            let workingDirectory = payload.string("workingDirectory"),
+            let model = payload.string("model"),
+            let provider = payload.string("provider")
+        else {
+            TronLogger.shared.warning(
+                "session.start event missing required field(s) workingDirectory/model/provider; dropping",
+                category: .events
+            )
+            return nil
+        }
+
+        self.workingDirectory = workingDirectory
+        self.model = model
+        self.provider = provider
         self.systemPrompt = payload.string("systemPrompt")
         self.title = payload.string("title")
         self.tags = payload.stringArray("tags")
 
         if let forked = payload.dict("forkedFrom") {
-            self.forkedFrom = ForkedFromInfo(
-                sessionId: forked["sessionId"] as? String ?? "",
-                eventId: forked["eventId"] as? String ?? ""
-            )
+            guard
+                let sessionId = forked["sessionId"] as? String,
+                let eventId = forked["eventId"] as? String
+            else {
+                TronLogger.shared.warning(
+                    "session.start forkedFrom missing sessionId/eventId; dropping fork info",
+                    category: .events
+                )
+                self.forkedFrom = nil
+                return
+            }
+            self.forkedFrom = ForkedFromInfo(sessionId: sessionId, eventId: eventId)
         } else {
             self.forkedFrom = nil
         }

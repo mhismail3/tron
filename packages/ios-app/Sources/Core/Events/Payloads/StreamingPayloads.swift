@@ -13,9 +13,20 @@ struct StreamTurnEndPayload {
     let turn: Int
     let tokenRecord: TokenRecord?
 
-    init(from payload: [String: AnyCodable]) {
-        self.turn = payload.int("turn") ?? 1
-
+    /// Failable decode from a persisted `stream.turn_end` payload.
+    ///
+    /// `turn` is always emitted by the server; silently defaulting to 1
+    /// used to pin `state.currentTurn` at 1 forever when the field went
+    /// missing — a schema-drift symptom that was invisible in the UI.
+    init?(from payload: [String: AnyCodable]) {
+        guard let turn = payload.int("turn") else {
+            TronLogger.shared.warning(
+                "stream.turn_end event missing required `turn` field; dropping",
+                category: .events
+            )
+            return nil
+        }
+        self.turn = turn
         self.tokenRecord = TokenRecord.from(dict: payload.dict("tokenRecord"))
     }
 
@@ -58,11 +69,29 @@ struct ThinkingCompletePayload: Codable {
         self.preview = ThinkingCompletePayload.extractPreview(from: content)
     }
 
-    init(from payload: [String: AnyCodable]) {
-        self.turnNumber = payload.int("turnNumber") ?? 1
-        self.content = payload.string("content") ?? ""
-        self.preview = payload.string("preview") ?? ""
-        self.characterCount = payload.int("characterCount") ?? 0
+    /// Failable decode from a persisted `stream.thinking_complete` payload.
+    ///
+    /// `turnNumber` and `content` are required. `characterCount` is always
+    /// derived from `content`, so we recompute it rather than trusting a
+    /// possibly-stale wire value — which also removes a mismatch hazard
+    /// where content and characterCount disagreed after the decoder
+    /// silently defaulted one but not the other.
+    init?(from payload: [String: AnyCodable]) {
+        guard
+            let turnNumber = payload.int("turnNumber"),
+            let content = payload.string("content")
+        else {
+            TronLogger.shared.warning(
+                "stream.thinking_complete event missing required field(s) turnNumber/content; dropping",
+                category: .events
+            )
+            return nil
+        }
+        self.turnNumber = turnNumber
+        self.content = content
+        self.preview = payload.string("preview")
+            ?? ThinkingCompletePayload.extractPreview(from: content)
+        self.characterCount = content.count
         self.model = payload.string("model")
 
         if let timestampStr = payload.string("timestamp") {

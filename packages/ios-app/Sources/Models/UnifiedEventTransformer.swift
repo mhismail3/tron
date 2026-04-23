@@ -312,11 +312,12 @@ extension UnifiedEventTransformer {
 
             switch eventType {
             case .sessionStart:
-                let payload = SessionStartPayload(from: event.payload)
-                state.currentModel = payload.model
-                state.workingDirectory = payload.workingDirectory
-                state.sessionInfo.startTime = parseTimestamp(event.timestamp)
-                state.sessionInfo.initialModel = payload.model
+                if let payload = SessionStartPayload(from: event.payload) {
+                    state.currentModel = payload.model
+                    state.workingDirectory = payload.workingDirectory
+                    state.sessionInfo.startTime = parseTimestamp(event.timestamp)
+                    state.sessionInfo.initialModel = payload.model
+                }
 
             case .toolResult, .toolCall, .streamThinkingComplete:
                 // Skip - processed via message.assistant content blocks
@@ -398,8 +399,8 @@ extension UnifiedEventTransformer {
                 handleSubagentEvent(eventType, payload: event.payload, state: &state)
 
             case .streamTurnEnd:
-                let payload = StreamTurnEndPayload(from: event.payload)
-                if payload.turn > state.currentTurn {
+                if let payload = StreamTurnEndPayload(from: event.payload),
+                   payload.turn > state.currentTurn {
                     state.currentTurn = payload.turn
                 }
 

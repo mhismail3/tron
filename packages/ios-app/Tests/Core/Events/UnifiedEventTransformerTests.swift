@@ -587,7 +587,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let events = [
             rawEvent(type: "session.start", payload: [
                 "model": AnyCodable("claude-sonnet-4"),
-                "workingDirectory": AnyCodable("/home/user/project")
+                "workingDirectory": AnyCodable("/home/user/project"),
+                "provider": AnyCodable("anthropic")
             ], timestamp: timestamp(0)),
             rawEvent(type: "message.user", payload: ["content": AnyCodable("Hello")], timestamp: timestamp(1)),
             rawEvent(type: "message.assistant", payload: [
@@ -853,7 +854,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let events = [
             sessionEvent(type: "session.start", payload: [
                 "model": AnyCodable("claude-sonnet-4"),
-                "workingDirectory": AnyCodable("/test")
+                "workingDirectory": AnyCodable("/test"),
+                "provider": AnyCodable("anthropic")
             ], timestamp: timestamp(0), sequence: 1),
             sessionEvent(type: "message.user", payload: ["content": AnyCodable("Hi")], timestamp: timestamp(1), sequence: 2),
             sessionEvent(type: "message.assistant", payload: [
