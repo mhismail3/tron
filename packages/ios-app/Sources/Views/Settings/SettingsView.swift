@@ -39,7 +39,7 @@ struct SettingsView: View {
     /// the sheet dispatch does too, so a mis-set `activePage` in a
     /// production build falls through cleanly.
     enum SettingsPage: String, Identifiable {
-        case server, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary, updates
+        case server, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary, updates, privacy
         #if DEBUG || BETA
         case diagnostics
         #endif
@@ -138,6 +138,8 @@ struct SettingsView: View {
                         updateServerSetting: updateServerSetting,
                         rpcClient: rpcClient
                     )
+                case .privacy:
+                    PrivacySettingsPage()
                 #if DEBUG || BETA
                 case .diagnostics:
                     DiagnosticsPage(rpcClient: rpcClient)
@@ -237,13 +239,20 @@ struct SettingsView: View {
             }
             .cardEntrance(visible: cardsVisible, index: 7)
 
+            SettingsCard(interactive: true) {
+                categoryRow(icon: "hand.raised", label: "Privacy", subtitle: "Telemetry opt-in, event list, and feedback composer") {
+                    activePage = .privacy
+                }
+            }
+            .cardEntrance(visible: cardsVisible, index: 8)
+
             if #available(iOS 26.0, *) {
                 SettingsCard(interactive: true) {
                     categoryRow(icon: "paintbrush", label: "App", subtitle: "Change how the iOS app looks and behaves") {
                         activePage = .app
                     }
                 }
-                .cardEntrance(visible: cardsVisible, index: 8)
+                .cardEntrance(visible: cardsVisible, index: 9)
             }
 
             #if DEBUG || BETA
@@ -252,7 +261,7 @@ struct SettingsView: View {
                     activePage = .diagnostics
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 9)
+            .cardEntrance(visible: cardsVisible, index: 10)
             #endif
         }
     }

@@ -7,6 +7,9 @@ enum AppConstants {
     static var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     }
+    static var buildNumber: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
     // Force-unwrap is safe: the inputs are compile-time constants. AppConstantsTests
     // verifies the URL parses; any edit that breaks it trips CI before ship.
     static let fallbackServerURL = URL(string: "ws://\(defaultHost):\(prodPort)/ws")!

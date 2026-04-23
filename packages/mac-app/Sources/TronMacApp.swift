@@ -77,6 +77,7 @@ struct MenuBarHostView: View {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
     private var wizardCompletionObserver: NSObjectProtocol?
+    private var sendFeedbackObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Install single-instance lock first - if another Tron.app is
@@ -111,11 +112,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+
+        sendFeedbackObserver = NotificationCenter.default.addObserver(
+            forName: .tronMenuBarSendFeedback,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                await MenuBarFeedbackAction.present()
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         if let wizardCompletionObserver {
             NotificationCenter.default.removeObserver(wizardCompletionObserver)
+        }
+        if let sendFeedbackObserver {
+            NotificationCenter.default.removeObserver(sendFeedbackObserver)
         }
         SingleInstanceLock.shared.release()
         menuBarController?.dispose()
