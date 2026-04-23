@@ -194,6 +194,9 @@ fn write_patterns() -> &'static [Regex] {
     use std::sync::OnceLock;
     static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
     PATTERNS.get_or_init(|| {
+        // All patterns are compile-time constants. A failure here is a
+        // developer bug — silently skipping a broken guardrail regex would
+        // quietly lose a security check, so panic so tests catch it.
         [
             r">>\s*([^\s;|&]+)",
             r">\s*([^\s;|&]+)",
@@ -202,7 +205,11 @@ fn write_patterns() -> &'static [Regex] {
             r"rm\s+(?:-rf?\s+)?([^\s;|&]+)",
         ]
         .iter()
-        .filter_map(|p| Regex::new(p).ok())
+        .map(|p| {
+            Regex::new(p).unwrap_or_else(|e| {
+                panic!("guardrails write-pattern regex failed to compile: pattern={p:?} error={e}")
+            })
+        })
         .collect()
     })
 }

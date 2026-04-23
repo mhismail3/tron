@@ -299,6 +299,29 @@ fn load_prompt_context_artifacts(
     }
 }
 
+/// Parse a pending-results event row's payload into an `(id, value)` pair.
+///
+/// Used by the `get_pending_*` helpers that surface unconsumed notification
+/// events into the next prompt's context. A corrupt payload means the event
+/// cannot be displayed to the model, so we drop it — but we log first so the
+/// stale/corrupt payload is findable in operator logs.
+fn parse_pending_event_payload(
+    event: crate::events::sqlite::row_types::EventRow,
+) -> Option<(String, Value)> {
+    match serde_json::from_str::<Value>(&event.payload) {
+        Ok(payload) => Some((event.id, payload)),
+        Err(e) => {
+            tracing::warn!(
+                event_id = %event.id,
+                event_type = %event.event_type,
+                error = %e,
+                "pending-results: corrupt event payload JSON; dropping from prompt context"
+            );
+            None
+        }
+    }
+}
+
 /// Query unconsumed subagent results from the event store.
 ///
 /// Returns `(event_id, payload_json)` pairs for `notification.subagent_result`
@@ -336,11 +359,7 @@ pub fn get_pending_subagent_results(
     notifications
         .into_iter()
         .filter(|event| !consumed_ids.contains(&event.id))
-        .filter_map(|event| {
-            serde_json::from_str::<Value>(&event.payload)
-                .ok()
-                .map(|payload| (event.id, payload))
-        })
+        .filter_map(|event| parse_pending_event_payload(event))
         .collect()
 }
 
@@ -442,11 +461,7 @@ pub fn get_pending_process_results(
     notifications
         .into_iter()
         .filter(|event| !consumed_ids.contains(&event.id))
-        .filter_map(|event| {
-            serde_json::from_str::<Value>(&event.payload)
-                .ok()
-                .map(|payload| (event.id, payload))
-        })
+        .filter_map(|event| parse_pending_event_payload(event))
         .collect()
 }
 
@@ -550,11 +565,7 @@ pub fn get_pending_user_job_actions(
     notifications
         .into_iter()
         .filter(|event| !consumed_ids.contains(&event.id))
-        .filter_map(|event| {
-            serde_json::from_str::<Value>(&event.payload)
-                .ok()
-                .map(|payload| (event.id, payload))
-        })
+        .filter_map(|event| parse_pending_event_payload(event))
         .collect()
 }
 

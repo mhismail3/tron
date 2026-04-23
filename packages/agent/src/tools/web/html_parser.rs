@@ -50,21 +50,29 @@ pub fn parse_html(html: &str, _base_url: Option<&str>) -> HtmlParseResult {
     }
 }
 
+/// Parse a compile-time constant CSS selector.
+///
+/// Selectors in this module are all static literals — a parse failure means
+/// a developer introduced a typo. Panic so tests catch it rather than
+/// silently dropping the selector (which would look like "that document
+/// doesn't have a title" at runtime).
+fn static_selector(pattern: &'static str) -> Selector {
+    Selector::parse(pattern)
+        .unwrap_or_else(|e| panic!("html_parser: static CSS selector failed to compile: pattern={pattern:?} error={e:?}"))
+}
+
 fn extract_title(doc: &Html) -> String {
     // Priority: <title> → og:title → <h1>
-    if let Some(title_el) = Selector::parse("title")
-        .ok()
-        .and_then(|s| doc.select(&s).next())
-    {
+    if let Some(title_el) = doc.select(&static_selector("title")).next() {
         let text = title_el.text().collect::<String>().trim().to_string();
         if !text.is_empty() {
             return text;
         }
     }
 
-    if let Some(og) = Selector::parse(r#"meta[property="og:title"]"#)
-        .ok()
-        .and_then(|s| doc.select(&s).next())
+    if let Some(og) = doc
+        .select(&static_selector(r#"meta[property="og:title"]"#))
+        .next()
         && let Some(content) = og.value().attr("content")
     {
         let text = content.trim().to_string();
@@ -73,10 +81,7 @@ fn extract_title(doc: &Html) -> String {
         }
     }
 
-    if let Some(h1) = Selector::parse("h1")
-        .ok()
-        .and_then(|s| doc.select(&s).next())
-    {
+    if let Some(h1) = doc.select(&static_selector("h1")).next() {
         let text = h1.text().collect::<String>().trim().to_string();
         if !text.is_empty() {
             return text;
@@ -88,9 +93,9 @@ fn extract_title(doc: &Html) -> String {
 
 fn extract_description(doc: &Html) -> Option<String> {
     // Priority: meta[name=description] → og:description
-    if let Some(meta) = Selector::parse(r#"meta[name="description"]"#)
-        .ok()
-        .and_then(|s| doc.select(&s).next())
+    if let Some(meta) = doc
+        .select(&static_selector(r#"meta[name="description"]"#))
+        .next()
         && let Some(content) = meta.value().attr("content")
     {
         let text = content.trim().to_string();
@@ -99,9 +104,9 @@ fn extract_description(doc: &Html) -> Option<String> {
         }
     }
 
-    if let Some(og) = Selector::parse(r#"meta[property="og:description"]"#)
-        .ok()
-        .and_then(|s| doc.select(&s).next())
+    if let Some(og) = doc
+        .select(&static_selector(r#"meta[property="og:description"]"#))
+        .next()
         && let Some(content) = og.value().attr("content")
     {
         let text = content.trim().to_string();

@@ -81,7 +81,18 @@ fn parse_note(filename: &str, filepath: &str, content: &str) -> Value {
             if let Some(value) = line.strip_prefix("created: ") {
                 created_at = value.trim().to_string();
             } else if let Some(value) = line.strip_prefix("duration: ") {
-                duration_seconds = value.trim().parse().ok();
+                duration_seconds = match value.trim().parse() {
+                    Ok(d) => Some(d),
+                    Err(e) => {
+                        tracing::warn!(
+                            filename = %filename,
+                            raw = %value.trim(),
+                            error = %e,
+                            "voice_notes: corrupt `duration:` frontmatter field"
+                        );
+                        None
+                    }
+                };
             } else if let Some(value) = line.strip_prefix("language: ") {
                 language = Some(value.trim().to_string());
             }
