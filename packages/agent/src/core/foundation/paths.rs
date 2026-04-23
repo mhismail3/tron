@@ -347,11 +347,11 @@ mod tests {
         );
     }
 
-    /// Regression guard: `Cargo.toml` `repository` URL must not contain the
-    /// developer's personal GitHub handle. The actual repo lives at
-    /// `mhismail3/tron`; an older draft pointed at `moose/tron` (a non-existent
-    /// path that would 404 for any user trying to follow the link from
-    /// crates.io / docs.rs / IDE pop-ups).
+    /// Regression guard: `Cargo.toml` `repository` URL must not contain a
+    /// short personal GitHub handle (the dev-machine username) in the
+    /// `/<handle>/` path segment. An older draft pointed at a stale handle
+    /// that would 404 for any user trying to follow the link from
+    /// crates.io / docs.rs / IDE pop-ups.
     ///
     /// Needle constructed from parts so this test doesn't self-match.
     #[test]
@@ -366,13 +366,12 @@ mod tests {
 
     /// Regression guard: `import/parser.rs` doc-comments must not embed
     /// example paths from the developer's home directory. An earlier doc
-    /// comment used the literal string `-Users-moose-Downloads-projects-tron`
-    /// as an "example" of a Claude-Code-encoded path; that example leaks the
-    /// developer's directory layout into a public-facing comment that ships
-    /// in `cargo doc`.
+    /// comment used a literal Claude-Code-encoded form of the developer's
+    /// project tree as its "example"; that leaks the developer's directory
+    /// layout into a public-facing comment that ships in `cargo doc`.
     ///
-    /// Both forms are checked: the raw filesystem prefix `/Users/moose` AND
-    /// the encoded form `-Users-moose-` that Claude Code generates.
+    /// Both forms are checked: the raw filesystem prefix and the encoded
+    /// form that Claude Code generates (slashes replaced with hyphens).
     /// Needles constructed from parts so this test doesn't self-match.
     #[test]
     fn import_parser_doc_comments_have_no_personal_path_examples() {
