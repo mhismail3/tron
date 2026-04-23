@@ -195,17 +195,30 @@ fn parse_prompt_frontmatter(content: &str) -> Option<HookFileConfig> {
     let fields = parse_yaml_fields(frontmatter);
     let hook_type = parse_type_value(fields.get("type")?)?;
 
+    // `enabled` and `priority` surface parse errors loudly: a typo like
+    // `enabled: ya` used to silently enable the hook. We now reject the
+    // whole frontmatter so the user gets a clear signal that their hook
+    // file is malformed.
+    let enabled = match fields.get("enabled") {
+        None => true,
+        Some(v) => v.parse().map_err(|e| {
+            tracing::warn!(value = %v, error = %e, "hook frontmatter: invalid `enabled` value");
+            e
+        }).ok()?,
+    };
+    let priority = match fields.get("priority") {
+        None => 0,
+        Some(v) => v.parse().map_err(|e| {
+            tracing::warn!(value = %v, error = %e, "hook frontmatter: invalid `priority` value");
+            e
+        }).ok()?,
+    };
+
     Some(HookFileConfig {
         hook_type,
         label: fields.get("label").cloned().unwrap_or_default(),
-        enabled: fields
-            .get("enabled")
-            .map(|v| v.parse().unwrap_or(true))
-            .unwrap_or(true),
-        priority: fields
-            .get("priority")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
+        enabled,
+        priority,
         prompt: Some(body.to_string()),
     })
 }
@@ -238,17 +251,29 @@ fn parse_script_frontmatter(content: &str) -> Option<HookFileConfig> {
     let fields = parse_yaml_fields(&frontmatter);
     let hook_type = parse_type_value(fields.get("type")?)?;
 
+    // Same strict parsing as markdown frontmatter: a typo on `enabled` or
+    // `priority` now invalidates the file rather than silently accepting
+    // the default.
+    let enabled = match fields.get("enabled") {
+        None => true,
+        Some(v) => v.parse().map_err(|e| {
+            tracing::warn!(value = %v, error = %e, "hook frontmatter: invalid `enabled` value");
+            e
+        }).ok()?,
+    };
+    let priority = match fields.get("priority") {
+        None => 0,
+        Some(v) => v.parse().map_err(|e| {
+            tracing::warn!(value = %v, error = %e, "hook frontmatter: invalid `priority` value");
+            e
+        }).ok()?,
+    };
+
     Some(HookFileConfig {
         hook_type,
         label: fields.get("label").cloned().unwrap_or_default(),
-        enabled: fields
-            .get("enabled")
-            .map(|v| v.parse().unwrap_or(true))
-            .unwrap_or(true),
-        priority: fields
-            .get("priority")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
+        enabled,
+        priority,
         prompt: None, // Scripts don't have a prompt body
     })
 }
@@ -394,10 +419,27 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_frontmatter_prompt_priority_non_numeric() {
+    fn test_parse_frontmatter_prompt_priority_non_numeric_rejects_file() {
+        // A typo in `priority` used to silently fall back to 0, which would
+        // register the hook at the wrong priority relative to its siblings.
+        // Now it's treated as a malformed frontmatter → the hook is skipped.
         let content = "---\ntype: stop\npriority: high\n---\nPrompt.";
-        let config = parse_prompt_frontmatter(content).unwrap();
-        assert_eq!(config.priority, 0); // defaults
+        assert!(
+            parse_prompt_frontmatter(content).is_none(),
+            "non-numeric priority must reject the frontmatter, not default to 0"
+        );
+    }
+
+    #[test]
+    fn test_parse_frontmatter_prompt_enabled_non_boolean_rejects_file() {
+        // Previously `enabled: ya` silently defaulted to `true`; a user
+        // trying to disable a hook via a typo would accidentally leave it
+        // active. Now the whole file is rejected so the error surfaces.
+        let content = "---\ntype: stop\nenabled: ya\n---\nPrompt.";
+        assert!(
+            parse_prompt_frontmatter(content).is_none(),
+            "non-boolean enabled must reject the frontmatter, not default to true"
+        );
     }
 
     #[test]

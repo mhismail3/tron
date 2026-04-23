@@ -78,26 +78,46 @@ impl EventStore {
 /// Convert `EventRow`s to `SessionEvent`s for reconstruction.
 ///
 /// Each `EventRow.payload` is a JSON string; this parses it into `serde_json::Value`.
-/// Invalid JSON falls back to `Value::Null`.
+/// Invalid JSON on a known event type logs a warning and the payload is replaced
+/// with `Value::Null` (the reconstruction downstream skips missing payloads).
+///
+/// Rows whose `event_type` string does not parse into a known [`EventType`] are
+/// dropped and logged as corrupt — previously such rows were silently reclassified
+/// as [`EventType::SessionStart`], which would cause reconstruction to fake a new
+/// session boundary at an arbitrary point.
 pub fn event_rows_to_session_events(rows: &[EventRow]) -> Vec<SessionEvent> {
     rows.iter()
-        .map(|row| SessionEvent {
-            id: row.id.clone(),
-            parent_id: row.parent_id.clone(),
-            session_id: row.session_id.clone(),
-            workspace_id: row.workspace_id.clone(),
-            timestamp: row.timestamp.clone(),
-            event_type: row.event_type.parse().unwrap_or(EventType::SessionStart),
-            sequence: row.sequence,
-            checksum: row.checksum.clone(),
-            payload: serde_json::from_str(&row.payload).unwrap_or_else(|error| {
-                tracing::warn!(
-                    event_id = %row.id,
-                    error = %error,
-                    "corrupt event payload, defaulting to null"
-                );
-                Value::Null
-            }),
+        .filter_map(|row| {
+            let event_type: EventType = match row.event_type.parse() {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(
+                        event_id = %row.id,
+                        event_type = %row.event_type,
+                        error = %e,
+                        "dropping event row with unknown event_type"
+                    );
+                    return None;
+                }
+            };
+            Some(SessionEvent {
+                id: row.id.clone(),
+                parent_id: row.parent_id.clone(),
+                session_id: row.session_id.clone(),
+                workspace_id: row.workspace_id.clone(),
+                timestamp: row.timestamp.clone(),
+                event_type,
+                sequence: row.sequence,
+                checksum: row.checksum.clone(),
+                payload: serde_json::from_str(&row.payload).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        event_id = %row.id,
+                        error = %error,
+                        "corrupt event payload, defaulting to null"
+                    );
+                    Value::Null
+                }),
+            })
         })
         .collect()
 }

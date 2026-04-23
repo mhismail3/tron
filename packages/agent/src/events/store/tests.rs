@@ -2006,6 +2006,72 @@ fn event_rows_to_session_events_handles_invalid_json() {
     assert!(events[0].payload.is_null());
 }
 
+#[test]
+fn event_rows_to_session_events_skips_unknown_event_types() {
+    // Regression: previously an unknown event_type silently became
+    // EventType::SessionStart, which would misclassify the row during
+    // reconstruction. Now the row is dropped and logged as corrupt.
+    let unknown = EventRow {
+        id: "evt_bad".to_string(),
+        session_id: "sess_1".to_string(),
+        parent_id: None,
+        sequence: 0,
+        depth: 0,
+        event_type: "some.unknown.event.type".to_string(),
+        timestamp: "2025-01-01T00:00:00Z".to_string(),
+        payload: "{}".to_string(),
+        content_blob_id: None,
+        workspace_id: "ws_1".to_string(),
+        role: None,
+        tool_name: None,
+        tool_call_id: None,
+        turn: None,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_creation_tokens: None,
+        checksum: None,
+        model: None,
+        latency_ms: None,
+        stop_reason: None,
+        has_thinking: None,
+        provider_type: None,
+        cost: None,
+    };
+    let good = EventRow {
+        id: "evt_good".to_string(),
+        session_id: "sess_1".to_string(),
+        parent_id: None,
+        sequence: 1,
+        depth: 0,
+        event_type: "message.user".to_string(),
+        timestamp: "2025-01-01T00:00:00Z".to_string(),
+        payload: "{}".to_string(),
+        content_blob_id: None,
+        workspace_id: "ws_1".to_string(),
+        role: None,
+        tool_name: None,
+        tool_call_id: None,
+        turn: None,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_creation_tokens: None,
+        checksum: None,
+        model: None,
+        latency_ms: None,
+        stop_reason: None,
+        has_thinking: None,
+        provider_type: None,
+        cost: None,
+    };
+
+    let events = super::event_rows_to_session_events(&[unknown, good]);
+    assert_eq!(events.len(), 1, "unknown event type row must be filtered");
+    assert_eq!(events[0].id, "evt_good", "only the valid row survives");
+    assert_eq!(events[0].event_type, EventType::MessageUser);
+}
+
 // ── Concurrency (write serialization) ───────────────────────────
 
 fn setup_file_backed() -> (EventStore, tempfile::TempDir) {

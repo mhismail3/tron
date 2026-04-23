@@ -172,8 +172,23 @@ impl StreamAccumulator {
             return vec![];
         };
         let tc = self.tool_calls.remove(idx);
-        let arguments: Map<String, serde_json::Value> =
-            serde_json::from_str(&tc.args).unwrap_or_default();
+        // INVARIANT: a provider never emits partial JSON on a tool call —
+        // parse failures here indicate an upstream bug (stream chunk lost,
+        // wire corruption, or a provider quirk). Log so the operator has
+        // a signal; downstream still tries the tool with empty args.
+        let arguments: Map<String, serde_json::Value> = match serde_json::from_str(&tc.args) {
+            Ok(m) => m,
+            Err(error) => {
+                tracing::warn!(
+                    tool_call_id = %tc.id,
+                    tool_name = %tc.name,
+                    error = %error,
+                    raw_args_len = tc.args.len(),
+                    "tool_call args are not valid JSON — dispatching with empty args"
+                );
+                Map::new()
+            }
+        };
         let tool_call = ToolCall::new(tc.id, tc.name, arguments);
         vec![StreamEvent::ToolCallEnd { tool_call }]
     }
