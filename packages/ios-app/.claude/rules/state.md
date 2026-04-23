@@ -22,6 +22,8 @@ paths:
 | `DisplayStreamState` | Active display stream, frames, sheet |
 | `WorktreeIsolationState` | Session-scoped view over `WorktreeStatusCache`; the chat toolbar reads through it |
 | `WorktreeStatusCache` | Shared per-session worktree status; populated lazily by sidebar rows + kept live via global worktree events. Toolbar and sidebar row render from the same cache |
+| `OnboardingState` | `@Observable` wizard state. Owns the `WizardStep` enum, per-step form inputs, and `complete()` which flips `@AppStorage("onboardingComplete")`. `onboardingStep` persists across kill+relaunch so a killed wizard resumes at the same step. |
+| `SettingsState` | Server settings mirror + cached `connectionPresets[]`. Exposes the active preset ID so `PresetTokenStore` can look up the bearer token for `WebSocketService`. Telemetry and feedback toggles are surfaced from here to the Privacy page. |
 
 ## Managers (`ViewModels/Managers/`)
 

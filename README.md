@@ -23,6 +23,8 @@ This README is the single, canonical reference for the project and is expected t
 - [Context and Compaction](#context-and-compaction)
 - [Database Schema](#database-schema)
 - [iOS App](#ios-app)
+- [Mac App](#mac-app)
+- [Permissions](#permissions)
 - [Deployment](#deployment)
 - [Testing](#testing)
 - [Core Invariants](#core-invariants)
@@ -79,11 +81,17 @@ tron/
 +-- packages/
 |   +-- agent/              Rust agent server (single `tron` crate, modular layout)
 |   +-- ios-app/            SwiftUI iOS application
+|   +-- mac-app/            SwiftUI Mac menu-bar wrapper (Tron.app) — install wizard + server lifecycle
 +-- scripts/
 |   +-- tron                CLI for build, deploy, service management
 |   +-- tron-lib.sh         Shared bash helpers used by scripts/tron
 |   +-- tron-cli            Runtime CLI deployed alongside the server
-|   +-- auto-deploy         Background auto-deploy worker
+|   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
++-- .github/
+|   +-- workflows/          CI + Mac DMG release pipeline
+|   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
+|   +-- dependabot.yml      Weekly Cargo + GitHub Actions updates, monthly Swift
+|   +-- pull_request_template.md
 +-- .claude/
     +-- CLAUDE.md           AI agent project instructions
     +-- rules/              Path-scoped AI navigation rules
@@ -120,6 +128,9 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   +-- runtime          Agent loop, context, hooks, orchestrator, tasks
   |
   +-- server           Axum HTTP/WS, RPC handlers, event bridge, APNS
+  |                    +-- onboarding      Bearer token + `.onboarded` sentinel lifecycle
+  |                    +-- websocket       WS upgrade handler + bearer-auth middleware
+  |                    +-- updater         GitHub Releases poller + atomic self-update + rollback
   |
   +-- main.rs          Binary entry point: DB policy, CLI subcommands, startup
 ```
@@ -140,25 +151,39 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
 | `server` | HTTP/WS + RPC dispatch | `TronServer`, `MethodRegistry`, `RpcContext`, `EventBridge` |
+| `server::onboarding` | Bearer token + first-run sentinel | `ensure_bearer_token()`, `touch_onboarded_sentinel()` |
+| `server::websocket` | WS upgrade + bearer-auth middleware | `BearerAuth`, gated by `server.auth.enforced` |
+| `server::updater` | Auto-update scheduler + installer | `Scheduler`, `UpdateAction`, `UpdateChannel`, `UpdateFrequency` |
 
 ---
 
 ## Quick Start
 
-### Prerequisites
+### End Users (recommended)
+
+1. Install [Tailscale](https://tailscale.com) and sign in on the Mac that will host the agent.
+2. Download the latest `Tron-mac-v*.dmg` from [GitHub Releases](https://github.com/mhismail3/tron/releases) and drag `Tron.app` into `/Applications`.
+3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, and displays pairing info (Tailscale IP + port + bearer token + QR code).
+4. On iPhone, install the Tron TestFlight build and run the onboarding flow. Scan the QR or paste the three pairing fields.
+
+The wizard and menu bar surface everything else (`Check for updates…`, `Send feedback…`, `Restart server`, etc.) — you never need the CLI unless you want to.
+
+### Contributors (build from source)
+
+Prerequisites:
 
 - **Rust**: `rustup` + `cargo` (stable toolchain)
-- **Xcode 16+** (for iOS app)
+- **Xcode 16+** (for iOS + Mac apps)
 - **XcodeGen**: `brew install xcodegen`
 
-### First-Time Setup
+First-time setup:
 
 ```bash
 ./scripts/tron setup       # Check prerequisites, build, create ~/.tron/
 ./scripts/tron login       # Authenticate with Claude (OAuth browser flow)
 ```
 
-### Build and Run
+Build and run:
 
 ```bash
 # Build the server
@@ -172,7 +197,7 @@ cargo build --release
 ./scripts/tron install
 ```
 
-### iOS App
+iOS app:
 
 ```bash
 cd packages/ios-app
@@ -181,7 +206,17 @@ xcodegen generate
 open TronMobile.xcodeproj
 ```
 
+Mac app wrapper (optional; for DMG development):
+
+```bash
+cd packages/mac-app
+xcodegen generate
+open TronMac.xcodeproj
+```
+
 Build with the `Tron` scheme (or `Tron Beta` for the beta variant). The app connects to `ws://localhost:9847/ws` by default.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions, TDD expectations, and release workflows.
 
 ---
 
@@ -205,9 +240,10 @@ The `scripts/tron` CLI manages the full development and deployment lifecycle. Th
 |---------|-------------|
 | `tron preflight` | Pre-deploy infrastructure check |
 | `tron deploy` | Build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive) |
-| `tron install` | Initial install (launchd plist + CLI symlink) |
+| `tron install` | Initial install (launchd plist + CLI symlink). Supports `--gui-helper` for machine-readable output when invoked from the Mac wizard; `--skip-service-start` suppresses the `launchctl bootstrap` step. |
 | `tron uninstall` | Remove launchd service (preserves `~/.tron/` data) |
-| `tron auto-deploy` | Remote auto-deploy watcher (`install`, `uninstall`, `status`, `pause`, `resume`, `logs`) |
+| `tron auto-deploy` | Contributor-only auto-deploy watcher (`install`, `uninstall`, `status`, `pause`, `resume`, `logs`). Refuses to run outside a git repo — for DMG users, see `tron self-update` instead. |
+| `tron self-update` | User-mode GitHub Releases updater (`check`, `status`, `pause`, `resume`, `logs`, `reset`). Opt-in via `server.update.enabled`; gated by `~/.tron/auto-update.pause` sentinel. |
 
 ### Runtime
 
@@ -274,7 +310,7 @@ Source-control operations (sync main, push, switch branches, finalize a session 
 
 ## RPC API
 
-JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **162 methods** across three groups.
+JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **165 methods** across three groups.
 
 ### Connection
 
@@ -301,11 +337,13 @@ All messages use JSON-RPC 2.0 framing:
 
 These fields are additive; older clients that ignore them continue to work unchanged.
 
-### Core (60)
+`system.checkForUpdates` / `system.getUpdateStatus` / `system.applyUpdate` drive the user-mode auto-updater (see Section "Deployment → User-mode auto-update"). All three are no-ops when `server.update.enabled` is `false` (the safe default); they return structured `{ disabled: true, reason }` responses so iOS + Mac menu-bar UIs can render a "Updates are disabled" state instead of a spurious error.
+
+### Core (63)
 
 | Group | Count | Methods |
 |-------|------:|---------|
-| `system` | 4 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown` |
+| `system` | 7 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown`, `system.checkForUpdates`, `system.getUpdateStatus`, `system.applyUpdate` |
 | `blob` | 1 | `blob.get` |
 | `session` | 13 | `session.create`, `session.resume`, `session.list`, `session.delete`, `session.fork`, `session.getHead`, `session.getState`, `session.getHistory`, `session.reconstruct`, `session.archive`, `session.unarchive`, `session.archiveOlderThan`, `session.export` |
 | `agent` | 10 | `agent.prompt`, `agent.abort`, `agent.abortTool`, `agent.status`, `agent.queuePrompt`, `agent.dequeuePrompt`, `agent.clearQueue`, `agent.deliverSubagentResults`, `agent.submitConfirmation`, `agent.submitAnswers` |
@@ -354,7 +392,7 @@ These fields are additive; older clients that ignore them continue to work uncha
 
 ## Event System
 
-The event store uses an immutable, append-only log with **79 typed event variants**. Sessions are tree-structured, supporting fork and rewind. State is always reconstructed from events; no mutable session state is stored outside the log.
+The event store uses an immutable, append-only log with **84 typed event variants**. Sessions are tree-structured, supporting fork and rewind. State is always reconstructed from events; no mutable session state is stored outside the log.
 
 The canonical event list is generated by the `define_events!` macro in `packages/agent/src/events/types/macros.rs`, invoked from `events/types/generated.rs`. Adding a new event means editing `generated.rs` and adding a payload type — the macro generates the `EventType` enum, wire-format helpers, and `ALL_EVENT_TYPES` automatically.
 
@@ -383,6 +421,7 @@ The canonical event list is generated by the `define_events!` macro in `packages
 | `hook` | `hook.triggered`, `hook.completed`, `hook.background_started`, `hook.background_completed`, `hook.llm_result` |
 | `memory` | `memory.retained`, `memory.auto_retain_triggered`, `memory.auto_retain_failed` |
 | `device` | `device.token_invalidated` |
+| `server.update` | `server.update_available`, `server.update_downloaded`, `server.update_installed`, `server.update_failed`, `server.update_disabled_after_failures` |
 
 ### Event Broadcasting
 
@@ -431,7 +470,16 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
     "tailscaleIp": null,            // Surfaced via system.getInfo so iOS pairing UI can pre-fill
     "auth": {
       "enforced": false             // Phase 2 flag: when true, every WS upgrade requires `Authorization: Bearer <token>`
+    },
+    "update": {                     // User-mode auto-updater (Phase 5.5). All fields off / safest by default.
+      "enabled": false,             // Master switch — false means the scheduler never runs + no GitHub API traffic
+      "channel": "stable",          // "stable" ignores pre-release tags; "beta" includes them
+      "frequency": "daily",         // "manual" | "startup" | "hourly" | "daily" | "weekly"
+      "action": "notify",           // "notify" | "download" | "install" — monotonically escalating
+      "allowDowngradeOnRollback": true  // Mirror scripts/tron rollback semantics on failed auto-install
     }
+    // NB: telemetry is an iOS-only opt-in stored under `@AppStorage("telemetryEnabled")`;
+    // no corresponding server setting exists because the server never emits telemetry.
   },
 
   "agent": {
@@ -642,9 +690,10 @@ packages/ios-app/Sources/
 +-- Database/             SQLite event database, queries
 +-- Models/               Data models, RPC codables, event types
 +-- Protocols/            Coordinator and view model protocols
-+-- Services/             Network (RPC client, WebSocket, deep links), audio, push notifications
-+-- ViewModels/           Chat view models, handlers, managers, @Observable state
-+-- Views/                SwiftUI views (chat, tools, voice notes, settings, ...)
++-- Services/             Network (RPC client, WebSocket, deep links), audio, push notifications,
++                         feedback composer, telemetry redactor, PresetTokenStore (Keychain)
++-- ViewModels/           Chat view models, handlers, managers, @Observable state, OnboardingState
++-- Views/                SwiftUI views (chat, tools, voice notes, settings, Onboarding/, ...)
 +-- Theme/                Colors, typography, design tokens
 +-- Utilities/            Shared helpers
 +-- Extensions/           Type extensions
@@ -662,6 +711,9 @@ packages/ios-app/Sources/
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
+- **Onboarding gate**: `TronMobileApp.readyContent()` branches on `@AppStorage("onboardingComplete")` — false routes to `OnboardingFlowView`, true routes to `ContentView`. Existing TestFlight upgrades auto-set the flag when `connectionPresets` is non-empty so returning users skip the welcome flow.
+- **Multi-server bearer model**: Each entry in `connectionPresets[]` has its own bearer token, stored in Keychain via `PresetTokenStore` keyed by preset ID. `WebSocketService` attaches the active preset's token as `Authorization: Bearer <token>` on upgrade. A new `ConnectionState.unauthorized` surfaces a "Re-pair this server" tap in `ConnectionStatusPill`.
+- **Telemetry + feedback**: `SentryRedactor` scrubs bearer tokens, file paths, and chat content before crash events leave the device. `FeedbackComposer` builds a redacted log tail and hands it to `MFMailComposeViewController` via `FeedbackMailView`. Opt-in toggle on the Privacy settings page stores to `@AppStorage("telemetryEnabled")` (default OFF).
 
 ### Data Flow
 
@@ -685,6 +737,85 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 - `development.md` — Xcode setup, builds, testing
 - `events.md` — Event plugin system
 - `apns.md` — Push notification setup
+- `onboarding.md` — First-run flow: welcome → Tailscale → Mac install → pairing → provider → telemetry → notifications
+
+---
+
+## Mac App
+
+**Minimum macOS:** 14 Sonoma | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
+
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`, and on first launch runs a wizard that copies the bundled `tron-agent` binary into `~/.tron/system/Tron.app/Contents/MacOS/tron`, drops a launchd plist, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
+
+```
+packages/mac-app/Sources/
++-- TronMacApp.swift           App entry: branches on ~/.tron/system/.onboarded sentinel
++-- EnvironmentSetup.swift     Dev vs release bundle-ID wiring, log paths, shared state root
++-- Wizard/                    First-run flow
+|   +-- WizardState.swift      @Observable state machine + `WizardStep` enum
+|   +-- WizardView.swift       NavigationStack shell
+|   +-- Steps/                 Welcome, Tailscale, Permissions, Install, Pairing, Done
++-- MenuBar/                   NSStatusItem controller, status polling, copy actions, update submenu
++-- Services/
+|   +-- Server/                Install helper (invokes `tron install --gui-helper`), ping poller
+|   +-- Onboarding/            `.onboarded` sentinel probe + existing-install detection
+|   +-- Pairing/               settings.json + auth-token.json readers; QR + tron:// URL generation
+|   +-- Feedback/              FeedbackComposer + NSSharingService mail compose
+|   +-- Observability/         SentryRedactor (shared pattern with iOS)
+|   +-- LaunchAgentManaging.swift
+|   +-- TronPaths.swift        ~/.tron/ path helpers (mirrors Rust `core::foundation::paths`)
++-- Resources/
+    +-- tron-agent             Bundled server binary (embedded by packages/mac-app/scripts/bundle-agent.sh during CI)
+```
+
+### Wizard Steps
+
+1. **Welcome** — introduces Tron.
+2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` + signed-in state via `tailscale ip -4`.
+3. **Existing-install detection** — if `~/.tron/system/auth.json` is non-empty, skips to permissions (no clobber).
+4. **Permissions** — Full Disk Access (REQUIRED), Notifications (REQUIRED), Accessibility (optional for ComputerUse). Deep-links to System Settings.
+5. **Install** — invokes `tron install --gui-helper --skip-service-start`, polls `system.ping` with `BackoffPolicy(maxAttempts: 10, base: 1s, cap: 30s)`.
+6. **Pairing** — displays Tailscale IP + port + bearer token with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>`.
+7. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
+
+### Menu-bar Actions
+
+| Item | Action |
+|------|--------|
+| Status dot + version | Green/red circle + "Tron — running on port 9847" |
+| Tailscale: `100.x.y.z:9847` | Click to copy |
+| Pairing token (truncated) | Click to copy; "Reveal full" submenu |
+| Show pairing info… | Re-opens wizard step 6 (QR + copy buttons) |
+| Restart / Pause server | `launchctl kickstart` / `launchctl bootout` |
+| View logs… | Opens Console filtered to `com.tron.server` |
+| Send feedback… | `NSSharingService(.composeEmail)` with last 200 log lines |
+| Check for updates… | Triggers `system.checkForUpdates`; submenu shows channel/frequency/action |
+| Open at login | `SMAppService.mainApp` |
+| Uninstall Tron… | Confirm dialog + `tron uninstall` |
+| Quit Tron | Quits wrapper; server keeps running via LaunchAgent |
+
+### Dev Variant
+
+`Tron-Dev.app` (bundle ID `com.tron.mac.dev`) installs to `~/.tron/system/deployment/Tron-Dev.app` and shares the same `~/.tron/` state tree as production. A single-instance lock via `NSDistributedNotificationCenter` prevents two wrappers from managing the same server concurrently.
+
+### Documentation
+
+- `packages/mac-app/docs/architecture.md` — wizard + menu bar + helper-binary lifecycle
+- `packages/mac-app/docs/development.md` — XcodeGen setup, debug/release schemes, signing identities
+
+---
+
+## Permissions
+
+The Mac wizard surfaces three system permissions. Each is probed with a real system call (not just the TCC flag) so the status reflects actual access, and each has a "Open System Settings" deep link when revoked.
+
+| Permission | Why | Required | Probe |
+|------------|-----|----------|-------|
+| Full Disk Access | Agent reads/writes `~/Library/Mail/V*`, `~/.tron/workspace/`, anything outside the sandbox | Yes | `stat("~/Library/Mail/V*")` — fails without FDA |
+| Notifications | Agent-completion alerts on the Mac when long-running sessions finish | Yes | `UNUserNotificationCenter` auth request |
+| Accessibility | ComputerUse tool (mouse/keyboard control); optional today, plumbed for future | No | `AXIsProcessTrusted()` |
+
+Skipping a required permission shows a confirm dialog describing the consequence (e.g. "Tron cannot read files in Documents; most Read tool calls will fail"). The wizard does not block — users can always grant later from `/Applications/Tron.app` menu bar → "Permissions…" (or re-run the wizard via `tron reset-onboarding`).
 
 ---
 
@@ -726,6 +857,8 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   +-- auth.json                 LLM provider OAuth tokens + API keys (mode 600)
 |   +-- auth-token.json           WebSocket bearer token (mode 600, atomic writes; rotated by `tron auth rotate`)
 |   +-- .onboarded                First-run sentinel; presence drives `system.getInfo.paired` (Phase 2)
+|   +-- updater-state.json        Auto-update scheduler state (lastCheckAt, lastInstalledVersion, consecutiveFailures)
+|   +-- updates/                  Staged DMG downloads for `action: "download"` (Phase 5.5)
 |   +-- defaults/                 Seed copies of settings.json and auth.json (used on first install)
 |   +-- database/                 SQLite event store
 |   |   +-- log.db                Events, sessions, tasks, journals, cron state
@@ -758,10 +891,54 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 Notes:
 - `~/.tron/user/` is reserved (`paths::user_dir()`) but not currently populated.
 - Credentials for external CLIs (Google Workspace, etc.) live in `workspace/vault/`. See the relevant skills for the materialization pattern.
+- Additional sentinels at the root of `~/.tron/` toggle worker behavior: `auto-deploy.pause` (contributor-only watcher) and `auto-update.pause` (DMG-user self-updater). Both are managed by the respective `pause`/`resume` CLI subcommands.
 
 ### Service (launchd)
 
 Managed by the `com.tron.server` launchd plist. The entry point is the Rust binary inside the macOS app bundle: `~/.tron/system/Tron.app/Contents/MacOS/tron --port 9847 --quiet`. The plist is generated by `scripts/tron install` and lives at `~/Library/LaunchAgents/com.tron.server.plist`.
+
+### DMG Release Pipeline
+
+End-users install `Tron.app` via a notarized DMG published to GitHub Releases. The pipeline lives at `.github/workflows/release-mac.yml` and triggers on `mac-v*` tag push:
+
+1. Checkout + Rust toolchain cache (`Swatinem/rust-cache`).
+2. Decode `MACOS_CERT_P12_BASE64` secret; import to ad-hoc keychain.
+3. `cargo build --release --bin tron --locked`.
+4. `xcodegen generate` inside `packages/mac-app/`.
+5. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
+6. `packages/mac-app/scripts/bundle-agent.sh` embeds the release binary at `Tron.app/Contents/Resources/tron-agent` and signs it as a helper tool.
+7. Re-sign `Tron.app` with hardened runtime + `TronMac.entitlements`.
+8. `xcrun notarytool submit` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple on success.
+9. Build the DMG with `create-dmg`.
+10. Upload dSYMs to Sentry via `sentry-cli`.
+11. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg` with auto-generated notes.
+
+A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or the workflow itself. The dry-run stops before notarization (no cert needed) so PR contributors can verify the assembly pipeline without secrets.
+
+**iOS distribution is separate** — use the `/publish` skill (`/publish bump && /publish build`) which handles archive → IPA → asc upload to App ID `6761511764`. TestFlight indefinitely; no App Store submission planned.
+
+### User-mode Auto-update
+
+For users installed via DMG (no git remote), the server polls GitHub Releases and offers updates per the `server.update.*` settings. The module lives at `packages/agent/src/server/updater/mod.rs`; its behavior is test-driven end-to-end under `server/updater/mod_tests.rs`.
+
+| Phase | Action | Effect |
+|-------|--------|--------|
+| Check | `system.checkForUpdates` | Queries `api.github.com/repos/mhismail3/tron/releases`; returns the highest semver allowed by `channel` (`stable` excludes pre-release tags, `beta` includes them). Cached 60s to avoid rate-limit thrash. |
+| Notify | `action: "notify"` | Emits `server.update_available`; iOS banner + menu-bar submenu surface it. No download. |
+| Download | `action: "download"` | Fetches DMG to `~/.tron/system/updates/`, runs `codesign --verify --strict --deep`, emits `server.update_downloaded`. |
+| Install | `action: "install"` | Acquires `~/.tron/system/deployment/deploy.lock`, backs up to `tron.bak`, atomically replaces the binary (`.tmp → fsync → rename`), writes `restart-sentinel.json`, `launchctl kickstart`, post-restart ping; rollback on failure. |
+
+Safety invariants (all test-covered):
+
+- Signature verification before any binary swap.
+- Atomic replace via `.tmp + rename` (mirrors `auth/storage.rs` pattern).
+- `consecutiveFailures >= 3` auto-degrades `action` to `notify` and emits `server.update_disabled_after_failures` — the system cannot enter a download-restart-fail loop.
+- Locked behind `deploy.lock` so manual `tron deploy` and auto-update never race.
+- Skipped if a dev server has taken over port 9847 (same guard as `auto-deploy`).
+- Pause-able via `~/.tron/auto-update.pause` sentinel; `tron self-update pause|resume` manages it.
+- Existing active sessions defer an `install` action for up to 1 hour unless `force-install` is set; deferred installs emit `server.update_deferred` so iOS surfaces "update waiting for idle".
+
+**Contrast with `tron auto-deploy`**: the latter is contributor-only, pulls from `origin/main`, and refuses to run outside a git repo. Users on DMG-installed builds use `tron self-update` exclusively. See [CLI Reference → Deployment](#cli-reference) for the full command surface.
 
 ---
 
