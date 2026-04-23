@@ -105,13 +105,16 @@ enum PersistedEventType: String, CaseIterable {
     // MARK: - Classification (single source of truth)
 
     /// All classification flags for this event type, consolidated into one switch.
-    /// Individual properties below forward to this for backward compatibility.
+    /// The public `rendersAsChatMessage`/`affectsSessionState`/`isStreamingEvent`/
+    /// `isMetadataOnly`/`displayDescription` properties below are thin forwarders
+    /// so callers read the right flag by name; this private computed property is
+    /// the only place the classification itself is defined.
     private var classification: EventClassification {
         //                                                    renders  affects  stream  meta
         switch self {
         // Session lifecycle
         case .sessionStart:            return .init(false,   true,    false,   true,   "Session started")
-        case .sessionEnd:              return .init(false,   false,   false,   true,   "Session ended (legacy)")
+        case .sessionEnd:              return .init(false,   false,   false,   true,   "Session ended")
         case .sessionFork:             return .init(false,   true,    false,   true,   "Session forked")
         case .sessionBranch:           return .init(false,   false,   false,   true,   "Branch created")
         // Conversation

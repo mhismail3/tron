@@ -72,6 +72,25 @@ final class EventTypeRegistryTests: XCTestCase {
         XCTAssertFalse(t.affectsSessionState)
         XCTAssertFalse(t.isStreamingEvent)
         XCTAssertTrue(t.isMetadataOnly)
+        // `session.end` is actively emitted by the Rust
+        // `runtime/orchestrator/session_manager::end_session` path (persists
+        // EventType::SessionEnd with {"reason": "completed"}). The iOS label
+        // MUST NOT call it legacy. Regression guard for the prior wording.
+        XCTAssertEqual(t.displayDescription, "Session ended")
+    }
+
+    /// Regression guard: no `displayDescription` across the registry contains
+    /// the string "legacy" (case-insensitive). If a future event type really
+    /// is being deprecated, the enum case itself should be removed in the
+    /// same commit as the server stops emitting it — we never carry "legacy"
+    /// as a runtime label.
+    func testNoDisplayDescriptionUsesLegacyLabel() {
+        for eventType in PersistedEventType.allCases {
+            XCTAssertFalse(
+                eventType.displayDescription.lowercased().contains("legacy"),
+                "\(eventType.rawValue) label '\(eventType.displayDescription)' uses the 'legacy' marker"
+            )
+        }
     }
 
     func testFileReadIsMetadataOnly() {

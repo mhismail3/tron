@@ -504,6 +504,39 @@ mod tests {
         assert!(!mgr.is_active(&sid));
     }
 
+    /// Anchors the wire contract that `session.end` is an actively emitted
+    /// event — not a legacy shim. Historically the iOS side labelled the
+    /// classification "Session ended (legacy)"; this test guards against
+    /// any future change that accidentally stops emitting the event (e.g.
+    /// refactoring `end_session` to skip the append) because the iOS
+    /// display layer still treats the event as current.
+    #[tokio::test]
+    async fn end_session_emits_session_end_event() {
+        use crate::events::sqlite::repositories::event::ListEventsOptions;
+
+        let mgr = make_manager();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"), None)
+            .unwrap();
+
+        mgr.end_session(&sid).await.unwrap();
+
+        let events = mgr
+            .event_store
+            .get_events_by_session(&sid, &ListEventsOptions::default())
+            .unwrap();
+        let end_event = events
+            .iter()
+            .find(|e| e.event_type == EventType::SessionEnd.as_str())
+            .expect("end_session must persist a session.end event");
+        let payload: serde_json::Value = serde_json::from_str(&end_event.payload).unwrap();
+        assert_eq!(
+            payload.get("reason").and_then(|r| r.as_str()),
+            Some("completed"),
+            "session.end payload must carry reason=completed"
+        );
+    }
+
     #[tokio::test]
     async fn fork_session() {
         let mgr = make_manager();
