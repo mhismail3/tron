@@ -25,6 +25,7 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
     let overlap = job.overlap_policy.as_sql();
     let misfire = job.misfire_policy.as_sql();
 
+    // upsert: row count is always 1 (insert or updated row) — no stale-id semantics.
     let _ = conn.execute(
         "INSERT INTO cron_jobs (
             id, name, description, enabled, schedule_json, payload_json,
@@ -181,67 +182,92 @@ pub fn get_runtime_state(
 }
 
 /// Update `next_run_at` for a job.
+///
+/// Returns `CronError::NotFound` if `job_id` does not exist.
 pub fn update_next_run_at(
     pool: &ConnectionPool,
     job_id: &str,
     next: Option<DateTime<Utc>>,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
-    let _ = conn.execute(
+    let rows = conn.execute(
         "UPDATE cron_jobs SET next_run_at = ?1 WHERE id = ?2",
         params![next.map(|t| t.to_rfc3339()), job_id],
     )?;
+    if rows == 0 {
+        return Err(CronError::NotFound(job_id.to_string()));
+    }
     Ok(())
 }
 
 /// Update `last_run_at` for a job.
+///
+/// Returns `CronError::NotFound` if `job_id` does not exist.
 pub fn update_last_run_at(
     pool: &ConnectionPool,
     job_id: &str,
     last: DateTime<Utc>,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
-    let _ = conn.execute(
+    let rows = conn.execute(
         "UPDATE cron_jobs SET last_run_at = ?1 WHERE id = ?2",
         params![last.to_rfc3339(), job_id],
     )?;
+    if rows == 0 {
+        return Err(CronError::NotFound(job_id.to_string()));
+    }
     Ok(())
 }
 
 /// Set `running_since` to mark a job as currently executing.
+///
+/// Returns `CronError::NotFound` if `job_id` does not exist.
 pub fn set_running_since(
     pool: &ConnectionPool,
     job_id: &str,
     since: DateTime<Utc>,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
-    let _ = conn.execute(
+    let rows = conn.execute(
         "UPDATE cron_jobs SET running_since = ?1 WHERE id = ?2",
         params![since.to_rfc3339(), job_id],
     )?;
+    if rows == 0 {
+        return Err(CronError::NotFound(job_id.to_string()));
+    }
     Ok(())
 }
 
 /// Clear `running_since` when execution finishes.
+///
+/// Returns `CronError::NotFound` if `job_id` does not exist.
 pub fn clear_running_since(pool: &ConnectionPool, job_id: &str) -> Result<(), CronError> {
     let conn = pool.get()?;
-    let _ = conn.execute(
+    let rows = conn.execute(
         "UPDATE cron_jobs SET running_since = NULL WHERE id = ?1",
         params![job_id],
     )?;
+    if rows == 0 {
+        return Err(CronError::NotFound(job_id.to_string()));
+    }
     Ok(())
 }
 
 /// Increment consecutive failures and return the new count.
+///
+/// Returns `CronError::NotFound` if `job_id` does not exist.
 pub fn increment_consecutive_failures(
     pool: &ConnectionPool,
     job_id: &str,
 ) -> Result<u32, CronError> {
     let conn = pool.get()?;
-    let _ = conn.execute(
+    let rows = conn.execute(
         "UPDATE cron_jobs SET consecutive_failures = consecutive_failures + 1 WHERE id = ?1",
         params![job_id],
     )?;
+    if rows == 0 {
+        return Err(CronError::NotFound(job_id.to_string()));
+    }
     let count: u32 = conn.query_row(
         "SELECT consecutive_failures FROM cron_jobs WHERE id = ?1",
         params![job_id],
@@ -251,22 +277,32 @@ pub fn increment_consecutive_failures(
 }
 
 /// Reset consecutive failures to zero.
+///
+/// Returns `CronError::NotFound` if `job_id` does not exist.
 pub fn reset_consecutive_failures(pool: &ConnectionPool, job_id: &str) -> Result<(), CronError> {
     let conn = pool.get()?;
-    let _ = conn.execute(
+    let rows = conn.execute(
         "UPDATE cron_jobs SET consecutive_failures = 0 WHERE id = ?1",
         params![job_id],
     )?;
+    if rows == 0 {
+        return Err(CronError::NotFound(job_id.to_string()));
+    }
     Ok(())
 }
 
 /// Disable a job.
+///
+/// Returns `CronError::NotFound` if `job_id` does not exist.
 pub fn disable_job(pool: &ConnectionPool, job_id: &str) -> Result<(), CronError> {
     let conn = pool.get()?;
-    let _ = conn.execute(
+    let rows = conn.execute(
         "UPDATE cron_jobs SET enabled = 0 WHERE id = ?1",
         params![job_id],
     )?;
+    if rows == 0 {
+        return Err(CronError::NotFound(job_id.to_string()));
+    }
     Ok(())
 }
 
@@ -292,6 +328,7 @@ pub fn insert_run(
     started_at: DateTime<Utc>,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
+    // INSERT: row count is always 1 (unique PK violation becomes an Err, not 0 rows).
     let _ = conn.execute(
         "INSERT INTO cron_runs (id, job_id, job_name, status, started_at)
          VALUES (?1, ?2, ?3, 'running', ?4)",
@@ -301,9 +338,11 @@ pub fn insert_run(
 }
 
 /// Complete a run record with the final status.
+///
+/// Returns `CronError::NotFound` if `run.id` does not exist (e.g. GC raced with completion).
 pub fn complete_run(pool: &ConnectionPool, run: &CronRun) -> Result<(), CronError> {
     let conn = pool.get()?;
-    let _ = conn.execute(
+    let rows = conn.execute(
         "UPDATE cron_runs SET
             status = ?1, completed_at = ?2, duration_ms = ?3,
             output = ?4, output_truncated = ?5, error = ?6,
@@ -322,6 +361,9 @@ pub fn complete_run(pool: &ConnectionPool, run: &CronRun) -> Result<(), CronErro
             run.id,
         ],
     )?;
+    if rows == 0 {
+        return Err(CronError::NotFound(run.id.clone()));
+    }
     Ok(())
 }
 
@@ -381,16 +423,21 @@ pub fn count_running_runs(pool: &ConnectionPool, job_id: &str) -> Result<u32, Cr
 }
 
 /// Update delivery status on a run.
+///
+/// Returns `CronError::NotFound` if `run_id` does not exist (e.g. GC raced with delivery).
 pub fn update_delivery_status(
     pool: &ConnectionPool,
     run_id: &str,
     status: &DeliveryOutcome,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
-    let _ = conn.execute(
+    let rows = conn.execute(
         "UPDATE cron_runs SET delivery_status = ?1 WHERE id = ?2",
         params![status.as_str(), run_id],
     )?;
+    if rows == 0 {
+        return Err(CronError::NotFound(run_id.to_string()));
+    }
     Ok(())
 }
 

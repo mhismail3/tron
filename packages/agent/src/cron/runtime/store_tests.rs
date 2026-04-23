@@ -555,3 +555,195 @@ fn row_to_job_corrupt_created_at_returns_error() {
     let result = get_job(&pool, "cron_bad4");
     assert!(result.is_err(), "corrupt created_at should return error, not default to now");
 }
+
+// ── F1: Targeted UPDATE/DELETE on stale id surfaces NotFound ──────────
+//
+// Previously, every mutator discarded the row-count via `let _ = conn.execute(...)?`.
+// A stale or deleted-between-read-and-write id would silently produce 0 affected
+// rows and return `Ok(())`. Now UPDATE-by-id functions return `CronError::NotFound`.
+// UPSERT (`upsert_job`) and plain INSERT (`insert_run`) still discard the count —
+// their row count is always 1 by construction.
+
+#[test]
+fn upsert_doesnt_validate_row_count() {
+    // Regression guard: upsert_job must accept both insert (0→1 affected) and
+    // update (1→1 affected) paths. This test ensures we never accidentally
+    // add row-count validation to the upsert (which would break re-sync).
+    let pool = setup_pool();
+    let mut job = make_job("cron_upsert", "Original");
+    upsert_job(&pool, &job).unwrap(); // Insert path.
+
+    job.name = "Updated".into();
+    upsert_job(&pool, &job).unwrap(); // Update path.
+    upsert_job(&pool, &job).unwrap(); // Re-update — no-op diff still OK.
+
+    let loaded = get_job(&pool, "cron_upsert").unwrap().unwrap();
+    assert_eq!(loaded.name, "Updated");
+}
+
+#[test]
+fn update_next_run_at_missing_job_returns_not_found() {
+    let pool = setup_pool();
+    let result = update_next_run_at(&pool, "does_not_exist", Some(Utc::now()));
+    match result {
+        Err(CronError::NotFound(msg)) => assert!(msg.contains("does_not_exist")),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn update_last_run_at_missing_job_returns_not_found() {
+    let pool = setup_pool();
+    let result = update_last_run_at(&pool, "does_not_exist", Utc::now());
+    match result {
+        Err(CronError::NotFound(msg)) => assert!(msg.contains("does_not_exist")),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn set_running_since_missing_job_returns_not_found() {
+    let pool = setup_pool();
+    let result = set_running_since(&pool, "does_not_exist", Utc::now());
+    match result {
+        Err(CronError::NotFound(msg)) => assert!(msg.contains("does_not_exist")),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn clear_running_since_missing_job_returns_not_found() {
+    let pool = setup_pool();
+    let result = clear_running_since(&pool, "does_not_exist");
+    match result {
+        Err(CronError::NotFound(msg)) => assert!(msg.contains("does_not_exist")),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn increment_consecutive_failures_missing_job_returns_not_found() {
+    let pool = setup_pool();
+    let result = increment_consecutive_failures(&pool, "does_not_exist");
+    match result {
+        Err(CronError::NotFound(msg)) => assert!(msg.contains("does_not_exist")),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn reset_consecutive_failures_missing_job_returns_not_found() {
+    let pool = setup_pool();
+    let result = reset_consecutive_failures(&pool, "does_not_exist");
+    match result {
+        Err(CronError::NotFound(msg)) => assert!(msg.contains("does_not_exist")),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn disable_job_missing_job_returns_not_found() {
+    let pool = setup_pool();
+    let result = disable_job(&pool, "does_not_exist");
+    match result {
+        Err(CronError::NotFound(msg)) => assert!(msg.contains("does_not_exist")),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn complete_run_missing_run_returns_not_found() {
+    let pool = setup_pool();
+    let run = CronRun {
+        id: "does_not_exist".into(),
+        job_id: None,
+        job_name: "Test".into(),
+        status: RunStatus::Completed,
+        started_at: Utc::now(),
+        completed_at: Some(Utc::now()),
+        duration_ms: None,
+        output: None,
+        output_truncated: false,
+        error: None,
+        exit_code: None,
+        attempt: 0,
+        session_id: None,
+        delivery_status: None,
+    };
+    let result = complete_run(&pool, &run);
+    match result {
+        Err(CronError::NotFound(msg)) => assert!(msg.contains("does_not_exist")),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn update_delivery_status_missing_run_returns_not_found() {
+    let pool = setup_pool();
+    let result = update_delivery_status(&pool, "does_not_exist", &DeliveryOutcome::Ok);
+    match result {
+        Err(CronError::NotFound(msg)) => assert!(msg.contains("does_not_exist")),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn stale_run_id_surfaces_not_found_not_silent_success() {
+    // End-to-end: a run is inserted, then cascade-deleted by job deletion is
+    // disabled (cron_runs has ON DELETE SET NULL for job_id). But if a caller
+    // retains a run_id after an explicit DELETE FROM cron_runs (e.g. GC race),
+    // subsequent complete_run / update_delivery_status must surface NotFound.
+    let pool = setup_pool();
+    let job = make_job("cron_1", "Test");
+    upsert_job(&pool, &job).unwrap();
+    insert_run(&pool, "run_gc", "cron_1", "Test", Utc::now()).unwrap();
+
+    // Simulate GC or manual delete of the run row.
+    let conn = pool.get().unwrap();
+    conn.execute("DELETE FROM cron_runs WHERE id = ?1", params!["run_gc"])
+        .unwrap();
+    drop(conn);
+
+    let result = update_delivery_status(&pool, "run_gc", &DeliveryOutcome::Ok);
+    assert!(
+        matches!(result, Err(CronError::NotFound(_))),
+        "stale run_id after GC must surface NotFound, not silent success"
+    );
+}
+
+#[test]
+fn upsert_after_update_no_longer_silent() {
+    // Positive path for the targeted updaters: after an upsert, every setter
+    // must succeed (and return Ok(_)), not fail.
+    let pool = setup_pool();
+    let job = make_job("cron_alive", "Alive");
+    upsert_job(&pool, &job).unwrap();
+
+    update_next_run_at(&pool, "cron_alive", Some(Utc::now())).unwrap();
+    update_last_run_at(&pool, "cron_alive", Utc::now()).unwrap();
+    set_running_since(&pool, "cron_alive", Utc::now()).unwrap();
+    clear_running_since(&pool, "cron_alive").unwrap();
+    increment_consecutive_failures(&pool, "cron_alive").unwrap();
+    reset_consecutive_failures(&pool, "cron_alive").unwrap();
+    disable_job(&pool, "cron_alive").unwrap();
+
+    insert_run(&pool, "run_alive", "cron_alive", "Alive", Utc::now()).unwrap();
+    let run = CronRun {
+        id: "run_alive".into(),
+        job_id: Some("cron_alive".into()),
+        job_name: "Alive".into(),
+        status: RunStatus::Completed,
+        started_at: Utc::now(),
+        completed_at: Some(Utc::now()),
+        duration_ms: None,
+        output: None,
+        output_truncated: false,
+        error: None,
+        exit_code: Some(0),
+        attempt: 0,
+        session_id: None,
+        delivery_status: None,
+    };
+    complete_run(&pool, &run).unwrap();
+    update_delivery_status(&pool, "run_alive", &DeliveryOutcome::Ok).unwrap();
+}
