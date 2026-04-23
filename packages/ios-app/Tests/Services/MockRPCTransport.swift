@@ -10,6 +10,7 @@ import Foundation
 @MainActor
 final class MockRPCTransport: RPCTransport {
     var webSocket: WebSocketService?
+    var connectionState: ConnectionState = .connected
     var currentSessionId: String?
     var currentModel: String = "claude-opus-4-20250514"
     var serverOrigin: String = "localhost:3456"

@@ -48,7 +48,7 @@ enum ConnectionState: Equatable, Sendable {
 
 // MARK: - WebSocket Errors
 
-enum WebSocketError: Error, LocalizedError, Sendable {
+enum WebSocketError: Error, LocalizedError, Sendable, Equatable {
     case notConnected
     case timeout
     case invalidResponse
@@ -82,8 +82,10 @@ final class WebSocketService {
     private let serverURL: URL
     private var isConnectedFlag = false
     private var reconnectAttempts = 0
-    private let maxReconnectAttempts = 3  // Give up after 3 attempts
-    private let reconnectDelayPerAttempt: TimeInterval = 5.0  // 5 seconds per attempt
+
+    /// Reconnection backoff policy — exponential 2s / 4s / 8s across 3 attempts (14s total).
+    private let backoff = BackoffPolicy()
+
     private let requestTimeout: TimeInterval = 30.0
 
     /// Task for reconnection (can be cancelled for manual retry)
@@ -204,15 +206,35 @@ final class WebSocketService {
         logger.logWebSocketState("Disconnected")
     }
 
-    /// Set background state to pause heartbeats and save battery
-    /// Call this from scene phase changes in TronMobileApp
-    /// Note: We only pause heartbeats, not disconnect - reconnecting is expensive
+    /// Set background state to pause heartbeats and save battery.
+    /// Call this from scene phase changes in TronMobileApp.
+    ///
+    /// Note: We only pause heartbeats for a live `.connected` socket — reconnecting is
+    /// expensive so we don't want to tear that down on every backgrounding.
+    ///
+    /// When backgrounding MID-RECONNECT however, we must clean up: the reconnect Task's
+    /// countdown loop guards on `!isInBackground` and exits silently, leaving the state
+    /// frozen at e.g. `.reconnecting(attempt: 2, nextRetrySeconds: 2)`. If we then return
+    /// to foreground, the scene-phase handler would see `.reconnecting` and believe a
+    /// reconnect is already in flight when nothing is actually running. Cancel the Task
+    /// and reset to `.disconnected` so the foreground handler triggers a fresh retry.
     func setBackgroundState(_ inBackground: Bool) {
         guard isInBackground != inBackground else { return }
         isInBackground = inBackground
 
         if inBackground {
             logger.info("App entering background - pausing heartbeats", category: .websocket)
+
+            switch connectionState {
+            case .connecting, .reconnecting:
+                logger.info("Cancelling in-flight reconnect for background transition", category: .websocket)
+                reconnectTask?.cancel()
+                reconnectTask = nil
+                reconnectAttempts = 0
+                connectionState = .disconnected
+            case .connected, .disconnected, .failed, .deployRestarting:
+                break
+            }
         } else {
             logger.info("App returning to foreground - resuming heartbeats", category: .websocket)
         }
@@ -515,22 +537,25 @@ final class WebSocketService {
         }
     }
 
-    /// Limited reconnection - tries maxReconnectAttempts times with reconnectDelayPerAttempt seconds each
-    /// After all attempts exhausted, sets state to .failed for read-only mode
+    /// Exponential reconnection across `backoff.maxAttempts` attempts.
+    /// After all attempts exhausted, sets state to .failed for read-only mode.
+    /// User can tap the pill to trigger `manualRetry()` which resets the attempt counter.
     private func startReconnection() async {
         reconnectAttempts += 1
 
         // Check if we've exhausted all attempts
-        if reconnectAttempts > maxReconnectAttempts {
-            logger.warning("Max reconnection attempts (\(maxReconnectAttempts)) exhausted - entering read-only mode", category: .websocket)
-            connectionState = .failed(reason: "Connection lost - session in read-only mode")
+        if reconnectAttempts > backoff.maxAttempts {
+            logger.warning("Max reconnection attempts (\(backoff.maxAttempts)) exhausted - entering read-only mode", category: .websocket)
+            connectionState = .failed(reason: "Connection lost — tap to retry")
             return
         }
 
-        logger.info("Reconnecting in \(Int(reconnectDelayPerAttempt))s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))", category: .websocket)
+        // Delay scales exponentially per attempt (2s, 4s, 8s — no jitter).
+        let delaySeconds = Int(backoff.delay(forAttempt: reconnectAttempts).rounded(.up))
+        logger.info("Reconnecting in \(delaySeconds)s (attempt \(reconnectAttempts)/\(backoff.maxAttempts))", category: .websocket)
 
         // Countdown loop - updates UI every second
-        var remainingSeconds = Int(reconnectDelayPerAttempt)
+        var remainingSeconds = delaySeconds
         while remainingSeconds > 0 && !isConnectedFlag && !isInBackground && !Task.isCancelled {
             connectionState = .reconnecting(attempt: reconnectAttempts, nextRetrySeconds: remainingSeconds)
             try? await Task.sleep(for: .seconds(1))

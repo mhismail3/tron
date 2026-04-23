@@ -74,6 +74,8 @@ struct GlassMicButton: View {
     let buttonSize: CGFloat
     let audioMonitor: AudioAvailabilityMonitor
 
+    @Environment(\.interactionPolicy) private var interactionPolicy
+
     @State private var isMicPulsing = false
 
     private var isMicDisabled: Bool {
@@ -85,7 +87,13 @@ struct GlassMicButton: View {
             return true
         }
         if isRecording {
+            // Allow tapping to stop/commit a recording that's already in flight, even if
+            // the connection dropped mid-recording.
             return false
+        }
+        // New-recording block: server transcription requires an active connection.
+        if !(interactionPolicy?.canRecordAudio ?? false) {
+            return true
         }
         return isProcessing
     }

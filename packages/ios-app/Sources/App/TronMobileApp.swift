@@ -32,26 +32,7 @@ struct TronMobileApp: App {
         WindowGroup {
             Group {
                 if #available(iOS 26.0, *) {
-                    switch initializer.state {
-                    case .ready:
-                        ContentView(
-                            deepLinkSessionId: $deepLinkSessionId,
-                            deepLinkScrollTarget: $deepLinkScrollTarget,
-                            deepLinkNotificationToolCallId: $deepLinkNotificationToolCallId
-                        )
-                        .environment(\.dependencies, container)
-                        .withErrorHandler()
-                    case .loading:
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .tronScreenBackground()
-                    case .failed(let message):
-                        InitializationErrorView(message: message) {
-                            Task { await initializeApp() }
-                        }
-                        .tronScreenBackground()
-                    }
+                    rootContent()
                 } else {
                     Text("This app requires iOS 26 or later")
                         .foregroundStyle(.tronTextPrimary)
@@ -141,31 +122,70 @@ struct TronMobileApp: App {
                             }
                         }
 
-                        // Handle reconnection based on current connection state
+                        // Handle reconnection based on current connection state.
+                        // Session-list refresh is requested unconditionally — the central
+                        // SessionRefreshService coalesces and defers to reconnect if offline.
+                        container.eventStoreManager.requestSessionRefresh(reason: .foreground)
+
                         switch container.rpcClient.connectionState {
                         case .connected:
-                            // Verify connection is still alive
+                            // Verify the connection is still alive — force-reconnect if dead.
                             let isAlive = await container.verifyConnection()
                             if !isAlive {
                                 TronLogger.shared.info("Connection dead on foreground return - reconnecting", category: .rpc)
                                 await container.forceReconnect()
-                            } else {
-                                // Connection alive — refresh session list to pick up server-side changes
-                                await container.eventStoreManager.refreshSessionList()
                             }
-                        case .disconnected, .failed:
-                            // Trigger reconnection for disconnected/failed states
-                            // Session list will refresh via ContentView's onChange(of: connectionState)
-                            TronLogger.shared.info("Triggering reconnection on foreground return (state: \(container.rpcClient.connectionState))", category: .rpc)
+                        case .deployRestarting:
+                            // Server restart flow owns its own reconnect budget — don't interfere.
+                            TronLogger.shared.debug("Deploy-restart reconnect in progress on foreground return", category: .rpc)
+                        case .disconnected, .failed, .connecting, .reconnecting:
+                            // Any non-connected/non-deploy state on foreground return is
+                            // treated as "kick a fresh retry". This covers the case where
+                            // the reconnect Task was paused during backgrounding and the
+                            // state is stale; manualRetry() resets the attempt counter and
+                            // cancels any lingering task before spawning a new one.
+                            TronLogger.shared.info("Triggering manualRetry on foreground return (state: \(container.rpcClient.connectionState))", category: .rpc)
                             await container.manualRetry()
-                        case .connecting, .reconnecting, .deployRestarting:
-                            // Already in progress, let it continue
-                            TronLogger.shared.debug("Reconnection already in progress on foreground return", category: .rpc)
                         }
                     }
                 }
             }
         }
+    }
+
+    // MARK: - Content builder
+
+    @available(iOS 26.0, *)
+    @ViewBuilder
+    private func rootContent() -> some View {
+        switch initializer.state {
+        case .ready:
+            readyContent()
+        case .loading:
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .tronScreenBackground()
+        case .failed(let message):
+            InitializationErrorView(message: message) {
+                Task { await initializeApp() }
+            }
+            .tronScreenBackground()
+        }
+    }
+
+    @available(iOS 26.0, *)
+    @ViewBuilder
+    private func readyContent() -> some View {
+        ContentView(
+            deepLinkSessionId: $deepLinkSessionId,
+            deepLinkScrollTarget: $deepLinkScrollTarget,
+            deepLinkNotificationToolCallId: $deepLinkNotificationToolCallId
+        )
+        .environment(\.dependencies, container)
+        .environment(\.interactionPolicy, container.interactionPolicy)
+        .withErrorHandler()
+        .withToastBanner()
     }
 
     // MARK: - Initialization

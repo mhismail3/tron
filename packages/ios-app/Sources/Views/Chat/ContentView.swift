@@ -78,14 +78,11 @@ struct ContentView: View {
                    eventStoreManager.sessionExists(activeId) {
                     selectedSessionId = activeId
                 }
-                // Refresh session list from server if already connected
-                // (handles the case where WebSocket connected before this view appeared)
-                if rpcClient.connectionState.isConnected {
-                    Task {
-                        await eventStoreManager.refreshSessionList()
-                        await notificationStore.refresh()
-                    }
-                }
+                // Refresh session list via the central coordinator — it coalesces duplicates
+                // across call sites and handles the disconnected/connected/reconnecting cases
+                // without blocking the view.
+                eventStoreManager.requestSessionRefresh(reason: .foreground)
+                Task { await notificationStore.refresh() }
 
                 // Cold launch share: the .pendingShareContent notification may have
                 // fired before this view existed (app was still initializing). Check
@@ -96,6 +93,9 @@ struct ContentView: View {
             }
             .onDisappear {}
             .onChange(of: rpcClient.connectionState) { oldState, newState in
+                // Session list refresh on reconnect is now handled by the central
+                // SessionRefreshService via ConnectionManager.runOnReconnect. Other
+                // connection-restored side effects still live here until migrated.
                 if newState.isConnected && !oldState.isConnected {
                     coordinator?.handleConnectionEstablished(selectedSessionId: selectedSessionId)
                     Task { await notificationStore.refresh() }

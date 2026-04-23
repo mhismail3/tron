@@ -3,122 +3,215 @@ import Foundation
 
 @testable import TronMobile
 
-@Suite("ErrorHandler Queue Tests")
+@Suite("ErrorHandler routing")
 @MainActor
 struct ErrorHandlerTests {
 
-    private func makeSUT() -> ErrorHandler {
-        // Use the shared singleton since it's the only way to create one
-        let handler = ErrorHandler.shared
-        handler.clearAll()
-        return handler
+    // MARK: - Helpers
+
+    private func makeSUT() -> (ErrorHandler, ToastCenter) {
+        let toast = ToastCenter(clock: MockAsyncClock(mode: .instant))
+        let handler = ErrorHandler(toastCenter: toast)
+        return (handler, toast)
     }
 
-    @Test("handle shows first error")
-    func handleShowsError() {
-        let sut = makeSUT()
-        sut.handle(NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Test error"]))
-
-        #expect(sut.showError == true)
-        #expect(sut.currentError?.message == "Test error")
-        #expect(sut.currentError?.severity == .error)
+    private func anError(_ description: String = "generic failure") -> NSError {
+        NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: description])
     }
 
-    @Test("clearError advances to next queued error")
-    func clearErrorAdvances() {
-        let sut = makeSUT()
-        sut.showError("First error")
-        sut.showError("Second error")
+    // MARK: - Transient → toast routing
 
-        #expect(sut.currentError?.message == "First error")
-
-        sut.clearError()
-        #expect(sut.showError == true)
-        #expect(sut.currentError?.message == "Second error")
-
-        sut.clearError()
-        #expect(sut.showError == false)
-        #expect(sut.currentError == nil)
+    @Test("handle pushes a toast with message + context")
+    func handleRoutesToToast() {
+        let (handler, toast) = makeSUT()
+        handler.handle(anError("Connection refused"), context: "Server sync")
+        #expect(toast.toasts.count == 1)
+        #expect(toast.toasts[0].message == "Server sync: Connection refused")
+        #expect(toast.toasts[0].severity == .error)
     }
 
-    @Test("clearAll removes all queued errors")
-    func clearAllRemovesAll() {
-        let sut = makeSUT()
-        sut.showError("Error 1")
-        sut.showError("Error 2")
-        sut.showError("Error 3")
-
-        sut.clearAll()
-        #expect(sut.showError == false)
-        #expect(sut.currentError == nil)
+    @Test("handle does not populate modal queue")
+    func handleDoesNotSetModal() {
+        let (handler, _) = makeSUT()
+        handler.handle(anError(), context: "x")
+        #expect(handler.showError == false)
+        #expect(handler.currentError == nil)
     }
 
-    @Test("duplicate messages are deduplicated")
-    func deduplicatesSameMessage() {
-        let sut = makeSUT()
-        sut.showError("Same error")
-        sut.showError("Same error")
-        sut.showError("Same error")
-
-        #expect(sut.currentError?.message == "Same error")
-        sut.clearError()
-        // Only one was queued despite three calls
-        #expect(sut.showError == false)
+    @Test("handle maps WebSocketError.notConnected to connection.transient dedup key")
+    func notConnectedDedupKey() {
+        let (handler, toast) = makeSUT()
+        handler.handle(WebSocketError.notConnected, context: "Session refresh")
+        handler.handle(WebSocketError.notConnected, context: "Session refresh")
+        #expect(toast.toasts.count == 1)
+        #expect(toast.toasts[0].dedupKey == "connection.transient")
     }
 
-    @Test("queue respects max size")
-    func maxQueueSize() {
-        let sut = makeSUT()
-        for i in 0..<10 {
-            sut.showError("Error \(i)")
-        }
+    @Test("handle maps WebSocketError.timeout to connection.transient")
+    func timeoutDedupKey() {
+        let (handler, toast) = makeSUT()
+        handler.handle(WebSocketError.timeout, context: "Session refresh")
+        handler.handle(WebSocketError.timeout, context: "Session refresh")
+        #expect(toast.toasts.count == 1)
+        #expect(toast.toasts[0].dedupKey == "connection.transient")
+    }
 
-        // Max queue is 5, first is always kept (displayed), overflow drops from middle
-        #expect(sut.currentError?.message == "Error 0")
+    @Test("handle maps WebSocketError.connectionFailed to connection.transient")
+    func connectionFailedDedupKey() {
+        let (handler, toast) = makeSUT()
+        handler.handle(WebSocketError.connectionFailed("boom"), context: "x")
+        handler.handle(WebSocketError.connectionFailed("other"), context: "y")
+        #expect(toast.toasts.count == 1)
+        #expect(toast.toasts[0].dedupKey == "connection.transient")
+    }
 
-        // Clear all and verify queue was bounded
+    @Test("handle maps RPCClientError.connectionNotEstablished to connection.transient")
+    func rpcConnectionNotEstablishedDedupKey() {
+        let (handler, toast) = makeSUT()
+        handler.handle(RPCClientError.connectionNotEstablished, context: "x")
+        handler.handle(RPCClientError.connectionNotEstablished, context: "y")
+        #expect(toast.toasts.count == 1)
+        #expect(toast.toasts[0].dedupKey == "connection.transient")
+    }
+
+    @Test("handle uses no dedup key for non-connection errors")
+    func nonConnectionNoDedupKey() {
+        let (handler, toast) = makeSUT()
+        handler.handle(anError("random"), context: "x")
+        handler.handle(anError("other"), context: "x")
+        #expect(toast.toasts.count == 2)
+        #expect(toast.toasts[0].dedupKey == nil)
+    }
+
+    @Test("showError routes to toast with matching severity")
+    func showErrorRoutesSeverity() {
+        let (handler, toast) = makeSUT()
+        handler.showError("warn", severity: .warning)
+        handler.showError("info", severity: .info)
+        handler.showError("err")  // default .error
+
+        #expect(toast.toasts.count == 3)
+        #expect(toast.toasts[0].severity == .warning)
+        #expect(toast.toasts[1].severity == .info)
+        #expect(toast.toasts[2].severity == .error)
+    }
+
+    // MARK: - Fatal → modal routing
+
+    @Test("handleFatal enqueues modal error")
+    func handleFatalEnqueues() {
+        let (handler, toast) = makeSUT()
+        handler.handleFatal(anError("oops"), context: "Session resume")
+        #expect(handler.showError)
+        #expect(handler.currentError?.message == "Session resume: oops")
+        #expect(toast.toasts.isEmpty, "fatal does not also toast")
+    }
+
+    @Test("handleFatal dedupes by message")
+    func handleFatalDedupes() {
+        let (handler, _) = makeSUT()
+        handler.handleFatal(anError("same"), context: "x")
+        handler.handleFatal(anError("same"), context: "x")
+        handler.handleFatal(anError("same"), context: "x")
+
         var count = 0
-        while sut.showError {
+        while handler.showError {
             count += 1
-            sut.clearError()
+            handler.clearError()
+        }
+        #expect(count == 1)
+    }
+
+    @Test("handleFatal respects max queue size (5)")
+    func handleFatalMaxQueue() {
+        let (handler, _) = makeSUT()
+        for i in 0..<10 {
+            handler.handleFatal(anError("err \(i)"), context: nil)
+        }
+        // First enqueued is always displayed; max queue is 5.
+        #expect(handler.currentError?.message == "err 0")
+
+        var count = 0
+        while handler.showError {
+            count += 1
+            handler.clearError()
         }
         #expect(count <= 5)
     }
 
-    @Test("handle with context prefixes message")
-    func handleWithContext() {
-        let sut = makeSUT()
-        sut.handle(
-            NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Connection refused"]),
-            context: "Server sync"
-        )
+    @Test("clearError advances to next fatal")
+    func clearErrorAdvances() {
+        let (handler, _) = makeSUT()
+        handler.handleFatal(anError("first"), context: nil)
+        handler.handleFatal(anError("second"), context: nil)
 
-        #expect(sut.currentError?.message == "Server sync: Connection refused")
+        #expect(handler.currentError?.message == "first")
+        handler.clearError()
+        #expect(handler.currentError?.message == "second")
+        handler.clearError()
+        #expect(handler.showError == false)
     }
 
-    @Test("showError with different severities")
-    func severityLevels() {
-        let sut = makeSUT()
-        sut.showError("Warning message", severity: .warning)
-
-        #expect(sut.currentError?.severity == .warning)
-        #expect(sut.currentError?.message == "Warning message")
-    }
-
-    @Test("log does not show error to user")
-    func logDoesNotShow() {
-        let sut = makeSUT()
-        sut.log(NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Silent"]))
-
-        #expect(sut.showError == false)
-        #expect(sut.currentError == nil)
+    @Test("clearAll empties fatal queue")
+    func clearAllEmpties() {
+        let (handler, _) = makeSUT()
+        handler.handleFatal(anError("1"), context: nil)
+        handler.handleFatal(anError("2"), context: nil)
+        handler.clearAll()
+        #expect(handler.showError == false)
     }
 
     @Test("clearError on empty queue is safe")
-    func clearEmptyQueue() {
-        let sut = makeSUT()
-        sut.clearError()
-        sut.clearError()
-        #expect(sut.showError == false)
+    func clearErrorEmpty() {
+        let (handler, _) = makeSUT()
+        handler.clearError()
+        handler.clearError()
+        #expect(handler.showError == false)
+    }
+
+    // MARK: - Silent logging
+
+    @Test("log does not surface to user")
+    func logSilent() {
+        let (handler, toast) = makeSUT()
+        handler.log(anError(), context: "ctx")
+        #expect(handler.showError == false)
+        #expect(toast.toasts.isEmpty)
+    }
+
+    @Test("logError does not surface to user")
+    func logErrorSilent() {
+        let (handler, toast) = makeSUT()
+        handler.logError(anError(), context: "ctx")
+        handler.logError(anError(), context: "ctx", category: .rpc)
+        #expect(handler.showError == false)
+        #expect(toast.toasts.isEmpty)
+    }
+
+    @Test("logWarning does not surface to user")
+    func logWarningSilent() {
+        let (handler, toast) = makeSUT()
+        handler.logWarning("whoops")
+        #expect(handler.showError == false)
+        #expect(toast.toasts.isEmpty)
+    }
+
+    // MARK: - classifyDedupKey static
+
+    @Test("classifyDedupKey handles each WebSocketError case")
+    func classifyDedupKeyWebSocket() {
+        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.notConnected) == "connection.transient")
+        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.timeout) == "connection.transient")
+        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.connectionFailed("x")) == "connection.transient")
+        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.invalidResponse) == nil)
+        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.encodingError) == nil)
+        #expect(ErrorHandler.classifyDedupKey(for: WebSocketError.decodingError("x")) == nil)
+    }
+
+    @Test("classifyDedupKey handles each RPCClientError case")
+    func classifyDedupKeyRPC() {
+        #expect(ErrorHandler.classifyDedupKey(for: RPCClientError.connectionNotEstablished) == "connection.transient")
+        #expect(ErrorHandler.classifyDedupKey(for: RPCClientError.noActiveSession) == "connection.transient")
+        #expect(ErrorHandler.classifyDedupKey(for: RPCClientError.invalidURL) == nil)
     }
 }

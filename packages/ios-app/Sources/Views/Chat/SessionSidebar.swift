@@ -22,6 +22,7 @@ enum NavigationMode: String, CaseIterable {
 @available(iOS 26.0, *)
 struct SessionSidebar: View {
     @Environment(\.dependencies) var dependencies
+    @Environment(\.interactionPolicy) var interactionPolicy
     @Binding var selectedSessionId: String?
     @State private var sessionToArchive: String?
     @State private var showArchiveConfirmation = false
@@ -109,7 +110,7 @@ struct SessionSidebar: View {
                                 }
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                if !session.isDeleting {
+                                if !session.isDeleting && (interactionPolicy?.canMutateSession ?? false) {
                                     Button {
                                         sessionToArchive = session.id
                                         showArchiveConfirmation = true
@@ -154,6 +155,8 @@ struct SessionSidebar: View {
                 }
 
                 FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress, size: 56)
+                    .disabled(!(interactionPolicy?.canCreateSession ?? false))
+                    .opacity((interactionPolicy?.canCreateSession ?? false) ? 1.0 : 0.4)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 8)

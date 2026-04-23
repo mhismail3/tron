@@ -2,24 +2,30 @@ import SwiftUI
 
 // MARK: - Error Handler
 
-/// Centralized error handling service.
-/// Queues errors so rapid successive failures are not silently overwritten.
+/// Centralized error routing.
+///
+/// Transient / connection-class errors are routed to `ToastCenter` (non-blocking banner).
+/// Fatal / actionable errors are routed to the modal `.alert()` queue via `handleFatal`.
+///
+/// Silent logging (`log`, `logWarning`, `logError`) is unchanged and does not surface to the user.
 @MainActor
 @Observable
 final class ErrorHandler {
+
     // MARK: - Singleton
 
     static let shared = ErrorHandler()
 
-    // MARK: - State
+    // MARK: - Modal queue (fatal errors)
 
-    /// Queue of pending error messages (FIFO). The first entry is the one currently displayed.
+    /// Queue of pending fatal error messages shown as modal `.alert()`.
+    /// `handle`-style transient errors no longer enter this queue.
     private var errorQueue: [QueuedError] = []
 
-    /// The currently displayed error, if any.
+    /// The currently displayed fatal error, if any.
     var currentError: QueuedError? { errorQueue.first }
 
-    /// Whether an error alert should be shown.
+    /// Whether a fatal error alert should be shown.
     var showError: Bool { !errorQueue.isEmpty }
 
     // MARK: - Types
@@ -33,89 +39,137 @@ final class ErrorHandler {
         case error
         case warning
         case info
+
+        fileprivate var toastSeverity: ToastCenter.Severity {
+            switch self {
+            case .error: return .error
+            case .warning: return .warning
+            case .info: return .info
+            }
+        }
     }
 
     // MARK: - Private
 
-    /// Maximum queued errors to prevent unbounded growth from error storms.
+    /// Maximum queued fatal errors to prevent unbounded growth from error storms.
     private let maxQueueSize = 5
 
     private let logger = TronLogger.shared
 
-    private init() {}
+    @ObservationIgnored
+    private let toastCenter: ToastCenter
 
-    // MARK: - Public API
+    // MARK: - Init
 
-    /// Handle any Error with logging and user notification.
-    /// Queued — does not overwrite a currently displayed error.
-    func handle(_ error: Error, context: String? = nil) {
-        let message: String
-        if let context {
-            message = "\(context): \(error.localizedDescription)"
-        } else {
-            message = error.localizedDescription
-        }
-
-        logger.error(message, category: .session)
-        enqueue(message, severity: .error)
+    init(toastCenter: ToastCenter = .shared) {
+        self.toastCenter = toastCenter
     }
 
-    /// Show an error/warning/info message directly.
+    // MARK: - Public API — transient (toast)
+
+    /// Handle any transient Error with logging and a non-blocking toast.
+    /// Connection-class errors are deduplicated by a shared key so storms collapse.
+    func handle(_ error: Error, context: String? = nil) {
+        let message = formatMessage(error: error, context: context)
+        logger.error(message, category: .session)
+        toastCenter.push(
+            message,
+            severity: .error,
+            dedupKey: Self.classifyDedupKey(for: error)
+        )
+    }
+
+    /// Show an error/warning/info message directly as a non-blocking toast.
     func showError(_ message: String, severity: ErrorSeverity = .error) {
         switch severity {
-        case .error:
-            logger.error(message, category: .session)
-        case .warning:
-            logger.warning(message, category: .session)
-        case .info:
-            logger.info(message, category: .session)
+        case .error: logger.error(message, category: .session)
+        case .warning: logger.warning(message, category: .session)
+        case .info: logger.info(message, category: .session)
         }
 
-        enqueue(message, severity: severity)
+        toastCenter.push(message, severity: severity.toastSeverity)
     }
 
-    /// Log an error without showing to user
-    func log(_ error: Error, context: String? = nil) {
-        let message: String
-        if let context {
-            message = "\(context): \(error.localizedDescription)"
-        } else {
-            message = error.localizedDescription
-        }
+    // MARK: - Public API — fatal (modal)
+
+    /// Handle a fatal / actionable error with logging and modal `.alert()` display.
+    /// Reserved for errors the user must act on (e.g., session not found on server).
+    func handleFatal(_ error: Error, context: String? = nil) {
+        let message = formatMessage(error: error, context: context)
         logger.error(message, category: .session)
+        enqueueFatal(message, severity: .error)
     }
 
-    /// Log a warning without showing to user
-    func logWarning(_ message: String) {
-        logger.warning(message, category: .session)
-    }
-
-    /// Dismiss the current error and advance to the next queued error (if any).
+    /// Dismiss the current fatal error and advance to the next queued fatal (if any).
     func clearError() {
         guard !errorQueue.isEmpty else { return }
         errorQueue.removeFirst()
     }
 
-    /// Clear all queued errors.
+    /// Clear all queued fatal errors.
     func clearAll() {
         errorQueue.removeAll()
     }
 
-    /// Log an error silently without showing to user.
+    // MARK: - Public API — silent (log only)
+
+    /// Log an error without surfacing it to the user.
+    func log(_ error: Error, context: String? = nil) {
+        let message = formatMessage(error: error, context: context)
+        logger.error(message, category: .session)
+    }
+
+    /// Log a warning without surfacing it to the user.
+    func logWarning(_ message: String) {
+        logger.warning(message, category: .session)
+    }
+
+    /// Log an error silently (with default category).
     func logError(_ error: Error, context: String) {
         let message = "\(context): \(error.localizedDescription)"
         logger.error(message, category: .session)
     }
 
-    /// Log an error silently without showing to user (with category).
+    /// Log an error silently (with explicit category).
     func logError(_ error: Error, context: String, category: LogCategory) {
         let message = "\(context): \(error.localizedDescription)"
         logger.error(message, category: category)
     }
 
+    // MARK: - Helpers
+
+    private func formatMessage(error: Error, context: String?) -> String {
+        if let context {
+            return "\(context): \(error.localizedDescription)"
+        }
+        return error.localizedDescription
+    }
+
+    /// Classify an error into a dedup key for toast suppression. Connection-class errors
+    /// all collapse to a single key so storms don't flood the banner stack.
+    static func classifyDedupKey(for error: Error) -> String? {
+        if let ws = error as? WebSocketError {
+            switch ws {
+            case .notConnected, .timeout, .connectionFailed:
+                return "connection.transient"
+            case .invalidResponse, .encodingError, .decodingError:
+                return nil
+            }
+        }
+        if let rpc = error as? RPCClientError {
+            switch rpc {
+            case .connectionNotEstablished, .noActiveSession:
+                return "connection.transient"
+            case .invalidURL:
+                return nil
+            }
+        }
+        return nil
+    }
+
     // MARK: - Private
 
-    private func enqueue(_ message: String, severity: ErrorSeverity) {
+    private func enqueueFatal(_ message: String, severity: ErrorSeverity) {
         // Deduplicate: don't add if the same message is already in the queue.
         guard !errorQueue.contains(where: { $0.message == message }) else { return }
 
@@ -130,7 +184,7 @@ final class ErrorHandler {
     }
 }
 
-// MARK: - View Modifier for Error Alerts
+// MARK: - View Modifier for Fatal Error Alerts
 
 struct ErrorAlertModifier: ViewModifier {
     @Bindable var errorHandler: ErrorHandler
@@ -153,7 +207,8 @@ struct ErrorAlertModifier: ViewModifier {
 }
 
 extension View {
-    /// Attach the global error handler alerts to this view
+    /// Attach the global fatal-error alert modifier to this view.
+    /// Transient errors surface via `ToastCenter`; this modifier only handles fatal alerts.
     func withErrorHandler() -> some View {
         modifier(ErrorAlertModifier(errorHandler: ErrorHandler.shared))
     }

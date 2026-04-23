@@ -49,10 +49,21 @@ struct MyClient {
 
 ## Key Services
 
-- `EventStoreManager` - Session list, event sync, dashboard polling
-- `WebSocketService` - Low-level WebSocket with auto-reconnect
+- `EventStoreManager` - Session list, event sync, dashboard polling. Refresh via `requestSessionRefresh(reason:)` (coalesced by `SessionRefreshService`).
+- `SessionRefreshService` - Single coalescing coordinator for `session.list` refresh. Dedups concurrent requests, debounces `.foreground` reason (1s), queues disconnected requests via `ConnectionManager.runOnReconnect`.
+- `WebSocketService` - Low-level WebSocket with jittered exponential backoff (`BackoffPolicy`: 10 attempts, 1→30s cap).
+- `BackoffPolicy` - Pure value type. `baseDelay(forAttempt:)` deterministic; `delay(forAttempt:)` adds 0–30% jitter.
+- `AsyncClock` - Protocol for time-based code. Production: `SystemAsyncClock`. Tests: `MockAsyncClock`.
+- `ConnectionManager` - Policy layer over `RPCClient`. Exposes `state`, `runOnReconnect(label:_:)` single-shot dedup'd hooks, `cancelHook(label:)`, `manualRetry()`. Single source of truth for connection state.
+- `InteractionPolicy` - Central read-only / "can-mutate" policy read by all mutation UI (`canSendMessage`, `canRecordAudio`, `canCreateSession`, `canMutateSession`, `canCommitWorktree`, `canManageMCP`, `canManageSkills`, `canManageAutomations`, `canLoadServerData`). 500ms debounce on reconnect. Accessed via `@Environment(\.interactionPolicy)`.
+- `ToastCenter` - Non-blocking banner queue. Replaces modal `.alert()` for transient errors. Severity-based auto-dismiss, dedup by key, overflow trimming preferring retry toasts.
+- `ErrorHandler` - Router. `handle()` → `ToastCenter` (transient); `handleFatal()` → modal queue (actionable errors like session-not-found). Connection-class errors dedup under key `"connection.transient"`.
 - `SkillStore` - Cached skill definitions
 - `DraftStore` - Per-session draft persistence (debounced save, file-based attachment storage)
+
+## Fail-fast RPC
+
+`RPCTransport.requireConnection()` checks both `webSocket != nil` AND `connectionState.isConnected`; throws `WebSocketError.notConnected` when offline (no 30s wait). Every domain client routes through it.
 
 ## Rules
 

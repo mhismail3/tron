@@ -33,6 +33,15 @@ paths:
 | `AnimationCoordinator` | Animation timing |
 | `MessageWindowManager` | Visible message range |
 
+## Connection + read-only policy (`Services/Network/`)
+
+`@Observable @MainActor` services composing the single source of truth for connection
+interactivity:
+
+- `ConnectionManager` wraps `RPCClient.connectionState` and adds a `runOnReconnect(label:_:)` hook registry.
+- `InteractionPolicy` projects `ConnectionManager.state` into semantic predicates (`canSendMessage` / `canMutateSession` / `canRecordAudio` / etc.) with a 500ms debounce on reconnect. Installed at the app root via SwiftUI `\.interactionPolicy` environment key; views fail closed when the environment is absent.
+- `EventStoreManager+RefreshCoordination` extension adds `requestSessionRefresh(reason:)`, routing every session-list refresh through `SessionRefreshService` for coalescing, debouncing, and reconnect queuing.
+
 ## @Observable Usage
 
 ```swift

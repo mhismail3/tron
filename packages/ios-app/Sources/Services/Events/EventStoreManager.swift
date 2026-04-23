@@ -266,7 +266,7 @@ final class EventStoreManager {
             // Session not in our list — might be a new session on another device.
             // Trigger a full list refresh to pick it up.
             logger.info("Global: session.updated for unknown session \(sessionId), refreshing list", category: .session)
-            Task { await refreshSessionList() }
+            requestSessionRefresh(reason: .unknownSession)
             return
         }
 
@@ -375,8 +375,8 @@ final class EventStoreManager {
         let sessionId = result.sessionId
         logger.info("Global: session.unarchived for \(sessionId)", category: .session)
 
-        // Refresh from server to get the restored session
-        Task { await refreshSessionList() }
+        // Refresh from server to get the restored session.
+        requestSessionRefresh(reason: .serverHint)
     }
 
     /// Handle session.deleted: remove session from dashboard and local DB

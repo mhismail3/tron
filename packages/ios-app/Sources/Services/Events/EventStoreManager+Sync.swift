@@ -50,6 +50,13 @@ extension EventStoreManager {
             loadSessions()
             seedProcessingStateFromSessions()
             logger.info("Session list refreshed: \(self.sessions.count) sessions", category: .session)
+        } catch let error as WebSocketError where error == .notConnected || error == .timeout {
+            // Transport-level transient failures: the pill/banner already surfaces connection
+            // state, so don't toast. The coordinator's `runOnReconnect` hook will retry when
+            // the connection returns.
+            logger.info("Session refresh skipped: \(error.localizedDescription). Will retry on reconnect.", category: .session)
+        } catch let error as RPCClientError where error == .connectionNotEstablished {
+            logger.info("Session refresh skipped: connection not established. Will retry on reconnect.", category: .session)
         } catch {
             logger.error("Session list refresh failed: \(error.localizedDescription)", category: .session)
             ErrorHandler.shared.handle(error, context: "Session refresh")

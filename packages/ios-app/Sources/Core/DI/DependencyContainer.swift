@@ -65,6 +65,14 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// RPC client for server communication - recreated when server settings change
     private(set) var rpcClient: RPCClient
 
+    /// Centralized connection policy layer (replaces scattered `rpcClient.connectionState`
+    /// observers). Recreated when server settings change because `rpcClient` is.
+    private(set) var connectionManager: ConnectionManager
+
+    /// Single read-only / interaction-allowed policy for all UI surfaces. Recreated with
+    /// `connectionManager`.
+    private(set) var interactionPolicy: InteractionPolicy
+
     /// Skill store - updated when RPC client changes
     private(set) var skillStore: SkillStore
 
@@ -156,6 +164,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         let client = RPCClient(serverURL: url)
         rpcClient = client
 
+        // Initialize centralized connection policy layer
+        let manager = ConnectionManager(provider: client)
+        connectionManager = manager
+        interactionPolicy = InteractionPolicy(connection: manager)
+
         // Initialize skill store
         let store = SkillStore()
         skillStore = store
@@ -176,6 +189,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
         // Wire draft store into event store manager for cleanup on session delete
         eventStoreManager.draftStore = draftStore
+
+        // Attach connection manager to event store manager so refresh coordination can queue
+        // retries on reconnect. Must happen after all stored properties are initialized
+        // (`self` is fully available here).
+        eventStoreManager.attachConnectionManager(manager)
 
         // Listen for auth updates from WebSocket events
         NotificationCenter.default.addObserver(
@@ -236,11 +254,17 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         let newClient = RPCClient(serverURL: url)
         rpcClient = newClient
 
+        // Rebuild connection policy layer against the new client
+        let newManager = ConnectionManager(provider: newClient)
+        connectionManager = newManager
+        interactionPolicy = InteractionPolicy(connection: newManager)
+
         // Update skill store with new client
         skillStore.configure(rpcClient: newClient)
 
-        // Update event store manager with new client
+        // Update event store manager with new client + connection policy
         eventStoreManager.updateRPCClient(newClient)
+        eventStoreManager.attachConnectionManager(newManager)
 
         // Recreate notification store with new client
         notificationStore = NotificationStore(rpcClient: newClient)

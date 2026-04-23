@@ -119,13 +119,15 @@ final class RPCTransportHelpersTests: XCTestCase {
 @MainActor
 final class TestRPCTransport: RPCTransport {
     private(set) var webSocket: WebSocketService?
+    var connectionState: ConnectionState = .connected
     private(set) var currentSessionId: String?
     private(set) var currentModel: String = "claude-sonnet-4-20250514"
     private(set) var serverOrigin: String = "localhost:8080"
 
-    init(webSocket: WebSocketService? = nil, currentSessionId: String? = nil) {
+    init(webSocket: WebSocketService? = nil, currentSessionId: String? = nil, connectionState: ConnectionState = .connected) {
         self.webSocket = webSocket
         self.currentSessionId = currentSessionId
+        self.connectionState = connectionState
     }
 
     func setCurrentSessionId(_ id: String?) {

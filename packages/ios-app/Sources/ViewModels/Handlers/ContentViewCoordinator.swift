@@ -23,23 +23,19 @@ final class ContentViewCoordinator {
     // MARK: - Connection State Handling
 
     /// Called when connection state transitions to connected.
-    /// Refreshes session list and re-validates the current session's workspace.
+    /// Session list refresh is handled centrally by `SessionRefreshService`; this handler
+    /// only re-validates the current session's workspace.
     func handleConnectionEstablished(selectedSessionId: String?) {
-        Task {
-            await eventStoreManager.refreshSessionList()
-        }
-
         if let sessionId = selectedSessionId {
             validateWorkspace(for: sessionId)
         }
     }
 
-    /// Called when server settings change. Clears cached workspace states and refreshes sessions.
+    /// Called when server settings change. Clears cached workspace states and enqueues a
+    /// coordinator-coalesced session refresh.
     func handleServerSettingsChanged() {
         workspaceDeletedForSession = [:]
-        Task {
-            await eventStoreManager.refreshSessionList()
-        }
+        eventStoreManager.requestSessionRefresh(reason: .settingsChanged)
     }
 
     // MARK: - Session Selection

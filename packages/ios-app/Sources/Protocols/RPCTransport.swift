@@ -7,6 +7,11 @@ protocol RPCTransport: AnyObject {
     /// The underlying WebSocket service for sending RPC calls
     var webSocket: WebSocketService? { get }
 
+    /// Aggregated connection state. Usually mirrors `webSocket.connectionState` but is
+    /// exposed at the transport level so the fail-fast guard does not depend on digging
+    /// into the concrete `WebSocketService`.
+    var connectionState: ConnectionState { get }
+
     /// Current active session ID, if any
     var currentSessionId: String? { get }
 
@@ -26,26 +31,38 @@ protocol RPCTransport: AnyObject {
 // MARK: - Connection Helpers
 
 extension RPCTransport {
-    /// Get the WebSocket service, throwing if not connected.
-    /// Use this to replace: `guard let ws = transport.webSocket else { throw ... }`
+    /// Get the WebSocket service, throwing if the transport is not ready for RPCs.
     ///
-    /// - Throws: `RPCClientError.connectionNotEstablished` if webSocket is nil
-    /// - Returns: The active WebSocketService
+    /// Fail-fast: if the connection is not `.connected`, throws
+    /// `WebSocketError.notConnected` immediately rather than letting the domain-client
+    /// call proceed into a 30-second request timeout.
+    ///
+    /// - Throws: `RPCClientError.connectionNotEstablished` if webSocket is nil,
+    ///           `WebSocketError.notConnected` if connectionState is not connected.
+    /// - Returns: The active WebSocketService.
     func requireConnection() throws -> WebSocketService {
         guard let ws = webSocket else {
             throw RPCClientError.connectionNotEstablished
+        }
+        guard connectionState.isConnected else {
+            throw WebSocketError.notConnected
         }
         return ws
     }
 
     /// Get the WebSocket service and current session ID, throwing if either is unavailable.
-    /// Use this to replace: `guard let ws = ..., let sessionId = ... else { throw ... }`
     ///
-    /// - Throws: `RPCClientError.noActiveSession` if webSocket or sessionId is nil
+    /// Fail-fast: mirrors `requireConnection` for the connection-state guard.
+    ///
+    /// - Throws: `RPCClientError.noActiveSession` if webSocket or sessionId is nil,
+    ///           `WebSocketError.notConnected` if connectionState is not connected.
     /// - Returns: Tuple of (WebSocketService, sessionId)
     func requireSession() throws -> (WebSocketService, String) {
         guard let ws = webSocket, let sessionId = currentSessionId else {
             throw RPCClientError.noActiveSession
+        }
+        guard connectionState.isConnected else {
+            throw WebSocketError.notConnected
         }
         return (ws, sessionId)
     }

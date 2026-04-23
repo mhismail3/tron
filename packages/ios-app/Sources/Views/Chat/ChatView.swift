@@ -580,11 +580,15 @@ struct ChatView: View {
                                 .id("workspaceDeleted")
                         }
 
-                        // Connection status pill - appears when not connected
+                        // Connection status pill - appears when not connected.
+                        // Retry routes through ConnectionManager so manual retry shares the
+                        // same codepath as the dashboard toast/banner retry button.
                         ConnectionStatusPill(
                             connectionState: rpcClient.connectionState,
                             isReady: initialLoadComplete,
-                            onRetry: { await rpcClient.manualRetry() }
+                            onRetry: { [weak dependencies = dependencies] in
+                                await dependencies?.connectionManager.manualRetry()
+                            }
                         )
                         .id("connectionStatusPill")
 
