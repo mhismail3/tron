@@ -540,6 +540,39 @@ fn row_to_job_valid_data_succeeds() {
 }
 
 #[test]
+fn list_all_jobs_corrupt_row_logged_and_skipped() {
+    // S1 invariant: bulk reads are fail-skip (log + omit), not fail-loud.
+    // A valid row and a corrupt row coexist — list_all_jobs returns the
+    // valid one and drops the corrupt one, rather than surfacing an Err
+    // for the whole batch. (get_job, by contrast, is fail-loud — covered
+    // by `row_to_job_corrupt_*_returns_error` above.)
+    let pool = setup_pool();
+    let good = make_job("cron_good", "Good");
+    upsert_job(&pool, &good).unwrap();
+
+    let conn = pool.get().unwrap();
+    let _ = conn
+        .execute(
+            "INSERT INTO cron_jobs (id, name, schedule_json, payload_json, created_at, updated_at)
+             VALUES ('cron_bad', 'Bad', 'NOT VALID JSON', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    drop(conn);
+
+    let jobs = list_all_jobs(&pool).unwrap();
+    let ids: Vec<_> = jobs.iter().map(|j| j.id.as_str()).collect();
+    assert!(
+        ids.contains(&"cron_good"),
+        "fail-skip must preserve the good job: {ids:?}"
+    );
+    assert!(
+        !ids.contains(&"cron_bad"),
+        "fail-skip must drop the corrupt job: {ids:?}"
+    );
+}
+
+#[test]
 fn row_to_job_corrupt_created_at_returns_error() {
     let pool = setup_pool();
     let conn = pool.get().unwrap();

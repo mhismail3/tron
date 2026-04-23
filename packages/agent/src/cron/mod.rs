@@ -12,8 +12,20 @@
 //!
 //! ## Invariants
 //!
-//! - **Fail-loud on corrupt data**: `store::row_to_job()` returns an error if any
-//!   JSON column is corrupt. Jobs with invalid data are skipped, not silently defaulted.
+//! - **Corrupt-row handling is path-dependent**:
+//!   - Single-id reads (`store::get_job`) are **fail-loud**: any corrupt JSON
+//!     column returns `CronError::Database`, never a silent default.
+//!   - Bulk iteration (`store::list_all_jobs`, `store::get_runs`,
+//!     `store::get_stuck_candidates`) is **fail-skip**: the corrupt row is
+//!     logged at `tracing::error!` and omitted from the result, so one bad
+//!     row cannot hide the rest of the catalog. This is a deliberate trade-off
+//!     between availability and strictness; revisit if a corrupt row becomes
+//!     a silent-loss hazard.
+//! - **Stale-id writes surface `NotFound`**: Every targeted `UPDATE`/`DELETE`
+//!   by id in `store` checks `rows_affected` and returns `CronError::NotFound`
+//!   on 0, so a GC or concurrent delete racing with a state write is
+//!   observable. `upsert_job` and `insert_run` exempt themselves because
+//!   their row count is always 1 by construction.
 //! - **DB-before-memory**: Runtime state updates always write to SQLite first. If
 //!   the DB write fails, the in-memory update is skipped to prevent divergence.
 //! - **Allowlist-only restrictions**: `ToolRestrictions` uses `deny_unknown_fields` —
