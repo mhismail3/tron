@@ -57,34 +57,43 @@ final class ModelFilteringServiceTests: XCTestCase {
         contextWindow: Int = 200_000,
         maxOutputTokens: Int? = 16_000,
         family: String? = nil,
-        tier: String? = nil,
+        tier: String = "sonnet",
         maxOutput: Int? = nil,
         description: String? = nil,
         inputCostPerMillion: Double? = nil,
         outputCostPerMillion: Double? = nil,
         recommended: Bool? = nil,
-        isLegacy: Bool? = nil,
+        isLegacy: Bool = false,
+        supportsThinking: Bool = false,
+        supportsImages: Bool = false,
+        supportsDocuments: Bool = false,
         sortOrder: Int? = nil,
         isDeprecated: Bool? = nil,
         deprecationDate: String? = nil
     ) -> ModelInfo {
+        // I8: tier, isLegacy, supportsThinking, supportsImages, and
+        // supportsDocuments are required on the wire — the server (every
+        // provider registry) always emits them. The fixture matches that.
         var json: [String: Any] = [
             "id": id,
             "name": name ?? id,
             "provider": provider,
             "contextWindow": contextWindow,
             "maxOutputTokens": maxOutputTokens as Any,
+            "tier": tier,
+            "isLegacy": isLegacy,
+            "supportsThinking": supportsThinking,
+            "supportsImages": supportsImages,
+            "supportsDocuments": supportsDocuments,
             "providerDisplayName": Self.providerDisplayName(provider),
             "providerSortOrder": Self.providerSortOrder(provider)
         ]
         if let family { json["family"] = family }
-        if let tier { json["tier"] = tier }
         if let maxOutput { json["maxOutput"] = maxOutput }
         if let description { json["description"] = description }
         if let inputCostPerMillion { json["inputCostPerMillion"] = inputCostPerMillion }
         if let outputCostPerMillion { json["outputCostPerMillion"] = outputCostPerMillion }
         if let recommended { json["recommended"] = recommended }
-        if let isLegacy { json["isLegacy"] = isLegacy }
         if let sortOrder { json["sortOrder"] = sortOrder }
         if let isDeprecated { json["isDeprecated"] = isDeprecated }
         if let deprecationDate { json["deprecationDate"] = deprecationDate }
@@ -183,7 +192,7 @@ final class ModelFilteringServiceTests: XCTestCase {
         let latest = ModelFilteringService.filterLatest(models)
 
         latest.forEach { model in
-            XCTAssertFalse(model.isLegacy ?? false, "Expected \(model.id) to not be legacy")
+            XCTAssertFalse(model.isLegacy, "Expected \(model.id) to not be legacy")
         }
     }
 
@@ -192,7 +201,7 @@ final class ModelFilteringServiceTests: XCTestCase {
         let legacy = ModelFilteringService.filterLegacy(models)
 
         legacy.forEach { model in
-            XCTAssertTrue(model.isLegacy ?? false, "Expected \(model.id) to be legacy")
+            XCTAssertTrue(model.isLegacy, "Expected \(model.id) to be legacy")
         }
     }
 

@@ -59,7 +59,7 @@ enum ModelNameFormatter {
             case .compact:
                 return info.name.lowercased().replacingOccurrences(of: " ", with: "-")
             case .tierOnly:
-                return info.isAnthropic ? (info.tier?.capitalized ?? info.name) : info.name
+                return info.isAnthropic ? info.tier.capitalized : info.name
             }
         }
 

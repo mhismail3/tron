@@ -213,12 +213,19 @@ final class DefaultModelRepositoryTests: XCTestCase {
     // MARK: - Helpers
 
     private func createMockModel(id: String) -> ModelInfo {
+        // I8: supportsThinking/Images/Documents, tier, and isLegacy are
+        // required on the wire — the server emits them unconditionally.
         let json = """
         {
             "id": "\(id)",
             "name": "Test Model",
             "provider": "anthropic",
-            "contextWindow": 200000
+            "contextWindow": 200000,
+            "supportsThinking": true,
+            "supportsImages": true,
+            "supportsDocuments": true,
+            "tier": "sonnet",
+            "isLegacy": false
         }
         """
         return try! JSONDecoder().decode(ModelInfo.self, from: json.data(using: .utf8)!)

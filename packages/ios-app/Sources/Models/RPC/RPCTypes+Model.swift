@@ -18,12 +18,22 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let provider: String
     let contextWindow: Int
     let maxOutputTokens: Int?
-    let supportsThinking: Bool?
-    let supportsImages: Bool?
-    /// Whether this model supports document inputs (PDFs, etc.)
-    let supportsDocuments: Bool?
-    let tier: String?
-    let isLegacy: Bool?
+    /// Whether the model emits thinking blocks. Required on the wire —
+    /// every provider registry (Anthropic, OpenAI, Google, MiniMax, Kimi,
+    /// Ollama) populates this explicitly. See I8.
+    let supportsThinking: Bool
+    /// Whether the model accepts image inputs. Required on the wire.
+    let supportsImages: Bool
+    /// Whether the model supports document inputs (PDFs, etc.). Required.
+    let supportsDocuments: Bool
+    /// Server-authoritative tier classification ("opus", "sonnet",
+    /// "flagship", "flash", "local", …). Required on the wire — decoding
+    /// a model payload without a tier is a server bug, not a client
+    /// fallback case.
+    let tier: String
+    /// Whether this model is a previous-generation release that the UI
+    /// should de-prioritize. Required on the wire.
+    let isLegacy: Bool
     /// Whether this model is deprecated and should not be selectable
     let isDeprecated: Bool?
     /// Deprecation date (YYYY-MM-DD) for display
@@ -82,18 +92,23 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         case available, unavailableReason
     }
 
-    /// Manual init preserving backward compatibility — new metadata fields default to nil
+    /// Explicit initializer used by tests and non-wire construction sites.
+    /// The five required metadata fields (`supportsThinking`,
+    /// `supportsImages`, `supportsDocuments`, `tier`, `isLegacy`) have no
+    /// defaults — callers must pass them. Everything else is genuinely
+    /// optional on the wire and defaults to nil here so test fixtures
+    /// stay lean.
     init(
         id: String,
         name: String,
         provider: String,
         contextWindow: Int,
+        supportsThinking: Bool,
+        supportsImages: Bool,
+        supportsDocuments: Bool,
+        tier: String,
+        isLegacy: Bool,
         maxOutputTokens: Int? = nil,
-        supportsThinking: Bool? = nil,
-        supportsImages: Bool? = nil,
-        supportsDocuments: Bool? = nil,
-        tier: String? = nil,
-        isLegacy: Bool? = nil,
         isDeprecated: Bool? = nil,
         deprecationDate: String? = nil,
         supportsReasoning: Bool? = nil,
@@ -183,7 +198,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 
     /// Short tier name: "Opus", "Sonnet", "Haiku" (Anthropic), or full name for others
     var shortName: String {
-        isAnthropic ? (tier?.capitalized ?? name) : name
+        isAnthropic ? tier.capitalized : name
     }
 
     /// Formatted model name for UI display (delegates to `displayName`)
@@ -191,7 +206,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 
     /// Whether this is a latest generation model (server-driven via isLegacy flag)
     var isLatestGeneration: Bool {
-        !(isLegacy ?? false)
+        !isLegacy
     }
 
     /// Whether this model is deprecated and should not be selectable

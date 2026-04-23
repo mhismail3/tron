@@ -407,6 +407,52 @@ mod tests {
         }
     }
 
+    /// I8: every provider registry must emit the five metadata fields the
+    /// iOS wire contract requires (supportsThinking, supportsImages,
+    /// supportsDocuments, tier, isLegacy). Missing any of these on the
+    /// wire would break `JSONDecoder.decode(ModelInfo.self, …)` after the
+    /// iOS side dropped the optional-fallback pattern. This is the
+    /// cross-boundary meta-test: new provider registries must satisfy it.
+    #[tokio::test]
+    async fn list_models_all_models_emit_required_metadata() {
+        let ctx = make_test_context();
+        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let models = result["models"].as_array().unwrap();
+        assert!(!models.is_empty(), "registry produced no models");
+        for model in models {
+            let id = model["id"].as_str().unwrap_or("<unknown>");
+            assert!(
+                model["supportsThinking"].is_boolean(),
+                "{id}: supportsThinking must be bool, got {:?}",
+                model["supportsThinking"]
+            );
+            assert!(
+                model["supportsImages"].is_boolean(),
+                "{id}: supportsImages must be bool, got {:?}",
+                model["supportsImages"]
+            );
+            assert!(
+                model["supportsDocuments"].is_boolean(),
+                "{id}: supportsDocuments must be bool, got {:?}",
+                model["supportsDocuments"]
+            );
+            assert!(
+                model["tier"].is_string(),
+                "{id}: tier must be string, got {:?}",
+                model["tier"]
+            );
+            assert!(
+                !model["tier"].as_str().unwrap_or("").is_empty(),
+                "{id}: tier must be non-empty"
+            );
+            assert!(
+                model["isLegacy"].is_boolean(),
+                "{id}: isLegacy must be bool, got {:?}",
+                model["isLegacy"]
+            );
+        }
+    }
+
     #[tokio::test]
     async fn list_models_has_pricing() {
         let ctx = make_test_context();

@@ -153,14 +153,19 @@ final class ModelNameFormatterTests: XCTestCase {
         id: String,
         name: String,
         provider: String,
-        tier: String? = nil
+        tier: String = "sonnet"
     ) -> ModelInfo {
+        // I8: tier/isLegacy/supportsThinking/Images/Documents are required.
         ModelInfo(
             id: id,
             name: name,
             provider: provider,
             contextWindow: 200_000,
-            tier: tier
+            supportsThinking: false,
+            supportsImages: false,
+            supportsDocuments: false,
+            tier: tier,
+            isLegacy: false
         )
     }
 }

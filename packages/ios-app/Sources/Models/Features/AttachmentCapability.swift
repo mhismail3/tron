@@ -64,7 +64,7 @@ struct AttachmentCapability: Equatable {
         }
         if model.isCodex {
             return AttachmentCapability(
-                supportsImages: model.supportsImages ?? true,
+                supportsImages: model.supportsImages,
                 supportsPdfContent: false,
                 supportsTextFiles: true,
                 maxImageBytes: 20_971_520,
@@ -82,7 +82,7 @@ struct AttachmentCapability: Equatable {
         }
         if model.isKimi {
             return AttachmentCapability(
-                supportsImages: model.supportsImages ?? false,
+                supportsImages: model.supportsImages,
                 supportsPdfContent: false,
                 supportsTextFiles: true,
                 maxImageBytes: 10_485_760,

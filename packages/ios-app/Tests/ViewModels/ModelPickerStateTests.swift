@@ -53,21 +53,19 @@ struct ModelPickerStateTests {
         isLegacy: Bool = false,
         sortOrder: Int? = nil
     ) -> ModelInfo {
+        // I8: the five required fields (supportsThinking/Images/Documents,
+        // tier, isLegacy) have no defaults — callers pass them explicitly.
         ModelInfo(
             id: id,
             name: name.isEmpty ? id : name,
             provider: "anthropic",
             contextWindow: contextWindow,
-            maxOutputTokens: 8192,
             supportsThinking: true,
             supportsImages: true,
-            tier: nil,
+            supportsDocuments: false,
+            tier: "sonnet",
             isLegacy: isLegacy,
-            supportsReasoning: nil,
-            reasoningLevels: nil,
-            defaultReasoningLevel: nil,
-            thinkingLevel: nil,
-            supportedThinkingLevels: nil,
+            maxOutputTokens: 8192,
             sortOrder: sortOrder
         )
     }
@@ -373,21 +371,21 @@ struct ModelPickerStateTests {
 
     @Test("Opus 4.6 supports reasoning")
     func testOpus46SupportsReasoning() {
+        // I8: the five required fields precede the optional metadata.
         let model = ModelInfo(
             id: "claude-opus-4-6",
             name: "Opus 4.6",
             provider: "anthropic",
             contextWindow: 200_000,
-            maxOutputTokens: 128_000,
             supportsThinking: true,
             supportsImages: true,
+            supportsDocuments: true,
             tier: "opus",
             isLegacy: false,
+            maxOutputTokens: 128_000,
             supportsReasoning: true,
             reasoningLevels: ["low", "medium", "high", "max"],
-            defaultReasoningLevel: "high",
-            thinkingLevel: nil,
-            supportedThinkingLevels: nil
+            defaultReasoningLevel: "high"
         )
         #expect(model.supportsReasoning == true)
         #expect(model.reasoningLevels?.count == 4)

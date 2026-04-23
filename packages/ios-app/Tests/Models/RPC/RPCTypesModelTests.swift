@@ -12,8 +12,11 @@ struct ModelInfoComputedTests {
         name: String = "Sonnet 4.6",
         provider: String = "anthropic",
         contextWindow: Int = 200_000,
-        tier: String? = "sonnet",
-        isLegacy: Bool? = nil,
+        supportsThinking: Bool = false,
+        supportsImages: Bool = false,
+        supportsDocuments: Bool = false,
+        tier: String = "sonnet",
+        isLegacy: Bool = false,
         isDeprecated: Bool? = nil,
         family: String? = "Claude 4.6",
         maxOutput: Int? = nil,
@@ -21,14 +24,20 @@ struct ModelInfoComputedTests {
         inputCostPerMillion: Double? = nil,
         outputCostPerMillion: Double? = nil
     ) -> ModelInfo {
+        // I8: supportsThinking/Images/Documents, tier, and isLegacy are
+        // required on the wire — every provider registry emits them.
+        // The fixture enforces the same contract.
         ModelInfo(
             id: id,
             name: name,
             provider: provider,
             contextWindow: contextWindow,
-            maxOutputTokens: maxOutputTokens,
+            supportsThinking: supportsThinking,
+            supportsImages: supportsImages,
+            supportsDocuments: supportsDocuments,
             tier: tier,
             isLegacy: isLegacy,
+            maxOutputTokens: maxOutputTokens,
             isDeprecated: isDeprecated,
             family: family,
             maxOutput: maxOutput,
@@ -147,10 +156,10 @@ struct ModelInfoComputedTests {
         #expect(m.shortName == "Sonnet")
     }
 
-    @Test("shortName Anthropic without tier")
-    func testShortNameWithoutTier() {
-        let m = makeModel(tier: nil)
-        #expect(m.shortName == "Sonnet 4.6")
+    @Test("shortName Anthropic with opus tier")
+    func shortNameOpusTier() {
+        let m = makeModel(tier: "opus")
+        #expect(m.shortName == "Opus")
     }
 
     @Test("shortName non-Anthropic")
@@ -228,9 +237,6 @@ struct ModelInfoComputedTests {
 
     // MARK: - Lifecycle Flags
 
-    @Test("isLatestGeneration nil isLegacy returns true")
-    func testLatestGenNil() { #expect(makeModel(isLegacy: nil).isLatestGeneration == true) }
-
     @Test("isLatestGeneration false isLegacy returns true")
     func testLatestGenFalse() { #expect(makeModel(isLegacy: false).isLatestGeneration == true) }
 
@@ -247,5 +253,97 @@ struct ModelInfoComputedTests {
     func testIsPreview() {
         #expect(makeModel(id: "claude-preview-2026").isPreview == true)
         #expect(makeModel(id: "claude-sonnet-4-6").isPreview == false)
+    }
+}
+
+// MARK: - I8: Strict Wire-Decode Tests
+//
+// Server contract: every provider registry (Anthropic, OpenAI, Google,
+// MiniMax, Kimi, Ollama) populates `supportsThinking`, `supportsImages`,
+// `supportsDocuments`, `tier`, and `isLegacy` unconditionally. A payload
+// missing any of these is a server bug, not a client fallback case.
+
+@Suite("ModelInfo Strict Decode — I8")
+struct ModelInfoStrictDecodeTests {
+
+    /// Full, valid wire payload. Helper mutates this for the missing-field
+    /// cases so each test starts from a known-good baseline.
+    private static func validPayload() -> [String: Any] {
+        [
+            "id": "claude-sonnet-4-6-20260101",
+            "name": "Sonnet 4.6",
+            "provider": "anthropic",
+            "contextWindow": 200_000,
+            "supportsThinking": true,
+            "supportsImages": true,
+            "supportsDocuments": true,
+            "tier": "sonnet",
+            "isLegacy": false
+        ]
+    }
+
+    private func decode(_ payload: [String: Any]) throws -> ModelInfo {
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        return try JSONDecoder().decode(ModelInfo.self, from: data)
+    }
+
+    @Test("full payload decodes cleanly")
+    func fullPayloadDecodes() throws {
+        let m = try decode(Self.validPayload())
+        #expect(m.id == "claude-sonnet-4-6-20260101")
+        #expect(m.supportsThinking == true)
+        #expect(m.supportsImages == true)
+        #expect(m.supportsDocuments == true)
+        #expect(m.tier == "sonnet")
+        #expect(m.isLegacy == false)
+    }
+
+    @Test("missing supportsThinking fails decode")
+    func missingSupportsThinking() {
+        var payload = Self.validPayload()
+        payload.removeValue(forKey: "supportsThinking")
+        #expect(throws: DecodingError.self) { try decode(payload) }
+    }
+
+    @Test("missing supportsImages fails decode")
+    func missingSupportsImages() {
+        var payload = Self.validPayload()
+        payload.removeValue(forKey: "supportsImages")
+        #expect(throws: DecodingError.self) { try decode(payload) }
+    }
+
+    @Test("missing supportsDocuments fails decode")
+    func missingSupportsDocuments() {
+        var payload = Self.validPayload()
+        payload.removeValue(forKey: "supportsDocuments")
+        #expect(throws: DecodingError.self) { try decode(payload) }
+    }
+
+    @Test("missing tier fails decode")
+    func missingTier() {
+        var payload = Self.validPayload()
+        payload.removeValue(forKey: "tier")
+        #expect(throws: DecodingError.self) { try decode(payload) }
+    }
+
+    @Test("missing isLegacy fails decode")
+    func missingIsLegacy() {
+        var payload = Self.validPayload()
+        payload.removeValue(forKey: "isLegacy")
+        #expect(throws: DecodingError.self) { try decode(payload) }
+    }
+
+    @Test("null tier fails decode")
+    func nullTier() {
+        var payload = Self.validPayload()
+        payload["tier"] = NSNull()
+        #expect(throws: DecodingError.self) { try decode(payload) }
+    }
+
+    @Test("null isLegacy fails decode")
+    func nullIsLegacy() {
+        var payload = Self.validPayload()
+        payload["isLegacy"] = NSNull()
+        #expect(throws: DecodingError.self) { try decode(payload) }
     }
 }

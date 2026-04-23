@@ -84,21 +84,19 @@ final class ModelInfoTests: XCTestCase {
         name: String,
         contextWindow: Int = 200_000
     ) -> ModelInfo {
+        // I8: the five metadata fields (supportsThinking/Images/Documents,
+        // tier, isLegacy) are required — the server emits them
+        // unconditionally from every provider registry.
         return ModelInfo(
             id: id,
             name: name,
             provider: "anthropic",
             contextWindow: contextWindow,
-            maxOutputTokens: nil,
-            supportsThinking: nil,
-            supportsImages: nil,
-            tier: nil,
-            isLegacy: nil,
-            supportsReasoning: nil,
-            reasoningLevels: nil,
-            defaultReasoningLevel: nil,
-            thinkingLevel: nil,
-            supportedThinkingLevels: nil
+            supportsThinking: false,
+            supportsImages: false,
+            supportsDocuments: false,
+            tier: "sonnet",
+            isLegacy: false
         )
     }
 }

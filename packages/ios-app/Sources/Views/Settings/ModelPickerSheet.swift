@@ -467,13 +467,13 @@ private struct ModelCard: View {
 
                     // Capability badges
                     HStack(spacing: 6) {
-                        if model.supportsThinking == true {
+                        if model.supportsThinking {
                             capabilityBadge("Thinking", icon: "brain", color: providerColor)
                         }
                         if model.supportsReasoning == true {
                             capabilityBadge("Reasoning", icon: "sparkles", color: providerColor)
                         }
-                        if model.supportsImages == true {
+                        if model.supportsImages {
                             capabilityBadge("Vision", icon: "photo", color: providerColor)
                         }
                     }

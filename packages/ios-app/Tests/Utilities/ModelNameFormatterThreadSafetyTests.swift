@@ -6,8 +6,19 @@ import Foundation
 @Suite("ModelNameFormatter Thread Safety Tests")
 struct ModelNameFormatterThreadSafetyTests {
 
-    private func makeModel(id: String, name: String, provider: String, tier: String? = nil) -> ModelInfo {
-        ModelInfo(id: id, name: name, provider: provider, contextWindow: 200_000, tier: tier)
+    private func makeModel(id: String, name: String, provider: String, tier: String = "sonnet") -> ModelInfo {
+        // I8: required metadata fields have no defaults.
+        ModelInfo(
+            id: id,
+            name: name,
+            provider: provider,
+            contextWindow: 200_000,
+            supportsThinking: false,
+            supportsImages: false,
+            supportsDocuments: false,
+            tier: tier,
+            isLegacy: false
+        )
     }
 
     @Test("concurrent reads during write do not crash")
@@ -28,7 +39,17 @@ struct ModelNameFormatterThreadSafetyTests {
             for i in 0..<10 {
                 group.addTask {
                     let models = [
-                        ModelInfo(id: "claude-sonnet-4-6", name: "Sonnet 4.6 v\(i)", provider: "anthropic", contextWindow: 200_000, tier: "sonnet")
+                        ModelInfo(
+                            id: "claude-sonnet-4-6",
+                            name: "Sonnet 4.6 v\(i)",
+                            provider: "anthropic",
+                            contextWindow: 200_000,
+                            supportsThinking: false,
+                            supportsImages: false,
+                            supportsDocuments: false,
+                            tier: "sonnet",
+                            isLegacy: false
+                        )
                     ]
                     ModelNameFormatter.updateFromServer(models)
                 }

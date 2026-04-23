@@ -444,21 +444,17 @@ final class ContextStateTests: XCTestCase {
     }
 
     private func createTestModelInfo(id: String, name: String, contextWindow: Int) -> ModelInfo {
+        // I8: required metadata fields have no defaults.
         return ModelInfo(
             id: id,
             name: name,
             provider: "anthropic",
             contextWindow: contextWindow,
-            maxOutputTokens: nil,
-            supportsThinking: nil,
-            supportsImages: nil,
-            tier: nil,
-            isLegacy: nil,
-            supportsReasoning: nil,
-            reasoningLevels: nil,
-            defaultReasoningLevel: nil,
-            thinkingLevel: nil,
-            supportedThinkingLevels: nil
+            supportsThinking: false,
+            supportsImages: false,
+            supportsDocuments: false,
+            tier: "sonnet",
+            isLegacy: false
         )
     }
 }

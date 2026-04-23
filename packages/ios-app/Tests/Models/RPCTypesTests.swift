@@ -582,8 +582,9 @@ final class ModelTypesExtendedTests: XCTestCase {
     }
 
     func testModelInfoSortOrderDecoding() throws {
+        // I8: the five required fields must be present on the wire.
         let json = """
-        {"id": "claude-opus-4-6", "name": "Opus 4.6", "provider": "anthropic", "contextWindow": 200000, "sortOrder": 0}
+        {"id": "claude-opus-4-6", "name": "Opus 4.6", "provider": "anthropic", "contextWindow": 200000, "supportsThinking": true, "supportsImages": true, "supportsDocuments": true, "tier": "opus", "isLegacy": false, "sortOrder": 0}
         """.data(using: .utf8)!
         let model = try JSONDecoder().decode(ModelInfo.self, from: json)
         XCTAssertEqual(model.sortOrder, 0)
@@ -601,26 +602,23 @@ final class ModelTypesExtendedTests: XCTestCase {
         id: String,
         provider: String = "anthropic",
         name: String? = nil,
-        tier: String? = nil,
+        tier: String = "sonnet",
         family: String? = nil,
-        isLegacy: Bool? = nil,
+        isLegacy: Bool = false,
         sortOrder: Int? = nil
     ) -> ModelInfo {
+        // I8: the five required fields (supportsThinking/Images/Documents,
+        // tier, isLegacy) have no defaults. The server always emits them.
         ModelInfo(
             id: id,
             name: name ?? id,
             provider: provider,
             contextWindow: 200_000,
-            maxOutputTokens: nil,
-            supportsThinking: nil,
-            supportsImages: nil,
+            supportsThinking: false,
+            supportsImages: false,
+            supportsDocuments: false,
             tier: tier,
             isLegacy: isLegacy,
-            supportsReasoning: nil,
-            reasoningLevels: nil,
-            defaultReasoningLevel: nil,
-            thinkingLevel: nil,
-            supportedThinkingLevels: nil,
             family: family,
             sortOrder: sortOrder
         )

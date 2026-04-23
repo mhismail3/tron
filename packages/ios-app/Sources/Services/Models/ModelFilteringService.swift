@@ -185,12 +185,12 @@ enum ModelFilteringService {
 
     /// Filter to latest versions only (server-driven via isLegacy flag)
     static func filterLatest(_ models: [ModelInfo]) -> [ModelInfo] {
-        models.filter { !($0.isLegacy ?? false) }
+        models.filter { !$0.isLegacy }
     }
 
     /// Filter to legacy versions only (server-driven via isLegacy flag)
     static func filterLegacy(_ models: [ModelInfo]) -> [ModelInfo] {
-        models.filter { $0.isLegacy ?? false }
+        models.filter { $0.isLegacy }
     }
 
     // MARK: - Sorting
