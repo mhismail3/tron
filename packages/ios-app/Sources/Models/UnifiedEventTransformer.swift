@@ -550,25 +550,59 @@ extension UnifiedEventTransformer {
         timestamp: String,
         state: inout ReconstructedState
     ) {
+        // Every field we read below is non-optional on the corresponding
+        // Rust payload (see `events/types/payloads/worktree.rs`). Missing
+        // any of them is a schema violation, not a legacy event — we drop
+        // the event from reconstruction with a warning rather than silently
+        // rendering an empty-string commit or a nil worktree path.
         switch eventType {
         case .worktreeAcquired:
+            guard let path = payload.string("path") else {
+                TronLogger.shared.warning(
+                    "worktree.acquired missing required field 'path'; dropping",
+                    category: .events
+                )
+                return
+            }
             state.worktree.isAcquired = true
-            state.worktree.currentWorktree = payload["path"]?.value as? String
+            state.worktree.currentWorktree = path
         case .worktreeReleased:
             state.worktree.isAcquired = false
         case .worktreeCommit:
+            guard let hash = payload.string("commitHash"),
+                  let message = payload.string("message") else {
+                TronLogger.shared.warning(
+                    "worktree.commit missing required field(s) commitHash/message; dropping",
+                    category: .events
+                )
+                return
+            }
             state.worktree.commits.append(ReconstructedState.WorktreeState.Commit(
-                hash: payload["commitHash"]?.value as? String ?? "",
-                message: payload["message"]?.value as? String ?? "",
+                hash: hash,
+                message: message,
                 timestamp: parseTimestamp(timestamp)
             ))
         case .worktreeMerged:
+            guard let sourceBranch = payload.string("sourceBranch") else {
+                TronLogger.shared.warning(
+                    "worktree.merged missing required field 'sourceBranch'; dropping",
+                    category: .events
+                )
+                return
+            }
             state.worktree.merges.append(ReconstructedState.WorktreeState.Merge(
-                branch: payload["sourceBranch"]?.value as? String ?? "",
+                branch: sourceBranch,
                 timestamp: parseTimestamp(timestamp)
             ))
         case .worktreeRenamed:
-            state.worktree.currentBranch = payload["newBranch"]?.value as? String
+            guard let newBranch = payload.string("newBranch") else {
+                TronLogger.shared.warning(
+                    "worktree.renamed missing required field 'newBranch'; dropping",
+                    category: .events
+                )
+                return
+            }
+            state.worktree.currentBranch = newBranch
         default:
             break
         }

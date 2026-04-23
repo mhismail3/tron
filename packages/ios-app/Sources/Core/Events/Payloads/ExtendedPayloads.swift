@@ -61,7 +61,13 @@ struct FileReadPayload {
 }
 
 /// Payload for file.write event
-/// Server: FileWriteEvent.payload
+/// Server: `events/types/payloads/file.rs::FileWritePayload`
+///
+/// All three fields (`path`, `size`, `contentHash`) are required on the wire —
+/// the Rust struct declares them as non-optional (`path: String`,
+/// `size: i64`, `content_hash: String`). Missing any of them fails decoding
+/// (`return nil`) rather than silently substituting a default that would
+/// lie about the file's recorded size.
 struct FileWritePayload {
     let path: String
     let size: Int
@@ -69,11 +75,16 @@ struct FileWritePayload {
 
     init?(from payload: [String: AnyCodable]) {
         guard let path = payload.string("path"),
+              let size = payload.int("size"),
               let contentHash = payload.string("contentHash") else {
+            TronLogger.shared.warning(
+                "file.write event missing required field(s) path/size/contentHash; dropping",
+                category: .events
+            )
             return nil
         }
         self.path = path
-        self.size = payload.int("size") ?? 0
+        self.size = size
         self.contentHash = contentHash
     }
 }
@@ -427,101 +438,19 @@ struct LoadedTaskContext: Codable {
 }
 
 // MARK: - Worktree Payloads
-
-/// Payload for worktree.acquired event
-/// Server: WorktreeAcquiredEvent.payload
-struct WorktreeAcquiredPayload {
-    let path: String
-    let branch: String
-    let baseCommit: String
-    let isolated: Bool
-    let forkedFrom: ForkedFromInfo?
-
-    struct ForkedFromInfo {
-        let sessionId: String
-        let commit: String
-    }
-
-    init?(from payload: [String: AnyCodable]) {
-        guard let path = payload.string("path"),
-              let branch = payload.string("branch"),
-              let baseCommit = payload.string("baseCommit") else {
-            return nil
-        }
-        self.path = path
-        self.branch = branch
-        self.baseCommit = baseCommit
-        self.isolated = payload.bool("isolated") ?? false
-
-        if let forked = payload.dict("forkedFrom") {
-            self.forkedFrom = ForkedFromInfo(
-                sessionId: forked["sessionId"] as? String ?? "",
-                commit: forked["commit"] as? String ?? ""
-            )
-        } else {
-            self.forkedFrom = nil
-        }
-    }
-}
-
-/// Payload for worktree.commit event
-/// Server: WorktreeCommitEvent.payload
-struct WorktreeCommitPayload {
-    let commitHash: String
-    let message: String
-    let filesChanged: [String]
-    let insertions: Int?
-    let deletions: Int?
-
-    init?(from payload: [String: AnyCodable]) {
-        guard let commitHash = payload.string("commitHash"),
-              let message = payload.string("message") else {
-            return nil
-        }
-        self.commitHash = commitHash
-        self.message = message
-        self.filesChanged = payload.stringArray("filesChanged") ?? []
-        self.insertions = payload.int("insertions")
-        self.deletions = payload.int("deletions")
-    }
-}
-
-/// Payload for worktree.released event
-/// Server: WorktreeReleasedEvent.payload
-struct WorktreeReleasedPayload {
-    let finalCommit: String?
-    let deleted: Bool
-    let branchPreserved: Bool
-
-    init(from payload: [String: AnyCodable]) {
-        self.finalCommit = payload.string("finalCommit")
-        self.deleted = payload.bool("deleted") ?? false
-        self.branchPreserved = payload.bool("branchPreserved") ?? false
-    }
-}
-
-/// Payload for worktree.merged event
-/// Server: WorktreeMergedEvent.payload
-struct WorktreeMergedPayload {
-    let sourceBranch: String
-    let targetBranch: String
-    let mergeCommit: String
-    let strategy: MergeStrategy?
-
-    init?(from payload: [String: AnyCodable]) {
-        guard let sourceBranch = payload.string("sourceBranch"),
-              let targetBranch = payload.string("targetBranch"),
-              let mergeCommit = payload.string("mergeCommit") else {
-            return nil
-        }
-        self.sourceBranch = sourceBranch
-        self.targetBranch = targetBranch
-        self.mergeCommit = mergeCommit
-
-        if let strategyStr = payload.string("strategy") {
-            self.strategy = MergeStrategy(rawValue: strategyStr)
-        } else {
-            self.strategy = nil
-        }
-    }
-}
+//
+// Worktree events (`worktree.acquired` / `.commit` / `.released` / `.merged` /
+// `.renamed`) are consumed in two places:
+//
+// - Live streaming: the per-event plugins in
+//   `Core/Events/Plugins/Worktree/` decode directly into each plugin's own
+//   `EventData.DataPayload`.
+// - History reconstruction: `UnifiedEventTransformer.handleWorktreeEvent`
+//   reads the payload dict inline with strict guards and drops malformed
+//   events.
+//
+// There is no shared wrapper struct here on purpose — an unused
+// `WorktreeAcquiredPayload` / `...Commit` / `...Released` / `...Merged` type
+// lived in this file previously and drifted out of sync with the server
+// schema. If a third consumer appears, add a strict `init?(from:)` type at
+// that point rather than resurrecting the speculative shared version.
