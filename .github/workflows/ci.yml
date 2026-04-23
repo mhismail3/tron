@@ -1,0 +1,211 @@
+# Continuous Integration
+#
+# Three workloads, two cost tiers:
+#   - personal-info-guard: ubuntu, ~30s, runs every PR + push (always).
+#   - rust:                ubuntu (1x), runs when packages/agent/** changes,
+#                          on every push to main, or when labeled `rust`.
+#   - ios:                 macos (10x), runs when packages/ios-app/** changes,
+#                          on every push to main, or when labeled `ios`.
+#
+# Path-gating happens via `dorny/paths-filter` so PRs that only touch docs or
+# the other platform don't burn macos minutes. Pushes to main always run
+# everything to catch any cross-cutting regressions.
+#
+# Concurrency: in-flight runs for the same PR are cancelled on new pushes
+# (cheap on push to main — only one run can be in flight there anyway).
+#
+# Adding a new ecosystem (e.g. packages/mac-app/** in Phase 5):
+#   1. Add a `mac` filter under `changes.steps.filter`.
+#   2. Add a new job gated on `needs.changes.outputs.mac` + label `mac`.
+#   3. Document in CONTRIBUTING.md.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel previous in-flight runs for the same PR to avoid macOS minute waste.
+# Pushes to main never cancel — full-history validation is the goal there.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      ios: ${{ steps.filter.outputs.ios }}
+      mac: ${{ steps.filter.outputs.mac }}
+      scripts: ${{ steps.filter.outputs.scripts }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'packages/agent/**'
+              - '.github/workflows/ci.yml'
+            ios:
+              - 'packages/ios-app/**'
+              - '.github/workflows/ci.yml'
+            mac:
+              - 'packages/mac-app/**'
+              - '.github/workflows/ci.yml'
+            scripts:
+              - 'scripts/**'
+              - '.github/workflows/ci.yml'
+
+  personal-info-guard:
+    name: Personal-info guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full history so `git grep` sees everything, not just the PR diff.
+          fetch-depth: 0
+      - name: Run personal-info-guard
+        run: ./scripts/personal-info-guard.sh
+
+  rust:
+    name: Rust (fmt + clippy + test)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: |
+      github.event_name == 'push' ||
+      needs.changes.outputs.rust == 'true' ||
+      needs.changes.outputs.scripts == 'true' ||
+      contains(github.event.pull_request.labels.*.name, 'rust')
+    defaults:
+      run:
+        working-directory: packages/agent
+    steps:
+      - uses: actions/checkout@v4
+
+      # `actions-rust-lang/setup-rust-toolchain` reads packages/agent/rust-toolchain.toml
+      # automatically, so it picks up the pinned channel + components (rustfmt, clippy).
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: packages/agent
+
+      - name: Toolchain info
+        run: |
+          rustc --version
+          cargo --version
+          cargo fmt --version
+          cargo clippy --version
+
+      # fmt + clippy are ADVISORY for now: the existing tree has accumulated
+      # ~2k fmt diffs and ~1k clippy warnings predating this CI pipeline.
+      # They surface in PR checks as ⚠️ but don't block. A dedicated cleanup
+      # pass will apply `cargo fmt` workspace-wide and tighten clippy to
+      # `-D warnings`, at which point `continue-on-error` here is removed.
+      - name: cargo fmt --check (advisory)
+        continue-on-error: true
+        run: cargo fmt --check
+
+      - name: cargo clippy (advisory)
+        continue-on-error: true
+        run: cargo clippy --all-targets
+
+      - name: cargo check
+        run: cargo check
+
+      - name: cargo test
+        run: cargo test -- --quiet
+
+  ios:
+    name: iOS (xcodebuild test)
+    runs-on: macos-15
+    needs: changes
+    if: |
+      github.event_name == 'push' ||
+      needs.changes.outputs.ios == 'true' ||
+      contains(github.event.pull_request.labels.*.name, 'ios')
+    defaults:
+      run:
+        working-directory: packages/ios-app
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pin to the latest stable Xcode the runner image has installed. The
+      # iOS app's project.yml requires Xcode 26+ (xcodeVersion: "2640"); when
+      # this fails on a runner upgrade, bump to a runner image that ships it.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: List available iOS simulators
+        run: xcrun simctl list devices available | head -60
+
+      # NOTE: destination uses `OS=latest` and a generic `iPhone` family so
+      # the test job survives Xcode/Simulator upgrades. The user's local
+      # machine targets `iPhone 17 Pro` specifically; CI is more permissive.
+      - name: xcodebuild test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project TronMobile.xcodeproj \
+            -scheme Tron \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17 Pro' \
+            -resultBundlePath TestResults.xcresult \
+            -quiet
+
+      - name: Upload xcresult on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: packages/ios-app/TestResults.xcresult
+          retention-days: 7
+
+  # Aggregate gate — branch protection points at this single check.
+  # Adding a new required job? List it under `needs:` here too AND add a
+  # corresponding line in the script body (skipped jobs from path-gating
+  # count as success).
+  ci:
+    name: CI summary
+    runs-on: ubuntu-latest
+    needs: [personal-info-guard, rust, ios]
+    if: always()
+    env:
+      RESULT_GUARD: ${{ needs.personal-info-guard.result }}
+      RESULT_RUST: ${{ needs.rust.result }}
+      RESULT_IOS: ${{ needs.ios.result }}
+    steps:
+      - name: Verify all required jobs passed
+        run: |
+          fail=0
+          # personal-info-guard never path-gates — must be success.
+          if [[ "$RESULT_GUARD" != "success" ]]; then
+            echo "::error::personal-info-guard: $RESULT_GUARD"; fail=1
+          fi
+          # rust + ios may be `skipped` by the path filter — treat as success.
+          for name in RUST IOS; do
+            var="RESULT_$name"
+            result="${!var}"
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::$name job: $result"; fail=1
+            fi
+          done
+          if [[ $fail -ne 0 ]]; then exit 1; fi
+          echo "All required jobs passed (or skipped via path filter)."
