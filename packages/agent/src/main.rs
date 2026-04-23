@@ -1078,6 +1078,14 @@ fn build_rpc_context(
         // so handlers see the live values from the start of the first request.
         ws_port: 0,
         onboarded_marker_path: tron::server::onboarding::onboarded_marker_path(),
+        // User-mode updater wiring (Plan §H.2). Production uses the live
+        // GitHub Releases fetcher; `main_tests.rs` and `tests/integration.rs`
+        // construct their own `RpcContext` directly and leave this `None`,
+        // which short-circuits `system.checkForUpdates` + skips the
+        // scheduler arm below. The state path is stable regardless so the
+        // `system.getUpdateStatus` handler can still render defaults.
+        release_fetcher: Some(Arc::new(tron::server::updater::HttpReleaseFetcher::new())),
+        updater_state_path: tron::core::paths::updater_state_path(),
     }
 }
 
@@ -1256,6 +1264,33 @@ async fn main() -> Result<()> {
     let (cron_sched_handle, cron_watcher_handle) = cron.scheduler.clone().start();
     run_deploy_self_test(&db_path, &settings_path_for_selftest);
 
+    // User-mode auto-update scheduler (Plan §H.2, Phase 5.5). Spawned
+    // unconditionally; the task checks `server.update.enabled` on every
+    // iteration so a settings flip takes effect without restart. When
+    // the fetcher is `None` (embedded / test paths) the scheduler
+    // silently no-ops because `perform_tick` bails on `enabled = false`
+    // and tests never set enabled.
+    let updater_scheduler_handle = if let Some(fetcher) = server
+        .rpc_context()
+        .release_fetcher
+        .as_ref()
+        .cloned()
+    {
+        let deps = tron::server::updater::SchedulerDeps {
+            fetcher,
+            broadcast: server.broadcast().clone(),
+            state_path: server.rpc_context().updater_state_path.clone(),
+            pause_path: tron::server::updater::pause_sentinel_path(),
+            current_version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+        Some(tron::server::updater::scheduler::spawn(
+            deps,
+            server.shutdown().token(),
+        ))
+    } else {
+        None
+    };
+
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
     tracing::info!(
         "{}",
@@ -1270,12 +1305,15 @@ async fn main() -> Result<()> {
         .context("Failed to listen for ctrl-c")?;
 
     tracing::info!("Shutting down...");
-    let shutdown_handles: Vec<tokio::task::JoinHandle<()>> = vec![
+    let mut shutdown_handles: Vec<tokio::task::JoinHandle<()>> = vec![
         server_handle,
         bridge_handle,
         cron_sched_handle,
         cron_watcher_handle,
     ];
+    if let Some(h) = updater_scheduler_handle {
+        shutdown_handles.push(h);
+    }
     process_manager_for_shutdown.cancel_all();
     server
         .shutdown()

@@ -12,6 +12,73 @@ struct SystemPingResult: Decodable {
     let pong: Bool
 }
 
+// MARK: - Auto-Update (Phase 5.5)
+
+/// Result of `system.checkForUpdates` — a forced GitHub Releases probe.
+///
+/// The server caches the upstream response for 60s to avoid API rate-limit
+/// thrash, so back-to-back calls from the iOS UI return the same snapshot.
+/// All fields except `available` are optional because the server may still
+/// surface a successful "no release found" response even when the network
+/// is intact (e.g. empty releases list, or the configured channel
+/// filtered everything out).
+struct SystemCheckForUpdatesResult: Decodable {
+    /// `true` if a newer version exists for the configured channel.
+    let available: Bool
+    /// The matched release's semver (e.g. `"0.5.1"`). `nil` when nothing
+    /// beats the current running version.
+    let latestVersion: String?
+    /// Direct DMG download URL. `nil` when `available == false`.
+    let downloadUrl: String?
+    /// GitHub release notes in markdown. `nil` when `available == false`.
+    let releaseNotes: String?
+    /// The channel evaluated for this check (`"stable"` / `"beta"`). Mirrored
+    /// back so UI can show "Checking Beta channel…" without re-reading
+    /// settings.
+    let channel: String?
+}
+
+/// Result of `system.getUpdateStatus` — snapshot of the updater state file
+/// plus the currently-configured settings.
+struct SystemUpdateStatusResult: Decodable {
+    /// Current running server version.
+    let currentVersion: String
+    /// The configured channel (`"stable"` / `"beta"`).
+    let channel: String
+    /// The configured check frequency.
+    let frequency: String
+    /// The configured action on a found update.
+    let action: String
+    /// Master enabled flag.
+    let enabled: Bool
+    /// Allow auto-rollback flag.
+    let allowDowngradeOnRollback: Bool
+    /// RFC3339 timestamp of the last check attempt. `nil` if never checked.
+    let lastCheckAt: String?
+    /// Last version the updater installed (if any). `nil` if never installed.
+    let lastInstalledVersion: String?
+    /// Running count of post-install failures. When this hits 3, `action`
+    /// auto-degrades to `notify`.
+    let consecutiveFailures: Int
+    /// Latest known version from the most recent successful check. `nil`
+    /// if no check has landed yet.
+    let latestAvailableVersion: String?
+    /// Latest known download URL.
+    let latestDownloadUrl: String?
+}
+
+/// Result of `system.applyUpdate` — kicks off the action pipeline
+/// (download or install, depending on the configured action).
+struct SystemApplyUpdateResult: Decodable {
+    /// `"started"` means the server is now working. Progress is streamed
+    /// through the normal event pipeline (`server.update_downloaded`,
+    /// `server.update_installed`, `server.update_failed`).
+    /// `"noop"` means there was nothing to apply (no staged update).
+    let status: String
+    /// Short human-readable note surfaced inline in the iOS toast.
+    let message: String?
+}
+
 // MARK: - Diagnostics (debug / beta only)
 
 #if DEBUG || BETA

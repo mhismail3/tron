@@ -404,6 +404,8 @@ async fn server_boots_and_responds() {
         hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
         ws_port: 9847,
         onboarded_marker_path: dir.path().join(".onboarded"),
+        release_fetcher: None,
+        updater_state_path: dir.path().join("updater-state.json"),
     };
 
     let mut registry = MethodRegistry::new();
@@ -601,6 +603,8 @@ async fn server_graceful_shutdown() {
         hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
         ws_port: 9847,
         onboarded_marker_path: dir.path().join(".onboarded"),
+        release_fetcher: None,
+        updater_state_path: dir.path().join("updater-state.json"),
     };
 
     let mut registry = MethodRegistry::new();

@@ -1056,6 +1056,8 @@ mod tests {
             ),
             ws_port: 9847,
             onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
+            release_fetcher: None,
+            updater_state_path: std::path::PathBuf::from("/tmp/tron-test-updater-state.json"),
         };
 
         (tmp, ctx, sid)

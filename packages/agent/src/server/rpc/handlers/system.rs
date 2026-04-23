@@ -1,14 +1,28 @@
-//! System handlers: ping, getInfo, shutdown, getDiagnostics.
+//! System handlers: ping, getInfo, shutdown, getDiagnostics, auto-updater.
+//!
+//! The three updater handlers below (`system.checkForUpdates`,
+//! `system.getUpdateStatus`, `system.applyUpdate`) are the RPC surface for
+//! the user-mode auto-updater (Plan §H.2, Phase 5.5). They never mutate the
+//! binary themselves — the install pipeline (codesign-verify → atomic swap
+//! → ping → rollback) lands in Phase 6 alongside the DMG release workflow.
+//! `ApplyUpdateHandler` is wired today as a `{ status: "noop" }` stub so
+//! the iOS "Install now" button can be laid out and tested against a real
+//! response shape; flipping it to `status: "installing"` is a pure
+//! server-side change once the pipeline exists.
 
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{CLIENT_VERSION_UNSUPPORTED, RpcError};
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
+use crate::server::updater::{
+    AUTO_DEGRADE_FAILURE_THRESHOLD, UpdateDecision, UpdaterState, check_for_update,
+    read_update_state,
+};
 
 /// Current RPC wire-protocol version.
 ///
@@ -205,6 +219,194 @@ impl MethodHandler for ShutdownHandler {
                 message: e.to_string(),
             })?;
         Ok(serde_json::json!({ "acknowledged": true }))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// User-mode auto-updater — Plan §H.2, Phase 5.5
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Builds the "status + live outcome" JSON the two read-side updater
+/// handlers both need to emit. Pulled into a free function so the unit
+/// tests can exercise the merge logic without instantiating a handler.
+///
+/// `live_outcome` is the fresh check result (if one is available in the
+/// current RPC) — `None` means the handler is building a pure
+/// status-from-disk response.
+fn build_status_value(
+    current_version: &str,
+    settings_update: &crate::settings::types::UpdateSettings,
+    state: &UpdaterState,
+    live_outcome: Option<&crate::server::updater::CheckOutcome>,
+) -> Value {
+    // Prefer the live outcome's resolved release if we ran one this
+    // request; fall back to the state file's last-observed values so the
+    // iOS settings page renders consistently between checks.
+    let (latest_version, latest_download_url) = match live_outcome.and_then(|o| o.latest.as_ref()) {
+        Some(r) => (Some(r.version.clone()), r.download_url.clone()),
+        None => (
+            state.latest_available_version.clone(),
+            state.latest_download_url.clone(),
+        ),
+    };
+
+    serde_json::json!({
+        "currentVersion": current_version,
+        "channel": settings_update.channel.as_str(),
+        "frequency": settings_update.frequency.as_str(),
+        "action": settings_update.action.as_str(),
+        "enabled": settings_update.enabled,
+        "allowDowngradeOnRollback": settings_update.allow_downgrade_on_rollback,
+        "lastCheckAt": state.last_check_at,
+        "lastInstalledVersion": state.last_installed_version,
+        "consecutiveFailures": state.consecutive_failures,
+        "autoDegradeThreshold": AUTO_DEGRADE_FAILURE_THRESHOLD,
+        "latestAvailableVersion": latest_version,
+        "latestDownloadUrl": latest_download_url,
+    })
+}
+
+/// `system.checkForUpdates` — forces an immediate GitHub Releases check.
+///
+/// Early-returns `{ available: false, disabled: true, ... }` when the
+/// user hasn't opted into the updater. Otherwise resolves the current
+/// channel's highest semver release and compares it to
+/// `env!("CARGO_PKG_VERSION")`. The response shape exactly matches the
+/// iOS `SystemCheckForUpdatesResult` decoder so we don't need a
+/// translation layer.
+///
+/// Non-goals:
+/// - This handler does NOT write to `updater-state.json`. State
+///   mutation is the scheduler's job (Phase 5.5 cont.); keeping the
+///   handler read-only means iOS clients can poke "Check now" as often
+///   as they want without racing the scheduler.
+/// - No in-memory TTL cache in v1. Rate-limit concerns (Plan §N.22)
+///   are hedged by the daily / weekly default frequencies; manual UI
+///   presses are negligible in the per-user budget.
+pub struct CheckForUpdatesHandler;
+
+#[async_trait]
+impl MethodHandler for CheckForUpdatesHandler {
+    #[instrument(skip(self, ctx), fields(method = "system.checkForUpdates"))]
+    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let settings = crate::settings::get_settings();
+        let update_cfg = &settings.server.update;
+
+        // Disabled → tell iOS so it can render the disabled banner without
+        // a second round-trip. Don't touch the fetcher at all.
+        if !update_cfg.enabled {
+            return Ok(serde_json::json!({
+                "available": false,
+                "disabled": true,
+                "channel": update_cfg.channel.as_str(),
+                "currentVersion": env!("CARGO_PKG_VERSION"),
+            }));
+        }
+
+        let Some(fetcher) = ctx.release_fetcher.as_ref() else {
+            // Updater dependency not wired (e.g. embedded builds). Rather
+            // than erroring — which would surface as a red toast — we
+            // report "not available" so the UI degrades gracefully.
+            warn!(
+                "system.checkForUpdates called but RpcContext::release_fetcher is None; \
+                 responding as if no release was found"
+            );
+            return Ok(serde_json::json!({
+                "available": false,
+                "disabled": false,
+                "channel": update_cfg.channel.as_str(),
+                "currentVersion": env!("CARGO_PKG_VERSION"),
+                "unavailableReason": "fetcher-unwired",
+            }));
+        };
+
+        let outcome = check_for_update(
+            env!("CARGO_PKG_VERSION"),
+            update_cfg.channel,
+            fetcher.as_ref(),
+        )
+        .await
+        .map_err(|e| RpcError::Internal {
+            message: format!("release check failed: {e}"),
+        })?;
+
+        let available = matches!(outcome.decision, UpdateDecision::Available);
+
+        Ok(serde_json::json!({
+            "available": available,
+            "disabled": false,
+            "channel": update_cfg.channel.as_str(),
+            "currentVersion": outcome.current_version,
+            "latestVersion": outcome.latest.as_ref().map(|r| r.version.clone()),
+            "downloadUrl": outcome.latest.as_ref().and_then(|r| r.download_url.clone()),
+            "releaseNotes": outcome.latest.as_ref().and_then(|r| r.release_notes.clone()),
+            "isPrerelease": outcome.latest.as_ref().map(|r| r.is_prerelease),
+        }))
+    }
+}
+
+/// `system.getUpdateStatus` — returns merged settings + state-file
+/// snapshot for the iOS Settings → Updates page and the Mac menu bar's
+/// updater submenu.
+///
+/// Deliberately does NOT call the fetcher — this is a cheap read of
+/// (a) current settings via `get_settings()` (ArcSwap atomic load) and
+/// (b) the updater state file via `read_update_state`. Safe to poll
+/// every 2s from the iOS page without any rate-limit risk.
+///
+/// Reads a missing state file as the `UpdaterState::default()` so a
+/// brand-new install surfaces "no check yet" instead of an error.
+pub struct GetUpdateStatusHandler;
+
+#[async_trait]
+impl MethodHandler for GetUpdateStatusHandler {
+    #[instrument(skip(self, ctx), fields(method = "system.getUpdateStatus"))]
+    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let settings = crate::settings::get_settings();
+        let state_path = ctx.updater_state_path.clone();
+        // read_update_state does blocking filesystem I/O; keep the
+        // reactor snappy by bouncing off the blocking pool.
+        let state = ctx
+            .run_blocking("system.getUpdateStatus.read_state", move || {
+                read_update_state(&state_path).map_err(|e| RpcError::Internal {
+                    message: format!("read updater state: {e}"),
+                })
+            })
+            .await?;
+
+        Ok(build_status_value(
+            env!("CARGO_PKG_VERSION"),
+            &settings.server.update,
+            &state,
+            None,
+        ))
+    }
+}
+
+/// `system.applyUpdate` — stub in Phase 5.5.
+///
+/// The full install pipeline (lock `deploy.lock`, backup `.bak`,
+/// atomic swap, `launchctl kickstart`, post-install ping, rollback
+/// on failure) is explicitly deferred to Phase 6 per the updater
+/// module docs. Returning `{ status: "noop", … }` today lets iOS
+/// develop the "Install now" button against the real response shape
+/// (`SystemApplyUpdateResult`) without waiting on the pipeline.
+///
+/// When Phase 6 lands, the noop branch gets replaced with a call to
+/// the install pipeline and returns `status: "installing"` while the
+/// WS streams progress events. No RPC wire-shape change required.
+pub struct ApplyUpdateHandler;
+
+#[async_trait]
+impl MethodHandler for ApplyUpdateHandler {
+    #[instrument(skip(self, _ctx), fields(method = "system.applyUpdate"))]
+    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+        Ok(serde_json::json!({
+            "status": "noop",
+            "message": "Install pipeline wiring lands with Phase 6 (DMG release + codesign-verify + atomic swap + rollback). \
+Until then, manual DMG drag-install remains the supported upgrade path.",
+            "currentVersion": env!("CARGO_PKG_VERSION"),
+        }))
     }
 }
 
@@ -602,5 +804,351 @@ mod tests {
                 .any(|m| m.as_str() == Some("system.getDiagnostics")),
             "diagnostics method list must include the diagnostics method itself"
         );
+    }
+
+    // ── Phase 5.5: user-mode auto-updater RPCs ──────────────────────
+
+    use crate::server::updater::{
+        MockReleaseFetcher, ReleaseInfo, UpdateAction, UpdateChannel, UpdateFrequency,
+        UpdaterState, write_update_state,
+    };
+    use crate::settings::{TronSettings, init_settings, test_settings_lock};
+    use std::sync::Arc;
+
+    /// Build an `UpdateSettings` with the given field overrides.
+    fn cfg(
+        enabled: bool,
+        channel: UpdateChannel,
+        frequency: UpdateFrequency,
+        action: UpdateAction,
+    ) -> TronSettings {
+        let mut s = TronSettings::default();
+        s.server.update.enabled = enabled;
+        s.server.update.channel = channel;
+        s.server.update.frequency = frequency;
+        s.server.update.action = action;
+        s
+    }
+
+    fn rel(version: &str, is_prerelease: bool, dmg_url: Option<&str>) -> ReleaseInfo {
+        ReleaseInfo {
+            version: version.to_string(),
+            tag: format!("mac-v{version}"),
+            download_url: dmg_url.map(String::from),
+            release_notes: Some(format!("Notes for {version}")),
+            is_prerelease,
+        }
+    }
+
+    /// When `server.update.enabled = false` the handler must NOT call
+    /// the fetcher and must reply with a shape iOS can decode as
+    /// "no-op" (`available=false, disabled=true`). Proves the opt-in
+    /// contract — a user who hasn't flipped the setting never touches
+    /// github.com.
+    #[tokio::test]
+    async fn check_for_updates_disabled_short_circuits_fetcher() {
+        let _lock = test_settings_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        init_settings(cfg(
+            false,
+            UpdateChannel::Stable,
+            UpdateFrequency::Daily,
+            UpdateAction::Notify,
+        ));
+
+        // Fetcher that would explode if called — proves we don't call it.
+        let mut ctx = make_test_context();
+        ctx.release_fetcher = Some(Arc::new(MockReleaseFetcher::failing(
+            "test must not call fetcher",
+        )));
+
+        let result = CheckForUpdatesHandler.handle(None, &ctx).await.unwrap();
+
+        assert_eq!(result["available"], false);
+        assert_eq!(result["disabled"], true);
+        assert_eq!(result["channel"], "stable");
+
+        init_settings(TronSettings::default());
+    }
+
+    /// Enabled + fetcher wired to only the *current* version → no
+    /// update available. Exercises the semver-compare happy path.
+    #[tokio::test]
+    async fn check_for_updates_enabled_up_to_date() {
+        let _lock = test_settings_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        init_settings(cfg(
+            true,
+            UpdateChannel::Stable,
+            UpdateFrequency::Daily,
+            UpdateAction::Notify,
+        ));
+
+        let mut ctx = make_test_context();
+        ctx.release_fetcher = Some(Arc::new(MockReleaseFetcher::new(vec![rel(
+            env!("CARGO_PKG_VERSION"),
+            false,
+            Some("https://example.test/Tron.dmg"),
+        )])));
+
+        let result = CheckForUpdatesHandler.handle(None, &ctx).await.unwrap();
+
+        assert_eq!(result["available"], false);
+        assert_eq!(result["disabled"], false);
+        assert_eq!(
+            result["currentVersion"].as_str().unwrap(),
+            env!("CARGO_PKG_VERSION"),
+        );
+
+        init_settings(TronSettings::default());
+    }
+
+    /// Enabled + fetcher returning a strictly-higher version → the
+    /// handler signals `available=true` and propagates the DMG URL,
+    /// release notes, and prerelease flag so iOS can surface them
+    /// without another round-trip.
+    #[tokio::test]
+    async fn check_for_updates_enabled_update_available() {
+        let _lock = test_settings_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        init_settings(cfg(
+            true,
+            UpdateChannel::Stable,
+            UpdateFrequency::Daily,
+            UpdateAction::Notify,
+        ));
+
+        // Build "CARGO + 1 major" so we're strictly higher regardless
+        // of what patch rev we're on today.
+        let current = env!("CARGO_PKG_VERSION");
+        let bumped = {
+            let parts: Vec<&str> = current.split('.').collect();
+            let major: u32 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+            format!("{}.0.0", major + 99)
+        };
+
+        let mut ctx = make_test_context();
+        ctx.release_fetcher = Some(Arc::new(MockReleaseFetcher::new(vec![rel(
+            &bumped,
+            false,
+            Some("https://example.test/Tron-new.dmg"),
+        )])));
+
+        let result = CheckForUpdatesHandler.handle(None, &ctx).await.unwrap();
+
+        assert_eq!(result["available"], true);
+        assert_eq!(result["disabled"], false);
+        assert_eq!(result["latestVersion"].as_str().unwrap(), bumped);
+        assert_eq!(
+            result["downloadUrl"].as_str().unwrap(),
+            "https://example.test/Tron-new.dmg",
+        );
+        assert!(result["releaseNotes"].as_str().unwrap().contains("Notes"));
+        assert_eq!(result["isPrerelease"], false);
+
+        init_settings(TronSettings::default());
+    }
+
+    /// Enabled but `release_fetcher = None` (embedded build / misconfig).
+    /// Rather than returning an error toast, the handler reports
+    /// "unavailable" with a machine-readable reason so iOS can render
+    /// a disabled button silently.
+    #[tokio::test]
+    async fn check_for_updates_enabled_but_fetcher_missing_degrades() {
+        let _lock = test_settings_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        init_settings(cfg(
+            true,
+            UpdateChannel::Beta,
+            UpdateFrequency::Hourly,
+            UpdateAction::Download,
+        ));
+
+        let mut ctx = make_test_context();
+        ctx.release_fetcher = None;
+
+        let result = CheckForUpdatesHandler.handle(None, &ctx).await.unwrap();
+
+        assert_eq!(result["available"], false);
+        assert_eq!(result["disabled"], false);
+        assert_eq!(result["channel"], "beta");
+        assert_eq!(result["unavailableReason"], "fetcher-unwired");
+
+        init_settings(TronSettings::default());
+    }
+
+    /// Fetcher returning a transport error is mapped to `RpcError::Internal`
+    /// so the client sees a structured error rather than a hang. The
+    /// post-install failure counter is NOT incremented here (only the
+    /// install pipeline increments it).
+    #[tokio::test]
+    async fn check_for_updates_fetch_error_surfaces_as_internal_error() {
+        let _lock = test_settings_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        init_settings(cfg(
+            true,
+            UpdateChannel::Stable,
+            UpdateFrequency::Daily,
+            UpdateAction::Notify,
+        ));
+
+        let mut ctx = make_test_context();
+        ctx.release_fetcher = Some(Arc::new(MockReleaseFetcher::failing("boom")));
+
+        let err = CheckForUpdatesHandler
+            .handle(None, &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INTERNAL_ERROR");
+        assert!(err.to_string().contains("release check failed"));
+
+        init_settings(TronSettings::default());
+    }
+
+    /// Status reflects the current settings AND the state file
+    /// verbatim. A missing state file is the common first-run case;
+    /// it must NOT error and must surface as "no check yet"
+    /// (all nullable fields null, `consecutiveFailures = 0`).
+    #[tokio::test]
+    async fn get_update_status_merges_settings_and_state() {
+        let _lock = test_settings_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        init_settings(cfg(
+            true,
+            UpdateChannel::Beta,
+            UpdateFrequency::Weekly,
+            UpdateAction::Install,
+        ));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state_path = dir.path().join("updater-state.json");
+
+        // Write a realistic state file.
+        let mut state = UpdaterState::default();
+        state.last_check_at = Some("2026-04-23T12:00:00Z".to_string());
+        state.last_installed_version = Some("0.5.0".to_string());
+        state.consecutive_failures = 1;
+        state.latest_available_version = Some("0.5.1".to_string());
+        state.latest_download_url = Some("https://example.test/Tron-0.5.1.dmg".to_string());
+        write_update_state(&state_path, &state).expect("write state");
+
+        let mut ctx = make_test_context();
+        ctx.updater_state_path = state_path;
+
+        let result = GetUpdateStatusHandler.handle(None, &ctx).await.unwrap();
+
+        // Settings fields flow through verbatim.
+        assert_eq!(result["enabled"], true);
+        assert_eq!(result["channel"], "beta");
+        assert_eq!(result["frequency"], "weekly");
+        assert_eq!(result["action"], "install");
+        assert_eq!(result["allowDowngradeOnRollback"], true);
+
+        // State fields flow through verbatim.
+        assert_eq!(result["lastCheckAt"], "2026-04-23T12:00:00Z");
+        assert_eq!(result["lastInstalledVersion"], "0.5.0");
+        assert_eq!(result["consecutiveFailures"], 1);
+        assert_eq!(result["latestAvailableVersion"], "0.5.1");
+        assert_eq!(
+            result["latestDownloadUrl"],
+            "https://example.test/Tron-0.5.1.dmg"
+        );
+
+        // Contract fields iOS needs regardless of state.
+        assert!(result["currentVersion"].is_string());
+        assert!(result["autoDegradeThreshold"].is_u64());
+
+        init_settings(TronSettings::default());
+    }
+
+    /// Missing state file must NOT error — first-run case. All nullable
+    /// fields serialize as JSON null and `consecutiveFailures = 0`.
+    #[tokio::test]
+    async fn get_update_status_missing_state_file_is_fresh_defaults() {
+        let _lock = test_settings_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        init_settings(TronSettings::default());
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state_path = dir.path().join("definitely-does-not-exist.json");
+
+        let mut ctx = make_test_context();
+        ctx.updater_state_path = state_path;
+
+        let result = GetUpdateStatusHandler.handle(None, &ctx).await.unwrap();
+
+        assert_eq!(result["consecutiveFailures"], 0);
+        assert!(result["lastCheckAt"].is_null());
+        assert!(result["lastInstalledVersion"].is_null());
+        assert!(result["latestAvailableVersion"].is_null());
+        assert!(result["latestDownloadUrl"].is_null());
+        assert_eq!(result["enabled"], false); // default-off
+    }
+
+    /// `system.applyUpdate` is a stub in Phase 5.5 — it must return
+    /// `status=noop` with a message explaining that the install
+    /// pipeline lands in Phase 6. The iOS decoder treats `status=noop`
+    /// as a non-error "not installed" outcome so users aren't misled
+    /// into thinking the update succeeded.
+    #[tokio::test]
+    async fn apply_update_is_noop_in_phase_5_5() {
+        let ctx = make_test_context();
+        let result = ApplyUpdateHandler.handle(None, &ctx).await.unwrap();
+
+        assert_eq!(result["status"], "noop");
+        assert!(result["message"].as_str().unwrap().to_lowercase().contains("phase 6"));
+        assert!(result["currentVersion"].is_string());
+    }
+
+    /// `build_status_value` must prefer a live outcome's latest release
+    /// over stale state — Phase 6's `applyUpdate` will use the same
+    /// merge rule when streaming progress. Locking the precedence now
+    /// means the Phase 6 refactor can't silently regress it.
+    #[test]
+    fn build_status_value_prefers_live_outcome_over_state() {
+        use crate::server::updater::{CheckOutcome, UpdateDecision};
+
+        let mut settings_update = crate::settings::types::UpdateSettings::default();
+        settings_update.enabled = true;
+
+        let mut state = UpdaterState::default();
+        state.latest_available_version = Some("0.5.0-stale".to_string());
+        state.latest_download_url = Some("https://example.test/stale.dmg".to_string());
+
+        let live = CheckOutcome {
+            current_version: "0.4.0".to_string(),
+            decision: UpdateDecision::Available,
+            latest: Some(rel(
+                "0.5.1-fresh",
+                false,
+                Some("https://example.test/fresh.dmg"),
+            )),
+        };
+
+        let v = build_status_value("0.4.0", &settings_update, &state, Some(&live));
+        assert_eq!(v["latestAvailableVersion"], "0.5.1-fresh");
+        assert_eq!(v["latestDownloadUrl"], "https://example.test/fresh.dmg");
+    }
+
+    /// Without a live outcome, `build_status_value` uses the state file
+    /// — covers the `getUpdateStatus` path between scheduler ticks.
+    #[test]
+    fn build_status_value_falls_back_to_state_when_no_live_outcome() {
+        let settings_update = crate::settings::types::UpdateSettings::default();
+
+        let mut state = UpdaterState::default();
+        state.latest_available_version = Some("0.5.0".to_string());
+        state.latest_download_url = Some("https://example.test/s.dmg".to_string());
+
+        let v = build_status_value("0.4.0", &settings_update, &state, None);
+        assert_eq!(v["latestAvailableVersion"], "0.5.0");
+        assert_eq!(v["latestDownloadUrl"], "https://example.test/s.dmg");
     }
 }

@@ -30,6 +30,9 @@ pub struct ServerSettings {
     /// Bearer-token authentication settings.
     #[serde(default)]
     pub auth: AuthSettings,
+    /// User-mode auto-update configuration (Phase 5.5).
+    #[serde(default)]
+    pub update: UpdateSettings,
     /// Cached Tailscale IP address. Populated by the Mac wrapper / install
     /// scripts (or manually) so iOS clients can display "your Mac is at
     /// 100.x.y.z" without shelling out to the `tailscale` binary.
@@ -48,6 +51,7 @@ impl Default for ServerSettings {
             transcription: TranscriptionSettings::default(),
             connection_presets: Vec::new(),
             auth: AuthSettings::default(),
+            update: UpdateSettings::default(),
             tailscale_ip: None,
         }
     }
@@ -69,6 +73,57 @@ impl Default for ServerSettings {
 pub struct AuthSettings {
     /// Whether the WebSocket bearer-token check is enforced.
     pub enforced: bool,
+}
+
+/// User-mode auto-update configuration.
+///
+/// Drives the `server::updater` module's behavior. Default is the
+/// safest possible combination — `enabled = false` means the
+/// updater is entirely dormant. Flipping `enabled = true` with the
+/// other fields at their defaults gives the gentlest behavior:
+/// daily checks on the `stable` channel, `notify`-only when a
+/// newer release is found (no automatic downloads, no automatic
+/// installs).
+///
+/// See Plan §H.2 for the full semantics of each field. All fields
+/// have 1:1 iOS UI counterparts per the project's Settings-parity
+/// rule (root CLAUDE.md).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UpdateSettings {
+    /// Master switch. When `false`, no scheduler runs, no HTTP
+    /// requests hit GitHub, and `system.checkForUpdates` returns
+    /// `{ available: false, disabled: true }`. The safe default.
+    pub enabled: bool,
+    /// Release channel. `stable` ignores pre-release tags; `beta`
+    /// includes them.
+    pub channel: crate::server::updater::UpdateChannel,
+    /// How often the in-process scheduler fires an automatic check.
+    /// `manual` disables the scheduler entirely; checks only fire
+    /// on explicit RPC.
+    pub frequency: crate::server::updater::UpdateFrequency,
+    /// What to do when a newer release is found. The escalation
+    /// order is `notify < download < install`; each step implies
+    /// everything the weaker levels do.
+    pub action: crate::server::updater::UpdateAction,
+    /// Whether the updater is allowed to auto-rollback on a failed
+    /// install. `true` mirrors the existing `scripts/tron rollback`
+    /// semantics used by `cmd_deploy`; `false` leaves the broken
+    /// binary in place and surfaces an `update_failed` event for
+    /// operator intervention.
+    pub allow_downgrade_on_rollback: bool,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            channel: crate::server::updater::UpdateChannel::default(),
+            frequency: crate::server::updater::UpdateFrequency::default(),
+            action: crate::server::updater::UpdateAction::default(),
+            allow_downgrade_on_rollback: true,
+        }
+    }
 }
 
 /// A connection preset for quick-connect from iOS clients.
@@ -420,6 +475,97 @@ mod tests {
         // safe (off) default.
         let s: ServerSettings = serde_json::from_str("{}").unwrap();
         assert!(!s.auth.enforced);
+    }
+
+    #[test]
+    fn update_settings_defaults_are_safe() {
+        // The safe default is the full "dormant" state — no HTTP
+        // requests to GitHub, no downloads, no installs. Flipping
+        // just `enabled = true` gives the gentlest behavior
+        // (daily stable notify-only), matching Plan §H.2's promise
+        // that opt-in users get a predictable experience.
+        let s = UpdateSettings::default();
+        assert!(!s.enabled);
+        assert_eq!(
+            s.channel,
+            crate::server::updater::UpdateChannel::Stable,
+            "default channel must be stable"
+        );
+        assert_eq!(
+            s.frequency,
+            crate::server::updater::UpdateFrequency::Daily,
+            "default frequency must be daily"
+        );
+        assert_eq!(
+            s.action,
+            crate::server::updater::UpdateAction::Notify,
+            "default action must be notify"
+        );
+        assert!(s.allow_downgrade_on_rollback);
+    }
+
+    #[test]
+    fn update_settings_default_when_section_missing() {
+        // Existing settings.json files predating Phase 5.5 don't have
+        // an `update` block; they must deserialize without error and
+        // end up with the dormant default.
+        let s: ServerSettings = serde_json::from_str("{}").unwrap();
+        assert!(!s.update.enabled);
+    }
+
+    #[test]
+    fn update_settings_roundtrip() {
+        let json = serde_json::json!({
+            "update": {
+                "enabled": true,
+                "channel": "beta",
+                "frequency": "hourly",
+                "action": "download",
+                "allowDowngradeOnRollback": false
+            }
+        });
+        let s: ServerSettings = serde_json::from_value(json).unwrap();
+        assert!(s.update.enabled);
+        assert_eq!(
+            s.update.channel,
+            crate::server::updater::UpdateChannel::Beta
+        );
+        assert_eq!(
+            s.update.frequency,
+            crate::server::updater::UpdateFrequency::Hourly
+        );
+        assert_eq!(
+            s.update.action,
+            crate::server::updater::UpdateAction::Download
+        );
+        assert!(!s.update.allow_downgrade_on_rollback);
+
+        // Roundtrip.
+        let back = serde_json::to_value(&s).unwrap();
+        assert_eq!(back["update"]["enabled"], true);
+        assert_eq!(back["update"]["channel"], "beta");
+        assert_eq!(back["update"]["frequency"], "hourly");
+        assert_eq!(back["update"]["action"], "download");
+        assert_eq!(back["update"]["allowDowngradeOnRollback"], false);
+    }
+
+    #[test]
+    fn update_settings_partial_fills_from_defaults() {
+        // Only `enabled` specified — everything else must land on the
+        // safe defaults rather than fail to parse.
+        let json = serde_json::json!({
+            "update": { "enabled": true }
+        });
+        let s: ServerSettings = serde_json::from_value(json).unwrap();
+        assert!(s.update.enabled);
+        assert_eq!(
+            s.update.channel,
+            crate::server::updater::UpdateChannel::Stable
+        );
+        assert_eq!(
+            s.update.action,
+            crate::server::updater::UpdateAction::Notify
+        );
     }
 
     #[test]

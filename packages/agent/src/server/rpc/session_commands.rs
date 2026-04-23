@@ -493,6 +493,8 @@ mod tests {
             hook_abort_tracker: Arc::new(crate::runtime::hooks::abort_tracker::HookAbortTracker::new()),
             ws_port: 9847,
             onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
+            release_fetcher: None,
+            updater_state_path: std::path::PathBuf::from("/tmp/tron-test-updater-state.json"),
         };
         (ctx, coord)
     }

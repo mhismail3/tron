@@ -105,6 +105,19 @@ pub struct RpcContext {
     /// [`crate::server::onboarding::onboarded_marker_path`]. Drives the `paired`
     /// field returned by `system.getInfo`.
     pub onboarded_marker_path: PathBuf,
+    /// Release fetcher used by the user-mode auto-updater (Plan §H.2).
+    /// `None` disables all updater RPCs — they return a structured
+    /// "updater disabled" error. Production wires
+    /// [`crate::server::updater::HttpReleaseFetcher::new`]; tests inject a
+    /// [`crate::server::updater::MockReleaseFetcher`] so RPC tests can
+    /// exercise the happy + sad paths offline.
+    pub release_fetcher: Option<Arc<dyn crate::server::updater::ReleaseFetcher>>,
+    /// Path to the updater state file (`~/.tron/system/updater-state.json`).
+    /// Atomic reads/writes go through [`crate::server::updater::read_update_state`]
+    /// / [`crate::server::updater::write_update_state`]. Tests inject a
+    /// tempdir path; production sets it to
+    /// [`crate::core::foundation::paths::updater_state_path`].
+    pub updater_state_path: PathBuf,
 }
 
 impl RpcContext {

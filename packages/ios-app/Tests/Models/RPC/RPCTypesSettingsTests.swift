@@ -250,4 +250,106 @@ struct ServerSettingsTests {
         #expect(GitMergeStrategy.from("rebase") == .rebase)
         #expect(GitMergeStrategy.from("squash") == .squash)
     }
+
+    // MARK: - Update Settings (Phase 5.5 — auto-update parity)
+
+    @Test("decode update settings from JSON")
+    func updateSettingsDecode() throws {
+        let json = """
+        {
+            "server": {
+                "update": {
+                    "enabled": true,
+                    "channel": "beta",
+                    "frequency": "hourly",
+                    "action": "download",
+                    "allowDowngradeOnRollback": false
+                }
+            }
+        }
+        """
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        #expect(settings.updateEnabled == true)
+        #expect(settings.updateChannel == "beta")
+        #expect(settings.updateFrequency == "hourly")
+        #expect(settings.updateAction == "download")
+        #expect(settings.updateAllowDowngradeOnRollback == false)
+    }
+
+    @Test("update settings defaults when key missing")
+    func updateSettingsDefaultsWhenMissing() throws {
+        let json = "{}"
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        // The default from the Rust UpdateSettings struct: opt-in (enabled=false),
+        // stable channel, daily cadence, notify-only, allow-downgrade=true.
+        #expect(settings.updateEnabled == false)
+        #expect(settings.updateChannel == "stable")
+        #expect(settings.updateFrequency == "daily")
+        #expect(settings.updateAction == "notify")
+        #expect(settings.updateAllowDowngradeOnRollback == true)
+    }
+
+    @Test("update settings defaults when server present but update missing")
+    func updateSettingsDefaultsWhenServerOnly() throws {
+        let json = #"{"server":{"defaultWorkspace":"/tmp"}}"#
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        #expect(settings.updateEnabled == false)
+        #expect(settings.updateChannel == "stable")
+    }
+
+    @Test("UpdateChannel/Frequency/Action enum from(_:) accepts wire values")
+    func updateEnumsFromString() {
+        #expect(UpdateChannel.from("stable") == .stable)
+        #expect(UpdateChannel.from("beta") == .beta)
+        #expect(UpdateChannel.from("garbage") == nil)
+        #expect(UpdateChannel.from(nil) == nil)
+
+        #expect(UpdateFrequency.from("manual") == .manual)
+        #expect(UpdateFrequency.from("startup") == .startup)
+        #expect(UpdateFrequency.from("hourly") == .hourly)
+        #expect(UpdateFrequency.from("daily") == .daily)
+        #expect(UpdateFrequency.from("weekly") == .weekly)
+
+        #expect(UpdateAction.from("notify") == .notify)
+        #expect(UpdateAction.from("download") == .download)
+        #expect(UpdateAction.from("install") == .install)
+    }
+
+    @Test("ServerSettingsUpdate encodes update block under server.update")
+    func updateSettingsUpdateEncode() throws {
+        var update = ServerSettingsUpdate()
+        update.server = .init(update: .init(
+            enabled: true,
+            channel: .beta,
+            frequency: .weekly,
+            action: .install,
+            allowDowngradeOnRollback: false
+        ))
+        let data = try JSONEncoder().encode(update)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let server = json["server"] as! [String: Any]
+        let updateBlock = server["update"] as! [String: Any]
+        #expect(updateBlock["enabled"] as? Bool == true)
+        #expect(updateBlock["channel"] as? String == "beta")
+        #expect(updateBlock["frequency"] as? String == "weekly")
+        #expect(updateBlock["action"] as? String == "install")
+        #expect(updateBlock["allowDowngradeOnRollback"] as? Bool == false)
+    }
+
+    @Test("ServerSettingsUpdate omits update block when nil (partial update)")
+    func updateSettingsPartialEncode() throws {
+        var update = ServerSettingsUpdate()
+        update.server = .init(update: .init(enabled: true))
+        let data = try JSONEncoder().encode(update)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let server = json["server"] as! [String: Any]
+        let updateBlock = server["update"] as! [String: Any]
+        #expect(updateBlock["enabled"] as? Bool == true)
+        // Only `enabled` was set; the rest must be omitted by the encoder so
+        // the server's deep-merge preserves the other fields.
+        #expect(updateBlock["channel"] == nil)
+        #expect(updateBlock["frequency"] == nil)
+        #expect(updateBlock["action"] == nil)
+        #expect(updateBlock["allowDowngradeOnRollback"] == nil)
+    }
 }

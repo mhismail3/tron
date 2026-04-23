@@ -18,6 +18,7 @@ pub mod metadata;
 pub mod notification;
 pub mod repo;
 pub mod rules;
+pub mod server;
 pub mod session;
 pub mod skill;
 pub mod streaming;

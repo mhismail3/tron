@@ -87,6 +87,16 @@ pub mod files {
     /// the first successful WS authentication from any iOS device. The
     /// `system.getInfo` RPC reports `paired: true` once it exists.
     pub const ONBOARDED_MARKER: &str = ".onboarded";
+    /// Persistent state for the user-mode auto-updater
+    /// (`server::updater`) — lastCheckAt, lastInstalledVersion,
+    /// consecutiveFailures. Stored in `~/.tron/system/updater-state.json`
+    /// with mode `0o644` (non-secret, widely readable is fine). Atomic
+    /// writes mirror the `auth-token.json` pattern.
+    pub const UPDATER_STATE_JSON: &str = "updater-state.json";
+    /// Pause sentinel honoured by both the contributor `scripts/auto-deploy`
+    /// loop and the user-mode auto-updater. Presence of the file blocks
+    /// any further install actions without touching settings.
+    pub const AUTO_UPDATE_PAUSE: &str = "auto-update.pause";
     /// Canonical cron job definitions.
     pub const AUTOMATIONS_JSON: &str = "automations.json";
     /// Global system prompt override.
@@ -336,6 +346,23 @@ pub fn bearer_token_path() -> PathBuf {
 /// wizard or `server::onboarding::mark_onboarded`.
 pub fn onboarded_marker_path() -> PathBuf {
     system_dir().join(files::ONBOARDED_MARKER)
+}
+
+/// `~/.tron/system/updater-state.json` — auto-updater persistent state.
+///
+/// See [`files::UPDATER_STATE_JSON`] for purpose. Read/written by
+/// `server::updater`. Mode `0o644` (no secrets); atomic writes.
+pub fn updater_state_path() -> PathBuf {
+    system_dir().join(files::UPDATER_STATE_JSON)
+}
+
+/// `~/.tron/auto-update.pause` — pause sentinel for the auto-updater.
+///
+/// Presence causes `server::updater` to skip any further install action
+/// without mutating settings. `tron self-update pause / resume` toggle
+/// the file.
+pub fn auto_update_pause_path() -> PathBuf {
+    tron_home().join(files::AUTO_UPDATE_PAUSE)
 }
 
 /// `~/.tron/<workspace>/automations/automations.json`
@@ -687,6 +714,33 @@ mod tests {
     fn containers_path_correct() {
         let p = containers_path();
         assert!(p.ends_with(format!("{}/{}", dirs::SYSTEM, files::CONTAINERS_JSON)));
+    }
+
+    #[test]
+    fn updater_state_path_lives_under_system_dir() {
+        let p = updater_state_path();
+        let s = p.to_string_lossy();
+        assert!(s.ends_with("/updater-state.json"), "got: {s}");
+        assert!(
+            s.contains("/.tron/system/"),
+            "must live under ~/.tron/system/, got: {s}"
+        );
+    }
+
+    #[test]
+    fn auto_update_pause_path_at_tron_home() {
+        // Mirrors the existing `~/.tron/auto-deploy.pause` placement so both
+        // sentinels are colocated for operator discovery.
+        let p = auto_update_pause_path();
+        let s = p.to_string_lossy();
+        assert!(s.ends_with("/.tron/auto-update.pause"), "got: {s}");
+        // Must NOT sit under system/ — the auto-deploy pause is at the
+        // tron-home root; matching that convention avoids an extra discovery
+        // step for users.
+        assert!(
+            !s.contains("/.tron/system/"),
+            "auto-update.pause must live at tron-home root, got: {s}"
+        );
     }
 
     // ── Transcription sidecar ──────────────────────────────────────

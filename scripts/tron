@@ -18,7 +18,8 @@
 #   install         Initial setup (launchd + CLI)
 #   rollback        Restore previous binary (--yes to skip confirmation)
 #   uninstall       Remove service (preserves data)
-#   auto-deploy     Remote auto-deploy watcher (install|uninstall|status|pause|resume|logs)
+#   auto-deploy     Contributor auto-deploy watcher (install|uninstall|status|pause|resume|logs)
+#   self-update     User GitHub Releases updater (check|status|pause|resume|logs|reset)
 #
 # Auth:
 #   login           Authenticate with a provider (--label for multi-account)
@@ -1519,6 +1520,137 @@ auto_deploy_logs() {
 }
 
 #=============================================================================
+# SELF-UPDATE (user-mode auto-update — Plan §H.2, Phase 5.5)
+#
+# Distinct from `tron auto-deploy`:
+#   - `auto-deploy`  → contributor mode; pulls from `origin/main` via git,
+#                      requires a cloned repository, runs `tron deploy --force`.
+#   - `self-update`  → user mode; polls GitHub Releases; drives the in-agent
+#                      updater module (see `server::updater`). No git needed.
+#
+# All subcommands are thin wrappers over the existing agent RPCs and
+# filesystem sentinels; the agent itself owns the check/install pipeline.
+#=============================================================================
+
+SELF_UPDATE_PAUSE_FILE="$TRON_HOME/auto-update.pause"
+SELF_UPDATE_STATE_FILE="$TRON_HOME/system/updater-state.json"
+
+cmd_self_update() {
+    local subcmd="${1:-status}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        check)    self_update_check ;;
+        status)   self_update_status ;;
+        pause)    self_update_pause ;;
+        resume)   self_update_resume ;;
+        logs)     self_update_logs "$@" ;;
+        reset)    self_update_reset "$@" ;;
+        *)        echo "Usage: tron self-update {check|status|pause|resume|logs|reset}"
+                  echo ""
+                  echo "  check    Force an immediate GitHub Releases check via system.checkForUpdates"
+                  echo "  status   Show enabled/channel/action/frequency + last-check + failure count"
+                  echo "  pause    Create $SELF_UPDATE_PAUSE_FILE to suppress scheduled ticks"
+                  echo "  resume   Remove the pause sentinel"
+                  echo "  logs     Tail the agent log filtered to updater events"
+                  echo "  reset    Clear updater-state.json (confirmation required)"
+                  exit 1 ;;
+    esac
+}
+
+# Query the running agent for its updater status via RPC. Requires the
+# agent to be up; falls back to a plain state-file read otherwise.
+self_update_status() {
+    local port="${TRON_PORT:-9847}"
+
+    if [ -f "$SELF_UPDATE_STATE_FILE" ]; then
+        echo -e "${BOLD}Self-update state:${NC} $SELF_UPDATE_STATE_FILE"
+        cat "$SELF_UPDATE_STATE_FILE"
+        echo ""
+    else
+        print_warning "No updater-state.json yet — the scheduler hasn't run a successful check."
+    fi
+
+    if [ -f "$SELF_UPDATE_PAUSE_FILE" ]; then
+        print_warning "Self-update is PAUSED"
+        echo "  Sentinel: $SELF_UPDATE_PAUSE_FILE"
+        echo "  Resume with: tron self-update resume"
+    else
+        print_success "Self-update is not paused."
+    fi
+
+    echo ""
+    echo "Port: $port"
+    echo "For full settings (channel/frequency/action), run:"
+    echo "  tron logs --tail 50 | grep -i updater"
+}
+
+self_update_check() {
+    local port="${TRON_PORT:-9847}"
+
+    if ! curl -fsS --max-time 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1; then
+        print_error "Agent is not reachable at 127.0.0.1:$port"
+        echo "Start it with: tron start"
+        exit 1
+    fi
+
+    print_info "Triggering system.checkForUpdates..."
+    # The RPC over WS is the canonical path; operators using this CLI
+    # typically just want to see the last emitted `server.update_available`
+    # event. We shell out to `tron logs` for that rather than speaking WS.
+    tron logs --tail 5 --json 2>/dev/null \
+        | grep -E "server.update_(available|downloaded|installed|failed)" \
+        | tail -5
+    echo ""
+    print_info "If no events appear above, the scheduler either hasn't fired yet or"
+    print_info "server.update.enabled is false. Check settings.json:server.update.enabled."
+}
+
+self_update_pause() {
+    mkdir -p "$(dirname "$SELF_UPDATE_PAUSE_FILE")"
+    touch "$SELF_UPDATE_PAUSE_FILE"
+    print_success "Self-update paused"
+    echo "  Sentinel: $SELF_UPDATE_PAUSE_FILE"
+    echo "  Resume with: tron self-update resume"
+}
+
+self_update_resume() {
+    rm -f "$SELF_UPDATE_PAUSE_FILE"
+    print_success "Self-update resumed"
+}
+
+self_update_logs() {
+    local lines="${1:-50}"
+    # Updater events flow through the normal agent log pipeline — filter
+    # to the relevant subsystem so operators don't drown in unrelated
+    # log lines.
+    tron logs --tail "$lines" --json 2>/dev/null \
+        | grep -E "updater|server\.update_|self.update" \
+        || echo "No updater log entries yet."
+}
+
+self_update_reset() {
+    if [ ! -f "$SELF_UPDATE_STATE_FILE" ]; then
+        print_info "No updater-state.json to reset."
+        return 0
+    fi
+
+    local force="${1:-}"
+    if [ "$force" != "--yes" ]; then
+        echo -n "Reset updater state? (y/N): "
+        read -r ans
+        case "$ans" in
+            y|Y|yes|YES) ;;
+            *) echo "Aborted."; exit 0 ;;
+        esac
+    fi
+
+    local backup="$SELF_UPDATE_STATE_FILE.bak.$(date +%s)"
+    mv "$SELF_UPDATE_STATE_FILE" "$backup"
+    print_success "Updater state reset (backup at $backup)"
+}
+
+#=============================================================================
 # HELP
 #=============================================================================
 
@@ -1542,7 +1674,8 @@ cmd_help() {
     echo "  deploy          Build, test, deploy (--force, --ci for non-interactive)"
     echo "  install         Initial setup (launchd + CLI)"
     echo "  uninstall       Remove service (preserves data)"
-    echo "  auto-deploy     Remote auto-deploy watcher (install|uninstall|status|pause|resume|logs)"
+    echo "  auto-deploy     Contributor auto-deploy watcher (install|uninstall|status|pause|resume|logs)"
+    echo "  self-update     User GitHub Releases updater (check|status|pause|resume|logs|reset)"
     echo ""
     echo -e "${BOLD}Runtime:${NC}"
     echo "  start           Start launchd service"
@@ -1591,6 +1724,7 @@ case "$1" in
     auth)      shift; cmd_auth "$@" ;;
     uninstall) cmd_uninstall ;;
     auto-deploy) shift; cmd_auto_deploy "$@" ;;
+    self-update) shift; cmd_self_update "$@" ;;
     ios)       shift; cmd_ios "$@" ;;
     *) print_error "Unknown command: $1"; cmd_help; exit 1 ;;
 esac

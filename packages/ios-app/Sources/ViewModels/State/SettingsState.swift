@@ -91,6 +91,23 @@ final class SettingsState {
     /// Mac wrapper).
     var tailscaleIp: String? = nil
 
+    // MARK: - Auto-Update (Phase 5.5)
+
+    /// Master switch for the user-mode auto-updater. Default `false` (opt-in).
+    var updateEnabled: Bool = false
+    /// Release channel: `"stable"` (latest GitHub release) or `"beta"`
+    /// (highest semver including pre-release tags).
+    var updateChannel: String = "stable"
+    /// How often the in-process scheduler checks GitHub Releases. One of
+    /// `"manual" | "startup" | "hourly" | "daily" | "weekly"`.
+    var updateFrequency: String = "daily"
+    /// What the server does when a newer release is found. One of
+    /// `"notify" | "download" | "install"`.
+    var updateAction: String = "notify"
+    /// Auto-rollback a freshly-installed version if its post-install self-test
+    /// fails (ping timeout or version mismatch).
+    var updateAllowDowngradeOnRollback: Bool = true
+
     // MARK: - Preset Cache
 
     /// UserDefaults key for the cached `[ConnectionPreset]`. Internal so the
@@ -213,5 +230,11 @@ final class SettingsState {
 
         authEnforced = settings.authEnforced
         tailscaleIp = settings.tailscaleIp
+
+        updateEnabled = settings.updateEnabled
+        updateChannel = settings.updateChannel
+        updateFrequency = settings.updateFrequency
+        updateAction = settings.updateAction
+        updateAllowDowngradeOnRollback = settings.updateAllowDowngradeOnRollback
     }
 }

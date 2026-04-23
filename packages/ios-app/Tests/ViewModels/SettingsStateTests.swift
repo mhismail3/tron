@@ -66,4 +66,18 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         XCTAssertTrue(state.connectionPresets.isEmpty)
     }
+
+    // MARK: - Update Settings (Phase 5.5 — auto-update parity)
+
+    func testUpdateSettingsInitialDefaults() {
+        let state = SettingsState()
+        // Defaults match the Rust UpdateSettings::default():
+        // opt-in (off), stable channel, daily check, notify-only,
+        // allow auto-rollback on a failed install.
+        XCTAssertFalse(state.updateEnabled)
+        XCTAssertEqual(state.updateChannel, "stable")
+        XCTAssertEqual(state.updateFrequency, "daily")
+        XCTAssertEqual(state.updateAction, "notify")
+        XCTAssertTrue(state.updateAllowDowngradeOnRollback)
+    }
 }

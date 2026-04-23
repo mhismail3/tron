@@ -39,7 +39,7 @@ struct SettingsView: View {
     /// the sheet dispatch does too, so a mis-set `activePage` in a
     /// production build falls through cleanly.
     enum SettingsPage: String, Identifiable {
-        case server, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary
+        case server, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary, updates
         #if DEBUG || BETA
         case diagnostics
         #endif
@@ -128,6 +128,12 @@ struct SettingsView: View {
                     GitWorkflowSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
                 case .promptLibrary:
                     PromptLibrarySettingsPage(
+                        settingsState: settingsState,
+                        updateServerSetting: updateServerSetting,
+                        rpcClient: rpcClient
+                    )
+                case .updates:
+                    UpdatesSettingsPage(
                         settingsState: settingsState,
                         updateServerSetting: updateServerSetting,
                         rpcClient: rpcClient
@@ -224,13 +230,20 @@ struct SettingsView: View {
             }
             .cardEntrance(visible: cardsVisible, index: 6)
 
+            SettingsCard(interactive: true) {
+                categoryRow(icon: "arrow.down.app", label: "Updates", subtitle: "Configure how the Tron server checks for and installs new releases") {
+                    activePage = .updates
+                }
+            }
+            .cardEntrance(visible: cardsVisible, index: 7)
+
             if #available(iOS 26.0, *) {
                 SettingsCard(interactive: true) {
                     categoryRow(icon: "paintbrush", label: "App", subtitle: "Change how the iOS app looks and behaves") {
                         activePage = .app
                     }
                 }
-                .cardEntrance(visible: cardsVisible, index: 7)
+                .cardEntrance(visible: cardsVisible, index: 8)
             }
 
             #if DEBUG || BETA
@@ -239,7 +252,7 @@ struct SettingsView: View {
                     activePage = .diagnostics
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 8)
+            .cardEntrance(visible: cardsVisible, index: 9)
             #endif
         }
     }

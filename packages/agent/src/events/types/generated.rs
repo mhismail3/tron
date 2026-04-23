@@ -175,6 +175,19 @@ define_events! {
         /// DeviceTokenNotForTopic). Row already deactivated in the DB;
         /// this event is the audit trail + broadcast signal for iOS.
         DeviceTokenInvalidated => "device.token_invalidated" => payloads::device::DeviceTokenInvalidatedPayload,
+        /// User-mode auto-updater observed a newer release on the
+        /// configured channel. Phase 5.5.
+        ServerUpdateAvailable => "server.update_available" => payloads::server::ServerUpdateAvailablePayload,
+        /// Staged DMG finished downloading and signature verification ran.
+        ServerUpdateDownloaded => "server.update_downloaded" => payloads::server::ServerUpdateDownloadedPayload,
+        /// Auto-install completed and post-install ping confirmed the
+        /// new version.
+        ServerUpdateInstalled => "server.update_installed" => payloads::server::ServerUpdateInstalledPayload,
+        /// A stage of the download/install pipeline failed.
+        ServerUpdateFailed => "server.update_failed" => payloads::server::ServerUpdateFailedPayload,
+        /// Post-install failure threshold hit; action auto-degraded
+        /// from `install` back to `notify`.
+        ServerUpdateDisabledAfterFailures => "server.update_disabled_after_failures" => payloads::server::ServerUpdateDisabledAfterFailuresPayload,
     }
     raw_events {
     }
@@ -212,6 +225,15 @@ define_events! {
         is_queue_type => [MessageQueued, MessageDequeued],
         /// Whether this is a file event (`file.*`).
         is_file_type => [FileRead, FileWrite, FileEdit],
+        /// Whether this is a server lifecycle event (`server.*`) —
+        /// Phase 5.5 auto-updater surface.
+        is_server_type => [
+            ServerUpdateAvailable,
+            ServerUpdateDownloaded,
+            ServerUpdateInstalled,
+            ServerUpdateFailed,
+            ServerUpdateDisabledAfterFailures
+        ],
     }
 }
 
@@ -219,7 +241,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 79] = [
+    const EXPECTED: [(EventType, &str); 84] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -356,11 +378,28 @@ mod tests {
             EventType::DeviceTokenInvalidated,
             "device.token_invalidated",
         ),
+        (
+            EventType::ServerUpdateAvailable,
+            "server.update_available",
+        ),
+        (
+            EventType::ServerUpdateDownloaded,
+            "server.update_downloaded",
+        ),
+        (
+            EventType::ServerUpdateInstalled,
+            "server.update_installed",
+        ),
+        (EventType::ServerUpdateFailed, "server.update_failed"),
+        (
+            EventType::ServerUpdateDisabledAfterFailures,
+            "server.update_disabled_after_failures",
+        ),
     ];
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 79);
+        assert_eq!(ALL_EVENT_TYPES.len(), 84);
     }
 
     #[test]

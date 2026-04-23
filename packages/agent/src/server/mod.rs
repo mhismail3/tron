@@ -26,6 +26,7 @@
 //! | `rpc`         | JSON-RPC method registry, handler tree, request/response types                     |
 //! | `server`      | `TronServer::new` wiring (registry + context + bind)                               |
 //! | `shutdown`    | Phased graceful shutdown coordinator (MCP → tasks → IO)                            |
+//! | `updater`     | User-mode GitHub Releases auto-updater (Phase 5.5) — channel + action + state     |
 //! | `websocket`   | WS upgrade, framing, heartbeat, bearer-auth middleware (when `auth.enforced=true`) |
 
 #![deny(unsafe_code)]
@@ -49,4 +50,5 @@ pub mod rpc;
 pub mod server;
 #[path = "app/shutdown.rs"]
 pub mod shutdown;
+pub mod updater;
 pub mod websocket;

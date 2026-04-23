@@ -24,6 +24,43 @@ final class MiscClient: RPCDomainClient {
         )
     }
 
+    // MARK: - Auto-Update (Phase 5.5)
+
+    /// Force an immediate GitHub Releases probe. Returns the latest release
+    /// info (if any); the server caches upstream responses 60s to avoid API
+    /// thrash.
+    func checkForUpdates() async throws -> SystemCheckForUpdatesResult {
+        let ws = try requireTransport().requireConnection()
+
+        return try await ws.send(
+            method: "system.checkForUpdates",
+            params: EmptyParams()
+        )
+    }
+
+    /// Snapshot of the updater state + configured settings. Used to render
+    /// the iOS `UpdatesSettingsPage` status row and the Mac menu bar.
+    func getUpdateStatus() async throws -> SystemUpdateStatusResult {
+        let ws = try requireTransport().requireConnection()
+
+        return try await ws.send(
+            method: "system.getUpdateStatus",
+            params: EmptyParams()
+        )
+    }
+
+    /// Kick off the configured action pipeline for any staged update.
+    /// Progress is streamed through the normal event pipeline, not the
+    /// RPC response.
+    func applyUpdate() async throws -> SystemApplyUpdateResult {
+        let ws = try requireTransport().requireConnection()
+
+        return try await ws.send(
+            method: "system.applyUpdate",
+            params: EmptyParams()
+        )
+    }
+
     // MARK: - Message Methods
 
     /// Delete a message from a session.
