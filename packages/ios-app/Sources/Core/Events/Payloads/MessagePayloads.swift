@@ -103,7 +103,17 @@ struct UserMessagePayload {
             return nil
         }
 
-        self.turn = payload.int("turn") ?? 1
+        // `turn` is non-optional on the server's `UserMessagePayload`
+        // (`turn: i64`). Dropping the `?? 1` default keeps a malformed
+        // import from silently pinning a message to turn 1.
+        guard let turn = payload.int("turn") else {
+            TronLogger.shared.warning(
+                "message.user event missing required field 'turn'; dropping",
+                category: .events
+            )
+            return nil
+        }
+        self.turn = turn
         self.imageCount = payload.int("imageCount")
         self.attachments = extractedAttachments.isEmpty ? nil : extractedAttachments
 
@@ -142,17 +152,23 @@ struct UserMessagePayload {
 }
 
 /// Payload for message.assistant event
-/// Server: AssistantMessageEvent.payload
+/// Server: `events/types/payloads/message.rs::AssistantMessagePayload`
 ///
 /// IMPORTANT: This payload contains ContentBlocks which may include tool_use blocks.
-/// However, tool_use blocks should be IGNORED here - they are rendered via tool.call events.
+/// However, tool_use blocks should be IGNORED here — they are rendered via tool.call events.
+///
+/// `content`, `turn`, `model`, and `stopReason` are all non-optional on the
+/// Rust payload. Missing any of them fails decoding (`init?` returns nil)
+/// rather than silently pinning the message to turn 1 or leaving the model
+/// label blank — both defaults have lied in the past when an emitter skipped
+/// a field.
 struct AssistantMessagePayload {
-    let contentBlocks: [[String: Any]]?
+    let contentBlocks: [[String: Any]]
     let turn: Int
     let tokenRecord: TokenRecord?
     let stopReason: StopReason?
     let latencyMs: Int?
-    let model: String?
+    let model: String
     let hasThinking: Bool?
     let interrupted: Bool?
 
@@ -165,8 +181,7 @@ struct AssistantMessagePayload {
     /// live-finalized text for the same message. Guarded by
     /// `TextStreamConvergenceTests`.
     var textContent: String? {
-        guard let blocks = contentBlocks else { return nil }
-        let texts = blocks.compactMap { block -> String? in
+        let texts = contentBlocks.compactMap { block -> String? in
             guard block["type"] as? String == ContentBlockType.text.rawValue else { return nil }
             return block["text"] as? String
         }
@@ -178,54 +193,68 @@ struct AssistantMessagePayload {
 
     /// Extracts thinking content if present
     var thinkingContent: String? {
-        guard let blocks = contentBlocks else { return nil }
-        let thoughts = blocks.compactMap { block -> String? in
+        let thoughts = contentBlocks.compactMap { block -> String? in
             guard block["type"] as? String == ContentBlockType.thinking.rawValue else { return nil }
             return block["thinking"] as? String
         }
         return thoughts.isEmpty ? nil : thoughts.joined(separator: "\n")
     }
 
-    init(from payload: [String: AnyCodable]) {
-        if let blocks = payload["content"]?.value as? [[String: Any]] {
-            self.contentBlocks = blocks
-        } else {
-            self.contentBlocks = nil
+    init?(from payload: [String: AnyCodable]) {
+        // `content` is `Value` (non-optional) on the server, and iOS needs it
+        // to be an array-of-blocks in every production code path. A plain
+        // string or missing key is a schema violation.
+        guard let blocks = payload["content"]?.value as? [[String: Any]] else {
+            TronLogger.shared.warning(
+                "message.assistant event missing required field 'content' (array of blocks); dropping",
+                category: .events
+            )
+            return nil
+        }
+        guard let turn = payload.int("turn"),
+              let model = payload.string("model"),
+              let stopStr = payload.string("stopReason") else {
+            TronLogger.shared.warning(
+                "message.assistant event missing required field(s) turn/model/stopReason; dropping",
+                category: .events
+            )
+            return nil
         }
 
-        self.turn = payload.int("turn") ?? 1
+        self.contentBlocks = blocks
+        self.turn = turn
+        self.model = model
+        self.stopReason = StopReason(rawValue: stopStr)
 
         self.tokenRecord = TokenRecord.from(dict: payload.dict("tokenRecord"))
-
-        if let stopStr = payload.string("stopReason") {
-            self.stopReason = StopReason(rawValue: stopStr)
-        } else {
-            self.stopReason = nil
-        }
-
         self.latencyMs = payload.int("latency") ?? payload.int("latencyMs")
-        self.model = payload.string("model")
         self.hasThinking = payload.bool("hasThinking")
         self.interrupted = payload.bool("interrupted")
     }
 }
 
 /// Payload for message.system event
-/// Server: SystemMessageEvent.payload
+/// Server: `events/types/payloads/message.rs::SystemMessagePayload`
+///
+/// Both `content` and `source` are non-optional on the Rust payload.
+/// Missing `source` or an unknown value fails decode rather than silently
+/// dropping the discriminator that would otherwise let the UI route the
+/// message (compaction banner vs. error banner vs. hook output).
 struct SystemMessagePayload {
     let content: String
-    let source: SystemMessageSource?
+    let source: SystemMessageSource
 
     init?(from payload: [String: AnyCodable]) {
-        guard let content = payload.string("content") else {
+        guard let content = payload.string("content"),
+              let sourceStr = payload.string("source"),
+              let source = SystemMessageSource(rawValue: sourceStr) else {
+            TronLogger.shared.warning(
+                "message.system event missing required field(s) content/source or unknown source value; dropping",
+                category: .events
+            )
             return nil
         }
         self.content = content
-
-        if let sourceStr = payload.string("source") {
-            self.source = SystemMessageSource(rawValue: sourceStr)
-        } else {
-            self.source = nil
-        }
+        self.source = source
     }
 }

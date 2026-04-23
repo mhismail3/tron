@@ -335,8 +335,14 @@ extension UnifiedEventTransformer {
                 }
                 state.messages.append(contentsOf: interleaved)
 
-                let payload = AssistantMessagePayload(from: event.payload)
-                if let record = payload.tokenRecord {
+                // If the event decodes strictly, use its `tokenRecord` +
+                // `turn`. If it doesn't, fall through to the raw
+                // `tokenUsage` dict — both the native runtime and the
+                // import transformer always emit one of these, but native
+                // events additionally carry the turn/model/stopReason
+                // required fields that the strict decode gates on.
+                let parsedPayload = AssistantMessagePayload(from: event.payload)
+                if let parsed = parsedPayload, let record = parsed.tokenRecord {
                     state.totalTokenUsage = TokenUsage(
                         inputTokens: state.totalTokenUsage.inputTokens + record.source.rawInputTokens,
                         outputTokens: state.totalTokenUsage.outputTokens + record.source.rawOutputTokens,
@@ -359,8 +365,8 @@ extension UnifiedEventTransformer {
                     // Use inputTokens as best available approximation for context window size
                     state.lastTurnInputTokens = input
                 }
-                if payload.turn > state.currentTurn {
-                    state.currentTurn = payload.turn
+                if let parsed = parsedPayload, parsed.turn > state.currentTurn {
+                    state.currentTurn = parsed.turn
                 }
 
             case .messageUser, .messageSystem,

@@ -33,7 +33,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             type: type,
             timestamp: timestamp ?? self.timestamp(),
             sequence: sequence,
-            payload: payload
+            payload: augmentPayload(type: type, payload: payload)
         )
     }
 
@@ -55,8 +55,35 @@ final class UnifiedEventTransformerTests: XCTestCase {
             type: type,
             timestamp: timestamp ?? self.timestamp(),
             sequence: sequence,
-            payload: payload
+            payload: augmentPayload(type: type, payload: payload)
         )
+    }
+
+    /// Inject required-but-test-irrelevant payload fields for event types that
+    /// have strict schemas. Tests that care about a specific value override by
+    /// setting it explicitly in the payload dict; this helper only adds fields
+    /// that are absent. This mirrors the `#[serde(default)]`-free but
+    /// always-emitted-by-server reality of production payloads like
+    /// `message.assistant` (content / turn / model / stopReason).
+    private func augmentPayload(type: String, payload: [String: AnyCodable]) -> [String: AnyCodable] {
+        var augmented = payload
+        switch type {
+        case "message.assistant":
+            if augmented["turn"] == nil { augmented["turn"] = AnyCodable(1) }
+            if augmented["model"] == nil { augmented["model"] = AnyCodable("claude-sonnet-4") }
+            if augmented["stopReason"] == nil { augmented["stopReason"] = AnyCodable("end_turn") }
+        case "message.user":
+            if augmented["turn"] == nil { augmented["turn"] = AnyCodable(1) }
+        case "message.system":
+            if augmented["source"] == nil { augmented["source"] = AnyCodable("compaction") }
+        case "session.start":
+            if augmented["workingDirectory"] == nil { augmented["workingDirectory"] = AnyCodable("/test/workspace") }
+            if augmented["model"] == nil { augmented["model"] = AnyCodable("claude-sonnet-4") }
+            if augmented["provider"] == nil { augmented["provider"] = AnyCodable("anthropic") }
+        default:
+            break
+        }
+        return augmented
     }
 
     // MARK: - User Message Tests

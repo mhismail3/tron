@@ -76,7 +76,9 @@ enum MessageHandlers {
         _ payload: [String: AnyCodable],
         timestamp: Date
     ) -> ChatMessage? {
-        let parsed = AssistantMessagePayload(from: payload)
+        guard let parsed = AssistantMessagePayload(from: payload) else {
+            return nil
+        }
 
         // CRITICAL: Only extract TEXT from assistant messages
         // Tool blocks are handled by tool.call/tool.result events

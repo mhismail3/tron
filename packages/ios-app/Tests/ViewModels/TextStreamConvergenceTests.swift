@@ -45,14 +45,19 @@ final class TextStreamConvergenceTests: XCTestCase {
     }
 
     /// Build a server-shaped AssistantMessagePayload with a single text
-    /// content block and return its extracted textContent.
+    /// content block and return its extracted textContent. Required
+    /// scalar fields (`turn`, `model`, `stopReason`) are fixed — the
+    /// convergence invariant has nothing to do with them.
     private func serverTextContent(_ text: String) -> String? {
         let payload: [String: AnyCodable] = [
             "content": AnyCodable([
                 ["type": "text", "text": text]
-            ])
+            ]),
+            "turn": AnyCodable(1),
+            "model": AnyCodable("claude-sonnet-4"),
+            "stopReason": AnyCodable("end_turn")
         ]
-        return AssistantMessagePayload(from: payload).textContent
+        return AssistantMessagePayload(from: payload)?.textContent
     }
 
     // MARK: - Convergence
@@ -112,9 +117,12 @@ final class TextStreamConvergenceTests: XCTestCase {
                 ["type": "text", "text": "Before tool."],
                 ["type": "tool_use", "id": "t1", "name": "Bash", "input": ["cmd": "ls"]],
                 ["type": "text", "text": "After tool."],
-            ])
+            ]),
+            "turn": AnyCodable(1),
+            "model": AnyCodable("claude-sonnet-4"),
+            "stopReason": AnyCodable("tool_use")
         ]
-        let server = AssistantMessagePayload(from: payload).textContent
+        let server = AssistantMessagePayload(from: payload)?.textContent
         // Text blocks join with newline separator, then trim.
         XCTAssertEqual(server, "Before tool.\nAfter tool.")
     }
@@ -123,9 +131,12 @@ final class TextStreamConvergenceTests: XCTestCase {
         let payload: [String: AnyCodable] = [
             "content": AnyCodable([
                 ["type": "tool_use", "id": "t1", "name": "Bash", "input": [:] as [String: String]]
-            ])
+            ]),
+            "turn": AnyCodable(1),
+            "model": AnyCodable("claude-sonnet-4"),
+            "stopReason": AnyCodable("tool_use")
         ]
-        XCTAssertNil(AssistantMessagePayload(from: payload).textContent)
+        XCTAssertNil(AssistantMessagePayload(from: payload)?.textContent)
     }
 
     // MARK: - Trimming semantics

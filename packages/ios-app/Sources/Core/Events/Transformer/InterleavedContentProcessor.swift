@@ -42,8 +42,10 @@ enum InterleavedContentProcessor {
         toolCalls: [String: ToolCallPayload],
         toolResults: [String: ToolResultPayload]
     ) -> [ChatMessage] {
-        let parsed = AssistantMessagePayload(from: payload)
-        guard let blocks = parsed.contentBlocks else { return [] }
+        guard let parsed = AssistantMessagePayload(from: payload) else {
+            return []
+        }
+        let blocks = parsed.contentBlocks
 
         // Token record from message.assistant payload
         let effectiveTokenRecord = parsed.tokenRecord

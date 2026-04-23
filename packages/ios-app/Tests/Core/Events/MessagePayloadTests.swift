@@ -3,85 +3,129 @@ import XCTest
 
 final class AssistantMessagePayloadTests: XCTestCase {
 
+    /// The Rust payload (`events/types/payloads/message.rs::AssistantMessagePayload`)
+    /// declares `content`, `turn`, `model`, and `stopReason` non-optional.
+    /// Every fixture in this file MUST include them; missing any field →
+    /// `init?` returns nil, guarded by the "missing" tests below.
+    private func validPayload(
+        content: AnyCodable,
+        turn: Int = 1,
+        model: String = "claude-sonnet-4",
+        stopReason: String = "end_turn"
+    ) -> [String: AnyCodable] {
+        [
+            "content": content,
+            "turn": AnyCodable(turn),
+            "model": AnyCodable(model),
+            "stopReason": AnyCodable(stopReason)
+        ]
+    }
+
     func testParsesContentBlockArray() {
-        let payload: [String: AnyCodable] = [
-            "content": AnyCodable([
-                ["type": "text", "text": "Hello world"] as [String: Any]
-            ] as [[String: Any]])
-        ]
+        let payload = validPayload(content: AnyCodable([
+            ["type": "text", "text": "Hello world"] as [String: Any]
+        ] as [[String: Any]]))
 
         let parsed = AssistantMessagePayload(from: payload)
 
-        XCTAssertNotNil(parsed.contentBlocks)
-        XCTAssertEqual(parsed.contentBlocks?.count, 1)
-        XCTAssertEqual(parsed.contentBlocks?[0]["text"] as? String, "Hello world")
+        XCTAssertNotNil(parsed)
+        XCTAssertEqual(parsed?.contentBlocks.count, 1)
+        XCTAssertEqual(parsed?.contentBlocks[0]["text"] as? String, "Hello world")
     }
 
-    func testMissingContentReturnsNilBlocks() {
+    func testMissingContentFailsDecode() {
+        // `content` is non-optional on the Rust payload. Its absence
+        // is a schema violation; init? must return nil.
         let payload: [String: AnyCodable] = [
-            "turn": AnyCodable(1)
+            "turn": AnyCodable(1),
+            "model": AnyCodable("claude-sonnet-4"),
+            "stopReason": AnyCodable("end_turn")
         ]
 
-        let parsed = AssistantMessagePayload(from: payload)
-
-        XCTAssertNil(parsed.contentBlocks)
+        XCTAssertNil(AssistantMessagePayload(from: payload))
     }
 
-    func testNonArrayContentReturnsNilBlocks() {
-        // Content as a plain string (not array) should yield nil — no legacy handling
+    func testNonArrayContentFailsDecode() {
+        // Content as a plain string (not array) is not a valid shape.
+        // No legacy handling — init? returns nil.
         let payload: [String: AnyCodable] = [
-            "content": AnyCodable("plain string")
+            "content": AnyCodable("plain string"),
+            "turn": AnyCodable(1),
+            "model": AnyCodable("claude-sonnet-4"),
+            "stopReason": AnyCodable("end_turn")
         ]
 
-        let parsed = AssistantMessagePayload(from: payload)
-
-        XCTAssertNil(parsed.contentBlocks)
+        XCTAssertNil(AssistantMessagePayload(from: payload))
     }
 
-    func testEmptyArrayContentReturnsEmptyBlocks() {
-        let payload: [String: AnyCodable] = [
-            "content": AnyCodable([[String: Any]]())
-        ]
+    func testEmptyArrayContentDecodesWithNoBlocks() {
+        let payload = validPayload(content: AnyCodable([[String: Any]]()))
 
         let parsed = AssistantMessagePayload(from: payload)
 
-        XCTAssertNotNil(parsed.contentBlocks)
-        XCTAssertEqual(parsed.contentBlocks?.count, 0)
+        XCTAssertNotNil(parsed)
+        XCTAssertEqual(parsed?.contentBlocks.count, 0)
     }
 
     func testParsesTurn() {
-        let payload: [String: AnyCodable] = [
-            "content": AnyCodable([[String: Any]]()),
-            "turn": AnyCodable(3)
-        ]
+        let payload = validPayload(content: AnyCodable([[String: Any]]()), turn: 3)
 
         let parsed = AssistantMessagePayload(from: payload)
 
-        XCTAssertEqual(parsed.turn, 3)
+        XCTAssertEqual(parsed?.turn, 3)
     }
 
-    func testDefaultTurnIsOne() {
-        let payload: [String: AnyCodable] = [:]
+    func testMissingTurnFailsDecode() {
+        // `turn` is non-optional on the Rust payload. Regression guard
+        // against the removed "default to 1" back-compat behavior.
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable([[String: Any]]()),
+            "model": AnyCodable("claude-sonnet-4"),
+            "stopReason": AnyCodable("end_turn")
+        ]
 
-        let parsed = AssistantMessagePayload(from: payload)
+        XCTAssertNil(AssistantMessagePayload(from: payload))
+    }
 
-        XCTAssertEqual(parsed.turn, 1)
+    func testMissingModelFailsDecode() {
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable([[String: Any]]()),
+            "turn": AnyCodable(1),
+            "stopReason": AnyCodable("end_turn")
+        ]
+
+        XCTAssertNil(AssistantMessagePayload(from: payload))
+    }
+
+    func testMissingStopReasonFailsDecode() {
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable([[String: Any]]()),
+            "turn": AnyCodable(1),
+            "model": AnyCodable("claude-sonnet-4")
+        ]
+
+        XCTAssertNil(AssistantMessagePayload(from: payload))
     }
 }
 
 final class UserMessagePayloadTests: XCTestCase {
 
+    /// `turn` is non-optional on the Rust payload (`UserMessagePayload.turn: i64`).
+    /// Every fixture must include it; the `testMissingTurnFailsDecode` case
+    /// guards against regression of the removed "default to 1" back-compat.
+    private func validPayload(content: AnyCodable, turn: Int = 1) -> [String: AnyCodable] {
+        ["content": content, "turn": AnyCodable(turn)]
+    }
+
     func testParsesModernImageFormat() {
         let imageData = Data([0xFF, 0xD8, 0xFF]).base64EncodedString()
-        let payload: [String: AnyCodable] = [
-            "content": AnyCodable([
-                [
-                    "type": "image",
-                    "data": imageData,
-                    "mimeType": "image/jpeg"
-                ] as [String: Any]
-            ] as [[String: Any]])
-        ]
+        let payload = validPayload(content: AnyCodable([
+            [
+                "type": "image",
+                "data": imageData,
+                "mimeType": "image/jpeg"
+            ] as [String: Any]
+        ] as [[String: Any]]))
 
         let parsed = UserMessagePayload(from: payload)
 
@@ -93,21 +137,29 @@ final class UserMessagePayloadTests: XCTestCase {
 
     func testUnrecognizedImageFormatSkipped() {
         let imageData = Data([0xFF, 0xD8, 0xFF]).base64EncodedString()
-        let payload: [String: AnyCodable] = [
-            "content": AnyCodable([
-                [
-                    "type": "image",
-                    "source": [
-                        "data": imageData,
-                        "media_type": "image/png"
-                    ] as [String: Any]
+        let payload = validPayload(content: AnyCodable([
+            [
+                "type": "image",
+                "source": [
+                    "data": imageData,
+                    "media_type": "image/png"
                 ] as [String: Any]
-            ] as [[String: Any]])
-        ]
+            ] as [String: Any]
+        ] as [[String: Any]]))
 
         let parsed = UserMessagePayload(from: payload)
 
         XCTAssertNotNil(parsed)
         XCTAssertEqual(parsed?.attachments?.count ?? 0, 0)
+    }
+
+    func testMissingTurnFailsDecode() {
+        // `turn` is non-optional on the Rust payload. Regression guard
+        // against the removed "default to 1" back-compat behavior.
+        let payload: [String: AnyCodable] = [
+            "content": AnyCodable("Hello")
+        ]
+
+        XCTAssertNil(UserMessagePayload(from: payload))
     }
 }
