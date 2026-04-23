@@ -1,0 +1,72 @@
+# Dependabot config — keep dependencies fresh without manual diligence.
+#
+# Three ecosystems (today):
+#   - cargo: the Rust agent. Weekly. Grouped: dev-deps and prod-deps split so a
+#     test-only bump can merge without re-reviewing the runtime surface.
+#   - github-actions: workflow action versions (actions/checkout, etc.). Weekly.
+#   - swift (Swift Package Manager): NOT YET — packages/ios-app has no
+#     Package.swift today. Adds in Phase 7 when Sentry is introduced. Re-enable
+#     this entry then.
+#
+# Reviewers: PR labels are auto-applied so we can filter the queue. Keep
+# `open-pull-requests-limit` low so dependabot doesn't drown the repo.
+
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /packages/agent
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    groups:
+      # Group dev-only crates so test-runner bumps don't ping the runtime
+      # reviewer for nothing.
+      dev-dependencies:
+        dependency-type: development
+      # Group all minor/patch runtime updates into one PR per week.
+      runtime-minor:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Major bumps land via dedicated PRs we open ourselves; dependabot's
+      # auto-major PRs are noisy and rarely safe to merge unreviewed.
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "chore(ci)"
+      include: scope
+
+  # Re-enable in Phase 7 once Sentry SDK lands a Package.swift in packages/ios-app.
+  # - package-ecosystem: swift
+  #   directory: /packages/ios-app
+  #   schedule:
+  #     interval: monthly
+  #   open-pull-requests-limit: 3
+  #   labels:
+  #     - dependencies
+  #     - ios
+  #   commit-message:
+  #     prefix: "chore(deps-ios)"
+  #     include: scope
