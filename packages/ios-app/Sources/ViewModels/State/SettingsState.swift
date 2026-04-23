@@ -97,7 +97,12 @@ final class SettingsState {
     /// `DependencyContainer` bearer-token resolver can read it directly on
     /// the WS-upgrade synchronous path (avoids a round-trip through the
     /// async `SettingsState.load`).
-    static let cachedPresetsKey = "cachedConnectionPresets"
+    ///
+    /// `nonisolated` so non-main-actor helpers (e.g. `OnboardingMigrationDecider`,
+    /// the canary test that pins this string against `OnboardingState.cachedPresetsKey`)
+    /// can read it without crossing actor boundaries. The string is a value type;
+    /// no isolation is needed.
+    nonisolated static let cachedPresetsKey = "cachedConnectionPresets"
 
     private func loadCachedPresets() {
         guard let data = UserDefaults.standard.data(forKey: Self.cachedPresetsKey),

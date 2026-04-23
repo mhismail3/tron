@@ -66,6 +66,14 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     @ObservationIgnored
     let presetTokenStore = PresetTokenStore()
 
+    /// Default pairing probe used by the onboarding PairingStep. Held here
+    /// so tests + previews can swap a `StubPairingProbe` without rebuilding
+    /// the container. Lazy because a fresh probe spins up its own URLSession
+    /// on every call and we don't need one until the user lands on the
+    /// Pairing step.
+    @ObservationIgnored
+    lazy var pairingProbe: any PairingProbing = URLSessionPairingProbe()
+
     // MARK: - Recreatable Services (When Server Changes)
 
     /// RPC client for server communication - recreated when server settings change

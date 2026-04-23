@@ -14,6 +14,20 @@ struct TronMobileApp: App {
 
     @State private var initializer = AppInitializer()
 
+    // Onboarding state — owned per-launch; survives across the wizard
+    // because @State preserves its initial value for the lifetime of
+    // the App. Once `onboardingComplete` flips to true the first-run
+    // gate stops mounting it.
+    @State private var onboardingState = OnboardingState()
+
+    /// First-run gate. Driven by `OnboardingState.completionStorageKey`
+    /// (the literal key `"onboardingComplete"`). When false → mount
+    /// `OnboardingFlowView`. When true → mount `ContentView`. The
+    /// migration decider in `init()` may flip this to true on first
+    /// launch with this build for existing TestFlight users with cached
+    /// presets so they don't get dragged through the wizard.
+    @AppStorage("onboardingComplete") private var onboardingComplete: Bool = false
+
     @Environment(\.scenePhase) private var scenePhase
 
     // Deep link navigation state
@@ -26,6 +40,15 @@ struct TronMobileApp: App {
 
         // Register all event plugins for the new event system
         EventRegistry.shared.registerAll()
+
+        // Migration: existing TestFlight users with cached `connectionPresets`
+        // shouldn't be re-dragged through the welcome wizard on the first
+        // launch with this build. The decider is a pure helper — see
+        // `OnboardingMigrationDecider.runMigrationIfNeeded` for invariants.
+        // It writes `onboardingComplete=true` only when the user has cached
+        // presets AND hasn't already been marked complete; explicit resets
+        // (e.g. via the diagnostics page) are never undone.
+        OnboardingMigrationDecider.runMigrationIfNeeded()
     }
 
     var body: some Scene {
@@ -183,15 +206,46 @@ struct TronMobileApp: App {
     @available(iOS 26.0, *)
     @ViewBuilder
     private func readyContent() -> some View {
-        ContentView(
-            deepLinkSessionId: $deepLinkSessionId,
-            deepLinkScrollTarget: $deepLinkScrollTarget,
-            deepLinkNotificationToolCallId: $deepLinkNotificationToolCallId
-        )
-        .environment(\.dependencies, container)
-        .environment(\.interactionPolicy, container.interactionPolicy)
-        .withErrorHandler()
-        .withToastBanner()
+        if onboardingComplete {
+            ContentView(
+                deepLinkSessionId: $deepLinkSessionId,
+                deepLinkScrollTarget: $deepLinkScrollTarget,
+                deepLinkNotificationToolCallId: $deepLinkNotificationToolCallId
+            )
+            .environment(\.dependencies, container)
+            .environment(\.interactionPolicy, container.interactionPolicy)
+            .withErrorHandler()
+            .withToastBanner()
+            .task {
+                // Existing-user push reconnect: if onboarding completed in a
+                // prior launch (or via migration), re-check authorization +
+                // register any pending device token. This used to live in
+                // `setupPushNotifications` called from `initializeApp` — it
+                // moved here so the system permission prompt only fires inside
+                // `NotificationsStep`, never silently behind ContentView.
+                await container.pushNotificationService.checkAuthorizationStatus()
+                container.pushNotificationService.registerIfAuthorized()
+                if let token = container.pushNotificationService.deviceToken {
+                    await registerDeviceToken(token)
+                }
+            }
+        } else {
+            OnboardingFlowView(
+                state: onboardingState,
+                dependencies: container,
+                onComplete: {
+                    // OnboardingState.complete() already flipped the
+                    // AppStorage flag — this closure is the explicit hook
+                    // for tests / observability and is called immediately
+                    // after. Keep it side-effect-free here to avoid double
+                    // work; the @AppStorage update will swap the view.
+                }
+            )
+            .environment(\.dependencies, container)
+            .environment(\.interactionPolicy, container.interactionPolicy)
+            .withErrorHandler()
+            .withToastBanner()
+        }
     }
 
     // MARK: - Initialization
@@ -200,29 +254,14 @@ struct TronMobileApp: App {
         await initializer.initialize {
             try await container.initialize()
         }
-        if initializer.isReady {
-            await setupPushNotifications()
-        }
+        // Push-notification setup intentionally NOT triggered here. It used
+        // to call `setupPushNotifications()` which silently prompted for
+        // notification permission on every fresh install — that prompt is
+        // now part of `NotificationsStep` in the onboarding wizard, where
+        // the user is given context first. See plan section B / Phase 4.3.
     }
 
     // MARK: - Push Notifications
-
-    /// Request push notification authorization and register if authorized
-    private func setupPushNotifications() async {
-        // Request authorization
-        let authorized = await container.pushNotificationService.requestAuthorization()
-
-        if authorized {
-            TronLogger.shared.info("Push notifications authorized", category: .notification)
-
-            // If we already have a token and are connected, register it
-            if let token = container.pushNotificationService.deviceToken {
-                await registerDeviceToken(token)
-            }
-        } else {
-            TronLogger.shared.info("Push notifications not authorized", category: .notification)
-        }
-    }
 
     /// Register device token with the server (global registration — the
     /// server fans out every NotifyApp to all active tokens regardless of

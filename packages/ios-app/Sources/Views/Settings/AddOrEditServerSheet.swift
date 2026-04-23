@@ -136,10 +136,19 @@ struct AddOrEditServerSheet: View {
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
             Spacer()
             Group {
+                let pasteAwareBinding = binding.pasteAware { payload in
+                    host = payload.host
+                    port = String(payload.port)
+                    token = payload.token
+                    if let pastedLabel = payload.label, label.isEmpty {
+                        label = pastedLabel
+                    }
+                    inlineError = nil
+                }
                 if secure {
-                    SecureField(placeholder, text: pasteAware(binding))
+                    SecureField(placeholder, text: pasteAwareBinding)
                 } else {
-                    TextField(placeholder, text: pasteAware(binding))
+                    TextField(placeholder, text: pasteAwareBinding)
                 }
             }
             .font(TronTypography.sans(size: TronTypography.sizeBody))
@@ -159,27 +168,11 @@ struct AddOrEditServerSheet: View {
         .onTapGesture { if !locked { focusedField = field } }
     }
 
-    /// Wrap a text binding so that a `tron://pair?…` paste auto-distributes
-    /// across all three fields (host / port / token) regardless of which
-    /// field received the paste.
-    private func pasteAware(_ binding: Binding<String>) -> Binding<String> {
-        Binding(
-            get: { binding.wrappedValue },
-            set: { newValue in
-                if let payload = try? PairingURLParser.parse(newValue).get() {
-                    host = payload.host
-                    port = String(payload.port)
-                    token = payload.token
-                    if let pastedLabel = payload.label, label.isEmpty {
-                        label = pastedLabel
-                    }
-                    inlineError = nil
-                } else {
-                    binding.wrappedValue = newValue
-                }
-            }
-        )
-    }
+    // The paste-aware binding helper was extracted to
+    // `Extensions/Binding+PasteAware.swift` (Phase 4.5) so the
+    // onboarding `PairingStep` and this re-pair sheet share the same
+    // tron://pair-detection code path. The closure above is the only
+    // sheet-specific bit (mutating local @State).
 
     private func advanceFocus(from field: Field) {
         switch field {
