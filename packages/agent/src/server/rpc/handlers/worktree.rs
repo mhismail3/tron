@@ -13,7 +13,7 @@ use crate::worktree::{count_diff_stats, split_diff_by_file};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{
-    map_worktree_error, opt_bool, opt_string, require_string_param,
+    map_worktree_error, opt_bool, opt_string, require_bool, require_string_param,
 };
 use crate::server::rpc::registry::MethodHandler;
 use crate::worktree::types::CommitOptions;
@@ -159,13 +159,16 @@ impl MethodHandler for CommitHandler {
             });
         }
 
-        // Optional flag parsing. Defaults preserve pre-flag behavior so older
-        // clients that send only {sessionId, message} continue to see the
-        // "stage everything, no amend, no signoff" semantics they had.
+        // `stageAll` is contractually required — there is no sane server-side
+        // default now that iOS ships with an explicit toggle (I7). A client
+        // that omits it is bugged and must be fixed, not silently coerced.
+        // `amend` and `signoff` remain opt-in feature flags; the vast
+        // majority of callers want them off and sending `false` on every
+        // wire would be pure overhead.
         let opts = CommitOptions {
             amend: opt_bool(params.as_ref(), "amend").unwrap_or(false),
             signoff: opt_bool(params.as_ref(), "signoff").unwrap_or(false),
-            stage_all: opt_bool(params.as_ref(), "stageAll").unwrap_or(true),
+            stage_all: require_bool(params.as_ref(), "stageAll")?,
         };
 
         match coord.commit(&session_id, &message, opts).await {

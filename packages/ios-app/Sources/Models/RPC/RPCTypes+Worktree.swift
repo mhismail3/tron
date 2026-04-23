@@ -70,10 +70,11 @@ struct WorktreeIsGitRepoResult: Decodable {
 
 /// Commit changes in a session's worktree.
 ///
-/// All flag fields are optional on the wire. When omitted, the server
-/// applies defaults: `stageAll = true` (preserves legacy behavior),
-/// `amend = false`, `signoff = false`. Older clients that send only
-/// `{sessionId, message}` continue to see pre-flag semantics.
+/// `stageAll` is a contract-required flag — the caller must explicitly
+/// choose "stage everything first" (`true`, equivalent to `git add -A`)
+/// or "commit only what's already indexed" (`false`). There is no
+/// server-side default. `amend` and `signoff` stay optional: most commits
+/// want them off and sending `false` on every wire would be pure overhead.
 struct WorktreeCommitParams: Encodable {
     let sessionId: String
     let message: String
@@ -81,17 +82,16 @@ struct WorktreeCommitParams: Encodable {
     let amend: Bool?
     /// When true, append a `Signed-off-by:` trailer (DCO projects).
     let signoff: Bool?
-    /// When true (default), run `git add -A` before committing so every
-    /// tracked and untracked file is included. When false, only the index
-    /// is committed.
-    let stageAll: Bool?
+    /// When true, run `git add -A` before committing so every tracked and
+    /// untracked file is included. When false, only the index is committed.
+    let stageAll: Bool
 
     init(
         sessionId: String,
         message: String,
+        stageAll: Bool,
         amend: Bool? = nil,
-        signoff: Bool? = nil,
-        stageAll: Bool? = nil
+        signoff: Bool? = nil
     ) {
         self.sessionId = sessionId
         self.message = message

@@ -31,26 +31,26 @@ final class WorktreeClient: RPCDomainClient {
 
     /// Commit changes in a session's worktree.
     ///
-    /// All flags are optional. When omitted the server applies its
-    /// defaults: `stageAll = true` (runs `git add -A` first), `amend =
-    /// false`, `signoff = false`. Callers should pass `nil` rather than
-    /// `false` when they have no opinion — this lets the server's default
-    /// stay authoritative.
+    /// `stageAll` is required — the caller must decide between
+    /// "stage everything first" (`true`, equivalent to `git add -A`) and
+    /// "commit only what's already indexed" (`false`). `amend` and
+    /// `signoff` remain optional opt-in flags; omit them when the call
+    /// site has no opinion.
     func commit(
         sessionId: String,
         message: String,
+        stageAll: Bool,
         amend: Bool? = nil,
-        signoff: Bool? = nil,
-        stageAll: Bool? = nil
+        signoff: Bool? = nil
     ) async throws -> WorktreeCommitResult {
         let ws = try requireTransport().requireConnection()
 
         let params = WorktreeCommitParams(
             sessionId: sessionId,
             message: message,
+            stageAll: stageAll,
             amend: amend,
-            signoff: signoff,
-            stageAll: stageAll
+            signoff: signoff
         )
         let result: WorktreeCommitResult = try await ws.send(method: "worktree.commit", params: params)
         logger.info("Committed worktree changes: \(result.commitHash ?? "nothing-to-commit")", category: .session)

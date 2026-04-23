@@ -228,31 +228,44 @@ struct WorktreeCommitParamsTests {
 
     @Test("required fields always encoded")
     func requiredFieldsOnly() {
-        let params = WorktreeCommitParams(sessionId: "s1", message: "hi")
+        // I7: stageAll is a required field on the wire. A minimal call
+        // still carries it explicitly — there is no server-side default.
+        let params = WorktreeCommitParams(sessionId: "s1", message: "hi", stageAll: true)
         let dict = encode(params)
         #expect(dict["sessionId"] as? String == "s1")
         #expect(dict["message"] as? String == "hi")
+        #expect(dict["stageAll"] as? Bool == true)
     }
 
-    @Test("flag-less call preserves legacy server defaults")
-    func legacyCallPreservesServerDefaults() {
-        // Critical regression guard: older iOS clients that upgrade must
-        // continue to commit everything (stage_all = true by default on
-        // the server). If we accidentally emit `stageAll: false` when the
-        // caller passed nil, the server would silently start committing
-        // only the index — a destructive behavior change.
-        let params = WorktreeCommitParams(sessionId: "s1", message: "hi")
+    @Test("stageAll=true is encoded explicitly")
+    func stageAllTrueEncoded() {
+        // I7: omitting the flag on the wire is no longer legal. Even the
+        // "commit everything" case must put `stageAll: true` in the JSON
+        // so the server's require_bool check passes.
+        let params = WorktreeCommitParams(sessionId: "s1", message: "hi", stageAll: true)
         let dict = encode(params)
-        // Either absent, or present as NSNull — both route to
-        // `opt_bool(...).unwrap_or(true)` on the server.
-        if let raw = dict["stageAll"] {
-            #expect(raw is NSNull, "stageAll should be absent or null, got \(raw)")
-        }
+        #expect(dict["stageAll"] as? Bool == true,
+                "stageAll:true must be present, not omitted")
+    }
+
+    @Test("stageAll=false is encoded explicitly")
+    func stageAllFalseEncoded() {
+        let params = WorktreeCommitParams(sessionId: "s1", message: "hi", stageAll: false)
+        let dict = encode(params)
+        #expect(dict["stageAll"] as? Bool == false)
+    }
+
+    @Test("optional flags omitted when nil")
+    func optionalFlagsOmittedWhenNil() {
+        // amend and signoff remain opt-in — callers that don't care skip
+        // them entirely so the server sees a lean payload.
+        let params = WorktreeCommitParams(sessionId: "s1", message: "hi", stageAll: true)
+        let dict = encode(params)
         if let raw = dict["amend"] {
-            #expect(raw is NSNull)
+            #expect(raw is NSNull, "amend should be absent or NSNull when not set, got \(raw)")
         }
         if let raw = dict["signoff"] {
-            #expect(raw is NSNull)
+            #expect(raw is NSNull, "signoff should be absent or NSNull when not set, got \(raw)")
         }
     }
 
@@ -261,9 +274,9 @@ struct WorktreeCommitParamsTests {
         let params = WorktreeCommitParams(
             sessionId: "s1",
             message: "body",
+            stageAll: false,
             amend: true,
-            signoff: true,
-            stageAll: false
+            signoff: true
         )
         let dict = encode(params)
         #expect(dict["amend"] as? Bool == true)
@@ -274,14 +287,14 @@ struct WorktreeCommitParamsTests {
     @Test("multi-line message preserved through encoding")
     func multiLineMessageRoundTrip() {
         let msg = "subject\n\nbody line 1\nbody line 2"
-        let params = WorktreeCommitParams(sessionId: "s1", message: msg)
+        let params = WorktreeCommitParams(sessionId: "s1", message: msg, stageAll: true)
         let dict = encode(params)
         #expect(dict["message"] as? String == msg)
     }
 
     @Test("message starting with dash treated as string not flag")
     func dashPrefixedMessage() {
-        let params = WorktreeCommitParams(sessionId: "s1", message: "-x do thing")
+        let params = WorktreeCommitParams(sessionId: "s1", message: "-x do thing", stageAll: true)
         let dict = encode(params)
         #expect(dict["message"] as? String == "-x do thing")
     }

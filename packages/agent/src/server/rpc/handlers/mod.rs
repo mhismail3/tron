@@ -378,7 +378,9 @@ mod error_mapping;
 pub(crate) use error_mapping::{
     map_auth_error, map_cron_error, map_event_store_error, map_import_error, map_worktree_error,
 };
-pub(crate) use params::{opt_array, opt_bool, opt_string, opt_u64, require_param, require_string_param};
+pub(crate) use params::{
+    opt_array, opt_bool, opt_string, opt_u64, require_bool, require_param, require_string_param,
+};
 
 #[cfg(test)]
 pub(crate) mod test_helpers;

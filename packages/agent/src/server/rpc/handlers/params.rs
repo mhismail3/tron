@@ -55,6 +55,21 @@ pub(crate) fn opt_bool(params: Option<&serde_json::Value>, key: &str) -> Option<
         .and_then(serde_json::Value::as_bool)
 }
 
+/// Extract a required bool parameter. Missing or wrong-typed returns
+/// `RpcError::InvalidParams` — use this when the client is contractually
+/// required to send the flag and there is no sane server-side default
+/// (see I7: `stageAll` on `worktree.commit`).
+pub(crate) fn require_bool(
+    params: Option<&serde_json::Value>,
+    key: &str,
+) -> Result<bool, RpcError> {
+    require_param(params, key)?
+        .as_bool()
+        .ok_or_else(|| RpcError::InvalidParams {
+            message: format!("Parameter '{key}' must be a boolean"),
+        })
+}
+
 /// Extract an optional array parameter.
 pub(crate) fn opt_array<'a>(
     params: Option<&'a serde_json::Value>,

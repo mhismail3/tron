@@ -24,7 +24,7 @@ struct WorktreeClientTests {
         let client = WorktreeClient(transport: transport)
 
         await #expect(throws: RPCClientError.self) {
-            _ = try await client.commit(sessionId: "test-session", message: "test commit")
+            _ = try await client.commit(sessionId: "test-session", message: "test commit", stageAll: true)
         }
     }
 

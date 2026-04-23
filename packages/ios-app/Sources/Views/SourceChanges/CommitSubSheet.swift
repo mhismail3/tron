@@ -386,9 +386,9 @@ struct CommitSubSheet: View {
                 try await rpcClient.worktree.commit(
                     sessionId: sessionId,
                     message: trimmedMessage,
+                    stageAll: stageAll,
                     amend: amendPrevious ? true : nil,
-                    signoff: signOff ? true : nil,
-                    stageAll: stageAll ? nil : false
+                    signoff: signOff ? true : nil
                 )
             }
         }

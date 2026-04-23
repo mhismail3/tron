@@ -1264,25 +1264,50 @@ async fn commit_test_context_async() -> (
 }
 
 #[tokio::test]
-async fn commit_handler_default_stage_all_when_absent() {
-    // Backwards-compat guard: when older iOS clients send just
-    // `{sessionId, message}`, the handler must default `stageAll` to true
-    // so the untracked file is committed.
+async fn commit_handler_rejects_missing_stage_all() {
+    // I7: `stageAll` is contractually required on the wire. A client that
+    // sends only `{sessionId, message}` is bugged and must surface an
+    // InvalidParams error — no silent "true by default" fallback, no
+    // accidental `git add -A` on an untagged request.
     let (_tmp, ctx, _coord, sid, wt) = commit_test_context_async().await;
 
     std::fs::write(wt.join("new.txt"), "new").unwrap();
-    let result = CommitHandler
+    let err = CommitHandler
         .handle(
-            Some(json!({"sessionId": sid, "message": "default"})),
+            Some(json!({"sessionId": sid, "message": "legacy"})),
             &ctx,
         )
         .await
-        .unwrap();
-    assert!(result["commitHash"].is_string(), "expected a real commit hash, got {result:?}");
+        .expect_err("missing stageAll must be rejected, not defaulted");
+
+    assert_eq!(err.code(), "INVALID_PARAMS");
     assert!(
-        result["filesChanged"].as_array().unwrap().iter().any(|v| v == "new.txt"),
-        "default stage_all should have committed the untracked file"
+        err.to_string().contains("stageAll"),
+        "error should name the missing parameter, got {err:?}"
     );
+}
+
+#[tokio::test]
+async fn commit_handler_rejects_non_bool_stage_all() {
+    // I7 regression guard: non-bool `stageAll` (string, number, null) must
+    // be rejected up front rather than silently coerced. The old handler
+    // treated anything non-bool as "absent" and defaulted to true.
+    let (_tmp, ctx, _coord, sid, _wt) = commit_test_context_async().await;
+
+    for bogus in [json!("yes"), json!(1), json!(null), json!([true])] {
+        let err = CommitHandler
+            .handle(
+                Some(json!({
+                    "sessionId": sid,
+                    "message": "bogus",
+                    "stageAll": bogus,
+                })),
+                &ctx,
+            )
+            .await
+            .expect_err("non-bool stageAll must be rejected");
+        assert_eq!(err.code(), "INVALID_PARAMS", "bogus value {bogus:?}");
+    }
 }
 
 #[tokio::test]
@@ -1322,11 +1347,16 @@ async fn commit_handler_stage_all_false_only_commits_index() {
 async fn commit_handler_amend_rewrites_head() {
     let (_tmp, ctx, _coord, sid, wt) = commit_test_context_async().await;
 
-    // Seed a first commit via the handler (stage_all default).
+    // Seed a first commit via the handler — stageAll:true so the new file
+    // is picked up from the worktree.
     std::fs::write(wt.join("v1.txt"), "one").unwrap();
     let first = CommitHandler
         .handle(
-            Some(json!({"sessionId": sid, "message": "first"})),
+            Some(json!({
+                "sessionId": sid,
+                "message": "first",
+                "stageAll": true,
+            })),
             &ctx,
         )
         .await
@@ -1340,6 +1370,7 @@ async fn commit_handler_amend_rewrites_head() {
                 "sessionId": sid,
                 "message": "first (amended)",
                 "amend": true,
+                "stageAll": true,
             })),
             &ctx,
         )
@@ -1372,6 +1403,7 @@ async fn commit_handler_signoff_adds_trailer() {
                 "sessionId": sid,
                 "message": "body",
                 "signoff": true,
+                "stageAll": true,
             })),
             &ctx,
         )
@@ -1388,10 +1420,12 @@ async fn commit_handler_signoff_adds_trailer() {
 }
 
 #[tokio::test]
-async fn commit_handler_rejects_non_bool_flags_gracefully() {
-    // `opt_bool` should treat a non-bool like "yes" as absent and fall
-    // back to the default — not crash or return an error. This prevents
-    // client bugs from silently corrupting commit behavior.
+async fn commit_handler_soft_bool_flags_are_lenient() {
+    // `amend` and `signoff` remain opt-in feature flags parsed via
+    // `opt_bool` — non-bool values (e.g. a stringly typed "yes" from a
+    // misbehaving client) fall back to their defaults of false rather
+    // than erroring out. Only `stageAll` is strict (see
+    // commit_handler_rejects_non_bool_stage_all).
     let (_tmp, ctx, _coord, sid, wt) = commit_test_context_async().await;
 
     std::fs::write(wt.join("z.txt"), "z").unwrap();
@@ -1399,29 +1433,32 @@ async fn commit_handler_rejects_non_bool_flags_gracefully() {
         .handle(
             Some(json!({
                 "sessionId": sid,
-                "message": "invalid flag",
+                "message": "soft flags",
                 "amend": "yes",
-                "stageAll": 1,
+                "signoff": 1,
+                "stageAll": true,
             })),
             &ctx,
         )
         .await
         .unwrap();
-    // Non-bool flags are coerced to default false — handler still returns
-    // a successful response (with a real commit hash if there were changes).
-    assert!(result.is_object(), "expected an object response, got {result:?}");
+    assert!(result["commitHash"].is_string(), "expected a real commit hash, got {result:?}");
 }
 
 #[tokio::test]
 async fn commit_handler_nothing_to_commit_returns_null_hash() {
-    // Clean tree, no flags → coordinator returns None → handler responds
-    // with null commitHash. iOS surfaces this as a friendly "nothing to
-    // commit" banner. Failures throw typed RPC errors instead.
+    // Clean tree, stageAll:true → coordinator returns None → handler
+    // responds with null commitHash. iOS surfaces this as a friendly
+    // "nothing to commit" banner. Failures throw typed RPC errors instead.
     let (_tmp, ctx, _coord, sid, _wt) = commit_test_context_async().await;
 
     let result = CommitHandler
         .handle(
-            Some(json!({"sessionId": sid, "message": "empty"})),
+            Some(json!({
+                "sessionId": sid,
+                "message": "empty",
+                "stageAll": true,
+            })),
             &ctx,
         )
         .await
