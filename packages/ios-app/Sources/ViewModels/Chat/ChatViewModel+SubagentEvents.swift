@@ -7,13 +7,27 @@ extension ChatViewModel {
     func handleSubagentSpawnedResult(_ result: SubagentSpawnedPlugin.Result) {
         logger.info("Subagent spawned: \(result.subagentSessionId) for task: \(result.task.prefix(50))...", category: .chat)
 
+        let resolvedSpawnType: SubagentSpawnType
+        if let decoded = SubagentSpawnType(from: result.spawnType) {
+            resolvedSpawnType = decoded
+        } else {
+            // Wire contract: `spawnType` is always emitted by the server.
+            // Missing / unknown value signals a schema drift — log loudly and
+            // use the safe default (toolAgent) so the chip still renders.
+            logger.error(
+                "Subagent live event missing/unknown spawnType=\(result.spawnType ?? "<nil>") for session \(result.subagentSessionId); defaulting to toolAgent",
+                category: .chat
+            )
+            resolvedSpawnType = .toolAgent
+        }
+
         subagentState.trackSpawn(
             toolCallId: result.toolCallId ?? result.subagentSessionId,
             subagentSessionId: result.subagentSessionId,
             task: result.task,
             model: result.model,
             blocking: result.blocking,
-            spawnType: SubagentSpawnType(from: result.spawnType)
+            spawnType: resolvedSpawnType
         )
 
         updateToolMessageToSubagentChip(

@@ -344,7 +344,19 @@ final class DashboardStreamManager {
     }
 
     func handleSubagentSpawned(sessionId: String, task: String, toolCallId: String?, subagentSessionId: String, spawnType: String?) {
-        let resolvedType = SubagentSpawnType(from: spawnType)
+        // Wire contract: server emits a known spawnType for every subagent
+        // event. An unknown/missing value indicates a schema drift — log and
+        // treat conservatively as `.toolAgent` so the activity still renders.
+        let resolvedType: SubagentSpawnType
+        if let decoded = SubagentSpawnType(from: spawnType) {
+            resolvedType = decoded
+        } else {
+            logger.error(
+                "Dashboard stream received unknown spawnType=\(spawnType ?? "<nil>") for session \(subagentSessionId); defaulting to toolAgent",
+                category: .session
+            )
+            resolvedType = .toolAgent
+        }
         if resolvedType != .toolAgent {
             nonToolSubagentIds.insert(subagentSessionId)
             return

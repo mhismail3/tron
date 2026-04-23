@@ -98,7 +98,17 @@ extension ChatViewModel {
                 tokenUsage: completion?.tokenUsage
             )
             subagentData.blocking = spawn.blocking
-            subagentData.spawnType = SubagentSpawnType(from: spawn.spawnType)
+            if let resolvedSpawnType = SubagentSpawnType(from: spawn.spawnType) {
+                subagentData.spawnType = resolvedSpawnType
+            } else {
+                // Wire contract: server always emits a known spawnType. If we
+                // reach this branch a schema drift has landed — log loudly and
+                // leave the default (.toolAgent) so the subagent still renders.
+                logger.error(
+                    "Subagent reconstruction received unknown spawnType=\(spawn.spawnType ?? "<nil>") for session \(sessionId); defaulting to toolAgent",
+                    category: .session
+                )
+            }
 
             if let existing = subagentState.getSubagent(sessionId: sessionId) {
                 subagentData.resultDeliveryStatus = existing.resultDeliveryStatus

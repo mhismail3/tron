@@ -53,18 +53,27 @@ enum SubagentResultDeliveryStatus: String, Codable, Equatable {
 
 /// Categorizes the origin of a subagent for UI-level decisions
 /// (e.g., whether it suppresses the breathing line or shows a chip).
+///
+/// Decoding is strict: the server is the source of truth and every
+/// `subagent_spawned` / `subagent_completed` / `subagent_failed` event
+/// carries a non-empty `spawnType` string from `SpawnType::as_str` on
+/// the Rust side. A missing or unrecognised value on the wire indicates
+/// a schema drift (iOS/server out of sync) and MUST be surfaced as a
+/// decode failure, not silently coerced into `.toolAgent`.
 enum SubagentSpawnType: String, Codable, Equatable {
     case toolAgent
     case subsession
     case hook
-    case unknown
 
-    init(from rawValue: String?) {
+    /// Failable init from a raw wire value. Returns nil for unknown
+    /// variants and for `nil` — callers decide whether to drop the
+    /// record, log a warning, or fall back to a safe default.
+    init?(from rawValue: String?) {
         switch rawValue {
         case "toolAgent": self = .toolAgent
         case "subsession": self = .subsession
         case "hook": self = .hook
-        default: self = .toolAgent  // Backward compat: treat unknown/nil as toolAgent
+        default: return nil
         }
     }
 }
