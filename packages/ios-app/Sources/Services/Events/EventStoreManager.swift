@@ -56,6 +56,15 @@ final class EventStoreManager {
     @ObservationIgnored
     private(set) lazy var dashboardStreamManager = DashboardStreamManager()
 
+    /// Coalescing coordinator for session-list refresh. Every caller routes through
+    /// `requestSessionRefresh(reason:)` — direct `refreshSessionList()` calls are reserved
+    /// for the coordinator's `performRefresh` closure.
+    @ObservationIgnored
+    private(set) lazy var refreshService: SessionRefreshService = SessionRefreshService(
+        performRefresh: { [weak self] in await self?.refreshSessionList() },
+        isConnected: { [weak self] in self?.rpcClient.connectionState.isConnected ?? false }
+    )
+
     /// Per-session worktree status, shared by the chat toolbar and the sidebar.
     /// Populated lazily by `.task` on sidebar rows and kept live by routing
     /// worktree events through `handleGlobalEventV2`.

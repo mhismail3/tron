@@ -120,10 +120,10 @@ struct ToastCenterTests {
 
     // MARK: - Auto-dismiss
 
-    @Test("autoDismissAfter dismisses toast after the duration")
+    @Test(".after(duration) dismisses toast after the duration")
     func autoDismissTriggers() async {
         let (sut, clock) = makeSUT()
-        sut.push("temp", autoDismissAfter: .seconds(2))
+        sut.push("temp", autoDismiss: .after(.seconds(2)))
         #expect(sut.toasts.count == 1)
 
         await yieldForAsync()  // let the auto-dismiss Task register its sleep
@@ -132,10 +132,10 @@ struct ToastCenterTests {
         #expect(sut.toasts.isEmpty)
     }
 
-    @Test("autoDismissAfter nil means sticky (no auto-dismiss)")
+    @Test(".sticky means no auto-dismiss regardless of time")
     func stickyToastNotDismissed() async {
         let (sut, clock) = makeSUT()
-        sut.push("sticky", autoDismissAfter: nil)
+        sut.push("sticky", autoDismiss: .sticky)
         await yieldForAsync()
         clock.advance(by: .seconds(60))
         await yieldForAsync()
@@ -190,7 +190,7 @@ struct ToastCenterTests {
     @Test("dismiss cancels the auto-dismiss timer")
     func dismissCancelsAutoTimer() async {
         let (sut, clock) = makeSUT()
-        sut.push("temp", autoDismissAfter: .seconds(5))
+        sut.push("temp", autoDismiss: .after(.seconds(5)))
         await yieldForAsync()
         let id = sut.toasts[0].id
         sut.dismiss(id)

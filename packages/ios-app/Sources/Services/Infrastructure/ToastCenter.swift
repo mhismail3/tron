@@ -29,6 +29,16 @@ final class ToastCenter {
         }
     }
 
+    /// Toast dismissal timing policy.
+    enum AutoDismiss: Sendable, Equatable {
+        /// Use severity defaults (info 2s / warning 3s / error 4s). Retry toasts are sticky.
+        case standard
+        /// Never auto-dismiss; user must tap / swipe / dismiss via Retry.
+        case sticky
+        /// Auto-dismiss after the given duration.
+        case after(Duration)
+    }
+
     struct Toast: Identifiable, Equatable {
         let id: UUID
         let message: String
@@ -83,29 +93,27 @@ final class ToastCenter {
     ///   - message: User-facing text.
     ///   - severity: Visual/semantic severity. Defaults to `.error`.
     ///   - dedupKey: Optional key used to suppress duplicates.
-    ///   - autoDismissAfter: Override dismissal timing. Pass `nil` to make the toast sticky.
-    ///     If unspecified, uses severity default (info 2s, warning 3s, error 4s). Retry toasts
-    ///     default to sticky (no auto-dismiss).
-    ///   - retryHandler: Optional callback for a Retry button. When non-nil, the toast is sticky
-    ///     by default.
+    ///   - autoDismiss: Dismissal timing policy. `.standard` uses severity defaults
+    ///     (info 2s / warning 3s / error 4s) unless `retryHandler` is non-nil (→ sticky).
+    ///   - retryHandler: Optional callback for a Retry button. Makes `.standard` mean sticky.
     func push(
         _ message: String,
         severity: Severity = .error,
         dedupKey: String? = nil,
-        autoDismissAfter: Duration? = .some(.zero),  // sentinel; resolved below
+        autoDismiss: AutoDismiss = .standard,
         retryHandler: (@MainActor () async -> Void)? = nil
     ) {
         if let key = dedupKey, toasts.contains(where: { $0.dedupKey == key }) {
             return
         }
 
-        // Resolve auto-dismiss: sentinel (default `.zero`) → use severity default; explicit nil → sticky.
-        let resolvedDismiss: Duration?
-        if autoDismissAfter == .some(.zero) {
-            resolvedDismiss = retryHandler == nil ? severity.defaultAutoDismiss : nil
-        } else {
-            resolvedDismiss = autoDismissAfter
-        }
+        let resolvedDismiss: Duration? = {
+            switch autoDismiss {
+            case .sticky: return nil
+            case .after(let duration): return duration
+            case .standard: return retryHandler == nil ? severity.defaultAutoDismiss : nil
+            }
+        }()
 
         let toast = Toast(
             id: UUID(),

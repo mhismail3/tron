@@ -154,9 +154,10 @@ struct SessionSidebar: View {
                     Spacer()
                 }
 
+                let canCreate = interactionPolicy?.canCreateSession ?? false
                 FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress, size: 56)
-                    .disabled(!(interactionPolicy?.canCreateSession ?? false))
-                    .opacity((interactionPolicy?.canCreateSession ?? false) ? 1.0 : 0.4)
+                    .disabled(!canCreate)
+                    .opacity(canCreate ? 1.0 : 0.4)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 8)

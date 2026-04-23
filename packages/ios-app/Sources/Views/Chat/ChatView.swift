@@ -26,9 +26,8 @@ struct ChatView: View {
     // See: https://www.hackingwithswift.com/quick-start/swiftui/how-to-present-multiple-sheets
     @State var sheetCoordinator = SheetCoordinator()
 
-    // MARK: - Connection Interaction State (private - body only)
-    @State private var isInteractionEnabled: Bool
-    @State private var interactionDebounceTask: Task<Void, Never>?
+    // MARK: - Interaction policy (read-only gate for input bar, shared app-wide debounce)
+    @Environment(\.interactionPolicy) private var interactionPolicy
 
     // MARK: - Navigation Lifecycle (SDF crash workaround)
     // Disables .textSelection(.enabled) before navigation pop animation starts,
@@ -67,7 +66,6 @@ struct ChatView: View {
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
         _viewModel = State(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId, audioRecorder: audioRecorder))
-        _isInteractionEnabled = State(initialValue: rpcClient.connectionState.canInteract)
     }
 
     // MARK: - Body
@@ -255,25 +253,8 @@ struct ChatView: View {
                     }
                 }
             }
-
-            // Debounce interaction enabled state to prevent UI flicker during reconnection
-            interactionDebounceTask?.cancel()
-            if newState.canInteract {
-                // Becoming connected - wait to ensure it's stable (not optimistic)
-                interactionDebounceTask = Task {
-                    try? await Task.sleep(for: .milliseconds(500))
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        // Double-check still connected before enabling
-                        if rpcClient.connectionState.canInteract {
-                            isInteractionEnabled = true
-                        }
-                    }
-                }
-            } else {
-                // Becoming disconnected - disable immediately
-                isInteractionEnabled = false
-            }
+            // Input-bar read-only mode is derived from `interactionPolicy` (500ms
+            // reconnect debounce) — no per-view debounce state needed.
         }
         .onChange(of: viewModel.shouldDismiss) { _, shouldDismiss in
             // Navigate back when session doesn't exist on server
@@ -372,7 +353,7 @@ struct ChatView: View {
                         skillStore: skillStore,
                         inputHistory: inputHistory,
                         animationCoordinator: viewModel.animationCoordinator,
-                        readOnly: workspaceDeleted || !isInteractionEnabled,
+                        readOnly: workspaceDeleted || !(interactionPolicy?.isConnected ?? false),
                         showDragHint: viewModel.pullUpPanelState.isHoldActive && !viewModel.pullUpPanelState.isExpanded && !viewModel.inputBarState.isMentionPopupVisible,
                         queuedMessages: viewModel.messageQueueState.queue
                     ),
@@ -586,9 +567,7 @@ struct ChatView: View {
                         ConnectionStatusPill(
                             connectionState: rpcClient.connectionState,
                             isReady: initialLoadComplete,
-                            onRetry: { [weak dependencies = dependencies] in
-                                await dependencies?.connectionManager.manualRetry()
-                            }
+                            onRetry: dependencies.connectionManager.manualRetry
                         )
                         .id("connectionStatusPill")
 
