@@ -364,6 +364,32 @@ mod tests {
         );
     }
 
+    /// Regression guard: `import/parser.rs` doc-comments must not embed
+    /// example paths from the developer's home directory. An earlier doc
+    /// comment used the literal string `-Users-moose-Downloads-projects-tron`
+    /// as an "example" of a Claude-Code-encoded path; that example leaks the
+    /// developer's directory layout into a public-facing comment that ships
+    /// in `cargo doc`.
+    ///
+    /// Both forms are checked: the raw filesystem prefix `/Users/moose` AND
+    /// the encoded form `-Users-moose-` that Claude Code generates.
+    /// Needles constructed from parts so this test doesn't self-match.
+    #[test]
+    fn import_parser_doc_comments_have_no_personal_path_examples() {
+        let src = include_str!("../../import/parser.rs");
+        let raw_needle = format!("/Users/{}", "moose");
+        let encoded_needle = format!("-Users-{}-", "moose");
+        assert!(
+            !src.contains(&raw_needle),
+            "import/parser.rs contains a hardcoded user path: {raw_needle}"
+        );
+        assert!(
+            !src.contains(&encoded_needle),
+            "import/parser.rs doc-comment example references the developer's \
+             home directory in encoded form: {encoded_needle}"
+        );
+    }
+
     /// Regression guard: managed skill bundles (every `packages/agent/skills/*`
     /// with a `.managed` sentinel) must contain no hardcoded personal-info
     /// literals. Needles are constructed from parts so this test file itself

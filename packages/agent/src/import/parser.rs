@@ -46,11 +46,11 @@ pub struct ClaudeSessionMeta {
 /// Decode a Claude Code project directory name to a filesystem path.
 ///
 /// Claude Code encodes paths by replacing every `/` with `-`, producing
-/// names like `-Users-moose-Downloads-projects-tron`. The naive decode
-/// (replace all `-` with `/`) is lossy when directory names contain hyphens.
-/// We resolve ambiguity by checking the filesystem: starting from the full
-/// naive decode, we walk up the path to find the deepest real directory,
-/// then treat the remainder as the final component name with hyphens.
+/// names like `-Users-alice-projects-myapp`. The naive decode (replace all
+/// `-` with `/`) is lossy when directory names contain hyphens. We resolve
+/// ambiguity by checking the filesystem: starting from the full naive
+/// decode, we walk up the path to find the deepest real directory, then
+/// treat the remainder as the final component name with hyphens.
 pub fn decode_project_dir(encoded: &str) -> String {
     let naive = encoded.replace('-', "/");
 
