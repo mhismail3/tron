@@ -157,7 +157,21 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> LogEntry {
         trace_id: row.get(10).unwrap_or(None),
         parent_trace_id: row.get(11).unwrap_or(None),
         depth: row.get(12).unwrap_or(None),
-        data: data_str.and_then(|s| serde_json::from_str(&s).ok()),
+        data: data_str.and_then(|s| match serde_json::from_str(&s) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                // Surface corrupt persisted data to operators, but let the
+                // query return the rest of the row — dropping the whole log
+                // entry on a malformed `data` column would be worse.
+                tracing::warn!(
+                    log_id = row.get::<_, i64>(0).unwrap_or(0),
+                    error = %e,
+                    raw_len = s.len(),
+                    "logs.store: corrupt `data` column JSON; rendering as None"
+                );
+                None
+            }
+        }),
         error_message: row.get(14).unwrap_or(None),
         error_stack: row.get(15).unwrap_or(None),
         origin: row.get(16).unwrap_or(None),

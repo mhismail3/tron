@@ -340,7 +340,20 @@ impl McpClient {
             .and_then(Value::as_array)
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                    .filter_map(|v| match serde_json::from_value::<McpToolDef>(v.clone()) {
+                        Ok(def) => Some(def),
+                        Err(e) => {
+                            tracing::warn!(
+                                server = %self.name,
+                                error = %e,
+                                tool_preview = %v.get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("<unknown>"),
+                                "MCP server returned malformed tool definition; dropping entry"
+                            );
+                            None
+                        }
+                    })
                     .collect()
             })
             .unwrap_or_default();

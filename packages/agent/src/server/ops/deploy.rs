@@ -156,10 +156,25 @@ pub fn read_deployed_commit(artifacts_dir: &Path) -> String {
 }
 
 /// Read the restart sentinel if it exists.
+///
+/// Returns `None` for the common "no sentinel yet" case (file missing).
+/// Logs a warning if the file exists but cannot be parsed (corrupt JSON,
+/// schema drift) — the caller treats it as "no sentinel" in that case, but
+/// operators see the signal that manual inspection is needed.
 pub fn read_sentinel(artifacts_dir: &Path) -> Option<RestartSentinel> {
     let path = artifacts_dir.join("restart-sentinel.json");
-    let data = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&data).ok()
+    let data = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str(&data) {
+        Ok(sentinel) => Some(sentinel),
+        Err(e) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "deploy: restart sentinel JSON is corrupt; treating as absent"
+            );
+            None
+        }
+    }
 }
 
 /// Write a file atomically using temp-file + rename (crash-safe).
@@ -270,10 +285,19 @@ async fn read_deployed_commit_async(artifacts_dir: &Path) -> String {
 }
 
 async fn read_sentinel_async(artifacts_dir: &Path) -> Option<RestartSentinel> {
-    let data = tokio::fs::read_to_string(artifacts_dir.join("restart-sentinel.json"))
-        .await
-        .ok()?;
-    serde_json::from_str(&data).ok()
+    let path = artifacts_dir.join("restart-sentinel.json");
+    let data = tokio::fs::read_to_string(&path).await.ok()?;
+    match serde_json::from_str(&data) {
+        Ok(sentinel) => Some(sentinel),
+        Err(e) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "deploy: restart sentinel JSON is corrupt; treating as absent"
+            );
+            None
+        }
+    }
 }
 
 // ── Self-test & auto-rollback ─────────────────────────────────────────────

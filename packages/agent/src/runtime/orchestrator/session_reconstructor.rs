@@ -58,7 +58,31 @@ fn from_session_state(state: &SessionState) -> ReconstructedState {
     let messages: Vec<Message> = state
         .messages_with_event_ids
         .iter()
-        .filter_map(|m| serde_json::from_value(serde_json::to_value(&m.message).ok()?).ok())
+        .filter_map(|m| match serde_json::to_value(&m.message) {
+            Ok(value) => match serde_json::from_value::<Message>(value) {
+                Ok(msg) => Some(msg),
+                Err(e) => {
+                    tracing::warn!(
+                        event_ids = ?m.event_ids,
+                        role = %m.message.role,
+                        error = %e,
+                        "session reconstructor: wire-format message does not round-trip to \
+                         runtime Message enum; dropping from reconstructed history"
+                    );
+                    None
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    event_ids = ?m.event_ids,
+                    role = %m.message.role,
+                    error = %e,
+                    "session reconstructor: failed to serialize wire-format message to JSON; \
+                     dropping from reconstructed history"
+                );
+                None
+            }
+        })
         .collect();
 
     let token_usage = TokenUsage {

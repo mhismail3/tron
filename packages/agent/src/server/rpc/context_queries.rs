@@ -422,14 +422,21 @@ fn build_added_skills(
 
     let json_events: Vec<Value> = events
         .iter()
-        .filter_map(|e| {
-            serde_json::from_str::<Value>(&e.payload).ok().map(|payload| {
-                json!({
-                    "type": e.event_type,
-                    "id": e.id,
-                    "payload": payload,
-                })
-            })
+        .filter_map(|e| match serde_json::from_str::<Value>(&e.payload) {
+            Ok(payload) => Some(json!({
+                "type": e.event_type,
+                "id": e.id,
+                "payload": payload,
+            })),
+            Err(err) => {
+                tracing::warn!(
+                    event_id = %e.id,
+                    event_type = %e.event_type,
+                    error = %err,
+                    "context_queries: corrupt event payload JSON; dropping from skill tracker"
+                );
+                None
+            }
         })
         .collect();
 

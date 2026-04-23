@@ -251,14 +251,21 @@ pub fn reconstruct_tracker(
         .unwrap_or_default();
     let json_events: Vec<Value> = events
         .iter()
-        .filter_map(|e| {
-            serde_json::from_str::<Value>(&e.payload).ok().map(|payload| {
-                serde_json::json!({
-                    "type": e.event_type,
-                    "id": e.id,
-                    "payload": payload,
-                })
-            })
+        .filter_map(|e| match serde_json::from_str::<Value>(&e.payload) {
+            Ok(payload) => Some(serde_json::json!({
+                "type": e.event_type,
+                "id": e.id,
+                "payload": payload,
+            })),
+            Err(err) => {
+                tracing::warn!(
+                    event_id = %e.id,
+                    event_type = %e.event_type,
+                    error = %err,
+                    "skill_session: corrupt event payload JSON; dropping from skill tracker"
+                );
+                None
+            }
         })
         .collect();
     SkillTracker::from_events_with_policy(&json_events, policy)

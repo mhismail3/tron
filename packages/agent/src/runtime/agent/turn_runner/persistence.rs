@@ -214,7 +214,21 @@ pub(super) fn add_assistant_message_to_context(
         }
     });
     let stop_reason_for_context: Option<crate::core::messages::StopReason> =
-        serde_json::from_value(serde_json::Value::String(stream_result.stop_reason.clone())).ok();
+        match serde_json::from_value::<crate::core::messages::StopReason>(
+            serde_json::Value::String(stream_result.stop_reason.clone()),
+        ) {
+            Ok(sr) => Some(sr),
+            Err(e) => {
+                tracing::warn!(
+                    raw_stop_reason = %stream_result.stop_reason,
+                    error = %e,
+                    "persistence: unrecognized stop_reason from provider; stored as None. \
+                     This likely means the provider added a new stop_reason that our \
+                     StopReason enum does not yet model."
+                );
+                None
+            }
+        };
 
     context_manager.add_message(crate::core::messages::Message::Assistant {
         content: stream_result.message.content.clone(),
