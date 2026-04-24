@@ -1,6 +1,13 @@
 import SwiftUI
 import Darwin
 
+/// Install step. The shell owns the icon, title, progress pill, and
+/// the bottom action bar (Back / Continue, with Continue gated by
+/// `installOutcome ∈ {.success, .alreadyInstalled}` in
+/// `WizardShell.installCanContinue`). This view contributes the
+/// description, the per-stage progress list, an inline error
+/// summary on failure, and an inline Retry link that re-runs
+/// `runPipeline()`.
 struct InstallStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
@@ -10,9 +17,7 @@ struct InstallStep: View {
     @State private var startedOnce = false
 
     var body: some View {
-        // Title is rendered by `WizardShell.headerRow` — body starts
-        // with the description text directly.
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("Copies the Tron agent binary into ~/.tron/system/Tron.app, drops a LaunchAgent so the server starts at login, and waits for the first heartbeat.")
                 .font(.body)
                 .foregroundStyle(.secondary)
@@ -31,31 +36,20 @@ struct InstallStep: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 8)
                 }
+                // Tertiary retry — only shown on failure. The shell's
+                // Continue stays disabled until the retry succeeds, so
+                // there's no risk of the user advancing on a half-
+                // installed system.
+                Button {
+                    Task { await runPipeline() }
+                } label: {
+                    Label("Retry install", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.wizardLink)
+                .disabled(running)
             }
 
-            HStack {
-                if state.installOutcome != .success && state.installOutcome != .alreadyInstalled {
-                    Button {
-                        Task { await runPipeline() }
-                    } label: {
-                        Label("Retry install", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(running)
-                    .controlSize(.large)
-                }
-                Spacer()
-                Button {
-                    state.advance()
-                } label: {
-                    Text("Continue")
-                        .frame(minWidth: 140)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
-                .disabled(state.installOutcome == nil || running ||
-                          (state.installOutcome != .success && state.installOutcome != .alreadyInstalled))
-            }
+            Spacer(minLength: 0)
         }
         .task {
             // Auto-skip if we know an existing install is fully present.

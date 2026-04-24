@@ -16,11 +16,11 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
 
     /// Title rendered in the wizard's shared header row. Each step's
     /// own body no longer renders a title — it's hoisted into
-    /// `WizardShell` so the back chevron, logo, title, and progress
-    /// pill all sit on the same baseline.
+    /// `WizardShell` so the icon, title, and progress pill all sit
+    /// on the same baseline.
     var displayTitle: String {
         switch self {
-        case .welcome: return "Welcome to Tron"
+        case .welcome: return "Tron Installer"
         case .tailscale: return "Tailscale"
         case .existingInstall: return "Existing install"
         case .permissions: return "Permissions"
@@ -29,6 +29,31 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .done: return "You're all set"
         }
     }
+
+    /// Glyph rendered to the left of `displayTitle` in the shell's
+    /// header row. The Welcome step uses the brand asset; every other
+    /// step uses an SF Symbol so a single rendering path styles them
+    /// uniformly with `Color.tronEmerald`.
+    var headerIcon: HeaderIcon {
+        switch self {
+        case .welcome: return .asset("TronLogo")
+        case .tailscale: return .symbol("network")
+        case .existingInstall: return .symbol("magnifyingglass")
+        case .permissions: return .symbol("lock.shield.fill")
+        case .install: return .symbol("arrow.down.circle.fill")
+        case .pairingInfo: return .symbol("qrcode")
+        case .done: return .symbol("checkmark.seal.fill")
+        }
+    }
+}
+
+/// Discriminated source for the icon rendered in `WizardShell`'s
+/// header row. Asset cases are rendered as `Image(_:)` with the
+/// template rendering mode (so `foregroundStyle` tints them); symbol
+/// cases use `Image(systemName:)` directly.
+enum HeaderIcon: Equatable, Sendable {
+    case asset(String)
+    case symbol(String)
 }
 
 /// Permission categories the wizard probes during the Permissions step.

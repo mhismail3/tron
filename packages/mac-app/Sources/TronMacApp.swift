@@ -23,6 +23,12 @@ struct TronMacApp: App {
                 // to honour this as the window's actual size, and
                 // `WindowConfigurator` strips `.resizable` from the
                 // style mask as a belt-and-braces measure.
+                //
+                // Height = 360 (was 400) trims the dead bottom space
+                // that empty steps (Welcome, Done) made obvious. The
+                // densest steps compensate internally — `PermissionsStep`
+                // wraps its cards in a `ScrollView`, and `PairingInfoStep`
+                // shrinks its QR from 200pt to 170pt — so they still fit.
                 .frame(width: 480, height: 360)
                 // `.containerBackground(_:for: .window)` paints the
                 // material at the WINDOW level — under the entire

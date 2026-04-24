@@ -1,12 +1,15 @@
 import SwiftUI
 
+/// Existing-install detection step. The shell owns the icon, title,
+/// progress pill, and the bottom action bar (Back / "Skip install" or
+/// Continue, dispatched by `WizardStep`). This view contributes the
+/// description plus a status card whose copy adapts to whether a
+/// prior install was found, partial, or absent.
 struct ExistingInstallStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
 
     var body: some View {
-        // Title is rendered by `WizardShell.headerRow` — body starts
-        // with the description text directly.
         VStack(alignment: .leading, spacing: 16) {
             Text("Tron checks for a prior install before laying down its files. If we detect one, we skip the install step so we don't clobber your settings, sessions, or auth tokens.")
                 .font(.body)
@@ -14,18 +17,7 @@ struct ExistingInstallStep: View {
 
             statusCard
 
-            HStack {
-                Spacer()
-                Button {
-                    state.advance()
-                } label: {
-                    Text(continueLabel)
-                        .frame(minWidth: 160)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
-            }
+            Spacer(minLength: 0)
         }
         .onAppear {
             state.existingInstallStatus = setup.detectExistingInstall()
@@ -73,12 +65,5 @@ struct ExistingInstallStep: View {
             Spacer()
         }
         .padding(.vertical, 8)
-    }
-
-    private var continueLabel: String {
-        if case .installed = state.existingInstallStatus {
-            return "Skip install"
-        }
-        return "Continue"
     }
 }

@@ -1,43 +1,47 @@
 import SwiftUI
 
+/// Welcome is the wizard's entry step. The shell owns the icon, title,
+/// progress pill, and both action buttons (primary "Get started", link
+/// "I already have Tron running"); this view contributes only the
+/// description text plus a contextual banner if an existing install
+/// has already been detected on disk.
+///
+/// Layout note: when no banner is showing, the description is centered
+/// both vertically and horizontally so the welcome screen reads as a
+/// proper hero moment rather than a leading paragraph adrift in white
+/// space. The instant an existing install is detected, we revert to a
+/// top-leading layout so the description and banner stack as a normal
+/// reading column.
 struct WelcomeStep: View {
     @Bindable var state: WizardState
 
+    private let copy = "Tron is an agent that lives on your Mac. You talk to Tron from your iPhone."
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Title is rendered by `WizardShell.headerRow` — body
-            // starts with the description text directly.
-            Text("Tron is a coding agent that lives on this Mac. You talk to it from your phone over Tailscale.")
-                .font(.system(.body, design: .rounded))
-                .foregroundStyle(.secondary)
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if case .installed(let version) = state.existingInstallStatus {
+        if case .installed(let version) = state.existingInstallStatus {
+            VStack(alignment: .leading, spacing: 16) {
+                descriptionText
                 existingInstallBanner(version: version)
-                    .padding(.top, 16)
+                Spacer(minLength: 0)
             }
-
-            Spacer(minLength: 12)
-
-            VStack(spacing: 8) {
-                Button {
-                    state.advance()
-                } label: {
-                    Text("Get started")
-                }
-                .buttonStyle(.wizardPrimary)
-                .keyboardShortcut(.defaultAction)
-
-                Button {
-                    state.skipToPairing()
-                } label: {
-                    Text("I already have Tron running")
-                }
-                .buttonStyle(.wizardLink)
+        } else {
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                descriptionText
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                Spacer(minLength: 0)
             }
-            .padding(.bottom, 4)
         }
+    }
+
+    @ViewBuilder
+    private var descriptionText: some View {
+        Text(copy)
+            .font(.system(.body, design: .rounded))
+            .foregroundStyle(.secondary)
+            .lineSpacing(4)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder

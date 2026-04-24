@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// Tailscale prerequisite step. The shell owns the icon, title,
+/// progress pill, and the bottom action bar (Back / "I have Tailscale"
+/// or Continue). This view contributes the explanatory copy, the live
+/// status card driven by `setup.probeTailscale()`, and — only when
+/// Tailscale isn't yet ready — an inline link to the macOS download
+/// page.
 struct TailscaleStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
@@ -8,8 +14,6 @@ struct TailscaleStep: View {
     @State private var pollTask: Task<Void, Never>?
 
     var body: some View {
-        // Title is rendered by `WizardShell.headerRow` — body starts
-        // with the description text directly.
         VStack(alignment: .leading, spacing: 16) {
             Text("Tron uses Tailscale as a private mesh network so your iPhone can reach this Mac without exposing it to the public internet.")
                 .font(.body)
@@ -17,28 +21,20 @@ struct TailscaleStep: View {
 
             statusCard
 
-            HStack(spacing: 12) {
-                if !(state.tailscaleStatus?.isReady ?? false) {
-                    Button {
-                        NSWorkspace.shared.open(URL(string: "https://tailscale.com/download/mac")!)
-                    } label: {
-                        Label("Open Tailscale download", systemImage: "arrow.down.circle")
-                    }
-                    .controlSize(.large)
-                }
-
-                Spacer()
-
+            // Tertiary action: only relevant before Tailscale is up.
+            // Inlined here (rather than living in the shell's bottom
+            // bar) so it slides with the rest of the body content
+            // and disappears cleanly once the user signs in.
+            if !(state.tailscaleStatus?.isReady ?? false) {
                 Button {
-                    state.advance()
+                    NSWorkspace.shared.open(URL(string: "https://tailscale.com/download/mac")!)
                 } label: {
-                    Text(state.tailscaleStatus?.isReady == true ? "Continue" : "I have Tailscale")
-                        .frame(minWidth: 140)
+                    Label("Open Tailscale download", systemImage: "arrow.down.circle")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.wizardLink)
             }
+
+            Spacer(minLength: 0)
         }
         .onAppear { startProbe() }
         .onDisappear { pollTask?.cancel() }

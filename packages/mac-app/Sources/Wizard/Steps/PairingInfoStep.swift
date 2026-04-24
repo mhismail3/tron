@@ -1,6 +1,12 @@
 import SwiftUI
 import AppKit
 
+/// Pairing-info step. The shell owns the icon, title, progress pill,
+/// and the bottom action bar (Back / "I'm paired", with the primary
+/// gated by `state.pairingPayload != nil` in `WizardShell`). This view
+/// contributes the description, the QR + info side-by-side panels,
+/// and an inline Refresh icon-button that re-runs the pairing
+/// resolver.
 struct PairingInfoStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
@@ -17,47 +23,62 @@ struct PairingInfoStep: View {
         case noTailscaleIP
     }
 
-    var body: some View {
-        // Title is rendered by `WizardShell.headerRow` — body starts
-        // with the description text directly.
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Open Tron on your iPhone and tap “I have Tron running”. Either scan the QR code below or enter the values manually.")
-                .font(.body)
-                .foregroundStyle(.secondary)
+    /// QR code rendered side dimension. Picked to fit alongside the
+    /// info panel inside the shell's content area at the current
+    /// window height (360pt) once the header (~46pt), the
+    /// description row (~36pt), and the bottom bar (~70pt) are
+    /// subtracted. 170pt is the largest square that still leaves
+    /// enough vertical room for the single-line URL caption beneath
+    /// the QR.
+    private let qrSize: CGFloat = 170
 
-            HStack(alignment: .top, spacing: 24) {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text("Open Tron on your iPhone, tap “I have Tron running”, then scan the QR or enter the values manually.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                // Tertiary action: lives inline (rather than in the
+                // shell's bottom bar) so it slides with the rest of
+                // the body content. Compact icon-button form keeps
+                // the description row visually tidy.
+                Button {
+                    refresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.tronEmerald)
+                        .frame(width: 26, height: 26)
+                        .background(
+                            Circle()
+                                .fill(.ultraThinMaterial)
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(Color.tronEmerald.opacity(0.30), lineWidth: 0.5)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Refresh pairing info")
+            }
+
+            HStack(alignment: .top, spacing: 20) {
                 qrPanel
                 infoPanel
             }
 
-            HStack {
-                Button {
-                    refresh()
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .controlSize(.large)
-
-                Spacer()
-
-                Button {
-                    state.complete()
-                } label: {
-                    Text("I'm paired — finish setup")
-                        .frame(minWidth: 200)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
-                .disabled(state.pairingPayload == nil)
-            }
+            Spacer(minLength: 0)
         }
         .task { refresh() }
     }
 
     @ViewBuilder
     private var qrPanel: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(.thickMaterial)
@@ -71,48 +92,54 @@ struct PairingInfoStep: View {
                     ProgressView().controlSize(.large)
                 }
             }
-            .frame(width: 220, height: 220)
+            .frame(width: qrSize, height: qrSize)
 
             if let qrPayloadString {
+                // Single-line caption — at the shorter window height,
+                // a two-line wrap pushes the info panel off-screen.
+                // Truncate the middle of the URL so both ends (the
+                // host and the token tail) stay legible.
                 Text(qrPayloadString)
-                    .font(.caption.monospaced())
+                    .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: 220)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: qrSize)
             }
         }
     }
 
     @ViewBuilder
     private var infoPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             if let payload = state.pairingPayload {
                 pairingRow(label: "Tailscale IP", value: payload.host)
                 pairingRow(label: "Port", value: String(payload.port))
                 pairingRow(label: "Pairing token", value: payload.token, masked: true)
             } else {
                 GroupBox {
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(failureHeadline).font(.headline)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(failureHeadline).font(.subheadline.weight(.semibold))
                             Text(failureBody)
-                                .font(.subheadline).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                    }.padding(.vertical, 8)
+                    }.padding(.vertical, 6)
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
     private func pairingRow(label: String, value: String, masked: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.caption).foregroundStyle(.secondary)
             HStack {
                 Text(masked ? maskValue(value) : value)
-                    .font(.body.monospaced())
+                    .font(.callout.monospaced())
                 Spacer()
                 Button {
                     let pb = NSPasteboard.general
@@ -125,7 +152,7 @@ struct PairingInfoStep: View {
                 .help("Copy to clipboard")
             }
         }
-        .padding(8)
+        .padding(6)
         .background(.windowBackground.tertiary, in: RoundedRectangle(cornerRadius: 6))
     }
 
@@ -144,7 +171,7 @@ struct PairingInfoStep: View {
     private var failureBody: String {
         switch failureReason {
         case .noTailscaleIP:
-            return "The server is running but we can't read this Mac's Tailscale IP. Open Tailscale and confirm you're signed in, then tap Refresh."
+            return "The server is running but we can't read this Mac's Tailscale IP. Open Tailscale, confirm sign-in, then tap Refresh."
         case .noToken, .none:
             return "If you skipped the install step, make sure Tron is running. Otherwise wait a few seconds and tap Refresh."
         }
@@ -188,7 +215,7 @@ struct PairingInfoStep: View {
             failureReason = nil
             if let url = PairingURLBuilder.makeURL(payload) {
                 qrPayloadString = url.absoluteString
-                qrImage = QRCodeGenerator.makeImage(payload: url.absoluteString, size: 220)
+                qrImage = QRCodeGenerator.makeImage(payload: url.absoluteString, size: qrSize)
             }
         }
     }

@@ -22,6 +22,22 @@ final class WizardState {
         }
     }
 
+    /// Direction of the most recent navigation, set BEFORE `step` is
+    /// mutated by every navigation method (`advance`, `goBack`,
+    /// `skipToPairing`, `complete`). `WizardShell.slideTransition`
+    /// reads this single source of truth to pick the asymmetric
+    /// move-edge pair, instead of inferring direction from ordinal
+    /// comparisons against a separate `previousStep` field.
+    ///
+    /// Why this matters: `previousStep`-based ordinal comparison was
+    /// fragile around `skipToPairing` (a long forward jump that
+    /// looked structurally identical to a regular advance), and around
+    /// any future "fork" navigations that don't follow the canonical
+    /// step ordering. An explicit, navigation-method-set field can't
+    /// get out of sync with intent — back is back, forward is forward,
+    /// regardless of how far either one moves.
+    var slideDirection: WizardSlideDirection = .forward
+
     // Transient form state surfaced by individual step views.
 
     /// Result of the most recent Tailscale probe. Nil before the
@@ -74,7 +90,7 @@ final class WizardState {
         // is handled by InstallStep itself — it short-circuits to
         // `installOutcome = .alreadyInstalled` and lets the user click
         // Continue, which keeps this function pure navigation.
-        step = next
+        navigate(to: next, direction: .forward)
     }
 
     /// Steps backwards in the canonical sequence. Bounded at the first
@@ -82,20 +98,20 @@ final class WizardState {
     func goBack() {
         let candidates = WizardStep.allCases
         guard let currentIndex = candidates.firstIndex(of: step), currentIndex > 0 else { return }
-        step = candidates[currentIndex - 1]
+        navigate(to: candidates[currentIndex - 1], direction: .backward)
     }
 
     /// Power-user shortcut: from Welcome, skip directly to the Pairing
     /// step on the assumption the server is already installed.
     func skipToPairing() {
-        step = .pairingInfo
+        navigate(to: .pairingInfo, direction: .forward)
     }
 
     /// Marks the wizard complete and notifies AppDelegate to swap to
     /// menu-bar mode.
     func complete() {
         defaults.set(true, forKey: Self.onboardingCompleteKey)
-        step = .done
+        navigate(to: .done, direction: .forward)
         NotificationCenter.default.post(name: .tronWizardDidComplete, object: nil)
     }
 
@@ -105,12 +121,32 @@ final class WizardState {
         defaults.removeObject(forKey: Self.stepStorageKey)
         defaults.removeObject(forKey: Self.onboardingCompleteKey)
         step = .welcome
+        slideDirection = .forward
         tailscaleStatus = nil
         permissionStatuses.removeAll()
         existingInstallStatus = .none
         installOutcome = nil
         pairingPayload = nil
     }
+
+    /// Single mutation point for step + direction. Centralises the
+    /// "set direction synchronously BEFORE step" ordering invariant
+    /// that `WizardShell.slideTransition` depends on. Every navigation
+    /// path goes through here so the transition direction can never
+    /// race the step change.
+    private func navigate(to next: WizardStep, direction: WizardSlideDirection) {
+        slideDirection = direction
+        step = next
+    }
+}
+
+/// Direction of a wizard step transition, used by
+/// `WizardShell.slideTransition` to pick the asymmetric move edges.
+/// `.forward` slides the outgoing view off-left and the incoming view
+/// in from the right; `.backward` reverses both.
+enum WizardSlideDirection: Sendable, Equatable {
+    case forward
+    case backward
 }
 
 /// Outcome of the install pipeline. Surfaced by the Install step so

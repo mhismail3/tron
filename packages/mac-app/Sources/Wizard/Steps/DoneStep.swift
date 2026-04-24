@@ -1,34 +1,24 @@
 import SwiftUI
 import os.log
 
+/// Done step. The shell owns the icon, title, progress pill, and
+/// the bottom action bar (no secondary; primary "Open menu bar"
+/// posts `tronWizardDidComplete`). This view contributes only the
+/// celebratory description text and the side effect of touching the
+/// onboarded sentinel so a kill+relaunch lands in menu-bar mode.
 struct DoneStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
 
     var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 96))
-                .foregroundStyle(.green)
-                .padding(.top, 32)
-            Text("You're all set")
-                .font(.largeTitle.bold())
+        VStack(alignment: .leading, spacing: 12) {
             Text("Tron lives in your menu bar from here on. Click the icon any time to copy your pairing info, restart the server, or send feedback.")
-                .font(.body)
+                .font(.system(.body, design: .rounded))
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Spacer(minLength: 16)
-            Button {
-                NotificationCenter.default.post(name: .tronWizardDidComplete, object: nil)
-            } label: {
-                Text("Open menu bar")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .keyboardShortcut(.defaultAction)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
         }
         .onAppear {
             // Touch the sentinel atomically so the next launch lands
