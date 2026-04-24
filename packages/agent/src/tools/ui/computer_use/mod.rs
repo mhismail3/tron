@@ -172,14 +172,14 @@ mod screenshot;
 mod permissions;
 mod codegen;
 
-pub use permissions::{PermissionStatus, check_permissions_on_startup};
+pub use permissions::{
+    PermissionStatus, WizardPermissions, check_permissions_on_startup,
+    probe_wizard_permissions,
+};
 
 // Re-export parse functions for tests
 #[cfg(test)]
-pub(crate) use permissions::{
-    parse_accessibility_result, parse_automation_result,
-    parse_screen_recording_result, parse_fda_result,
-};
+pub(crate) use permissions::{parse_automation_result, parse_fda_result};
 
 #[cfg(test)]
 #[path = "../computer_use_tests.rs"]

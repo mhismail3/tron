@@ -67,6 +67,11 @@ struct BinaryInstallerTests {
         #expect(dict?["CFBundleIdentifier"] as? String == TronPaths.bundleID)
         #expect(dict?["CFBundlePackageType"] as? String == "APPL")
         #expect(dict?["LSUIElement"] as? Bool == true)
+        // The display name surfaces in every TCC pane; pinning it here
+        // prevents a silent regression to "Tron" that would re-create
+        // the two-entry confusion the naming audit resolved.
+        #expect(dict?["CFBundleName"] as? String == "Tron Server")
+        #expect(dict?["CFBundleDisplayName"] as? String == "Tron Server")
     }
 
     @Test("install replaces existing binary (atomic re-install)")

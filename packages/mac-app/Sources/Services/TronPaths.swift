@@ -60,5 +60,15 @@ enum TronPaths {
 
     static let launchAgentLabel = "com.tron.server"
     static let defaultServerPort = 9847
-    static let bundleID = "com.tron.agent"
+    /// Bundle identifier for the installed AGENT (`~/.tron/system/Tron.app`),
+    /// not the menu-bar wrapper. Intentionally matches `launchAgentLabel`
+    /// so TCC grants, `launchctl kickstart` targets, and the LaunchAgent
+    /// label all read the same string. The menu-bar wrapper's own bundle
+    /// id lives in its Info.plist (`com.tron.macapp`).
+    static let bundleID = "com.tron.server"
+    /// User-facing display name for the agent in System Settings, Activity
+    /// Monitor, and the Dock (if it ever surfaced). Kept separate from the
+    /// wrapper's "Tron" name so the three permission panes never show two
+    /// entries titled "Tron".
+    static let agentDisplayName = "Tron Server"
 }

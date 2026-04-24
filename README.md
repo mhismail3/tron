@@ -310,7 +310,7 @@ Source-control operations (sync main, push, switch branches, finalize a session 
 
 ## RPC API
 
-JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **165 methods** across three groups.
+JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **166 methods** across three groups.
 
 ### Connection
 
@@ -337,17 +337,19 @@ All messages use JSON-RPC 2.0 framing:
 
 These fields are additive; older clients that ignore them continue to work unchanged.
 
+`system.probePermissions` returns a non-prompting snapshot of the agent's macOS TCC grants for the three wizard-surfaced permissions — Full Disk Access, Screen Recording, Accessibility. Each value is one of `"granted"`, `"denied"`, or `"unknown"`. The Mac wizard polls this RPC every ~2 s (and on app-focus-regain) so it can confirm that a TCC grant the user just made in System Settings has stuck, then `launchctl kickstart -k` the agent to pick up the new sandbox extension. Implementation uses native `AXIsProcessTrusted()` / `CGPreflightScreenCaptureAccess()` FFI — no subprocess, no prompt.
+
 `system.checkForUpdates` / `system.getUpdateStatus` / `system.applyUpdate` drive the user-mode auto-updater (see Section "Deployment → User-mode auto-update"). Each has a deliberately tame default response so iOS + Mac menu-bar UIs render a meaningful empty state instead of a spurious error:
 
 - `system.checkForUpdates` returns `{ available: false, disabled: true, channel, currentVersion }` when `server.update.enabled` is `false` (the safe default) — no GitHub fetch is performed.
 - `system.getUpdateStatus` is a pure read of `settings.server.update` + `~/.tron/system/updater-state.json`; it always succeeds and exposes `enabled: false` plus null `latestAvailableVersion` for un-opted-in users.
 - `system.applyUpdate` is wired today as a stub that returns `{ status: "noop", message, currentVersion }` regardless of the flag. The install pipeline (lock `deploy.lock` → backup `.bak` → atomic swap → `launchctl kickstart` → post-install ping → rollback on failure) lands with the DMG release work in Phase 6; until then the supported upgrade path is a manual DMG drag-install. The wire shape will not change when the pipeline lands — only `status` flips from `"noop"` to `"installing"`.
 
-### Core (63)
+### Core (64)
 
 | Group | Count | Methods |
 |-------|------:|---------|
-| `system` | 7 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown`, `system.checkForUpdates`, `system.getUpdateStatus`, `system.applyUpdate` |
+| `system` | 8 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown`, `system.probePermissions`, `system.checkForUpdates`, `system.getUpdateStatus`, `system.applyUpdate` |
 | `blob` | 1 | `blob.get` |
 | `session` | 13 | `session.create`, `session.resume`, `session.list`, `session.delete`, `session.fork`, `session.getHead`, `session.getState`, `session.getHistory`, `session.reconstruct`, `session.archive`, `session.unarchive`, `session.archiveOlderThan`, `session.export` |
 | `agent` | 10 | `agent.prompt`, `agent.abort`, `agent.abortTool`, `agent.status`, `agent.queuePrompt`, `agent.dequeuePrompt`, `agent.clearQueue`, `agent.deliverSubagentResults`, `agent.submitConfirmation`, `agent.submitAnswers` |

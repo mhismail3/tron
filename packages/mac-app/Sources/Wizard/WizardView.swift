@@ -104,18 +104,38 @@ struct WizardShell<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // Layer 1 (transitioning): header + body + bottom bar
-            // re-mount on every `displayStep` change and slide as one
-            // cohesive group. The `.id(displayStep)` is what triggers
-            // the slide; without it SwiftUI would diff in place and
-            // we'd lose the animation.
+            // Outer chrome holds three layers. The padding + horizontal
+            // insets live on the outer VStack so every child (sliding
+            // chrome, pinned bottom bar) shares the same gutter — tests
+            // would otherwise have to know whether each sub-layer
+            // applies its own padding.
             VStack(spacing: 0) {
-                stepHeader
+                // Layer 1a (transitioning): header + body re-mount on
+                // every `displayStep` change and slide as one cohesive
+                // group. The `.id(displayStep)` is what triggers the
+                // slide; without it SwiftUI would diff in place and we'd
+                // lose the animation. The bottom bar used to live in
+                // this layer too, which made the Back/Continue buttons
+                // slide off-screen with every navigation — users read
+                // that as the buttons "getting messed up" because their
+                // landing position jostled briefly before settling.
+                // Pinning the bar (Layer 1b) keeps the buttons at the
+                // same Y the whole way through.
+                VStack(spacing: 0) {
+                    stepHeader
+                    content(displayStep)
+                        .padding(.top, 18)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+                .id(displayStep)
+                .transition(slideTransition)
 
-                content(displayStep)
-                    .padding(.top, 18)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
+                // Layer 1b (pinned): bottom bar stays in place across
+                // step changes. Its sub-views (secondary button, primary
+                // button) still switch on `displayStep` so their labels
+                // and styles update, but because the container doesn't
+                // re-mount the buttons crossfade in place rather than
+                // sliding off with the chrome.
                 bottomBar
             }
             // Tightened from 36 → 18 so the header tucks just below
@@ -126,8 +146,6 @@ struct WizardShell<Content: View>: View {
             .padding(.top, 18)
             .padding(.bottom, 24)
             .padding(.horizontal, 32)
-            .id(displayStep)
-            .transition(slideTransition)
 
             // Layer 2 (pinned): the pill stays fixed in the top-right
             // corner. Only its progress fill width animates as the
@@ -401,20 +419,38 @@ struct WizardShell<Content: View>: View {
     /// the origin Y, since AppKit frames anchor at the bottom-left)
     /// so the wizard grows/shrinks downward instead of jumping
     /// upward. Width stays pinned at 480pt.
+    ///
+    /// Early-returns for zero-delta transitions. Same-height step
+    /// changes (welcome → tailscale, both 360pt) would otherwise push
+    /// a no-op frame through `NSAnimationContext`, which AppKit still
+    /// translates into a redraw cycle. The redraw lands a frame late
+    /// relative to SwiftUI's slide transition and shows up as a
+    /// visible flicker around the pinned bottom-bar — the user sees
+    /// the buttons jostle even though the window genuinely didn't
+    /// need to resize.
     private func animateHostingWindow(to targetHeight: CGFloat) {
         guard let window = Self.findHostingWindow() else { return }
+        let currentHeight = window.frame.height
+        let delta = targetHeight - currentHeight
+        // Sub-pixel deltas are rounding noise — no animation needed,
+        // and skipping the call also lets sibling steps share a
+        // preferredHeight without paying for a no-op resize on every
+        // navigation between them.
+        guard abs(delta) >= 1 else { return }
         var frame = window.frame
-        let delta = targetHeight - frame.height
         frame.size.height = targetHeight
         frame.size.width = 480
         frame.origin.y -= delta
         NSAnimationContext.runAnimationGroup { context in
             // Match the SwiftUI `.animation(.spring(response: 0.42, ...))`
             // above so the window, header slide, and body transition
-            // all finish within roughly the same frame budget. AppKit
-            // doesn't expose a spring curve; ease-in-out at 0.35s is
-            // the closest visual match.
-            context.duration = 0.35
+            // all finish within the same frame budget. AppKit doesn't
+            // expose a spring curve directly; duration-matching the
+            // spring's `response` parameter and using ease-in-ease-out
+            // is the closest visual match, and keeps the window chrome
+            // from lagging the SwiftUI content by a frame or two at
+            // the end of the animation.
+            context.duration = 0.42
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             context.allowsImplicitAnimation = true
             window.animator().setFrame(frame, display: true)

@@ -222,6 +222,44 @@ impl MethodHandler for ShutdownHandler {
     }
 }
 
+/// `system.probePermissions` — returns the current TCC grant state of
+/// the agent process for the three wizard-surfaced permissions: Full
+/// Disk Access, Screen Recording, Accessibility.
+///
+/// The Mac wrapper's Permissions wizard polls this handler every ~2s
+/// (and on `NSApp.didBecomeActive`) to decide when to advance. The
+/// whole point of doing the probe RPC-side is that the AGENT is the
+/// binary the user is granting permissions to — not the wrapper —
+/// because the agent runs the Computer-Use tool and the filesystem
+/// tools. Probing in the wrapper would answer the wrong question.
+///
+/// Non-prompting: uses `AXIsProcessTrusted()` and
+/// `CGPreflightScreenCaptureAccess()` FFI calls, so polling is safe
+/// (it does not race the System Settings deep-link UX).
+///
+/// Shape:
+/// ```json
+/// {
+///   "fullDiskAccess": "granted" | "denied" | "unknown",
+///   "screenRecording": "granted" | "denied" | "unknown",
+///   "accessibility":   "granted" | "denied" | "unknown"
+/// }
+/// ```
+pub struct ProbePermissionsHandler;
+
+#[async_trait]
+impl MethodHandler for ProbePermissionsHandler {
+    #[instrument(skip(self, _ctx), fields(method = "system.probePermissions"))]
+    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+        let snapshot = crate::tools::ui::computer_use::probe_wizard_permissions().await;
+        Ok(serde_json::json!({
+            "fullDiskAccess":  snapshot.full_disk_access.wire_token(),
+            "screenRecording": snapshot.screen_recording.wire_token(),
+            "accessibility":   snapshot.accessibility.wire_token(),
+        }))
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // User-mode auto-updater — Plan §H.2, Phase 5.5
 // ─────────────────────────────────────────────────────────────────────────
@@ -563,6 +601,27 @@ mod tests {
         let ctx = make_test_context();
         let result = ShutdownHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["acknowledged"], true);
+    }
+
+    /// `system.probePermissions` must return exactly the three top-level
+    /// keys the Mac wrapper's `PermissionProbeRPC` decoder expects, and
+    /// each value must be one of the three wire tokens — never a
+    /// typo'd alias, number, or structured object. A breaking change
+    /// here silently freezes the Permissions wizard at "waiting…".
+    #[tokio::test]
+    async fn probe_permissions_returns_three_wire_tokens() {
+        let ctx = make_test_context();
+        let result = ProbePermissionsHandler.handle(None, &ctx).await.unwrap();
+
+        for key in ["fullDiskAccess", "screenRecording", "accessibility"] {
+            let token = result[key].as_str().unwrap_or_else(|| {
+                panic!("{key} must be a string, got {:?}", result[key])
+            });
+            assert!(
+                matches!(token, "granted" | "denied" | "unknown"),
+                "{key} must be one of granted/denied/unknown, got {token:?}",
+            );
+        }
     }
 
     #[tokio::test]

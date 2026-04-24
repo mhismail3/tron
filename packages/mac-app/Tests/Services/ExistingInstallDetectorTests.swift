@@ -169,7 +169,7 @@ struct ExistingInstallDetectorTests {
         try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
         let infoPlist: [String: Any] = [
             "CFBundleShortVersionString": "0.5.0",
-            "CFBundleIdentifier": "com.tron.agent",
+            "CFBundleIdentifier": "com.tron.server",
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: infoPlist, format: .xml, options: 0)
         try data.write(to: contents.appendingPathComponent("Info.plist", isDirectory: false))

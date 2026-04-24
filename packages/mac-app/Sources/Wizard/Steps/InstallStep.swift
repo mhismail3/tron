@@ -18,7 +18,7 @@ struct InstallStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Copies the Tron agent binary into ~/.tron/system/Tron.app, drops a LaunchAgent so the server starts at login, and waits for the first heartbeat.")
+            Text("Copies Tron Server into ~/.tron/system/Tron.app, drops a LaunchAgent so it starts at login, and waits for the first heartbeat. Permissions come next — granting them before the server exists wouldn't stick.")
                 .font(.body)
                 .foregroundStyle(.secondary)
 
@@ -267,13 +267,19 @@ enum BinaryInstaller {
             throw Failure.copyFailed(error.localizedDescription)
         }
 
-        // Write a minimal Info.plist for the inner Tron.app so TCC
-        // identifies the binary by bundle ID, not raw path.
+        // Write a minimal Info.plist for the inner Tron Server.app so TCC
+        // identifies the binary by bundle ID, not raw path. The display
+        // name is deliberately "Tron Server" (not "Tron") so the three
+        // permission panes in System Settings can distinguish the agent
+        // from the menu-bar wrapper — which the user already knows as
+        // "Tron" — without forcing them to read bundle IDs.
         let infoPlist: [String: Any] = [
             "CFBundleExecutable": "tron",
             "CFBundleIdentifier": TronPaths.bundleID,
-            "CFBundleName": "Tron",
+            "CFBundleName": TronPaths.agentDisplayName,
+            "CFBundleDisplayName": TronPaths.agentDisplayName,
             "CFBundlePackageType": "APPL",
+            "LSMinimumSystemVersion": "11.0",
             "LSUIElement": true,
         ]
         do {

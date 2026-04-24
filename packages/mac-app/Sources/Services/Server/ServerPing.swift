@@ -125,6 +125,107 @@ enum ServerPing {
     }
 }
 
+/// One-shot `system.probePermissions` RPC client. Returns the agent's
+/// TCC grant state — which is the state the Permissions wizard cares
+/// about, because the AGENT is the binary that actually uses FDA /
+/// Screen Recording / Accessibility at runtime.
+///
+/// The RPC is defined in
+/// `packages/agent/src/server/rpc/handlers/system.rs`
+/// (`ProbePermissionsHandler`). It uses native FFI and never prompts,
+/// so this client can poll every couple of seconds without racing the
+/// System Settings deep-link UX.
+///
+/// Failure modes are folded into `.probeUnavailable` on the per-
+/// permission result so the wizard renders a retry affordance rather
+/// than looping forever — e.g. the agent is mid-restart after a kickstart.
+enum PermissionProbeRPC {
+    /// Probes the three wizard permissions against the agent. If the
+    /// server is unreachable or the response is malformed, all three
+    /// come back as `.probeUnavailable` so the UI can surface a single
+    /// "server restarting…" banner instead of three confused spinners.
+    static func probeAll(
+        host: String,
+        port: Int,
+        token: String?,
+        timeout: TimeInterval = 3
+    ) async -> [Permission: PermissionStatus] {
+        guard let url = URLComponents(string: "ws://\(host):\(port)/ws")?.url else {
+            return fallback()
+        }
+
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        if let token, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+
+        let task = session.webSocketTask(with: request)
+        task.resume()
+
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "system.probePermissions",
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
+              let str = String(data: data, encoding: .utf8) else {
+            return fallback()
+        }
+
+        do {
+            try await task.send(.string(str))
+            let message = try await task.receive()
+            task.cancel(with: .goingAway, reason: nil)
+            let raw: Data
+            switch message {
+            case .data(let d): raw = d
+            case .string(let s): raw = Data(s.utf8)
+            @unknown default: return fallback()
+            }
+            return decode(raw) ?? fallback()
+        } catch {
+            return fallback()
+        }
+    }
+
+    static func decode(_ data: Data) -> [Permission: PermissionStatus]? {
+        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+              let result = json["result"] as? [String: Any] else {
+            return nil
+        }
+        func status(for key: String) -> PermissionStatus {
+            // Server emits lowercase tokens ("granted" / "denied" /
+            // "unknown"). Anything else degrades to probeUnavailable so
+            // a future server bump that introduces new tokens still
+            // renders a retry affordance, not a crash.
+            switch result[key] as? String {
+            case "granted": return .granted
+            case "denied":  return .denied
+            default:        return .probeUnavailable
+            }
+        }
+        return [
+            .fullDiskAccess:  status(for: "fullDiskAccess"),
+            .screenRecording: status(for: "screenRecording"),
+            .accessibility:   status(for: "accessibility"),
+        ]
+    }
+
+    /// Uniform fallback: every permission reports `.probeUnavailable`.
+    /// The wizard treats this as "server probably mid-restart, try again
+    /// in a moment" and keeps polling.
+    private static func fallback() -> [Permission: PermissionStatus] {
+        [
+            .fullDiskAccess:  .probeUnavailable,
+            .screenRecording: .probeUnavailable,
+            .accessibility:   .probeUnavailable,
+        ]
+    }
+}
+
 /// Captures the HTTP upgrade response status code via the URLSession
 /// delegate callbacks. Thread-safe via NSLock so it can be touched from
 /// the URLSession's delegate queue and the awaiter.

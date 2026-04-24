@@ -75,6 +75,7 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("system.getInfo", system::GetInfoHandler);
     registry.register("system.getDiagnostics", system::GetDiagnosticsHandler);
     registry.register("system.shutdown", system::ShutdownHandler);
+    registry.register("system.probePermissions", system::ProbePermissionsHandler);
     // System — user-mode auto-updater (Plan §H.2, Phase 5.5)
     registry.register("system.checkForUpdates", system::CheckForUpdatesHandler);
     registry.register("system.getUpdateStatus", system::GetUpdateStatusHandler);
@@ -418,8 +419,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            165,
-            "expected 165 methods, got {}",
+            166,
+            "expected 166 methods, got {}",
             reg.methods().len()
         );
     }

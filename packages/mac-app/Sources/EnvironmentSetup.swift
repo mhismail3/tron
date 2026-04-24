@@ -37,6 +37,14 @@ struct EnvironmentSetup: Sendable {
     /// prompted by Settings.
     var probePermission: @Sendable (Permission) async -> PermissionStatus
 
+    /// Probes all three wizard permissions against the AGENT process
+    /// via `system.probePermissions`. The agent is the binary that
+    /// actually runs the Computer-Use tool and the filesystem tools, so
+    /// this is the authoritative read for the Permissions wizard step.
+    /// Returns `.probeUnavailable` per-permission when the server is
+    /// unreachable (e.g. mid-`launchctl kickstart`).
+    var probeAgentPermissions: @Sendable () async -> [Permission: PermissionStatus]
+
     /// Detects whether a CLI-installed Tron is already present at the
     /// canonical paths.
     var detectExistingInstall: @Sendable () -> ExistingInstallStatus
@@ -78,6 +86,13 @@ struct EnvironmentSetup: Sendable {
         },
         probePermission: { permission in
             await PermissionProbe.probe(permission)
+        },
+        probeAgentPermissions: {
+            await PermissionProbeRPC.probeAll(
+                host: "127.0.0.1",
+                port: TronPaths.defaultServerPort,
+                token: BearerTokenReader.read(at: TronPaths.bearerTokenPath)
+            )
         },
         detectExistingInstall: {
             ExistingInstallDetector.detect()

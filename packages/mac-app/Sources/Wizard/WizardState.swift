@@ -73,7 +73,35 @@ final class WizardState {
             defaults.set(initialStep.rawValue, forKey: Self.stepStorageKey)
         } else {
             let raw = defaults.string(forKey: Self.stepStorageKey)
-            self.step = raw.flatMap(WizardStep.init(rawValue:)) ?? .welcome
+            let persisted = raw.flatMap(WizardStep.init(rawValue:)) ?? .welcome
+            // Only resume at steps that are safe to cold-start on.
+            // Post-install steps (.permissions, .pairingInfo, .done)
+            // depend on transient state (installOutcome, pairingPayload,
+            // …) that doesn't survive a relaunch; if we honour those on
+            // cold boot the user lands mid-wizard with greyed-out
+            // Continue buttons and nothing to click. Clamp them back to
+            // welcome so onboarding always has a coherent entry point.
+            // This also fixes a class of migration bugs where reordering
+            // the canonical step sequence leaves the persisted raw value
+            // pointing at a different step than the user left off on.
+            self.step = Self.isSafeToResume(persisted) ? persisted : .welcome
+            if self.step != persisted {
+                defaults.set(self.step.rawValue, forKey: Self.stepStorageKey)
+            }
+        }
+    }
+
+    /// Steps the wizard can cold-resume at without transient runtime
+    /// state. Pre-install steps are always safe; post-install steps
+    /// assume `installOutcome` / `pairingPayload` / `permissionStatuses`
+    /// from an earlier navigation, so cold-booting into them strands the
+    /// user behind a disabled Continue button.
+    private static func isSafeToResume(_ step: WizardStep) -> Bool {
+        switch step {
+        case .welcome, .tailscale, .existingInstall, .install:
+            return true
+        case .permissions, .pairingInfo, .done:
+            return false
         }
     }
 

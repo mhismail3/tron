@@ -1,4 +1,18 @@
-// MARK: - Startup Permission Check
+// MARK: - Startup + on-demand permission probes
+//
+// Two roles for this module:
+// 1. `check_permissions_on_startup` — logs the four macOS TCC grants at
+//    server boot so developers see any missing permissions in the log
+//    stream before the first tool call fails.
+// 2. `probe_wizard_permissions` — a fast, non-prompting RPC probe used by
+//    the Mac wrapper's Permissions wizard step. Surfaced via the
+//    `system.probePermissions` handler in `server::rpc::handlers::system`.
+//
+// The key design rule: probes must NEVER prompt. The Mac wrapper drives
+// prompting via System Settings deep links; a probe that itself triggers
+// a TCC dialog would race with that UX and confuse users. That's why
+// `check_accessibility` uses `AXIsProcessTrusted()` (no options dict)
+// rather than `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])`.
 
 /// Result of probing a single macOS TCC permission.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,24 +31,24 @@ pub enum PermissionStatus {
     },
 }
 
-// ─── Pure parsing functions (no I/O — fully unit-testable) ───
-
-pub(crate) fn parse_accessibility_result(stdout: &str, success: bool) -> PermissionStatus {
-    if !success {
-        return PermissionStatus::Unknown {
-            reason: "swift process failed".into(),
-        };
-    }
-    match stdout.trim() {
-        "granted" => PermissionStatus::Granted,
-        "denied" => PermissionStatus::Denied {
-            guidance: "System Settings > Privacy & Security > Accessibility".into(),
-        },
-        other => PermissionStatus::Unknown {
-            reason: format!("unexpected output: {other}"),
-        },
+impl PermissionStatus {
+    /// Lowercase wire-format token for RPC responses.
+    /// - `Granted` → `"granted"`
+    /// - `Denied`  → `"denied"`
+    /// - `Unknown` → `"unknown"`
+    ///
+    /// The wrapper's `PermissionProbeRPC` decodes these three tokens; any
+    /// other string is treated as `.probeUnavailable`.
+    pub fn wire_token(&self) -> &'static str {
+        match self {
+            PermissionStatus::Granted => "granted",
+            PermissionStatus::Denied { .. } => "denied",
+            PermissionStatus::Unknown { .. } => "unknown",
+        }
     }
 }
+
+// ─── Pure parsing functions (no I/O — fully unit-testable) ───
 
 pub(crate) fn parse_automation_result(_stdout: &str, stderr: &str, success: bool) -> PermissionStatus {
     if success {
@@ -47,16 +61,6 @@ pub(crate) fn parse_automation_result(_stdout: &str, stderr: &str, success: bool
     } else {
         PermissionStatus::Unknown {
             reason: stderr.trim().to_string(),
-        }
-    }
-}
-
-pub(crate) fn parse_screen_recording_result(success: bool, file_exists: bool, file_size: u64) -> PermissionStatus {
-    if success && file_exists && file_size > 0 {
-        PermissionStatus::Granted
-    } else {
-        PermissionStatus::Denied {
-            guidance: "System Settings > Privacy & Security > Screen Recording".into(),
         }
     }
 }
@@ -81,32 +85,64 @@ pub(crate) fn parse_fda_result(
     }
 }
 
+// ─── Native macOS FFI (fast, non-prompting) ───
+//
+// Both symbols live in Apple frameworks that are linked into every
+// macOS binary by default; the `#[link]` attributes below are
+// belt-and-braces so the symbols resolve even under stripped/minimal
+// link tables. Calling them is effectively a system-call-sized read
+// of the current process's TCC state.
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+#[link(name = "ApplicationServices", kind = "framework")]
+unsafe extern "C" {
+    /// Returns `1` if the current process has been granted Accessibility
+    /// access in the TCC database, `0` otherwise. Does NOT prompt —
+    /// safe to poll on a short interval.
+    fn AXIsProcessTrusted() -> u8;
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    /// Returns `1` if the current process has been granted Screen
+    /// Recording access in the TCC database, `0` otherwise. Does NOT
+    /// prompt, unlike `CGRequestScreenCaptureAccess`. macOS 10.15+.
+    fn CGPreflightScreenCaptureAccess() -> u8;
+}
+
 // ─── Async check functions (thin wrappers with timeouts) ───
 
-async fn check_accessibility() -> PermissionStatus {
-    use std::time::Duration;
-    // AXIsProcessTrustedWithOptions with kAXTrustedCheckOptionPrompt triggers
-    // the native macOS Accessibility permission dialog when not yet granted.
-    let result = tokio::time::timeout(Duration::from_secs(5), async {
-        tokio::task::spawn_blocking(|| {
-            std::process::Command::new("swift")
-                .args(["-e", concat!(
-                    "import ApplicationServices\n",
-                    "let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary\n",
-                    "print(AXIsProcessTrustedWithOptions(opts) ? \"granted\" : \"denied\")",
-                )])
-                .output()
-        }).await
-    }).await;
-
-    match result {
-        Ok(Ok(Ok(output))) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            parse_accessibility_result(&stdout, output.status.success())
+/// Accessibility probe via `AXIsProcessTrusted()`. Returns a
+/// non-prompting read of the current process's TCC Accessibility grant.
+///
+/// Historically this spawned a `swift -e` subprocess calling
+/// `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])`,
+/// which both took ~500ms and triggered a macOS TCC prompt the first
+/// time. The FFI path is ~microseconds and silent — important for the
+/// wrapper's Permissions wizard step, which polls this every 2s.
+#[allow(unsafe_code)]
+pub async fn check_accessibility() -> PermissionStatus {
+    #[cfg(target_os = "macos")]
+    {
+        let trusted = tokio::task::spawn_blocking(|| unsafe { AXIsProcessTrusted() } != 0)
+            .await
+            .unwrap_or(false);
+        if trusted {
+            PermissionStatus::Granted
+        } else {
+            PermissionStatus::Denied {
+                guidance: "System Settings > Privacy & Security > Accessibility".into(),
+            }
         }
-        _ => PermissionStatus::Unknown {
-            reason: "check timed out or failed to spawn".into(),
-        },
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        PermissionStatus::Unknown {
+            reason: "accessibility probe is macOS-only".into(),
+        }
     }
 }
 
@@ -132,37 +168,36 @@ async fn check_automation() -> PermissionStatus {
     }
 }
 
-async fn check_screen_recording() -> PermissionStatus {
-    use std::time::Duration;
-    let tmp = format!("/tmp/tron-permission-check-{}.png", std::process::id());
-    let result = tokio::time::timeout(Duration::from_secs(5), {
-        tokio::process::Command::new("screencapture")
-            .args(["-x", "-t", "png", &tmp])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .output()
-    }).await;
-
-    let (success, file_exists, file_size) = match result {
-        Ok(Ok(output)) => {
-            let meta = tokio::fs::metadata(&tmp).await;
-            let exists = meta.is_ok();
-            let size = meta.map(|m| m.len()).unwrap_or(0);
-            let _ = tokio::fs::remove_file(&tmp).await;
-            (output.status.success(), exists, size)
+/// Screen Recording probe via `CGPreflightScreenCaptureAccess()`.
+/// Non-prompting, no subprocess, constant time.
+#[allow(unsafe_code)]
+pub async fn check_screen_recording() -> PermissionStatus {
+    #[cfg(target_os = "macos")]
+    {
+        let granted = tokio::task::spawn_blocking(|| unsafe { CGPreflightScreenCaptureAccess() } != 0)
+            .await
+            .unwrap_or(false);
+        if granted {
+            PermissionStatus::Granted
+        } else {
+            PermissionStatus::Denied {
+                guidance: "System Settings > Privacy & Security > Screen Recording".into(),
+            }
         }
-        _ => {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            return PermissionStatus::Unknown {
-                reason: "check timed out or failed to spawn".into(),
-            };
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        PermissionStatus::Unknown {
+            reason: "screen-recording probe is macOS-only".into(),
         }
-    };
-
-    parse_screen_recording_result(success, file_exists, file_size)
+    }
 }
 
-async fn check_full_disk_access() -> PermissionStatus {
+/// Full Disk Access probe: tries an in-process read of `~/Library/Mail`
+/// (FDA-protected on every modern macOS). Falls back to `~/Library/Safari`
+/// when the user has never set up Mail. In-process so the TCC identity
+/// matches the agent's own bundle ID.
+pub async fn check_full_disk_access() -> PermissionStatus {
     let home = crate::core::paths::home_dir();
 
     let mail_result = tokio::fs::read_dir(format!("{home}/Library/Mail")).await;
@@ -172,6 +207,39 @@ async fn check_full_disk_access() -> PermissionStatus {
     let safari_err = safari_result.err().map(|e| e.kind());
 
     parse_fda_result(mail_err, safari_err)
+}
+
+/// Snapshot of the three wizard-surfaced permission grants. Feeds the
+/// `system.probePermissions` RPC that the Mac wrapper polls during the
+/// Permissions wizard step.
+///
+/// Automation is intentionally omitted: the wrapper doesn't surface an
+/// Automation card (we use CGEvent for mouse/keyboard, not AppleScript),
+/// and the probe itself is slower because it spawns `osascript`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WizardPermissions {
+    /// FDA grant state — probed via `~/Library/Mail` read (FDA-gated).
+    pub full_disk_access: PermissionStatus,
+    /// Screen Recording grant state — probed via `CGPreflightScreenCaptureAccess`.
+    pub screen_recording: PermissionStatus,
+    /// Accessibility grant state — probed via `AXIsProcessTrusted`.
+    pub accessibility: PermissionStatus,
+}
+
+/// Runs all three wizard-surfaced probes concurrently. Non-prompting;
+/// safe to call from an RPC handler that the Mac wrapper polls every
+/// few seconds during the Permissions step.
+pub async fn probe_wizard_permissions() -> WizardPermissions {
+    let (fda, screen, ax) = tokio::join!(
+        check_full_disk_access(),
+        check_screen_recording(),
+        check_accessibility(),
+    );
+    WizardPermissions {
+        full_disk_access: fda,
+        screen_recording: screen,
+        accessibility: ax,
+    }
 }
 
 /// Check macOS permissions at server startup.

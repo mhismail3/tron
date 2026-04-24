@@ -24,6 +24,7 @@ struct ServerStatusPollerTests {
             readTailscaleIPFromSettings: { tailscaleFromSettings },
             probeTailscale: { .notInstalled },
             probePermission: { _ in .notDetermined },
+            probeAgentPermissions: { [:] },
             detectExistingInstall: { .none },
             pingServer: { _ in pingResult },
             launchAgentManager: MockLaunchAgentManager(),

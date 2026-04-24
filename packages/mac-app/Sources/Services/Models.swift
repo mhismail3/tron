@@ -7,8 +7,8 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     case welcome
     case tailscale
     case existingInstall
-    case permissions
     case install
+    case permissions
     case pairingInfo
     case done
 
@@ -52,11 +52,21 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     /// their cards without scrolling, and sparse steps (Welcome, Done,
     /// ExistingInstall) don't float in dead space. Width stays pinned
     /// at 480 for every step — only height varies.
+    ///
+    /// Heights are deliberately collapsed into bands rather than tuned
+    /// per-step: the three lightweight "gate" steps (welcome / tailscale
+    /// / existingInstall) share a single height so the user can walk
+    /// through the opening of the wizard without the window resizing
+    /// between each click. Resizes only happen when the next step
+    /// genuinely needs more room (install → permissions) or
+    /// substantially less (pairingInfo → done). `WizardShell` further
+    /// no-ops the AppKit resize animation when the delta is < 1pt, so
+    /// steps that share a band stay completely still during navigation.
     var preferredHeight: CGFloat {
         switch self {
         case .welcome: return 360
         case .tailscale: return 360
-        case .existingInstall: return 340
+        case .existingInstall: return 360
         case .permissions: return 480
         case .install: return 400
         case .pairingInfo: return 420

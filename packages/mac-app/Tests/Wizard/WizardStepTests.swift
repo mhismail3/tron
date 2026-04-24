@@ -6,14 +6,22 @@ import Testing
 /// failing test instead of a confused user.
 @Suite("WizardStep ordering")
 struct WizardStepOrderingTests {
-    @Test("allCases is in canonical order")
+    @Test("allCases is in canonical order (install precedes permissions)")
     func canonicalOrder() {
+        // Install runs BEFORE permissions on purpose: macOS TCC grants
+        // are tied to the process running when the user granted them,
+        // so we need the agent to exist on disk and be running under
+        // launchd before asking the user to grant permissions to it.
+        // The permissions step then `launchctl kickstart -k`s the
+        // agent after each grant so the new extension takes effect
+        // without a visible restart prompt. Swapping these two steps
+        // back would silently break the seamless-grant flow.
         #expect(WizardStep.allCases == [
             .welcome,
             .tailscale,
             .existingInstall,
-            .permissions,
             .install,
+            .permissions,
             .pairingInfo,
             .done,
         ])

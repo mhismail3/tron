@@ -22,6 +22,7 @@ struct MenuBarItemBuilderTests {
             readTailscaleIPFromSettings: { nil },
             probeTailscale: { .notInstalled },
             probePermission: { _ in .notDetermined },
+            probeAgentPermissions: { [:] },
             detectExistingInstall: { .none },
             pingServer: { _ in .unreachable },
             launchAgentManager: MockLaunchAgentManager(),

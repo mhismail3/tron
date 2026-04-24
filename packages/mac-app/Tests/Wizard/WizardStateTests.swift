@@ -36,7 +36,7 @@ struct WizardStateTests {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
         let state = WizardState(defaults: defaults)
-        let expected: [WizardStep] = [.tailscale, .existingInstall, .permissions, .install, .pairingInfo, .done]
+        let expected: [WizardStep] = [.tailscale, .existingInstall, .install, .permissions, .pairingInfo, .done]
         for step in expected {
             state.advance()
             #expect(state.step == step, "after advance, expected \(step) got \(state.step)")
@@ -128,13 +128,13 @@ struct WizardStateTests {
         #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.welcome.rawValue)
     }
 
-    @Test("legacy step rawValue from UserDefaults is honored")
+    @Test("safe-to-resume persisted step rawValue is honored")
     func revivesFromRawValue() {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
-        defaults.set(WizardStep.permissions.rawValue, forKey: WizardState.stepStorageKey)
+        defaults.set(WizardStep.install.rawValue, forKey: WizardState.stepStorageKey)
         let state = WizardState(defaults: defaults)
-        #expect(state.step == .permissions)
+        #expect(state.step == .install)
     }
 
     @Test("invalid stored step falls back to welcome")
@@ -163,9 +163,60 @@ struct WizardStateTests {
     func initialStepNilHonorsPersisted() {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
-        defaults.set(WizardStep.permissions.rawValue, forKey: WizardState.stepStorageKey)
+        defaults.set(WizardStep.existingInstall.rawValue, forKey: WizardState.stepStorageKey)
         let state = WizardState(defaults: defaults, initialStep: nil)
-        #expect(state.step == .permissions)
+        #expect(state.step == .existingInstall)
+    }
+
+    // MARK: - Cold-resume clamp
+    //
+    // Post-install steps depend on transient state (`installOutcome`,
+    // `pairingPayload`, per-permission probes) that doesn't survive a
+    // relaunch. If we honoured those on cold boot the user would land
+    // mid-wizard behind a disabled Continue button with no way to
+    // recover. `WizardState.init` clamps persisted post-install steps
+    // back to `.welcome`; these tests pin that contract — without them
+    // a future contributor could silently re-introduce the stranded-
+    // user regression that ordering changes in this branch shook out.
+
+    @Test("persisted .permissions clamps back to welcome on cold start")
+    func persistedPermissionsClamped() {
+        let (defaults, cleanup) = Self.isolatedDefaults()
+        defer { cleanup() }
+        defaults.set(WizardStep.permissions.rawValue, forKey: WizardState.stepStorageKey)
+        let state = WizardState(defaults: defaults)
+        #expect(state.step == .welcome)
+        // The clamp is written back so the next cold boot agrees.
+        #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.welcome.rawValue)
+    }
+
+    @Test("persisted .pairingInfo clamps back to welcome on cold start")
+    func persistedPairingInfoClamped() {
+        let (defaults, cleanup) = Self.isolatedDefaults()
+        defer { cleanup() }
+        defaults.set(WizardStep.pairingInfo.rawValue, forKey: WizardState.stepStorageKey)
+        let state = WizardState(defaults: defaults)
+        #expect(state.step == .welcome)
+    }
+
+    @Test("persisted .done clamps back to welcome on cold start")
+    func persistedDoneClamped() {
+        let (defaults, cleanup) = Self.isolatedDefaults()
+        defer { cleanup() }
+        defaults.set(WizardStep.done.rawValue, forKey: WizardState.stepStorageKey)
+        let state = WizardState(defaults: defaults)
+        #expect(state.step == .welcome)
+    }
+
+    @Test("safe-to-resume steps (welcome/tailscale/existingInstall/install) do NOT clamp")
+    func safeToResumeNotClamped() {
+        for step in [WizardStep.welcome, .tailscale, .existingInstall, .install] {
+            let (defaults, cleanup) = Self.isolatedDefaults()
+            defer { cleanup() }
+            defaults.set(step.rawValue, forKey: WizardState.stepStorageKey)
+            let state = WizardState(defaults: defaults)
+            #expect(state.step == step, "expected \(step) to resume as-is")
+        }
     }
 
     // MARK: - slideDirection invariants

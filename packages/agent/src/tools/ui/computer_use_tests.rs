@@ -1378,38 +1378,12 @@ async fn focus_window_details() {
 }
 
 // ─── Permission parsing tests ───
-
-#[test]
-fn parse_accessibility_granted() {
-    assert_eq!(
-        parse_accessibility_result("granted\n", true),
-        PermissionStatus::Granted,
-    );
-}
-
-#[test]
-fn parse_accessibility_denied() {
-    let status = parse_accessibility_result("denied\n", true);
-    assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Accessibility")));
-}
-
-#[test]
-fn parse_accessibility_swift_error() {
-    let status = parse_accessibility_result("", false);
-    assert!(matches!(status, PermissionStatus::Unknown { .. }));
-}
-
-#[test]
-fn parse_accessibility_empty_output() {
-    let status = parse_accessibility_result("", true);
-    assert!(matches!(status, PermissionStatus::Unknown { reason } if reason.contains("unexpected")));
-}
-
-#[test]
-fn parse_accessibility_unexpected_output() {
-    let status = parse_accessibility_result("something weird", true);
-    assert!(matches!(status, PermissionStatus::Unknown { reason } if reason.contains("unexpected")));
-}
+//
+// Accessibility + Screen Recording probes now use native FFI
+// (AXIsProcessTrusted / CGPreflightScreenCaptureAccess) so the old
+// subprocess-output parsing tests are gone. Automation still shells
+// out to osascript and FDA is pure filesystem errno, both of which
+// keep unit-testable parse layers below.
 
 #[test]
 fn parse_automation_granted() {
@@ -1441,32 +1415,6 @@ fn parse_automation_denied_assistive() {
 fn parse_automation_unknown_error() {
     let status = parse_automation_result("", "some other error", false);
     assert!(matches!(status, PermissionStatus::Unknown { .. }));
-}
-
-#[test]
-fn parse_screen_recording_granted() {
-    assert_eq!(
-        parse_screen_recording_result(true, true, 1024),
-        PermissionStatus::Granted,
-    );
-}
-
-#[test]
-fn parse_screen_recording_denied_no_file() {
-    let status = parse_screen_recording_result(true, false, 0);
-    assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Screen Recording")));
-}
-
-#[test]
-fn parse_screen_recording_denied_empty_file() {
-    let status = parse_screen_recording_result(true, true, 0);
-    assert!(matches!(status, PermissionStatus::Denied { guidance } if guidance.contains("Screen Recording")));
-}
-
-#[test]
-fn parse_screen_recording_command_failed() {
-    let status = parse_screen_recording_result(false, false, 0);
-    assert!(matches!(status, PermissionStatus::Denied { .. }));
 }
 
 #[test]
