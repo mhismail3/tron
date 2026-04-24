@@ -17,12 +17,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::tools::errors::ToolError;
-use crate::tools::traits::{ProcessRunner, ProcessOptions, ToolContext, TronTool};
+use crate::tools::traits::{ProcessOptions, ProcessRunner, ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::validation::{
     get_optional_string, get_optional_u64, validate_required_string,
@@ -140,7 +140,10 @@ impl TronTool for ComputerUseTool {
 
         // Confirmation gate: mutating actions require GetConfirmation first
         if self.confirm_before_action && Self::is_mutating(&action) {
-            let confirmed = params.get("confirmed").and_then(Value::as_bool).unwrap_or(false);
+            let confirmed = params
+                .get("confirmed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             if !confirmed {
                 let desc = self.describe_action(&action, &params);
                 return Ok(error_result(format!(
@@ -168,14 +171,11 @@ impl TronTool for ComputerUseTool {
 }
 
 mod actions;
-mod screenshot;
-mod permissions;
 mod codegen;
+mod permissions;
+mod screenshot;
 
-pub use permissions::{
-    PermissionStatus, WizardPermissions, check_permissions_on_startup,
-    probe_wizard_permissions,
-};
+pub use permissions::{PermissionStatus, WizardPermissions, probe_wizard_permissions};
 
 // Re-export parse functions for tests
 #[cfg(test)]

@@ -45,3 +45,50 @@ struct MockLaunchAgentManagerTests {
         #expect(mock.calls.map(\.kind) == [.load, .unload, .restart, .isLoaded])
     }
 }
+
+@Suite("InstallLaunchAgentRunner")
+struct InstallLaunchAgentRunnerTests {
+    @Test("bootstrap success does not restart")
+    func bootstrapSuccessDoesNotRestart() async throws {
+        let mock = MockLaunchAgentManager()
+        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+            manager: mock,
+            plistPath: URL(fileURLWithPath: "/tmp/com.tron.server.plist"),
+            label: "com.tron.server"
+        )
+
+        #expect(outcome == .ok)
+        #expect(mock.calls.map(\.kind) == [.load])
+    }
+
+    @Test("already-loaded label is kickstarted after plist write")
+    func alreadyLoadedRestarts() async throws {
+        let mock = MockLaunchAgentManager()
+        mock.loadOutcome = .alreadyLoaded
+
+        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+            manager: mock,
+            plistPath: URL(fileURLWithPath: "/tmp/com.tron.server.plist"),
+            label: "com.tron.server"
+        )
+
+        #expect(outcome == .ok)
+        #expect(mock.calls.map(\.kind) == [.load, .restart])
+    }
+
+    @Test("restart failure is surfaced to the install step")
+    func restartFailureSurfaces() async throws {
+        let mock = MockLaunchAgentManager()
+        mock.loadOutcome = .alreadyLoaded
+        mock.restartOutcome = .launchdRefused(message: "stale job would not restart")
+
+        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+            manager: mock,
+            plistPath: URL(fileURLWithPath: "/tmp/com.tron.server.plist"),
+            label: "com.tron.server"
+        )
+
+        #expect(outcome == .launchdRefused(message: "stale job would not restart"))
+        #expect(mock.calls.map(\.kind) == [.load, .restart])
+    }
+}

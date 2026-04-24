@@ -14,6 +14,8 @@
     <string>Tron</string>
     <key>CFBundleDisplayName</key>
     <string>Tron</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>

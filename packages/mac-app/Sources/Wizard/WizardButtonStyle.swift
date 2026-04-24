@@ -131,7 +131,6 @@ struct WizardLinkButtonStyle: ButtonStyle {
             .font(.system(.callout, design: .rounded).weight(.medium))
             .foregroundStyle(textColor(pressed: configuration.isPressed))
             .padding(.vertical, 6)
-            .padding(.horizontal, 12)
             .contentShape(Rectangle())
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
             .animation(.easeOut(duration: 0.15), value: configuration.isPressed)

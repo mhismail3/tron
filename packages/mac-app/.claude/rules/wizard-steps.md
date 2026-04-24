@@ -4,6 +4,7 @@ paths:
   - "packages/mac-app/**/WizardState*"
   - "packages/mac-app/**/WizardView*"
   - "packages/mac-app/**/InstallPlanner*"
+  - "packages/mac-app/**/InstallArtifactCleaner*"
   - "packages/mac-app/**/InstallStep*"
   - "packages/mac-app/**/PermissionProbe*"
   - "packages/mac-app/**/TailscaleProbe*"
@@ -33,7 +34,7 @@ RootView (SwiftUI)
 
 WizardView
   └─ switch state.step in:
-       welcome → tailscale → existingInstall → permissions → install → pairingInfo → done
+       welcome → tailscale → existingInstall → install → permissions → pairingInfo → done
 
 DoneStep "Finish"
   └─ setup.touchOnboardedSentinel()      ← atomic tempfile+rename
@@ -64,9 +65,9 @@ This replaces the earlier `presentPairingInfoWindow(setup:)` AppDelegate path th
 |------|------|-----------------|-----------------|
 | `welcome` | `WelcomeStep` | NO | none — also exposes "I already have Tron running" skip-to-pairing |
 | `tailscale` | `TailscaleStep` | NO ("I have Tailscale" advances regardless) | `TailscaleProbe.probe()` populates `state.tailscaleStatus` |
-| `existingInstall` | `ExistingInstallStep` | NO (auto-skips if installed) | reads `ExistingInstallDetector` snapshot set on `WizardView.onAppear` |
-| `permissions` | `PermissionsStep` | FDA + Notifications REQUIRED (Continue button hard-disabled until granted); Accessibility skippable | `PermissionProbe.probe(…)` on appear + re-probe on return from System Settings. Plan §A.4 envisions a skip-with-confirm-dialog path — not yet implemented |
-| `install` | `InstallStep` | YES — must reach `.success` or `.alreadyInstalled` | copies `Bundle.main.url("tron-agent")` → `~/.tron/system/Tron.app/Contents/MacOS/tron`; writes plist; `launchctl bootstrap`; polls `system.ping` |
+| `existingInstall` | `ExistingInstallStep` | NO (skips directly to permissions if installed) | reads `ExistingInstallDetector` snapshot set on `WizardView.onAppear`; offers cleanup for stale launch artifacts |
+| `install` | `InstallStep` | YES — first click starts install; second click continues after `.success` / `.alreadyInstalled` | waits for explicit Install CTA, then copies `Bundle.main.url("tron-agent")` → `~/.tron/system/Tron.app/Contents/MacOS/tron`; writes bundle metadata/resources; ad-hoc signs the inner app for TCC; writes plist; `launchctl bootstrap` or `kickstart -k` if already loaded; polls string-id `system.ping` while skipping broadcast frames |
+| `permissions` | `PermissionsStep` | FDA + Screen Recording + Accessibility REQUIRED (Continue button hard-disabled until all three are granted) | polls `system.probePermissions` on the agent; app focus normally rechecks only; a Settings return opened from a wizard gear button is consumed once and kickstarts launchd only when that permission was previously missing |
 | `pairingInfo` | `PairingInfoStep` | NO (display-only); "I'm paired" disabled until both bearer token AND a real Tailscale IP are resolved | reads `auth-token.json` + `settings.json` (no placeholder fallback — surfaces a `PairingFailureReason` to differentiate "no token" vs "no Tailscale IP"); generates QR via `QRCodeGenerator`; copy actions |
 | `done` | `DoneStep` | NO | flips the gate via `touchOnboardedSentinel` + `state.complete()` |
 
@@ -94,24 +95,25 @@ The install step is split into three pure pieces + one view:
    Tests in `Tests/Services/InstallPlannerTests.swift`.
 
 2. **`BinaryInstaller.install(plan:)` + `BinaryInstaller.writePlist(plan:)`**
-   Side-effect runners. Atomic via tempfile + `FileManager.replaceItemAt`. `install` also writes a minimal `Info.plist` inside the inner `Tron.app` so TCC identifies the binary by bundle ID, not raw path.
+   Side-effect runners. Atomic via tempfile + `FileManager.replaceItemAt`. `install` also writes a minimal `Info.plist` inside the inner `Tron.app`, copies `AppIcon.icns` when the wrapper bundle provides it, strips quarantine, and runs `/usr/bin/codesign --force --sign - --timestamp=none` so TCC identifies the binary by `com.tron.server`, not Cargo's raw executable signature.
    Tests in `Tests/Wizard/InstallStepBinaryInstallerTests.swift`.
 
-3. **`LaunchAgentManaging.load(plistPath:label:) -> LaunchAgentOutcome`**
-   Protocol surface for `launchctl`. Live implementation shells out with a 10s timeout; mock records calls and returns configured outcomes.
+3. **`LaunchAgentManaging.load(plistPath:label:) -> LaunchAgentOutcome` + `InstallLaunchAgentRunner.ensureLoaded(...)`**
+   Protocol surface for `launchctl`. Live implementation shells out; mock records calls and returns configured outcomes. During install, `.alreadyLoaded` is treated as a stale-job signal and followed by `restart(label:)` / `launchctl kickstart -k` so launchd uses the plist and binary just written.
 
-4. **`InstallStep` view** — orchestrates (1)-(3) as a five-stage progress UI (`copyBinary` → `writePlist` → `loadAgent` → `awaitPing`). Each stage has a pending/running/succeeded/failed(String) state and a retry path. Failure surfaces an `InstallOutcome` that the Pairing step uses for gating.
+4. **`InstallStep` view** — displays a ready card on entry and does not mutate disk or launchd until `WizardState.requestInstall()` increments `installRequestID`. After that explicit user action, it orchestrates (1)-(3) as a four-stage progress UI (`copyBinary` / prepare app → `writePlist` → `loadAgent` → `awaitPing`). The ping client uses a string request ID (matching the Rust RPC wire type), ignores `connection.established` / broadcast frames, and waits for the matching response. Each stage has a pending/running/succeeded/failed(String) state and a retry path. Failure surfaces an `InstallOutcome` that the Pairing step uses for gating.
+
+5. **`InstallArtifactCleaner.clean(...)`** — installer recovery only. It unloads `com.tron.server` when launchd has it loaded, removes `~/.tron/system/Tron.app` and `~/Library/LaunchAgents/com.tron.server.plist`, removes an empty legacy `~/.tron/system/deployment/` directory, and preserves auth, settings, database, sessions, workspace files, and non-empty dev/deploy/update artifacts. Exposed from Existing Install and failed Install UI.
 
 ### Existing-install path
 
-`ExistingInstallDetector.detect()` returns `.installed(version:)` if both binary + plist exist, `.partial(reason:)` if only one, `.none` otherwise. `InstallPlanner` honors this:
+`ExistingInstallDetector.detect()` returns `.installed(version:)` when the installed server binary exists and the app bundle signature is bound to `com.tron.server`, `.partial(reason:)` when the LaunchAgent plist exists without the binary or the bundle signature needs repair, and `.none` otherwise. Auth/settings/database files are user data, not install artifacts, and are deliberately ignored by this detector so cleanup can preserve them. `InstallPlanner` honors this:
 
-- `.installed(version:)` + plist-on-disk → `requiresLoad = false`, pipeline is idempotent (copy + writePlist still run but `launchctl load` is skipped).
-- `.installed(version:)` + plist-missing → `requiresLoad = true`, full pipeline.
+- `.installed(version:)` → the Existing Install primary CTA calls `WizardState.skipInstall()`, records `.alreadyInstalled`, and jumps directly to `.permissions`.
 - `.partial(reason:)` → always `requiresLoad = true`.
 - `.none` → always `requiresLoad = true`.
 
-The InstallStep view has its own auto-skip branch on entry: if `state.existingInstallStatus` is already `.installed`, it short-circuits to `installOutcome = .alreadyInstalled` without running the pipeline at all.
+If lower-level callers use `InstallPlanner` directly, `.installed(version:)` + plist-on-disk yields `requiresLoad = false`; `.installed(version:)` + plist-missing yields `requiresLoad = true`.
 
 ## Error Surfaces
 
@@ -125,13 +127,23 @@ The InstallStep view has its own auto-skip branch on entry: if `state.existingIn
 | `.launchctlFailed(String)` | Same — most common is "binary missing" (wrong plist path) or launchd refusal |
 | `.awaitPingTimedOut` | "The server did not respond in time. Check Console.app or run `tron logs`." |
 
+Failed install outcomes also surface the cleanup action so the user can unload/remove launch artifacts before retrying without deleting auth, settings, or database files.
+
 ## Invariants
 
 - **The wizard NEVER shells out to `scripts/tron install`.** Everything is native Swift via `EnvironmentSetup` so tests don't need a subshell.
+- **The install pipeline is user-confirmed.** `InstallStep` may mark a fully existing install as `.alreadyInstalled` on entry, but it never copies binaries, writes plists, or invokes launchd from view appearance alone.
+- **Skip install must skip the install page.** The Existing Install CTA calls `WizardState.skipInstall()` for `.installed`, not generic `advance()`, because the canonical next step is still `.install`.
+- **Deployment artifacts are not installer artifacts.** The wizard writes `~/.tron/system/Tron.app` and the LaunchAgent plist only. `~/.tron/system/deployment/` is for `tron dev`, deploy, and update state and may be absent or empty after onboarding.
+- **Cleanup preserves user data.** `InstallArtifactCleaner` removes only LaunchAgent/app artifacts plus an empty legacy `deployment/` directory; auth tokens, provider auth, settings, databases, sessions, workspace files, and non-empty dev/deploy/update artifacts are out of scope.
+- **LaunchAgent `.alreadyLoaded` is restarted during install.** A stale loaded label can still point at an older process image after the app bundle was moved or deleted; install must kickstart it after rewriting the plist.
+- **Accessibility TCC requires a stable signed bundle identity.** The installed inner `Tron.app` must pass `codesign -dv --verbose=4` with `Identifier=com.tron.server`, a bound Info.plist, and sealed resources before the user grants Accessibility. If detection sees the old linker-generated identity, it reports `.partial` so the install step repairs it.
+- **Permissions app-activation does not imply restart.** `NSApplication.didBecomeActiveNotification` fires for ordinary focus changes and System Settings navigation. `PermissionsStep` must consume a wizard-opened `PermissionSettingsReturn` before kickstarting launchd; otherwise it only rechecks permissions.
 - **`touchOnboardedSentinel()` is idempotent.** ISO8601 with fractional seconds ensures repeated touches produce distinct bodies (matches Rust's serde_json timestamp format).
 - **No wizard step writes to `~/.tron/system/auth-token.json`.** That file is owned by the agent; the wizard only reads it. If the file is missing on the Pairing step, the user sees "(not generated)" and the pipeline has failed earlier.
 - **Navigation is strictly forward via `state.advance()` + bounded backward via `state.goBack()`.** No direct `state.step = .foo` writes outside WizardState.
 - **Power-user skip (`state.skipToPairing()`) goes directly to `.pairingInfo`.** Used by the Welcome step's "I already have Tron running" button.
+- **Existing-install skip (`state.skipInstall()`) goes directly to `.permissions`.** Used by the Existing Install step's "Skip install" button when the detector returns `.installed`.
 - **Mode + activation policy live in `RootView`, not `AppDelegate`.** The "Show pairing info…" menu-bar action posts a notification observed by `MenuBarHostView`, which signals `RootView` via a closure to flip mode and seed `wizardEntryStep`. AppDelegate observes only LaunchAgent / sentinel events, never SwiftUI mode.
 
 ## Key Files
@@ -142,6 +154,7 @@ The InstallStep view has its own auto-skip branch on entry: if `state.existingIn
 - `Sources/TronMacApp.swift` — `RootView` owns mode + `wizardEntryStep`; `MenuBarHostView` observes `.tronWizardShowPairingInfo`
 - `Sources/MenuBar/MenuBarItemBuilder.swift` — emits the `.tronWizardShowPairingInfo` notification
 - `Sources/Services/Onboarding/InstallPlanner.swift` — pure planner + plist renderer
+- `Sources/Services/Onboarding/InstallArtifactCleaner.swift` — cleanup/removal of installer launch artifacts
 - `Sources/Services/Onboarding/{ExistingInstallDetector,PermissionProbe,TailscaleProbe}.swift`
 - `Sources/Services/Server/TronCLI.swift` — single source of truth for `tron` binary resolution (used by menu-bar actions + feedback)
 - `Tests/Wizard/{WizardState,WizardStep,InstallStepBinaryInstaller,MockLaunchAgentManager}Tests.swift`

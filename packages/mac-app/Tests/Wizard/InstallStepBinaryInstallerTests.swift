@@ -30,7 +30,7 @@ struct BinaryInstallerTests {
             requiresLoad: true
         )
 
-        try BinaryInstaller.install(plan: plan)
+        try BinaryInstaller.install(plan: plan, signer: .noop)
 
         #expect(FileManager.default.fileExists(atPath: binary.path))
         #expect(FileManager.default.isExecutableFile(atPath: binary.path))
@@ -58,7 +58,7 @@ struct BinaryInstallerTests {
             plistContents: "<plist/>",
             requiresLoad: true
         )
-        try BinaryInstaller.install(plan: plan)
+        try BinaryInstaller.install(plan: plan, signer: .noop)
 
         let infoURL = bundle.appendingPathComponent("Contents/Info.plist", isDirectory: false)
         let data = try Data(contentsOf: infoURL)
@@ -72,6 +72,35 @@ struct BinaryInstallerTests {
         // the two-entry confusion the naming audit resolved.
         #expect(dict?["CFBundleName"] as? String == "Tron Server")
         #expect(dict?["CFBundleDisplayName"] as? String == "Tron Server")
+        #expect(dict?["CFBundleIconFile"] as? String == "AppIcon.icns")
+        #expect(dict?["CFBundleIconName"] as? String == "AppIcon")
+    }
+
+    @Test("install copies provided app icon into Resources")
+    func installCopiesAppIcon() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let source = tmp.appendingPathComponent("tron-agent", isDirectory: false)
+        let icon = tmp.appendingPathComponent("AppIcon.icns", isDirectory: false)
+        try Data("binary".utf8).write(to: source)
+        try Data("icon".utf8).write(to: icon)
+
+        let bundle = tmp.appendingPathComponent("Tron.app", isDirectory: true)
+        let binary = bundle.appendingPathComponent("Contents/MacOS/tron", isDirectory: false)
+        let plan = InstallPlan(
+            sourceBinary: source,
+            iconSource: icon,
+            targetBundle: bundle,
+            targetBinary: binary,
+            plistPath: tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false),
+            plistContents: "<plist/>",
+            requiresLoad: true
+        )
+
+        try BinaryInstaller.install(plan: plan, signer: .noop)
+
+        let copiedIcon = bundle.appendingPathComponent("Contents/Resources/AppIcon.icns", isDirectory: false)
+        #expect(try Data(contentsOf: copiedIcon) == Data("icon".utf8))
     }
 
     @Test("install replaces existing binary (atomic re-install)")
@@ -98,7 +127,7 @@ struct BinaryInstallerTests {
             plistContents: "<plist/>",
             requiresLoad: true
         )
-        try BinaryInstaller.install(plan: plan)
+        try BinaryInstaller.install(plan: plan, signer: .noop)
 
         let copied = try String(contentsOf: binary, encoding: .utf8)
         #expect(copied == "NEW")
@@ -154,7 +183,7 @@ struct BinaryInstallerTests {
             plistContents: "<plist/>",
             requiresLoad: true
         )
-        try BinaryInstaller.install(plan: plan)
+        try BinaryInstaller.install(plan: plan, signer: .noop)
 
         // After install, the destination must NOT carry quarantine.
         var buffer = [UInt8](repeating: 0, count: 256)
@@ -163,6 +192,34 @@ struct BinaryInstallerTests {
         }
         // -1 with errno ENOATTR (93 on Darwin) is the expected outcome.
         #expect(size == -1, "expected no quarantine xattr on installed binary, got \(size) bytes")
+    }
+
+    @Test("install signs a real app bundle as com.tron.server for TCC")
+    func installSignsBundleForTCC() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+
+        let source = tmp.appendingPathComponent("tron-agent", isDirectory: false)
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/echo"), to: source)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: source.path)
+
+        let bundle = tmp.appendingPathComponent("Tron.app", isDirectory: true)
+        let binary = bundle.appendingPathComponent("Contents/MacOS/tron", isDirectory: false)
+        let plan = InstallPlan(
+            sourceBinary: source,
+            targetBundle: bundle,
+            targetBinary: binary,
+            plistPath: tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false),
+            plistContents: "<plist/>",
+            requiresLoad: true
+        )
+
+        try BinaryInstaller.install(plan: plan)
+
+        let signature = try codesignDetails(for: bundle)
+        #expect(signature.contains("Identifier=\(TronPaths.bundleID)"))
+        #expect(!signature.contains("Info.plist=not bound"))
+        #expect(!signature.contains("Sealed Resources=none"))
     }
 
     @Test("writePlist overwrites existing file")
@@ -183,5 +240,18 @@ struct BinaryInstallerTests {
         try BinaryInstaller.writePlist(plan: plan)
         let body = try String(contentsOf: plist, encoding: .utf8)
         #expect(body == "new")
+    }
+
+    private func codesignDetails(for bundle: URL) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        process.arguments = ["-dv", "--verbose=4", bundle.path]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }

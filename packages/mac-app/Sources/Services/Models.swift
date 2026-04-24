@@ -58,8 +58,9 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     /// / existingInstall) share a single height so the user can walk
     /// through the opening of the wizard without the window resizing
     /// between each click. Resizes only happen when the next step
-    /// genuinely needs more room (install → permissions) or
-    /// substantially less (pairingInfo → done). `WizardShell` further
+    /// genuinely needs more room (existingInstall → install,
+    /// install → permissions) or substantially less (pairingInfo → done).
+    /// `WizardShell` further
     /// no-ops the AppKit resize animation when the delta is < 1pt, so
     /// steps that share a band stay completely still during navigation.
     var preferredHeight: CGFloat {
@@ -68,7 +69,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .tailscale: return 360
         case .existingInstall: return 360
         case .permissions: return 480
-        case .install: return 400
+        case .install: return 440
         case .pairingInfo: return 420
         case .done: return 320
         }
@@ -104,6 +105,34 @@ enum PermissionStatus: String, Equatable, Sendable {
     case denied
     case notDetermined
     case probeUnavailable
+}
+
+/// One Settings round-trip initiated by a Permissions-step gear button.
+/// App activation alone is too broad: System Settings focus changes can
+/// activate the wrapper even when the user only navigated inside Settings.
+struct PermissionSettingsReturn: Equatable, Sendable {
+    var permission: Permission
+    var statusBeforeOpen: PermissionStatus
+}
+
+enum PermissionSettingsReturnAction: Equatable, Sendable {
+    case recheckOnly
+    case restartAndRecheck
+}
+
+enum PermissionSettingsReturnPolicy {
+    static func action(for pendingReturn: PermissionSettingsReturn?) -> PermissionSettingsReturnAction {
+        guard let pendingReturn else {
+            return .recheckOnly
+        }
+
+        switch pendingReturn.statusBeforeOpen {
+        case .granted:
+            return .recheckOnly
+        case .denied, .notDetermined, .probeUnavailable:
+            return .restartAndRecheck
+        }
+    }
 }
 
 /// Tailscale state on the host. Used by the Tailscale prerequisite step.
@@ -159,6 +188,8 @@ struct PairingPayload: Equatable, Sendable, Hashable {
 /// Discrete steps in the install pipeline (wizard step 5). Each is
 /// tested separately in `InstallPlannerTests`.
 enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
+    /// Copies the server binary, writes bundle metadata/resources, strips
+    /// quarantine, and signs the app bundle before launchd ever starts it.
     case copyBinary
     case writePlist
     case loadAgent
@@ -169,6 +200,7 @@ enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
 /// View applies the plan via `LaunchAgentManaging`.
 struct InstallPlan: Equatable, Sendable {
     var sourceBinary: URL
+    var iconSource: URL? = nil
     var targetBundle: URL
     var targetBinary: URL
     var plistPath: URL

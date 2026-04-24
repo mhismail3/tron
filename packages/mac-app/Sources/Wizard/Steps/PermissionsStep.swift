@@ -15,9 +15,11 @@ import AppKit
 /// can't satisfy. By the time the wizard gets here the agent bundle
 /// is already on disk at `~/.tron/system/Tron.app` and the LaunchAgent
 /// is running — the user grants permissions to "Tron Server" in
-/// System Settings, and when they return to the wrapper we
-/// `launchctl kickstart -k` the agent silently so the new grant takes
-/// effect without a visible restart prompt.
+/// System Settings. When they return from a Settings pane opened via
+/// this step, we consume that single round-trip, `launchctl kickstart
+/// -k` the agent when the permission was previously missing, and then
+/// re-probe so the new grant takes effect without a visible restart
+/// prompt.
 ///
 /// The three categories map 1:1 to the macOS TCC probes exposed by the
 /// agent's `system.probePermissions` RPC. The wizard polls that RPC
@@ -32,6 +34,7 @@ struct PermissionsStep: View {
     @State private var appActivationObserver: NSObjectProtocol?
     @State private var pollTask: Task<Void, Never>?
     @State private var restarting = false
+    @State private var pendingSettingsReturn: PermissionSettingsReturn?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -92,6 +95,10 @@ struct PermissionsStep: View {
                 }
                 Spacer()
                 Button {
+                    pendingSettingsReturn = PermissionSettingsReturn(
+                        permission: permission,
+                        statusBeforeOpen: status
+                    )
                     NSWorkspace.shared.open(PermissionDeepLink.url(for: permission))
                 } label: {
                     Image(systemName: "gearshape.fill")
@@ -155,10 +162,10 @@ struct PermissionsStep: View {
     }
 
     /// Installs an observer on `NSApp.didBecomeActiveNotification`.
-    /// When the user comes back to the wrapper (typically after
-    /// granting a permission in System Settings) we kick the agent so
-    /// its sandbox extension picks up the new grant, wait for the
-    /// first post-restart ping, then re-probe.
+    /// When the user comes back to the wrapper, we first check whether
+    /// that activation corresponds to a Settings pane opened by this
+    /// view. Plain app activation is only a recheck; otherwise clicking
+    /// around System Settings can repeatedly restart the server.
     ///
     /// The observer is stored as a `@State` token so `onDisappear` can
     /// remove it — SwiftUI will recreate the view each time the user
@@ -172,7 +179,7 @@ struct PermissionsStep: View {
             queue: .main
         ) { _ in
             Task { @MainActor in
-                await kickstartAndRefresh()
+                await handleAppActivation()
             }
         }
     }
@@ -225,12 +232,20 @@ struct PermissionsStep: View {
         }
     }
 
-    /// Wrapper for the app-activation path. Only kickstart the agent
-    /// if the wizard is actually on the permissions step — otherwise a
-    /// user who revisits the wrapper during some other step would
-    /// trigger a stray agent restart.
-    private func kickstartAndRefresh() async {
+    /// Wrapper for the app-activation path. The pending Settings
+    /// round-trip is consumed before awaiting so repeated activation
+    /// notifications from the same System Settings visit cannot enqueue
+    /// repeated `launchctl kickstart -k` calls.
+    private func handleAppActivation() async {
         guard state.step == .permissions else { return }
-        await refreshAll(kickstart: true)
+        let pendingReturn = pendingSettingsReturn
+        pendingSettingsReturn = nil
+
+        switch PermissionSettingsReturnPolicy.action(for: pendingReturn) {
+        case .recheckOnly:
+            await refreshAll(kickstart: false)
+        case .restartAndRecheck:
+            await refreshAll(kickstart: true)
+        }
     }
 }

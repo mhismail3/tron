@@ -60,6 +60,10 @@ struct EnvironmentSetup: Sendable {
     /// LaunchAgent control surface - load/unload/restart/check.
     var launchAgentManager: LaunchAgentManaging
 
+    /// Removes installer-owned launch artifacts after a failed or stale
+    /// partial install. Preserves auth, settings, and database state.
+    var cleanupInstallArtifacts: @Sendable () async -> InstallCleanupOutcome
+
     /// Touches the `.onboarded` sentinel atomically.
     var touchOnboardedSentinel: @Sendable () throws -> Void
 
@@ -101,6 +105,15 @@ struct EnvironmentSetup: Sendable {
             await ServerPing.ping(host: "127.0.0.1", port: TronPaths.defaultServerPort, token: token)
         },
         launchAgentManager: LiveLaunchAgentManager(),
+        cleanupInstallArtifacts: {
+            await InstallArtifactCleaner.clean(
+                installedBundle: TronPaths.installedBundle,
+                launchAgentPlistPath: TronPaths.launchAgentPlistPath,
+                launchAgentManager: LiveLaunchAgentManager(),
+                label: TronPaths.launchAgentLabel,
+                emptyDirectoriesToRemove: [TronPaths.deploymentDir]
+            )
+        },
         touchOnboardedSentinel: {
             try OnboardedSentinelWriter.touch(at: TronPaths.onboardedMarkerPath)
         }

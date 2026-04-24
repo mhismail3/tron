@@ -56,6 +56,18 @@ final class WizardState {
     /// completes (or fails). The Pairing step blocks until non-nil.
     var installOutcome: InstallOutcome?
 
+    /// Monotonic user intent counter for the Install step. The wizard
+    /// must never start copying binaries or writing launchd state just
+    /// because the user landed on the page; pressing the Install CTA is
+    /// what increments this value and lets `InstallStep` run.
+    var installRequestID: Int = 0
+
+    /// True only while the Install step is actively mutating disk or
+    /// launchd. `WizardShell` reads this to turn the primary CTA into a
+    /// disabled "Installing…" affordance instead of letting a second
+    /// click enqueue another pipeline.
+    var installIsRunning = false
+
     /// Pairing payload assembled at the Pairing-info step. Populated
     /// after `system.ping` succeeds AND we read the bearer token off
     /// disk.
@@ -105,8 +117,7 @@ final class WizardState {
         }
     }
 
-    /// Advances to the next step in the canonical sequence. Skips
-    /// install/permissions when an existing install satisfies them.
+    /// Advances to the next step in the canonical sequence.
     func advance() {
         let candidates = WizardStep.allCases
         guard let currentIndex = candidates.firstIndex(of: step),
@@ -114,10 +125,6 @@ final class WizardState {
             return
         }
         let next = candidates[currentIndex + 1]
-        // Auto-skip install when an existing install is fully present
-        // is handled by InstallStep itself — it short-circuits to
-        // `installOutcome = .alreadyInstalled` and lets the user click
-        // Continue, which keeps this function pure navigation.
         navigate(to: next, direction: .forward)
     }
 
@@ -133,6 +140,16 @@ final class WizardState {
     /// step on the assumption the server is already installed.
     func skipToPairing() {
         navigate(to: .pairingInfo, direction: .forward)
+    }
+
+    /// Existing-install shortcut: when the detector has confirmed a
+    /// complete server app + LaunchAgent, the "Skip install" CTA should
+    /// bypass the install page entirely. Landing on Install would imply
+    /// there is still work to confirm or run, which is both confusing
+    /// and historically led users to re-run an already-satisfied step.
+    func skipInstall() {
+        installOutcome = .alreadyInstalled
+        navigate(to: .permissions, direction: .forward)
     }
 
     /// Marks the wizard complete and notifies AppDelegate to swap to
@@ -154,7 +171,16 @@ final class WizardState {
         permissionStatuses.removeAll()
         existingInstallStatus = .none
         installOutcome = nil
+        installRequestID = 0
+        installIsRunning = false
         pairingPayload = nil
+    }
+
+    /// Explicitly starts or retries the install pipeline. This is the
+    /// only public entry point that may cause `InstallStep` to mutate
+    /// disk/launchd state; view appearance is observational only.
+    func requestInstall() {
+        installRequestID += 1
     }
 
     /// Single mutation point for step + direction. Centralises the

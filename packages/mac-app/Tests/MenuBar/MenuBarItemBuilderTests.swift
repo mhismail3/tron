@@ -26,6 +26,7 @@ struct MenuBarItemBuilderTests {
             detectExistingInstall: { .none },
             pingServer: { _ in .unreachable },
             launchAgentManager: MockLaunchAgentManager(),
+            cleanupInstallArtifacts: { .success(removed: []) },
             touchOnboardedSentinel: { }
         )
     }

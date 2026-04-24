@@ -1,6 +1,6 @@
 # Mac App Development
 
-> Last verified: 2026-04-23 (Phases 5, 5.5, 7, 8)
+> Last verified: 2026-04-24 (Phase 9 onboarding polish)
 
 ## Setup
 
@@ -27,6 +27,8 @@ Build products differ between configurations:
 Both configurations manage the same LaunchAgent (`com.tron.server`) and port (`9847`) — the wrapper's `~/.tron/system/.mac-wrapper.lock` ensures only one wrapper runs at a time, regardless of which configuration built it.
 
 > **Disambiguation**: the Debug-config `TronMac.app` (workflow 2 — wizard dogfood) is unrelated to `Tron-Dev.app` at `~/.tron/system/deployment/Tron-Dev.app`, which is workflow 3's headless agent built by `tron dev` (bundle ID `com.tron.agent`, no SwiftUI). See [architecture.md → Workflows & Variants](./architecture.md#workflows--variants) for the canonical three-workflow breakdown.
+
+The wizard install path is intentionally smaller than `tron dev` or `tron deploy`: it copies the server into `~/.tron/system/Tron.app`, writes `~/Library/LaunchAgents/com.tron.server.plist`, and waits for the server heartbeat. It does not stage deploy scripts or dev bundles under `~/.tron/system/deployment/`; that directory is local dev/deploy/update state and can be absent or empty after a normal installer run.
 
 ## Local dev loop
 
@@ -56,6 +58,8 @@ xcodegen generate
 ```
 
 If you ship the wrapper without the staged binary, `InstallStep` surfaces `.sourceBinaryMissing`. The wizard refuses to advance past the Install step.
+
+If the installer is interrupted after writing launch artifacts, use the cleanup action on the Existing Install step or failed Install step. Cleanup unloads `com.tron.server`, removes `~/.tron/system/Tron.app` plus `~/Library/LaunchAgents/com.tron.server.plist`, and removes `~/.tron/system/deployment/` only when it is empty legacy state. Auth, settings, databases, workspace files, and non-empty dev/deploy/update artifacts are preserved.
 
 ### Building
 
@@ -155,3 +159,6 @@ swiftformat packages/mac-app/Sources packages/mac-app/Tests
 | `SingleInstanceLock.acquire()` returns false on first launch | Stale lock file with a PID no longer alive (rare — `fcntl(F_SETLK)` locks are kernel-released on process exit, so this only happens if the file's perms got broken). `rm ~/.tron/system/.mac-wrapper.lock` and relaunch. |
 | Wizard restarts every launch | `touchOnboardedSentinel` is not being called OR `~/.tron/system/` is not writable. Check permissions. |
 | `launchctl bootstrap` fails with 119 | LaunchAgent already loaded. Unload first: `launchctl bootout gui/$(id -u)/com.tron.server`. |
+| Existing-install step reports only a LaunchAgent plist | `~/Library/LaunchAgents/com.tron.server.plist` exists but `~/.tron/system/Tron.app/Contents/MacOS/tron` does not. This is usually an interrupted wrapper install or a removed app bundle; pressing Install will replace the plist and copy the bundled server. |
+| Accessibility toggle turns itself back off | The installed inner `~/.tron/system/Tron.app` is not signed as `com.tron.server` (old dogfood builds left the executable's linker-generated ad-hoc identity). Use installer cleanup and reinstall; the current installer signs the assembled bundle before launchd starts it. Verify with `codesign -dv --verbose=4 ~/.tron/system/Tron.app`. |
+| Install shows copy/write/load complete, then waits on heartbeat | Check whether launchd is running a stale process image: `launchctl print gui/$(id -u)/com.tron.server` then `lsof -p <pid>`. The wizard's install path should now kickstart an already-loaded label after rewriting the plist. |

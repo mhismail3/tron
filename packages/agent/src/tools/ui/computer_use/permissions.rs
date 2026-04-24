@@ -1,18 +1,15 @@
-// MARK: - Startup + on-demand permission probes
+// MARK: - On-demand permission probes
 //
-// Two roles for this module:
-// 1. `check_permissions_on_startup` — logs the four macOS TCC grants at
-//    server boot so developers see any missing permissions in the log
-//    stream before the first tool call fails.
-// 2. `probe_wizard_permissions` — a fast, non-prompting RPC probe used by
-//    the Mac wrapper's Permissions wizard step. Surfaced via the
-//    `system.probePermissions` handler in `server::rpc::handlers::system`.
+// The Mac wrapper asks the already-installed launchd agent for a fast,
+// non-prompting grant snapshot via `probe_wizard_permissions`, surfaced by
+// `system.probePermissions` in `server::rpc::handlers::system`.
 //
 // The key design rule: probes must NEVER prompt. The Mac wrapper drives
 // prompting via System Settings deep links; a probe that itself triggers
 // a TCC dialog would race with that UX and confuse users. That's why
 // `check_accessibility` uses `AXIsProcessTrusted()` (no options dict)
-// rather than `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])`.
+// rather than `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])`,
+// and why ordinary server startup never calls these probes.
 
 /// Result of probing a single macOS TCC permission.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +47,12 @@ impl PermissionStatus {
 
 // ─── Pure parsing functions (no I/O — fully unit-testable) ───
 
-pub(crate) fn parse_automation_result(_stdout: &str, stderr: &str, success: bool) -> PermissionStatus {
+#[cfg(test)]
+pub(crate) fn parse_automation_result(
+    _stdout: &str,
+    stderr: &str,
+    success: bool,
+) -> PermissionStatus {
     if success {
         return PermissionStatus::Granted;
     }
@@ -146,37 +148,16 @@ pub async fn check_accessibility() -> PermissionStatus {
     }
 }
 
-async fn check_automation() -> PermissionStatus {
-    use std::time::Duration;
-    let result = tokio::time::timeout(Duration::from_secs(5), {
-        tokio::process::Command::new("osascript")
-            .args(["-e", r#"tell application "System Events" to return name of first process"#])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
-    }).await;
-
-    match result {
-        Ok(Ok(output)) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            parse_automation_result(&stdout, &stderr, output.status.success())
-        }
-        _ => PermissionStatus::Unknown {
-            reason: "check timed out or failed to spawn".into(),
-        },
-    }
-}
-
 /// Screen Recording probe via `CGPreflightScreenCaptureAccess()`.
 /// Non-prompting, no subprocess, constant time.
 #[allow(unsafe_code)]
 pub async fn check_screen_recording() -> PermissionStatus {
     #[cfg(target_os = "macos")]
     {
-        let granted = tokio::task::spawn_blocking(|| unsafe { CGPreflightScreenCaptureAccess() } != 0)
-            .await
-            .unwrap_or(false);
+        let granted =
+            tokio::task::spawn_blocking(|| unsafe { CGPreflightScreenCaptureAccess() } != 0)
+                .await
+                .unwrap_or(false);
         if granted {
             PermissionStatus::Granted
         } else {
@@ -239,56 +220,5 @@ pub async fn probe_wizard_permissions() -> WizardPermissions {
         full_disk_access: fda,
         screen_recording: screen,
         accessibility: ax,
-    }
-}
-
-/// Check macOS permissions at server startup.
-///
-/// Probes four capabilities concurrently and logs results:
-/// 1. **Accessibility** — needed for CGEvent-based mouse/keyboard input (enigo).
-/// 2. **Automation** — needed for osascript to System Events.
-/// 3. **Screen Recording** — needed for screencapture.
-/// 4. **Full Disk Access** — needed for reading/writing protected locations.
-///
-/// No-op on non-macOS platforms.
-pub async fn check_permissions_on_startup() {
-    if std::env::consts::OS != "macos" {
-        return;
-    }
-
-    tracing::info!("checking macOS permissions...");
-
-    let (ax, auto, screen, fda) = tokio::join!(
-        check_accessibility(),
-        check_automation(),
-        check_screen_recording(),
-        check_full_disk_access(),
-    );
-
-    for (name, status) in [
-        ("Accessibility", &ax),
-        ("Automation", &auto),
-        ("Screen Recording", &screen),
-        ("Full Disk Access", &fda),
-    ] {
-        match status {
-            PermissionStatus::Granted => tracing::info!("{name}: granted"),
-            PermissionStatus::Denied { guidance } => {
-                tracing::warn!("{name}: denied — grant via {guidance}");
-            }
-            PermissionStatus::Unknown { reason } => {
-                tracing::warn!("{name}: could not check ({reason})");
-            }
-        }
-    }
-
-    // FDA is the only permission without a native prompt — open System Settings directly
-    if matches!(fda, PermissionStatus::Denied { .. }) {
-        let _ = tokio::process::Command::new("open")
-            .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await;
     }
 }

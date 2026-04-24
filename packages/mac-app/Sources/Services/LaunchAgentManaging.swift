@@ -16,7 +16,9 @@ enum LaunchAgentOutcome: Equatable, Sendable {
 /// `Tests/Mocks/MockLaunchAgentManager.swift`.
 protocol LaunchAgentManaging: Sendable {
     /// `launchctl bootstrap gui/$UID/<plistPath>` — installs the agent.
-    /// Returns `.alreadyLoaded` if the agent was already up.
+    /// Returns `.alreadyLoaded` if launchd already has the label. The
+    /// install wizard treats that as a stale-job signal and follows with
+    /// `restart(label:)` so launchd consumes the plist/binary just written.
     func load(plistPath: URL, label: String) async -> LaunchAgentOutcome
 
     /// `launchctl bootout gui/$UID/<label>` — removes the agent. Safe to

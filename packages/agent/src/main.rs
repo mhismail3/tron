@@ -38,7 +38,7 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -175,6 +175,11 @@ fn rotate_bearer_token_cli() -> Result<()> {
     Ok(())
 }
 
+fn ensure_bearer_token_at(path: &Path) -> Result<String> {
+    tron::server::onboarding::load_or_create_bearer_token(path)
+        .with_context(|| format!("Failed to initialize bearer token at {}", path.display()))
+}
+
 /// Build the human-readable startup log line, naming the bind address
 /// and its trust assumption.
 ///
@@ -252,12 +257,22 @@ fn init_crash_recovery() {
     }
 }
 
+/// System subdirectories created on ordinary server startup.
+///
+/// Deployment state is intentionally excluded: `deployment/` is for
+/// contributor/dev/deploy/update artifacts and should not appear just
+/// because a user installed and launched the server.
+fn startup_system_subdirs() -> &'static [&'static str] {
+    use tron::core::paths::dirs;
+    &[dirs::DB]
+}
+
 /// Ensure `~/.tron/` directory structure exists and seed the system prompt.
 fn init_directories() {
     use tron::core::paths::dirs;
     let tron_home = tron::settings::tron_home_dir();
     let system = tron_home.join(dirs::SYSTEM);
-    for subdir in &[dirs::DB, dirs::DEPLOYMENT] {
+    for subdir in startup_system_subdirs() {
         let _ = std::fs::create_dir_all(system.join(subdir));
     }
     let _ = std::fs::create_dir_all(system.join(dirs::APP_BUNDLE).join("Contents").join("MacOS"));
@@ -1093,7 +1108,12 @@ fn build_rpc_context(
 /// dropped from the in-memory cache by the background eviction task.
 const IDLE_SESSION_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
 
-/// Spawn background maintenance tasks (sandbox cleanup, session eviction, permissions check).
+/// Spawn background maintenance tasks (sandbox cleanup, session eviction).
+///
+/// INVARIANT: ordinary startup must not touch macOS TCC permissions. The
+/// Mac onboarding wrapper owns that UX after the install heartbeat, and a
+/// daemon-side startup probe can surface permission prompts while the user is
+/// still on the install step.
 fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronServer) {
     // Clean up stale sandbox directories from previous sessions (>24h old)
     let _sandbox_cleanup =
@@ -1119,11 +1139,6 @@ fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronSe
         }
     });
 
-    // Check macOS permissions for ComputerUse (Accessibility + Screen Recording).
-    // Triggers OS permission prompts on first run so users don't hit errors mid-session.
-    let _permissions_check = tokio::spawn(async {
-        tron::tools::ui::computer_use::check_permissions_on_startup().await;
-    });
 }
 
 #[tokio::main]
@@ -1143,6 +1158,8 @@ async fn main() -> Result<()> {
     // Phase 1: Pre-database filesystem operations
     init_crash_recovery();
     init_directories();
+    let bearer_token_path = tron::server::onboarding::bearer_token_path();
+    let _bearer_token = ensure_bearer_token_at(&bearer_token_path)?;
 
     // Phase 2: Database and logging
     // _db_lock is bound for the lifetime of main(); dropping it releases the
@@ -1270,26 +1287,22 @@ async fn main() -> Result<()> {
     // the fetcher is `None` (embedded / test paths) the scheduler
     // silently no-ops because `perform_tick` bails on `enabled = false`
     // and tests never set enabled.
-    let updater_scheduler_handle = if let Some(fetcher) = server
-        .rpc_context()
-        .release_fetcher
-        .as_ref()
-        .cloned()
-    {
-        let deps = tron::server::updater::SchedulerDeps {
-            fetcher,
-            broadcast: server.broadcast().clone(),
-            state_path: server.rpc_context().updater_state_path.clone(),
-            pause_path: tron::server::updater::pause_sentinel_path(),
-            current_version: env!("CARGO_PKG_VERSION").to_string(),
+    let updater_scheduler_handle =
+        if let Some(fetcher) = server.rpc_context().release_fetcher.as_ref().cloned() {
+            let deps = tron::server::updater::SchedulerDeps {
+                fetcher,
+                broadcast: server.broadcast().clone(),
+                state_path: server.rpc_context().updater_state_path.clone(),
+                pause_path: tron::server::updater::pause_sentinel_path(),
+                current_version: env!("CARGO_PKG_VERSION").to_string(),
+            };
+            Some(tron::server::updater::scheduler::spawn(
+                deps,
+                server.shutdown().token(),
+            ))
+        } else {
+            None
         };
-        Some(tron::server::updater::scheduler::spawn(
-            deps,
-            server.shutdown().token(),
-        ))
-    } else {
-        None
-    };
 
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
     tracing::info!(

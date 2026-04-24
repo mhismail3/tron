@@ -1,12 +1,12 @@
 # Mac App Architecture
 
-> Last verified: 2026-04-23 (Phases 5, 5.5, 7, 8)
+> Last verified: 2026-04-24 (Phase 9 onboarding polish)
 
 ## Overview
 
 `Tron.app` is the macOS SwiftUI wrapper around the headless Rust agent. It has two runtime modes:
 
-- **Wizard mode** — shown on first launch, before `~/.tron/system/.onboarded` exists. Walks the user through Tailscale, permissions, binary install, and pairing-info display.
+- **Wizard mode** — shown on first launch, before `~/.tron/system/.onboarded` exists. Walks the user through Tailscale, existing-install detection, an explicit binary-install confirmation, permissions, and pairing-info display.
 - **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system.ping` and exposes status + copy actions + diagnostics.
 
 The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side. This keeps the gate consistent with `scripts/tron` (the CLI-install path writes the same file).
@@ -23,12 +23,12 @@ packages/mac-app/
 ├── Sources/
 │   ├── TronMacApp.swift            # @main entry, AppDelegate, RootView
 │   ├── EnvironmentSetup.swift      # Sendable DI struct (live + test values)
-│   ├── Info.plist                  # Bundle metadata (LSUIElement = YES)
+│   ├── Info.plist                  # Bundle metadata (starts regular; switches to accessory after onboarding)
 │   ├── MenuBar/
 │   │   ├── MenuBarActionHandler.swift # routes menu-item descriptors → side effects (subprocess, NSWorkspace, notifications)
 │   │   ├── MenuBarController.swift    # NSStatusItem lifecycle + timer
 │   │   └── MenuBarItemBuilder.swift   # Pure builder: snapshot → [MenuItemDescriptor]
-│   ├── Resources/                  # tron-agent is staged here by CI
+│   ├── Resources/                  # tron-agent + AppIcon.icns staged into the wrapper bundle
 │   ├── Services/
 │   │   ├── LaunchAgentManaging.swift # protocol + LiveLaunchAgentManager (shells launchctl)
 │   │   ├── Models.swift            # TailscaleStatus, PermissionStatus, ExistingInstallStatus…
@@ -40,6 +40,7 @@ packages/mac-app/
 │   │   │   └── SentryRedactor.swift        # beforeSend hook: strip paths, mask tokens, drop chat content (Phase 7)
 │   │   ├── Onboarding/
 │   │   │   ├── ExistingInstallDetector.swift
+│   │   │   ├── InstallArtifactCleaner.swift # unload/remove launch artifacts while preserving user data
 │   │   │   ├── InstallPlanner.swift    # pure-value plan + plist renderer
 │   │   │   ├── PermissionProbe.swift
 │   │   │   └── TailscaleProbe.swift
@@ -48,7 +49,7 @@ packages/mac-app/
 │   │   │   └── QRCodeGenerator.swift   # CoreImage CIQRCodeGenerator wrapper
 │   │   └── Server/
 │   │       ├── BearerTokenReader.swift     # reads auth-token.json (+ legacy plain-string fallback) with 0o600 permission guard
-│   │       ├── ServerPing.swift            # one-shot system.ping over WS → ServerPingResult (success/unauthorized/unreachable/timeout/malformedResponse)
+│   │       ├── ServerPing.swift            # one-shot string-id system.ping over WS → ServerPingResult; skips broadcast/event frames
 │   │       ├── ServerStatusPoller.swift    # 30s periodic poll for menu bar
 │   │       ├── SingleInstanceLock.swift    # fcntl(F_SETLK) advisory lock
 │   │       └── TronCLI.swift               # single source of truth for resolving the `tron` binary on PATH
@@ -113,8 +114,8 @@ TronMacApp.main()
        └─ setup.onboardedSentinelExists() → false
            └─ RootView → WizardView
                 └─ WizardState.step = .welcome
-                    → .tailscale → .existingInstall → .permissions
-                    → .install → .pairingInfo → .done
+                    → .tailscale → .existingInstall → .install
+                    → .permissions → .pairingInfo → .done
                 └─ DoneStep taps "Finish"
                     ├─ setup.touchOnboardedSentinel()  ← atomic tempfile+rename
                     └─ post .tronWizardDidComplete
@@ -123,6 +124,15 @@ TronMacApp.main()
                              ├─ NSApp.setActivationPolicy(.accessory)
                              └─ orderOut all windows
 ```
+
+The install heartbeat is intentionally permission-neutral: the LaunchAgent
+may start the server, but ordinary agent startup must not probe TCC or open
+System Settings. The Permissions step is the first place the wrapper asks the
+agent for `system.probePermissions`, so Full Disk Access, Screen Recording,
+and Accessibility prompts cannot race the install progress UI. The step
+rechecks on app activation, but it only kickstarts launchd after consuming a
+Settings round-trip opened by one of the wizard's permission buttons; focus
+changes inside System Settings are not restart signals.
 
 ### Subsequent launches (menu-bar-only path)
 
@@ -147,21 +157,34 @@ The "Show pairing info…" menu item reopens the wizard at `pairingInfo` without
 ### Install pipeline (wizard's `InstallStep`)
 
 ```
-1. Locate source:  Bundle.main.url(forResource: "tron-agent")
-2. Plan:           InstallPlanner.plan(…) → Result<InstallPlan, Failure>
-3. Copy binary:    BinaryInstaller.install(plan:)   [tempfile + rename, chmod 755]
-4. Write plist:    BinaryInstaller.writePlist(plan:) [atomic write]
-5. Load agent:     setup.launchAgentManager.load(plistPath:label:)
-6. Await ping:     poll setup.pingServer(token) for 30s on 1s cadence
+0. Wait for user: Install CTA increments WizardState.installRequestID
+1. Locate source: Bundle.main.url(forResource: "tron-agent")
+2. Plan:          InstallPlanner.plan(…) → Result<InstallPlan, Failure>
+3. Prepare app:   BinaryInstaller.install(plan:)   [tempfile + rename, chmod 755, write Info.plist/resources, codesign -]
+4. Write plist:   BinaryInstaller.writePlist(plan:) [atomic write]
+5. Load agent:    launchctl bootstrap, or kickstart -k when label is already loaded
+6. Await ping:    poll setup.pingServer(token) for 30s on 1s cadence, ignoring connection events
 → state.installOutcome set; Pairing step unblocks when .success | .alreadyInstalled
+
+Recovery action:
+ExistingInstallStep / failed InstallStep → InstallArtifactCleaner.clean(...)
+→ launchctl bootout com.tron.server when loaded
+→ remove ~/.tron/system/Tron.app and ~/Library/LaunchAgents/com.tron.server.plist
+→ remove ~/.tron/system/deployment/ only when it is empty legacy state
+→ preserve auth.json, auth-token.json, settings.json, database/, and workspace/
 ```
 
 ## Key Invariants
 
 - **`Tron.app` never builds the Rust agent.** The binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing → wizard surfaces `sourceBinaryMissing` with a "reinstall the DMG" message.
+- **The Install step is not an `onAppear` side effect.** Landing on the page is read-only; the user must press Install before the wrapper copies the binary, writes the LaunchAgent plist, or calls launchd.
+- **The inner server bundle must be signed before launchd starts it.** `BinaryInstaller.install` ad-hoc signs `~/.tron/system/Tron.app` after writing `Info.plist` and resources so `codesign -dv` reports `Identifier=com.tron.server`, a bound Info.plist, and sealed resources. Accessibility TCC can flip grants back off when the bundle is left with only the executable's linker-generated ad-hoc identity.
+- **Cleanup preserves user data.** The installer recovery action unloads the LaunchAgent, removes the installed app bundle + plist, and removes an empty legacy `deployment/` directory if present. It never removes auth, settings, sessions, databases, workspace files, or non-empty dev/deploy/update artifacts.
+- **A loaded LaunchAgent label is not proof that the new binary is running.** After writing the plist, `.alreadyLoaded` is followed by `launchctl kickstart -k gui/<uid>/com.tron.server` so stale processes left from interrupted installs consume the just-copied bundle.
+- **App activation is a recheck by default.** The Permissions step records which permission Settings pane it opened and consumes that return once; repeated focus changes from System Settings only refresh the RPC snapshot.
 - **All atomic writes use tempfile + `replaceItemAt` (matching the Rust agent's `tempfile::Builder → sync_all → rename`).** See `OnboardedSentinelWriter.touch` and `BinaryInstaller.install`.
 - **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth-token.json`, `settings.json`, `.onboarded`) or a WS RPC call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
-- **Single port (`9847`) and single LaunchAgent label (`com.tron.server`) across every workflow.** The DMG-installed `Tron.app` (`com.tron.mac`), the Xcode-built `TronMac.app` dogfood wrapper (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/system/deployment/Tron-Dev.app` (`com.tron.agent`) are all distinct on-disk artifacts that share the same server port and `~/.tron/system/` data tree. Mutual exclusion is enforced at runtime: the wrapper's `.mac-wrapper.lock` rejects a second wrapper, the agent's `log.db.lock` rejects a second agent, and `tron dev` explicitly stops the LaunchAgent before binding 9847. See [Workflows & Variants](#workflows--variants) below for the full breakdown.
+- **Single port (`9847`) and single LaunchAgent label (`com.tron.server`) across every workflow.** The DMG-installed `Tron.app` (`com.tron.mac`), the Xcode-built `TronMac.app` dogfood wrapper (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/system/deployment/Tron-Dev.app` (`com.tron.agent`) are all distinct on-disk artifacts that share the same server port and `~/.tron/system/` data tree. The installer does not write deployment artifacts; `deployment/` is for local dev/deploy/update state and may be absent or empty after a normal install. Mutual exclusion is enforced at runtime: the wrapper's `.mac-wrapper.lock` rejects a second wrapper, the agent's `log.db.lock` rejects a second agent, and `tron dev` explicitly stops the LaunchAgent before binding 9847. See [Workflows & Variants](#workflows--variants) below for the full breakdown.
 - **TronPaths is the single source of truth.** If any path is referenced elsewhere, that's a bug. See `packages/agent/src/core/foundation/paths.rs` for the Rust-side mirror.
 
 ## Workflows & Variants

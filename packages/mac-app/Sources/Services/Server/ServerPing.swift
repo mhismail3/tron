@@ -28,6 +28,8 @@ enum ServerPingResult: Sendable, Equatable {
 /// One-shot `system.ping` over WebSocket. Used by the install step's
 /// "wait for server" loop AND by the menu bar's status poller.
 enum ServerPing {
+    static let requestID = "mac-system-ping"
+
     /// Performs a single ping with a default 3 s timeout. Classifies
     /// failures so the caller can render the right state without
     /// guessing.
@@ -53,10 +55,10 @@ enum ServerPing {
 
         let task = session.webSocketTask(with: request)
         task.resume()
+        defer { task.cancel(with: .goingAway, reason: nil) }
 
         let payload: [String: Any] = [
-            "jsonrpc": "2.0",
-            "id": 1,
+            "id": requestID,
             "method": "system.ping",
             "params": [
                 "protocolVersion": 1,
@@ -70,16 +72,28 @@ enum ServerPing {
 
         do {
             try await task.send(.string(str))
-            let message = try await task.receive()
-            task.cancel(with: .goingAway, reason: nil)
-            switch message {
-            case .data(let data):
-                return decode(data: data).map(ServerPingResult.success) ?? .malformedResponse
-            case .string(let s):
-                return decode(data: Data(s.utf8)).map(ServerPingResult.success) ?? .malformedResponse
-            @unknown default:
-                return .malformedResponse
+
+            var sawServerFrame = false
+            for _ in 0..<8 {
+                let message = try await task.receive()
+                guard let raw = messageData(from: message) else {
+                    return .malformedResponse
+                }
+
+                switch decodeFrame(data: raw) {
+                case .result(let info):
+                    return .success(info)
+                case .ignore:
+                    sawServerFrame = true
+                    continue
+                case .error:
+                    return .malformedResponse
+                case .malformed:
+                    return .malformedResponse
+                }
             }
+
+            return sawServerFrame ? .unauthorized : .malformedResponse
         } catch {
             // Server returned a non-101 status during upgrade — most
             // commonly 401 when auth fails. The delegate captured it.
@@ -112,6 +126,29 @@ enum ServerPing {
         }
     }
 
+    enum ResponseFrame: Equatable {
+        case result(ServerInfo)
+        case ignore
+        case error
+        case malformed
+    }
+
+    static func decodeFrame(data: Data, expectedID: String = requestID) -> ResponseFrame {
+        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+            return .malformed
+        }
+        guard responseID(json["id"], matches: expectedID) else {
+            return .ignore
+        }
+        if json["error"] != nil || json["success"] as? Bool == false {
+            return .error
+        }
+        guard let info = decode(data: data) else {
+            return .malformed
+        }
+        return .result(info)
+    }
+
     static func decode(data: Data) -> ServerInfo? {
         guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
               let result = json["result"] as? [String: Any] else {
@@ -122,6 +159,24 @@ enum ServerPing {
         let tailscaleIp = result["tailscaleIp"] as? String
         let paired = result["paired"] as? Bool ?? false
         return ServerInfo(version: serverVersion, port: port, tailscaleIp: tailscaleIp, paired: paired)
+    }
+
+    private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {
+        switch message {
+        case .data(let data):
+            return data
+        case .string(let string):
+            return Data(string.utf8)
+        @unknown default:
+            return nil
+        }
+    }
+
+    private static func responseID(_ value: Any?, matches expectedID: String) -> Bool {
+        if let string = value as? String {
+            return string == expectedID
+        }
+        return false
     }
 }
 
@@ -140,6 +195,8 @@ enum ServerPing {
 /// permission result so the wizard renders a retry affordance rather
 /// than looping forever — e.g. the agent is mid-restart after a kickstart.
 enum PermissionProbeRPC {
+    static let requestID = "mac-probe-permissions"
+
     /// Probes the three wizard permissions against the agent. If the
     /// server is unreachable or the response is malformed, all three
     /// come back as `.probeUnavailable` so the UI can surface a single
@@ -164,10 +221,10 @@ enum PermissionProbeRPC {
 
         let task = session.webSocketTask(with: request)
         task.resume()
+        defer { task.cancel(with: .goingAway, reason: nil) }
 
         let payload: [String: Any] = [
-            "jsonrpc": "2.0",
-            "id": 1,
+            "id": requestID,
             "method": "system.probePermissions",
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
@@ -177,18 +234,50 @@ enum PermissionProbeRPC {
 
         do {
             try await task.send(.string(str))
-            let message = try await task.receive()
-            task.cancel(with: .goingAway, reason: nil)
-            let raw: Data
-            switch message {
-            case .data(let d): raw = d
-            case .string(let s): raw = Data(s.utf8)
-            @unknown default: return fallback()
+
+            for _ in 0..<8 {
+                let message = try await task.receive()
+                guard let raw = messageData(from: message) else {
+                    return fallback()
+                }
+
+                switch decodeFrame(raw) {
+                case .result(let statuses):
+                    return statuses
+                case .ignore:
+                    continue
+                case .error, .malformed:
+                    return fallback()
+                }
             }
-            return decode(raw) ?? fallback()
+
+            return fallback()
         } catch {
             return fallback()
         }
+    }
+
+    enum ResponseFrame: Equatable {
+        case result([Permission: PermissionStatus])
+        case ignore
+        case error
+        case malformed
+    }
+
+    static func decodeFrame(_ data: Data, expectedID: String = requestID) -> ResponseFrame {
+        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+            return .malformed
+        }
+        guard responseID(json["id"], matches: expectedID) else {
+            return .ignore
+        }
+        if json["error"] != nil || json["success"] as? Bool == false {
+            return .error
+        }
+        guard let statuses = decode(data) else {
+            return .malformed
+        }
+        return .result(statuses)
     }
 
     static func decode(_ data: Data) -> [Permission: PermissionStatus]? {
@@ -223,6 +312,24 @@ enum PermissionProbeRPC {
             .screenRecording: .probeUnavailable,
             .accessibility:   .probeUnavailable,
         ]
+    }
+
+    private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {
+        switch message {
+        case .data(let data):
+            return data
+        case .string(let string):
+            return Data(string.utf8)
+        @unknown default:
+            return nil
+        }
+    }
+
+    private static func responseID(_ value: Any?, matches expectedID: String) -> Bool {
+        if let string = value as? String {
+            return string == expectedID
+        }
+        return false
     }
 }
 

@@ -54,6 +54,62 @@ struct ServerPingDecodeTests {
         let info = try #require(ServerPing.decode(data: Data(body.utf8)))
         #expect(info.paired == false)
     }
+
+    @Test("response frame decodes string-id server response")
+    func responseFrameDecodesStringID() {
+        let body = """
+        {"id":"mac-system-ping","success":true,"result":{"serverVersion":"0.5.0","port":9847,"tailscaleIp":"100.64.0.1","paired":true}}
+        """
+        let expected = ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true)
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(expected))
+    }
+
+    @Test("connection.established event is ignored while waiting for ping response")
+    func connectionEstablishedIsIgnored() {
+        let body = """
+        {"type":"connection.established","timestamp":"2026-04-24T17:40:42Z","data":{"clientId":"abc"}}
+        """
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .ignore)
+    }
+
+    @Test("matching RPC error frame is not mistaken for a heartbeat")
+    func rpcErrorFrameIsError() {
+        let body = """
+        {"id":"mac-system-ping","success":false,"error":{"code":"INVALID_PARAMS","message":"invalid id"}}
+        """
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .error)
+    }
+}
+
+@Suite("PermissionProbeRPC.decodeFrame")
+struct PermissionProbeRPCDecodeFrameTests {
+    @Test("connection.established event is ignored while waiting for permissions response")
+    func connectionEstablishedIsIgnored() {
+        let body = """
+        {"type":"connection.established","timestamp":"2026-04-24T17:40:42Z","data":{"clientId":"abc"}}
+        """
+        #expect(PermissionProbeRPC.decodeFrame(Data(body.utf8)) == .ignore)
+    }
+
+    @Test("string-id permissions response decodes statuses")
+    func stringIDResponseDecodesStatuses() {
+        let body = """
+        {"id":"mac-probe-permissions","success":true,"result":{"fullDiskAccess":"granted","screenRecording":"denied","accessibility":"unknown"}}
+        """
+        #expect(PermissionProbeRPC.decodeFrame(Data(body.utf8)) == .result([
+            .fullDiskAccess: .granted,
+            .screenRecording: .denied,
+            .accessibility: .probeUnavailable,
+        ]))
+    }
+
+    @Test("matching permissions RPC error frame is not decoded as statuses")
+    func rpcErrorFrameIsError() {
+        let body = """
+        {"id":"mac-probe-permissions","success":false,"error":{"code":"NOPE","message":"nope"}}
+        """
+        #expect(PermissionProbeRPC.decodeFrame(Data(body.utf8)) == .error)
+    }
 }
 
 @Suite("ServerPingResult")

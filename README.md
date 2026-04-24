@@ -310,7 +310,7 @@ Source-control operations (sync main, push, switch branches, finalize a session 
 
 ## RPC API
 
-JSON-RPC 2.0 over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **166 methods** across three groups.
+Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **166 methods** across three groups.
 
 ### Connection
 
@@ -320,11 +320,11 @@ Health:    GET  http://<host>:<port>/health
 Metrics:   GET  http://<host>:<port>/metrics
 ```
 
-All messages use JSON-RPC 2.0 framing:
+Messages use the server's WebSocket RPC framing. Request IDs are strings and are echoed on responses:
 
 ```json
-{"jsonrpc":"2.0","method":"system.ping","id":1}
-{"jsonrpc":"2.0","result":{"pong":true,"timestamp":"…","serverVersion":"0.1.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true},"id":1}
+{"id":"ping-1","method":"system.ping"}
+{"id":"ping-1","success":true,"result":{"pong":true,"timestamp":"…","serverVersion":"0.1.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true}}
 ```
 
 `system.ping` accepts optional `{"protocolVersion": <u32>, "clientVersion": <str>}` params. Clients that advertise a `protocolVersion` below `minClientProtocolVersion` receive a `CLIENT_VERSION_UNSUPPORTED` error with details naming both versions; clients that omit the field are accepted as pre-handshake (legacy).
@@ -337,7 +337,7 @@ All messages use JSON-RPC 2.0 framing:
 
 These fields are additive; older clients that ignore them continue to work unchanged.
 
-`system.probePermissions` returns a non-prompting snapshot of the agent's macOS TCC grants for the three wizard-surfaced permissions — Full Disk Access, Screen Recording, Accessibility. Each value is one of `"granted"`, `"denied"`, or `"unknown"`. The Mac wizard polls this RPC every ~2 s (and on app-focus-regain) so it can confirm that a TCC grant the user just made in System Settings has stuck, then `launchctl kickstart -k` the agent to pick up the new sandbox extension. Implementation uses native `AXIsProcessTrusted()` / `CGPreflightScreenCaptureAccess()` FFI — no subprocess, no prompt.
+`system.probePermissions` returns a non-prompting snapshot of the agent's macOS TCC grants for the three wizard-surfaced permissions — Full Disk Access, Screen Recording, Accessibility. Each value is one of `"granted"`, `"denied"`, or `"unknown"`. The Mac wizard polls this RPC every ~2 s and rechecks when the app regains focus. A `launchctl kickstart -k` is reserved for a consumed Settings round-trip from one of the wizard's permission buttons, so focus changes inside System Settings do not repeatedly restart the agent. Implementation uses native `AXIsProcessTrusted()` / `CGPreflightScreenCaptureAccess()` FFI — no subprocess, no prompt.
 
 `system.checkForUpdates` / `system.getUpdateStatus` / `system.applyUpdate` drive the user-mode auto-updater (see Section "Deployment → User-mode auto-update"). Each has a deliberately tame default response so iOS + Mac menu-bar UIs render a meaningful empty state instead of a spurious error:
 
@@ -593,7 +593,7 @@ tron login --label personal
 
 Distinct from provider auth above. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request when `server.auth.enforced` is `true`. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
 
-The token is generated lazily on first server start and stored alongside `auth.json` under `~/.tron/system/`. The Mac onboarding wizard (Phase 5) and iOS pairing flow (Phase 4) both display it for the user to copy into the iOS app's connection settings.
+The token is generated during first server startup and stored alongside `auth.json` under `~/.tron/system/`. The Mac onboarding wizard (Phase 5) and iOS pairing flow (Phase 4) both display it for the user to copy into the iOS app's connection settings.
 
 ```bash
 # Rotate the token (forces every paired iOS device to re-pair)
@@ -751,7 +751,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 14 Sonoma | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`, and on first launch runs a wizard that copies the bundled `tron-agent` binary into `~/.tron/system/Tron.app/Contents/MacOS/tron`, drops a launchd plist, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`, and on first launch runs a wizard that asks before copying the bundled `tron-agent` binary into `~/.tron/system/Tron.app/Contents/MacOS/tron`, drops a launchd plist, confirms permissions, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
 
 ```
 packages/mac-app/Sources/
@@ -760,11 +760,11 @@ packages/mac-app/Sources/
 +-- Wizard/                    First-run flow
 |   +-- WizardState.swift      @Observable state machine + `WizardStep` enum
 |   +-- WizardView.swift       NavigationStack shell
-|   +-- Steps/                 Welcome, Tailscale, Permissions, Install, Pairing, Done
+|   +-- Steps/                 Welcome, Tailscale, ExistingInstall, Install, Permissions, Pairing, Done
 +-- MenuBar/                   NSStatusItem controller, status polling, copy actions, update submenu
 +-- Services/
-|   +-- Server/                Install helper (invokes `tron install --gui-helper`), ping poller
-|   +-- Onboarding/            `.onboarded` sentinel probe + existing-install detection
+|   +-- Server/                Bearer-token reader, `system.ping` client, status poller
+|   +-- Onboarding/            Install planner, permission/Tailscale probes, existing-install detection
 |   +-- Pairing/               settings.json + auth-token.json readers; QR + tron:// URL generation
 |   +-- Feedback/              FeedbackComposer + NSSharingService mail compose
 |   +-- Observability/         SentryRedactor (shared pattern with iOS)
@@ -778,9 +778,9 @@ packages/mac-app/Sources/
 
 1. **Welcome** — introduces Tron.
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` + signed-in state via `tailscale ip -4`.
-3. **Existing-install detection** — if `~/.tron/system/auth.json` is non-empty, skips to permissions (no clobber).
-4. **Permissions** — Full Disk Access (REQUIRED), Notifications (REQUIRED), Accessibility (optional for ComputerUse). Deep-links to System Settings.
-5. **Install** — invokes `tron install --gui-helper --skip-service-start`, polls `system.ping` with `BackoffPolicy(maxAttempts: 10, base: 1s, cap: 30s)`.
+3. **Existing-install detection** — detects the installed server binary, provider auth, and stale LaunchAgent state without clobbering user data.
+4. **Install** — waits for the explicit Install CTA, then prepares and ad-hoc signs the inner `~/.tron/system/Tron.app` server bundle, writes the LaunchAgent plist, bootstraps or kickstarts `com.tron.server`, and polls `system.ping` while ignoring initial `connection.established` frames.
+5. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, rechecks on app-focus return, and kickstarts the agent at most once per wizard-opened Settings round-trip when the permission was previously missing.
 6. **Pairing** — displays Tailscale IP + port + bearer token with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>`.
 7. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
 
@@ -826,15 +826,15 @@ A contributor can have the DMG installed AND switch to `tron dev` for agent iter
 
 ## Permissions
 
-The Mac wizard surfaces three system permissions. Each is probed with a real system call (not just the TCC flag) so the status reflects actual access, and each has a "Open System Settings" deep link when revoked.
+The Mac wizard surfaces three system permissions after the server is installed, because macOS TCC grants need to bind to the launchd-managed agent bundle (`com.tron.server`). Each permission has an "Open System Settings" deep link when revoked.
 
 | Permission | Why | Required | Probe |
 |------------|-----|----------|-------|
-| Full Disk Access | Agent reads/writes `~/Library/Mail/V*`, `~/.tron/workspace/`, anything outside the sandbox | Yes | `stat("~/Library/Mail/V*")` — fails without FDA |
-| Notifications | Agent-completion alerts on the Mac when long-running sessions finish | Yes | `UNUserNotificationCenter` auth request |
-| Accessibility | ComputerUse tool (mouse/keyboard control); optional today, plumbed for future | No | `AXIsProcessTrusted()` |
+| Full Disk Access | Agent reads/writes user-selected files and app data outside the sandbox | Yes | Agent RPC snapshot (`system.probePermissions`) |
+| Screen Recording | ComputerUse screenshots and visual inspection | Yes | `CGPreflightScreenCaptureAccess()` in the agent |
+| Accessibility | ComputerUse mouse/keyboard control | Yes | `AXIsProcessTrusted()` in the agent |
 
-Skipping a required permission shows a confirm dialog describing the consequence (e.g. "Tron cannot read files in Documents; most Read tool calls will fail"). The wizard does not block — users can always grant later from `/Applications/Tron.app` menu bar → "Permissions…" (or re-run the wizard by deleting `~/.tron/system/.onboarded` and re-launching `Tron.app`).
+The install step only prepares the signed server bundle, writes/loads the LaunchAgent, and waits for the first heartbeat. The inner app bundle is ad-hoc signed after its `Info.plist` and resources are written so TCC binds grants to `com.tron.server` instead of Cargo's raw executable signature. Ordinary agent startup does not probe TCC or open System Settings, so macOS permission prompts cannot appear while the user is still on the install step. The wizard begins polling `system.probePermissions` only on the Permissions step, about every 2 seconds. When the user returns from a Settings pane opened by one of the wizard's permission buttons, the wrapper consumes that return, runs `launchctl kickstart -k gui/<uid>/com.tron.server` only if the permission was previously missing, waits for the agent to answer, and re-probes so new grants take effect without asking the user to manually quit the server.
 
 ---
 
@@ -883,7 +883,7 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   |   +-- log.db                Events, sessions, tasks, journals, cron state
 |   |   +-- log.db.lock           OS-level flock sidecar; one Tron process owns it while running
 |   |   +-- journals/             Streaming journals for crash recovery of partial LLM output
-|   +-- deployment/               Deploy state: tron-cli, tron-lib.sh, deployed-commit, ...; optional apns.json + AuthKey_*.p8 for direct APNs
+|   +-- deployment/               Dev/deploy/update state only; absent or empty after a normal Mac installer flow
 |   +-- transcription/            Speech-to-text sidecar
 |       +-- worker.py             parakeet-mlx Python worker (stdin/stdout JSON-line protocol)
 |       +-- requirements.txt      Pip deps for the venv

@@ -28,6 +28,7 @@ struct ServerStatusPollerTests {
             detectExistingInstall: { .none },
             pingServer: { _ in pingResult },
             launchAgentManager: MockLaunchAgentManager(),
+            cleanupInstallArtifacts: { .success(removed: []) },
             touchOnboardedSentinel: { }
         )
     }

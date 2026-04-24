@@ -3,7 +3,8 @@ import AppKit
 
 /// Top-level wizard. Reads the current `WizardStep` from `WizardState`
 /// and dispatches to a per-step view. The shell (top-bar with progress,
-/// glass canvas, animated step transitions) is shared by `WizardShell`.
+/// fixed action bar, glass canvas, animated step transitions) is shared
+/// by `WizardShell`.
 ///
 /// Pass `initialStep` to override the persisted last-visited step. The
 /// menu-bar's "Show pairing info…" path uses this to remount the wizard
@@ -44,8 +45,8 @@ struct WizardView: View {
 
 /// Shared chrome — single liquid-glass canvas with the system traffic
 /// lights floating in the top-left, a pinned progress pill in the top-
-/// right, and a transitioning content stack (icon + title, body,
-/// secondary/primary action bar) that slides on every step change.
+/// right, a transitioning content stack (icon + title, body), and a
+/// pinned secondary/primary action bar.
 ///
 /// Layout invariants:
 /// ```
@@ -62,9 +63,12 @@ struct WizardView: View {
 /// - The pill is pinned in the top-right and never participates in the
 ///   slide transition; only its capsule fill animates as the step
 ///   ordinal changes.
-/// - Header (icon + title), body content, and the bottom action bar
-///   share a single `.id(displayStep)` so they re-mount and slide
-///   together as one cohesive unit.
+/// - Header (icon + title) and body content share a single
+///   `.id(displayStep)` so they re-mount and slide together as one
+///   cohesive unit.
+/// - The bottom action bar is an overlay pinned to
+///   `WizardLayout.bottomPadding` + `WizardLayout.horizontalPadding`.
+///   Step bodies cannot push it around during measurement.
 /// - Slide direction is read from `displayDirection`, a local `@State`
 ///   mirror of `WizardState.slideDirection`. `WizardState`'s navigation
 ///   methods set the new direction BEFORE mutating `step`; this view
@@ -78,7 +82,7 @@ struct WizardView: View {
 ///   first.
 /// - The shell owns the secondary + primary CTAs for every step. Step
 ///   bodies provide ONLY their description / body content; tertiary
-///   actions (Refresh, Re-check, Retry) live inline within the body
+///   actions (Refresh, Re-check) live inline within the body
 ///   so they slide with it.
 struct WizardShell<Content: View>: View {
     @Bindable var state: WizardState
@@ -104,50 +108,35 @@ struct WizardShell<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // Outer chrome holds three layers. The padding + horizontal
-            // insets live on the outer VStack so every child (sliding
-            // chrome, pinned bottom bar) shares the same gutter — tests
-            // would otherwise have to know whether each sub-layer
-            // applies its own padding.
+            // Layer 1 (content plane): header + body re-mount on every
+            // `displayStep` change and slide as one cohesive group. The
+            // bottom inset reserves permanent space for Layer 2's pinned
+            // action bar, so dynamic body measurement cannot move the
+            // Back/Continue buttons even for a single frame.
             VStack(spacing: 0) {
-                // Layer 1a (transitioning): header + body re-mount on
-                // every `displayStep` change and slide as one cohesive
-                // group. The `.id(displayStep)` is what triggers the
-                // slide; without it SwiftUI would diff in place and we'd
-                // lose the animation. The bottom bar used to live in
-                // this layer too, which made the Back/Continue buttons
-                // slide off-screen with every navigation — users read
-                // that as the buttons "getting messed up" because their
-                // landing position jostled briefly before settling.
-                // Pinning the bar (Layer 1b) keeps the buttons at the
-                // same Y the whole way through.
-                VStack(spacing: 0) {
-                    stepHeader
-                    content(displayStep)
-                        .padding(.top, 18)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
-                .id(displayStep)
-                .transition(slideTransition)
-
-                // Layer 1b (pinned): bottom bar stays in place across
-                // step changes. Its sub-views (secondary button, primary
-                // button) still switch on `displayStep` so their labels
-                // and styles update, but because the container doesn't
-                // re-mount the buttons crossfade in place rather than
-                // sliding off with the chrome.
-                bottomBar
+                stepHeader
+                content(displayStep)
+                    .padding(.top, WizardLayout.headerBodySpacing)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            // Tightened from 36 → 18 so the header tucks just below
-            // the traffic-lights row instead of floating in dead space.
-            // The traffic lights are ~20pt tall starting from the top
-            // edge; 18pt of padding leaves a small visual gap without
-            // the wizard feeling cavernous at the top.
-            .padding(.top, 18)
-            .padding(.bottom, 24)
-            .padding(.horizontal, 32)
+            .padding(.top, WizardLayout.topPadding)
+            .padding(.horizontal, WizardLayout.horizontalPadding)
+            .padding(.bottom, WizardLayout.bottomPadding + WizardLayout.bottomBarHeight)
+            .id(displayStep)
+            .transition(slideTransition)
+            .animation(WizardLayout.transitionAnimation, value: displayStep)
 
-            // Layer 2 (pinned): the pill stays fixed in the top-right
+            // Layer 2 (pinned): bottom bar has an explicit height and
+            // absolute bottom alignment inside the 480×H canvas. Only
+            // its labels/styles switch with `displayStep`; the bar's
+            // frame never gets remeasured by the sliding content.
+            bottomBar
+                .frame(height: WizardLayout.bottomBarHeight, alignment: .center)
+                .padding(.horizontal, WizardLayout.horizontalPadding)
+                .padding(.bottom, WizardLayout.bottomPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+
+            // Layer 3 (pinned): the pill stays fixed in the top-right
             // corner. Only its progress fill width animates as the
             // step ordinal moves; the pill itself never re-mounts, so
             // it doesn't slide.
@@ -160,22 +149,21 @@ struct WizardShell<Content: View>: View {
             // 28pt frame sits at the same Y as the icon row and their
             // optical centers land at the same pixel.
             progressPill
-                .frame(height: 28)
-                .padding(.top, 18)
-                .padding(.trailing, 32)
+                .frame(height: WizardLayout.headerHeight)
+                .padding(.top, WizardLayout.topPadding)
+                .padding(.trailing, WizardLayout.horizontalPadding)
         }
         // Per-step canvas: width stays 480 but height is driven by
         // `displayStep.preferredHeight` so dense steps (Permissions,
         // Install, PairingInfo) get enough room without scrolling and
         // sparse steps (ExistingInstall, Done) don't float in dead
         // space. `.windowResizability(.contentSize)` on the scene
-        // propagates the new content size out to `NSWindow`, and the
-        // `.animation` below animates BOTH the content transition
-        // AND the frame delta, producing a smooth spring-driven
-        // window resize as the user navigates.
-        .frame(width: 480, height: displayStep.preferredHeight)
-        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: displayStep)
-        .onChange(of: displayStep) { _, newStep in
+        // propagates the new content size out to `NSWindow`. The
+        // sliding content owns its own animation above; the manual
+        // AppKit resize below only runs when the preferred content
+        // height actually changes.
+        .frame(width: WizardLayout.width, height: displayStep.preferredHeight)
+        .onChange(of: displayStep) { oldStep, newStep in
             // SwiftUI's implicit window resize via `.contentSize`
             // doesn't always interpolate smoothly (AppKit can choose
             // to snap instead of animate). Manually driving
@@ -183,7 +171,7 @@ struct WizardShell<Content: View>: View {
             // window chrome tracks the content animation on every
             // step change. We keep the top edge pinned so the
             // wizard doesn't jitter upward as it grows.
-            animateHostingWindow(to: newStep.preferredHeight)
+            animateHostingWindow(from: oldStep, to: newStep)
         }
         // Two-phase direction+step update (see struct doc). Phase 1
         // runs synchronously: write the new direction, which re-renders
@@ -222,7 +210,7 @@ struct WizardShell<Content: View>: View {
         // The pill is ~120pt wide + 32pt padding from the right edge
         // = ~152pt; 140pt of reserved space leaves a small visible
         // gap between title and pill on the longest-title step.
-        .padding(.trailing, 140)
+        .padding(.trailing, WizardLayout.progressPillReservedWidth)
     }
 
     @ViewBuilder
@@ -302,7 +290,11 @@ struct WizardShell<Content: View>: View {
             .keyboardShortcut(.defaultAction)
         case .existingInstall:
             Button {
-                state.advance()
+                if case .installed = state.existingInstallStatus {
+                    state.skipInstall()
+                } else {
+                    state.advance()
+                }
             } label: {
                 Text(existingInstallContinueLabel)
             }
@@ -319,13 +311,17 @@ struct WizardShell<Content: View>: View {
             .disabled(!permissionsCanContinue)
         case .install:
             Button {
-                state.advance()
+                if installCanContinue {
+                    state.advance()
+                } else {
+                    state.requestInstall()
+                }
             } label: {
-                Text("Continue")
+                Text(installPrimaryLabel)
             }
             .buttonStyle(.wizardPrimary)
             .keyboardShortcut(.defaultAction)
-            .disabled(!installCanContinue)
+            .disabled(state.installIsRunning)
         case .pairingInfo:
             Button {
                 state.complete()
@@ -365,14 +361,21 @@ struct WizardShell<Content: View>: View {
     }
 
     /// Mirrors the gate previously implemented privately by
-    /// `InstallStep`: Continue is enabled only after the install
-    /// pipeline has finished cleanly. The step body's Retry button
-    /// resets `installOutcome` to `nil` while running, so this
-    /// implicitly disables Continue during a retry too — we don't
-    /// need to plumb a separate `running` flag through state.
+    /// `InstallStep`: the primary CTA advances only after the install
+    /// pipeline has finished cleanly. Before then, the same CTA starts
+    /// or retries the pipeline via `state.requestInstall()`.
     private var installCanContinue: Bool {
         guard let outcome = state.installOutcome else { return false }
         return outcome == .success || outcome == .alreadyInstalled
+    }
+
+    private var installPrimaryLabel: String {
+        if installCanContinue { return "Continue" }
+        if state.installIsRunning { return "Installing..." }
+        if let outcome = state.installOutcome, outcome != .success, outcome != .alreadyInstalled {
+            return "Retry install"
+        }
+        return "Install"
     }
 
     // MARK: - Pinned progress pill
@@ -392,10 +395,10 @@ struct WizardShell<Content: View>: View {
             ZStack(alignment: .leading) {
                 Capsule(style: .continuous)
                     .fill(Color.tronEmerald.opacity(0.18))
-                    .frame(width: 80, height: 4)
+                    .frame(width: WizardLayout.progressBarWidth, height: WizardLayout.progressBarHeight)
                 Capsule(style: .continuous)
                     .fill(LinearGradient.tronEmeraldGradient)
-                    .frame(width: max(4, 80 * fraction), height: 4)
+                    .frame(width: max(4, WizardLayout.progressBarWidth * fraction), height: WizardLayout.progressBarHeight)
                     .animation(.spring(response: 0.5, dampingFraction: 0.8), value: fraction)
             }
         }
@@ -414,43 +417,34 @@ struct WizardShell<Content: View>: View {
     // MARK: - Animated window resize
 
     /// Drives `NSWindow.setFrame(_:display:animate:)` so the window
-    /// chrome resizes in lockstep with the SwiftUI frame spring.
+    /// chrome resizes in lockstep with the SwiftUI content transition.
     /// Pins the window's TOP edge (subtracts the height delta from
     /// the origin Y, since AppKit frames anchor at the bottom-left)
     /// so the wizard grows/shrinks downward instead of jumping
-    /// upward. Width stays pinned at 480pt.
+    /// upward. Width stays pinned by the SwiftUI content size.
     ///
-    /// Early-returns for zero-delta transitions. Same-height step
-    /// changes (welcome → tailscale, both 360pt) would otherwise push
-    /// a no-op frame through `NSAnimationContext`, which AppKit still
-    /// translates into a redraw cycle. The redraw lands a frame late
-    /// relative to SwiftUI's slide transition and shows up as a
-    /// visible flicker around the pinned bottom-bar — the user sees
-    /// the buttons jostle even though the window genuinely didn't
-    /// need to resize.
-    private func animateHostingWindow(to targetHeight: CGFloat) {
+    /// The delta is step-to-step CONTENT height, not
+    /// `window.frame.height`. AppKit frame height includes titlebar /
+    /// full-size-content-view accounting, so comparing that directly to
+    /// `WizardStep.preferredHeight` made same-height transitions look
+    /// like real resizes on the first click.
+    private func animateHostingWindow(from oldStep: WizardStep, to newStep: WizardStep) {
+        guard WizardLayout.shouldResizeWindow(from: oldStep, to: newStep) else { return }
         guard let window = Self.findHostingWindow() else { return }
-        let currentHeight = window.frame.height
-        let delta = targetHeight - currentHeight
-        // Sub-pixel deltas are rounding noise — no animation needed,
-        // and skipping the call also lets sibling steps share a
-        // preferredHeight without paying for a no-op resize on every
-        // navigation between them.
-        guard abs(delta) >= 1 else { return }
+        let delta = WizardLayout.contentHeightDelta(from: oldStep, to: newStep)
         var frame = window.frame
-        frame.size.height = targetHeight
-        frame.size.width = 480
+        frame.size.height += delta
         frame.origin.y -= delta
         NSAnimationContext.runAnimationGroup { context in
-            // Match the SwiftUI `.animation(.spring(response: 0.42, ...))`
-            // above so the window, header slide, and body transition
+            // Match the SwiftUI transition animation above so the
+            // window, header slide, and body transition
             // all finish within the same frame budget. AppKit doesn't
             // expose a spring curve directly; duration-matching the
             // spring's `response` parameter and using ease-in-ease-out
             // is the closest visual match, and keeps the window chrome
             // from lagging the SwiftUI content by a frame or two at
             // the end of the animation.
-            context.duration = 0.42
+            context.duration = WizardLayout.resizeDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             context.allowsImplicitAnimation = true
             window.animator().setFrame(frame, display: true)

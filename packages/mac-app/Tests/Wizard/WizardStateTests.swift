@@ -26,6 +26,8 @@ struct WizardStateTests {
         #expect(state.step == .welcome)
         #expect(state.permissionStatuses.isEmpty)
         #expect(state.installOutcome == nil)
+        #expect(state.installRequestID == 0)
+        #expect(state.installIsRunning == false)
         #expect(state.pairingPayload == nil)
         #expect(state.tailscaleStatus == nil)
         #expect(state.existingInstallStatus == .none)
@@ -81,6 +83,21 @@ struct WizardStateTests {
         #expect(state.step == .pairingInfo)
     }
 
+    @Test("skipInstall bypasses install and records already-installed outcome")
+    func skipInstallBypassesInstall() {
+        let (defaults, cleanup) = Self.isolatedDefaults()
+        defer { cleanup() }
+        let state = WizardState(defaults: defaults)
+        state.advance()
+        state.advance()
+        #expect(state.step == .existingInstall)
+
+        state.skipInstall()
+        #expect(state.step == .permissions)
+        #expect(state.installOutcome == .alreadyInstalled)
+        #expect(state.slideDirection == .forward)
+    }
+
     @Test("complete sets the done step + persists onboardingComplete=true")
     func completeFlips() async {
         let (defaults, cleanup) = Self.isolatedDefaults()
@@ -111,6 +128,8 @@ struct WizardStateTests {
         let state = WizardState(defaults: defaults)
         state.advance(); state.advance()
         state.installOutcome = .success
+        state.requestInstall()
+        state.installIsRunning = true
         state.pairingPayload = PairingPayload(host: "1.2.3.4", port: 9847, token: "x", label: nil)
         state.tailscaleStatus = .signedIn(ipv4: "100.1.2.3")
         state.permissionStatuses[.fullDiskAccess] = .granted
@@ -120,6 +139,8 @@ struct WizardStateTests {
         state.reset()
         #expect(state.step == .welcome)
         #expect(state.installOutcome == nil)
+        #expect(state.installRequestID == 0)
+        #expect(state.installIsRunning == false)
         #expect(state.pairingPayload == nil)
         #expect(state.tailscaleStatus == nil)
         #expect(state.permissionStatuses.isEmpty)
@@ -256,6 +277,15 @@ struct WizardStateTests {
         #expect(state.slideDirection == .forward)
     }
 
+    @Test("skipInstall sets slideDirection to forward")
+    func skipInstallForwardDirection() {
+        let (defaults, cleanup) = Self.isolatedDefaults()
+        defer { cleanup() }
+        let state = WizardState(defaults: defaults)
+        state.skipInstall()
+        #expect(state.slideDirection == .forward)
+    }
+
     @Test("complete sets slideDirection to forward")
     func completeForwardDirection() async {
         let (defaults, cleanup) = Self.isolatedDefaults()
@@ -263,6 +293,23 @@ struct WizardStateTests {
         let state = WizardState(defaults: defaults)
         state.complete()
         #expect(state.slideDirection == .forward)
+    }
+
+    @Test("install does not start until explicitly requested")
+    func installRequestIsExplicit() {
+        let (defaults, cleanup) = Self.isolatedDefaults()
+        defer { cleanup() }
+        let state = WizardState(defaults: defaults)
+        #expect(state.installRequestID == 0)
+        state.advance(); state.advance(); state.advance() // install
+        #expect(state.step == .install)
+        #expect(state.installRequestID == 0)
+        #expect(state.installOutcome == nil)
+
+        state.requestInstall()
+        #expect(state.installRequestID == 1)
+        state.requestInstall()
+        #expect(state.installRequestID == 2)
     }
 
     @Test("reset returns slideDirection to forward (default)")

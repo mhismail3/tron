@@ -37,7 +37,8 @@ struct ExistingInstallDetectorTests {
             binaryPath: binary,
             authJSONPath: tmp.appendingPathComponent("missing-auth.json", isDirectory: false),
             plistPath: tmp.appendingPathComponent("missing.plist", isDirectory: false),
-            bundleVersionResolver: { _ in nil }
+            bundleVersionResolver: { _ in nil },
+            bundleSignatureProblemResolver: { _ in nil }
         )
 
         if case .installed(let version) = result {
@@ -65,7 +66,8 @@ struct ExistingInstallDetectorTests {
             bundleVersionResolver: { url in
                 observedRoot = url
                 return "0.5.0"
-            }
+            },
+            bundleSignatureProblemResolver: { _ in nil }
         )
 
         if case .installed(let version) = result {
@@ -76,8 +78,33 @@ struct ExistingInstallDetectorTests {
         #expect(observedRoot == bundle, "resolver must receive the bundle root, not the binary path")
     }
 
-    @Test("auth.json present + binary missing: partial")
-    func authJSONOnlyIsPartial() throws {
+    @Test("binary with invalid bundle signature is treated as partial so install can repair it")
+    func invalidSignatureIsPartial() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let bundle = tmp.appendingPathComponent("Tron.app", isDirectory: true)
+        let macOS = bundle.appendingPathComponent("Contents/MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+        let binary = macOS.appendingPathComponent("tron", isDirectory: false)
+        FileManager.default.createFile(atPath: binary.path, contents: Data())
+
+        let result = ExistingInstallDetector.detect(
+            binaryPath: binary,
+            authJSONPath: tmp.appendingPathComponent("missing", isDirectory: false),
+            plistPath: tmp.appendingPathComponent("missing.plist", isDirectory: false),
+            bundleVersionResolver: { _ in "0.5.0" },
+            bundleSignatureProblemResolver: { _ in "Tron.app is present but its code signature is not bound to com.tron.server" }
+        )
+
+        if case .partial(let reason) = result {
+            #expect(reason.contains("code signature"))
+        } else {
+            Issue.record("expected .partial, got \(result)")
+        }
+    }
+
+    @Test("auth.json present + binary missing is not a partial install")
+    func authJSONOnlyIsIgnored() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let auth = tmp.appendingPathComponent("auth.json", isDirectory: false)
@@ -90,11 +117,7 @@ struct ExistingInstallDetectorTests {
             bundleVersionResolver: { _ in nil }
         )
 
-        if case .partial(let reason) = result {
-            #expect(reason.contains("auth.json"))
-        } else {
-            Issue.record("expected .partial, got \(result)")
-        }
+        #expect(result == .none, "auth.json is user data and must not force partial-install recovery")
     }
 
     @Test("plist present + binary missing: partial")
@@ -118,8 +141,8 @@ struct ExistingInstallDetectorTests {
         }
     }
 
-    @Test("auth.json + plist both present, binary missing: reason lists both leftovers")
-    func authAndPlistBothPresent() throws {
+    @Test("auth.json + plist with missing binary reports only launch artifact")
+    func authAndPlistReportsLaunchArtifactOnly() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let auth = tmp.appendingPathComponent("auth.json", isDirectory: false)
@@ -135,10 +158,8 @@ struct ExistingInstallDetectorTests {
         )
 
         if case .partial(let reason) = result {
-            // Both leftovers must appear so the user sees the full
-            // picture — the old ternary reported only auth.json.
-            #expect(reason.contains("auth.json"), "expected reason to mention auth.json, got: \(reason)")
             #expect(reason.contains("LaunchAgent plist"), "expected reason to mention LaunchAgent plist, got: \(reason)")
+            #expect(!reason.contains("auth.json"), "auth.json is preserved user data, not an install artifact")
         } else {
             Issue.record("expected .partial, got \(result)")
         }

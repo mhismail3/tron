@@ -698,6 +698,53 @@ fn run_subcommand_auth_rotate_writes_token_to_default_path() {
 }
 
 #[test]
+fn startup_ensures_bearer_token_exists() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("auth-token.json");
+
+    let token = ensure_bearer_token_at(&path).expect("startup should create bearer token");
+
+    assert_eq!(token.len(), 43);
+    assert!(
+        path.exists(),
+        "startup must persist auth-token.json for pairing"
+    );
+    let read_back = tron::server::onboarding::load_or_create_bearer_token(&path).expect("read");
+    assert_eq!(read_back, token);
+}
+
+#[test]
+fn ordinary_startup_does_not_create_deployment_dir() {
+    assert!(
+        !startup_system_subdirs().contains(&tron::core::paths::dirs::DEPLOYMENT),
+        "deployment/ is dev/deploy/update state and should be created only by those flows"
+    );
+}
+
+#[test]
+fn ordinary_startup_does_not_probe_tcc_permissions() {
+    let source = include_str!("main.rs");
+    let spawn_body = source
+        .split("fn spawn_background_tasks")
+        .nth(1)
+        .and_then(|tail| tail.split("#[tokio::main]").next())
+        .expect("spawn_background_tasks body should be discoverable");
+
+    for forbidden in [
+        "probe_wizard_permissions",
+        "CGPreflightScreenCaptureAccess",
+        "AXIsProcessTrusted",
+        "Privacy_AllFiles",
+        "x-apple.systempreferences",
+    ] {
+        assert!(
+            !spawn_body.contains(forbidden),
+            "ordinary startup must not touch macOS TCC or open permission UI; found {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn run_subcommand_auth_rotate_invalidates_prior_token() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("auth-token.json");

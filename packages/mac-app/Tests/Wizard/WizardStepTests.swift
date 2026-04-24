@@ -52,7 +52,7 @@ struct WizardStepOrderingTests {
 
 @Suite("InstallPipelineStage ordering")
 struct InstallPipelineStageOrderingTests {
-    @Test("stages run copy → plist → load → ping")
+    @Test("stages run prepare app → plist → load → ping")
     func canonicalOrder() {
         #expect(InstallPipelineStage.allCases == [
             .copyBinary,
@@ -94,5 +94,27 @@ struct WizardStepPreferredHeightTests {
         let max = heights.max() ?? 0
         #expect(WizardStep.permissions.preferredHeight == max,
                 "Permissions must be tallest so all three cards fit without scrolling")
+    }
+
+    @Test("opening gate steps share one no-resize band")
+    func openingStepsShareNoResizeBand() {
+        let gateHeight = WizardStep.welcome.preferredHeight
+        #expect(WizardStep.tailscale.preferredHeight == gateHeight)
+        #expect(WizardStep.existingInstall.preferredHeight == gateHeight)
+        #expect(WizardLayout.shouldResizeWindow(from: .welcome, to: .tailscale) == false)
+        #expect(WizardLayout.shouldResizeWindow(from: .tailscale, to: .existingInstall) == false)
+    }
+
+    @Test("install step leaves room for explicit confirmation without becoming tallest")
+    func installStepConfirmationBand() {
+        #expect(WizardStep.install.preferredHeight > WizardStep.existingInstall.preferredHeight)
+        #expect(WizardStep.install.preferredHeight < WizardStep.permissions.preferredHeight)
+    }
+
+    @Test("window resize math is content-delta based")
+    func contentDeltaDrivesResize() {
+        #expect(WizardLayout.contentHeightDelta(from: .welcome, to: .tailscale) == 0)
+        #expect(WizardLayout.contentHeightDelta(from: .existingInstall, to: .install) == 80)
+        #expect(WizardLayout.contentHeightDelta(from: .install, to: .permissions) == 40)
     }
 }
