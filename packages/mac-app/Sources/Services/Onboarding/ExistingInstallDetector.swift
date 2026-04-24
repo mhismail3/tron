@@ -29,11 +29,16 @@ enum ExistingInstallDetector {
             let version = bundleVersionResolver(binaryPath.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent())
             return .installed(version: version)
         case (false, true):
-            // Auth JSON or LaunchAgent plist present but binary missing
-            // - probably a prior install that was partially uninstalled.
-            return .partial(reason: hasAuth
-                ? "auth.json present but Tron.app missing"
-                : "LaunchAgent plist present but Tron.app missing")
+            // One or both sidecar files remain but the binary is gone —
+            // probably a prior install that was partially uninstalled,
+            // or a CLI-only install that never ran the wizard. List
+            // every leftover so the user sees the full picture instead
+            // of only the first one the old ternary happened to pick.
+            var leftovers: [String] = []
+            if hasAuth { leftovers.append("auth.json") }
+            if hasPlist { leftovers.append("LaunchAgent plist") }
+            let joined = ListFormatter.localizedString(byJoining: leftovers)
+            return .partial(reason: "\(joined) present but Tron.app missing")
         case (false, false):
             return .none
         }

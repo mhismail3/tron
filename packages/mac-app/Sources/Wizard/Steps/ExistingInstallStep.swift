@@ -11,7 +11,7 @@ struct ExistingInstallStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Tron checks for a prior install before laying down its files. If we detect one, we skip the install step so we don't clobber your settings, sessions, or auth tokens.")
+            Text("Before installing, we check for an existing setup. If we find one, we skip the install step to preserve your settings, sessions, and auth tokens.")
                 .font(.body)
                 .foregroundStyle(.secondary)
 
@@ -40,7 +40,7 @@ struct ExistingInstallStep: View {
                     icon: "exclamationmark.triangle.fill",
                     iconColor: .orange,
                     title: "Partial install detected",
-                    body: reason + ". The install step will repair this."
+                    body: reason + ". We'll install Tron.app next; your auth and settings are preserved."
                 )
             case .installed(let version):
                 cardRow(

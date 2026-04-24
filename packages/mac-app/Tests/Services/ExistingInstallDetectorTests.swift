@@ -118,6 +118,32 @@ struct ExistingInstallDetectorTests {
         }
     }
 
+    @Test("auth.json + plist both present, binary missing: reason lists both leftovers")
+    func authAndPlistBothPresent() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let auth = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try Data("{\"k\":\"v\"}".utf8).write(to: auth)
+        let plist = tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false)
+        try Data("<plist/>".utf8).write(to: plist)
+
+        let result = ExistingInstallDetector.detect(
+            binaryPath: tmp.appendingPathComponent("missing-bin", isDirectory: false),
+            authJSONPath: auth,
+            plistPath: plist,
+            bundleVersionResolver: { _ in nil }
+        )
+
+        if case .partial(let reason) = result {
+            // Both leftovers must appear so the user sees the full
+            // picture — the old ternary reported only auth.json.
+            #expect(reason.contains("auth.json"), "expected reason to mention auth.json, got: \(reason)")
+            #expect(reason.contains("LaunchAgent plist"), "expected reason to mention LaunchAgent plist, got: \(reason)")
+        } else {
+            Issue.record("expected .partial, got \(result)")
+        }
+    }
+
     @Test("empty auth.json doesn't count as present")
     func emptyAuthDoesntCount() throws {
         let tmp = TestTempDir.make()
