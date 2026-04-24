@@ -5,10 +5,9 @@ struct ExistingInstallStep: View {
     @Environment(\.environmentSetup) private var setup
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Existing Tron Install")
-                .font(.largeTitle.bold())
-
+        // Title is rendered by `WizardShell.headerRow` — body starts
+        // with the description text directly.
+        VStack(alignment: .leading, spacing: 16) {
             Text("Tron checks for a prior install before laying down its files. If we detect one, we skip the install step so we don't clobber your settings, sessions, or auth tokens.")
                 .font(.body)
                 .foregroundStyle(.secondary)

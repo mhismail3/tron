@@ -8,9 +8,9 @@ struct TailscaleStep: View {
     @State private var pollTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Tailscale")
-                .font(.largeTitle.bold())
+        // Title is rendered by `WizardShell.headerRow` — body starts
+        // with the description text directly.
+        VStack(alignment: .leading, spacing: 16) {
             Text("Tron uses Tailscale as a private mesh network so your iPhone can reach this Mac without exposing it to the public internet.")
                 .font(.body)
                 .foregroundStyle(.secondary)

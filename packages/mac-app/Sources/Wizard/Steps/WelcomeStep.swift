@@ -5,27 +5,12 @@ struct WelcomeStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Title row — Tron logo + heading at top-left, matching
-            // the rest of the wizard step pattern.
-            HStack(spacing: 12) {
-                Image("TronLogo")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 28, height: 28)
-                    // Logo + title share the brand emerald so the top
-                    // of every wizard step reads as "Tron" at a glance.
-                    .foregroundStyle(Color.tronEmerald)
-                Text("Welcome to Tron")
-                    .font(.system(.title2, design: .rounded).weight(.semibold))
-                    .foregroundStyle(Color.tronEmerald)
-            }
-
+            // Title is rendered by `WizardShell.headerRow` — body
+            // starts with the description text directly.
             Text("Tron is a coding agent that lives on this Mac. You talk to it from your phone over Tailscale.")
                 .font(.system(.body, design: .rounded))
                 .foregroundStyle(.secondary)
                 .lineSpacing(2)
-                .padding(.top, 12)
                 .fixedSize(horizontal: false, vertical: true)
 
             if case .installed(let version) = state.existingInstallStatus {

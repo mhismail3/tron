@@ -18,9 +18,9 @@ struct PairingInfoStep: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Pair your iPhone")
-                .font(.largeTitle.bold())
+        // Title is rendered by `WizardShell.headerRow` — body starts
+        // with the description text directly.
+        VStack(alignment: .leading, spacing: 16) {
             Text("Open Tron on your iPhone and tap “I have Tron running”. Either scan the QR code below or enter the values manually.")
                 .font(.body)
                 .foregroundStyle(.secondary)

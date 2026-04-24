@@ -10,9 +10,9 @@ struct InstallStep: View {
     @State private var startedOnce = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Install the Tron server")
-                .font(.largeTitle.bold())
+        // Title is rendered by `WizardShell.headerRow` — body starts
+        // with the description text directly.
+        VStack(alignment: .leading, spacing: 16) {
             Text("Copies the Tron agent binary into ~/.tron/system/Tron.app, drops a LaunchAgent so the server starts at login, and waits for the first heartbeat.")
                 .font(.body)
                 .foregroundStyle(.secondary)

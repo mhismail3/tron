@@ -6,9 +6,9 @@ struct PermissionsStep: View {
     @Environment(\.environmentSetup) private var setup
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Grant permissions")
-                .font(.largeTitle.bold())
+        // Title is rendered by `WizardShell.headerRow` — body starts
+        // with the description text directly.
+        VStack(alignment: .leading, spacing: 16) {
             Text("Tron needs three macOS permissions. Each opens System Settings to the right pane — return here when done; the wizard re-checks automatically.")
                 .font(.body)
                 .foregroundStyle(.secondary)

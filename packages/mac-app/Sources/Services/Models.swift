@@ -13,6 +13,22 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     case done
 
     var id: String { rawValue }
+
+    /// Title rendered in the wizard's shared header row. Each step's
+    /// own body no longer renders a title — it's hoisted into
+    /// `WizardShell` so the back chevron, logo, title, and progress
+    /// pill all sit on the same baseline.
+    var displayTitle: String {
+        switch self {
+        case .welcome: return "Welcome to Tron"
+        case .tailscale: return "Tailscale"
+        case .existingInstall: return "Existing install"
+        case .permissions: return "Permissions"
+        case .install: return "Install Tron"
+        case .pairingInfo: return "Pair your iPhone"
+        case .done: return "You're all set"
+        }
+    }
 }
 
 /// Permission categories the wizard probes during the Permissions step.

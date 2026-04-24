@@ -42,30 +42,39 @@ struct WizardView: View {
 }
 
 /// Shared chrome — single liquid-glass canvas with the system traffic
-/// lights floating in the top-left and a slim progress bar in the
-/// top-right. No separator between the top region and the content; the
-/// whole window is one continuous surface.
+/// lights floating in the top-left and the wizard's shared header row
+/// (back chevron / logo, step title, progress pill) on the row below.
+/// No separator between the top region and the content; the whole
+/// window is one continuous surface.
 ///
 /// Layout:
 /// ```
-/// ┌───────────────────────────────────┐
-/// │ ●●●            ████░░░░░░         │
-/// │                                   │
-/// │      [step content fills here]    │
-/// │                                   │
-/// └───────────────────────────────────┘
+/// ┌────────────────────────────────────────┐
+/// │ ●●●                                    │
+/// │   [‹ back] Tailscale          1/7 ▰▱▱  │
+/// │                                        │
+/// │      [step body fills here]            │
+/// │                                        │
+/// └────────────────────────────────────────┘
 /// ```
+///
+/// `.done` is the exception — it renders its own centred celebratory
+/// layout, so the shell hides the header row when the wizard is on the
+/// final step.
 struct WizardShell<Content: View>: View {
     @Bindable var state: WizardState
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        ZStack(alignment: .top) {
-            // Per-step content fills the full window so it can lay out
-            // its own title at the top-left (with breathing room for
-            // the traffic lights) and its CTAs at the bottom.
+        VStack(spacing: 0) {
+            if state.step != .done {
+                headerRow
+                    .padding(.top, 36)
+                    .padding(.horizontal, 32)
+            }
+
             content()
-                .padding(.top, 36)        // clear the traffic-light row
+                .padding(.top, state.step == .done ? 36 : 14)
                 .padding(.bottom, 24)
                 .padding(.horizontal, 32)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -74,21 +83,6 @@ struct WizardShell<Content: View>: View {
                     removal: .opacity.combined(with: .move(edge: .leading))
                 ))
                 .id(state.step) // re-mount per step so transitions fire
-
-            // Top bar — only the progress pill, anchored top-right and
-            // vertically centred with the per-step title row in
-            // `content()` (which sits at `.padding(.top, 36)` and is
-            // ~28pt tall thanks to the 28pt logo). Matching the pill's
-            // top padding to the content's puts it on the same baseline
-            // as the title.
-            HStack(spacing: 8) {
-                Spacer(minLength: 0)
-                if state.step != .done {
-                    progressPill
-                }
-            }
-            .padding(.top, 36)
-            .padding(.horizontal, 32)
         }
         // Pinned to the same fixed dimensions the WindowGroup uses in
         // `TronMacApp.swift` — the window is non-resizable, so every
@@ -99,7 +93,60 @@ struct WizardShell<Content: View>: View {
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: state.step)
     }
 
-    // MARK: - Progress pill (top-right)
+    // MARK: - Header row (back / logo + title + pill)
+
+    @ViewBuilder
+    private var headerRow: some View {
+        HStack(spacing: 12) {
+            // Welcome owns the brand logo; every later step replaces it
+            // with a back chevron so the user always has a way out. Both
+            // glyphs are 28×28 so the title text starts at the same x
+            // regardless of step.
+            if state.step == .welcome {
+                Image("TronLogo")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 28, height: 28)
+                    .foregroundStyle(Color.tronEmerald)
+            } else {
+                backChevronButton
+            }
+
+            Text(state.step.displayTitle)
+                .font(.system(.title2, design: .rounded).weight(.semibold))
+                .foregroundStyle(Color.tronEmerald)
+
+            Spacer(minLength: 12)
+
+            progressPill
+        }
+    }
+
+    @ViewBuilder
+    private var backChevronButton: some View {
+        Button {
+            state.goBack()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .frame(width: 28, height: 28)
+                .background(
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(Color.tronEmerald.opacity(0.35), lineWidth: 0.5)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .help("Back")
+        .accessibilityLabel("Back")
+    }
+
+    // MARK: - Progress pill (right end of header row)
 
     @ViewBuilder
     private var progressPill: some View {
