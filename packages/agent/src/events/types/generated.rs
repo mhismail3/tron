@@ -359,10 +359,7 @@ mod tests {
             EventType::WorktreePendingMergeDetected,
             "worktree.pending_merge_detected",
         ),
-        (
-            EventType::WorktreeRebasedOnMain,
-            "worktree.rebased_on_main",
-        ),
+        (EventType::WorktreeRebasedOnMain, "worktree.rebased_on_main"),
         (
             EventType::WorktreePostRebaseStashConflict,
             "worktree.post_rebase_stash_conflict",
@@ -378,18 +375,12 @@ mod tests {
             EventType::DeviceTokenInvalidated,
             "device.token_invalidated",
         ),
-        (
-            EventType::ServerUpdateAvailable,
-            "server.update_available",
-        ),
+        (EventType::ServerUpdateAvailable, "server.update_available"),
         (
             EventType::ServerUpdateDownloaded,
             "server.update_downloaded",
         ),
-        (
-            EventType::ServerUpdateInstalled,
-            "server.update_installed",
-        ),
+        (EventType::ServerUpdateInstalled, "server.update_installed"),
         (EventType::ServerUpdateFailed, "server.update_failed"),
         (
             EventType::ServerUpdateDisabledAfterFailures,

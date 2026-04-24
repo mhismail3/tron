@@ -12,11 +12,11 @@ use std::sync::atomic::AtomicI64;
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
+use crate::llm::provider::{ProviderError, StreamEventStream};
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::errors::RuntimeError;
 use crate::runtime::orchestrator::streaming_journal::StreamingJournal;
 use crate::runtime::types::StreamResult;
-use crate::llm::provider::{ProviderError, StreamEventStream};
 
 use super::stream_state::{StreamAction, StreamState};
 
@@ -77,7 +77,10 @@ pub async fn process_stream(
                 };
                 match action {
                     StreamAction::Continue => continue,
-                    StreamAction::Done { stop_reason: sr, final_message: fm } => {
+                    StreamAction::Done {
+                        stop_reason: sr,
+                        final_message: fm,
+                    } => {
                         stop_reason = sr;
                         final_message = fm;
                         break;

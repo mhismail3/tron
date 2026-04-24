@@ -1,8 +1,8 @@
 //! Shared client log ingestion logic used by the RPC handler.
 
-use serde::{Deserialize, Serialize};
 use crate::core::logging::LogLevel;
 use crate::events::PooledConnection;
+use serde::{Deserialize, Serialize};
 
 use crate::server::rpc::errors::RpcError;
 

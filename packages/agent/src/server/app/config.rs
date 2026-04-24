@@ -32,8 +32,8 @@ impl Default for ServerConfig {
             heartbeat_interval_secs: 30,
             heartbeat_timeout_secs: 90,
             max_message_size: 150 * 1024 * 1024, // 150 MB — accommodates 15-min voice notes at 48kHz (~115 MB base64)
-            rate_limit_rps: 0,   // disabled by default
-            cors_enabled: false,  // disabled by default
+            rate_limit_rps: 0,                   // disabled by default
+            cors_enabled: false,                 // disabled by default
         }
     }
 }

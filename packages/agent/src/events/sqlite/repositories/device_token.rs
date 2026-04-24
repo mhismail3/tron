@@ -211,10 +211,7 @@ impl DeviceTokenRepo {
     /// no-op: idempotent, must NOT emit audit events. The dedup invariant
     /// is preserved because the SELECT filters on `is_active = 1`, so
     /// a repeated call after the first returns empty.
-    pub fn deactivate(
-        conn: &Connection,
-        device_token: &str,
-    ) -> Result<Vec<DeactivatedTokenInfo>> {
+    pub fn deactivate(conn: &Connection, device_token: &str) -> Result<Vec<DeactivatedTokenInfo>> {
         let tx = conn.unchecked_transaction()?;
 
         // Pre-read every active row for this token. Filtering on
@@ -314,10 +311,11 @@ mod tests {
     fn register_existing_token_returns_same_id() {
         let conn = setup();
         let token = "b".repeat(64);
-        let first =
-            DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
+        let first = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD)
+            .unwrap();
         let second =
-            DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
+            DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD)
+                .unwrap();
         assert_eq!(first.id, second.id);
         assert!(first.created);
         assert!(!second.created);
@@ -353,15 +351,9 @@ mod tests {
         let conn = setup();
         insert_workspace_and_session(&conn);
         let token = "c".repeat(64);
-        let r1 = DeviceTokenRepo::register(
-            &conn,
-            &token,
-            None,
-            Some("ws_1"),
-            "sandbox",
-            BUNDLE_PROD,
-        )
-        .unwrap();
+        let r1 =
+            DeviceTokenRepo::register(&conn, &token, None, Some("ws_1"), "sandbox", BUNDLE_PROD)
+                .unwrap();
         let r2 = DeviceTokenRepo::register(
             &conn,
             &token,
@@ -373,8 +365,14 @@ mod tests {
         .unwrap();
 
         assert!(r1.created);
-        assert!(!r2.created, "same full identity must update the existing row");
-        assert_eq!(r1.id, r2.id, "row id is stable across same-identity re-register");
+        assert!(
+            !r2.created,
+            "same full identity must update the existing row"
+        );
+        assert_eq!(
+            r1.id, r2.id,
+            "row id is stable across same-identity re-register"
+        );
 
         let row = conn
             .query_row(
@@ -450,12 +448,7 @@ mod tests {
             )
             .unwrap()
             .query_map(params![token], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                ))
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })
             .unwrap()
             .filter_map(std::result::Result::ok)
@@ -478,7 +471,9 @@ mod tests {
         DeviceTokenRepo::unregister(&conn, &token).unwrap();
 
         // Re-register should reactivate
-        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
+        let result =
+            DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD)
+                .unwrap();
         assert!(!result.created); // existing row
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
             .unwrap()
@@ -506,7 +501,9 @@ mod tests {
     fn get_by_id_found() {
         let conn = setup();
         let token = "f".repeat(64);
-        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
+        let result =
+            DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD)
+                .unwrap();
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id).unwrap();
         assert!(row.is_some());
         let row = row.unwrap();
@@ -550,8 +547,24 @@ mod tests {
         insert_workspace_and_session(&conn);
         let token1 = "a".repeat(64);
         let token2 = "b".repeat(64);
-        DeviceTokenRepo::register(&conn, &token1, Some("sess_1"), None, "production", BUNDLE_PROD).unwrap();
-        DeviceTokenRepo::register(&conn, &token2, Some("sess_2"), None, "production", BUNDLE_PROD).unwrap();
+        DeviceTokenRepo::register(
+            &conn,
+            &token1,
+            Some("sess_1"),
+            None,
+            "production",
+            BUNDLE_PROD,
+        )
+        .unwrap();
+        DeviceTokenRepo::register(
+            &conn,
+            &token2,
+            Some("sess_2"),
+            None,
+            "production",
+            BUNDLE_PROD,
+        )
+        .unwrap();
 
         let session_tokens = DeviceTokenRepo::get_by_session(&conn, "sess_1").unwrap();
         assert_eq!(session_tokens.len(), 1);
@@ -574,7 +587,11 @@ mod tests {
         .unwrap();
 
         let infos = DeviceTokenRepo::deactivate(&conn, &token).unwrap();
-        assert_eq!(infos.len(), 1, "single registration should produce one info");
+        assert_eq!(
+            infos.len(),
+            1,
+            "single registration should produce one info"
+        );
         let info = &infos[0];
         assert_eq!(info.session_id.as_deref(), Some("sess_1"));
         assert_eq!(info.workspace_id.as_deref(), Some("ws_1"));
@@ -604,7 +621,8 @@ mod tests {
     fn deactivate_returns_empty_on_already_inactive_rows() {
         let conn = setup();
         let token = "g".repeat(64);
-        let _ = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
+        let _ = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD)
+            .unwrap();
         let first = DeviceTokenRepo::deactivate(&conn, &token).unwrap();
         assert_eq!(first.len(), 1);
 
@@ -619,7 +637,8 @@ mod tests {
     fn deactivate_preserves_nullable_session() {
         let conn = setup();
         let token = "h".repeat(64);
-        let _ = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD).unwrap();
+        let _ = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD)
+            .unwrap();
         let infos = DeviceTokenRepo::deactivate(&conn, &token).unwrap();
         assert_eq!(infos.len(), 1);
         let info = &infos[0];
@@ -649,15 +668,8 @@ mod tests {
             BUNDLE_PROD,
         )
         .unwrap();
-        DeviceTokenRepo::register(
-            &conn,
-            &token,
-            None,
-            Some("ws_2"),
-            "production",
-            BUNDLE_PROD,
-        )
-        .unwrap();
+        DeviceTokenRepo::register(&conn, &token, None, Some("ws_2"), "production", BUNDLE_PROD)
+            .unwrap();
 
         let infos = DeviceTokenRepo::deactivate(&conn, &token).unwrap();
         assert_eq!(
@@ -691,7 +703,8 @@ mod tests {
     fn register_preserves_platform_ios() {
         let conn = setup();
         let token = "h".repeat(64);
-        let result = DeviceTokenRepo::register(&conn, &token, None, None, "sandbox", BUNDLE_PROD).unwrap();
+        let result =
+            DeviceTokenRepo::register(&conn, &token, None, None, "sandbox", BUNDLE_PROD).unwrap();
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
             .unwrap()
             .unwrap();
@@ -705,15 +718,8 @@ mod tests {
     fn register_with_bundle_id_stores_it() {
         let conn = setup();
         let token = "1".repeat(64);
-        let result = DeviceTokenRepo::register(
-            &conn,
-            &token,
-            None,
-            None,
-            "sandbox",
-            BUNDLE_BETA,
-        )
-        .unwrap();
+        let result =
+            DeviceTokenRepo::register(&conn, &token, None, None, "sandbox", BUNDLE_BETA).unwrap();
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
             .unwrap()
             .unwrap();
@@ -729,24 +735,10 @@ mod tests {
     fn register_with_different_bundle_creates_distinct_row() {
         let conn = setup();
         let token = "3".repeat(64);
-        let r1 = DeviceTokenRepo::register(
-            &conn,
-            &token,
-            None,
-            None,
-            "production",
-            BUNDLE_PROD,
-        )
-        .unwrap();
-        let r2 = DeviceTokenRepo::register(
-            &conn,
-            &token,
-            None,
-            None,
-            "sandbox",
-            BUNDLE_BETA,
-        )
-        .unwrap();
+        let r1 = DeviceTokenRepo::register(&conn, &token, None, None, "production", BUNDLE_PROD)
+            .unwrap();
+        let r2 =
+            DeviceTokenRepo::register(&conn, &token, None, None, "sandbox", BUNDLE_BETA).unwrap();
 
         assert!(r1.created);
         assert!(r2.created, "distinct bundles must create distinct rows");
@@ -772,24 +764,8 @@ mod tests {
         let conn = setup();
         let t_prod = "5".repeat(64);
         let t_beta = "6".repeat(64);
-        DeviceTokenRepo::register(
-            &conn,
-            &t_prod,
-            None,
-            None,
-            "production",
-            BUNDLE_PROD,
-        )
-        .unwrap();
-        DeviceTokenRepo::register(
-            &conn,
-            &t_beta,
-            None,
-            None,
-            "sandbox",
-            BUNDLE_BETA,
-        )
-        .unwrap();
+        DeviceTokenRepo::register(&conn, &t_prod, None, None, "production", BUNDLE_PROD).unwrap();
+        DeviceTokenRepo::register(&conn, &t_beta, None, None, "sandbox", BUNDLE_BETA).unwrap();
 
         let mut rows = DeviceTokenRepo::get_all_active(&conn).unwrap();
         rows.sort_by(|a, b| a.device_token.cmp(&b.device_token));
@@ -866,7 +842,10 @@ mod tests {
             r2.created,
             "second registration with a different workspace must create a distinct row"
         );
-        assert_ne!(r1.id, r2.id, "distinct identities must produce distinct IDs");
+        assert_ne!(
+            r1.id, r2.id,
+            "distinct identities must produce distinct IDs"
+        );
 
         let active_count: i64 = conn
             .query_row(
@@ -875,7 +854,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(active_count, 2, "both workspace registrations must remain active");
+        assert_eq!(
+            active_count, 2,
+            "both workspace registrations must remain active"
+        );
 
         let mut rows = DeviceTokenRepo::get_all_active(&conn).unwrap();
         rows.sort_by(|a, b| a.workspace_id.cmp(&b.workspace_id));
@@ -883,9 +865,6 @@ mod tests {
         assert_eq!(rows[0].workspace_id.as_deref(), Some("ws_1"));
         assert_eq!(rows[1].workspace_id.as_deref(), Some("ws_2"));
         assert!(rows.iter().all(|r| r.device_token == token));
-        assert!(
-            rows.iter()
-                .all(|r| r.bundle_id == "com.tron.mobile")
-        );
+        assert!(rows.iter().all(|r| r.bundle_id == "com.tron.mobile"));
     }
 }

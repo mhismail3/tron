@@ -180,15 +180,14 @@ pub async fn all_ollama_models_api_json_with_availability(
                     let available = models.iter().any(|m| m == id);
                     json["available"] = serde_json::Value::Bool(available);
                     if !available {
-                        json["unavailableReason"] = serde_json::Value::String(
-                            format!("Not installed — run: ollama pull {id}"),
-                        );
+                        json["unavailableReason"] = serde_json::Value::String(format!(
+                            "Not installed — run: ollama pull {id}"
+                        ));
                     }
                 }
                 Err(reason) => {
                     json["available"] = serde_json::Value::Bool(false);
-                    json["unavailableReason"] =
-                        serde_json::Value::String(reason.clone());
+                    json["unavailableReason"] = serde_json::Value::String(reason.clone());
                 }
             }
             json

@@ -88,8 +88,8 @@ impl RelayClient {
     /// Compute HMAC-SHA256 signature: `hex(HMAC(secret, "{timestamp}.{body}"))`.
     fn sign(&self, timestamp: u64, body: &str) -> String {
         let message = format!("{timestamp}.{body}");
-        let mut mac =
-            HmacSha256::new_from_slice(self.relay_secret.as_bytes()).expect("HMAC accepts any key size");
+        let mut mac = HmacSha256::new_from_slice(self.relay_secret.as_bytes())
+            .expect("HMAC accepts any key size");
         mac.update(message.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }
@@ -177,7 +177,10 @@ impl PushSender for RelayClient {
         let status = response.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             warn!("relay returned 401 — check TRON_RELAY_SECRET matches the Worker secret");
-            return Self::error_results(device_tokens, "relay: invalid signature (check TRON_RELAY_SECRET)");
+            return Self::error_results(
+                device_tokens,
+                "relay: invalid signature (check TRON_RELAY_SECRET)",
+            );
         }
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             warn!("relay returned 429 — rate limited");
@@ -199,7 +202,10 @@ impl PushSender for RelayClient {
             Ok(t) => t,
             Err(e) => {
                 warn!(error = %e, "failed to read relay response body");
-                return Self::error_results(device_tokens, &format!("relay response read error: {e}"));
+                return Self::error_results(
+                    device_tokens,
+                    &format!("relay response read error: {e}"),
+                );
             }
         };
 
@@ -207,7 +213,10 @@ impl PushSender for RelayClient {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, body = %body_text, "relay returned malformed JSON");
-                return Self::error_results(device_tokens, &format!("relay: malformed response: {e}"));
+                return Self::error_results(
+                    device_tokens,
+                    &format!("relay: malformed response: {e}"),
+                );
             }
         };
 
@@ -248,8 +257,8 @@ mod tests {
             relay_secret: "test-secret".into(),
         };
 
-        let sig1 = client.sign(1000000, r#"{"test":"data"}"#);
-        let sig2 = client.sign(1000000, r#"{"test":"data"}"#);
+        let sig1 = client.sign(1_000_000, r#"{"test":"data"}"#);
+        let sig2 = client.sign(1_000_000, r#"{"test":"data"}"#);
         assert_eq!(sig1, sig2);
         // HMAC output is 64 hex chars (32 bytes)
         assert_eq!(sig1.len(), 64);
@@ -263,8 +272,8 @@ mod tests {
             relay_secret: "test-secret".into(),
         };
 
-        let sig1 = client.sign(1000000, "body");
-        let sig2 = client.sign(1000001, "body");
+        let sig1 = client.sign(1_000_000, "body");
+        let sig2 = client.sign(1_000_001, "body");
         assert_ne!(sig1, sig2);
     }
 
@@ -276,8 +285,8 @@ mod tests {
             relay_secret: "test-secret".into(),
         };
 
-        let sig1 = client.sign(1000000, "body1");
-        let sig2 = client.sign(1000000, "body2");
+        let sig1 = client.sign(1_000_000, "body1");
+        let sig2 = client.sign(1_000_000, "body2");
         assert_ne!(sig1, sig2);
     }
 
@@ -294,15 +303,12 @@ mod tests {
             relay_secret: "secret-b".into(),
         };
 
-        assert_ne!(c1.sign(1000000, "body"), c2.sign(1000000, "body"));
+        assert_ne!(c1.sign(1_000_000, "body"), c2.sign(1_000_000, "body"));
     }
 
     #[test]
     fn error_results_per_token() {
-        let results = RelayClient::error_results(
-            &["tok1".into(), "tok2".into()],
-            "relay timeout",
-        );
+        let results = RelayClient::error_results(&["tok1".into(), "tok2".into()], "relay timeout");
         assert_eq!(results.len(), 2);
         assert!(!results[0].success);
         assert!(!results[1].success);

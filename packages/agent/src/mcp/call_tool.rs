@@ -55,23 +55,23 @@ impl TronTool for McpCallTool {
         .build()
     }
 
-    async fn execute(&self, params: Value, _ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
+    async fn execute(
+        &self,
+        params: Value,
+        _ctx: &ToolContext,
+    ) -> Result<TronToolResult, ToolError> {
         let Some(server) = params.get("server").and_then(Value::as_str) else {
             return Ok(error_result("Missing required parameter: server"));
         };
         let Some(tool) = params.get("tool").and_then(Value::as_str) else {
             return Ok(error_result("Missing required parameter: tool"));
         };
-        let arguments = params.get("arguments")
-            .cloned()
-            .unwrap_or(json!({}));
+        let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
         let mut router = self.router.write().await;
         match router.call(server, tool, arguments).await {
             Ok(result) => Ok(mcp_result_to_tron_result(&result, server, tool)),
-            Err(e) => Ok(error_result(format!(
-                "MCP call failed: {e}"
-            ))),
+            Err(e) => Ok(error_result(format!("MCP call failed: {e}"))),
         }
     }
 }

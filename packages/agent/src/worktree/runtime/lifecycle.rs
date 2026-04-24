@@ -328,7 +328,10 @@ mod tests {
         // No changes made — zero commits over base
         let release = remove(&info, &config, &git).await.unwrap();
         assert!(release.deleted);
-        assert!(!release.branch_preserved, "zero-commit branch should be deleted even when preserve_branches is true");
+        assert!(
+            !release.branch_preserved,
+            "zero-commit branch should be deleted even when preserve_branches is true"
+        );
 
         // Verify branch is actually gone
         let branches = git
@@ -359,7 +362,10 @@ mod tests {
 
         let release = remove(&info, &config, &git).await.unwrap();
         assert!(release.deleted);
-        assert!(release.branch_preserved, "branch with commits should be preserved");
+        assert!(
+            release.branch_preserved,
+            "branch with commits should be preserved"
+        );
 
         // Verify branch still exists
         let branches = git

@@ -69,10 +69,14 @@ impl MethodHandler for SetActiveCredentialHandler {
                 // AuthError::Io with ErrorKind::NotFound which would
                 // otherwise route through map_auth_error to
                 // INTERNAL_ERROR.
-                crate::llm::auth::storage::set_active_credential(&auth_path, &provider, &credential)
-                    .map_err(|e| RpcError::InvalidParams {
-                        message: format!("Failed to set active credential: {e}"),
-                    })?;
+                crate::llm::auth::storage::set_active_credential(
+                    &auth_path,
+                    &provider,
+                    &credential,
+                )
+                .map_err(|e| RpcError::InvalidParams {
+                    message: format!("Failed to set active credential: {e}"),
+                })?;
 
                 build_masked_state(&auth_path).map_err(map_auth_error)
             })

@@ -213,7 +213,9 @@ fn build_message_info(msg: &Message, index: usize, tokens: u64) -> DetailedMessa
                 crate::core::messages::ToolResultMessageContent::Blocks(blocks) => blocks
                     .iter()
                     .filter_map(|b| match b {
-                        crate::core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                        crate::core::content::ToolResultContent::Text { text } => {
+                            Some(text.as_str())
+                        }
                         crate::core::content::ToolResultContent::Image { .. } => None,
                     })
                     .collect::<Vec<_>>()

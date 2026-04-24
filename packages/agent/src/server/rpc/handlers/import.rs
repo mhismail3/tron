@@ -31,9 +31,7 @@ impl MethodHandler for ListSourcesHandler {
     #[instrument(skip(self, ctx), fields(method = "import.listSources"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         ctx.run_blocking("import.listSources", move || {
-            let claude_projects = PathBuf::from(home_dir())
-                .join(".claude")
-                .join("projects");
+            let claude_projects = PathBuf::from(home_dir()).join(".claude").join("projects");
 
             // No Claude dir or I/O error → empty list (not an error for the client)
             let Ok(projects) = import::discover_projects(&claude_projects) else {
@@ -68,22 +66,17 @@ impl MethodHandler for ListSessionsHandler {
         let event_store = ctx.event_store.clone();
 
         ctx.run_blocking("import.listSessions", move || {
-            let claude_projects = PathBuf::from(home_dir())
-                .join(".claude")
-                .join("projects");
+            let claude_projects = PathBuf::from(home_dir()).join(".claude").join("projects");
 
             let project_dir = claude_projects.join(&encoded_dir);
 
-            let sessions = import::discover_sessions(&project_dir)
-                .map_err(map_import_error)?;
+            let sessions = import::discover_sessions(&project_dir).map_err(map_import_error)?;
 
             let result: Vec<Value> = sessions
                 .into_iter()
                 .map(|s| {
-                    let already_imported =
-                        check_already_imported(&event_store, &s.session_uuid);
-                    let (imported, existing_id) = already_imported
-                        .unwrap_or((false, None));
+                    let already_imported = check_already_imported(&event_store, &s.session_uuid);
+                    let (imported, existing_id) = already_imported.unwrap_or((false, None));
 
                     json!({
                         "sessionPath": s.file_path,
@@ -123,8 +116,7 @@ impl MethodHandler for PreviewSessionHandler {
             // UI preview. The validator (which we ALSO run below) discards
             // per-event payloads to produce its report — we still need the
             // events here to render the message list.
-            let records = import::parser::parse_session(&path)
-                .map_err(map_import_error)?;
+            let records = import::parser::parse_session(&path).map_err(map_import_error)?;
 
             let linear = import::tree::linearize(records);
             let assembled = import::assembler::assemble(linear);
@@ -147,24 +139,21 @@ impl MethodHandler for PreviewSessionHandler {
                     }
                     crate::events::EventType::MessageAssistant => {
                         let content = spec.payload.get("content");
-                        let has_tool_use = content
-                            .and_then(|c| c.as_array())
-                            .is_some_and(|blocks| {
+                        let has_tool_use =
+                            content.and_then(|c| c.as_array()).is_some_and(|blocks| {
                                 blocks.iter().any(|b| {
                                     b.get("type").and_then(Value::as_str) == Some("tool_use")
                                 })
                             });
-                        let tool_name = content
-                            .and_then(|c| c.as_array())
-                            .and_then(|blocks| {
-                                blocks.iter().find_map(|b| {
-                                    if b.get("type").and_then(Value::as_str) == Some("tool_use") {
-                                        b.get("name").and_then(Value::as_str).map(String::from)
-                                    } else {
-                                        None
-                                    }
-                                })
-                            });
+                        let tool_name = content.and_then(|c| c.as_array()).and_then(|blocks| {
+                            blocks.iter().find_map(|b| {
+                                if b.get("type").and_then(Value::as_str) == Some("tool_use") {
+                                    b.get("name").and_then(Value::as_str).map(String::from)
+                                } else {
+                                    None
+                                }
+                            })
+                        });
                         let preview = content_preview(content, 200);
                         messages.push(json!({
                             "id": format!("preview_{msg_idx}"),
@@ -183,9 +172,10 @@ impl MethodHandler for PreviewSessionHandler {
             }
 
             let total_messages = result.message_count;
-            let has_compaction = result.events.iter().any(|e| {
-                e.event_type == crate::events::EventType::CompactBoundary
-            });
+            let has_compaction = result
+                .events
+                .iter()
+                .any(|e| e.event_type == crate::events::EventType::CompactBoundary);
 
             // Dry-run validation — surfaces unparseable lines, orphan tool
             // calls/results, missing model, etc. Warnings attached to the
@@ -238,8 +228,7 @@ impl MethodHandler for ExecuteImportHandler {
                     .collect()
             })
             .unwrap_or_default();
-        let working_directory = opt_string(params.as_ref(), "workingDirectory")
-            .unwrap_or_default();
+        let working_directory = opt_string(params.as_ref(), "workingDirectory").unwrap_or_default();
 
         let event_store = ctx.event_store.clone();
         let origin = ctx.origin.clone();
@@ -296,22 +285,16 @@ impl MethodHandler for ExecuteImportHandler {
 /// category-specific context (line number, tool_use_id, etc.).
 fn import_warning_to_json(warning: &import::ImportWarning) -> Value {
     let (kind, details) = match &warning.kind {
-        import::ImportWarningKind::UnparseableLine { line_number } => (
-            "unparseable-line",
-            json!({ "lineNumber": line_number }),
-        ),
-        import::ImportWarningKind::OrphanToolResult { tool_call_id } => (
-            "orphan-tool-result",
-            json!({ "toolCallId": tool_call_id }),
-        ),
-        import::ImportWarningKind::OrphanToolUse { tool_call_id } => (
-            "orphan-tool-use",
-            json!({ "toolCallId": tool_call_id }),
-        ),
-        import::ImportWarningKind::AssistantMissingModel => (
-            "assistant-missing-model",
-            json!({}),
-        ),
+        import::ImportWarningKind::UnparseableLine { line_number } => {
+            ("unparseable-line", json!({ "lineNumber": line_number }))
+        }
+        import::ImportWarningKind::OrphanToolResult { tool_call_id } => {
+            ("orphan-tool-result", json!({ "toolCallId": tool_call_id }))
+        }
+        import::ImportWarningKind::OrphanToolUse { tool_call_id } => {
+            ("orphan-tool-use", json!({ "toolCallId": tool_call_id }))
+        }
+        import::ImportWarningKind::AssistantMissingModel => ("assistant-missing-model", json!({})),
     };
     json!({
         "kind": kind,

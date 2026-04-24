@@ -414,10 +414,7 @@ mod tests {
         let events = acc.start_tool_call("call_1".into(), "bash".into());
         assert_eq!(events.len(), 1);
         match &events[0] {
-            StreamEvent::ToolCallStart {
-                tool_call_id,
-                name,
-            } => {
+            StreamEvent::ToolCallStart { tool_call_id, name } => {
                 assert_eq!(tool_call_id, "call_1");
                 assert_eq!(name, "bash");
             }
@@ -495,10 +492,8 @@ mod tests {
         let mut acc = StreamAccumulator::new();
         let _ = acc.start_tool_call("call_1".into(), "bash".into());
         let _ = acc.append_tool_args("call_1", r#"{"cmd":"ls"}"#);
-        let args: Map<String, serde_json::Value> =
-            serde_json::from_str(r#"{"cmd":"ls"}"#).unwrap();
-        let events =
-            acc.finish_tool_call_with("call_1", args, Some("sig-abc".into()));
+        let args: Map<String, serde_json::Value> = serde_json::from_str(r#"{"cmd":"ls"}"#).unwrap();
+        let events = acc.finish_tool_call_with("call_1", args, Some("sig-abc".into()));
         match &events[0] {
             StreamEvent::ToolCallEnd { tool_call } => {
                 assert_eq!(tool_call.thought_signature.as_deref(), Some("sig-abc"));

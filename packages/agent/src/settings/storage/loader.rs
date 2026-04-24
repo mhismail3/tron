@@ -365,11 +365,7 @@ mod tests {
     fn load_deeply_nested_override() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        std::fs::write(
-            &path,
-            r#"{"context": {"compactor": {"maxTokens": 50000}}}"#,
-        )
-        .unwrap();
+        std::fs::write(&path, r#"{"context": {"compactor": {"maxTokens": 50000}}}"#).unwrap();
 
         let settings = load_settings_from_path(&path).unwrap();
         assert_eq!(settings.context.compactor.max_tokens, 50_000);
@@ -494,5 +490,4 @@ mod tests {
     fn parse_u64_invalid() {
         assert_eq!(parse_u64_range("abc", 1000, 600_000), None);
     }
-
 }

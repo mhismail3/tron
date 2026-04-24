@@ -201,10 +201,13 @@ fn parse_prompt_frontmatter(content: &str) -> Option<HookFileConfig> {
     // file is malformed.
     let enabled = match fields.get("enabled") {
         None => true,
-        Some(v) => v.parse().map_err(|e| {
-            tracing::warn!(value = %v, error = %e, "hook frontmatter: invalid `enabled` value");
-            e
-        }).ok()?,
+        Some(v) => v
+            .parse()
+            .map_err(|e| {
+                tracing::warn!(value = %v, error = %e, "hook frontmatter: invalid `enabled` value");
+                e
+            })
+            .ok()?,
     };
     let priority = match fields.get("priority") {
         None => 0,
@@ -256,10 +259,13 @@ fn parse_script_frontmatter(content: &str) -> Option<HookFileConfig> {
     // the default.
     let enabled = match fields.get("enabled") {
         None => true,
-        Some(v) => v.parse().map_err(|e| {
-            tracing::warn!(value = %v, error = %e, "hook frontmatter: invalid `enabled` value");
-            e
-        }).ok()?,
+        Some(v) => v
+            .parse()
+            .map_err(|e| {
+                tracing::warn!(value = %v, error = %e, "hook frontmatter: invalid `enabled` value");
+                e
+            })
+            .ok()?,
     };
     let priority = match fields.get("priority") {
         None => 0,
@@ -507,7 +513,8 @@ mod tests {
 
     #[test]
     fn test_parse_frontmatter_script_slash_prefix() {
-        let content = "// ---\n// type: post-tool-use\n// label: Logger\n// ---\nconsole.log('ok');";
+        let content =
+            "// ---\n// type: post-tool-use\n// label: Logger\n// ---\nconsole.log('ok');";
         let config = parse_script_frontmatter(content).unwrap();
         assert_eq!(config.hook_type, HookType::PostToolUse);
         assert_eq!(config.label, "Logger");
@@ -542,7 +549,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let hooks_dir = tmp.path().join(".tron/hooks");
         fs::create_dir_all(&hooks_dir).unwrap();
-        write_hook(&hooks_dir, "title-gen.prompt", "---\ntype: session-start\nlabel: Title\n---\nGenerate title.");
+        write_hook(
+            &hooks_dir,
+            "title-gen.prompt",
+            "---\ntype: session-start\nlabel: Title\n---\nGenerate title.",
+        );
 
         let config = DiscoveryConfig {
             project_path: Some(tmp.path().to_string_lossy().into_owned()),
@@ -563,7 +574,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let hooks_dir = tmp.path().join(".tron/hooks");
         fs::create_dir_all(&hooks_dir).unwrap();
-        write_hook(&hooks_dir, "safety.sh", "# ---\n# type: pre-tool-use\n# ---\n#!/bin/bash\necho ok");
+        write_hook(
+            &hooks_dir,
+            "safety.sh",
+            "# ---\n# type: pre-tool-use\n# ---\n#!/bin/bash\necho ok",
+        );
 
         let config = DiscoveryConfig {
             project_path: Some(tmp.path().to_string_lossy().into_owned()),
@@ -616,9 +631,17 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let hooks_dir = tmp.path().join(".tron/hooks");
         fs::create_dir_all(&hooks_dir).unwrap();
-        write_hook(&hooks_dir, "good.prompt", "---\ntype: session-start\n---\nOk.");
+        write_hook(
+            &hooks_dir,
+            "good.prompt",
+            "---\ntype: session-start\n---\nOk.",
+        );
         write_hook(&hooks_dir, "bad.sh", "#!/bin/bash\necho no frontmatter");
-        write_hook(&hooks_dir, "also-good.sh", "# ---\n# type: stop\n# ---\n#!/bin/bash\necho ok");
+        write_hook(
+            &hooks_dir,
+            "also-good.sh",
+            "# ---\n# type: stop\n# ---\n#!/bin/bash\necho ok",
+        );
 
         let config = DiscoveryConfig {
             project_path: Some(tmp.path().to_string_lossy().into_owned()),
@@ -636,7 +659,11 @@ mod tests {
         let hooks_dir = tmp.path().join(".tron/hooks");
         fs::create_dir_all(&hooks_dir).unwrap();
         // Filename says "my-cool-hook" but type is "stop"
-        write_hook(&hooks_dir, "my-cool-hook.prompt", "---\ntype: stop\n---\nSummarize.");
+        write_hook(
+            &hooks_dir,
+            "my-cool-hook.prompt",
+            "---\ntype: stop\n---\nSummarize.",
+        );
 
         let config = DiscoveryConfig {
             project_path: Some(tmp.path().to_string_lossy().into_owned()),
@@ -655,8 +682,16 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let hooks_dir = tmp.path().join(".tron/hooks");
         fs::create_dir_all(&hooks_dir).unwrap();
-        write_hook(&hooks_dir, "title.prompt", "---\ntype: session-start\n---\nTitle.");
-        write_hook(&hooks_dir, "tags.prompt", "---\ntype: session-start\n---\nTags.");
+        write_hook(
+            &hooks_dir,
+            "title.prompt",
+            "---\ntype: session-start\n---\nTitle.",
+        );
+        write_hook(
+            &hooks_dir,
+            "tags.prompt",
+            "---\ntype: session-start\n---\nTags.",
+        );
 
         let config = DiscoveryConfig {
             project_path: Some(tmp.path().to_string_lossy().into_owned()),
@@ -666,7 +701,11 @@ mod tests {
 
         let hooks = discover_hooks(&config);
         assert_eq!(hooks.len(), 2);
-        assert!(hooks.iter().all(|h| h.config.hook_type == HookType::SessionStart));
+        assert!(
+            hooks
+                .iter()
+                .all(|h| h.config.hook_type == HookType::SessionStart)
+        );
     }
 
     #[test]
@@ -697,7 +736,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let hooks_dir = tmp.path().join(USER_HOOK_DIR);
         fs::create_dir_all(&hooks_dir).unwrap();
-        write_hook(&hooks_dir, "cleanup.sh", "# ---\n# type: stop\n# ---\n#!/bin/bash\nexit 0");
+        write_hook(
+            &hooks_dir,
+            "cleanup.sh",
+            "# ---\n# type: stop\n# ---\n#!/bin/bash\nexit 0",
+        );
 
         let config = DiscoveryConfig {
             project_path: None,
@@ -734,15 +777,33 @@ mod tests {
     #[test]
     fn test_parse_type_value_all_valid() {
         assert_eq!(parse_type_value("pre-tool-use"), Some(HookType::PreToolUse));
-        assert_eq!(parse_type_value("post-tool-use"), Some(HookType::PostToolUse));
-        assert_eq!(parse_type_value("session-start"), Some(HookType::SessionStart));
+        assert_eq!(
+            parse_type_value("post-tool-use"),
+            Some(HookType::PostToolUse)
+        );
+        assert_eq!(
+            parse_type_value("session-start"),
+            Some(HookType::SessionStart)
+        );
         assert_eq!(parse_type_value("session-end"), Some(HookType::SessionEnd));
         assert_eq!(parse_type_value("stop"), Some(HookType::Stop));
-        assert_eq!(parse_type_value("subagent-stop"), Some(HookType::SubagentStop));
-        assert_eq!(parse_type_value("user-prompt-submit"), Some(HookType::UserPromptSubmit));
+        assert_eq!(
+            parse_type_value("subagent-stop"),
+            Some(HookType::SubagentStop)
+        );
+        assert_eq!(
+            parse_type_value("user-prompt-submit"),
+            Some(HookType::UserPromptSubmit)
+        );
         assert_eq!(parse_type_value("pre-compact"), Some(HookType::PreCompact));
-        assert_eq!(parse_type_value("notification"), Some(HookType::Notification));
-        assert_eq!(parse_type_value("worktree-acquired"), Some(HookType::WorktreeAcquired));
+        assert_eq!(
+            parse_type_value("notification"),
+            Some(HookType::Notification)
+        );
+        assert_eq!(
+            parse_type_value("worktree-acquired"),
+            Some(HookType::WorktreeAcquired)
+        );
     }
 
     #[test]

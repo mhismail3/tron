@@ -36,7 +36,6 @@ use super::types::{
     DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_NUM_CTX, OllamaConfig, get_ollama_model,
 };
 
-
 /// Ollama LLM provider — local inference, no auth.
 pub struct OllamaProvider {
     config: OllamaConfig,
@@ -82,12 +81,11 @@ impl OllamaProvider {
 
     /// Get the target `num_ctx` for this model.
     fn target_num_ctx(&self) -> u32 {
-        get_ollama_model(&self.config.model)
-            .map_or(DEFAULT_NUM_CTX, |m| {
-                // Use the model's full context window, capped at 64K.
-                // 64K ≈ 1.9 GB KV cache on E4B — comfortable on 24GB machines.
-                (m.context_window as u32).min(65_536)
-            })
+        get_ollama_model(&self.config.model).map_or(DEFAULT_NUM_CTX, |m| {
+            // Use the model's full context window, capped at 64K.
+            // 64K ≈ 1.9 GB KV cache on E4B — comfortable on 24GB machines.
+            (m.context_window as u32).min(65_536)
+        })
     }
 
     /// Calculate `max_tokens`: options → config → model registry fallback.
@@ -208,10 +206,9 @@ impl OllamaProvider {
         let url = format!("{}/api/chat", self.base_url());
         let headers = Self::build_headers();
 
-        let msg_count = body["messages"]
-            .as_array()
-            .map_or(0, std::vec::Vec::len);
-        let tool_count = body.get("tools")
+        let msg_count = body["messages"].as_array().map_or(0, std::vec::Vec::len);
+        let tool_count = body
+            .get("tools")
             .and_then(|t| t.as_array())
             .map_or(0, |a| a.len());
         let num_ctx = body["options"]["num_ctx"].as_u64().unwrap_or(0);
@@ -292,9 +289,14 @@ fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
     let byte_stream = response.bytes_stream();
 
     let event_stream = futures::stream::unfold(
-        (Box::pin(byte_stream) as std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>>,
-         OllamaStreamState::new(),
-         BytesMut::with_capacity(8192)),
+        (
+            Box::pin(byte_stream)
+                as std::pin::Pin<
+                    Box<dyn futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>,
+                >,
+            OllamaStreamState::new(),
+            BytesMut::with_capacity(8192),
+        ),
         |(mut stream, mut state, mut buffer)| async move {
             loop {
                 // Check buffer for a complete line
@@ -480,7 +482,10 @@ mod tests {
         cfg.model = "unknown-model".into();
         let provider = OllamaProvider::new(cfg);
         let options = ProviderStreamOptions::default();
-        assert_eq!(provider.calculate_max_tokens(&options), DEFAULT_MAX_OUTPUT_TOKENS);
+        assert_eq!(
+            provider.calculate_max_tokens(&options),
+            DEFAULT_MAX_OUTPUT_TOKENS
+        );
     }
 
     // ── Model capabilities ───────────────────────────────────────────────
@@ -554,7 +559,6 @@ mod tests {
         let provider = OllamaProvider::new(cfg);
         assert_eq!(provider.target_num_ctx(), DEFAULT_NUM_CTX);
     }
-
 
     #[test]
     fn request_body_uses_native_format() {

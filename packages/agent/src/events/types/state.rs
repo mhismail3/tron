@@ -189,4 +189,3 @@ pub struct Workspace {
     /// Number of sessions.
     pub session_count: i64,
 }
-

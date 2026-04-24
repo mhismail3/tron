@@ -78,9 +78,8 @@ impl HookHandler for ScriptHookHandler {
     async fn handle(&self, context: &HookContext) -> Result<HookResult, HookError> {
         use tokio::io::AsyncWriteExt;
 
-        let context_json = serde_json::to_string(context).map_err(|e| HookError::Internal(
-            format!("Failed to serialize hook context: {e}"),
-        ))?;
+        let context_json = serde_json::to_string(context)
+            .map_err(|e| HookError::Internal(format!("Failed to serialize hook context: {e}")))?;
 
         // Determine the command to run based on file extension
         let (cmd, args) = resolve_command(&self.script_path);
@@ -111,12 +110,13 @@ impl HookHandler for ScriptHookHandler {
         }
 
         // Wait for completion
-        let output = child.wait_with_output().await.map_err(|e| {
-            HookError::HandlerError {
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|e| HookError::HandlerError {
                 name: self.name.clone(),
                 message: format!("Failed to wait for script: {e}"),
-            }
-        })?;
+            })?;
 
         // Log stderr if present
         if !output.stderr.is_empty() {
@@ -167,10 +167,7 @@ impl HookHandler for ScriptHookHandler {
 
 /// Determine the command and args to run for a script file.
 fn resolve_command(path: &PathBuf) -> (String, Vec<String>) {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     let path_str = path.to_string_lossy().to_string();
 
@@ -196,10 +193,7 @@ mod tests {
     }
 
     fn create_script(content: &str) -> NamedTempFile {
-        let mut file = tempfile::Builder::new()
-            .suffix(".sh")
-            .tempfile()
-            .unwrap();
+        let mut file = tempfile::Builder::new().suffix(".sh").tempfile().unwrap();
         file.write_all(content.as_bytes()).unwrap();
         file.flush().unwrap();
 
@@ -240,8 +234,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_shell_script_returns_block_with_reason() {
-        let script =
-            create_script("#!/bin/bash\necho '{\"action\":\"block\",\"reason\":\"policy violation\"}'");
+        let script = create_script(
+            "#!/bin/bash\necho '{\"action\":\"block\",\"reason\":\"policy violation\"}'",
+        );
         let handler = make_handler(&script, HookType::SessionStart);
         let ctx = make_session_start_context();
 
@@ -259,14 +254,8 @@ mod tests {
         let ctx = make_session_start_context();
 
         let result = handler.handle(&ctx).await.unwrap();
-        assert_eq!(
-            result.action,
-            super::super::types::HookAction::Modify
-        );
-        assert_eq!(
-            result.modifications.unwrap()["key"],
-            "value"
-        );
+        assert_eq!(result.action, super::super::types::HookAction::Modify);
+        assert_eq!(result.modifications.unwrap()["key"], "value");
     }
 
     #[tokio::test]
@@ -283,7 +272,11 @@ echo "{\"action\":\"continue\",\"message\":\"session=$SESSION_ID\"}"
 
         let result = handler.handle(&ctx).await.unwrap();
         assert!(
-            result.message.as_deref().unwrap().contains("test-session-123"),
+            result
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("test-session-123"),
             "Expected message to contain session ID, got: {:?}",
             result.message
         );
@@ -362,10 +355,7 @@ echo "{\"action\":\"continue\",\"message\":\"session=$SESSION_ID\"}"
     #[tokio::test]
     #[cfg(unix)]
     async fn test_script_not_executable_returns_error() {
-        let mut file = tempfile::Builder::new()
-            .suffix(".sh")
-            .tempfile()
-            .unwrap();
+        let mut file = tempfile::Builder::new().suffix(".sh").tempfile().unwrap();
         file.write_all(b"#!/bin/bash\necho '{\"action\":\"continue\"}'")
             .unwrap();
         file.flush().unwrap();

@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use crate::runtime::context::types::CompactionConfig;
-use serde::{Deserialize, Serialize};
 use crate::core::messages::TokenUsage;
 use crate::llm::{AnthropicEffortLevel, ProviderHealthTracker, ReasoningEffort};
+use crate::runtime::context::types::CompactionConfig;
+use serde::{Deserialize, Serialize};
 
 use crate::runtime::errors::StopReason;
 

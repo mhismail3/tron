@@ -58,7 +58,8 @@ impl GitExecutor {
     /// Returns `false` for empty repos (after `git init` with no commits)
     /// and for non-git directories.
     pub async fn has_commits(&self, path: &Path) -> bool {
-        self.run_status(path, &["rev-parse", "--verify", "HEAD"]).await
+        self.run_status(path, &["rev-parse", "--verify", "HEAD"])
+            .await
     }
 
     /// Get the current branch name (None-ish error for detached HEAD).
@@ -117,7 +118,9 @@ impl GitExecutor {
 
     /// Rename a branch.
     pub async fn branch_rename(&self, repo: &Path, old_name: &str, new_name: &str) -> Result<()> {
-        let _ = self.run(repo, &["branch", "-m", old_name, new_name]).await?;
+        let _ = self
+            .run(repo, &["branch", "-m", old_name, new_name])
+            .await?;
         Ok(())
     }
 
@@ -465,17 +468,18 @@ impl GitExecutor {
         branch: &str,
     ) -> Result<Option<String>> {
         let args: &[&str] = &["ls-remote", remote, branch];
-        let output = self
-            .run(repo, args)
-            .await
-            .map_err(classify_remote_error)?;
+        let output = self.run(repo, args).await.map_err(classify_remote_error)?;
         if output.trim().is_empty() {
             return Ok(None);
         }
         // Each line: <sha>\t<ref>. Take the first.
         let first = output.lines().next().unwrap_or("");
         let sha = first.split_whitespace().next().unwrap_or("").to_string();
-        if sha.is_empty() { Ok(None) } else { Ok(Some(sha)) }
+        if sha.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(sha))
+        }
     }
 
     /// Push a branch to a remote. Returns a structured `PushOutput`.
@@ -509,8 +513,8 @@ impl GitExecutor {
         args.push(remote.to_string());
         args.push(branch.to_string());
 
-        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-        let (stdout, stderr, ok) = self.run_capture(repo, &argv).await?;
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (stdout, stderr, ok) = self.run_capture(repo, &arg_refs).await?;
 
         if !ok {
             return Err(classify_push_error(stderr));
@@ -578,11 +582,7 @@ impl GitExecutor {
     /// to a warning rather than popping the wrong entry.
     ///
     /// Used by `rebase_on_main` when the worktree is dirty at call time.
-    pub async fn stash_create_with_untracked(
-        &self,
-        dir: &Path,
-        message: &str,
-    ) -> Result<String> {
+    pub async fn stash_create_with_untracked(&self, dir: &Path, message: &str) -> Result<String> {
         let _ = self
             .run(dir, &["stash", "push", "-u", "-m", message])
             .await?;
@@ -595,9 +595,7 @@ impl GitExecutor {
     /// `MergeOrigin::StashPop` to clear the stash once conflicts are
     /// resolved and integrated into the working tree.
     pub async fn stash_drop(&self, dir: &Path, stash_ref: &str) -> Result<()> {
-        let (_stdout, stderr, ok) = self
-            .run_capture(dir, &["stash", "drop", stash_ref])
-            .await?;
+        let (_stdout, stderr, ok) = self.run_capture(dir, &["stash", "drop", stash_ref]).await?;
         if ok {
             return Ok(());
         }
@@ -623,9 +621,7 @@ impl GitExecutor {
     /// reasons" by: empty vec == clean, non-empty == conflicts, `Err`
     /// == genuine git error.
     pub async fn stash_pop(&self, dir: &Path, stash_ref: &str) -> Result<Vec<String>> {
-        let (_stdout, stderr, ok) = self
-            .run_capture(dir, &["stash", "pop", stash_ref])
-            .await?;
+        let (_stdout, stderr, ok) = self.run_capture(dir, &["stash", "pop", stash_ref]).await?;
         if ok {
             return Ok(Vec::new());
         }
@@ -650,9 +646,7 @@ impl GitExecutor {
     /// Read a config value. Returns `Ok(None)` if the key is unset (git
     /// returns a non-zero exit code for missing keys).
     pub async fn config_get(&self, dir: &Path, key: &str) -> Result<Option<String>> {
-        let (stdout, _stderr, ok) = self
-            .run_capture(dir, &["config", "--get", key])
-            .await?;
+        let (stdout, _stderr, ok) = self.run_capture(dir, &["config", "--get", key]).await?;
         if ok {
             Ok(Some(stdout.trim().to_string()))
         } else {
@@ -779,11 +773,7 @@ impl GitExecutor {
     /// Binary detection: we run `git check-attr` — cheap, authoritative,
     /// and respects `.gitattributes`. As a fallback we treat a NUL byte
     /// in any stage as binary.
-    pub async fn conflict_sections(
-        &self,
-        dir: &Path,
-        path: &str,
-    ) -> Result<ConflictedFile> {
+    pub async fn conflict_sections(&self, dir: &Path, path: &str) -> Result<ConflictedFile> {
         // 1. Figure out which stages exist. Output from ls-files --unmerged:
         //    <mode> SP <sha> SP <stage>\t<path>\0
         // For simplicity we just split on \t (path may legitimately contain
@@ -898,9 +888,7 @@ impl GitExecutor {
     pub async fn merge_continue(&self, dir: &Path, message: Option<&str>) -> Result<String> {
         match message {
             Some(m) => {
-                let _ = self
-                    .run(dir, &["commit", "--no-edit", "-m", m])
-                    .await?;
+                let _ = self.run(dir, &["commit", "--no-edit", "-m", m]).await?;
             }
             None => {
                 let _ = self.run(dir, &["commit", "--no-edit"]).await?;
@@ -966,11 +954,7 @@ impl GitExecutor {
 
     /// Like `run` but preserves stdout/stderr/status separately. Used by
     /// commands where stderr content is meaningful even on success.
-    async fn run_capture(
-        &self,
-        dir: &Path,
-        args: &[&str],
-    ) -> Result<(String, String, bool)> {
+    async fn run_capture(&self, dir: &Path, args: &[&str]) -> Result<(String, String, bool)> {
         debug!(dir = %dir.display(), args = ?args, "git (capture)");
         let output = tokio::time::timeout(
             self.timeout,
@@ -1006,11 +990,13 @@ impl GitExecutor {
                 .output(),
         )
         .await
-        .map_err(|_| WorktreeError::NetworkTimeout(format!(
-            "git {} timed out after {}ms",
-            args.join(" "),
-            timeout.as_millis()
-        )))?
+        .map_err(|_| {
+            WorktreeError::NetworkTimeout(format!(
+                "git {} timed out after {}ms",
+                args.join(" "),
+                timeout.as_millis()
+            ))
+        })?
         .map_err(|e| WorktreeError::Git(format!("failed to execute git: {e}")))?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -1422,7 +1408,10 @@ branch refs/heads/session/x
             .await
             .unwrap();
         assert!(out.status.success());
-        String::from_utf8(out.stdout).unwrap().trim_end().to_string()
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .trim_end()
+            .to_string()
     }
 
     async fn rev_list_count(dir: &Path) -> u64 {
@@ -1433,7 +1422,11 @@ branch refs/heads/session/x
             .await
             .unwrap();
         assert!(out.status.success());
-        String::from_utf8(out.stdout).unwrap().trim().parse().unwrap()
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
     }
 
     async fn files_at_head(dir: &Path) -> Vec<String> {
@@ -1458,7 +1451,10 @@ branch refs/heads/session/x
         let git = init_repo(dir.path()).await;
 
         std::fs::write(dir.path().join("new.txt"), "hello").unwrap();
-        let opts = CommitOptions { stage_all: true, ..Default::default() };
+        let opts = CommitOptions {
+            stage_all: true,
+            ..Default::default()
+        };
         let sha = git
             .commit_with_options(dir.path(), "add new", &opts)
             .await
@@ -1466,8 +1462,14 @@ branch refs/heads/session/x
 
         assert_eq!(sha.len(), 40, "sha must be a 40-char hex");
         let files = files_at_head(dir.path()).await;
-        assert!(files.iter().any(|f| f == "new.txt"), "expected new.txt in HEAD, got {files:?}");
-        assert!(!git.has_changes(dir.path()).await.unwrap(), "tree should be clean after commit");
+        assert!(
+            files.iter().any(|f| f == "new.txt"),
+            "expected new.txt in HEAD, got {files:?}"
+        );
+        assert!(
+            !git.has_changes(dir.path()).await.unwrap(),
+            "tree should be clean after commit"
+        );
     }
 
     #[tokio::test]
@@ -1482,7 +1484,10 @@ branch refs/heads/session/x
         std::fs::write(dir.path().join("unstaged.txt"), "two").unwrap();
         run_cmd(dir.path(), &["git", "add", "staged.txt"]).await;
 
-        let opts = CommitOptions { stage_all: false, ..Default::default() };
+        let opts = CommitOptions {
+            stage_all: false,
+            ..Default::default()
+        };
         let sha = git
             .commit_with_options(dir.path(), "partial", &opts)
             .await
@@ -1490,8 +1495,14 @@ branch refs/heads/session/x
         assert_eq!(sha.len(), 40);
 
         let files = files_at_head(dir.path()).await;
-        assert!(files.contains(&"staged.txt".to_string()), "staged.txt must be in commit: {files:?}");
-        assert!(!files.contains(&"unstaged.txt".to_string()), "unstaged.txt MUST NOT be in commit: {files:?}");
+        assert!(
+            files.contains(&"staged.txt".to_string()),
+            "staged.txt must be in commit: {files:?}"
+        );
+        assert!(
+            !files.contains(&"unstaged.txt".to_string()),
+            "unstaged.txt MUST NOT be in commit: {files:?}"
+        );
 
         // Untracked file still present after commit
         assert!(
@@ -1512,14 +1523,22 @@ branch refs/heads/session/x
 
         // Modify and amend with a new message
         std::fs::write(dir.path().join("a.txt"), "a-edited").unwrap();
-        let opts = CommitOptions { stage_all: true, amend: true, ..Default::default() };
+        let opts = CommitOptions {
+            stage_all: true,
+            amend: true,
+            ..Default::default()
+        };
         let sha = git
             .commit_with_options(dir.path(), "first add (amended)", &opts)
             .await
             .unwrap();
         assert_eq!(sha.len(), 40);
 
-        assert_eq!(rev_list_count(dir.path()).await, count_before, "amend must not add a commit");
+        assert_eq!(
+            rev_list_count(dir.path()).await,
+            count_before,
+            "amend must not add a commit"
+        );
         assert_eq!(head_subject(dir.path()).await, "first add (amended)");
     }
 
@@ -1529,7 +1548,11 @@ branch refs/heads/session/x
         let git = init_repo(dir.path()).await;
 
         std::fs::write(dir.path().join("s.txt"), "s").unwrap();
-        let opts = CommitOptions { stage_all: true, signoff: true, ..Default::default() };
+        let opts = CommitOptions {
+            stage_all: true,
+            signoff: true,
+            ..Default::default()
+        };
         let _ = git
             .commit_with_options(dir.path(), "signed change", &opts)
             .await
@@ -1578,11 +1601,15 @@ branch refs/heads/session/x
         // git commit exits non-zero when the index is clean; the "nothing to
         // commit" text lands on stdout, not stderr, so we just assert Err
         // rather than probing the message.
-        let opts = CommitOptions { stage_all: false, ..Default::default() };
-        let result = git
-            .commit_with_options(dir.path(), "empty", &opts)
-            .await;
-        assert!(result.is_err(), "expected Err on clean index without --allow-empty");
+        let opts = CommitOptions {
+            stage_all: false,
+            ..Default::default()
+        };
+        let result = git.commit_with_options(dir.path(), "empty", &opts).await;
+        assert!(
+            result.is_err(),
+            "expected Err on clean index without --allow-empty"
+        );
     }
 
     #[tokio::test]
@@ -1592,7 +1619,10 @@ branch refs/heads/session/x
 
         std::fs::write(dir.path().join("m.txt"), "m").unwrap();
         let message = "subject line\n\nbody paragraph\nsecond body line";
-        let opts = CommitOptions { stage_all: true, ..Default::default() };
+        let opts = CommitOptions {
+            stage_all: true,
+            ..Default::default()
+        };
         let _ = git
             .commit_with_options(dir.path(), message, &opts)
             .await
@@ -1610,7 +1640,10 @@ branch refs/heads/session/x
 
         std::fs::write(dir.path().join("d.txt"), "d").unwrap();
         let message = "-x do thing";
-        let opts = CommitOptions { stage_all: true, ..Default::default() };
+        let opts = CommitOptions {
+            stage_all: true,
+            ..Default::default()
+        };
         let sha = git
             .commit_with_options(dir.path(), message, &opts)
             .await
@@ -1942,7 +1975,9 @@ branch refs/heads/session/x
         let _git = init_repo(dir.path()).await;
 
         let git = GitExecutor::new(30_000);
-        let result = git.branch_rename(dir.path(), "nonexistent", "new-name").await;
+        let result = git
+            .branch_rename(dir.path(), "nonexistent", "new-name")
+            .await;
         assert!(result.is_err());
     }
 
@@ -2008,8 +2043,7 @@ mod phase1_tests {
     #[test]
     fn classify_push_error_non_fast_forward() {
         let e = classify_push_error(
-            "! [rejected] main -> main (non-fast-forward)\nerror: failed to push"
-                .to_string(),
+            "! [rejected] main -> main (non-fast-forward)\nerror: failed to push".to_string(),
         );
         matches!(e, WorktreeError::NonFastForward(_))
             .then_some(())
@@ -2029,7 +2063,8 @@ mod phase1_tests {
     #[test]
     fn classify_remote_error_auth_publickey() {
         let e = classify_remote_error(WorktreeError::Git(
-            "Permission denied (publickey). fatal: Could not read from remote repository.".to_string(),
+            "Permission denied (publickey). fatal: Could not read from remote repository."
+                .to_string(),
         ));
         matches!(e, WorktreeError::AuthFailure(_))
             .then_some(())
@@ -2087,7 +2122,10 @@ mod phase1_tests {
         let work = tempdir().unwrap();
         let origin = tempdir().unwrap();
         let git = init_repo_with_origin(work.path(), origin.path()).await;
-        let sha = git.ls_remote_head(work.path(), "origin", "main").await.unwrap();
+        let sha = git
+            .ls_remote_head(work.path(), "origin", "main")
+            .await
+            .unwrap();
         assert!(sha.is_some(), "expected sha for origin/main");
         assert_eq!(sha.as_ref().unwrap().len(), 40);
     }
@@ -2121,7 +2159,14 @@ mod phase1_tests {
         add_commit(work.path(), "a.txt", "a", "local a").await;
 
         let out = git
-            .push(work.path(), "origin", "main", false, false, true /* dry_run */)
+            .push(
+                work.path(),
+                "origin",
+                "main",
+                false,
+                false,
+                true, /* dry_run */
+            )
             .await
             .unwrap();
         assert!(out.success);
@@ -2287,12 +2332,17 @@ mod phase1_tests {
         std::fs::write(dir.path().join("wip.txt"), "contents").unwrap();
         let r = git.stash_push(dir.path(), "msg").await.unwrap();
         assert_eq!(r.as_deref(), Some("stash@{0}"));
-        assert!(!dir.path().join("wip.txt").exists(),
-            "stash should remove wip from working tree");
+        assert!(
+            !dir.path().join("wip.txt").exists(),
+            "stash should remove wip from working tree"
+        );
 
         let conflicts = git.stash_pop(dir.path(), "stash@{0}").await.unwrap();
         assert!(conflicts.is_empty(), "clean pop should report no conflicts");
-        assert_eq!(std::fs::read_to_string(dir.path().join("wip.txt")).unwrap(), "contents");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("wip.txt")).unwrap(),
+            "contents"
+        );
     }
 
     #[tokio::test]
@@ -2391,7 +2441,10 @@ mod phase1_tests {
         let r = git
             .for_each_ref_first_existing(dir.path(), &["master", "main"])
             .await;
-        assert_eq!(r.as_deref(), Some("master").or(Some("main")).and(Some("main")));
+        assert_eq!(
+            r.as_deref(),
+            Some("master").or(Some("main")).and(Some("main"))
+        );
         let r = git
             .for_each_ref_first_existing(dir.path(), &["main", "master"])
             .await;
@@ -2408,7 +2461,11 @@ mod phase1_tests {
         let git = init_repo(dir.path()).await;
         let sha = git.rev_parse_verify(dir.path(), "HEAD").await.unwrap();
         assert_eq!(sha.len(), 40);
-        assert!(git.rev_parse_verify(dir.path(), "nonexistent").await.is_err());
+        assert!(
+            git.rev_parse_verify(dir.path(), "nonexistent")
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -2449,10 +2506,7 @@ mod phase1_tests {
         git.checkout_new_branch_from(dir.path(), "feature/new", "HEAD")
             .await
             .unwrap();
-        assert_eq!(
-            git.current_branch(dir.path()).await.unwrap(),
-            "feature/new"
-        );
+        assert_eq!(git.current_branch(dir.path()).await.unwrap(), "feature/new");
     }
 
     #[tokio::test]
@@ -2605,4 +2659,3 @@ mod phase1_tests {
         assert!(!git.has_merge_in_progress(dir.path()).await.unwrap());
     }
 }
-

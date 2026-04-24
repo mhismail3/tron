@@ -98,11 +98,11 @@ pub fn import_session(
             extra_tags,
         })
         .map_err(|e| match e {
-            EventStoreError::DuplicateImport { existing_session_id } => {
-                ImportError::AlreadyImported {
-                    tron_session_id: existing_session_id,
-                }
-            }
+            EventStoreError::DuplicateImport {
+                existing_session_id,
+            } => ImportError::AlreadyImported {
+                tron_session_id: existing_session_id,
+            },
             other => ImportError::Database(other),
         })?;
 

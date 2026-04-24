@@ -53,19 +53,21 @@ impl TronTool for McpSearchTool {
         .build()
     }
 
-    async fn execute(&self, params: Value, _ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
-        let query = params.get("query")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+    async fn execute(
+        &self,
+        params: Value,
+        _ctx: &ToolContext,
+    ) -> Result<TronToolResult, ToolError> {
+        let query = params.get("query").and_then(Value::as_str).unwrap_or("");
         let server_filter = params.get("server").and_then(Value::as_str);
 
         let router = self.router.read().await;
         let text = router.format_search_results(query, server_filter);
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(text),
-            ]),
+            content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                text,
+            )]),
             details: None,
             is_error: None,
             stop_turn: None,

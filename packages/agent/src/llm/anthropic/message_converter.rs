@@ -10,18 +10,14 @@
 
 use std::collections::HashMap;
 
-use crate::llm::{
-    IdFormat, build_tool_call_id_mapping, compose_context_parts_grouped,
-    remap_tool_call_id,
-};
-use serde_json::{Value, json};
 use crate::core::content::{AssistantContent, ToolResultContent, UserContent};
 use crate::core::messages::{Context, Message, ToolResultMessageContent, UserMessageContent};
-
-use super::types::{
-    AnthropicMessageParam, AnthropicTool, CacheControl,
-    SystemPromptBlock,
+use crate::llm::{
+    IdFormat, build_tool_call_id_mapping, compose_context_parts_grouped, remap_tool_call_id,
 };
+use serde_json::{Value, json};
+
+use super::types::{AnthropicMessageParam, AnthropicTool, CacheControl, SystemPromptBlock};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Message conversion
@@ -456,12 +452,12 @@ fn convert_tools(tools: &[crate::core::tools::Tool]) -> Vec<AnthropicTool> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::OAUTH_SYSTEM_PROMPT_PREFIX;
-    use serde_json::Map;
+    use super::*;
     use crate::core::content::AssistantContent;
     use crate::core::messages::{Context, Message, UserMessageContent};
     use crate::core::tools::{Tool, ToolParameterSchema};
+    use serde_json::Map;
 
     fn simple_context() -> Context {
         Context {

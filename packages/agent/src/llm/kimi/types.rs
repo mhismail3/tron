@@ -7,8 +7,9 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::llm::models::model_ids::{
-    KIMI_K2_5, KIMI_K2_0905_PREVIEW, KIMI_K2_0711_PREVIEW, KIMI_K2_TURBO_PREVIEW,
-    KIMI_K2_THINKING, KIMI_K2_THINKING_TURBO, MOONSHOT_V1_8K, MOONSHOT_V1_32K, MOONSHOT_V1_128K,
+    KIMI_K2_5, KIMI_K2_0711_PREVIEW, KIMI_K2_0905_PREVIEW, KIMI_K2_THINKING,
+    KIMI_K2_THINKING_TURBO, KIMI_K2_TURBO_PREVIEW, MOONSHOT_V1_8K, MOONSHOT_V1_32K,
+    MOONSHOT_V1_128K,
 };
 use crate::llm::retry::StreamRetryConfig;
 
@@ -318,7 +319,10 @@ impl KimiModelInfo {
 pub fn all_kimi_models_api_json() -> Vec<serde_json::Value> {
     let mut entries: Vec<_> = KIMI_MODELS.iter().collect();
     entries.sort_by_key(|(_, info)| info.sort_order);
-    entries.into_iter().map(|(id, info)| info.to_api_json(id)).collect()
+    entries
+        .into_iter()
+        .map(|(id, info)| info.to_api_json(id))
+        .collect()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -488,9 +492,15 @@ mod tests {
         for id in all_kimi_model_ids() {
             let m = get_kimi_model(id).unwrap();
             if id.starts_with("kimi-") {
-                assert!(m.cache_read_cost_per_million.is_some(), "{id} should have cache pricing");
+                assert!(
+                    m.cache_read_cost_per_million.is_some(),
+                    "{id} should have cache pricing"
+                );
             } else {
-                assert!(m.cache_read_cost_per_million.is_none(), "{id} should not have cache pricing");
+                assert!(
+                    m.cache_read_cost_per_million.is_none(),
+                    "{id} should not have cache pricing"
+                );
             }
         }
     }

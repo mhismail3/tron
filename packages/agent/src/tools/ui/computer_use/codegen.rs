@@ -23,9 +23,14 @@ impl ComputerUseTool {
                 format!("Type text: \"{preview}\"")
             }
             "keypress" => {
-                let keys: Vec<String> = params.get("keys")
+                let keys: Vec<String> = params
+                    .get("keys")
                     .and_then(Value::as_array)
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 format!("Press keys: {}", keys.join("+"))
             }
@@ -79,7 +84,7 @@ impl ComputerUseTool {
                 format!(r#"var ax: AXUIElement!; for a in NSWorkspace.shared.runningApplications {{ if a.activationPolicy == .regular, let n = a.localizedName, n.localizedCaseInsensitiveContains("{escaped}") {{ ax = AXUIElementCreateApplication(a.processIdentifier); break }} }}; guard ax != nil else {{ fputs("App '{escaped}' not found", stderr); Foundation.exit(1) }}"#)
             }
             None => {
-                r#"let app = NSWorkspace.shared.frontmostApplication!; let ax = AXUIElementCreateApplication(app.processIdentifier)"#.to_string()
+                r"let app = NSWorkspace.shared.frontmostApplication!; let ax = AXUIElementCreateApplication(app.processIdentifier)".to_string()
             }
         }
     }

@@ -170,8 +170,13 @@ impl ServiceAuth {
     /// callers should validate before construction.
     pub fn from_single(key: impl Into<String>) -> Self {
         let key = key.into();
-        assert!(!key.is_empty(), "ServiceAuth::from_single requires a non-empty key");
-        Self { api_keys: vec![key] }
+        assert!(
+            !key.is_empty(),
+            "ServiceAuth::from_single requires a non-empty key"
+        );
+        Self {
+            api_keys: vec![key],
+        }
     }
 }
 
@@ -753,7 +758,8 @@ mod tests {
 
     #[test]
     fn provider_auth_with_api_keys() {
-        let json = r#"{"apiKeys":[{"label":"work","key":"sk-123"},{"label":"personal","key":"sk-456"}]}"#;
+        let json =
+            r#"{"apiKeys":[{"label":"work","key":"sk-123"},{"label":"personal","key":"sk-456"}]}"#;
         let pa: ProviderAuth = serde_json::from_str(json).unwrap();
         let keys = pa.api_keys.unwrap();
         assert_eq!(keys.len(), 2);

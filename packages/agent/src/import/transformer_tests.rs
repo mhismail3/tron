@@ -42,7 +42,12 @@ fn make_assistant_item(
     })
 }
 
-fn make_tool_result_item(tool_use_id: &str, content: &str, is_error: bool, turn: i64) -> AssembledItem {
+fn make_tool_result_item(
+    tool_use_id: &str,
+    content: &str,
+    is_error: bool,
+    turn: i64,
+) -> AssembledItem {
     AssembledItem::UserMessage {
         record: serde_json::from_value(json!({
             "type": "user",
@@ -128,7 +133,11 @@ fn user_message_turn_start_only_once_per_turn() {
         make_user_item(json!("first"), 1),
         make_assistant_item(
             vec![json!({"type": "text", "text": "ok"})],
-            1, "claude-opus-4-6", "end_turn", 10, 5,
+            1,
+            "claude-opus-4-6",
+            "end_turn",
+            10,
+            5,
         ),
     ];
     let result = transform(items);
@@ -174,7 +183,12 @@ fn tool_result_user_emits_tool_result_event() {
 
 #[test]
 fn tool_result_with_error() {
-    let items = vec![make_tool_result_item("toolu_02", "permission denied", true, 1)];
+    let items = vec![make_tool_result_item(
+        "toolu_02",
+        "permission denied",
+        true,
+        1,
+    )];
     let result = transform(items);
 
     assert_eq!(result.events[0].payload["isError"], true);
@@ -197,7 +211,10 @@ fn compact_summary_emits_boundary_and_summary() {
     assert_eq!(result.events[0].event_type, EventType::CompactBoundary);
     assert_eq!(result.events[0].payload["originalTokens"], 0);
     assert_eq!(result.events[1].event_type, EventType::CompactSummary);
-    assert_eq!(result.events[1].payload["summary"], "The session covered X and Y.");
+    assert_eq!(
+        result.events[1].payload["summary"],
+        "The session covered X and Y."
+    );
 }
 
 #[test]
@@ -249,7 +266,9 @@ fn assistant_thinking_has_thinking_flag() {
 #[test]
 fn assistant_tool_use_produces_tool_call_event() {
     let items = vec![make_assistant_item(
-        vec![json!({"type": "tool_use", "id": "toolu_x", "name": "Read", "input": {"path": "/a.rs"}})],
+        vec![
+            json!({"type": "tool_use", "id": "toolu_x", "name": "Read", "input": {"path": "/a.rs"}}),
+        ],
         1,
         "claude-opus-4-6",
         "tool_use",
@@ -369,12 +388,20 @@ fn transform_result_aggregates() {
         make_user_item(json!("q1"), 1),
         make_assistant_item(
             vec![json!({"type": "text", "text": "a1"})],
-            1, "claude-opus-4-6", "end_turn", 100, 50,
+            1,
+            "claude-opus-4-6",
+            "end_turn",
+            100,
+            50,
         ),
         make_user_item(json!("q2"), 2),
         make_assistant_item(
             vec![json!({"type": "text", "text": "a2"})],
-            2, "claude-opus-4-6", "end_turn", 200, 100,
+            2,
+            "claude-opus-4-6",
+            "end_turn",
+            200,
+            100,
         ),
     ];
     let result = transform(items);
@@ -397,7 +424,11 @@ fn full_conversation_event_sequence() {
                 json!({"type": "thinking", "thinking": "Let me explain Rust"}),
                 json!({"type": "text", "text": "Rust is a systems language"}),
             ],
-            1, "claude-opus-4-6", "end_turn", 100, 50,
+            1,
+            "claude-opus-4-6",
+            "end_turn",
+            100,
+            50,
         ),
         make_user_item(json!("Show me an example"), 2),
         make_assistant_item(
@@ -405,12 +436,20 @@ fn full_conversation_event_sequence() {
                 json!({"type": "text", "text": "Here's an example:"}),
                 json!({"type": "tool_use", "id": "t1", "name": "Write", "input": {"path": "main.rs"}}),
             ],
-            2, "claude-opus-4-6", "tool_use", 200, 100,
+            2,
+            "claude-opus-4-6",
+            "tool_use",
+            200,
+            100,
         ),
         make_tool_result_item("t1", "File written", false, 2),
         make_assistant_item(
             vec![json!({"type": "text", "text": "I created the file."})],
-            2, "claude-opus-4-6", "end_turn", 150, 30,
+            2,
+            "claude-opus-4-6",
+            "end_turn",
+            150,
+            30,
         ),
     ];
     let result = transform(items);
@@ -419,17 +458,17 @@ fn full_conversation_event_sequence() {
     assert_eq!(
         types,
         vec![
-            EventType::StreamTurnStart,   // turn 1
-            EventType::MessageUser,        // "What is Rust?"
-            EventType::MessageAssistant,   // thinking + text
-            EventType::StreamTurnEnd,      // turn 1 end
-            EventType::StreamTurnStart,    // turn 2
-            EventType::MessageUser,        // "Show me an example"
-            EventType::MessageAssistant,   // text + tool_use
-            EventType::ToolCall,           // Write tool
-            EventType::ToolResult,         // "File written"
-            EventType::MessageAssistant,   // "I created the file."
-            EventType::StreamTurnEnd,      // turn 2 end (one per turn)
+            EventType::StreamTurnStart,  // turn 1
+            EventType::MessageUser,      // "What is Rust?"
+            EventType::MessageAssistant, // thinking + text
+            EventType::StreamTurnEnd,    // turn 1 end
+            EventType::StreamTurnStart,  // turn 2
+            EventType::MessageUser,      // "Show me an example"
+            EventType::MessageAssistant, // text + tool_use
+            EventType::ToolCall,         // Write tool
+            EventType::ToolResult,       // "File written"
+            EventType::MessageAssistant, // "I created the file."
+            EventType::StreamTurnEnd,    // turn 2 end (one per turn)
         ]
     );
 }

@@ -10,7 +10,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use crate::cron::errors::CronError;
 use crate::cron::types::{CronJob, CronRun};
 #[cfg(feature = "apns")]
@@ -19,6 +18,7 @@ use crate::events::ConnectionPool;
 use crate::server::platform::apns::{ApnsBatch, ApnsNotification};
 use crate::server::rpc::types::RpcEvent;
 use crate::server::websocket::broadcast::BroadcastManager;
+use async_trait::async_trait;
 // ── Agent Turn Execution ──────────────────────────────────────────────
 
 /// Maximum output size stored on a [`crate::cron::AgentTurnResult`].
@@ -106,18 +106,17 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
         cancel: tokio_util::sync::CancellationToken,
     ) -> Result<crate::cron::AgentTurnResult, CronError> {
         // Resolve model (fall back to settings default)
-        let settings =
-            crate::settings::loader::load_settings_from_path(&crate::settings::loader::settings_path())
-                .unwrap_or_default();
+        let settings = crate::settings::loader::load_settings_from_path(
+            &crate::settings::loader::settings_path(),
+        )
+        .unwrap_or_default();
         let model = model.unwrap_or(&settings.server.default_model);
 
         // Resolve workspace path
         let workspace_path = if let Some(wid) = workspace_id {
-            let conn = self
-                .event_store
-                .pool()
-                .get()
-                .map_err(|e| CronError::Execution(format!("pool error resolving workspace: {e}")))?;
+            let conn = self.event_store.pool().get().map_err(|e| {
+                CronError::Execution(format!("pool error resolving workspace: {e}"))
+            })?;
             let ws = crate::events::sqlite::repositories::workspace::WorkspaceRepo::get_by_id(
                 &conn, wid,
             )
@@ -212,7 +211,8 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
                 rules_index: None,
                 pre_activated_rules: vec![],
                 subagent_manager: self.subagent_manager.clone(),
-                compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+                compaction_trigger_config:
+                    crate::runtime::context::types::CompactionTriggerConfig::default(),
                 process_manager: None,
                 job_manager: None,
                 output_buffer_registry: None,
@@ -315,11 +315,16 @@ pub struct CronPushNotifier {
 #[cfg(feature = "apns")]
 impl CronPushNotifier {
     /// Create a new notifier with a push sender and DB pool for device tokens.
-    pub fn new(sender: Arc<dyn crate::server::platform::apns::PushSender>, pool: ConnectionPool) -> Self {
+    pub fn new(
+        sender: Arc<dyn crate::server::platform::apns::PushSender>,
+        pool: ConnectionPool,
+    ) -> Self {
         Self { sender, pool }
     }
 
-    fn active_tokens(&self) -> Result<Vec<crate::events::sqlite::row_types::DeviceTokenRow>, CronError> {
+    fn active_tokens(
+        &self,
+    ) -> Result<Vec<crate::events::sqlite::row_types::DeviceTokenRow>, CronError> {
         let conn = self
             .pool
             .get()
@@ -487,7 +492,8 @@ mod tests {
         Arc<crate::events::EventStore>,
         Arc<crate::runtime::orchestrator::session_manager::SessionManager>,
     ) {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -501,8 +507,6 @@ mod tests {
 
     // ── Provider retry tests ──────────────────────────────────────────
 
-    use async_trait::async_trait;
-    use futures::stream;
     use crate::core::content::AssistantContent;
     use crate::core::events::{AssistantMessage, StreamEvent};
     use crate::core::messages::TokenUsage;
@@ -510,6 +514,8 @@ mod tests {
     use crate::llm::provider::{
         Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
     };
+    use async_trait::async_trait;
+    use futures::stream;
 
     const LEDGER_JSON: &str = r#"{"title":"Cron test session","entryType":"research","input":"test prompt","actions":["executed cron task"]}"#;
 
@@ -566,7 +572,9 @@ mod tests {
     #[async_trait]
     impl ProviderFactory for RetryMockProviderFactory {
         async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-            let remaining = self.failures_remaining.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            let remaining = self
+                .failures_remaining
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
             if remaining > 0 {
                 if self.retryable {
                     Err(ProviderError::Api {

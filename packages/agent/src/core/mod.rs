@@ -24,8 +24,6 @@
 pub mod ask_user_question;
 #[path = "foundation/constants.rs"]
 pub mod constants;
-#[path = "foundation/paths.rs"]
-pub mod paths;
 #[path = "protocol/content.rs"]
 pub mod content;
 #[path = "protocol/document_extractor.rs"]
@@ -40,6 +38,8 @@ pub mod logging;
 pub mod memory;
 #[path = "protocol/messages.rs"]
 pub mod messages;
+#[path = "foundation/paths.rs"]
+pub mod paths;
 #[path = "foundation/retry.rs"]
 pub mod retry;
 #[path = "foundation/text.rs"]

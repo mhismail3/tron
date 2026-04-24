@@ -181,10 +181,7 @@ impl SessionQueryService {
     /// sessions larger than ~50k events the export is large but not
     /// unbounded — the payload is serialized in memory before being
     /// returned, which matches how `session.reconstruct` already behaves.
-    pub(crate) async fn export(
-        ctx: &RpcContext,
-        session_id: String,
-    ) -> Result<Value, RpcError> {
+    pub(crate) async fn export(ctx: &RpcContext, session_id: String) -> Result<Value, RpcError> {
         let session_manager = ctx.session_manager.clone();
         let event_store = ctx.event_store.clone();
         let session_id_for_export = session_id.clone();
@@ -423,7 +420,9 @@ mod tests {
             .create_session("m", "/tmp", Some("t"), None)
             .unwrap();
 
-        let result = SessionQueryService::export(ctx_ref(&ctx), sid).await.unwrap();
+        let result = SessionQueryService::export(ctx_ref(&ctx), sid)
+            .await
+            .unwrap();
         let ts = result["exportedAt"].as_str().unwrap();
         chrono::DateTime::parse_from_rfc3339(ts).unwrap_or_else(|e| {
             panic!("exportedAt not RFC3339: value='{ts}' err={e}");
@@ -454,5 +453,7 @@ mod tests {
     }
 
     // Tiny helper so tests don't get cluttered with `&` every call.
-    fn ctx_ref<'a>(c: &'a RpcContext) -> &'a RpcContext { c }
+    fn ctx_ref<'a>(c: &'a RpcContext) -> &'a RpcContext {
+        c
+    }
 }

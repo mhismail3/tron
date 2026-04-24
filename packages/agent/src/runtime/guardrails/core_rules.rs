@@ -498,7 +498,10 @@ mod tests {
     #[test]
     fn system_protection_blocks_write_to_usr() {
         let rule = find_rule("core.system-protection");
-        let ctx = make_ctx("Write", serde_json::json!({"file_path": "/usr/local/bin/test"}));
+        let ctx = make_ctx(
+            "Write",
+            serde_json::json!({"file_path": "/usr/local/bin/test"}),
+        );
         let result = rule.evaluate(&ctx, None);
         assert!(result.triggered, "Write to /usr should be blocked");
     }
@@ -514,7 +517,10 @@ mod tests {
     #[test]
     fn system_protection_allows_tmp() {
         let rule = find_rule("core.system-protection");
-        let ctx = make_ctx("Write", serde_json::json!({"file_path": "/tmp/scratch.txt"}));
+        let ctx = make_ctx(
+            "Write",
+            serde_json::json!({"file_path": "/tmp/scratch.txt"}),
+        );
         let result = rule.evaluate(&ctx, None);
         assert!(!result.triggered, "Write to /tmp should be allowed");
     }
@@ -522,7 +528,10 @@ mod tests {
     #[test]
     fn system_protection_blocks_bash_redirect_to_etc() {
         let rule = find_rule("core.system-protection");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "echo test > /etc/hosts"}));
+        let ctx = make_ctx(
+            "Bash",
+            serde_json::json!({"command": "echo test > /etc/hosts"}),
+        );
         let result = rule.evaluate(&ctx, None);
         assert!(result.triggered, "Bash redirect to /etc should be blocked");
     }
@@ -579,7 +588,10 @@ mod tests {
     #[test]
     fn bash_timeout_blocks_above_3600s() {
         let rule = find_rule("bash.timeout");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "sleep 999", "timeout": 3_700_000}));
+        let ctx = make_ctx(
+            "Bash",
+            serde_json::json!({"command": "sleep 999", "timeout": 3_700_000}),
+        );
         let result = rule.evaluate(&ctx, None);
         assert!(result.triggered, "Timeout above 60 min should be blocked");
         assert_eq!(result.severity, Some(Severity::Block));
@@ -588,15 +600,24 @@ mod tests {
     #[test]
     fn bash_timeout_allows_up_to_3600s() {
         let rule = find_rule("bash.timeout");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "sleep 999", "timeout": 3_600_000}));
+        let ctx = make_ctx(
+            "Bash",
+            serde_json::json!({"command": "sleep 999", "timeout": 3_600_000}),
+        );
         let result = rule.evaluate(&ctx, None);
-        assert!(!result.triggered, "Timeout at exactly 60 min should be allowed");
+        assert!(
+            !result.triggered,
+            "Timeout at exactly 60 min should be allowed"
+        );
     }
 
     #[test]
     fn bash_timeout_allows_600s() {
         let rule = find_rule("bash.timeout");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "ls", "timeout": 600_000}));
+        let ctx = make_ctx(
+            "Bash",
+            serde_json::json!({"command": "ls", "timeout": 600_000}),
+        );
         let result = rule.evaluate(&ctx, None);
         assert!(!result.triggered, "Timeout at 10 min should be allowed");
     }
@@ -604,16 +625,25 @@ mod tests {
     #[test]
     fn bash_long_timeout_warns_above_600s() {
         let rule = find_rule("bash.long-timeout");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "build", "timeout": 900_000}));
+        let ctx = make_ctx(
+            "Bash",
+            serde_json::json!({"command": "build", "timeout": 900_000}),
+        );
         let result = rule.evaluate(&ctx, None);
-        assert!(result.triggered, "Timeout above 10 min should trigger warning");
+        assert!(
+            result.triggered,
+            "Timeout above 10 min should trigger warning"
+        );
         assert_eq!(result.severity, Some(Severity::Warn));
     }
 
     #[test]
     fn bash_long_timeout_no_warn_at_600s() {
         let rule = find_rule("bash.long-timeout");
-        let ctx = make_ctx("Bash", serde_json::json!({"command": "ls", "timeout": 600_000}));
+        let ctx = make_ctx(
+            "Bash",
+            serde_json::json!({"command": "ls", "timeout": 600_000}),
+        );
         let result = rule.evaluate(&ctx, None);
         assert!(!result.triggered, "Timeout at 10 min should not warn");
     }

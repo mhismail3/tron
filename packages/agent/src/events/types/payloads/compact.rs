@@ -160,7 +160,12 @@ mod tests {
         // `CompactionReason` via serde. These literal strings must match
         // `#[serde(rename_all = "snake_case")]` on `CompactionReason` so
         // decode on the other end produces the expected classification.
-        for reason in ["manual", "threshold_exceeded", "progress_signal", "imported"] {
+        for reason in [
+            "manual",
+            "threshold_exceeded",
+            "progress_signal",
+            "imported",
+        ] {
             let ok = serde_json::json!({
                 "originalTokens": 0,
                 "compactedTokens": 0,

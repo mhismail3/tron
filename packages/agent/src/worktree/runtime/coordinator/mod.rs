@@ -72,22 +72,20 @@ mod transactions;
 pub mod utils;
 
 pub use repo_lock::{LockGuard, LockHolder, LockedOp};
-pub use utils::{split_diff_by_file, count_diff_stats};
+pub use utils::{count_diff_stats, split_diff_by_file};
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
-use tokio::sync::{broadcast, Mutex as AsyncMutex};
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
 use crate::core::events::TronEvent;
 use crate::events::EventStore;
 
 use crate::worktree::git::GitExecutor;
-use crate::worktree::types::{
-    PendingMergeState, WorktreeConfig, WorktreeInfo,
-};
+use crate::worktree::types::{PendingMergeState, WorktreeConfig, WorktreeInfo};
 
 /// All active worktree state, kept coherent behind a single lock.
 #[derive(Default)]
@@ -209,8 +207,7 @@ pub struct WorktreeCoordinator {
     /// (double-tap, reconnect-mid-send, etc.) would otherwise all pass the
     /// cache check and each try to create a worktree. Weak refs so entries
     /// drop automatically once no call is holding the lock.
-    pub(super) session_acquire_locks:
-        Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
+    pub(super) session_acquire_locks: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
 }
 
 impl WorktreeCoordinator {
@@ -296,7 +293,10 @@ impl WorktreeCoordinator {
     }
 
     /// Resolve the git repository root for a given path.
-    pub async fn resolve_repo_root(&self, path: &std::path::Path) -> crate::worktree::errors::Result<String> {
+    pub async fn resolve_repo_root(
+        &self,
+        path: &std::path::Path,
+    ) -> crate::worktree::errors::Result<String> {
         self.git.repo_root(path).await
     }
 

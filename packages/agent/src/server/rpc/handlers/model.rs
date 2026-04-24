@@ -205,12 +205,12 @@ impl MethodHandler for SetReasoningLevelHandler {
 
         // Resolve previous level: event history first, then model default.
         // A DB error here is a real failure, not "no prior state" — surface it.
-        let state =
-            ctx.event_store
-                .get_state_at_head(&session_id)
-                .map_err(|e| RpcError::Internal {
-                    message: format!("failed to resolve session state: {e}"),
-                })?;
+        let state = ctx
+            .event_store
+            .get_state_at_head(&session_id)
+            .map_err(|e| RpcError::Internal {
+                message: format!("failed to resolve session state: {e}"),
+            })?;
         let previous_level = state
             .reasoning_level
             .clone()

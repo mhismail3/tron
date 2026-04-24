@@ -112,7 +112,11 @@ fn format_hunks_structured(
                 EditOp::Delete(oi) => {
                     if first {
                         old_start = oi + 1;
-                        new_start = if *oi < new.len() { oi + 1 } else { new.len() + 1 };
+                        new_start = if *oi < new.len() {
+                            oi + 1
+                        } else {
+                            new.len() + 1
+                        };
                         first = false;
                     }
                     old_count += 1;
@@ -124,7 +128,11 @@ fn format_hunks_structured(
                 }
                 EditOp::Insert(ni) => {
                     if first {
-                        old_start = if *ni < old.len() { ni + 1 } else { old.len() + 1 };
+                        old_start = if *ni < old.len() {
+                            ni + 1
+                        } else {
+                            old.len() + 1
+                        };
                         new_start = ni + 1;
                         first = false;
                     }
@@ -363,8 +371,8 @@ mod tests {
         let entries = generate_structured_diff("hello world\n", "hello tron\n", 1);
         let types = all_types(&entries);
         assert!(types.contains(&"hunk_header"));
-        assert!(types.iter().any(|t| *t == "deletion"));
-        assert!(types.iter().any(|t| *t == "addition"));
+        assert!(types.contains(&"deletion"));
+        assert!(types.contains(&"addition"));
     }
 
     #[test]
@@ -372,11 +380,18 @@ mod tests {
         let entries = generate_structured_diff("", "a\nb\nc\n", 3);
         let types = all_types(&entries);
         assert!(types.contains(&"hunk_header"));
-        assert!(types.iter().all(|t| *t == "hunk_header" || *t == "addition"));
+        assert!(
+            types
+                .iter()
+                .all(|t| *t == "hunk_header" || *t == "addition")
+        );
         // Every addition has a newLine, never an oldLine.
         for e in entries.iter().filter(|e| entry_type(e) == "addition") {
             assert!(e.get("newLine").is_some(), "addition missing newLine");
-            assert!(e.get("oldLine").is_none(), "addition should not have oldLine");
+            assert!(
+                e.get("oldLine").is_none(),
+                "addition should not have oldLine"
+            );
         }
     }
 
@@ -385,10 +400,17 @@ mod tests {
         let entries = generate_structured_diff("a\nb\nc\n", "", 3);
         let types = all_types(&entries);
         assert!(types.contains(&"hunk_header"));
-        assert!(types.iter().all(|t| *t == "hunk_header" || *t == "deletion"));
+        assert!(
+            types
+                .iter()
+                .all(|t| *t == "hunk_header" || *t == "deletion")
+        );
         for e in entries.iter().filter(|e| entry_type(e) == "deletion") {
             assert!(e.get("oldLine").is_some(), "deletion missing oldLine");
-            assert!(e.get("newLine").is_none(), "deletion should not have newLine");
+            assert!(
+                e.get("newLine").is_none(),
+                "deletion should not have newLine"
+            );
         }
     }
 
@@ -416,8 +438,7 @@ mod tests {
 
     #[test]
     fn structured_diff_context_entries_have_both_line_numbers() {
-        let entries =
-            generate_structured_diff("a\nb\nc\nd\ne\n", "a\nb\nX\nd\ne\n", 3);
+        let entries = generate_structured_diff("a\nb\nc\nd\ne\n", "a\nb\nX\nd\ne\n", 3);
         let context_entries: Vec<&Value> = entries
             .iter()
             .filter(|e| entry_type(e) == "context")
@@ -431,8 +452,7 @@ mod tests {
 
     #[test]
     fn structured_diff_context_zero_no_context_entries() {
-        let entries =
-            generate_structured_diff("a\nb\nc\nd\ne\n", "a\nb\nX\nd\ne\n", 0);
+        let entries = generate_structured_diff("a\nb\nc\nd\ne\n", "a\nb\nX\nd\ne\n", 0);
         assert!(
             !entries.iter().any(|e| entry_type(e) == "context"),
             "context_lines=0 must produce no context entries"
@@ -487,12 +507,13 @@ mod tests {
             .any(|s| s.len() == 5_000);
         assert!(has_long, "long lines must be preserved verbatim");
 
-        let tab_entries =
-            generate_structured_diff("a\tb\n", "a\tc\n", 1);
-        assert!(tab_entries
-            .iter()
-            .filter_map(|e| e.get("content").and_then(Value::as_str))
-            .any(|s| s.contains('\t')));
+        let tab_entries = generate_structured_diff("a\tb\n", "a\tc\n", 1);
+        assert!(
+            tab_entries
+                .iter()
+                .filter_map(|e| e.get("content").and_then(Value::as_str))
+                .any(|s| s.contains('\t'))
+        );
     }
 
     #[test]
@@ -518,10 +539,7 @@ mod tests {
             }
             if let Some(line) = entry.get("oldLine").and_then(Value::as_u64) {
                 if let Some(p) = prev {
-                    assert!(
-                        line >= p,
-                        "oldLine not monotonic: {p} -> {line} at {entry}"
-                    );
+                    assert!(line >= p, "oldLine not monotonic: {p} -> {line} at {entry}");
                 }
                 prev = Some(line);
             }
@@ -542,10 +560,7 @@ mod tests {
             }
             if let Some(line) = entry.get("newLine").and_then(Value::as_u64) {
                 if let Some(p) = prev {
-                    assert!(
-                        line >= p,
-                        "newLine not monotonic: {p} -> {line} at {entry}"
-                    );
+                    assert!(line >= p, "newLine not monotonic: {p} -> {line} at {entry}");
                 }
                 prev = Some(line);
             }

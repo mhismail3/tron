@@ -155,7 +155,11 @@ mod tests {
     #[test]
     fn diff_detects_description_change_as_modified() {
         let old = vec![def("query", "Run SQL", json!({"type": "object"}))];
-        let new = vec![def("query", "Run SQL query (async)", json!({"type": "object"}))];
+        let new = vec![def(
+            "query",
+            "Run SQL query (async)",
+            json!({"type": "object"}),
+        )];
         let d = diff_schemas(&old, &new);
         assert_eq!(d.modified, vec!["query"]);
     }

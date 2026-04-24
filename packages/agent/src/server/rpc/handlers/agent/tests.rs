@@ -1,19 +1,19 @@
 use super::*;
-use crate::server::rpc::context::AgentDeps;
-use crate::server::rpc::handlers::session::CreateSessionHandler;
-use crate::server::rpc::handlers::test_helpers::{FixedProviderFactory, make_test_context};
-use futures::stream;
-use serde_json::json;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio_util::sync::CancellationToken;
 use crate::core::content::AssistantContent;
 use crate::core::events::{AssistantMessage, StreamEvent};
 use crate::core::messages::TokenUsage;
 use crate::events::sqlite::row_types::EventRow;
 use crate::llm::models::types::Provider as ProviderKind;
 use crate::llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
+use crate::server::rpc::context::AgentDeps;
+use crate::server::rpc::handlers::session::CreateSessionHandler;
+use crate::server::rpc::handlers::test_helpers::{FixedProviderFactory, make_test_context};
 use crate::tools::registry::ToolRegistry;
+use futures::stream;
+use serde_json::json;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 use crate::server::device::{DeviceRequestBroker, DeviceRequestError};
 use crate::server::websocket::broadcast::BroadcastManager;
@@ -2413,7 +2413,13 @@ fn payload_extra_metadata_merged_for_answered_questions() {
         "messageKind": "answered_questions",
         "answerCount": 3,
     });
-    let payload = build_user_event_payload("[Answers to your questions]\n...", None, None, Some(&meta), None);
+    let payload = build_user_event_payload(
+        "[Answers to your questions]\n...",
+        None,
+        None,
+        Some(&meta),
+        None,
+    );
     assert_eq!(payload["messageKind"], "answered_questions");
     assert_eq!(payload["answerCount"], 3);
 }
@@ -2695,16 +2701,16 @@ fn history_capture_lock() -> &'static std::sync::Mutex<()> {
     crate::server::rpc::settings_service::settings_reload_lock()
 }
 
-async fn wait_for_history_count(ctx: &RpcContext, expected: usize) -> Vec<crate::prompt_library::types::HistoryItem> {
+async fn wait_for_history_count(
+    ctx: &RpcContext,
+    expected: usize,
+) -> Vec<crate::prompt_library::types::HistoryItem> {
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             // Tolerate brief BUSY contention from the fire-and-forget writer.
-            if let Ok(page) = crate::prompt_library::store::list_history(
-                ctx.event_store.pool(),
-                200,
-                None,
-                None,
-            ) {
+            if let Ok(page) =
+                crate::prompt_library::store::list_history(ctx.event_store.pool(), 200, None, None)
+            {
                 if page.items.len() == expected {
                     return page.items;
                 }
@@ -2720,13 +2726,14 @@ async fn confirm_no_history_after_tick(ctx: &RpcContext) {
     tokio::time::sleep(Duration::from_millis(100)).await;
     // Retry a few times to survive transient BUSY while asserting emptiness.
     for _ in 0..20 {
-        if let Ok(page) = crate::prompt_library::store::list_history(
-            ctx.event_store.pool(),
-            200,
-            None,
-            None,
-        ) {
-            assert!(page.items.is_empty(), "expected no history, found {:?}", page.items);
+        if let Ok(page) =
+            crate::prompt_library::store::list_history(ctx.event_store.pool(), 200, None, None)
+        {
+            assert!(
+                page.items.is_empty(),
+                "expected no history, found {:?}",
+                page.items
+            );
             return;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -2776,13 +2783,19 @@ async fn prompt_history_dedups_on_repeat() {
         .unwrap();
 
     PromptHandler
-        .handle(Some(json!({"sessionId": sid1, "prompt": "duplicate text"})), &ctx)
+        .handle(
+            Some(json!({"sessionId": sid1, "prompt": "duplicate text"})),
+            &ctx,
+        )
         .await
         .unwrap();
     // Wait for the first row before sending the second to avoid racing inserts.
     wait_for_history_count(&ctx, 1).await;
     PromptHandler
-        .handle(Some(json!({"sessionId": sid2, "prompt": "duplicate text"})), &ctx)
+        .handle(
+            Some(json!({"sessionId": sid2, "prompt": "duplicate text"})),
+            &ctx,
+        )
         .await
         .unwrap();
 
@@ -2871,8 +2884,7 @@ async fn prompt_validation_failure_does_not_record_history() {
         .create_session("mock", "/tmp", Some("t"), None)
         .unwrap();
 
-    let oversized =
-        "x".repeat(crate::server::rpc::validation::MAX_PROMPT_LENGTH.saturating_add(1));
+    let oversized = "x".repeat(crate::server::rpc::validation::MAX_PROMPT_LENGTH.saturating_add(1));
     let err = PromptHandler
         .handle(Some(json!({"sessionId": sid, "prompt": oversized})), &ctx)
         .await
@@ -2943,10 +2955,7 @@ async fn status_missing_session_id_returns_invalid_params() {
 async fn status_unknown_session_returns_session_not_found() {
     let ctx = make_test_context();
     let err = StatusHandler
-        .handle(
-            Some(json!({"sessionId": "nonexistent-session"})),
-            &ctx,
-        )
+        .handle(Some(json!({"sessionId": "nonexistent-session"})), &ctx)
         .await
         .unwrap_err();
     assert_eq!(err.code(), "SESSION_NOT_FOUND");
@@ -2966,18 +2975,16 @@ async fn status_surfaces_running_tool_snapshot_from_turn_accumulator() {
     let accumulators = ctx.orchestrator.turn_accumulators();
     accumulators.handle_turn_start(&sid);
     accumulators.handle_tool_generating(&sid, "tc-1", "Bash");
-    accumulators.handle_tool_start(
-        &sid,
-        "tc-1",
-        Some(&serde_json::json!({"cmd": "ls"})),
-    );
+    accumulators.handle_tool_start(&sid, "tc-1", Some(&serde_json::json!({"cmd": "ls"})));
 
     let result = StatusHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
         .await
         .unwrap();
 
-    let tool = result["currentTool"].as_object().expect("currentTool should be present");
+    let tool = result["currentTool"]
+        .as_object()
+        .expect("currentTool should be present");
     assert_eq!(tool["name"], "Bash");
     assert_eq!(tool["toolCallId"], "tc-1");
     assert!(
@@ -3095,7 +3102,10 @@ async fn status_exposes_last_event_timestamp_and_elapsed_when_events_exist() {
     // timeSinceLastEventMs should be a non-negative integer.
     let elapsed = result["timeSinceLastEventMs"].as_i64().unwrap();
     assert!(elapsed >= 0, "elapsed should never go negative");
-    assert!(elapsed < 60_000, "elapsed should be small (< 60s) for a just-created event");
+    assert!(
+        elapsed < 60_000,
+        "elapsed should be small (< 60s) for a just-created event"
+    );
 }
 
 #[tokio::test]

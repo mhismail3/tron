@@ -83,21 +83,27 @@ fn convert_for_ios(data: Vec<u8>, mime: &str) -> Result<ConvertedImage, ToolErro
 
 /// Rasterize SVG data to PNG.
 fn rasterize_svg(svg_data: &[u8]) -> Result<Vec<u8>, ToolError> {
-    let tree = resvg::usvg::Tree::from_data(svg_data, &resvg::usvg::Options::default())
-        .map_err(|e| ToolError::Validation {
-            message: format!("Invalid SVG: {e}"),
+    let tree =
+        resvg::usvg::Tree::from_data(svg_data, &resvg::usvg::Options::default()).map_err(|e| {
+            ToolError::Validation {
+                message: format!("Invalid SVG: {e}"),
+            }
         })?;
     let size = tree.size().to_int_size();
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
-        .ok_or_else(|| ToolError::Validation {
-            message: "Failed to create pixmap for SVG".into(),
+    let mut pixmap =
+        resvg::tiny_skia::Pixmap::new(size.width(), size.height()).ok_or_else(|| {
+            ToolError::Validation {
+                message: "Failed to create pixmap for SVG".into(),
+            }
         })?;
-    resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
-    pixmap
-        .encode_png()
-        .map_err(|e| ToolError::Validation {
-            message: format!("Failed to encode SVG as PNG: {e}"),
-        })
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::default(),
+        &mut pixmap.as_mut(),
+    );
+    pixmap.encode_png().map_err(|e| ToolError::Validation {
+        message: format!("Failed to encode SVG as PNG: {e}"),
+    })
 }
 
 /// Map a file extension to its MIME type.
@@ -229,8 +235,7 @@ impl TronTool for DisplayTool {
 
         let title = get_optional_string(&params, "title");
 
-        let action = get_optional_string(&params, "action")
-            .unwrap_or_else(|| "start".to_string());
+        let action = get_optional_string(&params, "action").unwrap_or_else(|| "start".to_string());
 
         let result = match content_type.as_str() {
             "image" => self.handle_image(&params).await,
@@ -271,11 +276,13 @@ impl DisplayTool {
                 .map_err(|e| ToolError::Validation {
                     message: format!("Invalid base64 data: {e}"),
                 })?;
-            let mime = get_optional_string(params, "mimeType")
-                .unwrap_or_else(|| "image/png".to_string());
+            let mime =
+                get_optional_string(params, "mimeType").unwrap_or_else(|| "image/png".to_string());
             (decoded, mime)
         } else if let Some(ref path) = path {
-            let (bytes, mime) = self.read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image").await?;
+            let (bytes, mime) = self
+                .read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image")
+                .await?;
             (bytes, mime.to_string())
         } else {
             return Ok(error_result(
@@ -302,11 +309,9 @@ impl DisplayTool {
         }
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!(
-                    "Displaying image ({size} bytes)"
-                )),
-            ]),
+            content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                format!("Displaying image ({size} bytes)"),
+            )]),
             details: Some(details),
             is_error: None,
             stop_turn: None,
@@ -318,16 +323,25 @@ impl DisplayTool {
         let paths: Vec<String> = params
             .get("paths")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
             .unwrap_or_default();
 
         if paths.is_empty() {
-            return Ok(error_result("Missing or empty 'paths' array for images type."));
+            return Ok(error_result(
+                "Missing or empty 'paths' array for images type.",
+            ));
         }
 
         let mut images_data: Vec<Value> = Vec::with_capacity(paths.len());
         for path in &paths {
-            let (bytes, mime) = self.read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image").await?;
+            let (bytes, mime) = self
+                .read_file(path, SUPPORTED_IMAGE_EXTS, MAX_IMAGE_BYTES, "Image")
+                .await?;
             let converted = convert_for_ios(bytes, mime)?;
             let blob_id = self.store_blob(&converted.data, &converted.mime).await?;
             let mut entry = json!({"blobId": blob_id, "mimeType": converted.mime, "path": path});
@@ -341,11 +355,9 @@ impl DisplayTool {
         }
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!(
-                    "Displaying {} images", paths.len()
-                )),
-            ]),
+            content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                format!("Displaying {} images", paths.len()),
+            )]),
             details: Some(json!({"images": images_data})),
             is_error: None,
             stop_turn: None,
@@ -366,7 +378,11 @@ impl DisplayTool {
     ) -> Result<TronToolResult, ToolError> {
         let stream_id = match get_optional_string(params, "streamId") {
             Some(s) => s,
-            None => return Ok(error_result("Missing 'streamId' parameter for stream type.")),
+            None => {
+                return Ok(error_result(
+                    "Missing 'streamId' parameter for stream type.",
+                ));
+            }
         };
 
         let event_tx = match self.event_tx.as_ref() {
@@ -374,7 +390,7 @@ impl DisplayTool {
             None => {
                 return Ok(error_result(
                     "Streaming not available (event emitter not configured).",
-                ))
+                ));
             }
         };
 
@@ -383,12 +399,15 @@ impl DisplayTool {
             None => {
                 return Ok(error_result(
                     "Streaming not available (process manager not configured).",
-                ))
+                ));
             }
         };
 
         // Check for duplicate streams.
-        if pm.find_by_label(&ctx.session_id, "display_stream:").is_some() {
+        if pm
+            .find_by_label(&ctx.session_id, "display_stream:")
+            .is_some()
+        {
             return Ok(error_result(
                 "A display stream is already active. Stop it first with Display(type=\"stream\", action=\"stop\", streamId=\"...\").",
             ));
@@ -411,13 +430,18 @@ impl DisplayTool {
         // cause the stream to die whenever the user interrupts the agent.
         let stream_cancel = CancellationToken::new();
 
-        let task: std::pin::Pin<Box<dyn std::future::Future<Output = crate::tools::traits::ManagedProcessResult> + Send>> = Box::pin(async move {
+        let task: std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = crate::tools::traits::ManagedProcessResult> + Send,
+            >,
+        > = Box::pin(async move {
             let start = std::time::Instant::now();
-            let last_frame_data =
-                crate::tools::ui::display_stream::screen_capture_loop(
-                    event_tx, config, stream_cancel,
-                )
-                .await;
+            let last_frame_data = crate::tools::ui::display_stream::screen_capture_loop(
+                event_tx,
+                config,
+                stream_cancel,
+            )
+            .await;
 
             // Save last frame to blob storage for the static fallback.
             let mut blob_id = None;
@@ -452,22 +476,17 @@ impl DisplayTool {
         };
 
         let handle = pm
-            .spawn_managed(
-                &ctx.session_id,
-                &ctx.tool_call_id,
-                pm_config,
-                task,
-            )
+            .spawn_managed(&ctx.session_id, &ctx.tool_call_id, pm_config, task)
             .await?;
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!(
+            content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                format!(
                     "Screen stream '{stream_id}' started. Frames are being sent to the user's device at ~3 FPS. \
                      The stream will continue in the background while you work. \
                      To stop it, call Display(type=\"stream\", action=\"stop\", streamId=\"{stream_id}\")."
-                )),
-            ]),
+                ),
+            )]),
             details: Some(json!({
                 "streamId": stream_id,
                 "processId": handle.process_id,
@@ -486,7 +505,11 @@ impl DisplayTool {
     ) -> Result<TronToolResult, ToolError> {
         let stream_id = match get_optional_string(params, "streamId") {
             Some(s) => s,
-            None => return Ok(error_result("Missing 'streamId' parameter for stream stop.")),
+            None => {
+                return Ok(error_result(
+                    "Missing 'streamId' parameter for stream stop.",
+                ));
+            }
         };
 
         let pm = match ctx.process_manager.as_ref() {
@@ -533,11 +556,9 @@ impl DisplayTool {
         }
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(format!(
-                    "Displaying WebView: {url}"
-                )),
-            ]),
+            content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                format!("Displaying WebView: {url}"),
+            )]),
             details: Some(json!({"url": url})),
             is_error: None,
             stop_turn: None,
@@ -645,12 +666,17 @@ mod tests {
         let tool = DisplayTool::new(None);
         let def = tool.definition();
         let props = def.parameters.properties.as_ref().unwrap();
-        for key in &["type", "action", "title", "path", "data", "mimeType", "paths", "streamId", "url"] {
+        for key in &[
+            "type", "action", "title", "path", "data", "mimeType", "paths", "streamId", "url",
+        ] {
             assert!(props.contains_key(*key), "missing schema property: {key}");
         }
         // Removed params should NOT be present
         for key in &["content", "label", "autoplay", "interactive"] {
-            assert!(!props.contains_key(*key), "removed property still present: {key}");
+            assert!(
+                !props.contains_key(*key),
+                "removed property still present: {key}"
+            );
         }
         let required = def.parameters.required.as_ref().unwrap();
         assert_eq!(required, &["type"]);
@@ -682,7 +708,10 @@ mod tests {
         let path = tmp.path().to_string_lossy().to_string();
 
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "image", "path": path}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"type": "image", "path": path}), &make_ctx())
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         let details = r.details.unwrap();
         assert_eq!(details["displayType"], "image");
@@ -697,8 +726,12 @@ mod tests {
 
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}), &make_ctx())
-            .await.unwrap();
+            .execute(
+                json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.details.unwrap()["mimeType"], "image/jpeg");
     }
 
@@ -709,8 +742,12 @@ mod tests {
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"inline image bytes");
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(json!({"type": "image", "data": b64, "mimeType": "image/jpeg"}), &make_ctx())
-            .await.unwrap();
+            .execute(
+                json!({"type": "image", "data": b64, "mimeType": "image/jpeg"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         let details = r.details.unwrap();
         assert!(details["blobId"].as_str().is_some());
@@ -721,14 +758,22 @@ mod tests {
     async fn image_data_defaults_to_png_mime() {
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"data");
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "image", "data": b64}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"type": "image", "data": b64}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.details.unwrap()["mimeType"], "image/png");
     }
 
     #[tokio::test]
     async fn image_data_invalid_base64() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "image", "data": "not valid!!!"}), &make_ctx()).await;
+        let r = tool
+            .execute(
+                json!({"type": "image", "data": "not valid!!!"}),
+                &make_ctx(),
+            )
+            .await;
         assert!(r.is_err());
         assert!(r.unwrap_err().to_string().contains("Invalid base64"));
     }
@@ -738,8 +783,12 @@ mod tests {
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"priority");
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(json!({"type": "image", "data": b64, "path": "/nonexistent.png"}), &make_ctx())
-            .await.unwrap();
+            .execute(
+                json!({"type": "image", "data": b64, "path": "/nonexistent.png"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 
@@ -748,7 +797,12 @@ mod tests {
     #[tokio::test]
     async fn image_missing_file() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "image", "path": "/nonexistent.png"}), &make_ctx()).await;
+        let r = tool
+            .execute(
+                json!({"type": "image", "path": "/nonexistent.png"}),
+                &make_ctx(),
+            )
+            .await;
         assert!(r.is_err());
         assert!(r.unwrap_err().to_string().contains("File not found"));
     }
@@ -760,7 +814,12 @@ mod tests {
         std::fs::write(&path, vec![0u8; (MAX_IMAGE_BYTES + 1) as usize]).unwrap();
 
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "image", "path": path.to_string_lossy().to_string()}), &make_ctx()).await;
+        let r = tool
+            .execute(
+                json!({"type": "image", "path": path.to_string_lossy().to_string()}),
+                &make_ctx(),
+            )
+            .await;
         assert!(r.is_err());
         assert!(r.unwrap_err().to_string().contains("limit"));
     }
@@ -771,7 +830,12 @@ mod tests {
         write!(tmp, "data").unwrap();
 
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}), &make_ctx()).await;
+        let r = tool
+            .execute(
+                json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}),
+                &make_ctx(),
+            )
+            .await;
         assert!(r.is_err());
         assert!(r.unwrap_err().to_string().contains("Unsupported"));
     }
@@ -779,7 +843,10 @@ mod tests {
     #[tokio::test]
     async fn image_no_path_or_data() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "image"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"type": "image"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -790,7 +857,12 @@ mod tests {
         std::fs::write(&path, "data").unwrap();
 
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "image", "path": path.to_string_lossy().to_string()}), &make_ctx()).await;
+        let r = tool
+            .execute(
+                json!({"type": "image", "path": path.to_string_lossy().to_string()}),
+                &make_ctx(),
+            )
+            .await;
         assert!(r.is_err());
     }
 
@@ -805,11 +877,15 @@ mod tests {
 
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(json!({"type": "images", "paths": [
-                t1.path().to_string_lossy().to_string(),
-                t2.path().to_string_lossy().to_string()
-            ]}), &make_ctx())
-            .await.unwrap();
+            .execute(
+                json!({"type": "images", "paths": [
+                    t1.path().to_string_lossy().to_string(),
+                    t2.path().to_string_lossy().to_string()
+                ]}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         let details = r.details.unwrap();
         let images = details["images"].as_array().unwrap();
@@ -822,7 +898,10 @@ mod tests {
     #[tokio::test]
     async fn images_empty_array() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "images", "paths": []}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"type": "images", "paths": []}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -833,10 +912,13 @@ mod tests {
 
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(json!({"type": "images", "paths": [
-                t1.path().to_string_lossy().to_string(),
-                "/nonexistent.png"
-            ]}), &make_ctx())
+            .execute(
+                json!({"type": "images", "paths": [
+                    t1.path().to_string_lossy().to_string(),
+                    "/nonexistent.png"
+                ]}),
+                &make_ctx(),
+            )
             .await;
         assert!(r.is_err());
     }
@@ -846,7 +928,10 @@ mod tests {
     #[tokio::test]
     async fn stream_missing_id() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "stream"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"type": "stream"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -884,7 +969,10 @@ mod tests {
 
         // Stop it
         let r = tool
-            .execute(json!({"type": "stream", "action": "stop", "streamId": "stop-test"}), &ctx)
+            .execute(
+                json!({"type": "stream", "action": "stop", "streamId": "stop-test"}),
+                &ctx,
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -898,7 +986,10 @@ mod tests {
         let tool = DisplayTool::new(None);
         let ctx = make_stream_ctx();
         let r = tool
-            .execute(json!({"type": "stream", "action": "stop", "streamId": "nope"}), &ctx)
+            .execute(
+                json!({"type": "stream", "action": "stop", "streamId": "nope"}),
+                &ctx,
+            )
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));
@@ -950,7 +1041,10 @@ mod tests {
     #[tokio::test]
     async fn unknown_type_returns_error() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "markdown"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"type": "markdown"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -978,8 +1072,12 @@ mod tests {
         write!(tmp, "data").unwrap();
         let tool = DisplayTool::new(None);
         let r = tool
-            .execute(json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}), &make_ctx())
-            .await.unwrap();
+            .execute(
+                json!({"type": "image", "path": tmp.path().to_string_lossy().to_string()}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.details.unwrap().get("title").is_none());
     }
 
@@ -997,7 +1095,13 @@ mod tests {
     #[tokio::test]
     async fn webview_returns_url_in_details() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "webview", "url": "http://localhost:3000"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"type": "webview", "url": "http://localhost:3000"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         let details = r.details.unwrap();
         assert_eq!(details["displayType"], "webview");
@@ -1007,7 +1111,13 @@ mod tests {
     #[tokio::test]
     async fn webview_https_url() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "webview", "url": "https://example.com/dashboard"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"type": "webview", "url": "https://example.com/dashboard"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         assert_eq!(r.details.unwrap()["url"], "https://example.com/dashboard");
     }
@@ -1015,42 +1125,72 @@ mod tests {
     #[tokio::test]
     async fn webview_missing_url_returns_error() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "webview"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"type": "webview"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn webview_empty_url_returns_error() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "webview", "url": ""}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"type": "webview", "url": ""}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn webview_file_scheme_rejected() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "webview", "url": "file:///etc/passwd"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"type": "webview", "url": "file:///etc/passwd"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn webview_javascript_scheme_rejected() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "webview", "url": "javascript:alert(1)"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"type": "webview", "url": "javascript:alert(1)"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn webview_data_scheme_rejected() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "webview", "url": "data:text/html,<h1>hi</h1>"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"type": "webview", "url": "data:text/html,<h1>hi</h1>"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn webview_title_flows_to_details() {
         let tool = DisplayTool::new(None);
-        let r = tool.execute(json!({"type": "webview", "url": "http://localhost:8080", "title": "Dashboard"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"type": "webview", "url": "http://localhost:8080", "title": "Dashboard"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         let details = r.details.unwrap();
         assert_eq!(details["title"], "Dashboard");
         assert_eq!(details["url"], "http://localhost:8080");

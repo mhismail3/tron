@@ -24,8 +24,8 @@ use super::system_prompts;
 use super::token_estimator;
 use super::types::{
     CompactionPreview, CompactionResult, ContextManagerConfig, ContextSnapshot,
-    DetailedContextSnapshot, ExtractedData, ExportedState, PreTurnValidation,
-    ProcessedToolResult, SessionMemoryEntry, ToolSummary,
+    DetailedContextSnapshot, ExportedState, ExtractedData, PreTurnValidation, ProcessedToolResult,
+    SessionMemoryEntry, ToolSummary,
 };
 
 // =============================================================================
@@ -565,11 +565,7 @@ impl ContextManager {
         // Defensive coercion: local models strip job_results at turn time,
         // so tracking a non-zero estimate here would inflate compaction
         // triggers. Caller-passed values are silently ignored for local.
-        self.volatile_job_results_tokens = if self.is_local_model {
-            0
-        } else {
-            job_results
-        };
+        self.volatile_job_results_tokens = if self.is_local_model { 0 } else { job_results };
         self.volatile_refreshed_at_generation = Some(self.turn_generation);
     }
 

@@ -19,10 +19,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{ContentSummarizer, HttpClient, HttpRequest, ToolContext, TronTool};
@@ -80,7 +80,10 @@ pub(crate) fn classify_web_fetch_error(status: Option<u16>, message: &str) -> &'
     if lower.contains("too large") {
         return "too_large";
     }
-    if lower.contains("invalid url") || lower.contains("invalid host") || lower.contains("url parse") {
+    if lower.contains("invalid url")
+        || lower.contains("invalid host")
+        || lower.contains("url parse")
+    {
         return "invalid_url";
     }
     if lower.contains("network") || lower.contains("connection") {
@@ -94,9 +97,7 @@ fn web_fetch_error(message: impl Into<String>, status: Option<u16>) -> TronToolR
     let msg = message.into();
     let class = classify_web_fetch_error(status, &msg);
     TronToolResult {
-        content: ToolResultBody::Blocks(vec![
-            crate::core::content::ToolResultContent::text(&msg),
-        ]),
+        content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(&msg)]),
         details: Some(json!({
             "error": msg,
             "errorClass": class,
@@ -192,9 +193,7 @@ fn extract_body(params: &Value) -> (Option<String>, bool) {
     match params.get("body") {
         None | Some(Value::Null) => (None, false),
         Some(Value::String(s)) => (Some(s.clone()), false),
-        Some(obj @ (Value::Object(_) | Value::Array(_))) => {
-            (Some(obj.to_string()), true)
-        }
+        Some(obj @ (Value::Object(_) | Value::Array(_))) => (Some(obj.to_string()), true),
         Some(other) => (Some(other.to_string()), false),
     }
 }
@@ -252,8 +251,14 @@ impl TronTool for WebFetchTool {
             "WebFetch",
             "Fetch a URL and extract information. Returns markdown content.",
         )
-        .required_property("url", json!({"type": "string", "description": "URL to fetch"}))
-        .property("prompt", json!({"type": "string", "description": "What to extract from the page"}))
+        .required_property(
+            "url",
+            json!({"type": "string", "description": "URL to fetch"}),
+        )
+        .property(
+            "prompt",
+            json!({"type": "string", "description": "What to extract from the page"}),
+        )
         .build()
     }
 
@@ -270,8 +275,8 @@ impl TronTool for WebFetchTool {
         let raw_response = get_optional_bool(&params, "rawResponse").unwrap_or(false);
         let follow_redirects = get_optional_bool(&params, "followRedirects").unwrap_or(true);
         let allow_private = get_optional_bool(&params, "allowPrivateNetwork").unwrap_or(false);
-        let max_size = get_optional_u64(&params, "maxSize")
-            .map_or(MAX_RESPONSE_SIZE, |v| v as usize);
+        let max_size =
+            get_optional_u64(&params, "maxSize").map_or(MAX_RESPONSE_SIZE, |v| v as usize);
         let req_headers = parse_headers(&params);
         let cookie_header = parse_cookies(&params);
         let (body, auto_json_content_type) = extract_body(&params);
@@ -281,7 +286,10 @@ impl TronTool for WebFetchTool {
             && b.len() > MAX_BODY_SIZE
         {
             return Ok(web_fetch_error(
-                format!("Request body too large: {} bytes (max {MAX_BODY_SIZE})", b.len()),
+                format!(
+                    "Request body too large: {} bytes (max {MAX_BODY_SIZE})",
+                    b.len()
+                ),
                 None,
             ));
         }
@@ -301,12 +309,24 @@ impl TronTool for WebFetchTool {
 
         if use_summarization {
             let prompt = prompt.unwrap();
-            return self.execute_summarization(&url, &prompt, max_size, ctx).await;
+            return self
+                .execute_summarization(&url, &prompt, max_size, ctx)
+                .await;
         }
 
         // Raw HTTP mode
-        self.execute_raw(&url, &method, &req_headers, cookie_header.as_deref(),
-                         body.as_deref(), auto_json_content_type, follow_redirects, max_size, ctx).await
+        self.execute_raw(
+            &url,
+            &method,
+            &req_headers,
+            cookie_header.as_deref(),
+            body.as_deref(),
+            auto_json_content_type,
+            follow_redirects,
+            max_size,
+            ctx,
+        )
+        .await
     }
 }
 
@@ -344,7 +364,8 @@ impl WebFetchTool {
         }
 
         // Fetch via simple GET
-        ctx.emit_progress(Some(format!("fetching {url}")), None).await;
+        ctx.emit_progress(Some(format!("fetching {url}")), None)
+            .await;
         let response = match self.http.get(url).await {
             Ok(r) => r,
             Err(e) => return Ok(web_fetch_error(format!("HTTP request failed: {e}"), None)),
@@ -359,7 +380,10 @@ impl WebFetchTool {
 
         if response.body.len() > max_size {
             return Ok(web_fetch_error(
-                format!("Response too large: {} bytes (max {max_size})", response.body.len()),
+                format!(
+                    "Response too large: {} bytes (max {max_size})",
+                    response.body.len()
+                ),
                 None,
             ));
         }
@@ -452,7 +476,9 @@ impl WebFetchTool {
             .collect();
 
         // Auto-set Content-Type for JSON bodies if not already set
-        let has_content_type = headers.keys().any(|k| k.eq_ignore_ascii_case("content-type"));
+        let has_content_type = headers
+            .keys()
+            .any(|k| k.eq_ignore_ascii_case("content-type"));
         let json_ct = "application/json".to_string();
         if auto_json_content_type && !has_content_type {
             header_pairs.push(("Content-Type", &json_ct));
@@ -473,7 +499,8 @@ impl WebFetchTool {
             follow_redirects,
         };
 
-        ctx.emit_progress(Some(format!("{method} {url}")), None).await;
+        ctx.emit_progress(Some(format!("{method} {url}")), None)
+            .await;
         let response = match self.http.request(&req).await {
             Ok(r) => r,
             Err(e) => return Ok(web_fetch_error(format!("HTTP request failed: {e}"), None)),
@@ -481,20 +508,31 @@ impl WebFetchTool {
 
         if response.body.len() > max_size {
             return Ok(web_fetch_error(
-                format!("Response too large: {} bytes (max {max_size})", response.body.len()),
+                format!(
+                    "Response too large: {} bytes (max {max_size})",
+                    response.body.len()
+                ),
                 Some(response.status),
             ));
         }
 
         ctx.emit_progress(
-            Some(format!("HTTP {} ({} bytes)", response.status, response.body.len())),
+            Some(format!(
+                "HTTP {} ({} bytes)",
+                response.status,
+                response.body.len()
+            )),
             Some(1.0),
         )
         .await;
 
         // Handle binary response: base64-encode if content-type is not text/*
-        let is_binary = response.content_type.as_ref()
-            .is_some_and(|ct| !ct.starts_with("text/") && !ct.contains("json") && !ct.contains("xml") && !ct.contains("javascript"));
+        let is_binary = response.content_type.as_ref().is_some_and(|ct| {
+            !ct.starts_with("text/")
+                && !ct.contains("json")
+                && !ct.contains("xml")
+                && !ct.contains("javascript")
+        });
 
         let body_text = if is_binary {
             use base64::Engine;
@@ -515,17 +553,16 @@ impl WebFetchTool {
         let max_bytes = MAX_CONTENT_TOKENS * 4;
         let display_body = if body_text.len() > max_bytes {
             let prefix = crate::core::text::truncate_str(&body_text, max_bytes);
-            format!("{prefix}\n\n[Response truncated — {}/{} bytes shown]", max_bytes, body_text.len())
+            format!(
+                "{prefix}\n\n[Response truncated — {}/{} bytes shown]",
+                max_bytes,
+                body_text.len()
+            )
         } else {
             body_text
         };
 
-        let output = format!(
-            "HTTP {} {}\n\n{}",
-            response.status,
-            url,
-            &display_body,
-        );
+        let output = format!("HTTP {} {}\n\n{}", response.status, url, &display_body,);
 
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
@@ -555,11 +592,14 @@ mod tests {
 
     struct MockHttp {
         get_handler: Box<dyn Fn(&str) -> Result<HttpResponse, String> + Send + Sync>,
-        request_handler: Box<dyn Fn(&HttpRequest<'_>) -> Result<HttpResponse, String> + Send + Sync>,
+        request_handler:
+            Box<dyn Fn(&HttpRequest<'_>) -> Result<HttpResponse, String> + Send + Sync>,
     }
 
     impl MockHttp {
-        fn get_only(handler: impl Fn(&str) -> Result<HttpResponse, String> + Send + Sync + 'static) -> Self {
+        fn get_only(
+            handler: impl Fn(&str) -> Result<HttpResponse, String> + Send + Sync + 'static,
+        ) -> Self {
             Self {
                 get_handler: Box::new(handler),
                 request_handler: Box::new(|req| {
@@ -746,9 +786,7 @@ mod tests {
 
     #[tokio::test]
     async fn network_failure_returns_tool_error() {
-        let http = Arc::new(MockHttp::get_only(|_| {
-            Err("connection timed out".into())
-        }));
+        let http = Arc::new(MockHttp::get_only(|_| Err("connection timed out".into())));
         let tool = WebFetchTool::new(http);
         let r = tool
             .execute(
@@ -1105,9 +1143,14 @@ mod tests {
     #[tokio::test]
     async fn custom_headers() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|req| {
                 // Verify headers were passed through
                 let auth = req.headers.iter().find(|(k, _)| *k == "Authorization");
@@ -1117,7 +1160,10 @@ mod tests {
                     "no-auth".into()
                 };
                 Ok(HttpResponse {
-                    status: 200, body, content_type: None, headers: HashMap::new(),
+                    status: 200,
+                    body,
+                    content_type: None,
+                    headers: HashMap::new(),
                 })
             }),
         });
@@ -1141,9 +1187,14 @@ mod tests {
     #[tokio::test]
     async fn cookies_sent_with_request() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|req| {
                 let cookie = req.headers.iter().find(|(k, _)| *k == "Cookie");
                 let body = if let Some((_, v)) = cookie {
@@ -1152,7 +1203,10 @@ mod tests {
                     "no-cookie".into()
                 };
                 Ok(HttpResponse {
-                    status: 200, body, content_type: None, headers: HashMap::new(),
+                    status: 200,
+                    body,
+                    content_type: None,
+                    headers: HashMap::new(),
                 })
             }),
         });
@@ -1199,10 +1253,7 @@ mod tests {
         let http = Arc::new(full_mock());
         let tool = WebFetchTool::new(http);
         let r = tool
-            .execute(
-                json!({"url": "https://api.example.com/data"}),
-                &make_ctx(),
-            )
+            .execute(json!({"url": "https://api.example.com/data"}), &make_ctx())
             .await
             .unwrap();
         // Raw mode returns method= prefix, not HTML-parsed content
@@ -1214,9 +1265,14 @@ mod tests {
     #[tokio::test]
     async fn non_2xx_returns_response_not_error() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 404, body: "Not Found".into(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 404,
+                    body: "Not Found".into(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|_| {
                 Ok(HttpResponse {
                     status: 404,
@@ -1292,9 +1348,14 @@ mod tests {
     #[tokio::test]
     async fn content_type_auto_set_for_json_body() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|req| {
                 let ct = req.headers.iter().find(|(k, _)| *k == "Content-Type");
                 let body = if let Some((_, v)) = ct {
@@ -1303,7 +1364,10 @@ mod tests {
                     "no-ct".into()
                 };
                 Ok(HttpResponse {
-                    status: 200, body, content_type: None, headers: HashMap::new(),
+                    status: 200,
+                    body,
+                    content_type: None,
+                    headers: HashMap::new(),
                 })
             }),
         });
@@ -1329,10 +1393,7 @@ mod tests {
         let tool = WebFetchTool::new(http);
         // GET without prompt → raw mode
         let r = tool
-            .execute(
-                json!({"url": "https://example.com"}),
-                &make_ctx(),
-            )
+            .execute(json!({"url": "https://example.com"}), &make_ctx())
             .await
             .unwrap();
         let d = r.details.unwrap();
@@ -1398,9 +1459,14 @@ mod tests {
     #[tokio::test]
     async fn multiple_custom_headers() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|req| {
                 let auth = req.headers.iter().find(|(k, _)| *k == "Authorization");
                 let accept = req.headers.iter().find(|(k, _)| *k == "Accept");
@@ -1410,7 +1476,10 @@ mod tests {
                     accept.map_or("none", |(_, v)| *v),
                 );
                 Ok(HttpResponse {
-                    status: 200, body, content_type: None, headers: HashMap::new(),
+                    status: 200,
+                    body,
+                    content_type: None,
+                    headers: HashMap::new(),
                 })
             }),
         });
@@ -1440,9 +1509,14 @@ mod tests {
     #[tokio::test]
     async fn cookies_with_special_characters() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|req| {
                 let cookie = req.headers.iter().find(|(k, _)| *k == "Cookie");
                 let body = if let Some((_, v)) = cookie {
@@ -1451,7 +1525,10 @@ mod tests {
                     "no-cookie".into()
                 };
                 Ok(HttpResponse {
-                    status: 200, body, content_type: None, headers: HashMap::new(),
+                    status: 200,
+                    body,
+                    content_type: None,
+                    headers: HashMap::new(),
                 })
             }),
         });
@@ -1495,14 +1572,21 @@ mod tests {
     #[tokio::test]
     async fn no_follow_redirects() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|req| {
                 // Verify the flag was passed (in real impl, reqwest would not follow)
                 let body = format!("follow={}", req.follow_redirects);
                 Ok(HttpResponse {
-                    status: 301, body, content_type: None,
+                    status: 301,
+                    body,
+                    content_type: None,
                     headers: {
                         let mut h = HashMap::new();
                         let _ = h.insert("location".into(), "https://example.com/new".into());
@@ -1534,12 +1618,15 @@ mod tests {
     #[tokio::test]
     async fn invalid_method_returns_error() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
-            request_handler: Box::new(|_| {
-                Err("Unsupported HTTP method: TRACE".into())
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
             }),
+            request_handler: Box::new(|_| Err("Unsupported HTTP method: TRACE".into())),
         });
         let tool = WebFetchTool::new(http);
         let r = tool
@@ -1555,9 +1642,14 @@ mod tests {
     #[tokio::test]
     async fn binary_response_base64_encoded() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|_| {
                 Ok(HttpResponse {
                     status: 200,
@@ -1582,9 +1674,14 @@ mod tests {
     #[tokio::test]
     async fn json_response_not_base64() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|_| {
                 Ok(HttpResponse {
                     status: 200,
@@ -1610,9 +1707,14 @@ mod tests {
     #[tokio::test]
     async fn max_size_override() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|_| {
                 Ok(HttpResponse {
                     status: 200,
@@ -1664,16 +1766,24 @@ mod tests {
     #[tokio::test]
     async fn empty_body_on_post_sends_empty() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|req| {
                 let body_desc = match req.body {
                     Some(b) => format!("body_len={}", b.len()),
                     None => "no_body".into(),
                 };
                 Ok(HttpResponse {
-                    status: 200, body: body_desc, content_type: None, headers: HashMap::new(),
+                    status: 200,
+                    body: body_desc,
+                    content_type: None,
+                    headers: HashMap::new(),
                 })
             }),
         });
@@ -1697,9 +1807,14 @@ mod tests {
     #[tokio::test]
     async fn text_response_not_base64() {
         let http = Arc::new(MockHttp {
-            get_handler: Box::new(|_| Ok(HttpResponse {
-                status: 200, body: String::new(), content_type: None, headers: HashMap::new(),
-            })),
+            get_handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: String::new(),
+                    content_type: None,
+                    headers: HashMap::new(),
+                })
+            }),
             request_handler: Box::new(|_| {
                 Ok(HttpResponse {
                     status: 200,
@@ -1736,7 +1851,10 @@ mod tests {
 
     #[test]
     fn classify_by_message_text() {
-        assert_eq!(classify_web_fetch_error(None, "request timed out"), "timeout");
+        assert_eq!(
+            classify_web_fetch_error(None, "request timed out"),
+            "timeout"
+        );
         assert_eq!(classify_web_fetch_error(None, "no such host"), "dns");
         assert_eq!(
             classify_web_fetch_error(None, "failed to resolve address"),
@@ -1746,14 +1864,23 @@ mod tests {
             classify_web_fetch_error(None, "SSL certificate expired"),
             "ssl"
         );
-        assert_eq!(classify_web_fetch_error(None, "too many redirects"), "redirect");
+        assert_eq!(
+            classify_web_fetch_error(None, "too many redirects"),
+            "redirect"
+        );
         assert_eq!(classify_web_fetch_error(None, "domain blocked"), "blocked");
         assert_eq!(
             classify_web_fetch_error(None, "Response too large: 99 bytes"),
             "too_large"
         );
-        assert_eq!(classify_web_fetch_error(None, "invalid url scheme"), "invalid_url");
-        assert_eq!(classify_web_fetch_error(None, "network unreachable"), "network");
+        assert_eq!(
+            classify_web_fetch_error(None, "invalid url scheme"),
+            "invalid_url"
+        );
+        assert_eq!(
+            classify_web_fetch_error(None, "network unreachable"),
+            "network"
+        );
     }
 
     #[test]
@@ -1772,12 +1899,20 @@ mod tests {
 
     #[tokio::test]
     async fn http_404_emits_structured_details() {
-        let http = Arc::new(MockHttp::get_only(|_| Ok(HttpResponse {
-            status: 404, body: "".into(), content_type: None, headers: HashMap::new(),
-        })));
+        let http = Arc::new(MockHttp::get_only(|_| {
+            Ok(HttpResponse {
+                status: 404,
+                body: "".into(),
+                content_type: None,
+                headers: HashMap::new(),
+            })
+        }));
         let tool = WebFetchTool::new(http);
         let r = tool
-            .execute(json!({"url": "https://example.com/missing", "prompt": "q"}), &make_ctx())
+            .execute(
+                json!({"url": "https://example.com/missing", "prompt": "q"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));
@@ -1792,7 +1927,10 @@ mod tests {
         let http = Arc::new(MockHttp::get_only(|_| Err("connection timed out".into())));
         let tool = WebFetchTool::new(http);
         let r = tool
-            .execute(json!({"url": "https://example.com", "prompt": "q"}), &make_ctx())
+            .execute(
+                json!({"url": "https://example.com", "prompt": "q"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));
@@ -1839,8 +1977,7 @@ mod tests {
     async fn summarization_emits_fetch_start_and_completed_progress() {
         let http = Arc::new(html_response("<html><body>hi</body></html>"));
         let tool = WebFetchTool::new(http);
-        let (ctx, store, session_id) =
-            crate::tools::testutil::make_ctx_with_persister().await;
+        let (ctx, store, session_id) = crate::tools::testutil::make_ctx_with_persister().await;
 
         let _ = tool
             .execute(
@@ -1874,8 +2011,7 @@ mod tests {
     async fn raw_mode_emits_start_and_completed_progress_with_status() {
         let http = Arc::new(full_mock());
         let tool = WebFetchTool::new(http);
-        let (ctx, store, session_id) =
-            crate::tools::testutil::make_ctx_with_persister().await;
+        let (ctx, store, session_id) = crate::tools::testutil::make_ctx_with_persister().await;
 
         let _ = tool
             .execute(
@@ -1911,14 +2047,10 @@ mod tests {
             })
         }));
         let tool = WebFetchTool::new(http);
-        let (ctx, store, session_id) =
-            crate::tools::testutil::make_ctx_with_persister().await;
+        let (ctx, store, session_id) = crate::tools::testutil::make_ctx_with_persister().await;
 
         let _ = tool
-            .execute(
-                json!({"url": "https://example.com/", "prompt": "q"}),
-                &ctx,
-            )
+            .execute(json!({"url": "https://example.com/", "prompt": "q"}), &ctx)
             .await
             .unwrap();
 

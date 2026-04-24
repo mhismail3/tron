@@ -216,8 +216,8 @@ mod tests {
         // Traversal path: <tmp>/inner/../secret.txt — path containment
         // would reject this. Trusted-local allows it.
         let traversal = format!("{}/../secret.txt", inner.to_string_lossy());
-        let result = read_file(&traversal)
-            .expect("trusted-local filesystem MUST allow traversal reads");
+        let result =
+            read_file(&traversal).expect("trusted-local filesystem MUST allow traversal reads");
         assert_eq!(result["content"].as_str().unwrap(), "trusted-local");
 
         // list_dir also accepts traversal (picker-browse use case).

@@ -190,9 +190,7 @@ mod tests {
         WorktreeCoordinator::new(WorktreeConfig::default(), Arc::new(EventStore::new(pool)))
     }
 
-    fn coord_with_broadcast(
-        _hint: &str,
-    ) -> (WorktreeCoordinator, broadcast::Receiver<TronEvent>) {
+    fn coord_with_broadcast(_hint: &str) -> (WorktreeCoordinator, broadcast::Receiver<TronEvent>) {
         let pool = new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
@@ -294,9 +292,7 @@ mod tests {
             // One acquired event should be queued.
             let evt = rx.try_recv().expect("acquired event");
             match evt {
-                TronEvent::RepoLockAcquired {
-                    session_id, op, ..
-                } => {
+                TronEvent::RepoLockAcquired { session_id, op, .. } => {
                     assert_eq!(session_id, "s1");
                     assert_eq!(op, "syncMain");
                 }
@@ -306,9 +302,7 @@ mod tests {
 
         let evt = rx.try_recv().expect("released event");
         match evt {
-            TronEvent::RepoLockReleased {
-                session_id, op, ..
-            } => {
+            TronEvent::RepoLockReleased { session_id, op, .. } => {
                 assert_eq!(session_id, "s1");
                 assert_eq!(op, "syncMain");
             }

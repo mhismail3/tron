@@ -129,10 +129,10 @@ mod tests {
         build_active_skill_context, build_context_manager_for_session, tool_definitions,
     };
     use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::skills::registry::SkillRegistry;
     use parking_lot::RwLock;
     use serde_json::json;
     use std::sync::Arc;
-    use crate::skills::registry::SkillRegistry;
 
     // Helper: create a context with a real session
     fn ctx_with_session() -> (RpcContext, String) {
@@ -939,12 +939,13 @@ mod tests {
 
     // Helper: create a context with a session that has a server origin
     fn ctx_with_origin_session() -> (RpcContext, String) {
-        use crate::server::rpc::context::RpcContext;
         use crate::events::EventStore;
         use crate::runtime::orchestrator::orchestrator::Orchestrator;
         use crate::runtime::orchestrator::session_manager::SessionManager;
+        use crate::server::rpc::context::RpcContext;
 
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -972,7 +973,9 @@ mod tests {
             cron_scheduler: None,
             worktree_coordinator: None,
             device_request_broker: None,
-            context_artifacts: Arc::new(crate::server::rpc::session_context::ContextArtifactsService::new()),
+            context_artifacts: Arc::new(
+                crate::server::rpc::session_context::ContextArtifactsService::new(),
+            ),
             auth_path: std::path::PathBuf::from("/tmp/tron-test-auth.json"),
             broadcast_manager: None,
             oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
@@ -981,7 +984,9 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
-            hook_abort_tracker: Arc::new(crate::runtime::hooks::abort_tracker::HookAbortTracker::new()),
+            hook_abort_tracker: Arc::new(
+                crate::runtime::hooks::abort_tracker::HookAbortTracker::new(),
+            ),
             ws_port: 9847,
             onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
             release_fetcher: None,

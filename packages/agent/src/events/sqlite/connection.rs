@@ -232,7 +232,10 @@ mod tests {
     fn write_lock_surfaces_busy_quickly() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("busy_timeout.db");
-        let config = ConnectionConfig { pool_size: 2, ..ConnectionConfig::default() };
+        let config = ConnectionConfig {
+            pool_size: 2,
+            ..ConnectionConfig::default()
+        };
         let pool = new_file(path.to_str().unwrap(), &config).unwrap();
         let conn1 = pool.get().unwrap();
         let conn2 = pool.get().unwrap();

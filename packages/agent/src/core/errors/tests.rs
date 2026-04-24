@@ -50,8 +50,7 @@ fn tron_error_from_session() {
 
 #[test]
 fn tron_error_from_persistence() {
-    let persistence_err =
-        PersistenceError::new("events", PersistenceOperation::Write, "disk full");
+    let persistence_err = PersistenceError::new("events", PersistenceOperation::Write, "disk full");
     let err = TronError::from(persistence_err);
     assert!(err.to_string().contains("events"));
     assert_eq!(err.code(), "PERSISTENCE_WRITE_ERROR");
@@ -59,8 +58,8 @@ fn tron_error_from_persistence() {
 
 #[test]
 fn tron_error_from_provider() {
-    let provider_err = ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "overloaded")
-        .with_status(529);
+    let provider_err =
+        ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "overloaded").with_status(529);
     let err = TronError::from(provider_err);
     assert!(err.to_string().contains("anthropic"));
     assert!(err.is_retryable());
@@ -149,8 +148,8 @@ fn persistence_error_with_query() {
 #[test]
 fn persistence_error_with_source() {
     let cause = std::io::Error::other("sqlite busy");
-    let err = PersistenceError::new("events", PersistenceOperation::Read, "locked")
-        .with_source(cause);
+    let err =
+        PersistenceError::new("events", PersistenceOperation::Read, "locked").with_source(cause);
     assert!(err.source.is_some());
 }
 
@@ -175,8 +174,8 @@ fn provider_error_basic() {
 
 #[test]
 fn provider_error_with_401_status() {
-    let err = ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "unauthorized")
-        .with_status(401);
+    let err =
+        ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "unauthorized").with_status(401);
     assert_eq!(err.category, ErrorCategory::Authentication);
     assert!(!err.retryable);
 }
@@ -190,8 +189,7 @@ fn provider_error_with_429_status() {
 
 #[test]
 fn provider_error_with_500_status() {
-    let err =
-        ProviderError::new(Provider::Google, "gemini-2.0", "internal error").with_status(500);
+    let err = ProviderError::new(Provider::Google, "gemini-2.0", "internal error").with_status(500);
     assert_eq!(err.category, ErrorCategory::Server);
     assert!(err.retryable);
 }
@@ -251,8 +249,8 @@ fn tool_error_basic() {
 
 #[test]
 fn tool_error_with_severity() {
-    let err = ToolError::new("read", "call-2", "file not found")
-        .with_severity(ErrorSeverity::Warning);
+    let err =
+        ToolError::new("read", "call-2", "file not found").with_severity(ErrorSeverity::Warning);
     assert_eq!(err.severity, ErrorSeverity::Warning);
 }
 
@@ -389,8 +387,7 @@ fn tron_error_severity_from_tool() {
 
 #[test]
 fn tron_error_category_from_provider_status() {
-    let provider_err =
-        ProviderError::new(Provider::OpenAi, "gpt-4", "forbidden").with_status(403);
+    let provider_err = ProviderError::new(Provider::OpenAi, "gpt-4", "forbidden").with_status(403);
     let err = TronError::from(provider_err);
     assert_eq!(err.category(), ErrorCategory::Authorization);
 }

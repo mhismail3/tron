@@ -17,16 +17,14 @@ struct Pricing {
 fn pricing(model: &str) -> Option<Pricing> {
     match model {
         // Opus 4.6+ tier ($5/$25 per MTok)
-        "claude-opus-4-7"
-        | "claude-opus-4-6" => Some(Pricing {
+        "claude-opus-4-7" | "claude-opus-4-6" => Some(Pricing {
             input: 5.0,
             output: 25.0,
             cache_read: 0.5,
             cache_write: 6.25,
         }),
         // Legacy Opus tier ($15/$75 per MTok)
-        "claude-opus-4-20250514"
-        | "claude-3-opus-20240229" => Some(Pricing {
+        "claude-opus-4-20250514" | "claude-3-opus-20240229" => Some(Pricing {
             input: 15.0,
             output: 75.0,
             cache_read: 1.5,
@@ -44,8 +42,7 @@ fn pricing(model: &str) -> Option<Pricing> {
             cache_write: 3.75,
         }),
         // Haiku tier ($0.80/$4 per MTok)
-        "claude-haiku-4-5-20251001"
-        | "claude-3-5-haiku-20241022" => Some(Pricing {
+        "claude-haiku-4-5-20251001" | "claude-3-5-haiku-20241022" => Some(Pricing {
             input: 0.80,
             output: 4.0,
             cache_read: 0.08,

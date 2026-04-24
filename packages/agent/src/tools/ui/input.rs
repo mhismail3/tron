@@ -173,12 +173,7 @@ pub async fn key_press(keys: &[String]) -> Result<(), String> {
 }
 
 /// Scroll at a position.
-pub async fn scroll(
-    direction: &str,
-    amount: i32,
-    x: f64,
-    y: f64,
-) -> Result<(), String> {
+pub async fn scroll(direction: &str, amount: i32, x: f64, y: f64) -> Result<(), String> {
     let xi = x as i32;
     let yi = y as i32;
     let dir = direction.to_string();

@@ -2,8 +2,6 @@ use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::Arc;
 
-use parking_lot::RwLock;
-use serde_json::Value;
 use crate::events::types::payloads::skill::{SkillsClearedMode, SkillsClearedPayload};
 use crate::events::{ActivitySummaryLine, EventStore, EventType, MessagePreview};
 use crate::runtime::orchestrator::event_persister::EventPersister;
@@ -11,6 +9,8 @@ use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::orchestrator::session_reconstructor::ReconstructedState;
 use crate::skills::registry::SkillRegistry;
 use crate::skills::types::SkillMetadata;
+use parking_lot::RwLock;
+use serde_json::Value;
 
 use crate::server::rpc::context::run_blocking_task;
 use crate::server::rpc::errors::RpcError;
@@ -224,8 +224,7 @@ pub fn build_user_content_override(
                         mime_type: mime.to_owned(),
                     });
                 } else {
-                    let extracted_text =
-                        crate::core::document_extractor::extract_text(data, mime);
+                    let extracted_text = crate::core::document_extractor::extract_text(data, mime);
                     blocks.push(crate::core::content::UserContent::Document {
                         data: data.to_owned(),
                         mime_type: mime.to_owned(),
@@ -472,9 +471,7 @@ pub fn format_process_results(results: &[(String, Value)]) -> Option<String> {
     }
 
     let mut ctx = String::from("# Completed Background Processes\n\n");
-    ctx.push_str(
-        "The following background process(es) have completed since your last turn.\n\n",
-    );
+    ctx.push_str("The following background process(es) have completed since your last turn.\n\n");
 
     for (_event_id, payload) in results {
         let success = payload
@@ -573,9 +570,18 @@ pub fn get_pending_user_job_actions(
 pub fn format_user_job_actions(actions: &[(String, Value)]) -> String {
     let mut ctx = String::from("# User Job Actions\n\n");
     for (_event_id, action) in actions {
-        let job_id = action.get("jobId").and_then(Value::as_str).unwrap_or("unknown");
-        let action_type = action.get("action").and_then(Value::as_str).unwrap_or("unknown");
-        let label = action.get("label").and_then(Value::as_str).unwrap_or("unknown");
+        let job_id = action
+            .get("jobId")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let action_type = action
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let label = action
+            .get("label")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
         let _ = writeln!(ctx, "- User **{action_type}** job `{label}` ({job_id})");
     }
     ctx
@@ -756,7 +762,8 @@ pub async fn load_prompt_bootstrap(
         let user_job_actions_context = if user_job_actions.is_empty() {
             None
         } else {
-            let event_ids: Vec<String> = user_job_actions.iter().map(|(id, _)| id.clone()).collect();
+            let event_ids: Vec<String> =
+                user_job_actions.iter().map(|(id, _)| id.clone()).collect();
             let formatted = format_user_job_actions(&user_job_actions);
             let _ = event_store.append(&crate::events::AppendOptions {
                 session_id: &session_id,
@@ -994,7 +1001,11 @@ pub async fn load_session_update_data(
             .get_session_activity_summaries(&session_id)
             .unwrap_or_default();
 
-        Ok(Some(SessionUpdateData { session, preview, activity_lines }))
+        Ok(Some(SessionUpdateData {
+            session,
+            preview,
+            activity_lines,
+        }))
     })
     .await
 }
@@ -1135,7 +1146,10 @@ mod skills_cleared_emission_tests {
         // AutoRestore preserves active skills through the boundary, so there's
         // nothing cleared to notify about.
         let events = run_with_policy(CompactionPolicy::AutoRestore).await;
-        assert!(events.is_empty(), "AutoRestore must never emit skills.cleared");
+        assert!(
+            events.is_empty(),
+            "AutoRestore must never emit skills.cleared"
+        );
     }
 
     #[tokio::test]

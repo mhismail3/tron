@@ -642,7 +642,7 @@ mod tests {
             "wsPort": 8082,
             "healthPort": 8083,
             "host": "0.0.0.0",
-            "sessionTimeoutMs": 3600000,
+            "sessionTimeoutMs": 3_600_000,
             "anthropicAccount": "personal",
             "maxSessions": 20,
             "cacheTtl": 7200,

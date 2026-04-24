@@ -466,7 +466,10 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .collect();
 
-        assert!(triggers.is_empty(), "no triggers expected; found: {triggers:?}");
+        assert!(
+            triggers.is_empty(),
+            "no triggers expected; found: {triggers:?}"
+        );
     }
 
     #[test]
@@ -580,7 +583,10 @@ mod tests {
                      NULL, 'ws_1')",
             [],
         );
-        assert!(err.is_err(), "NULL payload + NULL content_blob_id must be rejected");
+        assert!(
+            err.is_err(),
+            "NULL payload + NULL content_blob_id must be rejected"
+        );
     }
 
     #[test]
@@ -670,13 +676,27 @@ mod tests {
         .unwrap();
 
         let (model, latency, stop, thinking, provider, cost): (
-            String, i64, String, i64, String, f64,
+            String,
+            i64,
+            String,
+            i64,
+            String,
+            f64,
         ) = conn
             .query_row(
                 "SELECT model, latency_ms, stop_reason, has_thinking, provider_type, cost
                  FROM events WHERE id = 'evt_1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
             )
             .unwrap();
 
@@ -851,7 +871,11 @@ mod tests {
         )
         .unwrap();
 
-        for (sid, value) in &[("sess_null", "NULL"), ("sess_true", "1"), ("sess_false", "0")] {
+        for (sid, value) in &[
+            ("sess_null", "NULL"),
+            ("sess_true", "1"),
+            ("sess_false", "0"),
+        ] {
             conn.execute(
                 &format!(
                     "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
@@ -865,13 +889,25 @@ mod tests {
         }
 
         let null_val: Option<i64> = conn
-            .query_row("SELECT use_worktree FROM sessions WHERE id = 'sess_null'", [], |r| r.get(0))
+            .query_row(
+                "SELECT use_worktree FROM sessions WHERE id = 'sess_null'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         let true_val: Option<i64> = conn
-            .query_row("SELECT use_worktree FROM sessions WHERE id = 'sess_true'", [], |r| r.get(0))
+            .query_row(
+                "SELECT use_worktree FROM sessions WHERE id = 'sess_true'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         let false_val: Option<i64> = conn
-            .query_row("SELECT use_worktree FROM sessions WHERE id = 'sess_false'", [], |r| r.get(0))
+            .query_row(
+                "SELECT use_worktree FROM sessions WHERE id = 'sess_false'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
 
         assert!(null_val.is_none());
@@ -929,7 +965,10 @@ mod tests {
                      '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', -1)",
             [],
         );
-        assert!(err_neg.is_err(), "use_worktree = -1 must be rejected on INSERT");
+        assert!(
+            err_neg.is_err(),
+            "use_worktree = -1 must be rejected on INSERT"
+        );
     }
 
     #[test]
@@ -961,7 +1000,11 @@ mod tests {
         assert!(err.is_err(), "use_worktree = 99 must be rejected on UPDATE");
 
         let val: Option<i64> = conn
-            .query_row("SELECT use_worktree FROM sessions WHERE id = 's1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT use_worktree FROM sessions WHERE id = 's1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(val, Some(1), "row should retain pre-rejection value");
     }
@@ -1089,9 +1132,11 @@ mod tests {
         .unwrap();
 
         let bundle_id: String = conn
-            .query_row("SELECT bundle_id FROM device_tokens WHERE id = 'dt_1'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT bundle_id FROM device_tokens WHERE id = 'dt_1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(bundle_id, "com.tron.mobile.beta");
     }
@@ -1386,9 +1431,11 @@ mod tests {
         )
         .unwrap();
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM prompt_snippets WHERE name = 'Shared'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM prompt_snippets WHERE name = 'Shared'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 2);
     }

@@ -58,7 +58,10 @@ fn validate_clean_session_returns_no_warnings() {
         "expected no warnings, got: {:?}",
         validation.warnings
     );
-    assert!(validation.events_ready > 0, "events_ready should be non-zero");
+    assert!(
+        validation.events_ready > 0,
+        "events_ready should be non-zero"
+    );
     assert_eq!(validation.records_parsed, validation.lines_total);
     assert_eq!(validation.preview.model, "claude-opus-4-6");
 }

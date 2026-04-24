@@ -43,11 +43,7 @@ impl WorktreeCoordinator {
     /// owned by a live session; check (3) catches the pathological case
     /// of a user running `git checkout session/x` directly in their
     /// primary working tree.
-    async fn preflight_delete_branch(
-        &self,
-        repo_root: &Path,
-        branch: &str,
-    ) -> Result<()> {
+    async fn preflight_delete_branch(&self, repo_root: &Path, branch: &str) -> Result<()> {
         if !branch.starts_with(&self.config.branch_prefix) {
             return Err(WorktreeError::Git(format!(
                 "branch '{branch}' does not match prefix '{}'",
@@ -152,13 +148,7 @@ impl WorktreeCoordinator {
     /// No-ops when the branch doesn't carry a resolvable session id or
     /// when no session row exists for it — the event is an iOS notice,
     /// and there's no timeline to attach to when the session is gone.
-    fn emit_auto_recovered(
-        &self,
-        branch: &str,
-        sha: &str,
-        wt_path: &Path,
-        branch_removed: bool,
-    ) {
+    fn emit_auto_recovered(&self, branch: &str, sha: &str, wt_path: &Path, branch_removed: bool) {
         let Some(session_id) = branch.strip_prefix(&self.config.branch_prefix) else {
             return;
         };
@@ -213,7 +203,11 @@ impl WorktreeCoordinator {
 
         // Count unmerged commits
         let default_branch = self.detect_default_branch(repo_root).await;
-        let unmerged_count = if let Ok(mb) = self.git.merge_base(repo_root, &default_branch, branch).await {
+        let unmerged_count = if let Ok(mb) = self
+            .git
+            .merge_base(repo_root, &default_branch, branch)
+            .await
+        {
             self.git
                 .commit_count_between(repo_root, &mb, branch)
                 .await
@@ -259,7 +253,8 @@ impl WorktreeCoordinator {
                 continue;
             }
 
-            self.remove_worktree_if_present(repo_root, &info.branch).await;
+            self.remove_worktree_if_present(repo_root, &info.branch)
+                .await;
 
             match self.git.branch_delete(repo_root, &info.branch, true).await {
                 Ok(()) => deleted.push(info.branch.clone()),

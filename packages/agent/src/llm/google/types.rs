@@ -702,10 +702,16 @@ impl GeminiModelInfo {
             let _ = map.insert("isPreview".into(), serde_json::json!(true));
         }
         if let Some(ref level) = self.default_thinking_level {
-            let _ = map.insert("thinkingLevel".into(), serde_json::json!(level.to_api_string().to_lowercase()));
+            let _ = map.insert(
+                "thinkingLevel".into(),
+                serde_json::json!(level.to_api_string().to_lowercase()),
+            );
         }
         if !self.supported_thinking_levels.is_empty() {
-            let _ = map.insert("supportedThinkingLevels".into(), serde_json::json!(self.supported_thinking_levels));
+            let _ = map.insert(
+                "supportedThinkingLevels".into(),
+                serde_json::json!(self.supported_thinking_levels),
+            );
         }
         if self.is_deprecated {
             let _ = map.insert("isDeprecated".into(), serde_json::json!(true));
@@ -721,7 +727,10 @@ impl GeminiModelInfo {
 pub fn all_gemini_models_api_json() -> Vec<serde_json::Value> {
     let mut entries: Vec<_> = GEMINI_MODELS.iter().collect();
     entries.sort_by_key(|(_, info)| info.sort_order);
-    entries.into_iter().map(|(id, info)| info.to_api_json(id)).collect()
+    entries
+        .into_iter()
+        .map(|(id, info)| info.to_api_json(id))
+        .collect()
 }
 
 /// Check if a model ID is a Gemini 3 model (uses `thinkingLevel` instead of `thinkingBudget`).
@@ -1128,7 +1137,6 @@ mod tests {
         assert_eq!(json["tokenUrl"], "https://custom.url/token");
         assert_eq!(json["clientId"], "cid");
     }
-
 
     // ── Generation config ────────────────────────────────────────────
 

@@ -15,8 +15,8 @@ use crate::events::sqlite::row_types::SessionRow;
 use crate::events::types::EventType;
 use crate::events::types::base::SessionEvent;
 
-use super::{AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult};
 use super::event_log::append_event_in_tx;
+use super::{AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult};
 
 /// Options for creating a session inside an already-open transaction.
 pub(super) struct CreateSessionInTxOptions<'a> {
@@ -290,8 +290,7 @@ impl EventStore {
                 written += 1;
             }
 
-            let dedup_payload =
-                serde_json::json!({ "action": "add", "tag": opts.dedup_tag });
+            let dedup_payload = serde_json::json!({ "action": "add", "tag": opts.dedup_tag });
             let event = append_event_in_tx(
                 &tx,
                 &session_mut,

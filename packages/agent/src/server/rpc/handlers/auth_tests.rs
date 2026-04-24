@@ -64,8 +64,13 @@ async fn auth_get_empty_returns_all_providers_unconfigured() {
 #[tokio::test]
 async fn auth_get_with_api_key_returns_masked_hint() {
     let (ctx, _dir) = make_ctx_with_temp_auth();
-    save_named_api_key(&ctx.auth_path, "anthropic", "(test)", "sk-ant-api03-abcdefghijklmnop")
-        .unwrap();
+    save_named_api_key(
+        &ctx.auth_path,
+        "anthropic",
+        "(test)",
+        "sk-ant-api03-abcdefghijklmnop",
+    )
+    .unwrap();
 
     let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
     let anthropic = &result["providers"]["anthropic"];
@@ -87,11 +92,18 @@ async fn auth_get_masks_key_correctly_short_key() {
 #[tokio::test]
 async fn auth_get_masks_key_correctly_long_key() {
     let (ctx, _dir) = make_ctx_with_temp_auth();
-    save_named_api_key(&ctx.auth_path, "anthropic", "(test)", "sk-ant-api03-verylongkeyvalue1234")
-        .unwrap();
+    save_named_api_key(
+        &ctx.auth_path,
+        "anthropic",
+        "(test)",
+        "sk-ant-api03-verylongkeyvalue1234",
+    )
+    .unwrap();
 
     let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
-    let hint = result["providers"]["anthropic"]["apiKeyHint"].as_str().unwrap();
+    let hint = result["providers"]["anthropic"]["apiKeyHint"]
+        .as_str()
+        .unwrap();
     assert!(hint.starts_with("sk-ant-"));
     assert!(hint.ends_with("1234"));
 }
@@ -105,7 +117,13 @@ async fn auth_get_shows_oauth_expiry_status() {
         refresh_token: "rt".into(),
         expires_at: future_ms,
     };
-    crate::llm::auth::storage::save_account_oauth_tokens(&ctx.auth_path, "anthropic", "(test)", &tokens).unwrap();
+    crate::llm::auth::storage::save_account_oauth_tokens(
+        &ctx.auth_path,
+        "anthropic",
+        "(test)",
+        &tokens,
+    )
+    .unwrap();
 
     let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
     let anthropic = &result["providers"]["anthropic"];
@@ -121,7 +139,13 @@ async fn auth_get_shows_expired_oauth() {
         refresh_token: "rt".into(),
         expires_at: 0, // already expired
     };
-    crate::llm::auth::storage::save_account_oauth_tokens(&ctx.auth_path, "anthropic", "(test)", &tokens).unwrap();
+    crate::llm::auth::storage::save_account_oauth_tokens(
+        &ctx.auth_path,
+        "anthropic",
+        "(test)",
+        &tokens,
+    )
+    .unwrap();
 
     let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
     assert_eq!(result["providers"]["anthropic"]["isOAuthExpired"], true);
@@ -144,7 +168,9 @@ async fn auth_get_shows_accounts_list() {
     .unwrap();
 
     let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
-    let accounts = result["providers"]["anthropic"]["accounts"].as_array().unwrap();
+    let accounts = result["providers"]["anthropic"]["accounts"]
+        .as_array()
+        .unwrap();
     assert_eq!(accounts.len(), 1);
     assert_eq!(accounts[0]["label"], "moose@macbook");
     assert_eq!(accounts[0]["expiresAt"], 1_700_000_000_000_i64);
@@ -212,7 +238,9 @@ async fn auth_update_sets_api_key() {
         .unwrap();
 
     assert_eq!(result["providers"]["anthropic"]["hasApiKey"], true);
-    let hint = result["providers"]["anthropic"]["apiKeyHint"].as_str().unwrap();
+    let hint = result["providers"]["anthropic"]["apiKeyHint"]
+        .as_str()
+        .unwrap();
     assert!(hint.contains("..."));
 
     // Verify on disk
@@ -318,10 +346,7 @@ async fn auth_update_null_api_key_clears_it() {
 
     // Clear with null
     let result = UpdateAuthHandler
-        .handle(
-            Some(json!({"provider": "anthropic", "apiKey": null})),
-            &ctx,
-        )
+        .handle(Some(json!({"provider": "anthropic", "apiKey": null})), &ctx)
         .await
         .unwrap();
 
@@ -407,7 +432,13 @@ async fn auth_clear_removes_provider() {
     let (ctx, _dir) = make_ctx_with_temp_auth();
 
     // Set up
-    save_named_api_key(&ctx.auth_path, "anthropic", "(test)", "sk-ant-api03-clearme123456789").unwrap();
+    save_named_api_key(
+        &ctx.auth_path,
+        "anthropic",
+        "(test)",
+        "sk-ant-api03-clearme123456789",
+    )
+    .unwrap();
 
     let result = ClearAuthHandler
         .handle(Some(json!({"provider": "anthropic"})), &ctx)
@@ -421,8 +452,20 @@ async fn auth_clear_removes_provider() {
 async fn auth_clear_preserves_other_providers() {
     let (ctx, _dir) = make_ctx_with_temp_auth();
 
-    save_named_api_key(&ctx.auth_path, "anthropic", "(test)", "sk-ant-api03-keep12345678901").unwrap();
-    save_named_api_key(&ctx.auth_path, "openai-codex", "(test)", "sk-proj-remove12345678901").unwrap();
+    save_named_api_key(
+        &ctx.auth_path,
+        "anthropic",
+        "(test)",
+        "sk-ant-api03-keep12345678901",
+    )
+    .unwrap();
+    save_named_api_key(
+        &ctx.auth_path,
+        "openai-codex",
+        "(test)",
+        "sk-proj-remove12345678901",
+    )
+    .unwrap();
 
     let result = ClearAuthHandler
         .handle(Some(json!({"provider": "openai-codex"})), &ctx)
@@ -576,7 +619,10 @@ async fn oauth_begin_auth_url_contains_state() {
         .unwrap();
 
     let url = result["authUrl"].as_str().unwrap();
-    assert!(url.contains("state="), "auth URL must contain state parameter");
+    assert!(
+        url.contains("state="),
+        "auth URL must contain state parameter"
+    );
 }
 
 #[tokio::test]
@@ -605,7 +651,10 @@ async fn oauth_begin_each_call_generates_unique_flow_id() {
         .await
         .unwrap();
 
-    assert_ne!(r1["flowId"].as_str().unwrap(), r2["flowId"].as_str().unwrap());
+    assert_ne!(
+        r1["flowId"].as_str().unwrap(),
+        r2["flowId"].as_str().unwrap()
+    );
 }
 
 #[tokio::test]
@@ -620,7 +669,9 @@ async fn oauth_begin_cleans_up_expired_flows() {
             PendingOAuthFlow {
                 verifier: "v".to_string(),
                 provider: "anthropic".to_string(),
-                created_at: std::time::Instant::now().checked_sub(std::time::Duration::from_secs(700)).unwrap(),
+                created_at: std::time::Instant::now()
+                    .checked_sub(std::time::Duration::from_secs(700))
+                    .unwrap(),
             },
         );
     }
@@ -737,7 +788,9 @@ async fn oauth_complete_expired_flow_returns_error() {
             PendingOAuthFlow {
                 verifier: "v".to_string(),
                 provider: "anthropic".to_string(),
-                created_at: std::time::Instant::now().checked_sub(std::time::Duration::from_secs(700)).unwrap(),
+                created_at: std::time::Instant::now()
+                    .checked_sub(std::time::Duration::from_secs(700))
+                    .unwrap(),
             },
         );
     }
@@ -808,7 +861,10 @@ async fn oauth_begin_openai_auth_url_contains_openai_endpoint() {
         .unwrap();
 
     let url = result["authUrl"].as_str().unwrap();
-    assert!(url.contains("auth.openai.com"), "URL should use OpenAI auth endpoint");
+    assert!(
+        url.contains("auth.openai.com"),
+        "URL should use OpenAI auth endpoint"
+    );
 }
 
 #[tokio::test]
@@ -820,8 +876,14 @@ async fn oauth_begin_openai_auth_url_has_pkce() {
         .unwrap();
 
     let url = result["authUrl"].as_str().unwrap();
-    assert!(url.contains("code_challenge="), "OpenAI should use PKCE code_challenge");
-    assert!(url.contains("code_challenge_method=S256"), "OpenAI should use S256");
+    assert!(
+        url.contains("code_challenge="),
+        "OpenAI should use PKCE code_challenge"
+    );
+    assert!(
+        url.contains("code_challenge_method=S256"),
+        "OpenAI should use S256"
+    );
 }
 
 #[tokio::test]
@@ -833,7 +895,10 @@ async fn oauth_begin_openai_auth_url_contains_state() {
         .unwrap();
 
     let url = result["authUrl"].as_str().unwrap();
-    assert!(url.contains("state="), "OpenAI auth URL must contain state parameter");
+    assert!(
+        url.contains("state="),
+        "OpenAI auth URL must contain state parameter"
+    );
 }
 
 #[tokio::test]
@@ -875,9 +940,15 @@ async fn oauth_begin_anthropic_still_returns_pkce() {
         .unwrap();
 
     let url = result["authUrl"].as_str().unwrap();
-    assert!(url.contains("claude.ai"), "Anthropic URL should use claude.ai");
+    assert!(
+        url.contains("claude.ai"),
+        "Anthropic URL should use claude.ai"
+    );
     assert!(url.contains("code_challenge="), "Anthropic should use PKCE");
-    assert!(url.contains("code_challenge_method=S256"), "Anthropic should use S256");
+    assert!(
+        url.contains("code_challenge_method=S256"),
+        "Anthropic should use S256"
+    );
 }
 
 // ── auth.oauthBegin (Google) ──
@@ -892,7 +963,11 @@ async fn oauth_begin_google_requires_client_id() {
         .unwrap_err();
 
     assert_eq!(err.code(), "INVALID_PARAMS");
-    assert!(err.to_string().contains("client_id"), "error should mention client_id: {}", err);
+    assert!(
+        err.to_string().contains("client_id"),
+        "error should mention client_id: {}",
+        err
+    );
 }
 
 #[tokio::test]
@@ -903,7 +978,11 @@ async fn oauth_begin_google_error_message_mentions_settings() {
         .await
         .unwrap_err();
 
-    assert!(err.to_string().contains("Settings"), "error should guide user to Settings: {}", err);
+    assert!(
+        err.to_string().contains("Settings"),
+        "error should guide user to Settings: {}",
+        err
+    );
 }
 
 #[tokio::test]
@@ -941,7 +1020,10 @@ async fn oauth_begin_google_auth_url_contains_google_endpoint() {
         .unwrap();
 
     let url = result["authUrl"].as_str().unwrap();
-    assert!(url.contains("accounts.google.com"), "URL should use Google auth endpoint");
+    assert!(
+        url.contains("accounts.google.com"),
+        "URL should use Google auth endpoint"
+    );
 }
 
 #[tokio::test]
@@ -959,8 +1041,14 @@ async fn oauth_begin_google_auth_url_has_pkce() {
         .unwrap();
 
     let url = result["authUrl"].as_str().unwrap();
-    assert!(url.contains("code_challenge="), "Google should use PKCE code_challenge");
-    assert!(url.contains("code_challenge_method=S256"), "Google should use S256");
+    assert!(
+        url.contains("code_challenge="),
+        "Google should use PKCE code_challenge"
+    );
+    assert!(
+        url.contains("code_challenge_method=S256"),
+        "Google should use S256"
+    );
 }
 
 #[tokio::test]
@@ -978,7 +1066,10 @@ async fn oauth_begin_google_auth_url_contains_client_id() {
         .unwrap();
 
     let url = result["authUrl"].as_str().unwrap();
-    assert!(url.contains("client_id=test-client-id"), "URL should contain user's client_id");
+    assert!(
+        url.contains("client_id=test-client-id"),
+        "URL should contain user's client_id"
+    );
 }
 
 #[tokio::test]
@@ -999,8 +1090,14 @@ async fn oauth_begin_google_auth_url_contains_required_params() {
     assert!(url.contains("response_type=code"));
     assert!(url.contains("redirect_uri="));
     assert!(url.contains("scope="));
-    assert!(url.contains("access_type=offline"), "Google should request offline access");
-    assert!(url.contains("prompt=consent"), "Google should force consent for refresh token");
+    assert!(
+        url.contains("access_type=offline"),
+        "Google should request offline access"
+    );
+    assert!(
+        url.contains("prompt=consent"),
+        "Google should force consent for refresh token"
+    );
 }
 
 #[tokio::test]
@@ -1018,7 +1115,10 @@ async fn oauth_begin_google_auth_url_has_no_state_param() {
         .unwrap();
 
     let url = result["authUrl"].as_str().unwrap();
-    assert!(!url.contains("state="), "Google OAuth should not include state parameter (PKCE-only)");
+    assert!(
+        !url.contains("state="),
+        "Google OAuth should not include state parameter (PKCE-only)"
+    );
 }
 
 #[tokio::test]
@@ -1059,7 +1159,10 @@ async fn oauth_begin_google_with_client_secret_succeeds() {
     let url = result["authUrl"].as_str().unwrap();
     assert!(!url.is_empty());
     // Client secret should NOT appear in the auth URL (used at token exchange time only)
-    assert!(!url.contains("csec"), "client_secret must not leak into auth URL");
+    assert!(
+        !url.contains("csec"),
+        "client_secret must not leak into auth URL"
+    );
 }
 
 #[tokio::test]
@@ -1105,7 +1208,11 @@ async fn oauth_complete_google_requires_client_id() {
         .await
         .unwrap_err();
 
-    assert!(err.to_string().contains("client_id"), "error should mention client_id: {}", err);
+    assert!(
+        err.to_string().contains("client_id"),
+        "error should mention client_id: {}",
+        err
+    );
 }
 
 // ── auth.setActive ──
@@ -1119,13 +1226,18 @@ async fn auth_set_active_oauth() {
         expires_at: crate::llm::auth::types::now_ms() + 3_600_000,
     };
     crate::llm::auth::storage::save_account_oauth_tokens(
-        &ctx.auth_path, "anthropic", "main", &tokens,
+        &ctx.auth_path,
+        "anthropic",
+        "main",
+        &tokens,
     )
     .unwrap();
 
     let result = SetActiveCredentialHandler
         .handle(
-            Some(json!({"provider": "anthropic", "credential": {"type": "oauth", "label": "main"}})),
+            Some(
+                json!({"provider": "anthropic", "credential": {"type": "oauth", "label": "main"}}),
+            ),
             &ctx,
         )
         .await
@@ -1144,14 +1256,14 @@ async fn auth_set_active_oauth() {
 #[tokio::test]
 async fn auth_set_active_api_key() {
     let (ctx, _dir) = make_ctx_with_temp_auth();
-    crate::llm::auth::storage::save_named_api_key(
-        &ctx.auth_path, "anthropic", "work", "sk-123",
-    )
-    .unwrap();
+    crate::llm::auth::storage::save_named_api_key(&ctx.auth_path, "anthropic", "work", "sk-123")
+        .unwrap();
 
     let result = SetActiveCredentialHandler
         .handle(
-            Some(json!({"provider": "anthropic", "credential": {"type": "apiKey", "label": "work"}})),
+            Some(
+                json!({"provider": "anthropic", "credential": {"type": "apiKey", "label": "work"}}),
+            ),
             &ctx,
         )
         .await
@@ -1168,7 +1280,9 @@ async fn auth_set_active_nonexistent_errors() {
     let (ctx, _dir) = make_ctx_with_temp_auth();
     let err = SetActiveCredentialHandler
         .handle(
-            Some(json!({"provider": "anthropic", "credential": {"type": "oauth", "label": "nope"}})),
+            Some(
+                json!({"provider": "anthropic", "credential": {"type": "oauth", "label": "nope"}}),
+            ),
             &ctx,
         )
         .await
@@ -1188,7 +1302,10 @@ async fn auth_remove_account() {
         expires_at: crate::llm::auth::types::now_ms() + 3_600_000,
     };
     crate::llm::auth::storage::save_account_oauth_tokens(
-        &ctx.auth_path, "anthropic", "del-me", &tokens,
+        &ctx.auth_path,
+        "anthropic",
+        "del-me",
+        &tokens,
     )
     .unwrap();
 
@@ -1200,7 +1317,9 @@ async fn auth_remove_account() {
         .await
         .unwrap();
 
-    let accounts = result["providers"]["anthropic"]["accounts"].as_array().unwrap();
+    let accounts = result["providers"]["anthropic"]["accounts"]
+        .as_array()
+        .unwrap();
     assert!(accounts.is_empty());
 }
 
@@ -1213,13 +1332,18 @@ async fn auth_remove_account_clears_active() {
         expires_at: crate::llm::auth::types::now_ms() + 3_600_000,
     };
     crate::llm::auth::storage::save_account_oauth_tokens(
-        &ctx.auth_path, "anthropic", "active-one", &tokens,
+        &ctx.auth_path,
+        "anthropic",
+        "active-one",
+        &tokens,
     )
     .unwrap();
     crate::llm::auth::storage::set_active_credential(
         &ctx.auth_path,
         "anthropic",
-        &ActiveCredential::OAuth { label: "active-one".into() },
+        &ActiveCredential::OAuth {
+            label: "active-one".into(),
+        },
     )
     .unwrap();
 
@@ -1239,10 +1363,8 @@ async fn auth_remove_account_clears_active() {
 #[tokio::test]
 async fn auth_remove_api_key() {
     let (ctx, _dir) = make_ctx_with_temp_auth();
-    crate::llm::auth::storage::save_named_api_key(
-        &ctx.auth_path, "anthropic", "del-me", "sk-123",
-    )
-    .unwrap();
+    crate::llm::auth::storage::save_named_api_key(&ctx.auth_path, "anthropic", "del-me", "sk-123")
+        .unwrap();
 
     let result = RemoveApiKeyHandler
         .handle(
@@ -1252,7 +1374,9 @@ async fn auth_remove_api_key() {
         .await
         .unwrap();
 
-    let api_keys = result["providers"]["anthropic"]["apiKeys"].as_array().unwrap();
+    let api_keys = result["providers"]["anthropic"]["apiKeys"]
+        .as_array()
+        .unwrap();
     assert!(api_keys.is_empty());
 }
 
@@ -1262,19 +1386,26 @@ async fn auth_remove_api_key() {
 async fn auth_get_returns_api_keys_and_active_credential() {
     let (ctx, _dir) = make_ctx_with_temp_auth();
     crate::llm::auth::storage::save_named_api_key(
-        &ctx.auth_path, "anthropic", "work", "sk-ant-api03-workkey123456789",
+        &ctx.auth_path,
+        "anthropic",
+        "work",
+        "sk-ant-api03-workkey123456789",
     )
     .unwrap();
     crate::llm::auth::storage::set_active_credential(
         &ctx.auth_path,
         "anthropic",
-        &ActiveCredential::ApiKey { label: "work".into() },
+        &ActiveCredential::ApiKey {
+            label: "work".into(),
+        },
     )
     .unwrap();
 
     let result = GetAuthHandler.handle(None, &ctx).await.unwrap();
 
-    let api_keys = result["providers"]["anthropic"]["apiKeys"].as_array().unwrap();
+    let api_keys = result["providers"]["anthropic"]["apiKeys"]
+        .as_array()
+        .unwrap();
     assert_eq!(api_keys.len(), 1);
     assert_eq!(api_keys[0]["label"], "work");
     assert!(api_keys[0]["keyHint"].as_str().unwrap().contains("..."));
@@ -1302,7 +1433,9 @@ async fn auth_update_with_api_key_label_creates_named_key() {
         .await
         .unwrap();
 
-    let api_keys = result["providers"]["anthropic"]["apiKeys"].as_array().unwrap();
+    let api_keys = result["providers"]["anthropic"]["apiKeys"]
+        .as_array()
+        .unwrap();
     assert_eq!(api_keys.len(), 1);
     assert_eq!(api_keys[0]["label"], "work");
 }

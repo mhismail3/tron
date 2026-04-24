@@ -150,7 +150,9 @@ pub fn validate_job(job: &CronJob) -> Result<(), CronError> {
                 )));
             }
             if *timeout_secs == 0 {
-                return Err(CronError::Validation("webhook timeout must be >= 1s".into()));
+                return Err(CronError::Validation(
+                    "webhook timeout must be >= 1s".into(),
+                ));
             }
             if *timeout_secs > 300 {
                 return Err(CronError::Validation("webhook timeout max is 300s".into()));

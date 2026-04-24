@@ -6,8 +6,6 @@
 //! their own file (instead of an inline `#[cfg(test)] mod` in `mod.rs`)
 //! lets the dispatch table file stay focused on registry wiring.
 
-#![cfg(test)]
-
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;

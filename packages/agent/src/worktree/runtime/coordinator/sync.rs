@@ -20,8 +20,8 @@ use crate::worktree::errors::{Result, WorktreeError};
 use crate::worktree::sync::{self as scm_sync, resolve_default_branch};
 use crate::worktree::types::SyncOutcome;
 
-use super::repo_lock::LockedOp;
 use super::WorktreeCoordinator;
+use super::repo_lock::LockedOp;
 
 impl WorktreeCoordinator {
     /// Sync a session's repo-level `main` from its upstream.
@@ -138,6 +138,8 @@ impl WorktreeCoordinator {
         {
             return Ok(PathBuf::from(root));
         }
-        Err(WorktreeError::NotFound { session_id: session_id.to_string() })
+        Err(WorktreeError::NotFound {
+            session_id: session_id.to_string(),
+        })
     }
 }

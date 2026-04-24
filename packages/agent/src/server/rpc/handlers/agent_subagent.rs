@@ -7,12 +7,12 @@ use tracing::instrument;
 
 use crate::events::EventType;
 use crate::server::rpc::context::RpcContext;
+use crate::server::rpc::errors;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::agent::prompt_runtime::{
     format_subagent_results, get_pending_subagent_results,
 };
-use crate::server::rpc::handlers::agent::prompt_service::{spawn_prompt_run, PromptRequest};
-use crate::server::rpc::errors;
+use crate::server::rpc::handlers::agent::prompt_service::{PromptRequest, spawn_prompt_run};
 use crate::server::rpc::handlers::require_string_param;
 use crate::server::rpc::registry::MethodHandler;
 
@@ -24,7 +24,10 @@ pub struct DeliverSubagentResultsHandler;
 
 #[async_trait]
 impl MethodHandler for DeliverSubagentResultsHandler {
-    #[instrument(skip(self, ctx), fields(method = "agent.deliverSubagentResults", session_id))]
+    #[instrument(
+        skip(self, ctx),
+        fields(method = "agent.deliverSubagentResults", session_id)
+    )]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
@@ -59,11 +62,10 @@ impl MethodHandler for DeliverSubagentResultsHandler {
 
                 let count = pending.len();
                 let event_ids: Vec<String> = pending.iter().map(|(id, _)| id.clone()).collect();
-                let formatted = format_subagent_results(&pending).ok_or_else(|| {
-                    RpcError::Internal {
+                let formatted =
+                    format_subagent_results(&pending).ok_or_else(|| RpcError::Internal {
                         message: "Failed to format subagent results".into(),
-                    }
-                })?;
+                    })?;
 
                 // Mark results as consumed
                 let _ = event_store.append(&crate::events::AppendOptions {
@@ -121,18 +123,19 @@ impl MethodHandler for DeliverSubagentResultsHandler {
         // Session is busy or agent deps not available — queue the formatted prompt
         let event_store = ctx.event_store.clone();
         let sid_for_queue = session_id.clone();
-        let _ = ctx.run_blocking("agent.deliverSubagentResults.queue", move || {
-            crate::server::rpc::prompt_queue::PromptQueueService::enqueue_with_metadata(
-                &event_store,
-                &sid_for_queue,
-                &prompt,
-                Some(metadata),
-            )
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
+        let _ = ctx
+            .run_blocking("agent.deliverSubagentResults.queue", move || {
+                crate::server::rpc::prompt_queue::PromptQueueService::enqueue_with_metadata(
+                    &event_store,
+                    &sid_for_queue,
+                    &prompt,
+                    Some(metadata),
+                )
+                .map_err(|e| RpcError::Internal {
+                    message: e.to_string(),
+                })
             })
-        })
-        .await?;
+            .await?;
 
         Ok(serde_json::json!({
             "acknowledged": true,
@@ -159,7 +162,10 @@ mod tests {
     }
 
     fn create_test_session(ctx: &RpcContext) -> String {
-        let result = ctx.event_store.create_session("m", "/tmp", None, None, None, None).unwrap();
+        let result = ctx
+            .event_store
+            .create_session("m", "/tmp", None, None, None, None)
+            .unwrap();
         result.session.id
     }
 

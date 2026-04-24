@@ -87,7 +87,10 @@ async fn persist_delivery_status_with_retry(
                         error = %e,
                         "delivery status update transient error; retrying"
                     );
-                    tokio::time::sleep(std::time::Duration::from_millis(BACKOFF_MS * u64::from(attempt))).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        BACKOFF_MS * u64::from(attempt),
+                    ))
+                    .await;
                 }
             }
         }
@@ -213,14 +216,19 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::cron::executor::PushNotifier for MockPushNotifier {
-        async fn notify(&self, _title: &str, _body: &str) -> Result<(), crate::cron::errors::CronError> {
+        async fn notify(
+            &self,
+            _title: &str,
+            _body: &str,
+        ) -> Result<(), crate::cron::errors::CronError> {
             self.called.store(true, Ordering::SeqCst);
             Ok(())
         }
     }
 
     fn make_deps_with_notifier(notifier: Arc<MockPushNotifier>) -> ExecutorDeps {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -284,7 +292,8 @@ mod tests {
     }
 
     fn make_deps() -> ExecutorDeps {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();

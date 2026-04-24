@@ -649,7 +649,6 @@ impl ConflictResolution {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -86,8 +86,6 @@ pub fn create_stream_state() -> StreamState {
     create_stream_state_for(crate::core::messages::Provider::Anthropic)
 }
 
-
-
 /// Process a single Anthropic SSE event and return zero or more [`StreamEvent`]s.
 ///
 /// Call this for each SSE event received. The state is mutated to track
@@ -136,33 +134,31 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
             }
         },
 
-        AnthropicSseEvent::ContentBlockDelta { delta, .. } => {
-            match delta {
-                SseDelta::TextDelta { text } => {
-                    state.acc.accumulate_text(text);
-                    vec![StreamEvent::TextDelta {
-                        delta: text.clone(),
-                    }]
-                }
-                SseDelta::ThinkingDelta { thinking } => {
-                    state.acc.accumulate_thinking(thinking);
-                    vec![StreamEvent::ThinkingDelta {
-                        delta: thinking.clone(),
-                    }]
-                }
-                SseDelta::SignatureDelta { signature } => {
-                    state.acc.accumulate_signature(signature);
+        AnthropicSseEvent::ContentBlockDelta { delta, .. } => match delta {
+            SseDelta::TextDelta { text } => {
+                state.acc.accumulate_text(text);
+                vec![StreamEvent::TextDelta {
+                    delta: text.clone(),
+                }]
+            }
+            SseDelta::ThinkingDelta { thinking } => {
+                state.acc.accumulate_thinking(thinking);
+                vec![StreamEvent::ThinkingDelta {
+                    delta: thinking.clone(),
+                }]
+            }
+            SseDelta::SignatureDelta { signature } => {
+                state.acc.accumulate_signature(signature);
+                vec![]
+            }
+            SseDelta::InputJsonDelta { partial_json } => {
+                if let Some(ref id) = state.current_tool_call_id {
+                    state.acc.append_tool_args(id, partial_json)
+                } else {
                     vec![]
                 }
-                SseDelta::InputJsonDelta { partial_json } => {
-                    if let Some(ref id) = state.current_tool_call_id {
-                        state.acc.append_tool_args(id, partial_json)
-                    } else {
-                        vec![]
-                    }
-                }
             }
-        }
+        },
 
         AnthropicSseEvent::ContentBlockStop { .. } => handle_content_block_stop(state),
 
@@ -321,7 +317,10 @@ mod tests {
     #[test]
     fn stream_state_for_minimax() {
         let state = create_stream_state_for(crate::core::messages::Provider::MiniMax);
-        assert_eq!(state.provider_type, crate::core::messages::Provider::MiniMax);
+        assert_eq!(
+            state.provider_type,
+            crate::core::messages::Provider::MiniMax
+        );
     }
 
     #[test]
@@ -522,7 +521,9 @@ mod tests {
         let mut state = create_stream_state();
         state.current_block_type = Some(BlockType::ToolUse);
         state.current_tool_call_id = Some("toolu_01abc".into());
-        let _ = state.acc.start_tool_call("toolu_01abc".into(), "bash".into());
+        let _ = state
+            .acc
+            .start_tool_call("toolu_01abc".into(), "bash".into());
         let event = AnthropicSseEvent::ContentBlockDelta {
             index: 1,
             delta: SseDelta::InputJsonDelta {
@@ -607,7 +608,9 @@ mod tests {
         let mut state = create_stream_state();
         state.current_block_type = Some(BlockType::ToolUse);
         state.current_tool_call_id = Some("toolu_01abc".into());
-        let _ = state.acc.start_tool_call("toolu_01abc".into(), "bash".into());
+        let _ = state
+            .acc
+            .start_tool_call("toolu_01abc".into(), "bash".into());
         let _ = state.acc.append_tool_args("toolu_01abc", r#"{"cmd":"ls"}"#);
         let event = AnthropicSseEvent::ContentBlockStop { index: 1 };
         let events = process_sse_event(&event, &mut state);
@@ -629,7 +632,9 @@ mod tests {
         let mut state = create_stream_state();
         state.current_block_type = Some(BlockType::ToolUse);
         state.current_tool_call_id = Some("toolu_01abc".into());
-        let _ = state.acc.start_tool_call("toolu_01abc".into(), "bash".into());
+        let _ = state
+            .acc
+            .start_tool_call("toolu_01abc".into(), "bash".into());
         // Empty args
         let event = AnthropicSseEvent::ContentBlockStop { index: 0 };
         let events = process_sse_event(&event, &mut state);

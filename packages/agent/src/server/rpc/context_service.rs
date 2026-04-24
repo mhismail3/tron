@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use parking_lot::RwLock;
 use crate::core::tools::Tool;
 use crate::events::sqlite::contention::{self, BusyRetryPolicy};
 use crate::runtime::context::context_manager::ContextManager;
@@ -9,6 +8,7 @@ use crate::runtime::context::summarizer::{KeywordSummarizer, Summarizer};
 use crate::runtime::context::types::{CompactionConfig, ContextManagerConfig};
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::skills::registry::SkillRegistry;
+use parking_lot::RwLock;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
@@ -63,9 +63,11 @@ pub(crate) fn build_context_manager_for_session(
         system_prompt: if is_chat {
             Some(crate::runtime::context::system_prompts::TRON_CHAT_PROMPT.to_string())
         } else {
-            crate::runtime::context::system_prompts::load_system_prompt_from_file(&session.working_directory)
-                .or_else(crate::runtime::context::system_prompts::load_global_system_prompt)
-                .map(|loaded| loaded.content)
+            crate::runtime::context::system_prompts::load_system_prompt_from_file(
+                &session.working_directory,
+            )
+            .or_else(crate::runtime::context::system_prompts::load_global_system_prompt)
+            .map(|loaded| loaded.content)
         },
         working_directory: state.working_directory.clone(),
         tools: tool_definitions,

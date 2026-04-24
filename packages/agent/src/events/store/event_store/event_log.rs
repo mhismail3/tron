@@ -7,10 +7,10 @@ use uuid::Uuid;
 use crate::events::errors::{EventStoreError, Result};
 use crate::events::sqlite::repositories::branch::BranchRepo;
 use crate::events::sqlite::repositories::event::{EventRepo, ListEventsOptions};
-use crate::events::types::TokenTotals;
 use crate::events::sqlite::repositories::session::{IncrementCounters, SessionRepo};
 use crate::events::sqlite::row_types::{EventRow, SessionRow};
 use crate::events::types::EventType;
+use crate::events::types::TokenTotals;
 use crate::events::types::base::SessionEvent;
 
 use super::{AppendOptions, EventStore};
@@ -109,8 +109,7 @@ pub(super) fn append_event_in_tx(
             counters.input_tokens = tu.get("inputTokens").and_then(Value::as_i64);
             counters.output_tokens = tu.get("outputTokens").and_then(Value::as_i64);
             counters.cache_read_tokens = tu.get("cacheReadTokens").and_then(Value::as_i64);
-            counters.cache_creation_tokens =
-                tu.get("cacheCreationTokens").and_then(Value::as_i64);
+            counters.cache_creation_tokens = tu.get("cacheCreationTokens").and_then(Value::as_i64);
         }
         if let Some(cost) = opts.payload.get("cost").and_then(Value::as_f64) {
             counters.cost = Some(cost);
@@ -170,8 +169,7 @@ impl EventStore {
         let event = append_event_in_tx(&tx, &session, opts)?;
         tx.commit()?;
 
-        EventRepo::get_by_id(&conn, &event.id)?
-            .ok_or(EventStoreError::EventNotFound(event.id))
+        EventRepo::get_by_id(&conn, &event.id)?.ok_or(EventStoreError::EventNotFound(event.id))
     }
 
     /// Delete a message by appending a `message.deleted` event.
@@ -275,11 +273,7 @@ impl EventStore {
     }
 
     /// Get the most recent N events for a session, in sequence ASC order.
-    pub fn get_latest_events(
-        &self,
-        session_id: &str,
-        limit: Option<i64>,
-    ) -> Result<Vec<EventRow>> {
+    pub fn get_latest_events(&self, session_id: &str, limit: Option<i64>) -> Result<Vec<EventRow>> {
         let conn = self.conn()?;
         EventRepo::get_latest_events(&conn, session_id, limit)
     }

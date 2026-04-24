@@ -64,9 +64,7 @@ fn mask_key(key: &str) -> String {
         .find('-')
         .map_or(4, |i| {
             // Find second dash for "sk-ant-..." style keys
-            key[i + 1..]
-                .find('-')
-                .map_or(i + 1, |j| i + 1 + j + 1)
+            key[i + 1..].find('-').map_or(i + 1, |j| i + 1 + j + 1)
         })
         .min(10);
     let suffix_start = key.len().saturating_sub(4);
@@ -109,8 +107,8 @@ fn build_provider_info(pa: &ProviderAuth) -> serde_json::Map<String, Value> {
     let _ = info.insert("apiKeys".into(), json!(api_keys));
 
     // Effective active credential: explicit selection, or fallback to first available
-    let effective_active = crate::llm::auth::resolve_credential(pa, None).map(|resolved| {
-        match resolved {
+    let effective_active =
+        crate::llm::auth::resolve_credential(pa, None).map(|resolved| match resolved {
             crate::llm::auth::ResolvedCredential::OAuthAccount(acct) => {
                 crate::llm::auth::ActiveCredential::OAuth {
                     label: acct.label.clone(),
@@ -121,8 +119,7 @@ fn build_provider_info(pa: &ProviderAuth) -> serde_json::Map<String, Value> {
                     label: key.label.clone(),
                 }
             }
-        }
-    });
+        });
     if let Some(active) = effective_active {
         let _ = info.insert(
             "activeCredential".into(),
@@ -174,9 +171,7 @@ fn build_masked_state(auth_path: &Path) -> Result<Value, crate::llm::auth::error
 
             let _ = providers.insert(provider.to_string(), Value::Object(info));
         } else {
-            let pa = storage
-                .as_ref()
-                .and_then(|s| s.get_provider_auth(provider));
+            let pa = storage.as_ref().and_then(|s| s.get_provider_auth(provider));
 
             let info = if let Some(ref pa) = pa {
                 let mut info = build_provider_info(pa);
@@ -184,8 +179,10 @@ fn build_masked_state(auth_path: &Path) -> Result<Value, crate::llm::auth::error
                 // Top-level OAuth expiry from first account — used by iOS to show
                 // quick expiry status without expanding the accounts list
                 if let Some(first_acct) = pa.accounts.as_ref().and_then(|a| a.first()) {
-                    let _ = info.insert("oauthExpiresAt".into(), json!(first_acct.oauth.expires_at));
-                    let is_expired = crate::llm::auth::types::now_ms() >= first_acct.oauth.expires_at;
+                    let _ =
+                        info.insert("oauthExpiresAt".into(), json!(first_acct.oauth.expires_at));
+                    let is_expired =
+                        crate::llm::auth::types::now_ms() >= first_acct.oauth.expires_at;
                     let _ = info.insert("isOAuthExpired".into(), json!(is_expired));
                 }
 
@@ -206,16 +203,17 @@ fn build_masked_state(auth_path: &Path) -> Result<Value, crate::llm::auth::error
     // Services
     let mut services = serde_json::Map::new();
     for &service in KNOWN_SERVICES {
-        let svc = storage
-            .as_ref()
-            .and_then(|s| s.get_service_auth(service));
+        let svc = storage.as_ref().and_then(|s| s.get_service_auth(service));
 
         let mut info = serde_json::Map::new();
         if let Some(svc) = svc {
             // INVARIANT: svc.api_keys is non-empty (enforced by ServiceAuth
             // deserializer — empty arrays and single-field legacy shapes
             // are rejected at auth.json load time).
-            let first = svc.api_keys.first().expect("ServiceAuth.api_keys non-empty invariant");
+            let first = svc
+                .api_keys
+                .first()
+                .expect("ServiceAuth.api_keys non-empty invariant");
             let _ = info.insert("hasApiKey".into(), json!(true));
             let _ = info.insert("apiKeyHint".into(), json!(mask_key(first)));
         } else {
@@ -238,8 +236,7 @@ fn build_accounts_list(pa: &ProviderAuth) -> Vec<Value> {
             accts
                 .iter()
                 .map(|a| {
-                    let is_expired =
-                        crate::llm::auth::types::now_ms() >= a.oauth.expires_at;
+                    let is_expired = crate::llm::auth::types::now_ms() >= a.oauth.expires_at;
                     json!({
                         "label": a.label,
                         "expiresAt": a.oauth.expires_at,

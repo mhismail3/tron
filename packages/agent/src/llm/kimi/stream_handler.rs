@@ -304,8 +304,8 @@ fn finalize_open_blocks(state: &mut KimiStreamState, events: &mut Vec<StreamEven
     // End any open tool calls
     for slot in &mut state.active_tools {
         if let Some(active) = slot.take() {
-            let arguments: Map<String, Value> = serde_json::from_str(&active.arguments)
-                .unwrap_or_default();
+            let arguments: Map<String, Value> =
+                serde_json::from_str(&active.arguments).unwrap_or_default();
             state.content_blocks.push(AssistantContent::ToolUse {
                 id: active.id.clone(),
                 name: active.name.clone(),
@@ -321,7 +321,10 @@ fn finalize_open_blocks(state: &mut KimiStreamState, events: &mut Vec<StreamEven
 
 /// Emit the Done event.
 fn emit_done(state: &mut KimiStreamState, events: &mut Vec<StreamEvent>) {
-    let stop_reason = state.stop_reason.take().unwrap_or_else(|| "end_turn".into());
+    let stop_reason = state
+        .stop_reason
+        .take()
+        .unwrap_or_else(|| "end_turn".into());
     let usage = state.usage.take();
     let content = std::mem::take(&mut state.content_blocks);
 
@@ -538,7 +541,9 @@ mod tests {
             }),
         };
         let events = process_chunk(&chunk, &mut state);
-        let done = events.iter().find(|e| matches!(e, StreamEvent::Done { .. }));
+        let done = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }));
         assert!(done.is_some());
         if let StreamEvent::Done { stop_reason, .. } = done.unwrap() {
             assert_eq!(stop_reason, "end_turn");
@@ -557,7 +562,9 @@ mod tests {
             },
             &mut state,
         );
-        let done = events.iter().find(|e| matches!(e, StreamEvent::Done { .. }));
+        let done = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }));
         assert!(done.is_some());
     }
 
@@ -567,7 +574,11 @@ mod tests {
         let _ = process_chunk(&text_chunk("hi"), &mut state);
         let events = process_chunk(&finish_chunk("length"), &mut state);
         // TextEnd should be emitted before finish processing
-        assert!(events.iter().any(|e| matches!(e, StreamEvent::TextEnd { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, StreamEvent::TextEnd { .. }))
+        );
     }
 
     #[test]
@@ -589,7 +600,10 @@ mod tests {
             }),
         };
         let events = process_chunk(&chunk, &mut state);
-        if let Some(StreamEvent::Done { message, .. }) = events.iter().find(|e| matches!(e, StreamEvent::Done { .. })) {
+        if let Some(StreamEvent::Done { message, .. }) = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }))
+        {
             let usage = message.token_usage.as_ref().unwrap();
             assert_eq!(usage.input_tokens, 500);
             assert_eq!(usage.output_tokens, 200);
@@ -746,12 +760,18 @@ mod tests {
         // Finish reason in one chunk
         let events1 = process_chunk(&finish_chunk("stop"), &mut state);
         // TextEnd should be emitted
-        assert!(events1.iter().any(|e| matches!(e, StreamEvent::TextEnd { .. })));
+        assert!(
+            events1
+                .iter()
+                .any(|e| matches!(e, StreamEvent::TextEnd { .. }))
+        );
         // No Done yet (no usage)
 
         // Usage in separate chunk
         let events2 = process_chunk(&usage_chunk(100, 50), &mut state);
-        let done = events2.iter().find(|e| matches!(e, StreamEvent::Done { .. }));
+        let done = events2
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }));
         assert!(done.is_some());
     }
 

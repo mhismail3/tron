@@ -2,9 +2,9 @@
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
+use crate::core::events::TronEvent;
 use tokio::sync::broadcast;
 use tracing::trace;
-use crate::core::events::TronEvent;
 
 /// Default broadcast channel capacity.
 const DEFAULT_CAPACITY: usize = 1024;

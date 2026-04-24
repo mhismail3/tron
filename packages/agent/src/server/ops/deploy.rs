@@ -752,9 +752,14 @@ pub fn codesign_binary(path: &Path) {
         // Try full signing with hardened runtime + entitlements (matches
         // the shell-script codesign_bundle() tier 1 path).
         let mut args: Vec<&str> = vec![
-            "--force", "--deep", "--sign", identity,
-            "--identifier", bundle_id,
-            "--options", "runtime",
+            "--force",
+            "--deep",
+            "--sign",
+            identity,
+            "--identifier",
+            bundle_id,
+            "--options",
+            "runtime",
         ];
         let entitlements_str;
         if let Some(ref ent) = entitlements_path {
@@ -783,8 +788,12 @@ pub fn codesign_binary(path: &Path) {
     // Fallback: ad-hoc signing
     match std::process::Command::new("codesign")
         .args([
-            "--force", "--deep", "--sign", "-",
-            "--identifier", bundle_id,
+            "--force",
+            "--deep",
+            "--sign",
+            "-",
+            "--identifier",
+            bundle_id,
             &bundle_str,
         ])
         .output()
@@ -820,7 +829,6 @@ pub async fn restart_handler(
         .map(Json)
         .map_err(Into::into)
 }
-
 
 #[cfg(test)]
 #[path = "deploy_tests.rs"]

@@ -92,8 +92,8 @@ impl StreamingJournal {
             t: delta_type.to_string(),
             c: content.to_string(),
         };
-        let mut line = serde_json::to_string(&entry)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut line =
+            serde_json::to_string(&entry).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         line.push('\n');
         self.file.write_all(line.as_bytes())?;
         self.file.flush()?;
@@ -193,7 +193,12 @@ impl StreamingJournal {
                     }
                 }
                 other => {
-                    trace!(session_id, turn, delta_type = other, "unknown journal delta type, skipping");
+                    trace!(
+                        session_id,
+                        turn,
+                        delta_type = other,
+                        "unknown journal delta type, skipping"
+                    );
                 }
             }
             recovered_lines += 1;
@@ -258,7 +263,10 @@ impl StreamingJournal {
         }
 
         if !results.is_empty() {
-            debug!(count = results.len(), "found incomplete journals for recovery");
+            debug!(
+                count = results.len(),
+                "found incomplete journals for recovery"
+            );
         }
 
         Ok(results)
@@ -428,7 +436,11 @@ mod tests {
         writeln!(f, r#"{{"t":"text","c":"Hello "}}"#).unwrap();
         writeln!(f, r#"{{"t":"text","c":"world"}}"#).unwrap();
         writeln!(f, r#"{{"t":"thinking","c":"I should greet"}}"#).unwrap();
-        writeln!(f, r#"{{"t":"tool_use","c":"{{\"name\":\"bash\",\"id\":\"tc1\"}}"}}"#).unwrap();
+        writeln!(
+            f,
+            r#"{{"t":"tool_use","c":"{{\"name\":\"bash\",\"id\":\"tc1\"}}"}}"#
+        )
+        .unwrap();
         drop(f);
 
         // load_recovery uses canonical paths — test the parsing logic directly
@@ -440,7 +452,9 @@ mod tests {
 
         for line_result in reader.lines() {
             let line = line_result.unwrap();
-            if line.is_empty() { continue; }
+            if line.is_empty() {
+                continue;
+            }
             let entry: JournalEntry = serde_json::from_str(&line).unwrap();
             match entry.t.as_str() {
                 "text" => text.push_str(&entry.c),
@@ -518,7 +532,9 @@ mod tests {
                 Ok(l) => l,
                 Err(_) => break, // partial line
             };
-            if line.is_empty() { continue; }
+            if line.is_empty() {
+                continue;
+            }
             if let Ok(entry) = serde_json::from_str::<JournalEntry>(&line) {
                 if entry.t == "text" {
                     text.push_str(&entry.c);
@@ -551,8 +567,15 @@ mod tests {
         for session_entry in fs::read_dir(journals_dir).unwrap() {
             let session_entry = session_entry.unwrap();
             let session_path = session_entry.path();
-            if !session_path.is_dir() { continue; }
-            let session_id = session_path.file_name().unwrap().to_str().unwrap().to_string();
+            if !session_path.is_dir() {
+                continue;
+            }
+            let session_id = session_path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
             for wal_entry in fs::read_dir(&session_path).unwrap() {
                 let wal_entry = wal_entry.unwrap();
                 let wal_name = wal_entry.file_name().into_string().unwrap();
@@ -644,7 +667,12 @@ mod tests {
         // Verify the structure: .../journals/my-session-id/turn_5.wal
         assert_eq!(path.file_name().unwrap().to_str().unwrap(), "turn_5.wal");
         assert_eq!(
-            path.parent().unwrap().file_name().unwrap().to_str().unwrap(),
+            path.parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap(),
             "my-session-id"
         );
     }
@@ -654,7 +682,10 @@ mod tests {
     #[test]
     fn test_parse_wal_filename() {
         assert_eq!(StreamingJournal::parse_wal_filename("turn_1.wal"), Some(1));
-        assert_eq!(StreamingJournal::parse_wal_filename("turn_42.wal"), Some(42));
+        assert_eq!(
+            StreamingJournal::parse_wal_filename("turn_42.wal"),
+            Some(42)
+        );
         assert_eq!(StreamingJournal::parse_wal_filename("turn_0.wal"), Some(0));
         assert_eq!(StreamingJournal::parse_wal_filename("not_a_wal.txt"), None);
         assert_eq!(StreamingJournal::parse_wal_filename("turn_.wal"), None);

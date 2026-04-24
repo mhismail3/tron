@@ -28,7 +28,9 @@ impl MethodHandler for OAuthBeginHandler {
                 let config = crate::llm::auth::anthropic::default_config();
                 // Use verifier as state (matches tron login CLI behavior)
                 let url = crate::llm::auth::anthropic::get_authorization_url_with_state(
-                    &config, &pair.challenge, Some(&pair.verifier),
+                    &config,
+                    &pair.challenge,
+                    Some(&pair.verifier),
                 );
                 (url, pair.verifier)
             }
@@ -36,7 +38,9 @@ impl MethodHandler for OAuthBeginHandler {
                 let pair = crate::llm::auth::pkce::generate_pkce();
                 let config = crate::llm::auth::openai::default_config();
                 let url = crate::llm::auth::openai::get_authorization_url_with_state(
-                    &config, &pair.challenge, Some(&pair.verifier),
+                    &config,
+                    &pair.challenge,
+                    Some(&pair.verifier),
                 );
                 (url, pair.verifier)
             }
@@ -131,26 +135,29 @@ impl MethodHandler for OAuthCompleteHandler {
                 let config = crate::llm::auth::anthropic::default_config();
                 // Pass verifier as state (matches tron login CLI behavior)
                 crate::llm::auth::anthropic::exchange_code_for_tokens(
-                    &config, &code, &flow.verifier, Some(&flow.verifier),
+                    &config,
+                    &code,
+                    &flow.verifier,
+                    Some(&flow.verifier),
                 )
                 .await
             }
             "openai-codex" => {
                 let config = crate::llm::auth::openai::default_config();
-                crate::llm::auth::openai::exchange_code_for_tokens(
-                    &config, &code, &flow.verifier,
-                )
-                .await
+                crate::llm::auth::openai::exchange_code_for_tokens(&config, &code, &flow.verifier)
+                    .await
             }
             "google" => {
                 let gpa = crate::llm::auth::storage::get_google_provider_auth(&ctx.auth_path)
                     .map_err(map_auth_error)?;
-                let client_id = gpa
-                    .as_ref()
-                    .and_then(|g| g.client_id.clone())
-                    .ok_or_else(|| RpcError::Internal {
-                        message: "Google client_id is no longer configured — cannot complete OAuth".into(),
-                    })?;
+                let client_id =
+                    gpa.as_ref()
+                        .and_then(|g| g.client_id.clone())
+                        .ok_or_else(|| RpcError::Internal {
+                            message:
+                                "Google client_id is no longer configured — cannot complete OAuth"
+                                    .into(),
+                        })?;
                 let client_secret = gpa.and_then(|g| g.client_secret);
 
                 let base_cfg = crate::llm::auth::google::cloud_code_assist_config();

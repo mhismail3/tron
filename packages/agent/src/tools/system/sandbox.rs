@@ -93,17 +93,15 @@ impl SandboxWorkspace {
         for src in &config.copy_paths {
             let src_path = Path::new(src);
             if src_path.exists() {
-                let dest = sandbox_path.join(
-                    src_path.file_name().unwrap_or_default(),
-                );
+                let dest = sandbox_path.join(src_path.file_name().unwrap_or_default());
                 if src_path.is_dir() {
                     copy_dir_recursive(src_path, &dest).await?;
                 } else {
-                    let _ = tokio::fs::copy(src_path, &dest)
-                        .await
-                        .map_err(|e| ToolError::Internal {
+                    let _ = tokio::fs::copy(src_path, &dest).await.map_err(|e| {
+                        ToolError::Internal {
                             message: format!("Failed to copy {src} into sandbox: {e}"),
-                        })?;
+                        }
+                    })?;
                 }
             }
         }
@@ -112,9 +110,7 @@ impl SandboxWorkspace {
         for mount in &config.readonly_mounts {
             let mount_path = Path::new(mount);
             if mount_path.exists() {
-                let link = sandbox_path.join(
-                    mount_path.file_name().unwrap_or_default(),
-                );
+                let link = sandbox_path.join(mount_path.file_name().unwrap_or_default());
                 tokio::fs::symlink(mount_path, &link)
                     .await
                     .map_err(|e| ToolError::Internal {
@@ -237,9 +233,13 @@ async fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), ToolError> {
             message: format!("Failed to read dir {}: {e}", src.display()),
         })?;
 
-    while let Some(entry) = entries.next_entry().await.map_err(|e| ToolError::Internal {
-        message: format!("Failed to read entry: {e}"),
-    })? {
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| ToolError::Internal {
+            message: format!("Failed to read entry: {e}"),
+        })?
+    {
         let entry_path = entry.path();
         let dest_path = dest.join(entry.file_name());
 
@@ -264,8 +264,7 @@ pub async fn cleanup_stale_sandboxes() {
         return;
     }
 
-    let cutoff = std::time::SystemTime::now()
-        - std::time::Duration::from_secs(24 * 60 * 60);
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(24 * 60 * 60);
 
     if let Ok(mut entries) = tokio::fs::read_dir(&scratch).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
@@ -359,9 +358,7 @@ mod tests {
     #[test]
     fn docker_command_with_mounts() {
         let config = DockerSandboxConfig {
-            mounts: vec![
-                ("/host/path".into(), "/container/path".into(), "ro".into()),
-            ],
+            mounts: vec![("/host/path".into(), "/container/path".into(), "ro".into())],
             ..Default::default()
         };
         let cmd = build_docker_command("ls", &config);
@@ -539,7 +536,11 @@ mod tests {
             .await
             .unwrap();
         let path_str = workspace.path.to_string_lossy().to_string();
-        let expected = format!(".tron/{}/{}/sandbox-", crate::core::paths::dirs::WORKSPACE, crate::core::paths::dirs::SCRATCH);
+        let expected = format!(
+            ".tron/{}/{}/sandbox-",
+            crate::core::paths::dirs::WORKSPACE,
+            crate::core::paths::dirs::SCRATCH
+        );
         assert!(path_str.contains(&expected));
         workspace.cleanup().await.unwrap();
     }

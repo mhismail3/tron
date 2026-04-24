@@ -396,10 +396,7 @@ mod session_event_tests {
                 EventType::SkillActivated,
                 json!({"skillName": "s", "source": "global"}),
             ),
-            (
-                EventType::SkillDeactivated,
-                json!({"skillName": "s"}),
-            ),
+            (EventType::SkillDeactivated, json!({"skillName": "s"})),
             (
                 EventType::SkillsCleared,
                 json!({"clearedSkills": ["s"], "reason": "compaction", "mode": "askUser"}),

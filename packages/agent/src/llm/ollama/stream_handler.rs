@@ -115,10 +115,7 @@ impl Default for OllamaStreamState {
 // ─── Chunk processing ──────────────────────────────────────────────────
 
 /// Process a single native API chunk and produce stream events.
-pub fn process_chunk(
-    chunk: &OllamaChatChunk,
-    state: &mut OllamaStreamState,
-) -> Vec<StreamEvent> {
+pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> Vec<StreamEvent> {
     let mut events = Vec::new();
 
     // Log first chunk for diagnostics
@@ -202,7 +199,10 @@ pub fn process_chunk(
         }
 
         for tc in tool_calls {
-            let id = tc.id.clone().unwrap_or_else(|| format!("call_{:08x}", rand_id()));
+            let id = tc
+                .id
+                .clone()
+                .unwrap_or_else(|| format!("call_{:08x}", rand_id()));
             let name = tc.function.name.clone();
             let arguments = tc.function.arguments.clone();
             let args_str = serde_json::to_string(&arguments).unwrap_or_default();
@@ -231,9 +231,7 @@ pub fn process_chunk(
     // Process done
     if chunk.done {
         // Capture usage from the final chunk
-        if let (Some(prompt), Some(completion)) =
-            (chunk.prompt_eval_count, chunk.eval_count)
-        {
+        if let (Some(prompt), Some(completion)) = (chunk.prompt_eval_count, chunk.eval_count) {
             state.usage = Some(TokenUsage {
                 input_tokens: prompt,
                 output_tokens: completion,
@@ -509,7 +507,11 @@ mod tests {
             .iter()
             .find(|e| matches!(e, StreamEvent::Done { .. }));
         assert!(done.is_some());
-        if let StreamEvent::Done { stop_reason, message } = done.unwrap() {
+        if let StreamEvent::Done {
+            stop_reason,
+            message,
+        } = done.unwrap()
+        {
             assert_eq!(stop_reason, "end_turn");
             let usage = message.token_usage.as_ref().unwrap();
             assert_eq!(usage.input_tokens, 100);
@@ -522,8 +524,9 @@ mod tests {
         let mut state = OllamaStreamState::new();
         let _ = process_chunk(&text_chunk("hi"), &mut state);
         let events = process_chunk(&done_chunk_no_usage(), &mut state);
-        if let Some(StreamEvent::Done { message, .. }) =
-            events.iter().find(|e| matches!(e, StreamEvent::Done { .. }))
+        if let Some(StreamEvent::Done { message, .. }) = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }))
         {
             assert!(message.token_usage.is_none());
         } else {
@@ -555,8 +558,9 @@ mod tests {
         let _ = process_chunk(&tc_chunk, &mut state);
         // Ollama sends done_reason: "stop" even for tool calls
         let events = process_chunk(&done_chunk("stop", 100, 50), &mut state);
-        if let Some(StreamEvent::Done { stop_reason, .. }) =
-            events.iter().find(|e| matches!(e, StreamEvent::Done { .. }))
+        if let Some(StreamEvent::Done { stop_reason, .. }) = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }))
         {
             assert_eq!(stop_reason, "tool_use");
         } else {
@@ -641,12 +645,12 @@ mod tests {
         let _ = process_chunk(&thinking_chunk("deep thoughts"), &mut state);
         let events = process_chunk(&done_chunk("stop", 10, 5), &mut state);
         // Should have ThinkingEnd before Done
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, StreamEvent::ThinkingEnd { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, StreamEvent::Done { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, StreamEvent::ThinkingEnd { .. }))
+        );
+        assert!(events.iter().any(|e| matches!(e, StreamEvent::Done { .. })));
     }
 
     #[test]
@@ -654,12 +658,12 @@ mod tests {
         let mut state = OllamaStreamState::new();
         let _ = process_chunk(&text_chunk("hello"), &mut state);
         let events = process_chunk(&done_chunk("stop", 10, 5), &mut state);
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, StreamEvent::TextEnd { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, StreamEvent::Done { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, StreamEvent::TextEnd { .. }))
+        );
+        assert!(events.iter().any(|e| matches!(e, StreamEvent::Done { .. })));
     }
 
     #[test]
@@ -668,8 +672,9 @@ mod tests {
         let _ = process_chunk(&thinking_chunk("hmm"), &mut state);
         let _ = process_chunk(&text_chunk("answer"), &mut state);
         let events = process_chunk(&done_chunk("stop", 10, 5), &mut state);
-        if let Some(StreamEvent::Done { message, .. }) =
-            events.iter().find(|e| matches!(e, StreamEvent::Done { .. }))
+        if let Some(StreamEvent::Done { message, .. }) = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }))
         {
             assert_eq!(message.content.len(), 2);
             assert!(matches!(

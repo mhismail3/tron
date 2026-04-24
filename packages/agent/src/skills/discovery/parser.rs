@@ -53,7 +53,9 @@ pub enum ParseSkillError {
     },
 
     /// A YAML array (tags, allowedTools, deniedTools, …) exceeded [`MAX_ARRAY_ITEMS`].
-    #[error("SKILL.md frontmatter key '{key}' has {count} items, exceeds limit of {MAX_ARRAY_ITEMS}")]
+    #[error(
+        "SKILL.md frontmatter key '{key}' has {count} items, exceeds limit of {MAX_ARRAY_ITEMS}"
+    )]
     TooManyArrayItems {
         /// YAML key whose array was oversized.
         key: String,
@@ -66,7 +68,9 @@ pub enum ParseSkillError {
     /// Historically this was silently coerced to `None`, which hid typos
     /// like `subagent: maybe`. Strict parsing surfaces the error so the
     /// operator can fix the manifest.
-    #[error("SKILL.md frontmatter has invalid subagent value '{value}' (expected one of: yes, no, true, false, ask)")]
+    #[error(
+        "SKILL.md frontmatter has invalid subagent value '{value}' (expected one of: yes, no, true, false, ask)"
+    )]
     InvalidSubagentMode {
         /// The offending value as written.
         value: String,
@@ -186,20 +190,10 @@ fn parse_simple_yaml(yaml: &str) -> Result<SkillFrontmatter, ParseSkillError> {
                 fm.tags = Some(parse_array_value("tags", value, &lines, &mut i)?);
             }
             "allowedTools" | "allowed_tools" => {
-                fm.allowed_tools = Some(parse_array_value(
-                    "allowedTools",
-                    value,
-                    &lines,
-                    &mut i,
-                )?);
+                fm.allowed_tools = Some(parse_array_value("allowedTools", value, &lines, &mut i)?);
             }
             "deniedTools" | "denied_tools" => {
-                fm.denied_tools = Some(parse_array_value(
-                    "deniedTools",
-                    value,
-                    &lines,
-                    &mut i,
-                )?);
+                fm.denied_tools = Some(parse_array_value("deniedTools", value, &lines, &mut i)?);
             }
             _ => {}
         }

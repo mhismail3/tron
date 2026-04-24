@@ -22,19 +22,16 @@ impl MethodHandler for QueuePromptHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let prompt = require_string_param(params.as_ref(), "prompt")?;
 
-        validation::validate_string_param(
-            &prompt,
-            "prompt",
-            validation::MAX_PROMPT_LENGTH,
-        )?;
+        validation::validate_string_param(&prompt, "prompt", validation::MAX_PROMPT_LENGTH)?;
 
         let event_store = ctx.event_store.clone();
         let sid = session_id.clone();
 
-        let item = ctx.run_blocking("agent.queuePrompt", move || {
-            PromptQueueService::enqueue(&event_store, &sid, &prompt)
-        })
-        .await?;
+        let item = ctx
+            .run_blocking("agent.queuePrompt", move || {
+                PromptQueueService::enqueue(&event_store, &sid, &prompt)
+            })
+            .await?;
 
         // Broadcast for real-time WebSocket delivery
         let _ = ctx.orchestrator.broadcast().emit(TronEvent::MessageQueued {
@@ -69,11 +66,14 @@ impl MethodHandler for DequeuePromptHandler {
         })
         .await?;
 
-        let _ = ctx.orchestrator.broadcast().emit(TronEvent::MessageDequeued {
-            base: BaseEvent::now(&session_id),
-            queue_id,
-            reason: "cancelled".into(),
-        });
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(TronEvent::MessageDequeued {
+                base: BaseEvent::now(&session_id),
+                queue_id,
+                reason: "cancelled".into(),
+            });
 
         Ok(serde_json::json!({ "ok": true }))
     }
@@ -92,25 +92,30 @@ impl MethodHandler for ClearQueueHandler {
         let sid = session_id.clone();
 
         // Get pending items before clearing (for broadcast)
-        let pending = ctx.run_blocking("agent.clearQueue.query", {
-            let es = event_store.clone();
-            let s = sid.clone();
-            move || PromptQueueService::get_pending_queue(&es, &s)
-        })
-        .await?;
+        let pending = ctx
+            .run_blocking("agent.clearQueue.query", {
+                let es = event_store.clone();
+                let s = sid.clone();
+                move || PromptQueueService::get_pending_queue(&es, &s)
+            })
+            .await?;
 
-        let cleared = ctx.run_blocking("agent.clearQueue", move || {
-            PromptQueueService::clear_queue(&event_store, &sid)
-        })
-        .await?;
+        let cleared = ctx
+            .run_blocking("agent.clearQueue", move || {
+                PromptQueueService::clear_queue(&event_store, &sid)
+            })
+            .await?;
 
         // Broadcast dequeue for each cleared item
         for item in &pending {
-            let _ = ctx.orchestrator.broadcast().emit(TronEvent::MessageDequeued {
-                base: BaseEvent::now(&session_id),
-                queue_id: item.queue_id.clone(),
-                reason: "cleared".into(),
-            });
+            let _ = ctx
+                .orchestrator
+                .broadcast()
+                .emit(TronEvent::MessageDequeued {
+                    base: BaseEvent::now(&session_id),
+                    queue_id: item.queue_id.clone(),
+                    reason: "cleared".into(),
+                });
         }
 
         Ok(serde_json::json!({ "cleared": cleared }))

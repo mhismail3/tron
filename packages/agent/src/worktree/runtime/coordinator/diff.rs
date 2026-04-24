@@ -1,12 +1,10 @@
 use std::path::PathBuf;
 
 use crate::worktree::errors::Result;
-use crate::worktree::types::{
-    CommitEntry, CommittedDiffResult, CommittedFileEntry, DiffSummary,
-};
+use crate::worktree::types::{CommitEntry, CommittedDiffResult, CommittedFileEntry, DiffSummary};
 
-use super::utils::{split_diff_by_file, count_diff_stats};
 use super::WorktreeCoordinator;
+use super::utils::{count_diff_stats, split_diff_by_file};
 
 impl WorktreeCoordinator {
     /// Get committed diff for a session's worktree branch.

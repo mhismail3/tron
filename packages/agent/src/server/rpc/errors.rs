@@ -369,7 +369,11 @@ mod tests {
             BLOB_NOT_FOUND,
         ];
         let unique: std::collections::HashSet<_> = codes.iter().collect();
-        assert_eq!(unique.len(), codes.len(), "event-store error codes must be distinct");
+        assert_eq!(
+            unique.len(),
+            codes.len(),
+            "event-store error codes must be distinct"
+        );
     }
 
     #[test]
@@ -383,18 +387,22 @@ mod tests {
             CRON_CANCELLED,
         ];
         let unique: std::collections::HashSet<_> = codes.iter().collect();
-        assert_eq!(unique.len(), codes.len(), "cron error codes must be distinct");
+        assert_eq!(
+            unique.len(),
+            codes.len(),
+            "cron error codes must be distinct"
+        );
     }
 
     #[test]
     fn auth_codes_are_distinct() {
-        let codes = [
-            AUTH_NOT_CONFIGURED,
-            AUTH_TOKEN_EXPIRED,
-            AUTH_OAUTH_ERROR,
-        ];
+        let codes = [AUTH_NOT_CONFIGURED, AUTH_TOKEN_EXPIRED, AUTH_OAUTH_ERROR];
         let unique: std::collections::HashSet<_> = codes.iter().collect();
-        assert_eq!(unique.len(), codes.len(), "auth error codes must be distinct");
+        assert_eq!(
+            unique.len(),
+            codes.len(),
+            "auth error codes must be distinct"
+        );
     }
 
     #[test]
@@ -406,7 +414,11 @@ mod tests {
             IMPORT_NO_CLAUDE_DIRECTORY,
         ];
         let unique: std::collections::HashSet<_> = codes.iter().collect();
-        assert_eq!(unique.len(), codes.len(), "import error codes must be distinct");
+        assert_eq!(
+            unique.len(),
+            codes.len(),
+            "import error codes must be distinct"
+        );
     }
 
     // ── M1: not-found message redaction contract ─────────────────────
@@ -415,7 +427,10 @@ mod tests {
     /// caller-supplied identifier — iOS diagnostic UI relies on it.
     #[test]
     fn format_not_found_echoes_id_under_trusted_local() {
-        assert_eq!(format_not_found("Session", "abc123"), "Session 'abc123' not found");
+        assert_eq!(
+            format_not_found("Session", "abc123"),
+            "Session 'abc123' not found"
+        );
         assert_eq!(current_redact_mode(), ErrorRedactMode::Echo);
     }
 
@@ -435,7 +450,11 @@ mod tests {
         ];
         for (kind, id) in victims {
             let msg = format_not_found_with_mode(ErrorRedactMode::Redact, kind, id);
-            assert_eq!(msg, format!("{kind} not found"), "redact must drop id {id:?}");
+            assert_eq!(
+                msg,
+                format!("{kind} not found"),
+                "redact must drop id {id:?}"
+            );
             assert!(
                 !msg.contains(id) || id.is_empty(),
                 "redact mode must not leak id {id:?} (got {msg:?})"

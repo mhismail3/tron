@@ -225,7 +225,6 @@ impl MethodHandler for ReconstructHandler {
     }
 }
 
-
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;

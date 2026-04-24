@@ -66,7 +66,10 @@ pub struct McpError {
 impl McpError {
     /// Returns `true` if this error is transient and the operation can be retried.
     pub fn is_retryable(&self) -> bool {
-        matches!(self.kind, McpErrorKind::Timeout | McpErrorKind::Transient(_))
+        matches!(
+            self.kind,
+            McpErrorKind::Timeout | McpErrorKind::Transient(_)
+        )
     }
 
     /// Returns `true` if this error indicates the connection is lost and the server must be restarted.
@@ -235,7 +238,11 @@ impl McpClient {
 
         let client = Self {
             name: config.name.clone(),
-            transport: Mutex::new(Transport::Stdio(Box::new(StdioTransport { child, writer, reader }))),
+            transport: Mutex::new(Transport::Stdio(Box::new(StdioTransport {
+                child,
+                writer,
+                reader,
+            }))),
             next_id: AtomicU64::new(1),
             tool_timeout_ms: config.tool_timeout_ms,
             negotiated_version: Mutex::new(None),
@@ -254,13 +261,11 @@ impl McpClient {
             message: "MCP server config must have 'url' for HTTP transport".into(),
         })?;
 
-        let http_client = reqwest::Client::builder()
-            .build()
-            .map_err(|e| McpError {
-                server: config.name.clone(),
-                kind: McpErrorKind::Transient(format!("HTTP client: {e}")),
-                message: format!("Failed to create HTTP client: {e}"),
-            })?;
+        let http_client = reqwest::Client::builder().build().map_err(|e| McpError {
+            server: config.name.clone(),
+            kind: McpErrorKind::Transient(format!("HTTP client: {e}")),
+            message: format!("Failed to create HTTP client: {e}"),
+        })?;
 
         debug!(server = %config.name, url, "connecting to MCP server via HTTP");
 
@@ -284,14 +289,20 @@ impl McpClient {
     async fn initialize(&self) -> Result<(), McpError> {
         let preferred_version = SUPPORTED_PROTOCOL_VERSIONS[0];
 
-        let result = self.send_request_with_timeout("initialize", Some(json!({
-            "protocolVersion": preferred_version,
-            "capabilities": {},
-            "clientInfo": {
-                "name": "tron-agent",
-                "version": "1.0"
-            }
-        })), INIT_TIMEOUT_MS).await?;
+        let result = self
+            .send_request_with_timeout(
+                "initialize",
+                Some(json!({
+                    "protocolVersion": preferred_version,
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "tron-agent",
+                        "version": "1.0"
+                    }
+                })),
+                INIT_TIMEOUT_MS,
+            )
+            .await?;
 
         // Validate protocol version from server response
         let server_version = result
@@ -326,7 +337,8 @@ impl McpClient {
         );
 
         // Send initialized notification
-        self.send_notification("notifications/initialized", None).await?;
+        self.send_notification("notifications/initialized", None)
+            .await?;
 
         Ok(())
     }
@@ -368,10 +380,15 @@ impl McpClient {
         tool_name: &str,
         arguments: Value,
     ) -> Result<McpToolResult, McpError> {
-        let result = self.send_request("tools/call", Some(json!({
-            "name": tool_name,
-            "arguments": arguments,
-        }))).await?;
+        let result = self
+            .send_request(
+                "tools/call",
+                Some(json!({
+                    "name": tool_name,
+                    "arguments": arguments,
+                })),
+            )
+            .await?;
 
         serde_json::from_value(result.clone()).map_err(|e| McpError {
             server: self.name.clone(),
@@ -397,12 +414,9 @@ impl McpClient {
     }
 
     /// Send a JSON-RPC request and wait for the response.
-    async fn send_request(
-        &self,
-        method: &str,
-        params: Option<Value>,
-    ) -> Result<Value, McpError> {
-        self.send_request_with_timeout(method, params, self.tool_timeout_ms).await
+    async fn send_request(&self, method: &str, params: Option<Value>) -> Result<Value, McpError> {
+        self.send_request_with_timeout(method, params, self.tool_timeout_ms)
+            .await
     }
 
     /// Send a JSON-RPC request with an explicit timeout.
@@ -472,21 +486,22 @@ impl McpClient {
                         });
                     }
 
-                    let bytes_read = tokio::time::timeout(remaining, stdio.reader.read_line(&mut line))
-                        .await
-                        .map_err(|_| McpError {
-                            server: self.name.clone(),
-                            kind: McpErrorKind::Timeout,
-                            message: format!(
-                                "MCP server '{}' timed out after {}ms",
-                                self.name, timeout_ms
-                            ),
-                        })?
-                        .map_err(|e| McpError {
-                            server: self.name.clone(),
-                            kind: McpErrorKind::ConnectionLost,
-                            message: format!("Failed to read from MCP server: {e}"),
-                        })?;
+                    let bytes_read =
+                        tokio::time::timeout(remaining, stdio.reader.read_line(&mut line))
+                            .await
+                            .map_err(|_| McpError {
+                                server: self.name.clone(),
+                                kind: McpErrorKind::Timeout,
+                                message: format!(
+                                    "MCP server '{}' timed out after {}ms",
+                                    self.name, timeout_ms
+                                ),
+                            })?
+                            .map_err(|e| McpError {
+                                server: self.name.clone(),
+                                kind: McpErrorKind::ConnectionLost,
+                                message: format!("Failed to read from MCP server: {e}"),
+                            })?;
 
                     if bytes_read == 0 {
                         return Err(McpError {
@@ -583,11 +598,7 @@ impl McpClient {
     }
 
     /// Send a JSON-RPC notification (no response expected).
-    async fn send_notification(
-        &self,
-        method: &str,
-        params: Option<Value>,
-    ) -> Result<(), McpError> {
+    async fn send_notification(&self, method: &str, params: Option<Value>) -> Result<(), McpError> {
         let notification = json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -620,9 +631,14 @@ impl McpClient {
     /// Graceful shutdown: send protocol notification, then kill process.
     pub async fn shutdown(&self) {
         // Attempt graceful shutdown notification (best-effort)
-        let _ = self.send_notification("notifications/cancelled", Some(json!({
-            "reason": "agent shutting down"
-        }))).await;
+        let _ = self
+            .send_notification(
+                "notifications/cancelled",
+                Some(json!({
+                    "reason": "agent shutting down"
+                })),
+            )
+            .await;
 
         let mut transport = self.transport.lock().await;
         match &mut *transport {
@@ -671,7 +687,10 @@ fn resolve_login_path() -> String {
             {
                 Ok(output) if output.status.success() => {
                     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    debug!(path_len = path.len(), "resolved login-shell PATH for MCP servers");
+                    debug!(
+                        path_len = path.len(),
+                        "resolved login-shell PATH for MCP servers"
+                    );
                     path
                 }
                 _ => {
@@ -732,7 +751,11 @@ mod tests {
     fn error_kind_display() {
         assert_eq!(McpErrorKind::ConnectionLost.to_string(), "connection lost");
         assert_eq!(McpErrorKind::Timeout.to_string(), "request timed out");
-        assert!(McpErrorKind::Protocol("bad".into()).to_string().contains("bad"));
+        assert!(
+            McpErrorKind::Protocol("bad".into())
+                .to_string()
+                .contains("bad")
+        );
     }
 
     #[test]
@@ -897,7 +920,10 @@ mod tests {
     fn resolve_login_path_returns_non_empty() {
         let path = resolve_login_path();
         assert!(!path.is_empty(), "login-shell PATH should not be empty");
-        assert!(path.contains("/usr/bin"), "PATH should contain /usr/bin: {path}");
+        assert!(
+            path.contains("/usr/bin"),
+            "PATH should contain /usr/bin: {path}"
+        );
     }
 
     // ── M27: write-after-death regression guard ─────────────
@@ -973,7 +999,8 @@ mod tests {
             err.kind,
             McpErrorKind::ConnectionLost,
             "broken pipe after child death must map to ConnectionLost, got {:?}: {}",
-            err.kind, err.message,
+            err.kind,
+            err.message,
         );
         assert!(
             err.requires_restart(),

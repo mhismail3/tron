@@ -83,7 +83,11 @@ fn discover_sessions_extracts_metadata() {
     // Assistant message
     writeln!(f, r#"{{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","slug":"my-slug","message":{{"id":"msg1","role":"assistant","model":"claude-opus-4-6","content":[{{"type":"text","text":"hi"}}],"usage":{{"input_tokens":100,"output_tokens":50}}}}}}"#).unwrap();
     // Custom title
-    writeln!(f, r#"{{"type":"custom-title","customTitle":"My Session","sessionId":"sess-001"}}"#).unwrap();
+    writeln!(
+        f,
+        r#"{{"type":"custom-title","customTitle":"My Session","sessionId":"sess-001"}}"#
+    )
+    .unwrap();
 
     let sessions = discover_sessions(dir.path()).unwrap();
     assert_eq!(sessions.len(), 1);
@@ -138,10 +142,18 @@ fn parse_session_skips_blank_lines() {
     let file = dir.path().join("blanks.jsonl");
     let mut f = fs::File::create(&file).unwrap();
 
-    writeln!(f, r#"{{"type":"user","uuid":"u1","message":{{"role":"user","content":"a"}}}}"#).unwrap();
+    writeln!(
+        f,
+        r#"{{"type":"user","uuid":"u1","message":{{"role":"user","content":"a"}}}}"#
+    )
+    .unwrap();
     writeln!(f).unwrap(); // blank line
     writeln!(f, "   ").unwrap(); // whitespace-only line
-    writeln!(f, r#"{{"type":"user","uuid":"u2","message":{{"role":"user","content":"b"}}}}"#).unwrap();
+    writeln!(
+        f,
+        r#"{{"type":"user","uuid":"u2","message":{{"role":"user","content":"b"}}}}"#
+    )
+    .unwrap();
 
     let records = parse_session(&file).unwrap();
     assert_eq!(records.len(), 2);

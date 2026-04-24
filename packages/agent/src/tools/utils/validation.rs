@@ -3,8 +3,8 @@
 //! Typed extraction from [`serde_json::Value`] with user-friendly error messages
 //! returned as [`TronToolResult`] (not panics or unwraps).
 
-use serde_json::Value;
 use crate::core::tools::{TronToolResult, error_result};
+use serde_json::Value;
 
 /// Extract a required string parameter.
 ///
@@ -129,5 +129,4 @@ mod tests {
         let args = json!({});
         assert_eq!(get_optional_string(&args, "key"), None);
     }
-
 }

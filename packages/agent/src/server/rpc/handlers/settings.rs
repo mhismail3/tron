@@ -56,9 +56,7 @@ impl MethodHandler for UpdateSettingsHandler {
         .await?;
 
         // Hot-reload MCP servers when the mcp section changes
-        if has_mcp_changes
-            && let Some(ref router) = ctx.mcp_router
-        {
+        if has_mcp_changes && let Some(ref router) = ctx.mcp_router {
             let mut guard = router.write().await;
             let _ = guard.reload_from_settings().await;
             drop(guard);
@@ -99,7 +97,8 @@ mod tests {
         SettingsTestGuard { _guard: guard }
     }
 
-    fn make_ctx_with_temp_settings() -> (crate::server::rpc::context::RpcContext, tempfile::TempDir) {
+    fn make_ctx_with_temp_settings() -> (crate::server::rpc::context::RpcContext, tempfile::TempDir)
+    {
         let mut ctx = make_test_context();
         let dir = tempfile::tempdir().unwrap();
         ctx.settings_path = dir.path().join("settings.json");

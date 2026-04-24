@@ -127,7 +127,9 @@ fn from_session_state(state: &SessionState) -> ReconstructedState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{AppendOptions, ConnectionConfig, EventType, new_in_memory, run_migrations};
+    use crate::events::{
+        AppendOptions, ConnectionConfig, EventType, new_in_memory, run_migrations,
+    };
 
     fn make_store() -> EventStore {
         let pool = new_in_memory(&ConnectionConfig::default()).unwrap();
@@ -449,7 +451,8 @@ mod tests {
                     assert_eq!(blocks.len(), 2);
                     assert!(blocks[0].is_text());
                     assert!(blocks[1].is_image());
-                    if let crate::core::content::UserContent::Image { data, mime_type } = &blocks[1] {
+                    if let crate::core::content::UserContent::Image { data, mime_type } = &blocks[1]
+                    {
                         assert_eq!(data, "base64data");
                         assert_eq!(mime_type, "image/png");
                     } else {
@@ -464,5 +467,4 @@ mod tests {
             panic!("Expected User message");
         }
     }
-
 }

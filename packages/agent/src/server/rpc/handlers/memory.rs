@@ -39,11 +39,13 @@ use chrono::Utc;
 use serde_json::{Value, json};
 use tracing::{debug, instrument, warn};
 
-use crate::events::types::state::Message;
 use crate::events::types::EventType;
-use crate::events::{AppendOptions, EventStore, event_rows_to_session_events, reconstruct_from_events};
-use crate::runtime::context::system_prompts::MEMORY_RETAIN_SUMMARIZER_PROMPT;
+use crate::events::types::state::Message;
+use crate::events::{
+    AppendOptions, EventStore, event_rows_to_session_events, reconstruct_from_events,
+};
 use crate::runtime::agent::event_emitter::EventEmitter;
+use crate::runtime::context::system_prompts::MEMORY_RETAIN_SUMMARIZER_PROMPT;
 use crate::runtime::orchestrator::subagent_manager::{SubagentManager, SubsessionConfig};
 use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::RpcError;
@@ -166,11 +168,10 @@ pub(crate) async fn trigger_retain(
     // ── Find summarization boundary ────────────────────────────────────────
     let event_store = deps.event_store.clone();
     let session_id_q = session_id.clone();
-    let boundary_sequence =
-        run_blocking_task("memory.retain.find_boundary", move || {
-            find_boundary_sequence(&event_store, &session_id_q)
-        })
-        .await?;
+    let boundary_sequence = run_blocking_task("memory.retain.find_boundary", move || {
+        find_boundary_sequence(&event_store, &session_id_q)
+    })
+    .await?;
 
     // ── Get events since boundary ─────────────────────────────────────────
     let event_store2 = deps.event_store.clone();
@@ -248,7 +249,7 @@ pub(crate) async fn trigger_retain(
     let bg_end_ts = slice.end_ts;
 
     let bg_source = source;
-    let _ = tokio::spawn(async move {
+    drop(tokio::spawn(async move {
         retain_background_task(
             bg_session_id,
             bg_event_store,
@@ -263,7 +264,7 @@ pub(crate) async fn trigger_retain(
         )
         .await;
         drop(guard);
-    });
+    }));
 
     Ok(json!({
         "retained": true,
@@ -325,11 +326,7 @@ async fn emit_auto_retain_failed(
 /// Persist and broadcast `memory.auto_retain_triggered` so iOS can distinguish
 /// automatic retentions from manual ones in the transcript and history. Errors
 /// are logged but never surfaced — the retain pipeline must proceed regardless.
-async fn emit_auto_retain_triggered(
-    deps: &RetainDeps,
-    session_id: &str,
-    interval_fired: u32,
-) {
+async fn emit_auto_retain_triggered(deps: &RetainDeps, session_id: &str, interval_fired: u32) {
     let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     // Persist to event store so it appears in session history.
@@ -359,13 +356,12 @@ async fn emit_auto_retain_triggered(
     .await;
 
     // Broadcast to live WebSocket clients.
-    let _ = deps
-        .orchestrator
-        .broadcast()
-        .emit(crate::core::events::TronEvent::MemoryAutoRetainTriggered {
+    let _ = deps.orchestrator.broadcast().emit(
+        crate::core::events::TronEvent::MemoryAutoRetainTriggered {
             base: crate::core::events::BaseEvent::now(session_id),
             interval_fired,
-        });
+        },
+    );
 }
 
 /// Background task that runs the summarizer and writes results.
@@ -384,9 +380,7 @@ async fn retain_background_task(
 ) {
     // ── Run summarizer ──────────────────────────────────────────────────────
     let outcome = match subagent_manager {
-        Some(manager) => {
-            run_summarizer(manager, &session_id, &working_directory, transcript).await
-        }
+        Some(manager) => run_summarizer(manager, &session_id, &working_directory, transcript).await,
         None => {
             warn!(session_id = %session_id, "no subagent manager for memory retain, using keyword fallback");
             SummarizerOutcome::Err {
@@ -718,7 +712,10 @@ fn get_retain_slice(
         return Ok(None);
     }
 
-    let start_ts = rows.first().map(|r| r.timestamp.clone()).unwrap_or_default();
+    let start_ts = rows
+        .first()
+        .map(|r| r.timestamp.clone())
+        .unwrap_or_default();
     let end_ts = rows.last().map(|r| r.timestamp.clone()).unwrap_or_default();
 
     let events = event_rows_to_session_events(&rows);
@@ -729,7 +726,11 @@ fn get_retain_slice(
         .map(|m| m.message)
         .collect();
 
-    Ok(Some(RetainSlice { messages, start_ts, end_ts }))
+    Ok(Some(RetainSlice {
+        messages,
+        start_ts,
+        end_ts,
+    }))
 }
 
 /// Tools whose results are UI scaffolding (verbose echoes of the call args),
@@ -886,7 +887,11 @@ fn serialize_for_memory(messages: &[Message]) -> String {
                     _ => continue,
                 };
                 let t = truncate_str(&text, MAX_TOOL);
-                let label = if msg.is_error == Some(true) { "[TOOL_ERROR]" } else { "[TOOL_RESULT]" };
+                let label = if msg.is_error == Some(true) {
+                    "[TOOL_ERROR]"
+                } else {
+                    "[TOOL_RESULT]"
+                };
                 if !t.is_empty() {
                     lines.push(format!("{label} {t}"));
                 }
@@ -912,7 +917,8 @@ fn truncate_str(s: &str, max: usize) -> &str {
         s
     } else {
         // Safe UTF-8 boundary truncation
-        &s[..s.char_indices()
+        &s[..s
+            .char_indices()
             .map(|(i, _)| i)
             .take_while(|&i| i < max)
             .last()
@@ -981,8 +987,7 @@ fn keyword_summary(session_id: &str) -> String {
 
 /// Return the path for a session's journal file: `~/.tron/workspace/memory/sessions/{session_id}.md`.
 fn session_file_path(session_id: &str) -> std::path::PathBuf {
-    crate::core::paths::memory_sessions_dir()
-        .join(format!("{session_id}.md"))
+    crate::core::paths::memory_sessions_dir().join(format!("{session_id}.md"))
 }
 
 /// Return the path for a core memory file: `~/.tron/workspace/memory/rules/{filename}`.
@@ -1003,9 +1008,7 @@ fn argument_file_path(slug: &str) -> std::path::PathBuf {
 
 /// Format YAML frontmatter for a new session memory file.
 fn format_session_frontmatter(session_id: &str, ts: &str, model: &str) -> String {
-    format!(
-        "---\nsession: {session_id}\ncreated: {ts}\nmodel: {model}\n---\n"
-    )
+    format!("---\nsession: {session_id}\ncreated: {ts}\nmodel: {model}\n---\n")
 }
 
 /// Extract `YYYY-MM-DD HH:MM` from an ISO-8601 timestamp. Returns the input
@@ -1073,7 +1076,10 @@ fn split_title_and_body(journal_text: &str) -> (String, String) {
     };
 
     let mut t = first_line.trim().trim_start_matches('#').trim();
-    if let Some(after) = t.strip_prefix("title:").or_else(|| t.strip_prefix("TITLE:")) {
+    if let Some(after) = t
+        .strip_prefix("title:")
+        .or_else(|| t.strip_prefix("TITLE:"))
+    {
         t = after.trim();
     }
 
@@ -1125,10 +1131,7 @@ fn write_session_entry(
 ///
 /// Creates the file with frontmatter if it doesn't exist, then appends
 /// a timestamped update entry.
-fn write_core_memory_update(
-    path: &std::path::Path,
-    update: &str,
-) -> std::io::Result<()> {
+fn write_core_memory_update(path: &std::path::Path, update: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -1145,9 +1148,8 @@ fn write_core_memory_update(
 
     if is_new {
         let today = now.format("%Y-%m-%d").to_string();
-        let frontmatter = format!(
-            "---\ntype: core-memory\ncreated: \"{today}\"\nupdated: \"{today}\"\n---\n\n"
-        );
+        let frontmatter =
+            format!("---\ntype: core-memory\ncreated: \"{today}\"\nupdated: \"{today}\"\n---\n\n");
         file.write_all(frontmatter.as_bytes())?;
     }
 
@@ -1157,10 +1159,7 @@ fn write_core_memory_update(
 }
 
 /// Write an argument document to `knowledge/arguments/{slug}.md`.
-fn write_argument_entry(
-    path: &std::path::Path,
-    arg: &ArgumentContent,
-) -> std::io::Result<()> {
+fn write_argument_entry(path: &std::path::Path, arg: &ArgumentContent) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -1201,7 +1200,10 @@ mod tests {
     #[test]
     fn session_file_path_uses_memory_sessions() {
         let path = session_file_path("sess_019d4a32");
-        assert_eq!(path.file_name().unwrap().to_str().unwrap(), "sess_019d4a32.md");
+        assert_eq!(
+            path.file_name().unwrap().to_str().unwrap(),
+            "sess_019d4a32.md"
+        );
         let path_str = path.to_str().unwrap();
         assert!(
             path_str.contains("memory/sessions/"),
@@ -1367,7 +1369,8 @@ mod tests {
     #[test]
     fn parse_retain_output_partial_core_memory_ignored() {
         // Missing update field — should not produce a core memory
-        let output = "<journal>Summary</journal>\n<core_memory>\nfile: user-preferences.md\n</core_memory>";
+        let output =
+            "<journal>Summary</journal>\n<core_memory>\nfile: user-preferences.md\n</core_memory>";
         let parsed = parse_retain_output(output);
         assert!(parsed.journal.is_some());
         assert!(parsed.core_memory.is_none());
@@ -1386,10 +1389,7 @@ mod tests {
 
     #[test]
     fn parse_bracket_list_basic() {
-        assert_eq!(
-            parse_bracket_list("[a, b, c]"),
-            vec!["a", "b", "c"]
-        );
+        assert_eq!(parse_bracket_list("[a, b, c]"), vec!["a", "b", "c"]);
     }
 
     #[test]
@@ -1399,7 +1399,10 @@ mod tests {
 
     #[test]
     fn slugify_basic() {
-        assert_eq!(slugify("Connection between X and Y"), "connection-between-x-and-y");
+        assert_eq!(
+            slugify("Connection between X and Y"),
+            "connection-between-x-and-y"
+        );
     }
 
     #[test]
@@ -1415,7 +1418,8 @@ mod tests {
         let session_id = "sess_test_create";
         let path = dir.path().join(format!("{session_id}.md"));
 
-        let frontmatter = format_session_frontmatter(session_id, "2026-01-01T00:00:00Z", "claude-haiku");
+        let frontmatter =
+            format_session_frontmatter(session_id, "2026-01-01T00:00:00Z", "claude-haiku");
         let section = format_session_section(
             "2026-01-01T00:00:00Z",
             "2026-01-01T00:15:00Z",
@@ -1436,7 +1440,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sess_test_append.md");
 
-        let frontmatter = format_session_frontmatter("sess_test_append", "2026-01-01T00:00:00Z", "claude-haiku");
+        let frontmatter =
+            format_session_frontmatter("sess_test_append", "2026-01-01T00:00:00Z", "claude-haiku");
         let section1 = format_session_section(
             "2026-01-01T00:00:00Z",
             "2026-01-01T00:10:00Z",
@@ -1452,7 +1457,10 @@ mod tests {
 
         std::fs::write(&path, format!("{frontmatter}{section1}")).unwrap();
         use std::io::Write as _;
-        let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
         file.write_all(section2.as_bytes()).unwrap();
 
         let content = std::fs::read_to_string(&path).unwrap();
@@ -1475,7 +1483,11 @@ mod tests {
     fn write_core_memory_appends_to_existing() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("user-preferences.md");
-        std::fs::write(&path, "---\ntype: core-memory\n---\n\n## Existing\n- Old pref\n").unwrap();
+        std::fs::write(
+            &path,
+            "---\ntype: core-memory\n---\n\n## Existing\n- Old pref\n",
+        )
+        .unwrap();
         write_core_memory_update(&path, "Also prefers dark mode").unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("Old pref"));
@@ -1515,7 +1527,10 @@ mod tests {
         use crate::server::rpc::handlers::test_helpers::make_test_context;
         let ctx = make_test_context();
         let handler = RetainMemoryHandler;
-        let err = handler.handle(Some(serde_json::json!({})), &ctx).await.unwrap_err();
+        let err = handler
+            .handle(Some(serde_json::json!({})), &ctx)
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
@@ -1709,14 +1724,7 @@ mod tests {
 
         // Step 2: record the failed event.
         let broadcast = Arc::clone(ctx.orchestrator.broadcast());
-        emit_auto_retain_failed(
-            &ctx.event_store,
-            &broadcast,
-            &session_id,
-            3,
-            "test failure",
-        )
-        .await;
+        emit_auto_retain_failed(&ctx.event_store, &broadcast, &session_id, 3, "test failure").await;
 
         let triggered = ctx
             .event_store
@@ -1880,22 +1888,23 @@ mod tests {
             assistant_tool_use("Bash", "b_1"),
         ];
         let ids = collect_interactive_tool_use_ids(&msgs);
-        assert!(ids.is_empty(), "should not collect non-interactive tool ids");
+        assert!(
+            ids.is_empty(),
+            "should not collect non-interactive tool ids"
+        );
     }
 
     #[test]
     fn collect_interactive_ids_mixed_tool_use() {
-        let msgs = vec![
-            Message {
-                role: "assistant".to_string(),
-                content: json!([
-                    {"type": "tool_use", "id": "aq_1", "name": "AskUserQuestion", "input": {}},
-                    {"type": "tool_use", "id": "r_1", "name": "Read", "input": {}}
-                ]),
-                tool_call_id: None,
-                is_error: None,
-            }
-        ];
+        let msgs = vec![Message {
+            role: "assistant".to_string(),
+            content: json!([
+                {"type": "tool_use", "id": "aq_1", "name": "AskUserQuestion", "input": {}},
+                {"type": "tool_use", "id": "r_1", "name": "Read", "input": {}}
+            ]),
+            tool_call_id: None,
+            is_error: None,
+        }];
         let ids = collect_interactive_tool_use_ids(&msgs);
         assert!(ids.contains("aq_1"));
         assert!(!ids.contains("r_1"));
@@ -1971,7 +1980,10 @@ mod tests {
     fn serialize_filters_ask_user_question_result_but_keeps_question_text() {
         let msgs = vec![
             assistant_ask_user_question("aq_1", &["What's your favorite color?"]),
-            tool_result("aq_1", "Q1: What's your favorite color? [single] (Red, Blue)"),
+            tool_result(
+                "aq_1",
+                "Q1: What's your favorite color? [single] (Red, Blue)",
+            ),
             user_text("Red"),
         ];
         let out = serialize_for_memory(&msgs);
@@ -2051,7 +2063,10 @@ mod tests {
             user_text("a3"),
         ];
         let out = serialize_for_memory(&msgs);
-        assert!(!out.contains("[TOOL_RESULT]"), "all three should be filtered: {out}");
+        assert!(
+            !out.contains("[TOOL_RESULT]"),
+            "all three should be filtered: {out}"
+        );
         assert!(!out.contains("Q1:"), "no question echo: {out}");
         assert!(!out.contains("Q2:"), "no question echo: {out}");
         assert!(!out.contains("Q3:"), "no question echo: {out}");
@@ -2201,9 +2216,15 @@ mod tests {
         });
         let out = extract_interactive_tool_summary(&block).unwrap();
         assert!(!out.contains("Crimson"), "options should be omitted: {out}");
-        assert!(!out.contains("Cerulean"), "options should be omitted: {out}");
+        assert!(
+            !out.contains("Cerulean"),
+            "options should be omitted: {out}"
+        );
         assert!(!out.contains("[single]"), "mode should be omitted: {out}");
-        assert!(!out.contains("ratification"), "context should be omitted: {out}");
+        assert!(
+            !out.contains("ratification"),
+            "context should be omitted: {out}"
+        );
     }
 
     #[test]
@@ -2258,10 +2279,16 @@ mod tests {
             user_text("IC; PT; Swift"),
         ];
         let out = serialize_for_memory(&msgs);
-        assert!(out.contains("Asked: \"What's your role?\""), "q1 missing: {out}");
+        assert!(
+            out.contains("Asked: \"What's your role?\""),
+            "q1 missing: {out}"
+        );
         assert!(out.contains("\"What timezone?\""), "q2 missing: {out}");
         assert!(out.contains("\"What language?\""), "q3 missing: {out}");
-        assert!(!out.contains("[TOOL_RESULT]"), "verbose recap leaked: {out}");
+        assert!(
+            !out.contains("[TOOL_RESULT]"),
+            "verbose recap leaked: {out}"
+        );
         assert!(out.contains("[USER] IC; PT; Swift"));
     }
 
@@ -2281,8 +2308,14 @@ mod tests {
             is_error: None,
         }];
         let out = serialize_for_memory(&msgs);
-        assert!(out.contains("Let me ask you something"), "text block missing: {out}");
-        assert!(out.contains("Asked: \"Ready?\""), "question text missing: {out}");
+        assert!(
+            out.contains("Let me ask you something"),
+            "text block missing: {out}"
+        );
+        assert!(
+            out.contains("Asked: \"Ready?\""),
+            "question text missing: {out}"
+        );
     }
 
     #[test]

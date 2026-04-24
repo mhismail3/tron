@@ -1343,7 +1343,10 @@ pub fn agent_ready_event(session_id: impl Into<String>) -> TronEvent {
 
 /// Create a session-processing-changed event.
 #[must_use]
-pub fn session_processing_changed_event(session_id: impl Into<String>, is_processing: bool) -> TronEvent {
+pub fn session_processing_changed_event(
+    session_id: impl Into<String>,
+    is_processing: bool,
+) -> TronEvent {
     TronEvent::SessionProcessingChanged {
         base: BaseEvent::now(session_id),
         is_processing,

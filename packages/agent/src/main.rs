@@ -1138,7 +1138,6 @@ fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronSe
             }
         }
     });
-
 }
 
 #[tokio::main]

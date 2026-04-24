@@ -4,11 +4,11 @@
 //! and iOS client expect. Token normalization delegates to `tron-tokens`
 //! for correct per-turn deltas.
 
-use serde_json::{Value, json};
 use crate::core::content::AssistantContent;
 use crate::core::messages::{Provider, TokenUsage};
 use crate::llm::tokens::normalization::normalize_tokens;
 use crate::llm::tokens::types::{TokenMeta, TokenSource};
+use serde_json::{Value, json};
 
 /// Build a JSON content array from assistant content blocks.
 ///

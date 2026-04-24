@@ -22,12 +22,12 @@ use base64::Engine as _;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use tracing::{debug, error, info, instrument};
 
+use crate::core::messages::{Context, Message};
 use crate::llm::compose_context_parts;
 use crate::llm::provider::ReasoningEffort;
 use crate::llm::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::core::messages::{Context, Message};
 
 use super::message_converter::{
     convert_to_responses_input, convert_tools_v2, generate_tool_clarification_message,
@@ -577,7 +577,6 @@ impl Provider for OpenAIProvider {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
-
 
 #[cfg(test)]
 #[path = "provider_tests.rs"]

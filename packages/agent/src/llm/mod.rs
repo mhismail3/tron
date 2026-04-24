@@ -29,20 +29,20 @@
 
 pub mod anthropic;
 pub mod auth;
-pub mod factory;
 #[path = "shared/context_composition.rs"]
 pub mod context_composition;
 #[path = "shared/error_parsing.rs"]
 pub mod error_parsing;
+pub mod factory;
 pub mod google;
 #[path = "shared/health.rs"]
 pub mod health;
-pub mod kimi;
-pub mod ollama;
 #[path = "shared/id_remapping.rs"]
 pub mod id_remapping;
+pub mod kimi;
 pub mod minimax;
 pub mod models;
+pub mod ollama;
 pub mod openai;
 #[path = "shared/provider.rs"]
 pub mod provider;

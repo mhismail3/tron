@@ -606,14 +606,7 @@ mod tests {
         let observed = order.lock().clone();
         assert_eq!(
             observed,
-            vec![
-                "agent",
-                "tools",
-                "mcp",
-                "cron",
-                "transcription",
-                "database"
-            ]
+            vec!["agent", "tools", "mcp", "cron", "transcription", "database"]
         );
     }
 

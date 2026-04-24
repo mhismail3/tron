@@ -75,7 +75,13 @@ impl PromptQueueService {
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0) as u32;
                     let metadata = payload.get("metadata").cloned();
-                    queued_items.push((queue_id, text, position, event.timestamp.clone(), metadata));
+                    queued_items.push((
+                        queue_id,
+                        text,
+                        position,
+                        event.timestamp.clone(),
+                        metadata,
+                    ));
                 }
                 _ => {}
             }
@@ -85,13 +91,15 @@ impl PromptQueueService {
         let mut pending: Vec<PendingQueueItem> = queued_items
             .into_iter()
             .filter(|(qid, _, _, _, _)| !dequeued_ids.contains(qid))
-            .map(|(queue_id, text, position, timestamp, metadata)| PendingQueueItem {
-                queue_id,
-                text,
-                position,
-                timestamp,
-                metadata,
-            })
+            .map(
+                |(queue_id, text, position, timestamp, metadata)| PendingQueueItem {
+                    queue_id,
+                    text,
+                    position,
+                    timestamp,
+                    metadata,
+                },
+            )
             .collect();
 
         // Re-number positions (0-indexed, ordered by original position)
@@ -127,9 +135,7 @@ impl PromptQueueService {
         if pending.len() >= MAX_QUEUE_CAPACITY {
             return Err(RpcError::Custom {
                 code: "QUEUE_FULL".into(),
-                message: format!(
-                    "Message queue is full ({MAX_QUEUE_CAPACITY} items max)"
-                ),
+                message: format!("Message queue is full ({MAX_QUEUE_CAPACITY} items max)"),
                 details: None,
             });
         }
@@ -195,10 +201,7 @@ impl PromptQueueService {
     }
 
     /// Clear all pending queued messages (emits `message.dequeued` for each).
-    pub fn clear_queue(
-        event_store: &EventStore,
-        session_id: &str,
-    ) -> Result<u32, RpcError> {
+    pub fn clear_queue(event_store: &EventStore, session_id: &str) -> Result<u32, RpcError> {
         let pending = Self::get_pending_queue(event_store, session_id)?;
         let count = pending.len() as u32;
 
@@ -208,7 +211,6 @@ impl PromptQueueService {
 
         Ok(count)
     }
-
 }
 
 #[cfg(test)]
@@ -241,8 +243,8 @@ impl PromptQueueService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::events::{self, ConnectionConfig, EventStore};
+    use std::sync::Arc;
 
     fn make_store_and_session() -> (Arc<EventStore>, String) {
         let pool = events::new_in_memory(&ConnectionConfig::default()).unwrap();
@@ -383,7 +385,9 @@ mod tests {
         PromptQueueService::enqueue(&store, &sid, "hello").unwrap();
 
         // Peek
-        let item = PromptQueueService::peek_next(&store, &sid).unwrap().unwrap();
+        let item = PromptQueueService::peek_next(&store, &sid)
+            .unwrap()
+            .unwrap();
         assert_eq!(item.text, "hello");
 
         // Simulate begin_run success, then dequeue
@@ -399,7 +403,9 @@ mod tests {
         PromptQueueService::enqueue(&store, &sid, "hello").unwrap();
 
         // Peek
-        let item = PromptQueueService::peek_next(&store, &sid).unwrap().unwrap();
+        let item = PromptQueueService::peek_next(&store, &sid)
+            .unwrap()
+            .unwrap();
         assert_eq!(item.text, "hello");
 
         // Simulate begin_run failure — do NOT dequeue
@@ -449,10 +455,7 @@ mod tests {
             PromptQueueService::drain_next(&store, &sid).unwrap(),
             Some("third".to_string())
         );
-        assert_eq!(
-            PromptQueueService::drain_next(&store, &sid).unwrap(),
-            None
-        );
+        assert_eq!(PromptQueueService::drain_next(&store, &sid).unwrap(), None);
     }
 
     #[test]
@@ -555,8 +558,12 @@ mod tests {
         }
         let store = Arc::new(EventStore::new(pool));
 
-        let r1 = store.create_session("claude-opus-4-6", "/tmp", None, None, None, None).unwrap();
-        let r2 = store.create_session("claude-opus-4-6", "/tmp", None, None, None, None).unwrap();
+        let r1 = store
+            .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
+            .unwrap();
+        let r2 = store
+            .create_session("claude-opus-4-6", "/tmp", None, None, None, None)
+            .unwrap();
         let sid1 = r1.session.id;
         let sid2 = r2.session.id;
 

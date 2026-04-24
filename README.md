@@ -990,6 +990,14 @@ tron ci fmt check            # Subset: formatting + compilation
 tron ci clippy test          # Subset: linting + tests
 ```
 
+Install the local hook once per clone with `scripts/install-hooks.sh`; it
+blocks commits with staged Rust formatting drift and runs the personal-info
+guard on staged changes.
+
+Rust clippy CI uses the lint policy in `packages/agent/Cargo.toml`: correctness,
+suspicious, performance, and a short list of footgun lints fail the build;
+style/pedantic suggestions stay advisory so the signal is not buried.
+
 ---
 
 ## Core Invariants

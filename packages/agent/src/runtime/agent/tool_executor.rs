@@ -4,17 +4,17 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::time::{Duration, Instant};
 
+use crate::core::events::{BaseEvent, HookResult as EventHookResult, TronEvent};
 use crate::core::messages::Provider;
+use crate::core::messages::ToolCall;
 use crate::runtime::context::local_policy;
 use crate::runtime::guardrails::{EvaluationContext, GuardrailEngine};
 use crate::runtime::hooks::engine::HookEngine;
 use crate::runtime::hooks::types::{HookAction, HookContext};
-use serde_json::Value;
-use tokio_util::sync::CancellationToken;
-use crate::core::events::{BaseEvent, HookResult as EventHookResult, TronEvent};
-use crate::core::messages::ToolCall;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::traits::ToolContext;
+use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 
 use metrics::{counter, histogram};
 use tracing::{debug, error, instrument, warn};
@@ -60,7 +60,8 @@ pub struct ToolExecutionContext<'a> {
     /// Optional unified job manager for process + subagent lifecycle.
     pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
     /// Optional output buffer registry for on-demand process output streaming.
-    pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    pub output_buffer_registry:
+        Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     /// Optional per-session sequence counter for monotonic event ordering.
     pub sequence_counter: Option<&'a AtomicI64>,
     /// Provider type of the active model. Used to enforce the local-model
@@ -70,7 +71,8 @@ pub struct ToolExecutionContext<'a> {
     /// tools can call `ctx.emit_progress(...)` to surface incremental status
     /// (Bash heartbeat, WebFetch bytes, subagent turn count) as persisted
     /// `tool.progress` events visible through live stream and reconstruction.
-    pub event_persister: Option<&'a Arc<crate::runtime::orchestrator::event_persister::EventPersister>>,
+    pub event_persister:
+        Option<&'a Arc<crate::runtime::orchestrator::event_persister::EventPersister>>,
     /// Turn number this tool call belongs to. Copied into each progress event
     /// so iOS can attribute progress after disconnect/reconnect.
     pub turn: i64,
@@ -175,13 +177,16 @@ pub async fn execute_tool(
             tool_call_id: tool_call_id.clone(),
         };
         if let Some(counter) = ctx.sequence_counter {
-            let _ = ctx.emitter.emit_sequenced(TronEvent::HookTriggered {
-                base: BaseEvent::now(session_id),
-                hook_names: vec![],
-                hook_event: "PreToolUse".into(),
-                tool_name: Some(tool_name.clone()),
-                tool_call_id: Some(tool_call_id.clone()),
-            }, counter);
+            let _ = ctx.emitter.emit_sequenced(
+                TronEvent::HookTriggered {
+                    base: BaseEvent::now(session_id),
+                    hook_names: vec![],
+                    hook_event: "PreToolUse".into(),
+                    tool_name: Some(tool_name.clone()),
+                    tool_call_id: Some(tool_call_id.clone()),
+                },
+                counter,
+            );
         } else {
             let _ = ctx.emitter.emit(TronEvent::HookTriggered {
                 base: BaseEvent::now(session_id),
@@ -201,16 +206,19 @@ pub async fn execute_tool(
             HookAction::Continue | HookAction::AddContext => EventHookResult::Continue,
         };
         if let Some(counter) = ctx.sequence_counter {
-            let _ = ctx.emitter.emit_sequenced(TronEvent::HookCompleted {
-                base: BaseEvent::now(session_id),
-                hook_names: vec![],
-                hook_event: "PreToolUse".into(),
-                result: event_result,
-                duration: None,
-                reason: result.reason.clone(),
-                tool_name: Some(tool_name.clone()),
-                tool_call_id: Some(tool_call_id.clone()),
-            }, counter);
+            let _ = ctx.emitter.emit_sequenced(
+                TronEvent::HookCompleted {
+                    base: BaseEvent::now(session_id),
+                    hook_names: vec![],
+                    hook_event: "PreToolUse".into(),
+                    result: event_result,
+                    duration: None,
+                    reason: result.reason.clone(),
+                    tool_name: Some(tool_name.clone()),
+                    tool_call_id: Some(tool_call_id.clone()),
+                },
+                counter,
+            );
         } else {
             let _ = ctx.emitter.emit(TronEvent::HookCompleted {
                 base: BaseEvent::now(session_id),
@@ -253,12 +261,15 @@ pub async fn execute_tool(
 
     // 4. Emit ToolExecutionStart
     if let Some(counter) = ctx.sequence_counter {
-        let _ = ctx.emitter.emit_sequenced(TronEvent::ToolExecutionStart {
-            base: BaseEvent::now(session_id),
-            tool_call_id: tool_call_id.clone(),
-            tool_name: tool_name.clone(),
-            arguments: effective_args.as_object().cloned(),
-        }, counter);
+        let _ = ctx.emitter.emit_sequenced(
+            TronEvent::ToolExecutionStart {
+                base: BaseEvent::now(session_id),
+                tool_call_id: tool_call_id.clone(),
+                tool_name: tool_name.clone(),
+                arguments: effective_args.as_object().cloned(),
+            },
+            counter,
+        );
     } else {
         let _ = ctx.emitter.emit(TronEvent::ToolExecutionStart {
             base: BaseEvent::now(session_id),
@@ -351,14 +362,17 @@ pub async fn execute_tool(
 
     // 6. Emit ToolExecutionEnd
     if let Some(counter) = ctx.sequence_counter {
-        let _ = ctx.emitter.emit_sequenced(TronEvent::ToolExecutionEnd {
-            base: BaseEvent::now(session_id),
-            tool_call_id: tool_call_id.clone(),
-            tool_name: tool_name.clone(),
-            duration: duration_ms,
-            is_error: tool_result.is_error,
-            result: Some(tool_result.clone()),
-        }, counter);
+        let _ = ctx.emitter.emit_sequenced(
+            TronEvent::ToolExecutionEnd {
+                base: BaseEvent::now(session_id),
+                tool_call_id: tool_call_id.clone(),
+                tool_name: tool_name.clone(),
+                duration: duration_ms,
+                is_error: tool_result.is_error,
+                result: Some(tool_result.clone()),
+            },
+            counter,
+        );
     } else {
         let _ = ctx.emitter.emit(TronEvent::ToolExecutionEnd {
             base: BaseEvent::now(session_id),
@@ -382,13 +396,16 @@ pub async fn execute_tool(
             duration_ms,
         };
         if let Some(counter) = ctx.sequence_counter {
-            let _ = ctx.emitter.emit_sequenced(TronEvent::HookTriggered {
-                base: BaseEvent::now(session_id),
-                hook_names: vec![],
-                hook_event: "PostToolUse".into(),
-                tool_name: Some(tool_name.clone()),
-                tool_call_id: Some(tool_call_id.clone()),
-            }, counter);
+            let _ = ctx.emitter.emit_sequenced(
+                TronEvent::HookTriggered {
+                    base: BaseEvent::now(session_id),
+                    hook_names: vec![],
+                    hook_event: "PostToolUse".into(),
+                    tool_name: Some(tool_name.clone()),
+                    tool_call_id: Some(tool_call_id.clone()),
+                },
+                counter,
+            );
         } else {
             let _ = ctx.emitter.emit(TronEvent::HookTriggered {
                 base: BaseEvent::now(session_id),
@@ -456,20 +473,20 @@ pub async fn execute_tool(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::content::ToolResultContent;
+    use crate::core::tools::{
+        Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, text_result,
+    };
     use crate::runtime::guardrails::rules::{GuardrailRule, RuleBase, pattern::PatternRule};
     use crate::runtime::guardrails::types::{RuleTier, Scope, Severity};
     use crate::runtime::hooks::errors::HookError;
     use crate::runtime::hooks::handler::HookHandler;
     use crate::runtime::hooks::registry::HookRegistry;
     use crate::runtime::hooks::types::{HookExecutionMode, HookResult as HookExecResult, HookType};
+    use crate::tools::traits::TronTool;
     use async_trait::async_trait;
     use serde_json::{Map, json};
     use std::sync::atomic::{AtomicBool, Ordering};
-    use crate::core::content::ToolResultContent;
-    use crate::core::tools::{
-        Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, text_result,
-    };
-    use crate::tools::traits::TronTool;
 
     macro_rules! tool_exec_ctx {
         ($registry:expr, $guardrails:expr, $hooks:expr, $emitter:expr, $cancel:expr) => {
@@ -717,7 +734,8 @@ mod tests {
         let cancel = CancellationToken::new();
 
         // Set up guardrails that block "echo" with dangerous args
-        let mut engine = GuardrailEngine::new(crate::runtime::guardrails::GuardrailEngineOptions::default());
+        let mut engine =
+            GuardrailEngine::new(crate::runtime::guardrails::GuardrailEngineOptions::default());
         engine.register_rule(GuardrailRule::Pattern(PatternRule {
             base: RuleBase {
                 id: "test-block".into(),
@@ -959,7 +977,8 @@ mod tests {
 
     #[tokio::test]
     async fn guardrail_lock_always_succeeds() {
-        let engine = GuardrailEngine::new(crate::runtime::guardrails::GuardrailEngineOptions::default());
+        let engine =
+            GuardrailEngine::new(crate::runtime::guardrails::GuardrailEngineOptions::default());
         let guardrails = Arc::new(parking_lot::Mutex::new(engine));
         // parking_lot::Mutex::lock() always succeeds (no Result, no poison)
         let _guard = guardrails.lock();
@@ -1247,7 +1266,8 @@ mod tests {
 
     #[tokio::test]
     async fn guardrail_evaluates_after_lock() {
-        let mut engine = GuardrailEngine::new(crate::runtime::guardrails::GuardrailEngineOptions::default());
+        let mut engine =
+            GuardrailEngine::new(crate::runtime::guardrails::GuardrailEngineOptions::default());
         engine.register_rule(GuardrailRule::Pattern(PatternRule {
             base: RuleBase {
                 id: "test".into(),
@@ -1322,10 +1342,22 @@ mod tests {
         let tc_target = ToolCall::new("target-call", "slow", Map::new());
         let tc_sibling = ToolCall::new("sibling-call", "slow", Map::new());
 
-        let ctx_a =
-            tool_exec_ctx_with_registry(&registry, &no_guardrails, &no_hooks, &emitter, &cancel, &abort_registry);
-        let ctx_b =
-            tool_exec_ctx_with_registry(&registry, &no_guardrails, &no_hooks, &emitter, &cancel, &abort_registry);
+        let ctx_a = tool_exec_ctx_with_registry(
+            &registry,
+            &no_guardrails,
+            &no_hooks,
+            &emitter,
+            &cancel,
+            &abort_registry,
+        );
+        let ctx_b = tool_exec_ctx_with_registry(
+            &registry,
+            &no_guardrails,
+            &no_hooks,
+            &emitter,
+            &cancel,
+            &abort_registry,
+        );
 
         let abort_registry_clone = abort_registry.clone();
         let aborter = async {
@@ -1425,7 +1457,10 @@ mod tests {
 
         assert!(result.result.is_error.unwrap_or(false));
         assert!(elapsed < Duration::from_secs(2));
-        assert!(abort_registry.is_empty(), "guard cleans up even on parent cancel");
+        assert!(
+            abort_registry.is_empty(),
+            "guard cleans up even on parent cancel"
+        );
     }
 
     #[tokio::test]

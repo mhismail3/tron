@@ -35,7 +35,9 @@ pub(crate) fn extract_bool_as_int(val: &Value, key: &str) -> Option<i64> {
     }
 }
 
-pub(crate) fn extract_tokens(payload: &Value) -> (Option<i64>, Option<i64>, Option<i64>, Option<i64>) {
+pub(crate) fn extract_tokens(
+    payload: &Value,
+) -> (Option<i64>, Option<i64>, Option<i64>, Option<i64>) {
     // Try payload.tokenUsage first (assistant messages)
     if let Some(tu) = payload.get("tokenUsage") {
         return (

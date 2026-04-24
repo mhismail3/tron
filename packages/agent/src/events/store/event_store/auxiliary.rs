@@ -107,11 +107,11 @@ impl crate::tools::traits::BlobStore for EventStore {
         let content = content.to_vec();
         let mime = mime_type.to_string();
         tokio::task::spawn_blocking(move || {
-            let conn = pool.get().map_err(|e| {
-                crate::tools::errors::ToolError::Internal {
+            let conn = pool
+                .get()
+                .map_err(|e| crate::tools::errors::ToolError::Internal {
                     message: format!("blob store connection error: {e}"),
-                }
-            })?;
+                })?;
             BlobRepo::store(&conn, &content, &mime).map_err(|e| {
                 crate::tools::errors::ToolError::Internal {
                     message: format!("blob store write error: {e}"),

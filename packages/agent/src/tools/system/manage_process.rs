@@ -315,10 +315,7 @@ mod tests {
     async fn missing_action() {
         let jm = Arc::new(MockJM::empty());
         let tool = ManageJobTool::new(jm);
-        let r = tool
-            .execute(json!({}), &make_ctx())
-            .await
-            .unwrap();
+        let r = tool.execute(json!({}), &make_ctx()).await.unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 }

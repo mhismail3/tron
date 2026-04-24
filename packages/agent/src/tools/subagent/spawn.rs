@@ -9,9 +9,9 @@
 
 use std::sync::Arc;
 
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{SubagentConfig, SubagentMode, SubagentSpawner, ToolContext, TronTool};
@@ -97,7 +97,11 @@ Returns (when completed within timeout):\n\
         };
 
         let timeout_ms = get_optional_u64(&params, "timeout").unwrap_or(DEFAULT_TIMEOUT_MS);
-        let blocking_timeout_ms = if timeout_ms > 0 { Some(timeout_ms) } else { None };
+        let blocking_timeout_ms = if timeout_ms > 0 {
+            Some(timeout_ms)
+        } else {
+            None
+        };
         let default_turns = if mode == SubagentMode::Tmux {
             DEFAULT_MAX_TURNS_TMUX
         } else {
@@ -113,7 +117,10 @@ Returns (when completed within timeout):\n\
         let denied_tools = if get_optional_bool(&params, "denyAllTools") == Some(true) {
             ctx.all_tool_names.clone()
         } else if let Some(arr) = params.get("deniedTools").and_then(Value::as_array) {
-            arr.iter().filter_map(Value::as_str).map(String::from).collect()
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
         } else {
             vec![]
         };
@@ -287,7 +294,10 @@ mod tests {
     async fn explicit_timeout_blocks() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"task": "do something", "timeout": 300_000}), &make_ctx())
+            .execute(
+                json!({"task": "do something", "timeout": 300_000}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -299,10 +309,7 @@ mod tests {
     async fn zero_timeout_returns_session_id() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(
-                json!({"task": "do something", "timeout": 0}),
-                &make_ctx(),
-            )
+            .execute(json!({"task": "do something", "timeout": 0}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -405,7 +412,10 @@ mod tests {
             .await
             .unwrap();
         let config = spawner.captured_config();
-        assert_eq!(config.denied_tools, vec!["Bash".to_string(), "Write".to_string()]);
+        assert_eq!(
+            config.denied_tools,
+            vec!["Bash".to_string(), "Write".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -451,7 +461,10 @@ mod tests {
             .await
             .unwrap();
         let config = spawner.captured_config();
-        assert_eq!(config.denied_tools, vec!["Read".to_string(), "Write".to_string()]);
+        assert_eq!(
+            config.denied_tools,
+            vec!["Read".to_string(), "Write".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -466,7 +479,10 @@ mod tests {
             .await
             .unwrap();
         let config = spawner.captured_config();
-        assert_eq!(config.denied_tools, vec!["Bash".to_string(), "Write".to_string()]);
+        assert_eq!(
+            config.denied_tools,
+            vec!["Bash".to_string(), "Write".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -690,7 +706,10 @@ mod tests {
             .unwrap();
 
         let events = crate::tools::testutil::drain_progress_events(&store, &session_id).await;
-        assert!(events.len() >= 2, "expected start + completed, got {events:?}");
+        assert!(
+            events.len() >= 2,
+            "expected start + completed, got {events:?}"
+        );
         let messages: Vec<String> = events
             .iter()
             .filter_map(|e| e["message"].as_str().map(String::from))

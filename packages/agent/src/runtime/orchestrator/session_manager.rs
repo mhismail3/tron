@@ -4,10 +4,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::events::{AppendOptions, EventStore, EventType};
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use serde_json::json;
-use crate::events::{AppendOptions, EventStore, EventType};
 
 use tracing::{debug, info, instrument};
 
@@ -160,7 +160,9 @@ impl SessionManager {
             state,
         });
 
-        let _ = self.active_sessions.insert(session_id.clone(), CachedSession::new(active));
+        let _ = self
+            .active_sessions
+            .insert(session_id.clone(), CachedSession::new(active));
         debug!(session_id, "session created");
         Ok(session_id)
     }
@@ -403,7 +405,11 @@ impl SessionManager {
             let age = now.duration_since(last);
             if age > ttl {
                 evicted += 1;
-                info!(session_id, age_secs = age.as_secs(), "evicting idle session from cache");
+                info!(
+                    session_id,
+                    age_secs = age.as_secs(),
+                    "evicting idle session from cache"
+                );
                 false
             } else {
                 true
@@ -444,7 +450,8 @@ mod tests {
     use super::*;
 
     fn make_manager() -> SessionManager {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -582,9 +589,7 @@ mod tests {
             })
             .unwrap();
 
-        let result = mgr
-            .fork_session(&sid, Some(&evt.id), None, None)
-            .unwrap();
+        let result = mgr.fork_session(&sid, Some(&evt.id), None, None).unwrap();
         assert_eq!(
             result.forked_from_event_id, evt.id,
             "should fork from the specified event, not HEAD"
@@ -652,8 +657,12 @@ mod tests {
     #[tokio::test]
     async fn list_sessions() {
         let mgr = make_manager();
-        let _ = mgr.create_session("model-a", "/tmp/a", Some("s1"), None).unwrap();
-        let _ = mgr.create_session("model-b", "/tmp/b", Some("s2"), None).unwrap();
+        let _ = mgr
+            .create_session("model-a", "/tmp/a", Some("s1"), None)
+            .unwrap();
+        let _ = mgr
+            .create_session("model-b", "/tmp/b", Some("s2"), None)
+            .unwrap();
 
         let sessions = mgr.list_sessions(&SessionFilter::default()).unwrap();
         assert_eq!(sessions.len(), 2);
@@ -679,7 +688,8 @@ mod tests {
 
     #[tokio::test]
     async fn create_session_with_origin() {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -706,7 +716,8 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_user_only() {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -734,7 +745,8 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_default_shows_all() {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -756,7 +768,8 @@ mod tests {
 
     #[tokio::test]
     async fn user_only_excludes_cron_sessions() {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -850,7 +863,9 @@ mod tests {
     async fn evict_mixed_idle_and_active() {
         let mgr = make_manager();
         let idle = mgr.create_session("m", "/tmp", Some("idle"), None).unwrap();
-        let recent = mgr.create_session("m", "/tmp", Some("recent"), None).unwrap();
+        let recent = mgr
+            .create_session("m", "/tmp", Some("recent"), None)
+            .unwrap();
 
         if let Some(cached) = mgr.active_sessions.get(&idle) {
             *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);

@@ -107,7 +107,9 @@ fn atomic_write_0600(parent: &Path, final_path: &Path, contents: &[u8]) -> Resul
 
     tmp.write_all(contents)?;
     tmp.as_file().sync_all()?;
-    let _persisted = tmp.persist(final_path).map_err(|e| AuthError::Io(e.error))?;
+    let _persisted = tmp
+        .persist(final_path)
+        .map_err(|e| AuthError::Io(e.error))?;
     Ok(())
 }
 
@@ -117,17 +119,12 @@ fn atomic_write_0600(parent: &Path, final_path: &Path, contents: &[u8]) -> Resul
 /// * `Ok(Some(..))`  — provider is configured.
 /// * `Err(..)`       — auth file is malformed on disk (propagated from
 ///   [`load_auth_storage`]).
-pub fn get_provider_auth(
-    path: &Path,
-    provider: &str,
-) -> Result<Option<ProviderAuth>, AuthError> {
+pub fn get_provider_auth(path: &Path, provider: &str) -> Result<Option<ProviderAuth>, AuthError> {
     Ok(load_auth_storage(path)?.and_then(|s| s.get_provider_auth(provider)))
 }
 
 /// Get Google provider auth from storage file.
-pub fn get_google_provider_auth(
-    path: &Path,
-) -> Result<Option<GoogleProviderAuth>, AuthError> {
+pub fn get_google_provider_auth(path: &Path) -> Result<Option<GoogleProviderAuth>, AuthError> {
     Ok(load_auth_storage(path)?.and_then(|s| s.get_google_auth()))
 }
 
@@ -135,9 +132,7 @@ pub fn get_google_provider_auth(
 /// shape fails to deserialize (e.g. legacy `endpoint` field). Used by
 /// `load_server_auth` to surface `MalformedProviderAuth` with re-auth
 /// guidance instead of silently falling back to "not configured".
-pub fn try_get_google_provider_auth(
-    path: &Path,
-) -> Result<Option<GoogleProviderAuth>, AuthError> {
+pub fn try_get_google_provider_auth(path: &Path) -> Result<Option<GoogleProviderAuth>, AuthError> {
     let Some(storage) = load_auth_storage(path)? else {
         return Ok(None);
     };
@@ -150,10 +145,7 @@ pub fn try_get_google_provider_auth(
 }
 
 /// Get service auth from storage file.
-pub fn get_service_auth(
-    path: &Path,
-    service: &str,
-) -> Result<Option<ServiceAuth>, AuthError> {
+pub fn get_service_auth(path: &Path, service: &str) -> Result<Option<ServiceAuth>, AuthError> {
     Ok(load_auth_storage(path)?.and_then(|s| s.get_service_auth(service).cloned()))
 }
 
@@ -497,7 +489,10 @@ mod tests {
     fn load_missing_file_returns_ok_none() {
         let dir = TempDir::new().unwrap();
         let result = load_auth_storage(&test_path(&dir)).unwrap();
-        assert!(result.is_none(), "missing file must be Ok(None), not an error");
+        assert!(
+            result.is_none(),
+            "missing file must be Ok(None), not an error"
+        );
     }
 
     #[test]
@@ -569,7 +564,9 @@ mod tests {
         assert!(matches!(err, AuthError::MalformedAuthFile { .. }));
         let msg = err.to_string();
         assert!(
-            msg.contains("unknown field") || msg.contains("apiKey") || msg.contains("missing field"),
+            msg.contains("unknown field")
+                || msg.contains("apiKey")
+                || msg.contains("missing field"),
             "error must name the offending field. got: {msg}"
         );
     }
@@ -639,7 +636,10 @@ mod tests {
             })
             .map(|e| e.file_name())
             .collect();
-        assert!(leftovers.is_empty(), "unexpected files left by save: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "unexpected files left by save: {leftovers:?}"
+        );
     }
 
     #[cfg(unix)]
@@ -793,10 +793,7 @@ mod tests {
 
         let mut storage = AuthStorage::new();
         let mut services = std::collections::HashMap::new();
-        let _ = services.insert(
-            "brave".to_string(),
-            ServiceAuth::from_single("key1"),
-        );
+        let _ = services.insert("brave".to_string(), ServiceAuth::from_single("key1"));
         storage.services = Some(services);
         save_auth_storage(&path, &mut storage).unwrap();
 
@@ -1149,7 +1146,10 @@ mod tests {
         save_account_oauth_tokens(&path, "anthropic", "main", &make_tokens()).unwrap();
         remove_account(&path, "anthropic", "nonexistent").unwrap();
 
-        assert_eq!(get_account_labels(&path, "anthropic").unwrap(), vec!["main"]);
+        assert_eq!(
+            get_account_labels(&path, "anthropic").unwrap(),
+            vec!["main"]
+        );
     }
 
     // ── Active credential ──
@@ -1616,8 +1616,16 @@ mod tests {
             .expect("auth file parses")
             .expect("GoogleProviderAuth should exist");
         assert_eq!(gpa.client_id.as_deref(), Some("test-cid"), "client_id lost");
-        assert_eq!(gpa.client_secret.as_deref(), Some("test-csec"), "client_secret lost");
-        assert_eq!(gpa.project_id.as_deref(), Some("test-proj"), "project_id lost");
+        assert_eq!(
+            gpa.client_secret.as_deref(),
+            Some("test-csec"),
+            "client_secret lost"
+        );
+        assert_eq!(
+            gpa.project_id.as_deref(),
+            Some("test-proj"),
+            "project_id lost"
+        );
     }
 
     #[test]
@@ -1715,7 +1723,9 @@ mod tests {
         set_active_credential(
             &path,
             "google",
-            &ActiveCredential::OAuth { label: "acct".into() },
+            &ActiveCredential::OAuth {
+                label: "acct".into(),
+            },
         )
         .unwrap();
 
@@ -1731,7 +1741,9 @@ mod tests {
         set_active_credential(
             &path,
             "google",
-            &ActiveCredential::OAuth { label: "acct".into() },
+            &ActiveCredential::OAuth {
+                label: "acct".into(),
+            },
         )
         .unwrap();
 
@@ -1753,7 +1765,9 @@ mod tests {
         set_active_credential(
             &path,
             "google",
-            &ActiveCredential::ApiKey { label: "key1".into() },
+            &ActiveCredential::ApiKey {
+                label: "key1".into(),
+            },
         )
         .unwrap();
         remove_account(&path, "google", "acct1").unwrap();

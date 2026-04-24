@@ -117,7 +117,8 @@ impl MethodHandler for GetHandler {
 
         let runtime_state = sched.get_runtime_state(&job_id);
         let (recent_runs, _total) =
-            crate::cron::store::get_runs(sched.pool(), Some(&job_id), None, 10, 0).map_err(map_cron_error)?;
+            crate::cron::store::get_runs(sched.pool(), Some(&job_id), None, 10, 0)
+                .map_err(map_cron_error)?;
 
         Ok(serde_json::json!({
             "job": to_json_value(&job)?,
@@ -263,9 +264,7 @@ impl MethodHandler for CreateHandler {
         let _guard = sched.config_lock().lock().await;
 
         // Check name uniqueness
-        if crate::cron::store::name_exists(sched.pool(), &job.name, None)
-            .map_err(map_cron_error)?
-        {
+        if crate::cron::store::name_exists(sched.pool(), &job.name, None).map_err(map_cron_error)? {
             return Err(RpcError::Custom {
                 code: "ALREADY_EXISTS".into(),
                 message: format!("Job with name '{}' already exists", job.name),
@@ -278,7 +277,8 @@ impl MethodHandler for CreateHandler {
 
         config.jobs.push(job.clone());
 
-        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(map_cron_error)?;
+        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config)
+            .map_err(map_cron_error)?;
 
         // Sync to SQLite
         crate::cron::store::upsert_job(sched.pool(), &job).map_err(map_cron_error)?;
@@ -338,7 +338,9 @@ impl MethodHandler for UpdateHandler {
         // Apply partial updates
         if let Some(name) = params.get("name").and_then(|v| v.as_str()) {
             // Check uniqueness (excluding self)
-            if crate::cron::store::name_exists(sched.pool(), name, Some(&job_id)).map_err(map_cron_error)? {
+            if crate::cron::store::name_exists(sched.pool(), name, Some(&job_id))
+                .map_err(map_cron_error)?
+            {
                 return Err(RpcError::Custom {
                     code: "ALREADY_EXISTS".into(),
                     message: format!("Job with name '{name}' already exists"),
@@ -432,7 +434,8 @@ impl MethodHandler for UpdateHandler {
         let updated_job = job.clone();
 
         // Save and sync
-        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(map_cron_error)?;
+        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config)
+            .map_err(map_cron_error)?;
 
         crate::cron::store::upsert_job(sched.pool(), &updated_job).map_err(map_cron_error)?;
 
@@ -482,7 +485,8 @@ impl MethodHandler for DeleteHandler {
             });
         }
 
-        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(map_cron_error)?;
+        crate::cron::config::save_config(sched.config_path(), sched.backup_path(), &config)
+            .map_err(map_cron_error)?;
 
         // Delete from SQLite (runs preserved via ON DELETE SET NULL)
         let _ = crate::cron::store::delete_job(sched.pool(), &job_id).map_err(map_cron_error)?;
@@ -654,7 +658,8 @@ mod tests {
     // ── Tests with a real scheduler ─────────────────────────────────
 
     fn make_cron_context() -> (RpcContext, tempfile::TempDir) {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -959,7 +964,10 @@ mod tests {
             .handle(Some(update_params), &ctx)
             .await
             .unwrap();
-        assert_eq!(updated["job"]["toolRestrictions"]["allowedTools"][0], "Read");
+        assert_eq!(
+            updated["job"]["toolRestrictions"]["allowedTools"][0],
+            "Read"
+        );
     }
 
     #[tokio::test]

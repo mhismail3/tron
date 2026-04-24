@@ -16,12 +16,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::llm::{ToolCallContext, parse_tool_call_arguments};
-use crate::llm::stream_common::StreamAccumulator;
-use tracing::debug;
 use crate::core::content::AssistantContent;
 use crate::core::events::{AssistantMessage, StreamEvent};
 use crate::core::messages::TokenUsage;
+use crate::llm::stream_common::StreamAccumulator;
+use crate::llm::{ToolCallContext, parse_tool_call_arguments};
+use tracing::debug;
 
 use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
 
@@ -1071,7 +1071,10 @@ mod tests {
         );
 
         assert!(state.has_reasoning_text);
-        assert_eq!(state.acc.accumulated_thinking, "Full reasoning content here...");
+        assert_eq!(
+            state.acc.accumulated_thinking,
+            "Full reasoning content here..."
+        );
         // Should emit ThinkingDelta (ThinkingStart already emitted by summary)
         assert_eq!(events.len(), 1);
         assert_eq!(

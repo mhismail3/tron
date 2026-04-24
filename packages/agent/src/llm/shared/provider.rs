@@ -9,10 +9,10 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::core::events::StreamEvent;
 use async_trait::async_trait;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
-use crate::core::events::StreamEvent;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Typed effort / reasoning enums

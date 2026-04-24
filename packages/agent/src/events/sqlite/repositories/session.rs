@@ -585,8 +585,10 @@ impl SessionRepo {
             if event_type == "tool.result" {
                 if let Ok(payload) = serde_json::from_str::<Value>(payload_str) {
                     if let Some(tcid) = payload.get("toolCallId").and_then(|v| v.as_str()) {
-                        let is_error =
-                            payload.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let is_error = payload
+                            .get("isError")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                         let duration = payload.get("duration").and_then(|v| v.as_i64());
                         let _ = tool_results.insert(tcid.to_string(), (is_error, duration));
                     }
@@ -599,8 +601,7 @@ impl SessionRepo {
         for (event_type, payload_str, tool_call_id) in &rows {
             if event_type == "subagent.spawned" && tool_call_id.is_none() {
                 if let Ok(payload) = serde_json::from_str::<Value>(payload_str) {
-                    if let Some(sub_id) =
-                        payload.get("subagentSessionId").and_then(|v| v.as_str())
+                    if let Some(sub_id) = payload.get("subagentSessionId").and_then(|v| v.as_str())
                     {
                         let _ = hook_subagent_ids.insert(sub_id.to_string());
                     }
@@ -632,18 +633,13 @@ impl SessionRepo {
                             let bt = block.get("type").and_then(|t| t.as_str());
                             match bt {
                                 Some("text") => {
-                                    if let Some(text) =
-                                        block.get("text").and_then(|t| t.as_str())
-                                    {
+                                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                                         let trimmed = text.trim();
                                         if !trimmed.is_empty() {
                                             let fl = first_non_empty_line(trimmed);
                                             lines.push(ActivitySummaryLine {
                                                 kind: "text".into(),
-                                                text: Some(truncate(
-                                                    &fl,
-                                                    MAX_ASSISTANT_TEXT_LEN,
-                                                )),
+                                                text: Some(truncate(&fl, MAX_ASSISTANT_TEXT_LEN)),
                                                 ..Default::default()
                                             });
                                         }
@@ -702,7 +698,10 @@ impl SessionRepo {
                     if sub_id.is_some_and(|id| hook_subagent_ids.contains(id)) {
                         continue;
                     }
-                    let turns = payload.get("totalTurns").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let turns = payload
+                        .get("totalTurns")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
                     let duration = payload.get("duration").and_then(|v| v.as_i64());
                     let complete_line = ActivitySummaryLine {
                         kind: "subagentDone".into(),

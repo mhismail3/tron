@@ -182,8 +182,8 @@ pub fn load_relay_config() -> Option<RelayConfig> {
         return None;
     }
 
-    let environment = std::env::var("TRON_RELAY_ENVIRONMENT")
-        .unwrap_or_else(|_| "production".to_string());
+    let environment =
+        std::env::var("TRON_RELAY_ENVIRONMENT").unwrap_or_else(|_| "production".to_string());
 
     debug!(
         relay_url = %url,

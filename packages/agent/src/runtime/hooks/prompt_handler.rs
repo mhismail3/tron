@@ -106,13 +106,19 @@ impl PromptHookHandler {
     }
 
     /// Attach a worktree coordinator for branch rename operations.
-    pub fn with_worktree_coordinator(mut self, coord: Arc<crate::worktree::WorktreeCoordinator>) -> Self {
+    pub fn with_worktree_coordinator(
+        mut self,
+        coord: Arc<crate::worktree::WorktreeCoordinator>,
+    ) -> Self {
         self.worktree_coordinator = Some(coord);
         self
     }
 
     /// Attach a shared abort tracker for cancelling stale subsessions.
-    pub fn with_abort_tracker(mut self, tracker: Arc<super::abort_tracker::HookAbortTracker>) -> Self {
+    pub fn with_abort_tracker(
+        mut self,
+        tracker: Arc<super::abort_tracker::HookAbortTracker>,
+    ) -> Self {
         self.abort_tracker = Some(tracker);
         self
     }
@@ -181,7 +187,13 @@ impl PromptHookHandler {
         // Replace any non-alphanumeric chars with hyphens
         let normalized: String = cleaned
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' {
+                    c
+                } else {
+                    '-'
+                }
+            })
             .collect();
 
         // Collapse multiple hyphens and strip leading/trailing
@@ -282,7 +294,10 @@ impl HookHandler for PromptHookHandler {
 
         // Suggest-prompts: skip if no conversation context available.
         if is_suggest_prompts {
-            if let HookContext::Stop { last_user_prompt, .. } = context {
+            if let HookContext::Stop {
+                last_user_prompt, ..
+            } = context
+            {
                 if last_user_prompt.is_none() {
                     debug!(id = %self.id, "[prompt_hook] skipping suggest-prompts (no user prompt)");
                     return Ok(HookResult::continue_());
@@ -334,7 +349,8 @@ impl HookHandler for PromptHookHandler {
 
                     // For title generation, persist to DB and emit SessionUpdated
                     if is_title_gen {
-                        if let Some(title) = output_text.as_ref().and_then(|t| Self::clean_title(t)) {
+                        if let Some(title) = output_text.as_ref().and_then(|t| Self::clean_title(t))
+                        {
                             // Respect pre-set titles (e.g., quick chat sessions titled "Chat")
                             let has_existing_title = event_store
                                 .as_ref()
@@ -345,29 +361,32 @@ impl HookHandler for PromptHookHandler {
                                 debug!(session_id = %session_id, "skipping title-gen: session already has a title");
                             } else {
                                 if let Some(store) = &event_store {
-                                    if let Err(e) = store.update_session_title(&session_id, Some(&title)) {
+                                    if let Err(e) =
+                                        store.update_session_title(&session_id, Some(&title))
+                                    {
                                         warn!(session_id = %session_id, error = %e, "failed to persist hook-generated title");
                                     }
                                 }
                                 debug!(title = %title, "LLM hook generated session title");
-                                let _ = emitter.emit(crate::core::events::TronEvent::SessionUpdated {
-                                    base: BaseEvent::now(&session_id),
-                                    title: Some(title),
-                                    model: None,
-                                    message_count: None,
-                                    input_tokens: None,
-                                    output_tokens: None,
-                                    last_turn_input_tokens: None,
-                                    cache_read_tokens: None,
-                                    cache_creation_tokens: None,
-                                    cost: None,
-                                    last_activity: chrono::Utc::now().to_rfc3339(),
-                                    is_active: true,
-                                    last_user_prompt: None,
-                                    last_assistant_response: None,
-                                    parent_session_id: None,
-                                    activity_lines: None,
-                                });
+                                let _ =
+                                    emitter.emit(crate::core::events::TronEvent::SessionUpdated {
+                                        base: BaseEvent::now(&session_id),
+                                        title: Some(title),
+                                        model: None,
+                                        message_count: None,
+                                        input_tokens: None,
+                                        output_tokens: None,
+                                        last_turn_input_tokens: None,
+                                        cache_read_tokens: None,
+                                        cache_creation_tokens: None,
+                                        cost: None,
+                                        last_activity: chrono::Utc::now().to_rfc3339(),
+                                        is_active: true,
+                                        last_user_prompt: None,
+                                        last_assistant_response: None,
+                                        parent_session_id: None,
+                                        activity_lines: None,
+                                    });
                             }
                         }
                     }
@@ -375,14 +394,12 @@ impl HookHandler for PromptHookHandler {
                     // For branch name generation, rename the branch
                     if is_branch_name_gen {
                         if let (Some(name), Some(coord)) = (
-                            output_text.as_ref().and_then(|t| Self::clean_branch_name(t)),
+                            output_text
+                                .as_ref()
+                                .and_then(|t| Self::clean_branch_name(t)),
                             &coordinator,
                         ) {
-                            let new_branch = format!(
-                                "{}{}",
-                                coord.config().branch_prefix,
-                                name
-                            );
+                            let new_branch = format!("{}{}", coord.config().branch_prefix, name);
                             match coord.rename_branch(&session_id, &new_branch).await {
                                 Ok(()) => {
                                     debug!(session_id = %session_id, new_branch = %new_branch, "branch renamed by hook");
@@ -407,9 +424,9 @@ impl HookHandler for PromptHookHandler {
 
                     // Parse structured suggestions for suggest-prompts hooks
                     let suggestions = if is_suggest_prompts {
-                        output_text.as_ref().map(|text| {
-                            Self::parse_suggestions(text)
-                        })
+                        output_text
+                            .as_ref()
+                            .map(|text| Self::parse_suggestions(text))
                     } else {
                         None
                     };
@@ -529,10 +546,7 @@ impl HookHandler for PromptHookHandler {
 /// 2. Then fire when: 6+ prompts since last title gen, OR a
 ///    compaction/memory event occurred since last title gen
 /// 3. Whichever comes first, then reset
-fn should_generate_title_with_store(
-    store: &crate::events::EventStore,
-    session_id: &str,
-) -> bool {
+fn should_generate_title_with_store(store: &crate::events::EventStore, session_id: &str) -> bool {
     // Count user messages in this session
     let user_msgs = store
         .get_events_by_type(session_id, &["message.user"], None)
@@ -571,11 +585,7 @@ fn should_generate_title_with_store(
 
     // Check for compaction or memory events since last title gen
     let trigger_events = store
-        .get_events_by_type(
-            session_id,
-            &["compact.summary", "memory.retained"],
-            None,
-        )
+        .get_events_by_type(session_id, &["compact.summary", "memory.retained"], None)
         .unwrap_or_default();
 
     trigger_events.iter().any(|e| e.sequence > last_gen_seq)
@@ -742,7 +752,10 @@ mod tests {
 
     #[test]
     fn test_clean_branch_name_rejects_two_words() {
-        assert_eq!(PromptHookHandler::clean_branch_name("purple-elephant"), None);
+        assert_eq!(
+            PromptHookHandler::clean_branch_name("purple-elephant"),
+            None
+        );
     }
 
     #[test]
@@ -764,7 +777,9 @@ mod tests {
     fn test_clean_branch_name_rejects_garbage_with_too_many_words() {
         // More than 3 words → takes first 3, which is "here-is-a" (not useful but valid format)
         // The LLM prompt constrains output to just the name; this tests the sanitizer, not the LLM
-        let result = PromptHookHandler::clean_branch_name("Here is a random branch name: fuzzy-purple-elephant");
+        let result = PromptHookHandler::clean_branch_name(
+            "Here is a random branch name: fuzzy-purple-elephant",
+        );
         // It will produce "here-is-a" from the first 3 words — that's valid format
         assert_eq!(result, Some("here-is-a".to_string()));
     }
@@ -791,7 +806,14 @@ mod tests {
     fn test_parse_suggestions_basic() {
         let output = "Fix the login bug\nAdd error handling\nRefactor the parser";
         let result = PromptHookHandler::parse_suggestions(output);
-        assert_eq!(result, vec!["Fix the login bug", "Add error handling", "Refactor the parser"]);
+        assert_eq!(
+            result,
+            vec![
+                "Fix the login bug",
+                "Add error handling",
+                "Refactor the parser"
+            ]
+        );
     }
 
     #[test]
@@ -1141,7 +1163,9 @@ mod tests {
             let sid = create_session(&store);
             assert!(store.get_session(&sid).unwrap().unwrap().title.is_none());
 
-            store.update_session_title(&sid, Some("Fix login bug")).unwrap();
+            store
+                .update_session_title(&sid, Some("Fix login bug"))
+                .unwrap();
 
             let session = store.get_session(&sid).unwrap().unwrap();
             assert_eq!(session.title.as_deref(), Some("Fix login bug"));
@@ -1175,9 +1199,7 @@ mod tests {
             let store = setup_store();
             let sid = create_session(&store);
             let title = "Fix l'Hopital's \"rule\" \u{2014} \u{65e5}\u{672c}\u{8a9e}";
-            store
-                .update_session_title(&sid, Some(title))
-                .unwrap();
+            store.update_session_title(&sid, Some(title)).unwrap();
             assert_eq!(
                 store.get_session(&sid).unwrap().unwrap().title.as_deref(),
                 Some(title)

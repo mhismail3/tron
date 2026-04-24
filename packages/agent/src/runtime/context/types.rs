@@ -3,9 +3,9 @@
 //! Shared types for context management components: threshold levels,
 //! configuration, snapshots, compaction, tool results, and summarization.
 
-use serde::{Deserialize, Serialize};
 use crate::core::messages::Message;
 use crate::core::tools::Tool;
+use serde::{Deserialize, Serialize};
 
 use super::constants::Thresholds;
 

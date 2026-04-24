@@ -25,9 +25,15 @@ fn deserialize_user_plain_text() {
     let record: ClaudeRecord = serde_json::from_value(raw).unwrap();
     assert_eq!(record.record_type, "user");
     assert_eq!(record.kind(), RecordKind::User);
-    assert_eq!(record.uuid.as_deref(), Some("bed3c186-e1df-4db2-b4d0-e044435c1b0e"));
+    assert_eq!(
+        record.uuid.as_deref(),
+        Some("bed3c186-e1df-4db2-b4d0-e044435c1b0e")
+    );
     assert!(record.parent_uuid.is_none());
-    assert_eq!(record.prompt_id.as_deref(), Some("1b3c12a5-e0a3-4e8d-ab2f-9068910081c0"));
+    assert_eq!(
+        record.prompt_id.as_deref(),
+        Some("1b3c12a5-e0a3-4e8d-ab2f-9068910081c0")
+    );
     assert!(!record.is_tool_result());
 
     let msg = record.message.unwrap();
@@ -351,13 +357,22 @@ fn record_kind_parse_all_variants() {
     assert_eq!(RecordKind::parse("assistant"), RecordKind::Assistant);
     assert_eq!(RecordKind::parse("system"), RecordKind::System);
     assert_eq!(RecordKind::parse("progress"), RecordKind::Progress);
-    assert_eq!(RecordKind::parse("file-history-snapshot"), RecordKind::FileHistorySnapshot);
+    assert_eq!(
+        RecordKind::parse("file-history-snapshot"),
+        RecordKind::FileHistorySnapshot
+    );
     assert_eq!(RecordKind::parse("attachment"), RecordKind::Attachment);
     assert_eq!(RecordKind::parse("custom-title"), RecordKind::CustomTitle);
     assert_eq!(RecordKind::parse("agent-name"), RecordKind::AgentName);
     assert_eq!(RecordKind::parse("last-prompt"), RecordKind::LastPrompt);
-    assert_eq!(RecordKind::parse("queue-operation"), RecordKind::QueueOperation);
-    assert_eq!(RecordKind::parse("permission-mode"), RecordKind::PermissionMode);
+    assert_eq!(
+        RecordKind::parse("queue-operation"),
+        RecordKind::QueueOperation
+    );
+    assert_eq!(
+        RecordKind::parse("permission-mode"),
+        RecordKind::PermissionMode
+    );
     assert_eq!(RecordKind::parse("invented"), RecordKind::Unknown);
 }
 

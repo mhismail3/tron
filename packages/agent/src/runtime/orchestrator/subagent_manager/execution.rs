@@ -1,15 +1,16 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use serde_json::{Value, json};
-use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, info, info_span};
 use crate::core::events::{BaseEvent, TronEvent};
 use crate::events::{AppendOptions, EventType};
 use crate::llm::provider::ProviderFactory;
 use crate::tools::registry::ToolRegistry;
+use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
+use tracing::{Instrument, info, info_span};
 
 use super::{SubagentManager, SubagentResult, TrackedSubagent, elapsed_ms, truncate};
+use crate::events::EventStore;
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
@@ -18,7 +19,6 @@ use crate::runtime::orchestrator::agent_runner;
 use crate::runtime::orchestrator::session_manager::SessionManager;
 use crate::runtime::types::ReasoningLevel;
 use crate::runtime::types::{AgentConfig as AgentCfg, RunContext};
-use crate::events::EventStore;
 
 pub(super) struct SubsessionTaskLaunch {
     pub(super) session_manager: Arc<SessionManager>,
@@ -70,11 +70,8 @@ pub(super) struct ToolAgentTaskLaunch {
     /// Optional weak probe to query whether the parent session has an active
     /// agent run. Used to compute the `notify` field on
     /// `SubagentResultAvailable` (notify=true when parent is idle).
-    pub(super) run_state_probe: Option<
-        std::sync::Weak<
-            dyn crate::runtime::orchestrator::orchestrator::RunStateProbe,
-        >,
-    >,
+    pub(super) run_state_probe:
+        Option<std::sync::Weak<dyn crate::runtime::orchestrator::orchestrator::RunStateProbe>>,
     pub(super) spawn_type: String,
 }
 
@@ -161,7 +158,8 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             rules_index: None,
             pre_activated_rules: vec![],
             subagent_manager: params.child_subagent_manager,
-            compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+            compaction_trigger_config:
+                crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
@@ -194,7 +192,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
         event_type: EventType::MessageUser,
         payload: json!({"content": params.task}),
         parent_id: None,
-                sequence: None,
+        sequence: None,
     });
 
     let result = agent_runner::run_agent(
@@ -327,7 +325,8 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
             rules_index: None,
             pre_activated_rules: vec![],
             subagent_manager: params.child_subagent_manager,
-            compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+            compaction_trigger_config:
+                crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
@@ -360,7 +359,7 @@ async fn run_tool_agent_task(params: ToolAgentTaskLaunch) {
         event_type: EventType::MessageUser,
         payload: json!({"content": params.task}),
         parent_id: None,
-                sequence: None,
+        sequence: None,
     });
 
     let (forward_cancel, forward_handle) = spawn_child_event_forwarder(

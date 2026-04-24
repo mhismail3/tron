@@ -5,14 +5,16 @@
 
 use std::sync::Arc;
 
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{HttpClient, ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
-use crate::tools::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
+use crate::tools::utils::validation::{
+    get_optional_string, get_optional_u64, validate_required_string,
+};
 
 const BRAVE_BASE_URL: &str = "https://api.search.brave.com";
 const MAX_QUERY_LENGTH: usize = 400;
@@ -62,9 +64,7 @@ fn web_search_error(message: impl Into<String>, status: Option<u16>) -> TronTool
     let msg = message.into();
     let class = classify_web_search_error(status, &msg);
     TronToolResult {
-        content: ToolResultBody::Blocks(vec![
-            crate::core::content::ToolResultContent::text(&msg),
-        ]),
+        content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(&msg)]),
         details: Some(json!({
             "error": msg,
             "errorClass": class,
@@ -172,7 +172,10 @@ impl TronTool for WebSearchTool {
 
         if query.len() > MAX_QUERY_LENGTH {
             return Ok(web_search_error(
-                format!("Query too long: {} chars (max {MAX_QUERY_LENGTH})", query.len()),
+                format!(
+                    "Query too long: {} chars (max {MAX_QUERY_LENGTH})",
+                    query.len()
+                ),
                 None,
             ));
         }
@@ -293,10 +296,7 @@ fn extract_structured_results(endpoint: &str, body: &Value) -> Vec<Value> {
                 .and_then(Value::as_str)
                 .or_else(|| r.get("src").and_then(Value::as_str))
                 .unwrap_or("");
-            let snippet = r
-                .get("description")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let snippet = r.get("description").and_then(Value::as_str).unwrap_or("");
             let age = r.get("age").and_then(Value::as_str);
             let mut obj = serde_json::Map::new();
             let _ = obj.insert("title".into(), json!(title));
@@ -412,9 +412,9 @@ fn format_video_results(body: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use crate::tools::testutil::{extract_text, make_ctx};
     use crate::tools::traits::{HttpRequest, HttpResponse};
+    use std::collections::HashMap;
 
     struct MockHttp {
         handler: Box<dyn Fn(&str) -> Result<HttpResponse, String> + Send + Sync>,
@@ -586,10 +586,7 @@ mod tests {
 
     #[test]
     fn classify_unknown_returns_unknown() {
-        assert_eq!(
-            classify_web_search_error(None, "weird failure"),
-            "unknown"
-        );
+        assert_eq!(classify_web_search_error(None, "weird failure"), "unknown");
     }
 
     #[tokio::test]
@@ -685,7 +682,10 @@ mod tests {
         });
         let tool = WebSearchTool::new(http, "key".into());
         let r = tool
-            .execute(json!({"query": "breaking", "endpoint": "news"}), &make_ctx())
+            .execute(
+                json!({"query": "breaking", "endpoint": "news"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         let results = r.details.as_ref().unwrap()["results"].as_array().unwrap();
@@ -699,7 +699,8 @@ mod tests {
             handler: Box::new(|_| {
                 Ok(HttpResponse {
                     status: 200,
-                    body: r#"{"results":[{"title":"Cat","src":"https://img.example/cat.jpg"}]}"#.into(),
+                    body: r#"{"results":[{"title":"Cat","src":"https://img.example/cat.jpg"}]}"#
+                        .into(),
                     content_type: Some("application/json".into()),
                     headers: HashMap::new(),
                 })

@@ -116,11 +116,7 @@ pub fn gather_state(
         .unwrap_or(0);
 
     let user_messages_since_retain = event_store
-        .count_events_by_type_after_sequence(
-            session_id,
-            USER_MESSAGE_TYPE,
-            last_retained_sequence,
-        )
+        .count_events_by_type_after_sequence(session_id, USER_MESSAGE_TYPE, last_retained_sequence)
         .map_err(map_event_store_error)?;
 
     Ok(AutoRetainInput {
@@ -233,17 +229,37 @@ mod tests {
             (5, 100, true, AutoRetainDecision::Skip(SkipReason::Subagent)),
             (0, 100, true, AutoRetainDecision::Skip(SkipReason::Subagent)),
             // disabled via interval=0
-            (0, 100, false, AutoRetainDecision::Skip(SkipReason::Disabled)),
+            (
+                0,
+                100,
+                false,
+                AutoRetainDecision::Skip(SkipReason::Disabled),
+            ),
             // no user messages since last retain
-            (5, 0, false, AutoRetainDecision::Skip(SkipReason::NoUserMessages)),
+            (
+                5,
+                0,
+                false,
+                AutoRetainDecision::Skip(SkipReason::NoUserMessages),
+            ),
             // below threshold
-            (5, 4, false, AutoRetainDecision::Skip(SkipReason::BelowThreshold)),
+            (
+                5,
+                4,
+                false,
+                AutoRetainDecision::Skip(SkipReason::BelowThreshold),
+            ),
             // exactly threshold
             (5, 5, false, AutoRetainDecision::Fire { interval_fired: 5 }),
             // past threshold
             (5, 10, false, AutoRetainDecision::Fire { interval_fired: 5 }),
             // small interval of 2 (the user's common case)
-            (2, 1, false, AutoRetainDecision::Skip(SkipReason::BelowThreshold)),
+            (
+                2,
+                1,
+                false,
+                AutoRetainDecision::Skip(SkipReason::BelowThreshold),
+            ),
             (2, 2, false, AutoRetainDecision::Fire { interval_fired: 2 }),
             (2, 3, false, AutoRetainDecision::Fire { interval_fired: 2 }),
             // interval of 1 fires on the very first user message
@@ -251,7 +267,12 @@ mod tests {
             // interval_fired reports the interval that triggered the fire, not the delta
             (7, 14, false, AutoRetainDecision::Fire { interval_fired: 7 }),
             // negative / pathological count treated as "nothing to retain"
-            (5, -1, false, AutoRetainDecision::Skip(SkipReason::NoUserMessages)),
+            (
+                5,
+                -1,
+                false,
+                AutoRetainDecision::Skip(SkipReason::NoUserMessages),
+            ),
         ];
 
         for (i, (interval, user_msgs, is_subagent, expected)) in cases.iter().enumerate() {
@@ -290,8 +311,8 @@ mod tests {
     use std::sync::Arc;
 
     fn test_store() -> Arc<EventStore> {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default())
-            .unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -301,11 +322,13 @@ mod tests {
 
     fn seed_session(store: &EventStore, parent: Option<&str>) -> String {
         match parent {
-            None => store
-                .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
-                .unwrap()
-                .session
-                .id,
+            None => {
+                store
+                    .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
+                    .unwrap()
+                    .session
+                    .id
+            }
             Some(parent_id) => {
                 use crate::events::sqlite::repositories::session::{
                     CreateSessionOptions, SessionRepo,

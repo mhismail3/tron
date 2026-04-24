@@ -624,8 +624,7 @@ mod tests {
 
         // Attacker connection claims the victim's session_id. Bind
         // today is a client-controlled action with no ownership check.
-        let (attacker, mut attacker_rx) =
-            make_connection_with_rx("attacker", Some("victim_sess"));
+        let (attacker, mut attacker_rx) = make_connection_with_rx("attacker", Some("victim_sess"));
         bm.add(attacker).await;
 
         // Victim's session emits an event.

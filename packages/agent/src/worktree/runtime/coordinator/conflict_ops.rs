@@ -53,11 +53,13 @@ impl WorktreeCoordinator {
         target_branch: &str,
         strategy: MergeStrategy,
     ) -> Result<PendingMergeState> {
-        let info = self
-            .state
-            .lock()
-            .active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
+        let info =
+            self.state
+                .lock()
+                .active_info(session_id)
+                .ok_or_else(|| WorktreeError::NotFound {
+                    session_id: session_id.to_string(),
+                })?;
 
         let pending = scm_conflict::start_merge_keep_conflicts(
             &info.repo_root,
@@ -77,14 +79,11 @@ impl WorktreeCoordinator {
 
         // Probe the in-flight merge's conflict paths so the event carries
         // actionable payload. Best-effort — on failure emit with empty list.
-        let paths: Vec<String> = scm_conflict::list_conflicts(
-            &info.repo_root,
-            strategy.clone(),
-            &self.git,
-        )
-        .await
-        .map(|v| v.into_iter().map(|c| c.path).collect())
-        .unwrap_or_default();
+        let paths: Vec<String> =
+            scm_conflict::list_conflicts(&info.repo_root, strategy.clone(), &self.git)
+                .await
+                .map(|v| v.into_iter().map(|c| c.path).collect())
+                .unwrap_or_default();
         let strategy_str = strategy.as_str().to_string();
         let conflict_count = paths.len() as u32;
 
@@ -174,11 +173,7 @@ impl WorktreeCoordinator {
     /// - `StashPop` — drop the stash (unmerged index entries are already
     ///   resolved by `resolve_conflict`); emit `merge_continued` with
     ///   origin = `stash_pop`.
-    pub async fn continue_merge(
-        &self,
-        session_id: &str,
-        message: Option<&str>,
-    ) -> Result<String> {
+    pub async fn continue_merge(&self, session_id: &str, message: Option<&str>) -> Result<String> {
         let pending_snapshot = self
             .state
             .lock()
@@ -192,8 +187,8 @@ impl WorktreeCoordinator {
         }
 
         let (working_dir, strategy) = self.merge_context(session_id)?;
-        let sha =
-            scm_conflict::continue_merge(&working_dir, strategy.clone(), message, &self.git).await?;
+        let sha = scm_conflict::continue_merge(&working_dir, strategy.clone(), message, &self.git)
+            .await?;
         self.state.lock().pending_merges.remove(session_id);
 
         let strategy_str = strategy.as_str().to_string();
@@ -212,8 +207,7 @@ impl WorktreeCoordinator {
                 // StashPop origin so the user has a resolver path.
                 self.handle_post_stash_pop(session_id, stash_ref, pop_result);
             }
-            let _ =
-                super::rebase_on_main::remove_sidecar(worktree_path, session_id).await;
+            let _ = super::rebase_on_main::remove_sidecar(worktree_path, session_id).await;
 
             // Compute new base commit.
             let new_base_commit = self
@@ -275,7 +269,9 @@ impl WorktreeCoordinator {
             .lock()
             .active_info(session_id)
             .map(|i| i.worktree_path)
-            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
+            .ok_or_else(|| WorktreeError::NotFound {
+                session_id: session_id.to_string(),
+            })?;
 
         // Reject continue if there are still unmerged paths.
         let remaining = self
@@ -334,11 +330,7 @@ impl WorktreeCoordinator {
     ///   for `RebaseOnMain`, also pops the auto-stash (restoring dirty state).
     /// - `StashPop` — `git reset --hard HEAD`; the stash stays on the stash
     ///   stack so the user can retry or drop it manually.
-    pub async fn abort_merge_with_reason(
-        &self,
-        session_id: &str,
-        reason: &str,
-    ) -> Result<()> {
+    pub async fn abort_merge_with_reason(&self, session_id: &str, reason: &str) -> Result<()> {
         let pending_snapshot = self
             .state
             .lock()
@@ -367,8 +359,7 @@ impl WorktreeCoordinator {
                 let pop_result = self.git.stash_pop(worktree_path, stash_ref).await;
                 self.handle_post_stash_pop(session_id, stash_ref, pop_result);
             }
-            let _ =
-                super::rebase_on_main::remove_sidecar(worktree_path, session_id).await;
+            let _ = super::rebase_on_main::remove_sidecar(worktree_path, session_id).await;
         }
         Ok(())
     }
@@ -376,17 +367,15 @@ impl WorktreeCoordinator {
     /// `abort_merge` branch for `MergeOrigin::StashPop` — reset the working
     /// tree + index to HEAD to discard the half-applied stash. The stash
     /// itself stays on the stack so the user can retry or drop it manually.
-    async fn abort_stash_pop(
-        &self,
-        session_id: &str,
-        reason: &str,
-    ) -> Result<()> {
+    async fn abort_stash_pop(&self, session_id: &str, reason: &str) -> Result<()> {
         let worktree_path = self
             .state
             .lock()
             .active_info(session_id)
             .map(|i| i.worktree_path)
-            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
+            .ok_or_else(|| WorktreeError::NotFound {
+                session_id: session_id.to_string(),
+            })?;
 
         self.git.reset_hard(&worktree_path, "HEAD").await?;
 
@@ -508,7 +497,9 @@ impl WorktreeCoordinator {
             .lock()
             .active_info(session_id)
             .map(|i| i.worktree_path)
-            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
+            .ok_or_else(|| WorktreeError::NotFound {
+                session_id: session_id.to_string(),
+            })?;
 
         // StashPop is "done" when no unmerged paths remain; the subagent
         // never calls `git merge --continue` / `rebase --continue` here.
@@ -595,14 +586,13 @@ impl WorktreeCoordinator {
     ///   happened inside the session's linked worktree).
     /// - `MergeOrigin::StashPop` — `info.worktree_path` (unmerged paths
     ///   live in the worktree's index; no cross-worktree state).
-    fn merge_context(
-        &self,
-        session_id: &str,
-    ) -> Result<(std::path::PathBuf, MergeStrategy)> {
+    fn merge_context(&self, session_id: &str) -> Result<(std::path::PathBuf, MergeStrategy)> {
         let state = self.state.lock();
         let info = state
             .active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
+            .ok_or_else(|| WorktreeError::NotFound {
+                session_id: session_id.to_string(),
+            })?;
         let pending = state
             .pending_merges
             .get(session_id)
@@ -699,4 +689,3 @@ fn emit_merge_aborted(
         origin: origin.to_string(),
     });
 }
-

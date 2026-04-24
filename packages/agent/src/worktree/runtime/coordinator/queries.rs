@@ -244,11 +244,7 @@ impl WorktreeCoordinator {
                 .map(|h| h.chars().take(7).collect())
                 .unwrap_or_else(|_| "HEAD".to_string()),
         };
-        let head = self
-            .git
-            .head_commit(repo_root)
-            .await
-            .unwrap_or_default();
+        let head = self.git.head_commit(repo_root).await.unwrap_or_default();
         let has_changes = self.git.has_changes(repo_root).await.unwrap_or(false);
         Ok(Some(crate::worktree::types::WorktreeStatus {
             isolated: false,

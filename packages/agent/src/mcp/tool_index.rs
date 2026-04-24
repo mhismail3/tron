@@ -94,7 +94,9 @@ impl ToolIndex {
     pub fn search(&self, query: &str, server_filter: Option<&str>) -> Vec<ToolMatch> {
         let keywords: Vec<String> = tokenize(query);
 
-        let mut results: Vec<ToolMatch> = self.tools.iter()
+        let mut results: Vec<ToolMatch> = self
+            .tools
+            .iter()
             .filter(|t| server_filter.is_none_or(|s| t.server_name == s))
             .filter_map(|t| {
                 let score = score_tool(t, &keywords);
@@ -126,7 +128,10 @@ impl ToolIndex {
 
     /// Number of tools from a specific server.
     pub fn server_tool_count(&self, server: &str) -> usize {
-        self.tools.iter().filter(|t| t.server_name == server).count()
+        self.tools
+            .iter()
+            .filter(|t| t.server_name == server)
+            .count()
     }
 
     /// Format search results as compact text for LLM consumption.
@@ -141,13 +146,17 @@ impl ToolIndex {
             if m.params.is_empty() {
                 out.push_str("  params: (none)\n");
             } else {
-                let param_strs: Vec<String> = m.params.iter().map(|p| {
-                    if p.required {
-                        format!("{} ({}, required)", p.name, p.param_type)
-                    } else {
-                        format!("{} ({})", p.name, p.param_type)
-                    }
-                }).collect();
+                let param_strs: Vec<String> = m
+                    .params
+                    .iter()
+                    .map(|p| {
+                        if p.required {
+                            format!("{} ({}, required)", p.name, p.param_type)
+                        } else {
+                            format!("{} ({})", p.name, p.param_type)
+                        }
+                    })
+                    .collect();
                 let _ = writeln!(out, "  params: {}", param_strs.join(", "));
             }
         }
@@ -211,20 +220,23 @@ fn extract_params(schema: &Value) -> Vec<ParamSummary> {
         .map(|arr| arr.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
 
-    properties.iter().map(|(name, prop)| {
-        ParamSummary {
+    properties
+        .iter()
+        .map(|(name, prop)| ParamSummary {
             name: name.clone(),
-            param_type: prop.get("type")
+            param_type: prop
+                .get("type")
                 .and_then(Value::as_str)
                 .unwrap_or("any")
                 .to_string(),
             required: required_set.contains(&name.as_str()),
-            description: prop.get("description")
+            description: prop
+                .get("description")
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -242,17 +254,25 @@ mod tests {
 
     fn sample_tools() -> Vec<McpToolDef> {
         vec![
-            make_tool("query", "Run SQL queries against the database", json!({
-                "type": "object",
-                "properties": {
-                    "sql": {"type": "string", "description": "SQL query"},
-                    "limit": {"type": "number", "description": "Row limit"}
-                },
-                "required": ["sql"]
-            })),
-            make_tool("list_tables", "List all tables in the database", json!({
-                "type": "object"
-            })),
+            make_tool(
+                "query",
+                "Run SQL queries against the database",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "sql": {"type": "string", "description": "SQL query"},
+                        "limit": {"type": "number", "description": "Row limit"}
+                    },
+                    "required": ["sql"]
+                }),
+            ),
+            make_tool(
+                "list_tables",
+                "List all tables in the database",
+                json!({
+                    "type": "object"
+                }),
+            ),
         ]
     }
 
@@ -275,7 +295,10 @@ mod tests {
     fn remove_server_clears_only_that_server() {
         let mut index = ToolIndex::new();
         index.add_server_tools("sqlite", &sample_tools());
-        index.add_server_tools("postgres", &[make_tool("execute", "Run SQL", json!({"type": "object"}))]);
+        index.add_server_tools(
+            "postgres",
+            &[make_tool("execute", "Run SQL", json!({"type": "object"}))],
+        );
         assert_eq!(index.tool_count(), 3);
 
         index.remove_server("sqlite");
@@ -287,10 +310,13 @@ mod tests {
     #[test]
     fn exact_name_match_scores_highest() {
         let mut index = ToolIndex::new();
-        index.add_server_tools("s", &[
-            make_tool("query", "Run query", json!({"type": "object"})),
-            make_tool("querylog", "Query log viewer", json!({"type": "object"})),
-        ]);
+        index.add_server_tools(
+            "s",
+            &[
+                make_tool("query", "Run query", json!({"type": "object"})),
+                make_tool("querylog", "Query log viewer", json!({"type": "object"})),
+            ],
+        );
         let results = index.search("query", None);
         assert!(results.len() >= 2);
         assert_eq!(results[0].tool, "query"); // exact match first
@@ -300,10 +326,13 @@ mod tests {
     #[test]
     fn prefix_match_scores_higher_than_description() {
         let mut index = ToolIndex::new();
-        index.add_server_tools("s", &[
-            make_tool("list_tables", "Show tables", json!({"type": "object"})),
-            make_tool("drop", "List and remove items", json!({"type": "object"})),
-        ]);
+        index.add_server_tools(
+            "s",
+            &[
+                make_tool("list_tables", "Show tables", json!({"type": "object"})),
+                make_tool("drop", "List and remove items", json!({"type": "object"})),
+            ],
+        );
         let results = index.search("list", None);
         assert!(!results.is_empty());
         assert_eq!(results[0].tool, "list_tables"); // prefix match > description
@@ -313,7 +342,10 @@ mod tests {
     fn server_filter_restricts_results() {
         let mut index = ToolIndex::new();
         index.add_server_tools("sqlite", &sample_tools());
-        index.add_server_tools("postgres", &[make_tool("query", "Run query", json!({"type": "object"}))]);
+        index.add_server_tools(
+            "postgres",
+            &[make_tool("query", "Run query", json!({"type": "object"}))],
+        );
 
         let all = index.search("query", None);
         let filtered = index.search("query", Some("sqlite"));
@@ -336,7 +368,14 @@ mod tests {
     #[test]
     fn case_insensitive_matching() {
         let mut index = ToolIndex::new();
-        index.add_server_tools("s", &[make_tool("CreateIssue", "Create a GitHub issue", json!({"type": "object"}))]);
+        index.add_server_tools(
+            "s",
+            &[make_tool(
+                "CreateIssue",
+                "Create a GitHub issue",
+                json!({"type": "object"}),
+            )],
+        );
 
         let results = index.search("createissue", None);
         assert_eq!(results.len(), 1);
@@ -347,10 +386,13 @@ mod tests {
     #[test]
     fn multi_keyword_query_combines_scores() {
         let mut index = ToolIndex::new();
-        index.add_server_tools("s", &[
-            make_tool("query", "Run SQL queries", json!({"type": "object"})),
-            make_tool("list_tables", "List all tables", json!({"type": "object"})),
-        ]);
+        index.add_server_tools(
+            "s",
+            &[
+                make_tool("query", "Run SQL queries", json!({"type": "object"})),
+                make_tool("list_tables", "List all tables", json!({"type": "object"})),
+            ],
+        );
         // "sql query" should score higher for "query" tool (matches name + description)
         let results = index.search("sql query", None);
         assert!(!results.is_empty());
@@ -412,8 +454,18 @@ mod tests {
             tool: "query".into(),
             description: "Run SQL queries".into(),
             params: vec![
-                ParamSummary { name: "sql".into(), param_type: "string".into(), required: true, description: "SQL".into() },
-                ParamSummary { name: "limit".into(), param_type: "number".into(), required: false, description: "Limit".into() },
+                ParamSummary {
+                    name: "sql".into(),
+                    param_type: "string".into(),
+                    required: true,
+                    description: "SQL".into(),
+                },
+                ParamSummary {
+                    name: "limit".into(),
+                    param_type: "number".into(),
+                    required: false,
+                    description: "Limit".into(),
+                },
             ],
             score: 100,
         }];

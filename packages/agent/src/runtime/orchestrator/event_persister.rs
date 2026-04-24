@@ -3,13 +3,13 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::events::sqlite::row_types::EventRow;
+use crate::events::{AppendOptions, EventStore, EventType};
 use metrics::{counter, histogram};
 use serde_json::Value;
 #[cfg(test)]
 use tokio::sync::Notify;
 use tokio::sync::{mpsc, oneshot};
-use crate::events::sqlite::row_types::EventRow;
-use crate::events::{AppendOptions, EventStore, EventType};
 
 use crate::runtime::errors::RuntimeError;
 
@@ -56,7 +56,8 @@ impl EventPersister {
         event_type: EventType,
         payload: Value,
     ) -> Result<EventRow, RuntimeError> {
-        self.append_with_sequence(session_id, event_type, payload, None).await
+        self.append_with_sequence(session_id, event_type, payload, None)
+            .await
     }
 
     /// Append an event with a pre-assigned sequence and wait for persistence.
@@ -95,7 +96,8 @@ impl EventPersister {
         event_type: EventType,
         payload: Value,
     ) -> Result<(), RuntimeError> {
-        self.append_background_with_sequence(session_id, event_type, payload, None).await
+        self.append_background_with_sequence(session_id, event_type, payload, None)
+            .await
     }
 
     /// Queue an event with a pre-assigned sequence for background persistence.
@@ -200,7 +202,7 @@ async fn persist_worker(
             payload: req.payload,
             parent_id: None,
             sequence: req.sequence,
-            });
+        });
 
         if let Some(reply) = req.reply {
             let mapped = result.map_err(|error| RuntimeError::Persistence(error.to_string()));
@@ -513,7 +515,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(event.sequence, 42, "persisted event should use pre-assigned sequence");
+        assert_eq!(
+            event.sequence, 42,
+            "persisted event should use pre-assigned sequence"
+        );
     }
 
     #[tokio::test]
@@ -539,7 +544,13 @@ mod tests {
         persister.flush().await.unwrap();
 
         let events = store.get_events_since(sid, 0).unwrap();
-        let user_event = events.iter().find(|e| e.event_type == "message.user").unwrap();
-        assert_eq!(user_event.sequence, 99, "background-persisted event should use pre-assigned sequence");
+        let user_event = events
+            .iter()
+            .find(|e| e.event_type == "message.user")
+            .unwrap();
+        assert_eq!(
+            user_event.sequence, 99,
+            "background-persisted event should use pre-assigned sequence"
+        );
     }
 }

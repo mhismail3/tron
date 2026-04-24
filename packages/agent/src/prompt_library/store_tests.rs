@@ -72,8 +72,8 @@ fn record_prompt_dedup_ignores_whitespace_and_crlf() {
 #[test]
 fn record_prompt_dedup_nfc_equivalence() {
     let pool = setup_pool();
-    let nfc = "caf\u{00e9}";     // é as single code point
-    let nfd = "cafe\u{0301}";    // e + combining acute
+    let nfc = "caf\u{00e9}"; // é as single code point
+    let nfd = "cafe\u{0301}"; // e + combining acute
     record_prompt(&pool, nfc).unwrap();
     record_prompt(&pool, nfd).unwrap();
 
@@ -86,7 +86,10 @@ fn record_prompt_dedup_nfc_equivalence() {
 fn record_prompt_skips_blank() {
     let pool = setup_pool();
     assert_eq!(record_prompt(&pool, "").unwrap(), RecordOutcome::Skipped);
-    assert_eq!(record_prompt(&pool, "   \n\t").unwrap(), RecordOutcome::Skipped);
+    assert_eq!(
+        record_prompt(&pool, "   \n\t").unwrap(),
+        RecordOutcome::Skipped
+    );
 
     assert_eq!(list_history(&pool, 10, None, None).unwrap().items.len(), 0);
 }
@@ -197,7 +200,9 @@ fn list_history_search_substring() {
     record_prompt(&pool, "run the tests").unwrap();
     record_prompt(&pool, "bug report template").unwrap();
 
-    let items = list_history(&pool, 10, None, Some("bug".into())).unwrap().items;
+    let items = list_history(&pool, 10, None, Some("bug".into()))
+        .unwrap()
+        .items;
     assert_eq!(items.len(), 2);
     for it in &items {
         assert!(it.text.contains("bug"));
@@ -212,12 +217,16 @@ fn list_history_search_escapes_like_wildcards() {
     record_prompt(&pool, "literal_under_score").unwrap();
 
     // `%` must match literal percent, not "anything".
-    let items = list_history(&pool, 10, None, Some("%".into())).unwrap().items;
+    let items = list_history(&pool, 10, None, Some("%".into()))
+        .unwrap()
+        .items;
     assert_eq!(items.len(), 1);
     assert!(items[0].text.contains('%'));
 
     // `_` must match literal underscore, not a single char.
-    let items = list_history(&pool, 10, None, Some("_under_".into())).unwrap().items;
+    let items = list_history(&pool, 10, None, Some("_under_".into()))
+        .unwrap()
+        .items;
     assert_eq!(items.len(), 1);
 }
 
@@ -226,7 +235,9 @@ fn list_history_empty_query_returns_all() {
     let pool = setup_pool();
     record_prompt(&pool, "a").unwrap();
     record_prompt(&pool, "b").unwrap();
-    let items = list_history(&pool, 10, None, Some("".into())).unwrap().items;
+    let items = list_history(&pool, 10, None, Some("".into()))
+        .unwrap()
+        .items;
     assert_eq!(items.len(), 2);
 }
 
@@ -246,7 +257,10 @@ fn delete_history_idempotent() {
         panic!();
     };
     assert!(delete_history(&pool, &id).unwrap());
-    assert!(!delete_history(&pool, &id).unwrap(), "second delete returns false");
+    assert!(
+        !delete_history(&pool, &id).unwrap(),
+        "second delete returns false"
+    );
     assert!(!delete_history(&pool, "nonexistent").unwrap());
 }
 

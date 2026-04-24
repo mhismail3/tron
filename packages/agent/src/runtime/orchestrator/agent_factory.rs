@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
+use crate::core::messages::Message;
+use crate::llm::provider::Provider;
 use crate::runtime::context::context_manager::ContextManager;
 use crate::runtime::context::rules_index::RulesIndex;
 use crate::runtime::context::types::ContextManagerConfig;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
-use crate::core::messages::Message;
-use crate::llm::provider::Provider;
 use crate::tools::registry::ToolRegistry;
 
 use crate::runtime::agent::tron_agent::{AgentDeps, TronAgent};
@@ -55,7 +55,8 @@ pub struct CreateAgentOpts {
     /// Optional unified job manager for process + subagent lifecycle.
     pub job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
     /// Optional output buffer registry for process output streaming.
-    pub output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    pub output_buffer_registry:
+        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
 /// Factory for constructing `TronAgent` instances.
@@ -154,11 +155,13 @@ impl AgentFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-    use crate::core::tools::{Tool, ToolCategory, ToolParameterSchema, TronToolResult, text_result};
+    use crate::core::tools::{
+        Tool, ToolCategory, ToolParameterSchema, TronToolResult, text_result,
+    };
     use crate::llm::models::types::Provider as ProviderKind;
     use crate::llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
     use crate::tools::traits::{ToolContext, TronTool};
+    use async_trait::async_trait;
 
     fn default_opts(provider: Arc<dyn Provider>, tools: ToolRegistry) -> CreateAgentOpts {
         CreateAgentOpts {
@@ -176,7 +179,8 @@ mod tests {
             rules_index: None,
             pre_activated_rules: vec![],
             subagent_manager: None,
-            compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+            compaction_trigger_config:
+                crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,

@@ -11,8 +11,8 @@ use regex::Regex;
 
 static AST_METAVAR_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\$[A-Z_][A-Z0-9_]*|\$\$\$").unwrap());
-use serde_json::{Value, json};
 use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
+use serde_json::{Value, json};
 
 use crate::tools::errors::ToolError;
 use crate::tools::search::ast_search;
@@ -20,7 +20,9 @@ use crate::tools::search::text_search;
 use crate::tools::traits::{ProcessRunner, ToolContext, TronTool};
 use crate::tools::utils::path::resolve_path;
 use crate::tools::utils::schema::ToolSchemaBuilder;
-use crate::tools::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
+use crate::tools::utils::validation::{
+    get_optional_string, get_optional_u64, validate_required_string,
+};
 
 /// Returns `true` if `pattern` contains AST metavariables (`$VAR` or `$$$`).
 fn has_ast_metavariables(pattern: &str) -> bool {
@@ -48,9 +50,7 @@ fn search_error(message: impl Into<String>) -> TronToolResult {
     let msg = message.into();
     let class = classify_search_error(&msg);
     TronToolResult {
-        content: ToolResultBody::Blocks(vec![
-            crate::core::content::ToolResultContent::text(&msg),
-        ]),
+        content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(&msg)]),
         details: Some(json!({
             "error": msg,
             "errorClass": class,
@@ -150,9 +150,9 @@ Examples:\n\
             .await?;
 
             Ok(TronToolResult {
-                content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
-                    result.output,
-                )]),
+                content: ToolResultBody::Blocks(vec![
+                    crate::core::content::ToolResultContent::text(result.output),
+                ]),
                 details: Some(json!({
                     "mode": "ast",
                     "matchCount": result.match_count,
@@ -339,8 +339,14 @@ mod tests {
 
     #[test]
     fn classify_invalid_regex_patterns() {
-        assert_eq!(classify_search_error("Invalid regex pattern: ["), "invalid_pattern");
-        assert_eq!(classify_search_error("unterminated character class"), "invalid_pattern");
+        assert_eq!(
+            classify_search_error("Invalid regex pattern: ["),
+            "invalid_pattern"
+        );
+        assert_eq!(
+            classify_search_error("unterminated character class"),
+            "invalid_pattern"
+        );
         assert_eq!(classify_search_error("invalid pattern"), "invalid_pattern");
     }
 
@@ -391,7 +397,10 @@ mod tests {
         std::fs::write(dir.path().join("a.rs"), "hello world").unwrap();
         let tool = SearchTool::new(ast_runner());
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "nonexistent_xyz"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "nonexistent_xyz"}), &ctx)
+            .await
+            .unwrap();
         let details = r.details.unwrap();
         assert_eq!(details["matchCount"], 0);
         assert_eq!(details["matches"].as_array().unwrap().len(), 0);

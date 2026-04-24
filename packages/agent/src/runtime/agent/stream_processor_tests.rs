@@ -3,11 +3,11 @@ use async_stream::stream;
 use std::collections::HashSet;
 use std::pin::Pin;
 
+use super::super::stream_state::{build_message, finalize_tool_call};
 use crate::core::content::AssistantContent;
 use crate::core::events::{AssistantMessage, RetryErrorInfo, StreamEvent, TronEvent};
 use crate::core::messages::{TokenUsage, ToolCall};
 use crate::llm::provider::ProviderError;
-use super::super::stream_state::{build_message, finalize_tool_call};
 
 fn make_emitter() -> Arc<EventEmitter> {
     Arc::new(EventEmitter::new())
@@ -36,8 +36,7 @@ fn text_stream(text: &str) -> StreamEventStream {
             stop_reason: "end_turn".into(),
         });
     };
-    Box::pin(s)
-        as Pin<Box<dyn futures::Stream<Item = Result<StreamEvent, ProviderError>> + Send>>
+    Box::pin(s) as Pin<Box<dyn futures::Stream<Item = Result<StreamEvent, ProviderError>> + Send>>
 }
 
 fn thinking_then_text_stream() -> StreamEventStream {
@@ -108,9 +107,17 @@ async fn pure_text_response() {
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
 
-    let result = process_stream(text_stream("hello world"), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        text_stream("hello world"),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "end_turn");
@@ -126,9 +133,17 @@ async fn thinking_plus_text_response() {
     let mut rx = emitter.subscribe();
     let cancel = CancellationToken::new();
 
-    let result = process_stream(thinking_then_text_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        thinking_then_text_stream(),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "end_turn");
@@ -155,9 +170,17 @@ async fn text_plus_tool_call() {
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
 
-    let result = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        tool_call_stream(),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.stop_reason, "tool_use");
     assert_eq!(result.tool_calls.len(), 1);
@@ -188,9 +211,17 @@ async fn multiple_tool_calls() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.tool_calls.len(), 2);
     assert_eq!(result.tool_calls[0].name, "read");
@@ -212,7 +243,16 @@ async fn error_mid_stream() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None).await;
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await;
 
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), RuntimeError::Provider(_)));
@@ -236,9 +276,17 @@ async fn abort_mid_stream() {
     };
 
     let emitter = make_emitter();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(result.interrupted);
     assert_eq!(result.stop_reason, "interrupted");
@@ -274,9 +322,17 @@ async fn retry_event_emission() {
     let mut rx = emitter.subscribe();
     let cancel = CancellationToken::new();
 
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     assert!(!result.interrupted);
 
     let mut saw_retry = false;
@@ -300,7 +356,16 @@ async fn safety_block_returns_error() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None).await;
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -319,9 +384,17 @@ async fn empty_response() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "end_turn");
@@ -333,9 +406,17 @@ async fn token_usage_extraction() {
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
 
-    let result = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        text_stream("hello"),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     let usage = result.token_usage.unwrap();
     assert_eq!(usage.input_tokens, 10);
@@ -348,9 +429,17 @@ async fn message_update_events_emitted() {
     let mut rx = emitter.subscribe();
     let cancel = CancellationToken::new();
 
-    let _ = process_stream(text_stream("hello"), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let _ = process_stream(
+        text_stream("hello"),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     let mut updates = vec![];
     while let Ok(event) = rx.try_recv() {
@@ -368,9 +457,17 @@ async fn tool_call_generating_event_emitted() {
     let mut rx = emitter.subscribe();
     let cancel = CancellationToken::new();
 
-    let _ = process_stream(tool_call_stream(), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let _ = process_stream(
+        tool_call_stream(),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     let mut saw_generating = false;
     while let Ok(event) = rx.try_recv() {
@@ -463,9 +560,17 @@ async fn duplicate_tool_calls_deduped_by_id() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         result.tool_calls.len(),
@@ -567,9 +672,17 @@ async fn abort_mid_thinking_preserves_signature() {
     };
 
     let emitter = make_emitter();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(result.interrupted);
     // The thinking signature must be preserved on the message
@@ -591,10 +704,7 @@ fn ask_user_stopping_tools() -> HashSet<String> {
 }
 
 fn both_stopping_tools() -> HashSet<String> {
-    HashSet::from([
-        "AskUserQuestion".to_string(),
-        "GetConfirmation".to_string(),
-    ])
+    HashSet::from(["AskUserQuestion".to_string(), "GetConfirmation".to_string()])
 }
 
 /// Helper: build a Done event with token usage.
@@ -643,9 +753,17 @@ async fn drain_after_interactive_tool_drops_trailing_text() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &ask_user_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "tool_use");
@@ -658,12 +776,22 @@ async fn drain_after_interactive_tool_drops_trailing_text() {
     assert_eq!(usage.output_tokens, 42);
 
     // Message should have text + tool use, no trailing text
-    let text_blocks: Vec<_> = result.message.content.iter().filter(|c| matches!(c, AssistantContent::Text { .. })).collect();
+    let text_blocks: Vec<_> = result
+        .message
+        .content
+        .iter()
+        .filter(|c| matches!(c, AssistantContent::Text { .. }))
+        .collect();
     assert_eq!(text_blocks.len(), 1);
     if let AssistantContent::Text { text, .. } = &text_blocks[0] {
         assert_eq!(text, "hello");
     }
-    let tool_blocks: Vec<_> = result.message.content.iter().filter(|c| matches!(c, AssistantContent::ToolUse { .. })).collect();
+    let tool_blocks: Vec<_> = result
+        .message
+        .content
+        .iter()
+        .filter(|c| matches!(c, AssistantContent::ToolUse { .. }))
+        .collect();
     assert_eq!(tool_blocks.len(), 1);
 }
 
@@ -699,20 +827,40 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &both_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &both_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(!result.interrupted);
     // Thinking preserved
-    let thinking = result.message.content.iter().find(|c| matches!(c, AssistantContent::Thinking { .. }));
+    let thinking = result
+        .message
+        .content
+        .iter()
+        .find(|c| matches!(c, AssistantContent::Thinking { .. }));
     assert!(thinking.is_some());
-    if let AssistantContent::Thinking { thinking: t, signature } = thinking.unwrap() {
+    if let AssistantContent::Thinking {
+        thinking: t,
+        signature,
+    } = thinking.unwrap()
+    {
         assert_eq!(t, "deep thought");
         assert_eq!(signature.as_deref(), Some("sig-1"));
     }
     // Text preserved
-    let text = result.message.content.iter().find(|c| matches!(c, AssistantContent::Text { .. }));
+    let text = result
+        .message
+        .content
+        .iter()
+        .find(|c| matches!(c, AssistantContent::Text { .. }));
     assert!(text.is_some());
     if let AssistantContent::Text { text: t, .. } = text.unwrap() {
         assert_eq!(t, "answer");
@@ -767,9 +915,17 @@ async fn drain_with_preceding_tools_keeps_all_before_interactive() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &ask_user_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.tool_calls.len(), 2);
     assert_eq!(result.tool_calls[0].name, "Bash");
@@ -820,9 +976,17 @@ async fn no_drain_for_non_stopping_tools() {
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
     // AskUserQuestion is in the set, but Bash is not — no drain
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &ask_user_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "tool_use");
@@ -862,9 +1026,17 @@ async fn cancel_during_drain_returns_interrupted() {
     };
 
     let emitter = make_emitter();
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &ask_user_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &ask_user_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(result.interrupted);
     assert_eq!(result.stop_reason, "interrupted");
@@ -910,16 +1082,26 @@ async fn drain_empty_stopping_set_no_change() {
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
     // Empty set — no drain should happen
-    let result = process_stream(Box::pin(s), "s1", &emitter, &cancel, &no_stopping_tools(), None, None)
-        .await
-        .unwrap();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_tools(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     // Trailing text should be present (from final_message)
     assert_eq!(result.stop_reason, "tool_use");
     assert_eq!(result.tool_calls.len(), 1);
     // Message comes from final_message which has combined text
-    let has_text = result.message.content.iter().any(|c| {
-        matches!(c, AssistantContent::Text { text, .. } if text.contains("trailing"))
-    });
+    let has_text = result
+        .message
+        .content
+        .iter()
+        .any(|c| matches!(c, AssistantContent::Text { text, .. } if text.contains("trailing")));
     assert!(has_text, "trailing text should be preserved when no drain");
 }

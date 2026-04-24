@@ -656,10 +656,7 @@ mod tests {
         );
 
         let params = json!({"sessionId": "sess_user"});
-        let result = MarkAllReadHandler
-            .handle(Some(params), &ctx)
-            .await
-            .unwrap();
+        let result = MarkAllReadHandler.handle(Some(params), &ctx).await.unwrap();
         assert_eq!(result["marked"], 1, "only sess_user's notification marked");
 
         let list = ListHandler.handle(None, &ctx).await.unwrap();

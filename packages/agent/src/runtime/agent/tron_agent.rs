@@ -3,15 +3,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 
-use crate::runtime::context::context_manager::ContextManager;
-use crate::runtime::guardrails::GuardrailEngine;
-use crate::runtime::hooks::engine::HookEngine;
-use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 use crate::core::events::{BaseEvent, TronEvent};
 use crate::core::messages::{Message, TokenUsage, UserMessageContent};
 use crate::llm::provider::Provider;
+use crate::runtime::context::context_manager::ContextManager;
+use crate::runtime::guardrails::GuardrailEngine;
+use crate::runtime::hooks::engine::HookEngine;
 use crate::tools::registry::ToolRegistry;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 use tracing::{debug, error, instrument, warn};
 
@@ -55,7 +55,8 @@ pub struct AgentDeps {
     /// Context manager for conversation history.
     pub context_manager: ContextManager,
     /// Optional subagent manager for LLM-backed compaction summarization.
-    pub subagent_manager: Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
+    pub subagent_manager:
+        Option<Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
     /// Compaction trigger configuration (from settings).
     pub compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig,
     /// Optional process manager for background process execution.
@@ -63,7 +64,8 @@ pub struct AgentDeps {
     /// Optional unified job manager for process + subagent lifecycle.
     pub job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
     /// Optional output buffer registry for process output streaming.
-    pub output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    pub output_buffer_registry:
+        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
 }
 
 /// Multi-turn agent that owns all submodules.
@@ -91,7 +93,8 @@ pub struct TronAgent {
     /// Optional unified job manager for process + subagent lifecycle.
     job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
     /// Optional output buffer registry for process output streaming.
-    output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    output_buffer_registry:
+        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     /// Optional per-tool cancellation registry. Enables `agent.abortTool` to
     /// cancel a single in-flight tool without aborting the whole turn. When
     /// `None` (subagents, older code paths) tools share the turn-level token.
@@ -168,9 +171,12 @@ impl TronAgent {
 
         // Emit AgentStart
         if let Some(ref counter) = self.sequence_counter {
-            let _ = self.emitter.emit_sequenced(TronEvent::AgentStart {
-                base: BaseEvent::now(&self.session_id),
-            }, counter);
+            let _ = self.emitter.emit_sequenced(
+                TronEvent::AgentStart {
+                    base: BaseEvent::now(&self.session_id),
+                },
+                counter,
+            );
         } else {
             let _ = self.emitter.emit(TronEvent::AgentStart {
                 base: BaseEvent::now(&self.session_id),
@@ -295,10 +301,20 @@ impl TronAgent {
             });
             let last_assistant = messages.iter().rev().find_map(|m| match m {
                 Message::Assistant { content, .. } => {
-                    let text: String = content.iter().filter_map(|c| c.as_text()).collect::<Vec<_>>().join("\n");
-                    if text.is_empty() { None } else {
+                    let text: String = content
+                        .iter()
+                        .filter_map(|c| c.as_text())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if text.is_empty() {
+                        None
+                    } else {
                         // Truncate to avoid bloating hook context
-                        Some(if text.len() > 500 { text[..500].to_string() } else { text })
+                        Some(if text.len() > 500 {
+                            text[..500].to_string()
+                        } else {
+                            text
+                        })
                     }
                 }
                 _ => None,
@@ -317,10 +333,13 @@ impl TronAgent {
 
         // Emit AgentEnd
         if let Some(ref counter) = self.sequence_counter {
-            let _ = self.emitter.emit_sequenced(TronEvent::AgentEnd {
-                base: BaseEvent::now(&self.session_id),
-                error: error.clone(),
-            }, counter);
+            let _ = self.emitter.emit_sequenced(
+                TronEvent::AgentEnd {
+                    base: BaseEvent::now(&self.session_id),
+                    error: error.clone(),
+                },
+                counter,
+            );
         } else {
             let _ = self.emitter.emit(TronEvent::AgentEnd {
                 base: BaseEvent::now(&self.session_id),
@@ -426,7 +445,6 @@ impl TronAgent {
     pub fn compaction_handler(&self) -> &Arc<CompactionHandler> {
         &self.compaction
     }
-
 }
 
 #[cfg(test)]
@@ -439,7 +457,6 @@ impl TronAgent {
         self.config.subagent_max_depth
     }
 }
-
 
 #[cfg(test)]
 #[path = "tron_agent_tests.rs"]

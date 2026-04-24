@@ -6,10 +6,10 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
+use crate::core::events::{BaseEvent, TronEvent};
 use crate::runtime::hooks::engine::HookEngine;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
-use crate::core::events::{BaseEvent, TronEvent};
 
 use tracing::{debug, instrument, warn};
 
@@ -47,7 +47,10 @@ pub async fn run_agent(
     // stale hook state from previous run interfering with the new run.
     if let Some(hook_engine) = hooks {
         let pending = hook_engine.pending_background_count();
-        debug!(pending = pending, "[agent_runner] draining background hooks");
+        debug!(
+            pending = pending,
+            "[agent_runner] draining background hooks"
+        );
         hook_engine.wait_for_background().await;
         debug!("[agent_runner] background hooks drained");
     }
@@ -122,17 +125,17 @@ pub async fn run_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::context::context_manager::ContextManager;
-    use crate::runtime::context::types::ContextManagerConfig;
-    use crate::runtime::errors::StopReason;
-    use async_trait::async_trait;
-    use futures::stream;
     use crate::core::content::AssistantContent;
     use crate::core::events::{AssistantMessage, StreamEvent};
     use crate::core::messages::TokenUsage;
     use crate::llm::models::types::Provider;
     use crate::llm::provider::{ProviderError, ProviderStreamOptions, StreamEventStream};
+    use crate::runtime::context::context_manager::ContextManager;
+    use crate::runtime::context::types::ContextManagerConfig;
+    use crate::runtime::errors::StopReason;
     use crate::tools::registry::ToolRegistry;
+    use async_trait::async_trait;
+    use futures::stream;
 
     use crate::runtime::agent::tron_agent::AgentDeps;
     use crate::runtime::types::AgentConfig;
@@ -189,7 +192,8 @@ mod tests {
                     compaction: crate::runtime::context::types::CompactionConfig::default(),
                 }),
                 subagent_manager: None,
-                compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+                compaction_trigger_config:
+                    crate::runtime::context::types::CompactionTriggerConfig::default(),
                 process_manager: None,
                 job_manager: None,
                 output_buffer_registry: None,
@@ -330,7 +334,8 @@ mod tests {
                     compaction: crate::runtime::context::types::CompactionConfig::default(),
                 }),
                 subagent_manager: None,
-                compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+                compaction_trigger_config:
+                    crate::runtime::context::types::CompactionTriggerConfig::default(),
                 process_manager: None,
                 job_manager: None,
                 output_buffer_registry: None,
@@ -341,7 +346,15 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(&mut agent, "Hi", RunContext::default(), &None, &broadcast, None).await;
+        let result = run_agent(
+            &mut agent,
+            "Hi",
+            RunContext::default(),
+            &None,
+            &broadcast,
+            None,
+        )
+        .await;
         assert_eq!(result.stop_reason, StopReason::Error);
 
         // Should still emit agent_ready after error
@@ -410,7 +423,8 @@ mod tests {
                     compaction: crate::runtime::context::types::CompactionConfig::default(),
                 }),
                 subagent_manager: None,
-                compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+                compaction_trigger_config:
+                    crate::runtime::context::types::CompactionTriggerConfig::default(),
                 process_manager: None,
                 job_manager: None,
                 output_buffer_registry: None,
@@ -421,7 +435,15 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(&mut agent, "Hi", RunContext::default(), &None, &broadcast, None).await;
+        let result = run_agent(
+            &mut agent,
+            "Hi",
+            RunContext::default(),
+            &None,
+            &broadcast,
+            None,
+        )
+        .await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
 
         // Collect all forwarded events

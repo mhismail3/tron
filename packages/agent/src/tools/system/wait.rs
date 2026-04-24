@@ -11,8 +11,8 @@ use serde_json::json;
 use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{JobKind, JobManagerOps, JobResult, ToolContext, TronTool, WaitMode};
-use crate::tools::utils::truncation::{truncate_tail, WAIT_OUTPUT_LIMIT};
 use crate::tools::utils::schema::ToolSchemaBuilder;
+use crate::tools::utils::truncation::{WAIT_OUTPUT_LIMIT, truncate_tail};
 use crate::tools::utils::validation::get_optional_string;
 
 const DEFAULT_TIMEOUT_MS: u64 = 300_000; // 5 minutes
@@ -90,7 +90,9 @@ impl TronTool for WaitTool {
         };
 
         if ids.is_empty() {
-            return Ok(error_result("No job IDs specified. Provide at least one ID."));
+            return Ok(error_result(
+                "No job IDs specified. Provide at least one ID.",
+            ));
         }
 
         let mode_str = get_optional_string(&params, "mode").unwrap_or_else(|| "all".into());
@@ -175,7 +177,10 @@ fn format_results(results: &[JobResult]) -> String {
                         out.push_str(&format!("Exit code: {exit_code} | "));
                     }
                 }
-                out.push_str(&format!("Duration: {:.1}s\n", r.duration_ms as f64 / 1000.0));
+                out.push_str(&format!(
+                    "Duration: {:.1}s\n",
+                    r.duration_ms as f64 / 1000.0
+                ));
             }
             JobKind::Agent => {
                 if let Some(ref details) = r.details {
@@ -183,7 +188,10 @@ fn format_results(results: &[JobResult]) -> String {
                         out.push_str(&format!("Turns: {turns} | "));
                     }
                 }
-                out.push_str(&format!("Duration: {:.1}s\n", r.duration_ms as f64 / 1000.0));
+                out.push_str(&format!(
+                    "Duration: {:.1}s\n",
+                    r.duration_ms as f64 / 1000.0
+                ));
             }
         }
 
@@ -274,10 +282,7 @@ mod tests {
         let tool = WaitTool::new(jm);
         let ctx = make_tool_ctx();
 
-        let result = tool
-            .execute(json!({"ids": []}), &ctx)
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"ids": []}), &ctx).await.unwrap();
         assert_eq!(result.is_error, Some(true));
         assert!(extract_text(&result).contains("No job IDs"));
     }

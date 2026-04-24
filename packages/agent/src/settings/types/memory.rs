@@ -48,7 +48,10 @@ mod tests {
 
         let roundtrip = serde_json::to_value(&s).unwrap();
         assert_eq!(roundtrip.get("autoRetainInterval").unwrap(), 20);
-        assert_eq!(roundtrip.get("retainModel").unwrap(), "claude-haiku-4-5-20251001");
+        assert_eq!(
+            roundtrip.get("retainModel").unwrap(),
+            "claude-haiku-4-5-20251001"
+        );
     }
 
     #[test]

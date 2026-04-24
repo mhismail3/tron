@@ -609,10 +609,7 @@ async fn shell_param_bash() {
 async fn shell_param_zsh() {
     let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
     let r = tool
-        .execute(
-            json!({"command": "echo test", "shell": "zsh"}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "echo test", "shell": "zsh"}), &make_ctx())
         .await
         .unwrap();
     assert!(r.is_error.is_none());
@@ -636,10 +633,7 @@ async fn timeout_max_raised_to_3600s() {
     let tool = BashTool::new(Arc::new(MockRunner::ok("")), None);
     // Should accept up to 3_600_000ms
     let r = tool
-        .execute(
-            json!({"command": "ls", "timeout": 3_600_000}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "ls", "timeout": 3_600_000}), &make_ctx())
         .await
         .unwrap();
     assert!(r.is_error.is_none());
@@ -767,7 +761,10 @@ async fn env_non_path_vars_unaffected() {
         )
         .await
         .unwrap();
-    assert!(r.is_error.is_none(), "Non-PATH env vars should not be checked");
+    assert!(
+        r.is_error.is_none(),
+        "Non-PATH env vars should not be checked"
+    );
 }
 
 // ── ptyInput audit tests ──
@@ -817,10 +814,7 @@ async fn pty_input_password_redacted() {
 async fn shell_logged_in_details_when_not_bash() {
     let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
     let r = tool
-        .execute(
-            json!({"command": "echo test", "shell": "zsh"}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "echo test", "shell": "zsh"}), &make_ctx())
         .await
         .unwrap();
     let d = r.details.unwrap();
@@ -831,10 +825,7 @@ async fn shell_logged_in_details_when_not_bash() {
 async fn shell_not_in_details_when_bash() {
     let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
     let r = tool
-        .execute(
-            json!({"command": "echo test"}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "echo test"}), &make_ctx())
         .await
         .unwrap();
     let d = r.details.unwrap();
@@ -850,7 +841,9 @@ fn suspicious_path_tmp() {
 
 #[test]
 fn suspicious_path_hidden_dir() {
-    assert!(BashTool::is_suspicious_path("/home/user/.malware/bin:/usr/bin"));
+    assert!(BashTool::is_suspicious_path(
+        "/home/user/.malware/bin:/usr/bin"
+    ));
 }
 
 #[test]
@@ -860,22 +853,30 @@ fn suspicious_path_var_tmp() {
 
 #[test]
 fn safe_path_standard() {
-    assert!(!BashTool::is_suspicious_path("/usr/local/bin:/usr/bin:/bin"));
+    assert!(!BashTool::is_suspicious_path(
+        "/usr/local/bin:/usr/bin:/bin"
+    ));
 }
 
 #[test]
 fn safe_path_cargo() {
-    assert!(!BashTool::is_suspicious_path("/Users/me/.cargo/bin:/usr/bin"));
+    assert!(!BashTool::is_suspicious_path(
+        "/Users/me/.cargo/bin:/usr/bin"
+    ));
 }
 
 #[test]
 fn safe_path_nvm() {
-    assert!(!BashTool::is_suspicious_path("/Users/me/.nvm/versions/node/v20/bin"));
+    assert!(!BashTool::is_suspicious_path(
+        "/Users/me/.nvm/versions/node/v20/bin"
+    ));
 }
 
 #[test]
 fn safe_path_local() {
-    assert!(!BashTool::is_suspicious_path("/Users/me/.local/bin:/usr/bin"));
+    assert!(!BashTool::is_suspicious_path(
+        "/Users/me/.local/bin:/usr/bin"
+    ));
 }
 
 // ── redact_pty_input unit tests ──
@@ -907,10 +908,7 @@ fn redact_pty_input_token() {
 async fn sandbox_true_boolean_creates_sandbox() {
     let tool = BashTool::new(Arc::new(MockRunner::ok("sandbox output")), None);
     let r = tool
-        .execute(
-            json!({"command": "ls", "sandbox": true}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "ls", "sandbox": true}), &make_ctx())
         .await
         .unwrap();
     assert!(r.is_error.is_none());
@@ -923,10 +921,7 @@ async fn sandbox_true_string_creates_sandbox() {
     // LLMs sometimes send "true" as a string instead of boolean
     let tool = BashTool::new(Arc::new(MockRunner::ok("sandbox output")), None);
     let r = tool
-        .execute(
-            json!({"command": "ls", "sandbox": "true"}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "ls", "sandbox": "true"}), &make_ctx())
         .await
         .unwrap();
     assert!(r.is_error.is_none());
@@ -938,10 +933,7 @@ async fn sandbox_true_string_creates_sandbox() {
 async fn sandbox_false_no_sandbox() {
     let tool = BashTool::new(Arc::new(MockRunner::ok("ok")), None);
     let r = tool
-        .execute(
-            json!({"command": "ls", "sandbox": false}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "ls", "sandbox": false}), &make_ctx())
         .await
         .unwrap();
     let d = r.details.unwrap();
@@ -1086,7 +1078,10 @@ async fn bash_interactive_always_synchronous() {
     // interactive mode should bypass async even with process_manager
     let tool = BashTool::new(Arc::new(MockRunner::ok("pty-output")), None);
     let r = tool
-        .execute(json!({"command": "echo pty", "interactive": true}), &make_ctx())
+        .execute(
+            json!({"command": "echo pty", "interactive": true}),
+            &make_ctx(),
+        )
         .await
         .unwrap();
     assert!(extract_text(&r).contains("pty-output"));
@@ -1117,8 +1112,14 @@ async fn bash_managed_fast_command_returns_inline() {
         .unwrap();
 
     let text = extract_text(&r);
-    assert!(text.contains("fast-result"), "expected inlined result, got: {text}");
-    assert!(!text.contains("proc-"), "should not return process ID for fast command");
+    assert!(
+        text.contains("fast-result"),
+        "expected inlined result, got: {text}"
+    );
+    assert!(
+        !text.contains("proc-"),
+        "should not return process ID for fast command"
+    );
 }
 
 #[tokio::test]
@@ -1194,10 +1195,7 @@ async fn details_include_timed_out_and_error_class_on_timeout() {
     let tool = BashTool::new(Arc::new(MockRunner::with_timeout()), None);
     // Use stdin to force the direct-run path (not managed execution).
     let r = tool
-        .execute(
-            json!({"command": "sleep 10", "stdin": ""}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "sleep 10", "stdin": ""}), &make_ctx())
         .await
         .unwrap();
     let details = r.details.as_ref().expect("details present");
@@ -1245,10 +1243,7 @@ async fn details_include_permission_denied_error_class() {
 async fn details_no_error_class_on_success() {
     let tool = BashTool::new(Arc::new(MockRunner::ok("hello")), None);
     let r = tool
-        .execute(
-            json!({"command": "echo hi", "stdin": ""}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "echo hi", "stdin": ""}), &make_ctx())
         .await
         .unwrap();
     let details = r.details.as_ref().expect("details present");
@@ -1297,10 +1292,7 @@ async fn backgrounded_details_carry_backgrounded_flag() {
     ctx.process_manager = Some(pm);
 
     let r = tool
-        .execute(
-            json!({"command": "sleep 60", "timeout": 50_u64}),
-            &ctx,
-        )
+        .execute(json!({"command": "sleep 60", "timeout": 50_u64}), &ctx)
         .await
         .unwrap();
     let details = r.details.as_ref().expect("details present");

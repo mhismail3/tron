@@ -17,10 +17,10 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use futures::Stream;
-use tokio_util::sync::CancellationToken;
 use crate::core::events::{RetryErrorInfo, StreamEvent};
 use crate::core::retry::RetryConfig;
+use futures::Stream;
+use tokio_util::sync::CancellationToken;
 
 use crate::llm::provider::{ProviderError, StreamEventStream};
 
@@ -173,10 +173,10 @@ pub fn with_provider_retry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::events::AssistantMessage;
     use futures::StreamExt;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use crate::core::events::AssistantMessage;
 
     fn success_factory() -> StreamFactory {
         Box::new(|| {

@@ -16,19 +16,37 @@ pub fn redact_sensitive_content(text: &str) -> String {
     static PATTERNS: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
         vec![
             // Anthropic API keys (sk-ant-api03-...)
-            (Regex::new(r"sk-ant-api\d{2}-[A-Za-z0-9_-]{10,}").unwrap(), "sk-ant-****"),
+            (
+                Regex::new(r"sk-ant-api\d{2}-[A-Za-z0-9_-]{10,}").unwrap(),
+                "sk-ant-****",
+            ),
             // OpenAI-style keys (sk-proj-...)
-            (Regex::new(r"sk-proj-[A-Za-z0-9_-]{10,}").unwrap(), "sk-proj-****"),
+            (
+                Regex::new(r"sk-proj-[A-Za-z0-9_-]{10,}").unwrap(),
+                "sk-proj-****",
+            ),
             // AWS access keys (AKIA...)
             (Regex::new(r"AKIA[0-9A-Z]{16}").unwrap(), "AKIA****"),
             // GitHub PATs (ghp_, gho_, ghs_, ghu_, ghr_)
-            (Regex::new(r"gh[pousr]_[A-Za-z0-9_]{20,}").unwrap(), "gh*_****"),
+            (
+                Regex::new(r"gh[pousr]_[A-Za-z0-9_]{20,}").unwrap(),
+                "gh*_****",
+            ),
             // Bearer tokens
-            (Regex::new(r"Bearer\s+[A-Za-z0-9._-]{20,}").unwrap(), "Bearer ****"),
+            (
+                Regex::new(r"Bearer\s+[A-Za-z0-9._-]{20,}").unwrap(),
+                "Bearer ****",
+            ),
             // Slack tokens (xoxb-, xoxp-, xoxa-, xoxo-)
-            (Regex::new(r"xox[bpao]-[A-Za-z0-9-]{10,}").unwrap(), "xox*-****"),
+            (
+                Regex::new(r"xox[bpao]-[A-Za-z0-9-]{10,}").unwrap(),
+                "xox*-****",
+            ),
             // Google API keys (AIzaSy...)
-            (Regex::new(r"AIzaSy[A-Za-z0-9_-]{30,}").unwrap(), "AIzaSy****"),
+            (
+                Regex::new(r"AIzaSy[A-Za-z0-9_-]{30,}").unwrap(),
+                "AIzaSy****",
+            ),
         ]
     });
 
@@ -115,7 +133,8 @@ mod tests {
 
     #[test]
     fn multiple_secrets_all_masked() {
-        let text = "key1=sk-ant-api03-abcdefghijklmnopqrstuvwxyz key2=ghp_xxxxxxxxxxxxxxxxxxxx123456";
+        let text =
+            "key1=sk-ant-api03-abcdefghijklmnopqrstuvwxyz key2=ghp_xxxxxxxxxxxxxxxxxxxx123456";
         let result = redact_sensitive_content(text);
         assert!(result.contains("sk-ant-****"));
         assert!(result.contains("gh*_****"));

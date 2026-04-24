@@ -1,7 +1,7 @@
-use serde_json::json;
 use crate::core::content::ToolResultContent;
 use crate::core::events::TronEvent;
 use crate::core::tools::ToolResultBody;
+use serde_json::json;
 
 use super::routed::{BridgedEvent, session_scoped, set_opt};
 

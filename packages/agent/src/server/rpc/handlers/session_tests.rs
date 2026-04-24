@@ -1301,10 +1301,7 @@ async fn reconstruct_with_before_sequence() {
 
     // Get events before sequence 5
     let result = ReconstructHandler
-        .handle(
-            Some(json!({"sessionId": sid, "beforeSequence": 5})),
-            &ctx,
-        )
+        .handle(Some(json!({"sessionId": sid, "beforeSequence": 5})), &ctx)
         .await
         .unwrap();
 
@@ -1407,10 +1404,7 @@ async fn reconstruct_idle_no_inflight() {
 async fn reconstruct_nonexistent_session() {
     let ctx = make_test_context();
     let err = ReconstructHandler
-        .handle(
-            Some(json!({"sessionId": "nonexistent-session-xyz"})),
-            &ctx,
-        )
+        .handle(Some(json!({"sessionId": "nonexistent-session-xyz"})), &ctx)
         .await
         .unwrap_err();
     assert_eq!(err.code(), "SESSION_NOT_FOUND");
@@ -1512,9 +1506,7 @@ async fn reconstruct_running_agent_has_inflight() {
 
     // Simulate a running agent: begin_run + populate accumulator
     let _run = ctx.orchestrator.begin_run(&sid, "run_1").unwrap();
-    ctx.orchestrator
-        .turn_accumulators()
-        .handle_turn_start(&sid);
+    ctx.orchestrator.turn_accumulators().handle_turn_start(&sid);
     ctx.orchestrator
         .turn_accumulators()
         .handle_text_delta(&sid, "partial response");
@@ -1703,10 +1695,7 @@ async fn reconstruct_before_sequence_zero_returns_empty() {
     }
 
     let result = ReconstructHandler
-        .handle(
-            Some(json!({"sessionId": sid, "beforeSequence": 0})),
-            &ctx,
-        )
+        .handle(Some(json!({"sessionId": sid, "beforeSequence": 0})), &ctx)
         .await
         .unwrap();
 
@@ -1728,10 +1717,7 @@ async fn reconstruct_oversized_limit_is_clamped() {
     // Ask for way more events than MAX_RECONSTRUCT_EVENTS. Even if the
     // session had a million events, the response must not exceed the cap.
     let result = ReconstructHandler
-        .handle(
-            Some(json!({"sessionId": sid, "limit": 1_000_000})),
-            &ctx,
-        )
+        .handle(Some(json!({"sessionId": sid, "limit": 1_000_000})), &ctx)
         .await
         .unwrap();
 

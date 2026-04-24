@@ -6,8 +6,8 @@
 
 use serde_json::Value;
 
-use crate::import::types::{ClaudeRecord, ClaudeUsage, RecordKind};
 use crate::import::tree::LinearRecord;
+use crate::import::types::{ClaudeRecord, ClaudeUsage, RecordKind};
 
 /// A fully reassembled assistant message.
 #[derive(Debug)]
@@ -64,15 +64,10 @@ pub fn assemble(records: Vec<LinearRecord>) -> Vec<AssembledItem> {
         let kind = lr.record.kind();
 
         if kind == RecordKind::Assistant {
-            let msg_id = lr
-                .record
-                .message
-                .as_ref()
-                .and_then(|m| m.id.clone());
+            let msg_id = lr.record.message.as_ref().and_then(|m| m.id.clone());
 
-            let should_group = msg_id.is_some()
-                && current_message_id.is_some()
-                && msg_id == current_message_id;
+            let should_group =
+                msg_id.is_some() && current_message_id.is_some() && msg_id == current_message_id;
 
             if should_group {
                 assistant_group.push((lr.record, lr.turn));
@@ -119,20 +114,13 @@ pub fn assemble(records: Vec<LinearRecord>) -> Vec<AssembledItem> {
     result
 }
 
-fn flush_assistant_group(
-    group: &mut Vec<(ClaudeRecord, i64)>,
-    result: &mut Vec<AssembledItem>,
-) {
+fn flush_assistant_group(group: &mut Vec<(ClaudeRecord, i64)>, result: &mut Vec<AssembledItem>) {
     if group.is_empty() {
         return;
     }
 
     let turn = group[0].1;
-    let timestamp = group[0]
-        .0
-        .timestamp
-        .clone()
-        .unwrap_or_default();
+    let timestamp = group[0].0.timestamp.clone().unwrap_or_default();
 
     let message_id = group[0]
         .0
@@ -151,7 +139,9 @@ fn flush_assistant_group(
             continue;
         };
 
-        if model.is_empty() && let Some(m) = &msg.model {
+        if model.is_empty()
+            && let Some(m) = &msg.model
+        {
             model.clone_from(m);
         }
 
@@ -160,11 +150,15 @@ fn flush_assistant_group(
             stop_reason.clone_from(sr);
         }
 
-        if let Some(u) = &msg.usage && (u.input_tokens > 0 || u.output_tokens > 0) {
+        if let Some(u) = &msg.usage
+            && (u.input_tokens > 0 || u.output_tokens > 0)
+        {
             usage = u.clone();
         }
 
-        if let Some(content) = &msg.content && let Some(blocks) = content.as_array() {
+        if let Some(content) = &msg.content
+            && let Some(blocks) = content.as_array()
+        {
             for block in blocks {
                 if let Some(b) = process_content_block(block) {
                     content_blocks.push(b);

@@ -442,7 +442,7 @@ impl MethodHandler for ApplyUpdateHandler {
         Ok(serde_json::json!({
             "status": "noop",
             "message": "Install pipeline wiring lands with Phase 6 (DMG release + codesign-verify + atomic swap + rollback). \
-Until then, manual DMG drag-install remains the supported upgrade path.",
+        Until then, manual DMG drag-install remains the supported upgrade path.",
             "currentVersion": env!("CARGO_PKG_VERSION"),
         }))
     }
@@ -614,9 +614,9 @@ mod tests {
         let result = ProbePermissionsHandler.handle(None, &ctx).await.unwrap();
 
         for key in ["fullDiskAccess", "screenRecording", "accessibility"] {
-            let token = result[key].as_str().unwrap_or_else(|| {
-                panic!("{key} must be a string, got {:?}", result[key])
-            });
+            let token = result[key]
+                .as_str()
+                .unwrap_or_else(|| panic!("{key} must be a string, got {:?}", result[key]));
             assert!(
                 matches!(token, "granted" | "denied" | "unknown"),
                 "{key} must be one of granted/denied/unknown, got {token:?}",
@@ -1059,10 +1059,7 @@ mod tests {
         let mut ctx = make_test_context();
         ctx.release_fetcher = Some(Arc::new(MockReleaseFetcher::failing("boom")));
 
-        let err = CheckForUpdatesHandler
-            .handle(None, &ctx)
-            .await
-            .unwrap_err();
+        let err = CheckForUpdatesHandler.handle(None, &ctx).await.unwrap_err();
         assert_eq!(err.code(), "INTERNAL_ERROR");
         assert!(err.to_string().contains("release check failed"));
 
@@ -1162,7 +1159,13 @@ mod tests {
         let result = ApplyUpdateHandler.handle(None, &ctx).await.unwrap();
 
         assert_eq!(result["status"], "noop");
-        assert!(result["message"].as_str().unwrap().to_lowercase().contains("phase 6"));
+        assert!(
+            result["message"]
+                .as_str()
+                .unwrap()
+                .to_lowercase()
+                .contains("phase 6")
+        );
         assert!(result["currentVersion"].is_string());
     }
 

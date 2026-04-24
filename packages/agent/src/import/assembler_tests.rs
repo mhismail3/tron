@@ -15,7 +15,17 @@ fn lr(record_type: &str, uuid: &str, parent: Option<&str>, ts: &str, turn: i64) 
     }
 }
 
-fn lr_assistant(uuid: &str, parent: Option<&str>, ts: &str, msg_id: &str, content: Value, stop_reason: Option<&str>, usage: Option<Value>, model: Option<&str>, turn: i64) -> LinearRecord {
+fn lr_assistant(
+    uuid: &str,
+    parent: Option<&str>,
+    ts: &str,
+    msg_id: &str,
+    content: Value,
+    stop_reason: Option<&str>,
+    usage: Option<Value>,
+    model: Option<&str>,
+    turn: i64,
+) -> LinearRecord {
     let mut msg = json!({
         "id": msg_id,
         "role": "assistant",
@@ -62,7 +72,10 @@ fn lr_user(uuid: &str, parent: Option<&str>, ts: &str, turn: i64) -> LinearRecor
 #[test]
 fn single_assistant_no_chunking() {
     let records = vec![lr_assistant(
-        "a1", None, "2026-01-01T00:00:00Z", "msg1",
+        "a1",
+        None,
+        "2026-01-01T00:00:00Z",
+        "msg1",
         json!([{ "type": "text", "text": "hello" }]),
         Some("end_turn"),
         Some(json!({ "input_tokens": 10, "output_tokens": 5 })),
@@ -72,7 +85,9 @@ fn single_assistant_no_chunking() {
 
     let items = assemble(records);
     assert_eq!(items.len(), 1);
-    let AssembledItem::AssistantMessage(am) = &items[0] else { panic!("expected AssistantMessage") };
+    let AssembledItem::AssistantMessage(am) = &items[0] else {
+        panic!("expected AssistantMessage")
+    };
     assert_eq!(am.content_blocks.len(), 1);
     assert_eq!(am.content_blocks[0]["text"], "hello");
     assert_eq!(am.stop_reason, "end_turn");
@@ -83,19 +98,35 @@ fn single_assistant_no_chunking() {
 #[test]
 fn two_chunk_assistant() {
     let records = vec![
-        lr_assistant("a1", None, "2026-01-01T00:00:00Z", "msg1",
+        lr_assistant(
+            "a1",
+            None,
+            "2026-01-01T00:00:00Z",
+            "msg1",
             json!([{ "type": "thinking", "thinking": "Let me think..." }]),
-            None, None, Some("claude-opus-4-6"), 1),
-        lr_assistant("a2", Some("a1"), "2026-01-01T00:00:01Z", "msg1",
+            None,
+            None,
+            Some("claude-opus-4-6"),
+            1,
+        ),
+        lr_assistant(
+            "a2",
+            Some("a1"),
+            "2026-01-01T00:00:01Z",
+            "msg1",
             json!([{ "type": "text", "text": "Here's the answer" }]),
             Some("end_turn"),
             Some(json!({ "input_tokens": 100, "output_tokens": 50 })),
-            None, 1),
+            None,
+            1,
+        ),
     ];
 
     let items = assemble(records);
     assert_eq!(items.len(), 1);
-    let AssembledItem::AssistantMessage(am) = &items[0] else { panic!() };
+    let AssembledItem::AssistantMessage(am) = &items[0] else {
+        panic!()
+    };
     assert_eq!(am.content_blocks.len(), 2);
     assert_eq!(am.content_blocks[0]["type"], "thinking");
     assert_eq!(am.content_blocks[1]["type"], "text");
@@ -107,22 +138,46 @@ fn two_chunk_assistant() {
 #[test]
 fn three_chunk_assistant() {
     let records = vec![
-        lr_assistant("a1", None, "2026-01-01T00:00:00Z", "msg1",
+        lr_assistant(
+            "a1",
+            None,
+            "2026-01-01T00:00:00Z",
+            "msg1",
             json!([{ "type": "thinking", "thinking": "hmm" }]),
-            None, None, Some("claude-opus-4-6"), 1),
-        lr_assistant("a2", Some("a1"), "2026-01-01T00:00:01Z", "msg1",
+            None,
+            None,
+            Some("claude-opus-4-6"),
+            1,
+        ),
+        lr_assistant(
+            "a2",
+            Some("a1"),
+            "2026-01-01T00:00:01Z",
+            "msg1",
             json!([{ "type": "text", "text": "answer" }]),
-            None, None, None, 1),
-        lr_assistant("a3", Some("a2"), "2026-01-01T00:00:02Z", "msg1",
+            None,
+            None,
+            None,
+            1,
+        ),
+        lr_assistant(
+            "a3",
+            Some("a2"),
+            "2026-01-01T00:00:02Z",
+            "msg1",
             json!([{ "type": "tool_use", "id": "t1", "name": "Bash", "input": {} }]),
             Some("tool_use"),
             Some(json!({ "input_tokens": 200, "output_tokens": 100 })),
-            None, 1),
+            None,
+            1,
+        ),
     ];
 
     let items = assemble(records);
     assert_eq!(items.len(), 1);
-    let AssembledItem::AssistantMessage(am) = &items[0] else { panic!() };
+    let AssembledItem::AssistantMessage(am) = &items[0] else {
+        panic!()
+    };
     assert_eq!(am.content_blocks.len(), 3);
     assert_eq!(am.content_blocks[0]["type"], "thinking");
     assert_eq!(am.content_blocks[1]["type"], "text");
@@ -133,36 +188,68 @@ fn three_chunk_assistant() {
 #[test]
 fn stop_reason_from_last_chunk() {
     let records = vec![
-        lr_assistant("a1", None, "2026-01-01T00:00:00Z", "msg1",
+        lr_assistant(
+            "a1",
+            None,
+            "2026-01-01T00:00:00Z",
+            "msg1",
             json!([{ "type": "text", "text": "a" }]),
-            None, None, None, 1),
-        lr_assistant("a2", Some("a1"), "2026-01-01T00:00:01Z", "msg1",
+            None,
+            None,
+            None,
+            1,
+        ),
+        lr_assistant(
+            "a2",
+            Some("a1"),
+            "2026-01-01T00:00:01Z",
+            "msg1",
             json!([{ "type": "tool_use", "id": "t1", "name": "X", "input": {} }]),
-            Some("tool_use"), None, None, 1),
+            Some("tool_use"),
+            None,
+            None,
+            1,
+        ),
     ];
 
     let items = assemble(records);
-    let AssembledItem::AssistantMessage(am) = &items[0] else { panic!() };
+    let AssembledItem::AssistantMessage(am) = &items[0] else {
+        panic!()
+    };
     assert_eq!(am.stop_reason, "tool_use");
 }
 
 #[test]
 fn usage_from_last_chunk() {
     let records = vec![
-        lr_assistant("a1", None, "2026-01-01T00:00:00Z", "msg1",
+        lr_assistant(
+            "a1",
+            None,
+            "2026-01-01T00:00:00Z",
+            "msg1",
             json!([{ "type": "thinking", "thinking": "x" }]),
             None,
             Some(json!({ "input_tokens": 3, "output_tokens": 1 })),
-            None, 1),
-        lr_assistant("a2", Some("a1"), "2026-01-01T00:00:01Z", "msg1",
+            None,
+            1,
+        ),
+        lr_assistant(
+            "a2",
+            Some("a1"),
+            "2026-01-01T00:00:01Z",
+            "msg1",
             json!([{ "type": "text", "text": "y" }]),
             Some("end_turn"),
             Some(json!({ "input_tokens": 100, "output_tokens": 50 })),
-            None, 1),
+            None,
+            1,
+        ),
     ];
 
     let items = assemble(records);
-    let AssembledItem::AssistantMessage(am) = &items[0] else { panic!() };
+    let AssembledItem::AssistantMessage(am) = &items[0] else {
+        panic!()
+    };
     assert_eq!(am.usage.input_tokens, 100);
     assert_eq!(am.usage.output_tokens, 50);
 }
@@ -170,42 +257,80 @@ fn usage_from_last_chunk() {
 #[test]
 fn model_from_any_chunk() {
     let records = vec![
-        lr_assistant("a1", None, "2026-01-01T00:00:00Z", "msg1",
+        lr_assistant(
+            "a1",
+            None,
+            "2026-01-01T00:00:00Z",
+            "msg1",
             json!([{ "type": "text", "text": "a" }]),
-            None, None, Some("claude-sonnet-4-6"), 1),
-        lr_assistant("a2", Some("a1"), "2026-01-01T00:00:01Z", "msg1",
+            None,
+            None,
+            Some("claude-sonnet-4-6"),
+            1,
+        ),
+        lr_assistant(
+            "a2",
+            Some("a1"),
+            "2026-01-01T00:00:01Z",
+            "msg1",
             json!([{ "type": "text", "text": "b" }]),
-            Some("end_turn"), None, None, 1),
+            Some("end_turn"),
+            None,
+            None,
+            1,
+        ),
     ];
 
     let items = assemble(records);
-    let AssembledItem::AssistantMessage(am) = &items[0] else { panic!() };
+    let AssembledItem::AssistantMessage(am) = &items[0] else {
+        panic!()
+    };
     assert_eq!(am.model, "claude-sonnet-4-6");
 }
 
 #[test]
 fn empty_thinking_stripped() {
-    let records = vec![lr_assistant("a1", None, "2026-01-01T00:00:00Z", "msg1",
+    let records = vec![lr_assistant(
+        "a1",
+        None,
+        "2026-01-01T00:00:00Z",
+        "msg1",
         json!([
             { "type": "thinking", "thinking": "", "signature": "abc" },
             { "type": "text", "text": "answer" }
         ]),
-        Some("end_turn"), None, None, 1)];
+        Some("end_turn"),
+        None,
+        None,
+        1,
+    )];
 
     let items = assemble(records);
-    let AssembledItem::AssistantMessage(am) = &items[0] else { panic!() };
+    let AssembledItem::AssistantMessage(am) = &items[0] else {
+        panic!()
+    };
     assert_eq!(am.content_blocks.len(), 1); // empty thinking stripped
     assert_eq!(am.content_blocks[0]["type"], "text");
 }
 
 #[test]
 fn thinking_signature_stripped() {
-    let records = vec![lr_assistant("a1", None, "2026-01-01T00:00:00Z", "msg1",
+    let records = vec![lr_assistant(
+        "a1",
+        None,
+        "2026-01-01T00:00:00Z",
+        "msg1",
         json!([{ "type": "thinking", "thinking": "deep thoughts", "signature": "ErsMClk" }]),
-        Some("end_turn"), None, None, 1)];
+        Some("end_turn"),
+        None,
+        None,
+        1,
+    )];
 
     let items = assemble(records);
-    let AssembledItem::AssistantMessage(am) = &items[0] else { panic!() };
+    let AssembledItem::AssistantMessage(am) = &items[0] else {
+        panic!()
+    };
     assert_eq!(am.content_blocks.len(), 1);
     assert!(am.content_blocks[0].get("signature").is_none());
     assert_eq!(am.content_blocks[0]["thinking"], "deep thoughts");
@@ -242,7 +367,9 @@ fn custom_title_extracted() {
 
     let items = assemble(records);
     assert_eq!(items.len(), 1);
-    let AssembledItem::CustomTitle(title) = &items[0] else { panic!() };
+    let AssembledItem::CustomTitle(title) = &items[0] else {
+        panic!()
+    };
     assert_eq!(title, "My Title");
 }
 
@@ -250,25 +377,53 @@ fn custom_title_extracted() {
 fn interleaved_user_assistant() {
     let records = vec![
         lr_user("u1", None, "2026-01-01T00:00:00Z", 1),
-        lr_assistant("a1", Some("u1"), "2026-01-01T00:00:01Z", "msg1",
+        lr_assistant(
+            "a1",
+            Some("u1"),
+            "2026-01-01T00:00:01Z",
+            "msg1",
             json!([{ "type": "thinking", "thinking": "t" }]),
-            None, None, Some("model"), 1),
-        lr_assistant("a2", Some("a1"), "2026-01-01T00:00:02Z", "msg1",
+            None,
+            None,
+            Some("model"),
+            1,
+        ),
+        lr_assistant(
+            "a2",
+            Some("a1"),
+            "2026-01-01T00:00:02Z",
+            "msg1",
             json!([{ "type": "text", "text": "answer" }]),
-            Some("end_turn"), None, None, 1),
+            Some("end_turn"),
+            None,
+            None,
+            1,
+        ),
         lr_user("u2", Some("a2"), "2026-01-01T00:00:03Z", 2),
-        lr_assistant("a3", Some("u2"), "2026-01-01T00:00:04Z", "msg2",
+        lr_assistant(
+            "a3",
+            Some("u2"),
+            "2026-01-01T00:00:04Z",
+            "msg2",
             json!([{ "type": "text", "text": "response" }]),
-            Some("end_turn"), None, None, 2),
+            Some("end_turn"),
+            None,
+            None,
+            2,
+        ),
     ];
 
     let items = assemble(records);
     assert_eq!(items.len(), 4); // u1, assembled(a1+a2), u2, assembled(a3)
     assert!(matches!(&items[0], AssembledItem::UserMessage { .. }));
-    let AssembledItem::AssistantMessage(am1) = &items[1] else { panic!() };
+    let AssembledItem::AssistantMessage(am1) = &items[1] else {
+        panic!()
+    };
     assert_eq!(am1.content_blocks.len(), 2); // thinking + text merged
     assert!(matches!(&items[2], AssembledItem::UserMessage { .. }));
-    let AssembledItem::AssistantMessage(am2) = &items[3] else { panic!() };
+    let AssembledItem::AssistantMessage(am2) = &items[3] else {
+        panic!()
+    };
     assert_eq!(am2.content_blocks.len(), 1);
 }
 
@@ -291,6 +446,8 @@ fn assistant_with_no_message_id() {
 
     let items = assemble(records);
     assert_eq!(items.len(), 1);
-    let AssembledItem::AssistantMessage(am) = &items[0] else { panic!() };
+    let AssembledItem::AssistantMessage(am) = &items[0] else {
+        panic!()
+    };
     assert_eq!(am.content_blocks.len(), 1);
 }

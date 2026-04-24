@@ -22,7 +22,11 @@ use std::time::SystemTime;
 const CONTEXT_FILENAMES: &[&str] = &["claude.md", "agents.md"];
 
 /// Directories that may contain rules files.
-const AGENT_DIRS: &[&str] = &[".claude", crate::core::paths::dirs::TRON_RULES_RELATIVE, ".agent"];
+const AGENT_DIRS: &[&str] = &[
+    ".claude",
+    crate::core::paths::dirs::TRON_RULES_RELATIVE,
+    ".agent",
+];
 
 /// Directories excluded from scanning by default.
 const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
@@ -441,11 +445,18 @@ mod tests {
     #[test]
     fn discovers_tron_rules_dir_at_project_root() {
         let tmp = setup();
-        write_file(tmp.path(), ".tron/workspace/memory/rules/CLAUDE.md", "# Tron rules");
+        write_file(
+            tmp.path(),
+            ".tron/workspace/memory/rules/CLAUDE.md",
+            "# Tron rules",
+        );
 
         let results = discover_rules_files(&make_config(tmp.path()));
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].relative_path, ".tron/workspace/memory/rules/CLAUDE.md");
+        assert_eq!(
+            results[0].relative_path,
+            ".tron/workspace/memory/rules/CLAUDE.md"
+        );
     }
 
     #[test]
@@ -462,13 +473,23 @@ mod tests {
     fn case_insensitive_filenames() {
         let tmp = setup();
         write_file(tmp.path(), ".claude/claude.md", "# lowercase claude");
-        write_file(tmp.path(), ".tron/workspace/memory/rules/agents.md", "# lowercase agents");
+        write_file(
+            tmp.path(),
+            ".tron/workspace/memory/rules/agents.md",
+            "# lowercase agents",
+        );
 
         let results = discover_rules_files(&make_config(tmp.path()));
         assert_eq!(results.len(), 2);
         let mut paths: Vec<_> = results.iter().map(|r| r.relative_path.as_str()).collect();
         paths.sort_unstable();
-        assert_eq!(paths, vec![".claude/claude.md", ".tron/workspace/memory/rules/agents.md"]);
+        assert_eq!(
+            paths,
+            vec![
+                ".claude/claude.md",
+                ".tron/workspace/memory/rules/agents.md"
+            ]
+        );
     }
 
     #[test]
@@ -496,7 +517,11 @@ mod tests {
             "packages/agent/.claude/CLAUDE.md",
             "# Deep rule",
         );
-        write_file(tmp.path(), "src/lib/.tron/workspace/memory/rules/AGENTS.md", "# Nested rule");
+        write_file(
+            tmp.path(),
+            "src/lib/.tron/workspace/memory/rules/AGENTS.md",
+            "# Nested rule",
+        );
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 2);
@@ -752,7 +777,11 @@ mod tests {
     fn discovers_files_across_multiple_agent_dirs() {
         let tmp = setup();
         write_file(tmp.path(), "packages/foo/.claude/CLAUDE.md", "# Claude");
-        write_file(tmp.path(), "packages/foo/.tron/workspace/memory/rules/AGENTS.md", "# Tron Agents");
+        write_file(
+            tmp.path(),
+            "packages/foo/.tron/workspace/memory/rules/AGENTS.md",
+            "# Tron Agents",
+        );
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 2);
@@ -773,7 +802,10 @@ mod tests {
 
     #[test]
     fn scope_dir_root_agent_dir() {
-        assert_eq!(compute_scope_dir(".claude/CLAUDE.md", false, Some(".claude")), "");
+        assert_eq!(
+            compute_scope_dir(".claude/CLAUDE.md", false, Some(".claude")),
+            ""
+        );
     }
 
     #[test]
@@ -787,7 +819,11 @@ mod tests {
     #[test]
     fn scope_dir_deeply_nested_tron_rules() {
         assert_eq!(
-            compute_scope_dir("a/b/c/.tron/workspace/memory/rules/AGENTS.md", false, Some(".tron/workspace/memory/rules")),
+            compute_scope_dir(
+                "a/b/c/.tron/workspace/memory/rules/AGENTS.md",
+                false,
+                Some(".tron/workspace/memory/rules")
+            ),
             "a/b/c"
         );
     }
@@ -795,7 +831,11 @@ mod tests {
     #[test]
     fn scope_dir_root_tron_rules() {
         assert_eq!(
-            compute_scope_dir(".tron/workspace/memory/rules/CLAUDE.md", false, Some(".tron/workspace/memory/rules")),
+            compute_scope_dir(
+                ".tron/workspace/memory/rules/CLAUDE.md",
+                false,
+                Some(".tron/workspace/memory/rules")
+            ),
             ""
         );
     }

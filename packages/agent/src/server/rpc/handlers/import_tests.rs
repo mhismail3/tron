@@ -8,23 +8,33 @@ fn write_sample_session_file(dir: &std::path::Path) -> std::path::PathBuf {
     let file = dir.join("sample-uuid.jsonl");
     let mut f = std::fs::File::create(&file).unwrap();
 
-    writeln!(f, "{}", json!({
-        "type": "user", "uuid": "u1",
-        "timestamp": "2026-01-01T00:00:00Z", "promptId": "p1",
-        "message": { "role": "user", "content": "Hello" }
-    })).unwrap();
+    writeln!(
+        f,
+        "{}",
+        json!({
+            "type": "user", "uuid": "u1",
+            "timestamp": "2026-01-01T00:00:00Z", "promptId": "p1",
+            "message": { "role": "user", "content": "Hello" }
+        })
+    )
+    .unwrap();
 
-    writeln!(f, "{}", json!({
-        "type": "assistant", "uuid": "a1", "parentUuid": "u1",
-        "timestamp": "2026-01-01T00:00:01Z",
-        "message": {
-            "id": "msg_01", "role": "assistant",
-            "content": [{ "type": "text", "text": "Hi there! How can I help?" }],
-            "stop_reason": "end_turn",
-            "usage": { "input_tokens": 100, "output_tokens": 50 },
-            "model": "claude-opus-4-6"
-        }
-    })).unwrap();
+    writeln!(
+        f,
+        "{}",
+        json!({
+            "type": "assistant", "uuid": "a1", "parentUuid": "u1",
+            "timestamp": "2026-01-01T00:00:01Z",
+            "message": {
+                "id": "msg_01", "role": "assistant",
+                "content": [{ "type": "text", "text": "Hi there! How can I help?" }],
+                "stop_reason": "end_turn",
+                "usage": { "input_tokens": 100, "output_tokens": 50 },
+                "model": "claude-opus-4-6"
+            }
+        })
+    )
+    .unwrap();
 
     file
 }
@@ -36,10 +46,7 @@ async fn preview_session_returns_messages() {
     let path = write_sample_session_file(dir.path());
 
     let result = PreviewSessionHandler
-        .handle(
-            Some(json!({ "sessionPath": path.to_str().unwrap() })),
-            &ctx,
-        )
+        .handle(Some(json!({ "sessionPath": path.to_str().unwrap() })), &ctx)
         .await
         .unwrap();
 
@@ -56,22 +63,32 @@ async fn preview_session_truncates_content() {
     let mut f = std::fs::File::create(&file).unwrap();
 
     let long_text = "x".repeat(500);
-    writeln!(f, "{}", json!({
-        "type": "user", "uuid": "u1",
-        "timestamp": "2026-01-01T00:00:00Z", "promptId": "p1",
-        "message": { "role": "user", "content": long_text }
-    })).unwrap();
-    writeln!(f, "{}", json!({
-        "type": "assistant", "uuid": "a1", "parentUuid": "u1",
-        "timestamp": "2026-01-01T00:00:01Z",
-        "message": {
-            "id": "msg_01", "role": "assistant",
-            "content": [{ "type": "text", "text": "ok" }],
-            "stop_reason": "end_turn",
-            "usage": { "input_tokens": 10, "output_tokens": 5 },
-            "model": "claude-opus-4-6"
-        }
-    })).unwrap();
+    writeln!(
+        f,
+        "{}",
+        json!({
+            "type": "user", "uuid": "u1",
+            "timestamp": "2026-01-01T00:00:00Z", "promptId": "p1",
+            "message": { "role": "user", "content": long_text }
+        })
+    )
+    .unwrap();
+    writeln!(
+        f,
+        "{}",
+        json!({
+            "type": "assistant", "uuid": "a1", "parentUuid": "u1",
+            "timestamp": "2026-01-01T00:00:01Z",
+            "message": {
+                "id": "msg_01", "role": "assistant",
+                "content": [{ "type": "text", "text": "ok" }],
+                "stop_reason": "end_turn",
+                "usage": { "input_tokens": 10, "output_tokens": 5 },
+                "model": "claude-opus-4-6"
+            }
+        })
+    )
+    .unwrap();
 
     let result = PreviewSessionHandler
         .handle(Some(json!({ "sessionPath": file.to_str().unwrap() })), &ctx)

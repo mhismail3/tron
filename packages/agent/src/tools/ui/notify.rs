@@ -5,14 +5,16 @@
 
 use std::sync::Arc;
 
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{Notification, NotifyDelegate, ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
-use crate::tools::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
+use crate::tools::utils::validation::{
+    get_optional_string, get_optional_u64, validate_required_string,
+};
 
 const MAX_TITLE_LENGTH: usize = 50;
 const MAX_BODY_LENGTH: usize = 200;
@@ -452,7 +454,10 @@ mod tests {
             .execute(json!({"title": "t", "body": "b"}), &make_ctx())
             .await
             .unwrap();
-        assert!(r.is_error.is_none(), "warning must not mark the tool as errored");
+        assert!(
+            r.is_error.is_none(),
+            "warning must not mark the tool as errored"
+        );
         assert!(
             extract_text(&r).starts_with("Warning: "),
             "warning must be surfaced with a prefix; got: {}",
@@ -525,7 +530,10 @@ mod tests {
             .unwrap();
         assert!(extract_text(&r).contains("successfully"));
         let d = r.details.unwrap();
-        assert!(d.get("warning").is_none(), "no warning field when delegate didn't set one");
+        assert!(
+            d.get("warning").is_none(),
+            "no warning field when delegate didn't set one"
+        );
     }
 
     #[tokio::test]

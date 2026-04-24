@@ -291,9 +291,11 @@ fn render_content(memory_md: Option<&str>, rule_files: &[MemoryRuleFile]) -> Str
     out.push_str("\n## Detail files (not auto-loaded — Read on demand)\n\n");
     out.push_str("Path: `~/.tron/workspace/memory/rules/`\n\n");
     if rule_files.is_empty() {
-        out.push_str("_No detail files yet. When you learn a larger topic about the user, \
+        out.push_str(
+            "_No detail files yet. When you learn a larger topic about the user, \
                       create `~/.tron/workspace/memory/rules/<topic>.md` with YAML frontmatter \
-                      (`description: <one-line>`)._\n");
+                      (`description: <one-line>`)._\n",
+        );
     } else {
         for rf in rule_files {
             match &rf.description {
@@ -358,10 +360,7 @@ pub(crate) fn extract_description(content: &str) -> Option<String> {
     for (start, _) in after_opener.match_indices("\n---") {
         // The `---` must be on its own line: followed by `\n`, `\r\n`, or EOF.
         let after = &after_opener[start + 4..];
-        if after.is_empty()
-            || after.starts_with('\n')
-            || after.starts_with("\r\n")
-        {
+        if after.is_empty() || after.starts_with('\n') || after.starts_with("\r\n") {
             end_idx = Some(start);
             break;
         }
@@ -489,11 +488,7 @@ mod tests {
         let home = tempdir().unwrap();
         make_memory_root(home.path());
         let home_str = home.path().to_str().unwrap();
-        std::fs::write(
-            home.path().join(".tron/workspace/memory/MEMORY.md"),
-            "root",
-        )
-        .unwrap();
+        std::fs::write(home.path().join(".tron/workspace/memory/MEMORY.md"), "root").unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
         std::fs::write(
             home.path().join(".tron/workspace/memory/rules/.DS_Store"),
@@ -517,17 +512,9 @@ mod tests {
         let home = tempdir().unwrap();
         make_memory_root(home.path());
         let home_str = home.path().to_str().unwrap();
-        std::fs::write(
-            home.path().join(".tron/workspace/memory/MEMORY.md"),
-            "root",
-        )
-        .unwrap();
+        std::fs::write(home.path().join(".tron/workspace/memory/MEMORY.md"), "root").unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
-        std::fs::create_dir_all(
-            home.path()
-                .join(".tron/workspace/memory/rules/nested"),
-        )
-        .unwrap();
+        std::fs::create_dir_all(home.path().join(".tron/workspace/memory/rules/nested")).unwrap();
         std::fs::write(
             home.path()
                 .join(".tron/workspace/memory/rules/nested/sub.md"),
@@ -558,9 +545,7 @@ mod tests {
         let home = tempdir().unwrap();
         make_memory_root(home.path());
         let home_str = home.path().to_str().unwrap();
-        let rule = home
-            .path()
-            .join(".tron/workspace/memory/rules/foo.md");
+        let rule = home.path().join(".tron/workspace/memory/rules/foo.md");
         std::fs::write(&rule, "v1").unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
         std::fs::remove_file(&rule).unwrap();

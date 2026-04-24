@@ -136,7 +136,9 @@ pub(crate) fn map_event_store_error(e: EventStoreError) -> RpcError {
             message: format!("Blob not found: {id}"),
         },
         E::InvalidOperation(m) => RpcError::InvalidParams { message: m },
-        E::DuplicateImport { existing_session_id } => RpcError::Custom {
+        E::DuplicateImport {
+            existing_session_id,
+        } => RpcError::Custom {
             code: codes::IMPORT_ALREADY_IMPORTED.into(),
             message: format!(
                 "This source has already been imported into session '{existing_session_id}'."
@@ -222,9 +224,7 @@ pub(crate) fn map_import_error(e: ImportError) -> RpcError {
         },
         I::AlreadyImported { tron_session_id } => RpcError::Custom {
             code: codes::IMPORT_ALREADY_IMPORTED.into(),
-            message: format!(
-                "Session already imported as Tron session {tron_session_id}"
-            ),
+            message: format!("Session already imported as Tron session {tron_session_id}"),
             details: Some(serde_json::json!({
                 "existingSessionId": tron_session_id,
             })),
@@ -319,10 +319,15 @@ mod tests {
 
     #[test]
     fn not_found_carries_inner_session_id() {
-        let rpc = map_worktree_error(W::NotFound { session_id: "sid-42".into() });
+        let rpc = map_worktree_error(W::NotFound {
+            session_id: "sid-42".into(),
+        });
         assert_eq!(rpc.code(), "WORKTREE_NOT_FOUND");
         let msg = rpc.to_string();
-        assert!(msg.contains("sid-42"), "message should carry session id; got {msg}");
+        assert!(
+            msg.contains("sid-42"),
+            "message should carry session id; got {msg}"
+        );
     }
 
     #[test]
@@ -496,7 +501,10 @@ mod tests {
 
     #[test]
     fn event_store_busy_is_internal() {
-        let rpc = map_event_store_error(E::Busy { operation: "append", attempts: 5 });
+        let rpc = map_event_store_error(E::Busy {
+            operation: "append",
+            attempts: 5,
+        });
         assert_eq!(rpc.code(), "INTERNAL_ERROR");
     }
 
@@ -509,7 +517,9 @@ mod tests {
 
     #[test]
     fn event_store_migration_is_internal() {
-        let rpc = map_event_store_error(E::Migration { message: "v005 failed".into() });
+        let rpc = map_event_store_error(E::Migration {
+            message: "v005 failed".into(),
+        });
         assert_eq!(rpc.code(), "INTERNAL_ERROR");
     }
 
@@ -589,7 +599,10 @@ mod tests {
 
     #[test]
     fn cron_io_is_internal() {
-        let rpc = map_cron_error(C::Io(std::io::Error::new(std::io::ErrorKind::Other, "disk")));
+        let rpc = map_cron_error(C::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "disk",
+        )));
         assert_eq!(rpc.code(), "INTERNAL_ERROR");
     }
 
@@ -611,7 +624,10 @@ mod tests {
 
     #[test]
     fn auth_oauth_error_is_typed() {
-        let rpc = map_auth_error(A::OAuth { status: 401, message: "invalid_grant".into() });
+        let rpc = map_auth_error(A::OAuth {
+            status: 401,
+            message: "invalid_grant".into(),
+        });
         assert_eq!(rpc.code(), "AUTH_OAUTH_ERROR");
         assert!(rpc.to_string().contains("invalid_grant"));
         assert!(rpc.to_string().contains("401"));
@@ -619,7 +635,10 @@ mod tests {
 
     #[test]
     fn auth_io_is_internal() {
-        let rpc = map_auth_error(A::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "x")));
+        let rpc = map_auth_error(A::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "x",
+        )));
         assert_eq!(rpc.code(), "INTERNAL_ERROR");
     }
 
@@ -667,10 +686,7 @@ mod tests {
         assert!(rpc.to_string().contains("sess_42"));
         // Details payload carries the session id for clients to follow.
         let body = rpc.to_error_body();
-        assert_eq!(
-            body.details.unwrap()["existingSessionId"],
-            "sess_42"
-        );
+        assert_eq!(body.details.unwrap()["existingSessionId"], "sess_42");
     }
 
     #[test]

@@ -5,9 +5,9 @@
 
 use std::sync::Arc;
 
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{FileSystemOps, ToolContext, TronTool};
@@ -174,9 +174,11 @@ impl TronTool for EditTool {
 
         if count > 1 && !replace_all {
             return Ok(TronToolResult {
-                content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
-                    format!("Found {count} occurrences of old_string. Use replace_all: true to replace all, or make old_string more specific."),
-                )]),
+                content: ToolResultBody::Blocks(vec![
+                    crate::core::content::ToolResultContent::text(format!(
+                        "Found {count} occurrences of old_string. Use replace_all: true to replace all, or make old_string more specific."
+                    )),
+                ]),
                 details: Some(json!({
                     "error": format!("Found {count} occurrences of old_string. Use replace_all: true to replace all, or make old_string more specific."),
                     "errorClass": "multiple_occurrences",

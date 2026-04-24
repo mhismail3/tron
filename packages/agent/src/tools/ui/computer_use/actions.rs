@@ -22,7 +22,10 @@ impl ComputerUseTool {
         let output = self.runner.run_command(&command, &opts).await?;
         if output.exit_code != 0 {
             return Err(ToolError::Internal {
-                message: format!("osascript failed (exit {}): {}", output.exit_code, output.stderr),
+                message: format!(
+                    "osascript failed (exit {}): {}",
+                    output.exit_code, output.stderr
+                ),
             });
         }
         Ok(output.stdout)
@@ -65,8 +68,12 @@ impl ComputerUseTool {
                     super::super::input::type_text(&text).await
                 } else {
                     let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
-                    let script = format!("tell application \"System Events\" to keystroke \"{escaped}\"");
-                    self.run_osascript(&script, ctx).await.map(|_| ()).map_err(|e| format!("{e}"))
+                    let script =
+                        format!("tell application \"System Events\" to keystroke \"{escaped}\"");
+                    self.run_osascript(&script, ctx)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| format!("{e}"))
                 }
             }
             #[cfg(not(target_os = "macos"))]
@@ -80,7 +87,8 @@ impl ComputerUseTool {
             Ok(()) => Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
-                        "Typed {} characters", text.len()
+                        "Typed {} characters",
+                        text.len()
                     )),
                 ]),
                 details: Some(json!({"action": "type", "length": text.len()})),
@@ -96,11 +104,15 @@ impl ComputerUseTool {
         params: &Value,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let keys = params.get("keys")
+        let keys = params
+            .get("keys")
             .and_then(Value::as_array)
-            .ok_or_else(|| ToolError::Validation { message: "keypress requires keys array".into() })?;
+            .ok_or_else(|| ToolError::Validation {
+                message: "keypress requires keys array".into(),
+            })?;
 
-        let key_names: Vec<String> = keys.iter()
+        let key_names: Vec<String> = keys
+            .iter()
             .filter_map(|v| v.as_str().map(String::from))
             .collect();
 
@@ -124,7 +136,10 @@ impl ComputerUseTool {
                 } else {
                     // Test fallback: treat as success (mock runner handles osascript)
                     let script = "tell application \"System Events\" to keystroke \"\"".to_string();
-                    self.run_osascript(&script, ctx).await.map(|_| ()).map_err(|e| format!("{e}"))
+                    self.run_osascript(&script, ctx)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| format!("{e}"))
                 }
             }
             #[cfg(not(target_os = "macos"))]
@@ -137,7 +152,8 @@ impl ComputerUseTool {
             Ok(()) => Ok(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
                     crate::core::content::ToolResultContent::text(format!(
-                        "Pressed: {}", key_names.join("+")
+                        "Pressed: {}",
+                        key_names.join("+")
                     )),
                 ]),
                 details: Some(json!({"action": "keypress", "keys": key_names})),
@@ -153,13 +169,15 @@ impl ComputerUseTool {
         params: &Value,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let direction = get_optional_string(params, "direction")
-            .unwrap_or_else(|| "down".to_string());
+        let direction =
+            get_optional_string(params, "direction").unwrap_or_else(|| "down".to_string());
         let amount = get_optional_u64(params, "amount").unwrap_or(100) as i32;
 
         // Validate direction before dispatching
         if !matches!(direction.as_str(), "up" | "down" | "left" | "right") {
-            return Ok(error_result(format!("Unknown scroll direction: {direction}")));
+            return Ok(error_result(format!(
+                "Unknown scroll direction: {direction}"
+            )));
         }
 
         // Scroll at current cursor position (x=0, y=0 means "don't reposition")
@@ -170,7 +188,10 @@ impl ComputerUseTool {
                     super::super::input::scroll(&direction, amount, 0.0, 0.0).await
                 } else {
                     let script = "tell application \"System Events\" to key code 125".to_string();
-                    self.run_osascript(&script, ctx).await.map(|_| ()).map_err(|e| format!("{e}"))
+                    self.run_osascript(&script, ctx)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| format!("{e}"))
                 }
             }
             #[cfg(not(target_os = "macos"))]
@@ -200,14 +221,14 @@ impl ComputerUseTool {
     /// Swift script for listing windows via CGWindowList (works from background processes).
     const GET_WINDOWS_SWIFT: &'static str = r#"import Cocoa; let ws = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]; var lines = [String](); for w in ws { let owner = w[kCGWindowOwnerName as String] as? String ?? ""; let name = w[kCGWindowName as String] as? String ?? ""; if name.isEmpty { continue }; let layer = w[kCGWindowLayer as String] as? Int ?? 999; if layer != 0 { continue }; let bounds = w[kCGWindowBounds as String] as? [String: Any] ?? [:]; let x = Int(bounds["X"] as? Double ?? 0); let y = Int(bounds["Y"] as? Double ?? 0); let bw = Int(bounds["Width"] as? Double ?? 0); let bh = Int(bounds["Height"] as? Double ?? 0); let onScreen = w[kCGWindowIsOnscreen as String] as? Bool ?? false; lines.append("\(owner) | \(name) | \(x),\(y) | \(bw),\(bh) | \(onScreen ? "visible" : "off-screen")") }; print(lines.joined(separator: "\n"))"#;
 
-    pub(super) async fn get_windows(
-        &self,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    pub(super) async fn get_windows(&self, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         // Use CGWindowList via Swift — works reliably from background launchd processes,
         // unlike the AppleScript "System Events" approach which returns empty when
         // the agent isn't running in a foreground terminal session.
-        let cmd = format!("swift -e '{}'", Self::GET_WINDOWS_SWIFT.replace('\'', "'\\''"));
+        let cmd = format!(
+            "swift -e '{}'",
+            Self::GET_WINDOWS_SWIFT.replace('\'', "'\\''")
+        );
         let output = self.run_shell(&cmd, ctx).await?;
 
         if output.exit_code != 0 {
@@ -219,15 +240,13 @@ impl ComputerUseTool {
 
         let trimmed = output.stdout.trim();
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(
-                    if trimmed.is_empty() {
-                        "No windows found.".to_string()
-                    } else {
-                        format!("App | Window | Position | Size | Status\n{trimmed}")
-                    }
-                ),
-            ]),
+            content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                if trimmed.is_empty() {
+                    "No windows found.".to_string()
+                } else {
+                    format!("App | Window | Position | Size | Status\n{trimmed}")
+                },
+            )]),
             details: Some(json!({"action": "getWindows"})),
             is_error: None,
             stop_turn: None,
@@ -247,9 +266,12 @@ impl ComputerUseTool {
         // Single Swift call: find window → activate via NSRunningApplication → verify
         let swift_script = Self::build_focus_window_swift(&window);
         let cmd = format!("swift -e '{}'", swift_script.replace('\'', "'\\''"));
-        let output = self.run_shell(&cmd, ctx).await.map_err(|e| {
-            ToolError::Internal { message: format!("focusWindow lookup failed: {e}") }
-        })?;
+        let output = self
+            .run_shell(&cmd, ctx)
+            .await
+            .map_err(|e| ToolError::Internal {
+                message: format!("focusWindow lookup failed: {e}"),
+            })?;
 
         if output.exit_code != 0 {
             let available = output.stderr.trim();
@@ -258,9 +280,7 @@ impl ComputerUseTool {
             } else {
                 format!("Available windows:\n{available}")
             };
-            return Ok(error_result(format!(
-                "Window '{window}' not found. {list}"
-            )));
+            return Ok(error_result(format!("Window '{window}' not found. {list}")));
         }
 
         // Parse: "owner\tname\tpid\tactivated|failed|no_process\tverified"
@@ -286,14 +306,16 @@ impl ComputerUseTool {
         let status = if verified {
             format!("Focused window: {window} (app: {owner}, verified on-screen)")
         } else {
-            format!("Focused window: {window} (app: {owner}, activated but not yet verified on-screen — \
-                     the window may need a moment or may be on another Space)")
+            format!(
+                "Focused window: {window} (app: {owner}, activated but not yet verified on-screen — \
+                     the window may need a moment or may be on another Space)"
+            )
         };
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                crate::core::content::ToolResultContent::text(status),
-            ]),
+            content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+                status,
+            )]),
             details: Some(json!({
                 "action": "focusWindow",
                 "window": window,
@@ -315,10 +337,11 @@ impl ComputerUseTool {
         params: &Value,
         ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let text = match validate_required_string(params, "text", "text label of the element to click") {
-            Ok(t) => t,
-            Err(e) => return Ok(e),
-        };
+        let text =
+            match validate_required_string(params, "text", "text label of the element to click") {
+                Ok(t) => t,
+                Err(e) => return Ok(e),
+            };
 
         let app_name = get_optional_string(params, "app");
         let app_resolve = Self::swift_resolve_app(app_name.as_deref());
@@ -341,9 +364,7 @@ impl ComputerUseTool {
             } else {
                 format!("Available elements in {target}:\n{stderr}")
             };
-            return Ok(error_result(format!(
-                "Element '{text}' not found. {list}"
-            )));
+            return Ok(error_result(format!("Element '{text}' not found. {list}")));
         }
 
         let parts: Vec<&str> = output.stdout.trim().splitn(4, '\t').collect();
@@ -358,7 +379,7 @@ impl ComputerUseTool {
 
         Ok(TronToolResult {
             content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
-                format!("Clicked: \"{title}\" ({role}, {method})")
+                format!("Clicked: \"{title}\" ({role}, {method})"),
             )]),
             details: Some(json!({
                 "action": "clickElement",
@@ -406,7 +427,7 @@ impl ComputerUseTool {
                     format!("No accessible elements found in {target}.")
                 } else {
                     format!("Elements in {target}:\n{trimmed}")
-                }
+                },
             )]),
             details: Some(json!({"action": "listElements", "app": app_name})),
             is_error: None,

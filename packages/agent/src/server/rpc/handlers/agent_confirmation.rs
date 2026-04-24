@@ -10,7 +10,7 @@ use tracing::instrument;
 use crate::server::rpc::agent_commands::AgentCommandService;
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
-use crate::server::rpc::handlers::agent::prompt_service::{spawn_prompt_run, PromptRequest};
+use crate::server::rpc::handlers::agent::prompt_service::{PromptRequest, spawn_prompt_run};
 use crate::server::rpc::handlers::require_string_param;
 use crate::server::rpc::registry::MethodHandler;
 
@@ -20,7 +20,10 @@ pub struct SubmitConfirmationHandler;
 
 #[async_trait]
 impl MethodHandler for SubmitConfirmationHandler {
-    #[instrument(skip(self, ctx), fields(method = "agent.submitConfirmation", session_id))]
+    #[instrument(
+        skip(self, ctx),
+        fields(method = "agent.submitConfirmation", session_id)
+    )]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let action = require_string_param(params.as_ref(), "action")?;
@@ -48,7 +51,10 @@ impl MethodHandler for SubmitConfirmationHandler {
         // Structured metadata for iOS chip rendering (persisted in the
         // message.user event payload alongside the text content).
         let mut metadata_obj = serde_json::Map::new();
-        let _ = metadata_obj.insert("messageKind".into(), serde_json::json!("confirmation_response"));
+        let _ = metadata_obj.insert(
+            "messageKind".into(),
+            serde_json::json!("confirmation_response"),
+        );
         let _ = metadata_obj.insert("confirmationDecision".into(), serde_json::json!(decision));
         if let Some(ref n) = note {
             if !n.is_empty() {
@@ -96,18 +102,19 @@ impl MethodHandler for SubmitConfirmationHandler {
                 let event_store = ctx.event_store.clone();
                 let sid = session_id.clone();
                 let queued_metadata = message_metadata.clone();
-                let _ = ctx.run_blocking("agent.submitConfirmation.queue", move || {
-                    crate::server::rpc::prompt_queue::PromptQueueService::enqueue_with_metadata(
-                        &event_store,
-                        &sid,
-                        &prompt,
-                        queued_metadata,
-                    )
-                    .map_err(|e| RpcError::Internal {
-                        message: e.to_string(),
+                let _ = ctx
+                    .run_blocking("agent.submitConfirmation.queue", move || {
+                        crate::server::rpc::prompt_queue::PromptQueueService::enqueue_with_metadata(
+                            &event_store,
+                            &sid,
+                            &prompt,
+                            queued_metadata,
+                        )
+                        .map_err(|e| RpcError::Internal {
+                            message: e.to_string(),
+                        })
                     })
-                })
-                .await?;
+                    .await?;
 
                 Ok(serde_json::json!({
                     "acknowledged": true,
@@ -157,10 +164,7 @@ impl MethodHandler for SubmitAnswersHandler {
         }
 
         // Construct the agent-facing prompt text
-        let mut lines = vec![
-            "[Answers to your questions]".to_string(),
-            String::new(),
-        ];
+        let mut lines = vec!["[Answers to your questions]".to_string(), String::new()];
         for answer in &answers {
             lines.push(format!("**{}**", answer.question));
             if let Some(ref other) = answer.other_value {
@@ -224,18 +228,19 @@ impl MethodHandler for SubmitAnswersHandler {
                 let event_store = ctx.event_store.clone();
                 let sid = session_id.clone();
                 let queued_metadata = message_metadata.clone();
-                let _ = ctx.run_blocking("agent.submitAnswers.queue", move || {
-                    crate::server::rpc::prompt_queue::PromptQueueService::enqueue_with_metadata(
-                        &event_store,
-                        &sid,
-                        &prompt,
-                        queued_metadata,
-                    )
-                    .map_err(|e| RpcError::Internal {
-                        message: e.to_string(),
+                let _ = ctx
+                    .run_blocking("agent.submitAnswers.queue", move || {
+                        crate::server::rpc::prompt_queue::PromptQueueService::enqueue_with_metadata(
+                            &event_store,
+                            &sid,
+                            &prompt,
+                            queued_metadata,
+                        )
+                        .map_err(|e| RpcError::Internal {
+                            message: e.to_string(),
+                        })
                     })
-                })
-                .await?;
+                    .await?;
 
                 Ok(serde_json::json!({
                     "acknowledged": true,
@@ -289,10 +294,7 @@ mod tests {
     async fn submit_answers_empty_questions() {
         let ctx = make_test_context();
         let err = SubmitAnswersHandler
-            .handle(
-                Some(json!({"sessionId": "s1", "questions": []})),
-                &ctx,
-            )
+            .handle(Some(json!({"sessionId": "s1", "questions": []})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");

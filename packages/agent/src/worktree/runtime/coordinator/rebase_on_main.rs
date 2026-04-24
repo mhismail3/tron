@@ -32,12 +32,10 @@ use crate::core::events::{BaseEvent, TronEvent};
 use crate::events::{AppendOptions, EventType};
 use crate::worktree::conflict as scm_conflict;
 use crate::worktree::errors::{Result, WorktreeError};
-use crate::worktree::types::{
-    MergeOrigin, MergeStrategy, RebaseOnMainResult,
-};
+use crate::worktree::types::{MergeOrigin, MergeStrategy, RebaseOnMainResult};
 
-use super::repo_lock::LockedOp;
 use super::WorktreeCoordinator;
+use super::repo_lock::LockedOp;
 
 /// Sidecar-file schema version. Bumping this invalidates old sidecars
 /// (treated as corrupt and cleaned up on startup).
@@ -61,11 +59,13 @@ impl WorktreeCoordinator {
             ));
         }
 
-        let info = self
-            .state
-            .lock()
-            .active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
+        let info =
+            self.state
+                .lock()
+                .active_info(session_id)
+                .ok_or_else(|| WorktreeError::NotFound {
+                    session_id: session_id.to_string(),
+                })?;
 
         if self.state.lock().pending_merges.contains_key(session_id) {
             return Err(WorktreeError::PendingMergeExists);
@@ -104,12 +104,7 @@ impl WorktreeCoordinator {
         }
         // Refuse detached HEAD — `current_branch` uses `symbolic-ref` and
         // errors when HEAD is detached.
-        if self
-            .git
-            .current_branch(&info.worktree_path)
-            .await
-            .is_err()
-        {
+        if self.git.current_branch(&info.worktree_path).await.is_err() {
             return Err(WorktreeError::InvalidSessionState(
                 "session worktree is on detached HEAD".into(),
             ));
@@ -216,14 +211,11 @@ impl WorktreeCoordinator {
         pending.auto_stash_ref = auto_stash_ref.clone();
 
         // Probe conflicts after start (also in worktree).
-        let conflict_paths: Vec<String> = scm_conflict::list_conflicts(
-            &info.worktree_path,
-            strategy.clone(),
-            &self.git,
-        )
-        .await
-        .map(|v| v.into_iter().map(|c| c.path).collect())
-        .unwrap_or_default();
+        let conflict_paths: Vec<String> =
+            scm_conflict::list_conflicts(&info.worktree_path, strategy.clone(), &self.git)
+                .await
+                .map(|v| v.into_iter().map(|c| c.path).collect())
+                .unwrap_or_default();
 
         // ── 7. Conflict path: stash conflicts-pending state + return ──
         if !conflict_paths.is_empty() {
@@ -302,11 +294,7 @@ impl WorktreeCoordinator {
 
         // Sidecar clean-up runs only when the clean path finished without
         // populating a StashPop pending merge. Check before removing.
-        let still_pending = self
-            .state
-            .lock()
-            .pending_merges
-            .contains_key(session_id);
+        let still_pending = self.state.lock().pending_merges.contains_key(session_id);
         if !still_pending {
             let _ = remove_sidecar(&info.worktree_path, session_id).await;
         }
@@ -377,10 +365,7 @@ pub(super) struct SidecarContents {
 /// Uses the worktree's `.git` dir (which, for a linked worktree, is the
 /// per-worktree `.git/worktrees/<name>/` directory — `git_dir_path` handles
 /// the indirection).
-pub(super) async fn sidecar_path(
-    worktree: &Path,
-    session_id: &str,
-) -> std::io::Result<PathBuf> {
+pub(super) async fn sidecar_path(worktree: &Path, session_id: &str) -> std::io::Result<PathBuf> {
     // The git executor returns the `.git` dir directly; we can shell it
     // ourselves to avoid taking a GitExecutor dependency here. Use the
     // common case: `<worktree>/.git`, and fall back to `git rev-parse
@@ -424,10 +409,7 @@ pub(super) async fn write_sidecar(
 }
 
 /// Remove a sidecar (idempotent — missing file is OK).
-pub(super) async fn remove_sidecar(
-    worktree: &Path,
-    session_id: &str,
-) -> std::io::Result<()> {
+pub(super) async fn remove_sidecar(worktree: &Path, session_id: &str) -> std::io::Result<()> {
     let path = sidecar_path(worktree, session_id).await?;
     match tokio::fs::remove_file(&path).await {
         Ok(()) => Ok(()),

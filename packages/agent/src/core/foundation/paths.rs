@@ -34,7 +34,8 @@ pub mod dirs {
     pub const DB: &str = "database";
     /// Streaming journals for crash recovery of partial LLM output.
     pub const JOURNALS: &str = "journals";
-    /// Deployment artifacts and rollback state.
+    /// Dev/deploy/update artifacts and rollback state. Ordinary user
+    /// installs do not create this directory on startup.
     pub const DEPLOYMENT: &str = "deployment";
     /// Transcription sidecar: Python venv, worker script, HuggingFace model cache.
     pub const TRANSCRIPTION: &str = "transcription";
@@ -80,7 +81,7 @@ pub mod files {
     /// WebSocket bearer token used by iOS clients to authenticate the
     /// `Authorization: Bearer <token>` header on the WS upgrade request.
     /// Stored in `~/.tron/system/auth-token.json` with mode `0o600`,
-    /// generated lazily on first server start when the file is absent.
+    /// generated during first server startup when the file is absent.
     pub const BEARER_TOKEN_JSON: &str = "auth-token.json";
     /// First-run sentinel: empty marker file at `~/.tron/system/.onboarded`.
     /// Touched by the Mac wizard at the end of its install flow OR on
@@ -184,7 +185,8 @@ pub fn journals_dir() -> PathBuf {
     db_dir().join(dirs::JOURNALS)
 }
 
-/// `~/.tron/system/deployment/`
+/// `~/.tron/system/deployment/` (dev/deploy/update state; not created
+/// during ordinary server startup)
 pub fn deploy_dir() -> PathBuf {
     system_dir().join(dirs::DEPLOYMENT)
 }

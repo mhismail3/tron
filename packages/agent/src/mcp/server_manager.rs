@@ -19,10 +19,10 @@ use chrono::Utc;
 use tracing::{debug, error, info, warn};
 
 use crate::mcp::client::{McpClient, McpError, McpErrorKind};
-use crate::mcp::schemas::{diff_schemas, SchemaDiff};
+use crate::mcp::schemas::{SchemaDiff, diff_schemas};
 use crate::mcp::types::{
-    McpServerConfig, McpServerHealth, McpServerStatus, McpToolDef,
-    BACKOFF_BASE_MS, BACKOFF_MAX_MS, MAX_CONSECUTIVE_FAILURES,
+    BACKOFF_BASE_MS, BACKOFF_MAX_MS, MAX_CONSECUTIVE_FAILURES, McpServerConfig, McpServerHealth,
+    McpServerStatus, McpToolDef,
 };
 
 /// Per-server runtime state tracked by the manager.
@@ -93,35 +93,45 @@ impl McpServerManager {
                         tool_count,
                         "MCP server connected"
                     );
-                    let _ = self.servers.insert(config.name.clone(), ServerState {
-                        client,
-                        tool_defs: tool_defs.clone(),
-                        health: McpServerHealth::Healthy,
-                        consecutive_failures: 0,
-                        last_error: None,
-                        connected_at: Utc::now().to_rfc3339(),
-                        tools_refreshed_at: Instant::now(),
-                    });
+                    let _ = self.servers.insert(
+                        config.name.clone(),
+                        ServerState {
+                            client,
+                            tool_defs: tool_defs.clone(),
+                            health: McpServerHealth::Healthy,
+                            consecutive_failures: 0,
+                            last_error: None,
+                            connected_at: Utc::now().to_rfc3339(),
+                            tools_refreshed_at: Instant::now(),
+                        },
+                    );
                     discovered.push((config.name.clone(), tool_defs));
                 }
                 Err(e) => {
                     warn!(server = %config.name, error = %e, "failed to connect MCP server");
-                    let _ = self.servers.insert(config.name.clone(), ServerState {
-                        client: Arc::new(McpClient::failed_placeholder(&config.name)),
-                        tool_defs: Vec::new(),
-                        health: McpServerHealth::Failed,
-                        consecutive_failures: 1,
-                        last_error: Some(e.message.clone()),
-                        connected_at: Utc::now().to_rfc3339(),
-                        tools_refreshed_at: Instant::now(),
-                    });
+                    let _ = self.servers.insert(
+                        config.name.clone(),
+                        ServerState {
+                            client: Arc::new(McpClient::failed_placeholder(&config.name)),
+                            tool_defs: Vec::new(),
+                            health: McpServerHealth::Failed,
+                            consecutive_failures: 1,
+                            last_error: Some(e.message.clone()),
+                            connected_at: Utc::now().to_rfc3339(),
+                            tools_refreshed_at: Instant::now(),
+                        },
+                    );
                 }
             }
         }
 
         debug!(
             total_tools = discovered.iter().map(|(_, d)| d.len()).sum::<usize>(),
-            servers = self.servers.iter().filter(|(_, s)| s.health == McpServerHealth::Healthy).count(),
+            servers = self
+                .servers
+                .iter()
+                .filter(|(_, s)| s.health == McpServerHealth::Healthy)
+                .count(),
             "MCP server manager initialized"
         );
 
@@ -209,10 +219,7 @@ impl McpServerManager {
     /// wait for manual intervention. Does NOT increment the failure counter
     /// on refusal; the counter advance happens only in the actual restart
     /// path when connect_server fails.
-    pub async fn try_auto_restart(
-        &mut self,
-        name: &str,
-    ) -> Result<Vec<McpToolDef>, McpError> {
+    pub async fn try_auto_restart(&mut self, name: &str) -> Result<Vec<McpToolDef>, McpError> {
         if let Some(state) = self.servers.get(name) {
             if state.health == McpServerHealth::Failed {
                 return Err(McpError {
@@ -234,27 +241,21 @@ impl McpServerManager {
     /// a user can recover a `Failed` server after fixing the underlying
     /// config. On success, `do_restart` replaces `ServerState` wholesale
     /// and the counter resets to 0.
-    pub async fn manual_restart(
-        &mut self,
-        name: &str,
-    ) -> Result<Vec<McpToolDef>, McpError> {
+    pub async fn manual_restart(&mut self, name: &str) -> Result<Vec<McpToolDef>, McpError> {
         self.do_restart(name).await
     }
 
     /// Shared restart body. Performs exponential backoff, shuts down the old
     /// client, reconnects, and installs a fresh ServerState on success.
     async fn do_restart(&mut self, name: &str) -> Result<Vec<McpToolDef>, McpError> {
-        let attempt = self.servers.get(name)
-            .map_or(0, |s| s.consecutive_failures);
+        let attempt = self.servers.get(name).map_or(0, |s| s.consecutive_failures);
 
         // Exponential backoff: base * 2^(attempt-1), capped at max.
         // Every arithmetic op is saturating so a pathological `attempt`
         // (e.g. from a counter that reached its cap) can never overflow.
         if attempt > 0 {
             let factor = 2u64.saturating_pow(attempt.saturating_sub(1));
-            let delay_ms = BACKOFF_BASE_MS
-                .saturating_mul(factor)
-                .min(BACKOFF_MAX_MS);
+            let delay_ms = BACKOFF_BASE_MS.saturating_mul(factor).min(BACKOFF_MAX_MS);
             debug!(server = %name, delay_ms, attempt, "backoff before restart");
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
@@ -265,7 +266,9 @@ impl McpServerManager {
         }
 
         // Find config
-        let config = self.configs.iter()
+        let config = self
+            .configs
+            .iter()
             .find(|c| c.name == name)
             .ok_or_else(|| McpError {
                 server: name.to_string(),
@@ -278,22 +281,24 @@ impl McpServerManager {
             Ok((client, tool_defs)) => {
                 let tool_count = tool_defs.len();
                 info!(server = %name, tool_count, "MCP server restarted successfully");
-                let _ = self.servers.insert(name.to_string(), ServerState {
-                    client,
-                    tool_defs: tool_defs.clone(),
-                    health: McpServerHealth::Healthy,
-                    consecutive_failures: 0,
-                    last_error: None,
-                    connected_at: Utc::now().to_rfc3339(),
-                    tools_refreshed_at: Instant::now(),
-                });
+                let _ = self.servers.insert(
+                    name.to_string(),
+                    ServerState {
+                        client,
+                        tool_defs: tool_defs.clone(),
+                        health: McpServerHealth::Healthy,
+                        consecutive_failures: 0,
+                        last_error: None,
+                        connected_at: Utc::now().to_rfc3339(),
+                        tools_refreshed_at: Instant::now(),
+                    },
+                );
                 Ok(tool_defs)
             }
             Err(e) => {
                 if let Some(state) = self.servers.get_mut(name) {
                     // INVARIANT: saturating_add keeps the counter bounded.
-                    state.consecutive_failures =
-                        state.consecutive_failures.saturating_add(1);
+                    state.consecutive_failures = state.consecutive_failures.saturating_add(1);
                     state.last_error = Some(e.message.clone());
                     state.health = if state.consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
                         McpServerHealth::Failed
@@ -316,32 +321,36 @@ impl McpServerManager {
 
     /// Get status snapshots for all configured servers.
     pub fn status(&self) -> Vec<McpServerStatus> {
-        self.configs.iter().map(|config| {
-            if let Some(state) = self.servers.get(&config.name) {
-                McpServerStatus {
-                    name: config.name.clone(),
-                    health: state.health.clone(),
-                    tool_count: state.tool_count(),
-                    consecutive_failures: state.consecutive_failures,
-                    last_error: state.last_error.clone(),
-                    connected_at: Some(state.connected_at.clone()),
+        self.configs
+            .iter()
+            .map(|config| {
+                if let Some(state) = self.servers.get(&config.name) {
+                    McpServerStatus {
+                        name: config.name.clone(),
+                        health: state.health.clone(),
+                        tool_count: state.tool_count(),
+                        consecutive_failures: state.consecutive_failures,
+                        last_error: state.last_error.clone(),
+                        connected_at: Some(state.connected_at.clone()),
+                    }
+                } else {
+                    McpServerStatus {
+                        name: config.name.clone(),
+                        health: McpServerHealth::Failed,
+                        tool_count: 0,
+                        consecutive_failures: 0,
+                        last_error: Some("never started".into()),
+                        connected_at: None,
+                    }
                 }
-            } else {
-                McpServerStatus {
-                    name: config.name.clone(),
-                    health: McpServerHealth::Failed,
-                    tool_count: 0,
-                    consecutive_failures: 0,
-                    last_error: Some("never started".into()),
-                    connected_at: None,
-                }
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     /// Get a list of connected (healthy or degraded) server names.
     pub fn connected_servers(&self) -> Vec<&str> {
-        self.servers.iter()
+        self.servers
+            .iter()
             .filter(|(_, s)| s.health != McpServerHealth::Failed)
             .map(|(name, _)| name.as_str())
             .collect()
@@ -349,7 +358,8 @@ impl McpServerManager {
 
     /// Check if a specific server is connected and operational.
     pub fn is_connected(&self, name: &str) -> bool {
-        self.servers.get(name)
+        self.servers
+            .get(name)
             .is_some_and(|s| s.health != McpServerHealth::Failed)
     }
 
@@ -360,7 +370,8 @@ impl McpServerManager {
 
     /// Get the client for a specific server (if connected).
     pub fn client(&self, name: &str) -> Option<Arc<McpClient>> {
-        self.servers.get(name)
+        self.servers
+            .get(name)
             .filter(|s| s.health != McpServerHealth::Failed)
             .map(|s| s.client.clone())
     }
@@ -464,18 +475,10 @@ impl McpServerManager {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_tools_refreshed_at_for_test(&mut self, name: &str, t: Instant) {
-        if let Some(state) = self.servers.get_mut(name) {
-            state.tools_refreshed_at = t;
-        }
-    }
-
-    #[cfg(test)]
     pub(crate) fn tool_defs_for_test(&self, name: &str) -> Option<Vec<McpToolDef>> {
         self.servers.get(name).map(|s| s.tool_defs.clone())
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -520,15 +523,18 @@ mod tests {
     fn record_success_resets_failures() {
         let mut manager = McpServerManager::new(Vec::new());
         // Manually insert a degraded server state
-        let _ = manager.servers.insert("test".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("test")),
-            tool_defs: vec![dummy_tool_def("t1"), dummy_tool_def("t2")],
-            health: McpServerHealth::Degraded,
-            consecutive_failures: 2,
-            last_error: Some("timeout".into()),
-            connected_at: "2026-03-25T10:00:00Z".into(),
-            tools_refreshed_at: Instant::now(),
-        });
+        let _ = manager.servers.insert(
+            "test".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("test")),
+                tool_defs: vec![dummy_tool_def("t1"), dummy_tool_def("t2")],
+                health: McpServerHealth::Degraded,
+                consecutive_failures: 2,
+                last_error: Some("timeout".into()),
+                connected_at: "2026-03-25T10:00:00Z".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
 
         manager.record_success("test");
         let state = manager.servers.get("test").unwrap();
@@ -540,15 +546,18 @@ mod tests {
     #[test]
     fn record_failure_degrades_then_fails() {
         let mut manager = McpServerManager::new(Vec::new());
-        let _ = manager.servers.insert("test".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("test")),
-            tool_defs: vec![dummy_tool_def("t1")],
-            health: McpServerHealth::Healthy,
-            consecutive_failures: 0,
-            last_error: None,
-            connected_at: "2026-03-25T10:00:00Z".into(),
-            tools_refreshed_at: Instant::now(),
-        });
+        let _ = manager.servers.insert(
+            "test".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("test")),
+                tool_defs: vec![dummy_tool_def("t1")],
+                health: McpServerHealth::Healthy,
+                consecutive_failures: 0,
+                last_error: None,
+                connected_at: "2026-03-25T10:00:00Z".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
 
         // First failure → Degraded
         let h1 = manager.record_failure("test", "timeout");
@@ -632,33 +641,46 @@ mod tests {
     #[test]
     fn connected_servers_excludes_failed() {
         let mut manager = McpServerManager::new(Vec::new());
-        let _ = manager.servers.insert("healthy".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("healthy")),
-            tool_defs: vec![dummy_tool_def("a"), dummy_tool_def("b"), dummy_tool_def("c")],
-            health: McpServerHealth::Healthy,
-            consecutive_failures: 0,
-            last_error: None,
-            connected_at: "2026-03-25T10:00:00Z".into(),
-            tools_refreshed_at: Instant::now(),
-        });
-        let _ = manager.servers.insert("broken".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("broken")),
-            tool_defs: Vec::new(),
-            health: McpServerHealth::Failed,
-            consecutive_failures: 3,
-            last_error: Some("crashed".into()),
-            connected_at: "2026-03-25T10:00:00Z".into(),
-            tools_refreshed_at: Instant::now(),
-        });
-        let _ = manager.servers.insert("degraded".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("degraded")),
-            tool_defs: vec![dummy_tool_def("d")],
-            health: McpServerHealth::Degraded,
-            consecutive_failures: 1,
-            last_error: Some("timeout".into()),
-            connected_at: "2026-03-25T10:00:00Z".into(),
-            tools_refreshed_at: Instant::now(),
-        });
+        let _ = manager.servers.insert(
+            "healthy".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("healthy")),
+                tool_defs: vec![
+                    dummy_tool_def("a"),
+                    dummy_tool_def("b"),
+                    dummy_tool_def("c"),
+                ],
+                health: McpServerHealth::Healthy,
+                consecutive_failures: 0,
+                last_error: None,
+                connected_at: "2026-03-25T10:00:00Z".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
+        let _ = manager.servers.insert(
+            "broken".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("broken")),
+                tool_defs: Vec::new(),
+                health: McpServerHealth::Failed,
+                consecutive_failures: 3,
+                last_error: Some("crashed".into()),
+                connected_at: "2026-03-25T10:00:00Z".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
+        let _ = manager.servers.insert(
+            "degraded".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("degraded")),
+                tool_defs: vec![dummy_tool_def("d")],
+                health: McpServerHealth::Degraded,
+                consecutive_failures: 1,
+                last_error: Some("timeout".into()),
+                connected_at: "2026-03-25T10:00:00Z".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
 
         let connected = manager.connected_servers();
         assert_eq!(connected.len(), 2);
@@ -670,15 +692,18 @@ mod tests {
     #[test]
     fn client_returns_none_for_failed() {
         let mut manager = McpServerManager::new(Vec::new());
-        let _ = manager.servers.insert("failed".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("failed")),
-            tool_defs: Vec::new(),
-            health: McpServerHealth::Failed,
-            consecutive_failures: 3,
-            last_error: None,
-            connected_at: "2026-03-25T10:00:00Z".into(),
-            tools_refreshed_at: Instant::now(),
-        });
+        let _ = manager.servers.insert(
+            "failed".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("failed")),
+                tool_defs: Vec::new(),
+                health: McpServerHealth::Failed,
+                consecutive_failures: 3,
+                last_error: None,
+                connected_at: "2026-03-25T10:00:00Z".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
         assert!(manager.client("failed").is_none());
         assert!(manager.client("nonexistent").is_none());
     }
@@ -695,17 +720,23 @@ mod tests {
     #[test]
     fn record_failure_counter_saturates_at_u32_max() {
         let mut manager = McpServerManager::new(Vec::new());
-        let _ = manager.servers.insert("s".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("s")),
-            tool_defs: Vec::new(),
-            health: McpServerHealth::Failed,
-            consecutive_failures: u32::MAX,
-            last_error: None,
-            connected_at: "t".into(),
-            tools_refreshed_at: Instant::now(),
-        });
+        let _ = manager.servers.insert(
+            "s".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("s")),
+                tool_defs: Vec::new(),
+                health: McpServerHealth::Failed,
+                consecutive_failures: u32::MAX,
+                last_error: None,
+                connected_at: "t".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
         let _ = manager.record_failure("s", "more");
-        assert_eq!(manager.servers.get("s").unwrap().consecutive_failures, u32::MAX);
+        assert_eq!(
+            manager.servers.get("s").unwrap().consecutive_failures,
+            u32::MAX
+        );
     }
 
     #[tokio::test]
@@ -719,15 +750,18 @@ mod tests {
             tool_timeout_ms: 5_000,
             enabled: true,
         }]);
-        let _ = manager.servers.insert("s".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("s")),
-            tool_defs: Vec::new(),
-            health: McpServerHealth::Failed,
-            consecutive_failures: MAX_CONSECUTIVE_FAILURES,
-            last_error: Some("hit cap".into()),
-            connected_at: "t".into(),
-            tools_refreshed_at: Instant::now(),
-        });
+        let _ = manager.servers.insert(
+            "s".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("s")),
+                tool_defs: Vec::new(),
+                health: McpServerHealth::Failed,
+                consecutive_failures: MAX_CONSECUTIVE_FAILURES,
+                last_error: Some("hit cap".into()),
+                connected_at: "t".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
 
         let err = manager.try_auto_restart("s").await.unwrap_err();
         assert!(matches!(err.kind, McpErrorKind::PermanentlyFailed));
@@ -752,15 +786,18 @@ mod tests {
             tool_timeout_ms: 5_000,
             enabled: true,
         }]);
-        let _ = manager.servers.insert("s".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("s")),
-            tool_defs: Vec::new(),
-            health: McpServerHealth::Degraded,
-            consecutive_failures: 1,
-            last_error: None,
-            connected_at: "t".into(),
-            tools_refreshed_at: Instant::now(),
-        });
+        let _ = manager.servers.insert(
+            "s".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("s")),
+                tool_defs: Vec::new(),
+                health: McpServerHealth::Degraded,
+                consecutive_failures: 1,
+                last_error: None,
+                connected_at: "t".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
 
         let err = manager.try_auto_restart("s").await.unwrap_err();
         // Degraded → attempted restart → transient/connection error, NOT refusal.
@@ -782,15 +819,18 @@ mod tests {
             tool_timeout_ms: 5_000,
             enabled: true,
         }]);
-        let _ = manager.servers.insert("s".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("s")),
-            tool_defs: Vec::new(),
-            health: McpServerHealth::Failed,
-            consecutive_failures: MAX_CONSECUTIVE_FAILURES,
-            last_error: Some("hit cap".into()),
-            connected_at: "t".into(),
-            tools_refreshed_at: Instant::now(),
-        });
+        let _ = manager.servers.insert(
+            "s".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("s")),
+                tool_defs: Vec::new(),
+                health: McpServerHealth::Failed,
+                consecutive_failures: MAX_CONSECUTIVE_FAILURES,
+                last_error: Some("hit cap".into()),
+                connected_at: "t".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
 
         let err = manager.manual_restart("s").await.unwrap_err();
         assert!(!matches!(err.kind, McpErrorKind::PermanentlyFailed));
@@ -808,15 +848,18 @@ mod tests {
             tool_timeout_ms: 5_000,
             enabled: true,
         }]);
-        let _ = manager.servers.insert("s".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("s")),
-            tool_defs: Vec::new(),
-            health: McpServerHealth::Degraded,
-            consecutive_failures: u32::MAX,
-            last_error: None,
-            connected_at: "t".into(),
-            tools_refreshed_at: Instant::now(),
-        });
+        let _ = manager.servers.insert(
+            "s".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("s")),
+                tool_defs: Vec::new(),
+                health: McpServerHealth::Degraded,
+                consecutive_failures: u32::MAX,
+                last_error: None,
+                connected_at: "t".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
 
         let _ = manager.manual_restart("s").await;
         // Still saturated; must not have overflowed.
@@ -846,15 +889,18 @@ mod tests {
     #[tokio::test]
     async fn refresh_schemas_if_stale_within_ttl_is_noop() {
         let mut manager = McpServerManager::new(Vec::new());
-        let _ = manager.servers.insert("s".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("s")),
-            tool_defs: vec![dummy_tool_def("a")],
-            health: McpServerHealth::Healthy,
-            consecutive_failures: 0,
-            last_error: None,
-            connected_at: "t".into(),
-            tools_refreshed_at: Instant::now(),
-        });
+        let _ = manager.servers.insert(
+            "s".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("s")),
+                tool_defs: vec![dummy_tool_def("a")],
+                health: McpServerHealth::Healthy,
+                consecutive_failures: 0,
+                last_error: None,
+                connected_at: "t".into(),
+                tools_refreshed_at: Instant::now(),
+            },
+        );
         // Fresh timestamp, large TTL → no refresh triggered and no list_tools
         // call is attempted against the placeholder client (which would error).
         let result = manager
@@ -867,16 +913,19 @@ mod tests {
     #[tokio::test]
     async fn refresh_schemas_if_stale_skips_failed_server() {
         let mut manager = McpServerManager::new(Vec::new());
-        let _ = manager.servers.insert("s".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("s")),
-            tool_defs: Vec::new(),
-            health: McpServerHealth::Failed,
-            consecutive_failures: MAX_CONSECUTIVE_FAILURES,
-            last_error: Some("cap".into()),
-            connected_at: "t".into(),
-            // Intentionally stale — the Failed gate must short-circuit first.
-            tools_refreshed_at: Instant::now() - Duration::from_secs(600),
-        });
+        let _ = manager.servers.insert(
+            "s".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("s")),
+                tool_defs: Vec::new(),
+                health: McpServerHealth::Failed,
+                consecutive_failures: MAX_CONSECUTIVE_FAILURES,
+                last_error: Some("cap".into()),
+                connected_at: "t".into(),
+                // Intentionally stale — the Failed gate must short-circuit first.
+                tools_refreshed_at: Instant::now() - Duration::from_secs(600),
+            },
+        );
         let result = manager
             .refresh_schemas_if_stale("s", Duration::from_millis(1))
             .await
@@ -891,20 +940,26 @@ mod tests {
         // hammering, and returns Ok(None) so callers continue with cached.
         let mut manager = McpServerManager::new(Vec::new());
         let past = Instant::now() - Duration::from_secs(600);
-        let _ = manager.servers.insert("s".into(), ServerState {
-            client: Arc::new(McpClient::failed_placeholder("s")),
-            tool_defs: vec![dummy_tool_def("cached")],
-            health: McpServerHealth::Healthy,
-            consecutive_failures: 0,
-            last_error: None,
-            connected_at: "t".into(),
-            tools_refreshed_at: past,
-        });
+        let _ = manager.servers.insert(
+            "s".into(),
+            ServerState {
+                client: Arc::new(McpClient::failed_placeholder("s")),
+                tool_defs: vec![dummy_tool_def("cached")],
+                health: McpServerHealth::Healthy,
+                consecutive_failures: 0,
+                last_error: None,
+                connected_at: "t".into(),
+                tools_refreshed_at: past,
+            },
+        );
         let result = manager
             .refresh_schemas_if_stale("s", Duration::from_millis(1))
             .await
             .unwrap();
-        assert!(result.is_none(), "list_tools failure must surface as Ok(None)");
+        assert!(
+            result.is_none(),
+            "list_tools failure must surface as Ok(None)"
+        );
         // Cached tool_defs must be preserved on refresh failure.
         assert_eq!(
             manager.tool_defs_for_test("s").unwrap().len(),
@@ -913,6 +968,9 @@ mod tests {
         );
         // Timestamp must have been bumped forward from the stale value.
         let after = manager.servers.get("s").unwrap().tools_refreshed_at;
-        assert!(after > past, "timestamp must advance after a refresh attempt");
+        assert!(
+            after > past,
+            "timestamp must advance after a refresh attempt"
+        );
     }
 }

@@ -10,11 +10,11 @@
 
 use std::collections::HashSet;
 
-use serde_json::Map;
 use crate::core::content::AssistantContent;
 use crate::core::events::{AssistantMessage, StreamEvent};
 use crate::core::messages::{Provider, TokenUsage, ToolCall};
 use crate::llm::stream_common::StreamAccumulator;
+use serde_json::Map;
 
 use super::types::{GeminiPart, GeminiStreamChunk, HarmProbability, SafetyRating};
 

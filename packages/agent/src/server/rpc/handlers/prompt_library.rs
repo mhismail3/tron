@@ -87,8 +87,7 @@ impl MethodHandler for DeleteHistoryHandler {
     #[instrument(skip(self, ctx), fields(method = "promptHistory.delete"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let id = require_string_param(params.as_ref(), "id")?;
-        let deleted =
-            store::delete_history(ctx.event_store.pool(), &id).map_err(map_store_err)?;
+        let deleted = store::delete_history(ctx.event_store.pool(), &id).map_err(map_store_err)?;
         Ok(serde_json::json!({ "deleted": deleted }))
     }
 }
@@ -154,8 +153,8 @@ impl MethodHandler for CreateSnippetHandler {
         let text = require_string_param(params.as_ref(), "text")?;
         validate_string_param(&text, "text", MAX_PROMPT_LENGTH)?;
 
-        let snippet = store::create_snippet(ctx.event_store.pool(), &name, &text)
-            .map_err(map_store_err)?;
+        let snippet =
+            store::create_snippet(ctx.event_store.pool(), &name, &text).map_err(map_store_err)?;
         Ok(serde_json::json!({ "snippet": to_json_value(&snippet)? }))
     }
 }
@@ -202,8 +201,7 @@ impl MethodHandler for DeleteSnippetHandler {
     #[instrument(skip(self, ctx), fields(method = "promptSnippet.delete"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let id = require_string_param(params.as_ref(), "id")?;
-        let deleted =
-            store::delete_snippet(ctx.event_store.pool(), &id).map_err(map_store_err)?;
+        let deleted = store::delete_snippet(ctx.event_store.pool(), &id).map_err(map_store_err)?;
         Ok(serde_json::json!({ "deleted": deleted }))
     }
 }

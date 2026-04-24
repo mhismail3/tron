@@ -6,9 +6,7 @@ use crate::events::{AppendOptions, EventType};
 
 use crate::worktree::errors::{Result, WorktreeError};
 use crate::worktree::isolation;
-use crate::worktree::types::{
-    AcquireResult, DeferralReason,
-};
+use crate::worktree::types::{AcquireResult, DeferralReason};
 
 use super::WorktreeCoordinator;
 
@@ -25,7 +23,8 @@ impl WorktreeCoordinator {
         session_id: &str,
         working_dir: &std::path::Path,
     ) -> Result<AcquireResult> {
-        self.maybe_acquire_with_override(session_id, working_dir, None).await
+        self.maybe_acquire_with_override(session_id, working_dir, None)
+            .await
     }
 
     /// Like [`maybe_acquire`] but accepts an explicit per-session worktree override.
@@ -96,7 +95,10 @@ impl WorktreeCoordinator {
 
         // Empty repo guard: git init without commits can't support worktrees
         if !self.git.has_commits(working_dir).await {
-            debug!(session_id, "git repo has no commits, deferring worktree creation");
+            debug!(
+                session_id,
+                "git repo has no commits, deferring worktree creation"
+            );
             return Ok(AcquireResult::Deferred(DeferralReason::EmptyRepository));
         }
 
@@ -116,7 +118,8 @@ impl WorktreeCoordinator {
         let _add_guard = add_mutex.lock().await;
 
         let info =
-            crate::worktree::lifecycle::create(session_id, working_dir, &self.config, &self.git).await?;
+            crate::worktree::lifecycle::create(session_id, working_dir, &self.config, &self.git)
+                .await?;
 
         // Emit event
         let _ = self.event_store.append(&AppendOptions {
@@ -182,13 +185,14 @@ impl WorktreeCoordinator {
             return Ok(());
         };
 
-        let release_info = match crate::worktree::lifecycle::remove(&info, &self.config, &self.git).await {
-            Ok(release_info) => release_info,
-            Err(error) => {
-                self.state.lock().track(info);
-                return Err(error);
-            }
-        };
+        let release_info =
+            match crate::worktree::lifecycle::remove(&info, &self.config, &self.git).await {
+                Ok(release_info) => release_info,
+                Err(error) => {
+                    self.state.lock().track(info);
+                    return Err(error);
+                }
+            };
 
         // Emit event
         let _ = self.event_store.append(&AppendOptions {
@@ -245,8 +249,13 @@ impl WorktreeCoordinator {
     /// the current branch name.
     #[instrument(skip(self), fields(session_id, new_branch))]
     pub async fn rename_branch(&self, session_id: &str, new_branch: &str) -> Result<()> {
-        let info = self.state.lock().active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
+        let info =
+            self.state
+                .lock()
+                .active_info(session_id)
+                .ok_or_else(|| WorktreeError::NotFound {
+                    session_id: session_id.to_string(),
+                })?;
 
         let old_branch = info.branch.clone();
 
@@ -254,7 +263,9 @@ impl WorktreeCoordinator {
             return Ok(());
         }
 
-        self.git.branch_rename(&info.repo_root, &old_branch, new_branch).await?;
+        self.git
+            .branch_rename(&info.repo_root, &old_branch, new_branch)
+            .await?;
 
         {
             let mut state = self.state.lock();

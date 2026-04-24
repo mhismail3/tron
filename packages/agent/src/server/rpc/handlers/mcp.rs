@@ -13,10 +13,12 @@ use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::registry::MethodHandler;
 use crate::server::rpc::types::RpcEvent;
 
-use super::{require_string_param, opt_string, opt_bool};
+use super::{opt_bool, opt_string, require_string_param};
 
 /// Helper: require that the router is configured.
-fn require_router(ctx: &RpcContext) -> Result<&std::sync::Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>, RpcError> {
+fn require_router(
+    ctx: &RpcContext,
+) -> Result<&std::sync::Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>, RpcError> {
     ctx.mcp_router.as_ref().ok_or(RpcError::Internal {
         message: "MCP is not configured on this server".into(),
     })
@@ -24,8 +26,12 @@ fn require_router(ctx: &RpcContext) -> Result<&std::sync::Arc<tokio::sync::RwLoc
 
 /// Broadcast an `mcp.status_changed` event with current server statuses.
 pub(crate) async fn broadcast_status_changed(ctx: &RpcContext) {
-    let Some(ref router_arc) = ctx.mcp_router else { return };
-    let Some(ref bm) = ctx.broadcast_manager else { return };
+    let Some(ref router_arc) = ctx.mcp_router else {
+        return;
+    };
+    let Some(ref bm) = ctx.broadcast_manager else {
+        return;
+    };
 
     let router = router_arc.read().await;
     let status = router.status();
@@ -70,18 +76,27 @@ impl MethodHandler for McpAddServerHandler {
         let url = opt_string(params.as_ref(), "url");
         let enabled = opt_bool(params.as_ref(), "enabled").unwrap_or(true);
 
-        let args: Vec<String> = params.as_ref()
+        let args: Vec<String> = params
+            .as_ref()
             .and_then(|p| p.get("args"))
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
             .unwrap_or_default();
 
-        let env: std::collections::HashMap<String, String> = params.as_ref()
+        let env: std::collections::HashMap<String, String> = params
+            .as_ref()
             .and_then(|p| p.get("env"))
             .and_then(Value::as_object)
-            .map(|obj| obj.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                .collect())
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let config = McpServerConfig {
@@ -95,9 +110,12 @@ impl MethodHandler for McpAddServerHandler {
         };
 
         let mut guard = router.write().await;
-        let tool_count = guard.add_server(config).await.map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        let tool_count = guard
+            .add_server(config)
+            .await
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
         drop(guard);
 
         broadcast_status_changed(ctx).await;
@@ -144,9 +162,12 @@ impl MethodHandler for McpEnableServerHandler {
         let name = require_string_param(params.as_ref(), "name")?;
 
         let mut guard = router.write().await;
-        guard.enable_server(&name).await.map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        guard
+            .enable_server(&name)
+            .await
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
         drop(guard);
 
         broadcast_status_changed(ctx).await;
@@ -168,9 +189,12 @@ impl MethodHandler for McpDisableServerHandler {
         let name = require_string_param(params.as_ref(), "name")?;
 
         let mut guard = router.write().await;
-        guard.disable_server(&name).await.map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        guard
+            .disable_server(&name)
+            .await
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
         drop(guard);
 
         broadcast_status_changed(ctx).await;
@@ -192,9 +216,12 @@ impl MethodHandler for McpRestartServerHandler {
         let name = require_string_param(params.as_ref(), "name")?;
 
         let mut guard = router.write().await;
-        let tool_count = guard.restart_server(&name).await.map_err(|e| RpcError::Internal {
-            message: e.to_string(),
-        })?;
+        let tool_count = guard
+            .restart_server(&name)
+            .await
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
         drop(guard);
 
         broadcast_status_changed(ctx).await;
@@ -218,9 +245,10 @@ impl MethodHandler for McpReloadHandler {
         let router = require_router(ctx)?.clone();
 
         let mut guard = router.write().await;
-        let server_count = guard.reload_from_settings().await.map_err(|e| RpcError::Internal {
-            message: e,
-        })?;
+        let server_count = guard
+            .reload_from_settings()
+            .await
+            .map_err(|e| RpcError::Internal { message: e })?;
         drop(guard);
 
         broadcast_status_changed(ctx).await;

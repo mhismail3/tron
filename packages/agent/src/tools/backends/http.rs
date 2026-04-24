@@ -35,7 +35,9 @@ impl ReqwestHttpClient {
         headers
             .iter()
             .filter_map(|(k, v)| {
-                v.to_str().ok().map(|val| (k.as_str().to_string(), val.to_string()))
+                v.to_str()
+                    .ok()
+                    .map(|val| (k.as_str().to_string(), val.to_string()))
             })
             .collect()
     }
@@ -124,9 +126,12 @@ impl HttpClient for ReqwestHttpClient {
             request_builder = request_builder.body(body.to_string());
         }
 
-        let response = request_builder.send().await.map_err(|e| ToolError::Internal {
-            message: format!("HTTP request failed: {e}"),
-        })?;
+        let response = request_builder
+            .send()
+            .await
+            .map_err(|e| ToolError::Internal {
+                message: format!("HTTP request failed: {e}"),
+            })?;
 
         let status = response.status().as_u16();
         let content_type = response

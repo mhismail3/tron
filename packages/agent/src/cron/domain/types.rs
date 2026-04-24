@@ -938,5 +938,4 @@ mod tests {
         let tr = back.tool_restrictions.unwrap();
         assert_eq!(tr.allowed_tools, Some(vec!["Read".to_string()]));
     }
-
 }

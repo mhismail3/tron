@@ -38,7 +38,9 @@ impl ToolAbortRegistry {
     /// Create an empty registry.
     #[must_use]
     pub fn new() -> Self {
-        Self { entries: DashMap::new() }
+        Self {
+            entries: DashMap::new(),
+        }
     }
 
     /// Register a new in-flight tool call. Returns a child token derived
@@ -52,22 +54,26 @@ impl ToolAbortRegistry {
         parent: &CancellationToken,
     ) -> CancellationToken {
         let child = parent.child_token();
-        let _ = self
-            .entries
-            .insert((session_id.to_owned(), tool_call_id.to_owned()), child.clone());
+        let _ = self.entries.insert(
+            (session_id.to_owned(), tool_call_id.to_owned()),
+            child.clone(),
+        );
         child
     }
 
     /// Remove an entry. Safe to call on an already-removed key.
     pub fn unregister(&self, session_id: &str, tool_call_id: &str) {
-        let _ = self.entries.remove(&(session_id.to_owned(), tool_call_id.to_owned()));
+        let _ = self
+            .entries
+            .remove(&(session_id.to_owned(), tool_call_id.to_owned()));
     }
 
     /// Cancel a specific in-flight tool. Returns `true` if the tool was in
     /// the registry (the token was cancelled and the entry removed).
     pub fn abort(&self, session_id: &str, tool_call_id: &str) -> bool {
-        if let Some((_, token)) =
-            self.entries.remove(&(session_id.to_owned(), tool_call_id.to_owned()))
+        if let Some((_, token)) = self
+            .entries
+            .remove(&(session_id.to_owned(), tool_call_id.to_owned()))
         {
             token.cancel();
             true
@@ -98,11 +104,7 @@ pub struct ToolAbortGuard {
 impl ToolAbortGuard {
     /// Create a new guard that removes the entry on drop.
     #[must_use]
-    pub fn new(
-        registry: Arc<ToolAbortRegistry>,
-        session_id: &str,
-        tool_call_id: &str,
-    ) -> Self {
+    pub fn new(registry: Arc<ToolAbortRegistry>, session_id: &str, tool_call_id: &str) -> Self {
         Self {
             registry,
             session_id: session_id.to_owned(),
@@ -113,7 +115,8 @@ impl ToolAbortGuard {
 
 impl Drop for ToolAbortGuard {
     fn drop(&mut self) {
-        self.registry.unregister(&self.session_id, &self.tool_call_id);
+        self.registry
+            .unregister(&self.session_id, &self.tool_call_id);
     }
 }
 
@@ -214,10 +217,7 @@ mod tests {
             let _guard = ToolAbortGuard::new(reg.clone(), "sess-1", "call_1");
         }
 
-        assert!(
-            reg.is_empty(),
-            "guard drop must remove the registry entry"
-        );
+        assert!(reg.is_empty(), "guard drop must remove the registry entry");
     }
 
     #[test]
@@ -227,6 +227,9 @@ mod tests {
         let _ = reg.register("sess-1", "call_1", &parent);
 
         assert!(reg.abort("sess-1", "call_1"));
-        assert!(!reg.abort("sess-1", "call_1"), "second abort must return false");
+        assert!(
+            !reg.abort("sess-1", "call_1"),
+            "second abort must return false"
+        );
     }
 }

@@ -5,10 +5,10 @@
 //! directory (with or without a worktree) since "show me the diff" is useful
 //! regardless of isolation mode.
 
+use crate::worktree::{count_diff_stats, split_diff_by_file};
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
-use crate::worktree::{count_diff_stats, split_diff_by_file};
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
@@ -20,7 +20,9 @@ use crate::worktree::types::CommitOptions;
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-fn require_coordinator(ctx: &RpcContext) -> Result<&crate::worktree::WorktreeCoordinator, RpcError> {
+fn require_coordinator(
+    ctx: &RpcContext,
+) -> Result<&crate::worktree::WorktreeCoordinator, RpcError> {
     ctx.worktree_coordinator
         .as_deref()
         .ok_or_else(|| RpcError::Internal {
@@ -565,8 +567,7 @@ impl MethodHandler for GetDiffHandler {
             match entry.staging_area {
                 "both" => {
                     // Partially staged: emit two entries with separate diffs
-                    let (staged_diff, s_add, s_del) =
-                        diff_for_file(&entry.path, &staged_diff_map);
+                    let (staged_diff, s_add, s_del) = diff_for_file(&entry.path, &staged_diff_map);
                     let (unstaged_diff, u_add, u_del) =
                         diff_for_file(&entry.path, &unstaged_diff_map);
 
@@ -709,7 +710,6 @@ fn synthesize_untracked_diff(dir: &str, path: &str) -> (Option<String>, usize, u
     (Some(diff), line_count, 0)
 }
 
-
 struct FileEntry {
     path: String,
     status: &'static str,
@@ -753,23 +753,22 @@ fn parse_porcelain(output: &str) -> Vec<FileEntry> {
                 };
 
                 // Determine file status
-                let file_status =
-                    if (x == b'U' || y == b'U')
-                        || (x == b'A' && y == b'A')
-                        || (x == b'D' && y == b'D')
-                    {
-                        "unmerged"
-                    } else if x == b'R' || y == b'R' {
-                        "renamed"
-                    } else if x == b'C' || y == b'C' {
-                        "copied"
-                    } else if x == b'A' || y == b'A' {
-                        "added"
-                    } else if x == b'D' || y == b'D' {
-                        "deleted"
-                    } else {
-                        "modified"
-                    };
+                let file_status = if (x == b'U' || y == b'U')
+                    || (x == b'A' && y == b'A')
+                    || (x == b'D' && y == b'D')
+                {
+                    "unmerged"
+                } else if x == b'R' || y == b'R' {
+                    "renamed"
+                } else if x == b'C' || y == b'C' {
+                    "copied"
+                } else if x == b'A' || y == b'A' {
+                    "added"
+                } else if x == b'D' || y == b'D' {
+                    "deleted"
+                } else {
+                    "modified"
+                };
 
                 (file_status, area)
             }
@@ -814,7 +813,6 @@ fn unquote_path(raw: &str) -> String {
 fn is_binary_diff(chunk: &str) -> bool {
     chunk.contains("Binary files") && chunk.contains("differ")
 }
-
 
 // ── Stage / Unstage / Discard handlers ──────────────────────────────
 
@@ -965,9 +963,7 @@ impl MethodHandler for DiscardFilesHandler {
             }
             // Resolve and check the path stays within repo root
             let resolved = canonical_root.join(path);
-            let canonical = resolved
-                .canonicalize()
-                .unwrap_or_else(|_| resolved.clone());
+            let canonical = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
             if !canonical.starts_with(&canonical_root) {
                 return Err(RpcError::InvalidParams {
                     message: format!("Path escapes repository root: {path}"),
@@ -1003,11 +999,11 @@ impl MethodHandler for DiscardFilesHandler {
                 // Untracked: delete from filesystem
                 let full_path = canonical_root.join(path);
                 if full_path.exists() {
-                    tokio::fs::remove_file(&full_path).await.map_err(|e| {
-                        RpcError::Internal {
+                    tokio::fs::remove_file(&full_path)
+                        .await
+                        .map_err(|e| RpcError::Internal {
                             message: format!("Failed to delete {path}: {e}"),
-                        }
-                    })?;
+                        })?;
                 } else {
                     return Err(RpcError::Internal {
                         message: format!("File not found: {path}"),

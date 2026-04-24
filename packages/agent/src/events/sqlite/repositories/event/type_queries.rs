@@ -338,10 +338,7 @@ impl EventRepo {
     }
 
     /// Aggregate token usage across all events in a session.
-    pub fn get_token_usage_summary(
-        conn: &Connection,
-        session_id: &str,
-    ) -> Result<TokenTotals> {
+    pub fn get_token_usage_summary(conn: &Connection, session_id: &str) -> Result<TokenTotals> {
         let summary = conn.query_row(
             "SELECT COALESCE(SUM(input_tokens), 0),
                     COALESCE(SUM(output_tokens), 0),

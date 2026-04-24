@@ -9,11 +9,11 @@ use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::core::tools::{Tool, ToolCategory, TronToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
-use crate::core::tools::{Tool, ToolCategory, TronToolResult};
 
 use crate::tools::errors::ToolError;
 
@@ -61,7 +61,8 @@ pub struct ToolContext {
     /// Unified job manager for waiting on and managing processes + subagents.
     pub job_manager: Option<Arc<dyn JobManagerOps>>,
     /// Registry for process output buffers (for on-demand streaming to iOS).
-    pub output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    pub output_buffer_registry:
+        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     /// Event emitter for broadcasting tool events (used by managed processes
     /// to emit `ToolExecutionUpdate` events directly, bypassing `output_tx`).
     pub event_emitter: Option<Arc<crate::runtime::agent::event_emitter::EventEmitter>>,
@@ -99,7 +100,10 @@ impl ToolContext {
             return;
         };
         let mut obj = serde_json::Map::new();
-        let _ = obj.insert("toolCallId".into(), serde_json::Value::String(self.tool_call_id.clone()));
+        let _ = obj.insert(
+            "toolCallId".into(),
+            serde_json::Value::String(self.tool_call_id.clone()),
+        );
         if let Some(msg) = message {
             let _ = obj.insert("message".into(), serde_json::Value::String(msg));
         }
@@ -130,11 +134,20 @@ impl std::fmt::Debug for ToolContext {
             .field("subagent_depth", &self.subagent_depth)
             .field("subagent_max_depth", &self.subagent_max_depth)
             .field("workspace_id", &self.workspace_id)
-            .field("process_manager", &self.process_manager.as_ref().map(|_| "..."))
+            .field(
+                "process_manager",
+                &self.process_manager.as_ref().map(|_| "..."),
+            )
             .field("job_manager", &self.job_manager.as_ref().map(|_| "..."))
-            .field("output_buffer_registry", &self.output_buffer_registry.as_ref().map(|_| "..."))
+            .field(
+                "output_buffer_registry",
+                &self.output_buffer_registry.as_ref().map(|_| "..."),
+            )
             .field("event_emitter", &self.event_emitter.as_ref().map(|_| "..."))
-            .field("event_persister", &self.event_persister.as_ref().map(|_| "..."))
+            .field(
+                "event_persister",
+                &self.event_persister.as_ref().map(|_| "..."),
+            )
             .field("turn", &self.turn)
             .finish_non_exhaustive()
     }
@@ -924,12 +937,16 @@ mod tests {
             all_tool_names: vec![],
         };
 
-        ctx.emit_progress(Some("downloading".into()), Some(0.25)).await;
+        ctx.emit_progress(Some("downloading".into()), Some(0.25))
+            .await;
 
         let event = rx.try_recv().expect("progress event should broadcast");
         match event {
             crate::core::events::TronEvent::ToolExecutionProgress {
-                tool_call_id, message, percent, base,
+                tool_call_id,
+                message,
+                percent,
+                base,
             } => {
                 assert_eq!(tool_call_id, "call-1");
                 assert_eq!(message.as_deref(), Some("downloading"));
@@ -1021,7 +1038,11 @@ mod tests {
 
     #[test]
     fn process_kind_serde_roundtrip() {
-        for kind in [ProcessKind::Shell, ProcessKind::DisplayStream, ProcessKind::ToolOperation] {
+        for kind in [
+            ProcessKind::Shell,
+            ProcessKind::DisplayStream,
+            ProcessKind::ToolOperation,
+        ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: ProcessKind = serde_json::from_str(&json).unwrap();
             assert_eq!(kind, back);
@@ -1030,9 +1051,18 @@ mod tests {
 
     #[test]
     fn process_kind_snake_case_serialization() {
-        assert_eq!(serde_json::to_string(&ProcessKind::Shell).unwrap(), "\"shell\"");
-        assert_eq!(serde_json::to_string(&ProcessKind::DisplayStream).unwrap(), "\"display_stream\"");
-        assert_eq!(serde_json::to_string(&ProcessKind::ToolOperation).unwrap(), "\"tool_operation\"");
+        assert_eq!(
+            serde_json::to_string(&ProcessKind::Shell).unwrap(),
+            "\"shell\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProcessKind::DisplayStream).unwrap(),
+            "\"display_stream\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProcessKind::ToolOperation).unwrap(),
+            "\"tool_operation\""
+        );
     }
 
     #[test]
@@ -1174,13 +1204,21 @@ mod tests {
 
     #[test]
     fn job_kind_snake_case_serialization() {
-        assert_eq!(serde_json::to_string(&JobKind::Process).unwrap(), "\"process\"");
+        assert_eq!(
+            serde_json::to_string(&JobKind::Process).unwrap(),
+            "\"process\""
+        );
         assert_eq!(serde_json::to_string(&JobKind::Agent).unwrap(), "\"agent\"");
     }
 
     #[test]
     fn job_state_serde_roundtrip() {
-        for state in [JobState::Running, JobState::Completed, JobState::Failed, JobState::Cancelled] {
+        for state in [
+            JobState::Running,
+            JobState::Completed,
+            JobState::Failed,
+            JobState::Cancelled,
+        ] {
             let json = serde_json::to_string(&state).unwrap();
             let back: JobState = serde_json::from_str(&json).unwrap();
             assert_eq!(state, back);
@@ -1189,10 +1227,22 @@ mod tests {
 
     #[test]
     fn job_state_snake_case_serialization() {
-        assert_eq!(serde_json::to_string(&JobState::Running).unwrap(), "\"running\"");
-        assert_eq!(serde_json::to_string(&JobState::Completed).unwrap(), "\"completed\"");
-        assert_eq!(serde_json::to_string(&JobState::Failed).unwrap(), "\"failed\"");
-        assert_eq!(serde_json::to_string(&JobState::Cancelled).unwrap(), "\"cancelled\"");
+        assert_eq!(
+            serde_json::to_string(&JobState::Running).unwrap(),
+            "\"running\""
+        );
+        assert_eq!(
+            serde_json::to_string(&JobState::Completed).unwrap(),
+            "\"completed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&JobState::Failed).unwrap(),
+            "\"failed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&JobState::Cancelled).unwrap(),
+            "\"cancelled\""
+        );
     }
 
     #[test]

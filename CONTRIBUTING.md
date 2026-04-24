@@ -129,15 +129,18 @@ Common types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`, `style`.
 Common scopes mirror the touched module (`rpc`, `events`, `ios-onboarding`,
 `mac-wizard`, `scripts`, `cargo`).
 
-The pre-commit hook (`scripts/install-hooks.sh`) runs
-`scripts/personal-info-guard.sh --staged` before each commit. It catches
-hardcoded usernames, home paths, and developer-machine identifiers from
-sneaking into source.
+The pre-commit hook (`scripts/install-hooks.sh`) runs Rust formatting check
+(`cargo fmt --all -- --check`) when staged Rust files change, then runs
+`scripts/personal-info-guard.sh --staged` before each commit. It catches both
+Rust formatting drift and hardcoded usernames, home paths, and
+developer-machine identifiers from sneaking into source.
 
 ## Code style
 
 - **Rust**: `cargo fmt` (config in `rustfmt.toml` if present, otherwise
-  defaults), `cargo clippy --all-targets -- -D warnings`. CI fails on either.
+  defaults), `cargo clippy --all-targets`. CI fails on high-signal lint classes
+  configured in `packages/agent/Cargo.toml`; broad style/pedantic suggestions
+  remain advisory.
 - **Swift**: project-wide style follows the existing patterns in
   `packages/ios-app/Sources/`. There is no auto-formatter in CI; match
   surrounding code.

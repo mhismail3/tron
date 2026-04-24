@@ -1,5 +1,5 @@
-use super::*;
 use super::extractors::*;
+use super::*;
 
 impl EventRepo {
     /// Insert a single event, extracting denormalized fields from the payload.

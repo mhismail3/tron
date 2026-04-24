@@ -82,10 +82,7 @@ pub async fn screen_capture_loop(
     config: StreamConfig,
     cancel: CancellationToken,
 ) -> Option<Vec<u8>> {
-    let tmp_path = format!(
-        "/tmp/tron-stream-{}.jpg",
-        uuid::Uuid::now_v7()
-    );
+    let tmp_path = format!("/tmp/tron-stream-{}.jpg", uuid::Uuid::now_v7());
     let mut frame_id: u64 = 0;
     let mut consecutive_failures: u32 = 0;
     let mut last_frame_data: Option<Vec<u8>> = None;

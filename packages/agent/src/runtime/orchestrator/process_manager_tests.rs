@@ -22,20 +22,10 @@ fn make_blocking_config(label: &str) -> ManagedProcessConfig {
     }
 }
 
-fn make_instant_result(pid: &str) -> ManagedProcessResult {
-    ManagedProcessResult {
-        process_id: pid.into(),
-        output: "done".into(),
-        exit_code: Some(0),
-        duration_ms: 0,
-        timed_out: false,
-        cancelled: false,
-        blob_id: None,
-        user_cancelled: false,
-    }
-}
-
-fn boxed_immediate(output: &str, exit_code: i32) -> Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>> {
+fn boxed_immediate(
+    output: &str,
+    exit_code: i32,
+) -> Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>> {
     let output = output.to_owned();
     Box::pin(async move {
         ManagedProcessResult {
@@ -51,7 +41,10 @@ fn boxed_immediate(output: &str, exit_code: i32) -> Pin<Box<dyn std::future::Fut
     })
 }
 
-fn boxed_delayed(ms: u64, output: &str) -> Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>> {
+fn boxed_delayed(
+    ms: u64,
+    output: &str,
+) -> Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>> {
     let output = output.to_owned();
     Box::pin(async move {
         tokio::time::sleep(Duration::from_millis(ms)).await;
@@ -68,7 +61,9 @@ fn boxed_delayed(ms: u64, output: &str) -> Pin<Box<dyn std::future::Future<Outpu
     })
 }
 
-fn boxed_cancellable(cancel: CancellationToken) -> Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>> {
+fn boxed_cancellable(
+    cancel: CancellationToken,
+) -> Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>> {
     Box::pin(async move {
         cancel.cancelled().await;
         ManagedProcessResult {
@@ -91,11 +86,19 @@ async fn spawn_foreground_blocks_until_complete() {
     let pm = ProcessManager::new();
     let start = Instant::now();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_blocking_config("test"), boxed_delayed(100, "ok"))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("test"),
+            boxed_delayed(100, "ok"),
+        )
         .await
         .unwrap();
     let elapsed = start.elapsed();
-    assert!(elapsed >= Duration::from_millis(80), "should have blocked ~100ms");
+    assert!(
+        elapsed >= Duration::from_millis(80),
+        "should have blocked ~100ms"
+    );
     assert!(handle.result.is_some());
 }
 
@@ -103,7 +106,12 @@ async fn spawn_foreground_blocks_until_complete() {
 async fn spawn_foreground_returns_correct_result() {
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_blocking_config("echo"), boxed_immediate("hello", 0))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("echo"),
+            boxed_immediate("hello", 0),
+        )
         .await
         .unwrap();
     let result = handle.result.unwrap();
@@ -117,7 +125,12 @@ async fn spawn_foreground_returns_correct_result() {
 async fn spawn_foreground_short_task() {
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_blocking_config("fast"), boxed_immediate("ok", 0))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("fast"),
+            boxed_immediate("ok", 0),
+        )
         .await
         .unwrap();
     assert!(handle.result.is_some());
@@ -128,7 +141,12 @@ async fn spawn_foreground_short_task() {
 async fn spawn_foreground_failed_exit_code() {
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_blocking_config("fail"), boxed_immediate("error", 1))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("fail"),
+            boxed_immediate("error", 1),
+        )
         .await
         .unwrap();
     let result = handle.result.unwrap();
@@ -149,7 +167,10 @@ async fn spawn_background_returns_immediately() {
         .await
         .unwrap();
     let elapsed = start.elapsed();
-    assert!(elapsed < Duration::from_millis(50), "should not have blocked");
+    assert!(
+        elapsed < Duration::from_millis(50),
+        "should not have blocked"
+    );
     assert!(handle.result.is_none());
     assert!(!handle.process_id.is_empty());
 }
@@ -220,9 +241,14 @@ async fn promote_foreground_unblocks_caller() {
 
     // Spawn foreground with a long-running task.
     let fg_handle = tokio::spawn(async move {
-        pm2.spawn_managed("s1", "tc1", make_blocking_config("long"), boxed_delayed(5000, "done"))
-            .await
-            .unwrap()
+        pm2.spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("long"),
+            boxed_delayed(5000, "done"),
+        )
+        .await
+        .unwrap()
     });
 
     // Give it a moment to start.
@@ -242,7 +268,10 @@ async fn promote_foreground_unblocks_caller() {
         .expect("should have returned after promotion")
         .unwrap();
 
-    assert!(handle.result.is_none(), "promoted handle should not have result");
+    assert!(
+        handle.result.is_none(),
+        "promoted handle should not have result"
+    );
 }
 
 #[tokio::test]
@@ -251,9 +280,14 @@ async fn promote_then_process_completes_in_background() {
     let pm2 = pm.clone();
 
     let fg_handle = tokio::spawn(async move {
-        pm2.spawn_managed("s1", "tc1", make_blocking_config("cmd"), boxed_delayed(200, "bg-done"))
-            .await
-            .unwrap()
+        pm2.spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("cmd"),
+            boxed_delayed(200, "bg-done"),
+        )
+        .await
+        .unwrap()
     });
 
     tokio::time::sleep(Duration::from_millis(30)).await;
@@ -295,7 +329,12 @@ async fn promote_already_background_returns_error() {
 async fn promote_already_completed_returns_error() {
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_blocking_config("fast"), boxed_immediate("ok", 0))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("fast"),
+            boxed_immediate("ok", 0),
+        )
         .await
         .unwrap();
     // Process is already completed.
@@ -334,7 +373,12 @@ async fn cancel_running_process_fires_token() {
 async fn cancel_completed_process_is_noop() {
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_blocking_config("done"), boxed_immediate("ok", 0))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("done"),
+            boxed_immediate("ok", 0),
+        )
         .await
         .unwrap();
     // Should not error.
@@ -415,10 +459,14 @@ async fn list_processes_empty_session() {
 #[tokio::test]
 async fn list_processes_includes_recently_completed() {
     let pm = ProcessManager::new();
-    let handle = pm
-        .spawn_managed("s1", "tc1", make_blocking_config("fast"), boxed_immediate("ok", 0))
-        .await
-        .unwrap();
+    pm.spawn_managed(
+        "s1",
+        "tc1",
+        make_blocking_config("fast"),
+        boxed_immediate("ok", 0),
+    )
+    .await
+    .unwrap();
 
     // Just completed — should still be in list.
     let procs = pm.list_processes("s1");
@@ -440,7 +488,12 @@ async fn get_result_returns_none_while_running() {
 async fn get_result_returns_some_after_completion() {
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_blocking_config("fast"), boxed_immediate("done", 0))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("fast"),
+            boxed_immediate("done", 0),
+        )
         .await
         .unwrap();
     let result = pm.get_result(&handle.process_id);
@@ -542,8 +595,14 @@ async fn blocking_timeout_auto_backgrounds() {
 
     // Should have returned due to blocking timeout (auto-backgrounded).
     let elapsed = start.elapsed();
-    assert!(elapsed < std::time::Duration::from_millis(1000), "should return quickly after 100ms blocking timeout");
-    assert!(handle.result.is_none(), "auto-backgrounded: no inline result");
+    assert!(
+        elapsed < std::time::Duration::from_millis(1000),
+        "should return quickly after 100ms blocking timeout"
+    );
+    assert!(
+        handle.result.is_none(),
+        "auto-backgrounded: no inline result"
+    );
 }
 
 #[tokio::test]
@@ -569,7 +628,12 @@ async fn foreground_no_timeout_completes_normally() {
 async fn process_id_format_valid() {
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_blocking_config("test"), boxed_immediate("ok", 0))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("test"),
+            boxed_immediate("ok", 0),
+        )
         .await
         .unwrap();
     assert!(handle.process_id.starts_with("proc-"));
@@ -585,7 +649,12 @@ async fn promote_race_with_completion() {
     // If the process completes just before promotion, promotion should fail gracefully.
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_blocking_config("fast"), boxed_immediate("done", 0))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_blocking_config("fast"),
+            boxed_immediate("done", 0),
+        )
         .await
         .unwrap();
 
@@ -616,7 +685,12 @@ async fn wait_already_completed() {
 async fn wait_completes_within_timeout() {
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_config("slow"), boxed_delayed(50, "finished"))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_config("slow"),
+            boxed_delayed(50, "finished"),
+        )
         .await
         .unwrap();
 
@@ -628,7 +702,12 @@ async fn wait_completes_within_timeout() {
 async fn wait_timeout_returns_error() {
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_config("very-slow"), boxed_delayed(5000, "late"))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_config("very-slow"),
+            boxed_delayed(5000, "late"),
+        )
         .await
         .unwrap();
 
@@ -644,7 +723,12 @@ async fn wait_timeout_returns_error() {
 async fn wait_for_cancelled_process() {
     let pm = ProcessManager::new();
     let handle = pm
-        .spawn_managed("s1", "tc1", make_config("cancel-me"), boxed_delayed(5000, "nope"))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_config("cancel-me"),
+            boxed_delayed(5000, "nope"),
+        )
         .await
         .unwrap();
 
@@ -671,7 +755,12 @@ async fn wait_unknown_process_returns_error() {
 async fn wait_concurrent_waiters_both_get_result() {
     let pm = Arc::new(ProcessManager::new());
     let handle = pm
-        .spawn_managed("s1", "tc1", make_config("shared"), boxed_delayed(50, "shared-result"))
+        .spawn_managed(
+            "s1",
+            "tc1",
+            make_config("shared"),
+            boxed_delayed(50, "shared-result"),
+        )
         .await
         .unwrap();
     let pid = handle.process_id.clone();

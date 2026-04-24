@@ -48,8 +48,7 @@ const CANCEL_DRAIN_MS: u64 = 30_000;
 /// Any tool not in this list is stripped from the inherited tool
 /// registry before the subagent starts — new tools added to the
 /// top-level registry never silently leak into the restricted resolver.
-pub const CONFLICT_RESOLVER_ALLOWED_TOOLS: &[&str] =
-    &["Read", "Edit", "Write", "Bash"];
+pub const CONFLICT_RESOLVER_ALLOWED_TOOLS: &[&str] = &["Read", "Edit", "Write", "Bash"];
 
 /// Default maximum number of LLM turns for a conflict-resolver session.
 pub const DEFAULT_MAX_TURNS: u32 = 40;
@@ -653,7 +652,9 @@ mod tests {
                 mode: WaitMode,
                 timeout_ms: u64,
             ) -> Result<Vec<SubagentResult>, ToolError> {
-                self.inner.wait_for_agents(session_ids, mode, timeout_ms).await
+                self.inner
+                    .wait_for_agents(session_ids, mode, timeout_ms)
+                    .await
             }
             fn get_subagent_result(&self, _: &str) -> Option<SubagentResult> {
                 None

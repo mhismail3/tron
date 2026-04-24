@@ -25,11 +25,13 @@ impl WorktreeCoordinator {
         message: &str,
         opts: CommitOptions,
     ) -> Result<Option<crate::worktree::types::CommitResult>> {
-        let info = self
-            .state
-            .lock()
-            .active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
+        let info =
+            self.state
+                .lock()
+                .active_info(session_id)
+                .ok_or_else(|| WorktreeError::NotFound {
+                    session_id: session_id.to_string(),
+                })?;
 
         let has_changes = self.git.has_changes(&info.worktree_path).await?;
         if !has_changes && !opts.amend {
@@ -143,11 +145,13 @@ impl WorktreeCoordinator {
         target_branch: &str,
         strategy: MergeStrategy,
     ) -> Result<MergeResult> {
-        let info = self
-            .state
-            .lock()
-            .active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
+        let info =
+            self.state
+                .lock()
+                .active_info(session_id)
+                .ok_or_else(|| WorktreeError::NotFound {
+                    session_id: session_id.to_string(),
+                })?;
 
         let result = crate::worktree::merge::merge_session(
             &info.repo_root,

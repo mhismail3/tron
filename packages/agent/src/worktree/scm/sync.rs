@@ -68,7 +68,10 @@ pub async fn sync_main(
             None => return Ok(SyncOutcome::Blocked(SyncBlockReason::NoDefaultBranch)),
         },
     };
-    if !git.show_ref_verify(repo_root, &format!("refs/heads/{main}")).await {
+    if !git
+        .show_ref_verify(repo_root, &format!("refs/heads/{main}"))
+        .await
+    {
         return Ok(SyncOutcome::Blocked(SyncBlockReason::NoDefaultBranch));
     }
 
@@ -181,12 +184,11 @@ pub async fn sync_main(
 
 /// Resolve the repo's default branch: `init.defaultBranch` config first,
 /// then a probe for `main` / `master`. Returns `Ok(None)` if nothing fits.
-pub async fn resolve_default_branch(
-    git: &GitExecutor,
-    repo_root: &Path,
-) -> Result<Option<String>> {
+pub async fn resolve_default_branch(git: &GitExecutor, repo_root: &Path) -> Result<Option<String>> {
     if let Some(v) = git.config_get(repo_root, "init.defaultBranch").await?
-        && git.show_ref_verify(repo_root, &format!("refs/heads/{v}")).await
+        && git
+            .show_ref_verify(repo_root, &format!("refs/heads/{v}"))
+            .await
     {
         return Ok(Some(v));
     }
@@ -208,9 +210,17 @@ mod tests {
         let work = tempdir().unwrap();
         let origin = tempdir().unwrap();
         let git = init_repo_with_origin(work.path(), origin.path()).await;
-        let out = sync_main(work.path(), Some("main"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("main"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         matches!(out, SyncOutcome::UpToDate { .. })
             .then_some(())
             .expect("expected UpToDate");
@@ -225,9 +235,17 @@ mod tests {
         // Make the remote advance (via a scratch clone).
         diverge_remote_only(work.path(), origin.path()).await;
 
-        let out = sync_main(work.path(), Some("main"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("main"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         match out {
             SyncOutcome::FastForwarded { advanced_by, .. } => assert_eq!(advanced_by, 1),
             other => panic!("expected FastForwarded, got {other:?}"),
@@ -241,9 +259,17 @@ mod tests {
         let git = init_repo_with_origin(work.path(), origin.path()).await;
         add_commit(work.path(), "a.txt", "a", "local a").await;
 
-        let out = sync_main(work.path(), Some("main"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("main"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         match out {
             SyncOutcome::Blocked(SyncBlockReason::LocalAhead { ahead }) => {
                 assert_eq!(ahead, 1)
@@ -259,9 +285,17 @@ mod tests {
         let git = init_repo_with_origin(work.path(), origin.path()).await;
         diverge(work.path(), origin.path()).await;
 
-        let out = sync_main(work.path(), Some("main"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("main"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         matches!(out, SyncOutcome::Blocked(SyncBlockReason::Diverged { .. }))
             .then_some(())
             .expect("expected Diverged");
@@ -271,9 +305,17 @@ mod tests {
     async fn sync_no_remote() {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;
-        let out = sync_main(dir.path(), Some("main"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            dir.path(),
+            Some("main"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(out, SyncOutcome::Blocked(SyncBlockReason::NoRemote));
     }
 
@@ -283,21 +325,36 @@ mod tests {
         run_cmd(dir.path(), &["git", "init"]).await;
         // Add an origin stub so the NoRemote check passes and we hit
         // empty-repo.
-        let origin_bare = dir.path().parent().unwrap().join(
-            format!("{}-origin.git", dir.path().file_name().unwrap().to_string_lossy()),
-        );
+        let origin_bare = dir.path().parent().unwrap().join(format!(
+            "{}-origin.git",
+            dir.path().file_name().unwrap().to_string_lossy()
+        ));
         std::fs::create_dir_all(&origin_bare).unwrap();
         run_cmd(&origin_bare, &["git", "init", "--bare"]).await;
         run_cmd(
             dir.path(),
-            &["git", "remote", "add", "origin", &origin_bare.to_string_lossy()],
+            &[
+                "git",
+                "remote",
+                "add",
+                "origin",
+                &origin_bare.to_string_lossy(),
+            ],
         )
         .await;
         let git = GitExecutor::new(30_000);
 
-        let out = sync_main(dir.path(), Some("main"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            dir.path(),
+            Some("main"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(out, SyncOutcome::Blocked(SyncBlockReason::EmptyRepository));
         let _ = std::fs::remove_dir_all(&origin_bare);
     }
@@ -308,9 +365,17 @@ mod tests {
         let origin = tempdir().unwrap();
         let git = init_repo_with_origin(work.path(), origin.path()).await;
         std::fs::write(work.path().join("dirty.txt"), "dirty").unwrap();
-        let out = sync_main(work.path(), Some("main"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("main"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(out, SyncOutcome::Blocked(SyncBlockReason::DirtyWorkingTree));
     }
 
@@ -322,9 +387,17 @@ mod tests {
         let head = git.head_commit(work.path()).await.unwrap();
         run_cmd(work.path(), &["git", "checkout", "--detach", &head]).await;
 
-        let out = sync_main(work.path(), Some("main"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("main"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(out, SyncOutcome::Blocked(SyncBlockReason::DetachedHead));
     }
 
@@ -345,9 +418,17 @@ mod tests {
         .await;
         run_cmd(work.path(), &["git", "push", "origin", "--delete", "main"]).await;
 
-        let out = sync_main(work.path(), Some("trunk"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("trunk"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         matches!(out, SyncOutcome::UpToDate { .. })
             .then_some(())
             .expect("expected UpToDate for trunk");
@@ -419,9 +500,17 @@ mod tests {
         .await;
         run_cmd(work.path(), &["git", "push", "origin", "--delete", "main"]).await;
 
-        let out = sync_main(work.path(), Some("メイン"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("メイン"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         matches!(out, SyncOutcome::UpToDate { .. })
             .then_some(())
             .expect("expected UpToDate for unicode branch");
@@ -437,12 +526,26 @@ mod tests {
         run_cmd(other_bare.path(), &["git", "init", "--bare"]).await;
         run_cmd(
             work.path(),
-            &["git", "remote", "add", "upstream", &other_bare.path().to_string_lossy()],
+            &[
+                "git",
+                "remote",
+                "add",
+                "upstream",
+                &other_bare.path().to_string_lossy(),
+            ],
         )
         .await;
-        let out = sync_main(work.path(), Some("main"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("main"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         matches!(out, SyncOutcome::UpToDate { .. })
             .then_some(())
             .expect("expected UpToDate with multiple remotes");
@@ -467,9 +570,17 @@ mod tests {
             ],
         )
         .await;
-        let out = sync_main(work.path(), Some("main"), "origin", &git, 1_500, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("main"),
+            "origin",
+            &git,
+            1_500,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(matches!(
             out,
             SyncOutcome::Blocked(SyncBlockReason::RemoteError(_))
@@ -487,12 +598,26 @@ mod tests {
         let bogus = work.path().parent().unwrap().join("nonexistent-origin.git");
         run_cmd(
             work.path(),
-            &["git", "remote", "set-url", "origin", &bogus.to_string_lossy()],
+            &[
+                "git",
+                "remote",
+                "set-url",
+                "origin",
+                &bogus.to_string_lossy(),
+            ],
         )
         .await;
-        let out = sync_main(work.path(), Some("main"), "origin", &git, 5_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("main"),
+            "origin",
+            &git,
+            5_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(matches!(
             out,
             SyncOutcome::Blocked(SyncBlockReason::RemoteError(_))
@@ -515,9 +640,17 @@ mod tests {
         let lock = git_dir.join("index.lock");
         std::fs::write(&lock, "").unwrap();
 
-        let out = sync_main(work.path(), Some("main"), "origin", &git, 30_000, false, false)
-            .await
-            .unwrap();
+        let out = sync_main(
+            work.path(),
+            Some("main"),
+            "origin",
+            &git,
+            30_000,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
 
         // Clean up the lock so the next tempdir teardown doesn't race.
         let _ = std::fs::remove_file(&lock);

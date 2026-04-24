@@ -9,12 +9,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::core::content::{AssistantContent, UserContent};
-use crate::core::messages::{
-    Message, ToolResultMessageContent, UserMessageContent,
-};
+use crate::core::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use crate::core::tools::Tool;
 use crate::llm::id_remapping::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
-
 
 /// A single message in `OpenAI` chat completions format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -79,10 +76,7 @@ pub struct ChatFunctionDef {
 /// Handles ID remapping from Anthropic `toolu_` format to `OpenAI` `call_` format.
 /// Strips image content blocks when `supports_images` is `false`.
 /// Omits thinking blocks from assistant messages (thinking is output-only).
-pub fn convert_messages(
-    messages: &[Message],
-    supports_images: bool,
-) -> Vec<ChatMessage> {
+pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<ChatMessage> {
     let id_mapping = build_id_mapping(messages);
     let mut result = Vec::new();
 
@@ -210,8 +204,12 @@ fn convert_user_block(block: &UserContent, supports_images: bool) -> Option<Valu
         } => {
             let name = file_name.as_deref().unwrap_or("document");
             match extracted_text {
-                Some(text) => Some(json!({"type": "text", "text": format!("--- Document: {name} ---\n{text}")})),
-                None => Some(json!({"type": "text", "text": format!("[Document: {name} \u{2014} content not available for this model]")})),
+                Some(text) => Some(
+                    json!({"type": "text", "text": format!("--- Document: {name} ---\n{text}")}),
+                ),
+                None => Some(
+                    json!({"type": "text", "text": format!("[Document: {name} \u{2014} content not available for this model]")}),
+                ),
             }
         }
     }
@@ -236,8 +234,8 @@ fn convert_assistant_message(
                 ..
             } => {
                 let remapped_id = remap_tool_call_id(id, id_mapping).to_string();
-                let args_str = serde_json::to_string(&Value::Object(arguments.clone()))
-                    .unwrap_or_default();
+                let args_str =
+                    serde_json::to_string(&Value::Object(arguments.clone())).unwrap_or_default();
                 tool_calls.push(ChatToolCall {
                     id: remapped_id,
                     call_type: "function".into(),
@@ -279,16 +277,14 @@ fn convert_assistant_message(
 fn convert_tool_result(tool_call_id: &str, content: &ToolResultMessageContent) -> ChatMessage {
     let text = match content {
         ToolResultMessageContent::Text(t) => t.clone(),
-        ToolResultMessageContent::Blocks(blocks) => {
-            blocks
-                .iter()
-                .filter_map(|b| match b {
-                    crate::core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    crate::core::content::ToolResultContent::Image { .. } => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
+        ToolResultMessageContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|b| match b {
+                crate::core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                crate::core::content::ToolResultContent::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
     };
 
     ChatMessage {
@@ -323,7 +319,9 @@ mod tests {
     fn user_message_with_image() {
         let msgs = vec![Message::User {
             content: UserMessageContent::Blocks(vec![
-                UserContent::Text { text: "Look".into() },
+                UserContent::Text {
+                    text: "Look".into(),
+                },
                 UserContent::Image {
                     data: "abc123".into(),
                     mime_type: "image/png".into(),
@@ -336,17 +334,21 @@ mod tests {
         assert_eq!(content.len(), 2);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[1]["type"], "image_url");
-        assert!(content[1]["image_url"]["url"]
-            .as_str()
-            .unwrap()
-            .starts_with("data:image/png;base64,"));
+        assert!(
+            content[1]["image_url"]["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
     }
 
     #[test]
     fn image_stripped_when_not_supported() {
         let msgs = vec![Message::User {
             content: UserMessageContent::Blocks(vec![
-                UserContent::Text { text: "Look".into() },
+                UserContent::Text {
+                    text: "Look".into(),
+                },
                 UserContent::Image {
                     data: "abc123".into(),
                     mime_type: "image/png".into(),
@@ -492,7 +494,11 @@ mod tests {
         let result = convert_messages(&msgs, true);
         // Anthropic IDs should be remapped to call_ format
         let tc = &result[0].tool_calls.as_ref().unwrap()[0];
-        assert!(tc.id.starts_with("call_"), "Expected call_ prefix, got: {}", tc.id);
+        assert!(
+            tc.id.starts_with("call_"),
+            "Expected call_ prefix, got: {}",
+            tc.id
+        );
         assert_eq!(result[1].tool_call_id.as_ref().unwrap(), &tc.id);
     }
 

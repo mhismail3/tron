@@ -42,8 +42,7 @@ pub(crate) struct ToolRegistryConfig {
 /// - Subagent tools: NOT registered (stubs return "not available", confusing LLM)
 pub(crate) fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     use tron::tools::backends::{
-        RealFileSystem, ReqwestHttpClient,
-        StubNotifyDelegate, TokioProcessRunner,
+        RealFileSystem, ReqwestHttpClient, StubNotifyDelegate, TokioProcessRunner,
     };
 
     let fs: Arc<dyn tron::tools::traits::FileSystemOps> = Arc::new(RealFileSystem);
@@ -91,22 +90,24 @@ pub(crate) fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry 
     let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> = {
         #[cfg(feature = "apns")]
         match config.push_service {
-            Some(crate::PushService::Direct(ref apns)) => {
-                Arc::new(tron::server::platform::apns::delegate::ApnsNotifyDelegate::new(
+            Some(crate::PushService::Direct(ref apns)) => Arc::new(
+                tron::server::platform::apns::delegate::ApnsNotifyDelegate::new(
                     apns.clone(),
                     config.event_store.clone(),
-                ))
-            }
-            Some(crate::PushService::Relay(ref relay)) => {
-                Arc::new(tron::server::platform::apns::relay_delegate::RelayNotifyDelegate::new(
+                ),
+            ),
+            Some(crate::PushService::Relay(ref relay)) => Arc::new(
+                tron::server::platform::apns::relay_delegate::RelayNotifyDelegate::new(
                     relay.clone(),
                     config.event_store.clone(),
-                ))
-            }
+                ),
+            ),
             None => Arc::new(StubNotifyDelegate),
         }
         #[cfg(not(feature = "apns"))]
-        { Arc::new(StubNotifyDelegate) }
+        {
+            Arc::new(StubNotifyDelegate)
+        }
     };
     registry.register(Arc::new(tron::tools::ui::notify::NotifyAppTool::new(
         notify_delegate,

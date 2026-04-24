@@ -135,11 +135,12 @@ pub async fn recover_repo(
         } else {
             let default_branch = detect_default_branch(repo_root, git).await;
             match git.merge_base(repo_root, &default_branch, branch).await {
-                Ok(mb) => git
-                    .commit_count_between(repo_root, &mb, branch)
-                    .await
-                    .unwrap_or(0)
-                    > 0,
+                Ok(mb) => {
+                    git.commit_count_between(repo_root, &mb, branch)
+                        .await
+                        .unwrap_or(0)
+                        > 0
+                }
                 Err(_) => false,
             }
         };
@@ -386,7 +387,10 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].branch, "session/orphaned");
         assert!(!result[0].auto_committed);
-        assert!(result[0].branch_deleted, "empty orphan branch should be deleted");
+        assert!(
+            result[0].branch_deleted,
+            "empty orphan branch should be deleted"
+        );
     }
 
     #[tokio::test]
@@ -449,7 +453,10 @@ mod tests {
             sha.chars().all(|c| c.is_ascii_hexdigit()),
             "sha must be hexadecimal: {sha:?}"
         );
-        assert!(!result[0].branch_deleted, "branch with auto-committed work should be preserved");
+        assert!(
+            !result[0].branch_deleted,
+            "branch with auto-committed work should be preserved"
+        );
     }
 
     #[tokio::test]
@@ -490,11 +497,7 @@ mod tests {
         let git = init_repo(dir.path()).await;
         let config = WorktreeConfig::default();
 
-        let wt_path = dir
-            .path()
-            .join(".worktrees")
-            .join("session")
-            .join("abc123");
+        let wt_path = dir.path().join(".worktrees").join("session").join("abc123");
         git.worktree_add(dir.path(), &wt_path, "session/abc123", "HEAD")
             .await
             .unwrap();
@@ -613,6 +616,9 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert!(!result[0].auto_committed);
-        assert!(!result[0].branch_deleted, "branch with committed work should be preserved");
+        assert!(
+            !result[0].branch_deleted,
+            "branch with committed work should be preserved"
+        );
     }
 }

@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{
-    Notification, NotifyDelegate, NotifyResult, SubagentConfig,
-    SubagentHandle, SubagentResult, SubagentSpawner, WaitMode,
+    Notification, NotifyDelegate, NotifyResult, SubagentConfig, SubagentHandle, SubagentResult,
+    SubagentSpawner, WaitMode,
 };
 
 fn not_available(feature: &str) -> ToolError {
@@ -51,8 +51,7 @@ pub struct StubNotifyDelegate;
 
 /// Message surfaced to the agent when a `NotifyApp` call hits the stub.
 /// Extracted as a constant so tests can assert on the exact wording.
-pub const STUB_NOTIFY_WARNING: &str =
-    "Push service is not configured on this server. The notification \
+pub const STUB_NOTIFY_WARNING: &str = "Push service is not configured on this server. The notification \
      was not delivered to any device. Configure APNs (direct or via \
      relay) in the server settings to enable push notifications.";
 
@@ -141,5 +140,4 @@ mod tests {
             "warning must mention the relay as an alternative"
         );
     }
-
 }

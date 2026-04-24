@@ -466,8 +466,7 @@ impl CachedArtifacts {
         _settings: &crate::settings::TronSettings,
         _home_dir: Option<&Path>,
     ) -> bool {
-        self.rules_fingerprint.is_fresh()
-            && self.rules_index_fingerprint.is_fresh()
+        self.rules_fingerprint.is_fresh() && self.rules_index_fingerprint.is_fresh()
     }
 }
 
@@ -590,8 +589,8 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::events::{AppendOptions, EventType};
+    use crate::server::rpc::handlers::test_helpers::make_test_context;
 
     #[tokio::test]
     async fn loads_rules_from_project_and_global() {

@@ -1,16 +1,16 @@
 use super::*;
-use crate::runtime::context::types::ContextManagerConfig;
-use async_trait::async_trait;
-use futures::stream;
-use serde_json::Map;
-use std::time::Duration;
 use crate::core::content::AssistantContent;
 use crate::core::events::{AssistantMessage, StreamEvent};
 use crate::core::messages::ToolResultMessageContent;
 use crate::core::tools::{Tool, ToolCategory, ToolParameterSchema, TronToolResult, text_result};
 use crate::llm::models::types::Provider as ProviderKind;
 use crate::llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
+use crate::runtime::context::types::ContextManagerConfig;
 use crate::tools::traits::{ExecutionMode, ToolContext, TronTool};
+use async_trait::async_trait;
+use futures::stream;
+use serde_json::Map;
+use std::time::Duration;
 
 // ── Mock Provider ──
 
@@ -233,7 +233,8 @@ fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
         hooks: None,
         context_manager: test_context_manager("mock-model"),
         subagent_manager: None,
-        compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+        compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(
+        ),
         process_manager: None,
         job_manager: None,
         output_buffer_registry: None,
@@ -658,7 +659,8 @@ fn make_agent_with_store(
             hooks: None,
             context_manager: test_context_manager("mock-model"),
             subagent_manager: None,
-            compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+            compaction_trigger_config:
+                crate::runtime::context::types::CompactionTriggerConfig::default(),
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
@@ -673,9 +675,8 @@ async fn agent_set_persister() {
     let store = make_event_store();
     let (mut agent, sid) = make_agent_with_store(MockProvider::text_only("Hello"), &store);
 
-    let persister = Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(
-        store.clone(),
-    ));
+    let persister =
+        Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(store.clone()));
     agent.set_persister(Some(persister.clone()));
 
     let result = agent.run("Hi", RunContext::default()).await;
@@ -701,8 +702,7 @@ async fn agent_set_persister() {
     );
 
     // Verify the payload has the new metadata fields
-    let payload: serde_json::Value =
-        serde_json::from_str(&assistant_events[0].payload).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&assistant_events[0].payload).unwrap();
     assert!(payload.get("model").is_some(), "payload must have model");
     assert!(
         payload.get("latency").is_some(),
@@ -774,9 +774,8 @@ async fn agent_multi_turn_persists_all_turns() {
     let provider = MockProvider::multi_turn(vec![turn1_events, turn2_events]);
     let (mut agent, sid) = make_agent_with_store(provider, &store);
 
-    let persister = Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(
-        store.clone(),
-    ));
+    let persister =
+        Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(store.clone()));
     agent.set_persister(Some(persister.clone()));
 
     agent.registry.register(Arc::new(StaticTool {
@@ -833,9 +832,8 @@ async fn agent_persisted_event_has_indexed_columns() {
     let store = make_event_store();
     let (mut agent, sid) = make_agent_with_store(MockProvider::text_only("Hello"), &store);
 
-    let persister = Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(
-        store.clone(),
-    ));
+    let persister =
+        Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(store.clone()));
     agent.set_persister(Some(persister.clone()));
 
     let _ = agent.run("Hi", RunContext::default()).await;
@@ -1032,7 +1030,8 @@ fn make_agent_with_tools(
         hooks: None,
         context_manager: test_context_manager("mock-model"),
         subagent_manager: None,
-        compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(),
+        compaction_trigger_config: crate::runtime::context::types::CompactionTriggerConfig::default(
+        ),
         process_manager: None,
         job_manager: None,
         output_buffer_registry: None,
@@ -1176,9 +1175,8 @@ async fn tool_call_events_precede_tool_result_events() {
         response: "c",
     }) as Arc<dyn crate::tools::traits::TronTool>);
 
-    let persister = Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(
-        store.clone(),
-    ));
+    let persister =
+        Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(store.clone()));
     agent.set_persister(Some(persister.clone()));
 
     let _ = agent.run("go", RunContext::default()).await;
@@ -1391,4 +1389,3 @@ async fn single_tool_unchanged_behavior() {
         .collect();
     assert_eq!(tool_results.len(), 1);
 }
-

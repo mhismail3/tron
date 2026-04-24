@@ -10,11 +10,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::events::ConnectionPool;
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use crate::events::ConnectionPool;
 use uuid::Uuid;
 
 use crate::cron::clock::Clock;
@@ -219,7 +219,10 @@ impl CronScheduler {
     /// `Webhook` and `SystemEvent` are fast I/O — they share the
     /// [delivery](`Self::delivery_semaphore`) pool so a burst of them cannot
     /// eat every execution permit and starve agent work.
-    fn semaphore_for_payload(&self, payload: &crate::cron::types::Payload) -> Arc<tokio::sync::Semaphore> {
+    fn semaphore_for_payload(
+        &self,
+        payload: &crate::cron::types::Payload,
+    ) -> Arc<tokio::sync::Semaphore> {
         use crate::cron::types::Payload;
         match payload {
             Payload::AgentTurn { .. } | Payload::ShellCommand { .. } => {
@@ -272,11 +275,11 @@ impl CronScheduler {
                         "jobCount": jobs.len(),
                     });
                     let broadcaster = broadcaster.clone();
-                    let _ = tokio::spawn(async move {
+                    drop(tokio::spawn(async move {
                         broadcaster
                             .broadcast_cron_event("cron.configError", payload)
                             .await;
-                    });
+                    }));
                 }
 
                 crate::cron::types::CronConfig { version: 1, jobs }
@@ -626,7 +629,8 @@ impl CronScheduler {
                 // create a synthetic timed_out record for audit trail
                 if updated == 0 {
                     let run_id = format!("cronrun_{}", Uuid::now_v7());
-                    if let Err(e) = store::insert_run(&self.pool, &run_id, &job_id, "stuck", since) {
+                    if let Err(e) = store::insert_run(&self.pool, &run_id, &job_id, "stuck", since)
+                    {
                         tracing::error!(job_id = %job_id, error = %e, "failed to insert synthetic stuck run");
                     }
                     let run = crate::cron::types::CronRun {
@@ -738,14 +742,15 @@ async fn execute_job(
         );
         // Notify via push if available
         if let Some(ref notifier) = deps.push_notifier {
-            if let Err(e) = notifier
-                .notify(
-                    &format!("Cron job '{}' auto-disabled", job.name),
-                    &format!(
-                        "Disabled after {failures} consecutive failures. Re-enable manually.",
-                    ),
-                )
-                .await
+            if let Err(e) =
+                notifier
+                    .notify(
+                        &format!("Cron job '{}' auto-disabled", job.name),
+                        &format!(
+                            "Disabled after {failures} consecutive failures. Re-enable manually.",
+                        ),
+                    )
+                    .await
             {
                 tracing::error!(job_id = %job.id, error = %e, "failed to send auto-disable notification");
             }
@@ -783,7 +788,8 @@ mod tests {
         CancellationToken,
         tempfile::TempDir,
     ) {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
@@ -1606,9 +1612,7 @@ mod tests {
     #[async_trait::async_trait]
     impl executor::PushNotifier for MockPushNotifier {
         async fn notify(&self, title: &str, body: &str) -> Result<(), CronError> {
-            self.calls
-                .lock()
-                .push((title.to_owned(), body.to_owned()));
+            self.calls.lock().push((title.to_owned(), body.to_owned()));
             Ok(())
         }
     }
@@ -1630,9 +1634,7 @@ mod tests {
     impl executor::EventBroadcaster for MockEventBroadcaster {
         async fn broadcast_cron_result(&self, _job: &CronJob, _run: &crate::cron::types::CronRun) {}
         async fn broadcast_cron_event(&self, event_type: &str, payload: serde_json::Value) {
-            self.events
-                .lock()
-                .push((event_type.to_owned(), payload));
+            self.events.lock().push((event_type.to_owned(), payload));
         }
     }
 
@@ -1689,21 +1691,34 @@ mod tests {
         store::upsert_job(&pool, &job).unwrap();
 
         let runtime: RuntimeMap = Arc::new(parking_lot::RwLock::new(HashMap::new()));
-        runtime
-            .write()
-            .insert(job.id.clone(), JobRuntimeState {
+        runtime.write().insert(
+            job.id.clone(),
+            JobRuntimeState {
                 job_id: job.id.clone(),
                 next_run_at: None,
                 last_run_at: None,
                 consecutive_failures: 0,
                 running_since: None,
-            });
+            },
+        );
 
-        execute_job(&job, &deps, &pool, clock.as_ref(), CancellationToken::new(), &runtime).await;
+        execute_job(
+            &job,
+            &deps,
+            &pool,
+            clock.as_ref(),
+            CancellationToken::new(),
+            &runtime,
+        )
+        .await;
 
         // Verify push notification was sent
         let calls = notifier.calls.lock();
-        assert_eq!(calls.len(), 1, "should have sent exactly 1 push notification");
+        assert_eq!(
+            calls.len(),
+            1,
+            "should have sent exactly 1 push notification"
+        );
         assert!(
             calls[0].0.contains("FailJob"),
             "notification title should contain job name"
@@ -1736,17 +1751,26 @@ mod tests {
         store::upsert_job(&pool, &job).unwrap();
 
         let runtime: RuntimeMap = Arc::new(parking_lot::RwLock::new(HashMap::new()));
-        runtime
-            .write()
-            .insert(job.id.clone(), JobRuntimeState {
+        runtime.write().insert(
+            job.id.clone(),
+            JobRuntimeState {
                 job_id: job.id.clone(),
                 next_run_at: None,
                 last_run_at: None,
                 consecutive_failures: 0,
                 running_since: None,
-            });
+            },
+        );
 
-        execute_job(&job, &deps, &pool, clock.as_ref(), CancellationToken::new(), &runtime).await;
+        execute_job(
+            &job,
+            &deps,
+            &pool,
+            clock.as_ref(),
+            CancellationToken::new(),
+            &runtime,
+        )
+        .await;
 
         // Verify broadcast event
         let events = broadcaster.events.lock();
@@ -1766,18 +1790,27 @@ mod tests {
         store::upsert_job(&pool, &job).unwrap();
 
         let runtime: RuntimeMap = Arc::new(parking_lot::RwLock::new(HashMap::new()));
-        runtime
-            .write()
-            .insert(job.id.clone(), JobRuntimeState {
+        runtime.write().insert(
+            job.id.clone(),
+            JobRuntimeState {
                 job_id: job.id.clone(),
                 next_run_at: None,
                 last_run_at: None,
                 consecutive_failures: 0,
                 running_since: None,
-            });
+            },
+        );
 
         // Should not panic even without notifier or broadcaster
-        execute_job(&job, &deps, &pool, clock.as_ref(), CancellationToken::new(), &runtime).await;
+        execute_job(
+            &job,
+            &deps,
+            &pool,
+            clock.as_ref(),
+            CancellationToken::new(),
+            &runtime,
+        )
+        .await;
 
         // Verify job was disabled in DB
         let conn = pool.get().unwrap();
@@ -1788,6 +1821,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(!enabled, "job should be disabled after auto_disable_after failures");
+        assert!(
+            !enabled,
+            "job should be disabled after auto_disable_after failures"
+        );
     }
 }

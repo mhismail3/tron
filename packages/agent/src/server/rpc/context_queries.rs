@@ -1,11 +1,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use parking_lot::RwLock;
-use serde_json::{Value, json};
 use crate::skills::registry::SkillRegistry;
 use crate::skills::tracker::SkillTracker;
 use crate::skills::types::{SkillAddMethod, SkillSource};
+use parking_lot::RwLock;
+use serde_json::{Value, json};
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::context_service::{
@@ -47,7 +47,9 @@ impl ContextQueryService {
                         let index = crate::skills::injector::build_skill_index(&skills);
                         if index.is_empty() { None } else { Some(index) }
                     };
-                    prepared.context_manager.set_skill_index_content(skill_index_content);
+                    prepared
+                        .context_manager
+                        .set_skill_index_content(skill_index_content);
 
                     let memory_content = {
                         let mut reg = memory_registry.lock();

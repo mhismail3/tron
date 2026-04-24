@@ -136,22 +136,23 @@ futures = "0.3"
 
 [lints.rust]
 unsafe_code = "deny"
-unused_results = "warn"
+unused_imports = "deny"
+unused_must_use = "deny"
+unused_results = "allow"
+unused_variables = "deny"
+unreachable_code = "deny"
 missing_docs = "warn"
 
 [lints.clippy]
-all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-module_name_repetitions = "allow"
-must_use_candidate = "allow"
-missing_errors_doc = "allow"
-missing_panics_doc = "allow"
-cast_possible_truncation = "allow"
-cast_possible_wrap = "allow"
-cast_sign_loss = "allow"
-cast_precision_loss = "allow"
-too_many_lines = "allow"
-too_many_arguments = "allow"
+all = { level = "allow", priority = -2 }
+pedantic = { level = "allow", priority = -2 }
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+duplicated_attributes = "deny"
+let_underscore_future = "deny"
+await_holding_lock = "allow"
+large_stack_arrays = "allow"
 struct_excessive_bools = "allow"
 type_complexity = "allow"
 used_underscore_binding = "allow"

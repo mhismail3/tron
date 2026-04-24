@@ -263,7 +263,12 @@ pub fn scan_all_for_home(home: &str, working_dir: &str) -> (SkillScanResult, Ski
     let mut project_result = SkillScanResult::default();
     let mut seen_project_scope_names: HashSet<(String, String)> = HashSet::new();
     for psd in discover_project_skills_dirs(working_dir) {
-        let scan = scan_directory(&psd.path, SkillSource::Project, &psd.service, &psd.scope_dir);
+        let scan = scan_directory(
+            &psd.path,
+            SkillSource::Project,
+            &psd.service,
+            &psd.scope_dir,
+        );
         for skill in scan.skills {
             if seen_project_scope_names.insert((psd.scope_dir.clone(), skill.name.clone())) {
                 project_result.skills.push(skill);
@@ -406,7 +411,12 @@ mod tests {
 
     #[test]
     fn test_scan_nonexistent_directory() {
-        let result = scan_directory(Path::new("/nonexistent/path"), SkillSource::Global, "tron", "");
+        let result = scan_directory(
+            Path::new("/nonexistent/path"),
+            SkillSource::Global,
+            "tron",
+            "",
+        );
         assert!(result.skills.is_empty());
         assert!(result.errors.is_empty());
     }
@@ -676,7 +686,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let skills_dir = tmp.path().join("packages/foo/.claude/skills");
         fs::create_dir_all(&skills_dir).unwrap();
-        create_skill(&skills_dir, "deploy", "---\nname: Deploy\n---\nDeploy things.");
+        create_skill(
+            &skills_dir,
+            "deploy",
+            "---\nname: Deploy\n---\nDeploy things.",
+        );
 
         let (_global, project) = scan_all(tmp.path().to_str().unwrap());
         assert_eq!(project.skills.len(), 1);
@@ -774,11 +788,21 @@ mod tests {
         );
 
         let working = TempDir::new().unwrap();
-        let (global, _project) =
-            scan_all_for_home(home.path().to_str().unwrap(), working.path().to_str().unwrap());
+        let (global, _project) = scan_all_for_home(
+            home.path().to_str().unwrap(),
+            working.path().to_str().unwrap(),
+        );
 
         assert!(global.skills.iter().any(|s| s.name == "claude-only"));
-        assert_eq!(global.skills.iter().find(|s| s.name == "claude-only").unwrap().source, SkillSource::Global);
+        assert_eq!(
+            global
+                .skills
+                .iter()
+                .find(|s| s.name == "claude-only")
+                .unwrap()
+                .source,
+            SkillSource::Global
+        );
     }
 
     #[test]
@@ -795,12 +819,21 @@ mod tests {
         }
 
         let working = TempDir::new().unwrap();
-        let (global, _project) =
-            scan_all_for_home(home.path().to_str().unwrap(), working.path().to_str().unwrap());
+        let (global, _project) = scan_all_for_home(
+            home.path().to_str().unwrap(),
+            working.path().to_str().unwrap(),
+        );
 
         let dup: Vec<_> = global.skills.iter().filter(|s| s.name == "dup").collect();
-        assert_eq!(dup.len(), 1, "duplicate 'dup' skill must be deduped across services");
-        assert_eq!(dup[0].description, "from tron", "tron service must win on collision");
+        assert_eq!(
+            dup.len(),
+            1,
+            "duplicate 'dup' skill must be deduped across services"
+        );
+        assert_eq!(
+            dup[0].description, "from tron",
+            "tron service must win on collision"
+        );
     }
 
     #[test]
@@ -817,12 +850,21 @@ mod tests {
         }
 
         let home = TempDir::new().unwrap();
-        let (_global, proj) =
-            scan_all_for_home(home.path().to_str().unwrap(), project.path().to_str().unwrap());
+        let (_global, proj) = scan_all_for_home(
+            home.path().to_str().unwrap(),
+            project.path().to_str().unwrap(),
+        );
 
         let pd: Vec<_> = proj.skills.iter().filter(|s| s.name == "pd").collect();
-        assert_eq!(pd.len(), 1, "same-scope duplicate must be deduped across services");
-        assert_eq!(pd[0].description, "from tron", "tron service must win on collision");
+        assert_eq!(
+            pd.len(),
+            1,
+            "same-scope duplicate must be deduped across services"
+        );
+        assert_eq!(
+            pd[0].description, "from tron",
+            "tron service must win on collision"
+        );
     }
 
     // --- service tagging (which .tron/.claude folder produced the skill) ---
@@ -835,8 +877,10 @@ mod tests {
         create_skill(&tron_skills, "one", "---\nname: one\n---\nbody\n");
 
         let working = TempDir::new().unwrap();
-        let (global, _project) =
-            scan_all_for_home(home.path().to_str().unwrap(), working.path().to_str().unwrap());
+        let (global, _project) = scan_all_for_home(
+            home.path().to_str().unwrap(),
+            working.path().to_str().unwrap(),
+        );
 
         let one = global.skills.iter().find(|s| s.name == "one").unwrap();
         assert_eq!(one.service, "tron");
@@ -850,8 +894,10 @@ mod tests {
         create_skill(&claude_skills, "two", "---\nname: two\n---\nbody\n");
 
         let working = TempDir::new().unwrap();
-        let (global, _project) =
-            scan_all_for_home(home.path().to_str().unwrap(), working.path().to_str().unwrap());
+        let (global, _project) = scan_all_for_home(
+            home.path().to_str().unwrap(),
+            working.path().to_str().unwrap(),
+        );
 
         let two = global.skills.iter().find(|s| s.name == "two").unwrap();
         assert_eq!(two.service, "claude");
@@ -866,14 +912,24 @@ mod tests {
         fs::create_dir_all(&tron_dir).unwrap();
         fs::create_dir_all(&claude_dir).unwrap();
         create_skill(&tron_dir, "tron-proj", "---\nname: tron-proj\n---\nbody\n");
-        create_skill(&claude_dir, "claude-proj", "---\nname: claude-proj\n---\nbody\n");
+        create_skill(
+            &claude_dir,
+            "claude-proj",
+            "---\nname: claude-proj\n---\nbody\n",
+        );
 
         let home = TempDir::new().unwrap();
-        let (_global, proj) =
-            scan_all_for_home(home.path().to_str().unwrap(), project.path().to_str().unwrap());
+        let (_global, proj) = scan_all_for_home(
+            home.path().to_str().unwrap(),
+            project.path().to_str().unwrap(),
+        );
 
         let tron_proj = proj.skills.iter().find(|s| s.name == "tron-proj").unwrap();
-        let claude_proj = proj.skills.iter().find(|s| s.name == "claude-proj").unwrap();
+        let claude_proj = proj
+            .skills
+            .iter()
+            .find(|s| s.name == "claude-proj")
+            .unwrap();
         assert_eq!(tron_proj.service, "tron");
         assert_eq!(claude_proj.service, "claude");
     }
@@ -886,8 +942,10 @@ mod tests {
         create_skill(&claude_skills, "c1", "---\nname: c1\n---\nbody\n");
 
         let working = TempDir::new().unwrap();
-        let (global, _) =
-            scan_all_for_home(home.path().to_str().unwrap(), working.path().to_str().unwrap());
+        let (global, _) = scan_all_for_home(
+            home.path().to_str().unwrap(),
+            working.path().to_str().unwrap(),
+        );
         let meta = global.skills.iter().find(|s| s.name == "c1").unwrap();
         let info = crate::skills::types::SkillInfo::from(meta);
         assert_eq!(info.service, "claude");
@@ -902,12 +960,22 @@ mod tests {
         let nested_skills = project.path().join("pkg/foo/.tron/skills");
         fs::create_dir_all(&root_skills).unwrap();
         fs::create_dir_all(&nested_skills).unwrap();
-        create_skill(&root_skills, "shared", "---\nname: shared\n---\nroot body\n");
-        create_skill(&nested_skills, "shared", "---\nname: shared\n---\nnested body\n");
+        create_skill(
+            &root_skills,
+            "shared",
+            "---\nname: shared\n---\nroot body\n",
+        );
+        create_skill(
+            &nested_skills,
+            "shared",
+            "---\nname: shared\n---\nnested body\n",
+        );
 
         let home = TempDir::new().unwrap();
-        let (_global, proj) =
-            scan_all_for_home(home.path().to_str().unwrap(), project.path().to_str().unwrap());
+        let (_global, proj) = scan_all_for_home(
+            home.path().to_str().unwrap(),
+            project.path().to_str().unwrap(),
+        );
 
         let shared: Vec<_> = proj.skills.iter().filter(|s| s.name == "shared").collect();
         assert_eq!(shared.len(), 2);

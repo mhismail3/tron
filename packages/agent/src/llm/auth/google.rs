@@ -3,9 +3,9 @@
 //! Supports OAuth (standard Gemini API) and direct API key authentication.
 
 use super::errors::AuthError;
-use super::types::{GoogleAuth, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at};
 #[cfg(test)]
 use super::types::now_ms;
+use super::types::{GoogleAuth, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at};
 
 /// Default Google OAuth configuration for the standard Gemini API.
 ///
@@ -19,9 +19,7 @@ pub fn cloud_code_assist_config() -> GoogleOAuthConfig {
             redirect_uri: "http://localhost:45289".to_string(),
             client_id: String::new(),
             client_secret: None,
-            scopes: vec![
-                "https://www.googleapis.com/auth/generative-language".to_string(),
-            ],
+            scopes: vec!["https://www.googleapis.com/auth/generative-language".to_string()],
             token_expiry_buffer_seconds: 300,
         },
         api_endpoint: "https://generativelanguage.googleapis.com".to_string(),
@@ -180,12 +178,7 @@ pub fn is_oauth_token(token: &str) -> bool {
 pub async fn load_server_auth(
     auth_path: &std::path::Path,
 ) -> Result<Option<GoogleAuth>, AuthError> {
-    load_server_auth_with_client(
-        auth_path,
-        None,
-        super::shared_auth_client(),
-    )
-    .await
+    load_server_auth_with_client(auth_path, None, super::shared_auth_client()).await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
@@ -232,7 +225,10 @@ pub async fn load_server_auth_with_client(
                     if refreshed {
                         tracing::info!("persisting refreshed Google tokens");
                         let _ = super::storage::save_account_oauth_tokens(
-                            auth_path, "google", &acct.label, &tokens,
+                            auth_path,
+                            "google",
+                            &acct.label,
+                            &tokens,
                         );
                     }
                     Ok(Some(GoogleAuth {
@@ -246,12 +242,10 @@ pub async fn load_server_auth_with_client(
                 }
             }
         }
-        super::ResolvedCredential::ApiKey(key) => {
-            Ok(Some(GoogleAuth {
-                auth: ServerAuth::from_api_key(&key.key),
-                project_id: None,
-            }))
-        }
+        super::ResolvedCredential::ApiKey(key) => Ok(Some(GoogleAuth {
+            auth: ServerAuth::from_api_key(&key.key),
+            project_id: None,
+        })),
     }
 }
 
@@ -291,8 +285,7 @@ pub fn save_oauth_credentials(
     client_id: &str,
     client_secret: &str,
 ) -> Result<(), AuthError> {
-    let mut gpa = super::storage::get_google_provider_auth(auth_path)?
-        .unwrap_or_default();
+    let mut gpa = super::storage::get_google_provider_auth(auth_path)?.unwrap_or_default();
     gpa.client_id = Some(client_id.to_string());
     gpa.client_secret = Some(client_secret.to_string());
     super::storage::save_google_provider_auth(auth_path, &gpa)
@@ -326,7 +319,10 @@ mod tests {
     fn cloud_code_assist_config_values() {
         let cfg = cloud_code_assist_config();
         assert!(cfg.oauth.auth_url.contains("accounts.google.com"));
-        assert!(cfg.api_endpoint.contains("generativelanguage.googleapis.com"));
+        assert!(
+            cfg.api_endpoint
+                .contains("generativelanguage.googleapis.com")
+        );
         assert_eq!(cfg.api_version, "v1beta");
     }
 
@@ -353,7 +349,8 @@ mod tests {
         let path = dir.path().join("auth.json");
 
         // Save API key via named key path
-        crate::llm::auth::storage::save_named_api_key(&path, "google", "(test)", "file-api-key").unwrap();
+        crate::llm::auth::storage::save_named_api_key(&path, "google", "(test)", "file-api-key")
+            .unwrap();
 
         let result = load_server_auth(&path).await.unwrap();
         let auth = result.unwrap();
@@ -371,7 +368,8 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: now_ms() + 3_600_000,
         };
-        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens)
+            .unwrap();
 
         // Set client_id (required for OAuth)
         let mut gpa = crate::llm::auth::storage::get_google_provider_auth(&path)
@@ -406,7 +404,8 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: now_ms() + 3_600_000,
         };
-        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens)
+            .unwrap();
 
         // Set client_id (required for OAuth)
         let mut gpa = crate::llm::auth::storage::get_google_provider_auth(&path)
@@ -431,12 +430,16 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: now_ms() + 3_600_000,
         };
-        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "google", "(test)", &tokens)
+            .unwrap();
 
         let result = load_server_auth(&path).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("client_id"), "error should mention client_id: {err}");
+        assert!(
+            err.contains("client_id"),
+            "error should mention client_id: {err}"
+        );
     }
 
     /// R3: legacy auth.json files with `endpoint: "antigravity"` (from the

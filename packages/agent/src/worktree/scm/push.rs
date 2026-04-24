@@ -50,12 +50,7 @@ pub async fn push_branch(
 ) -> Result<PushOutput> {
     // 1. Protected branch check up-front (even for `--dry-run` — the user
     //    shouldn't be able to even simulate pushing to `main`).
-    if !args.override_protected
-        && args
-            .protected_branches
-            .iter()
-            .any(|b| b == args.branch)
-    {
+    if !args.override_protected && args.protected_branches.iter().any(|b| b == args.branch) {
         return Err(WorktreeError::ProtectedBranch(format!(
             "refusing to push protected branch '{}' (override not set)",
             args.branch
@@ -94,9 +89,7 @@ pub async fn push_branch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worktree::test_fixtures::{
-        add_commit, checkout_new_branch, init_repo_with_origin,
-    };
+    use crate::worktree::test_fixtures::{add_commit, checkout_new_branch, init_repo_with_origin};
     use tempfile::tempdir;
 
     fn protected() -> Vec<String> {
@@ -449,52 +442,28 @@ mod tests {
             ],
         )
         .await;
-        crate::worktree::test_fixtures::run_cmd(
-            &scratch,
-            &["git", "config", "user.email", "t@t"],
-        )
-        .await;
-        crate::worktree::test_fixtures::run_cmd(
-            &scratch,
-            &["git", "config", "user.name", "t"],
-        )
-        .await;
+        crate::worktree::test_fixtures::run_cmd(&scratch, &["git", "config", "user.email", "t@t"])
+            .await;
+        crate::worktree::test_fixtures::run_cmd(&scratch, &["git", "config", "user.name", "t"])
+            .await;
         crate::worktree::test_fixtures::run_cmd(
             &scratch,
             &["git", "config", "commit.gpgsign", "false"],
         )
         .await;
-        crate::worktree::test_fixtures::run_cmd(
-            &scratch,
-            &["git", "checkout", "feature/a"],
-        )
-        .await;
+        crate::worktree::test_fixtures::run_cmd(&scratch, &["git", "checkout", "feature/a"]).await;
         std::fs::write(scratch.join("a.txt"), "remote-advance").unwrap();
         crate::worktree::test_fixtures::run_cmd(&scratch, &["git", "add", "-A"]).await;
-        crate::worktree::test_fixtures::run_cmd(
-            &scratch,
-            &["git", "commit", "-m", "adv"],
-        )
-        .await;
-        crate::worktree::test_fixtures::run_cmd(
-            &scratch,
-            &["git", "push", "origin", "feature/a"],
-        )
-        .await;
+        crate::worktree::test_fixtures::run_cmd(&scratch, &["git", "commit", "-m", "adv"]).await;
+        crate::worktree::test_fixtures::run_cmd(&scratch, &["git", "push", "origin", "feature/a"])
+            .await;
 
         // Meanwhile A makes a local commit and tries force-with-lease
         // without fetching — the lease check sees stale remote and rejects.
         std::fs::write(work_a.path().join("a.txt"), "A2").unwrap();
-        crate::worktree::test_fixtures::run_cmd(
-            work_a.path(),
-            &["git", "add", "-A"],
-        )
-        .await;
-        crate::worktree::test_fixtures::run_cmd(
-            work_a.path(),
-            &["git", "commit", "-m", "a2"],
-        )
-        .await;
+        crate::worktree::test_fixtures::run_cmd(work_a.path(), &["git", "add", "-A"]).await;
+        crate::worktree::test_fixtures::run_cmd(work_a.path(), &["git", "commit", "-m", "a2"])
+            .await;
         let err = push_branch(
             work_a.path(),
             &PushArgs {

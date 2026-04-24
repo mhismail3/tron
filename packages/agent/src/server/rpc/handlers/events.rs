@@ -1,9 +1,9 @@
 //! Events handlers: getHistory, getSince, subscribe, append.
 
+use crate::events::sqlite::row_types::EventRow;
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
-use crate::events::sqlite::row_types::EventRow;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};

@@ -8,9 +8,9 @@
 use futures::stream::{self, StreamExt};
 use tracing::{error, warn};
 
+use crate::core::events::StreamEvent;
 use crate::llm::provider::{ProviderResult, StreamEventStream};
 use crate::llm::sse::{SseParserOptions, parse_sse_lines};
-use crate::core::events::StreamEvent;
 
 /// Convert an HTTP response's SSE byte stream into a typed [`StreamEventStream`].
 ///

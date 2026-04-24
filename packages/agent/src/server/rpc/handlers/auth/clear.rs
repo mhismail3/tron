@@ -20,10 +20,8 @@ impl MethodHandler for ClearAuthHandler {
 
         let masked_state = ctx
             .run_blocking("auth.clear", move || {
-                let _lock = acquire_auth_file_lock(&auth_path).map_err(|e| {
-                    RpcError::Internal {
-                        message: format!("Failed to acquire auth lock: {e}"),
-                    }
+                let _lock = acquire_auth_file_lock(&auth_path).map_err(|e| RpcError::Internal {
+                    message: format!("Failed to acquire auth lock: {e}"),
                 })?;
 
                 if let Some(ref provider) = provider {
@@ -41,7 +39,10 @@ impl MethodHandler for ClearAuthHandler {
     }
 }
 
-fn clear_service_auth(auth_path: &Path, service: &str) -> Result<(), crate::llm::auth::errors::AuthError> {
+fn clear_service_auth(
+    auth_path: &Path,
+    service: &str,
+) -> Result<(), crate::llm::auth::errors::AuthError> {
     let Some(mut storage) = load_auth_storage(auth_path)? else {
         return Ok(());
     };

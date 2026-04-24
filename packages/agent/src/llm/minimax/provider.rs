@@ -9,6 +9,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tracing::{debug, error, instrument};
 
+use crate::core::messages::Context;
 use crate::llm::anthropic::message_converter::convert_messages;
 use crate::llm::anthropic::message_sanitizer::sanitize_messages;
 use crate::llm::anthropic::stream_handler::{create_stream_state_for, process_sse_event};
@@ -19,7 +20,6 @@ use crate::llm::compose_context_parts;
 use crate::llm::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::core::messages::Context;
 
 use super::types::{
     DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, MiniMaxAuth, MiniMaxConfig, get_minimax_model,

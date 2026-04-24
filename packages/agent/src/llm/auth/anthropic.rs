@@ -4,7 +4,9 @@
 //! loading for the Anthropic API.
 
 use super::errors::AuthError;
-use super::types::{ActiveCredential, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at, now_ms};
+use super::types::{
+    ActiveCredential, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at, now_ms,
+};
 
 /// Default Anthropic OAuth settings (matching `tron login` CLI).
 pub fn default_config() -> OAuthConfig {
@@ -171,8 +173,13 @@ pub async fn load_server_auth_with_credential(
     config: &OAuthConfig,
     credential_override: Option<&ActiveCredential>,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    load_server_auth_with_client(auth_path, config, credential_override, super::shared_auth_client())
-        .await
+    load_server_auth_with_client(
+        auth_path,
+        config,
+        credential_override,
+        super::shared_auth_client(),
+    )
+    .await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
@@ -193,19 +200,11 @@ pub async fn load_server_auth_with_client(
 
     match resolved {
         super::ResolvedCredential::OAuthAccount(acct) => {
-            let (tokens, _refreshed) = maybe_refresh_tokens(
-                auth_path,
-                &acct.label,
-                &acct.oauth,
-                config,
-                client,
-            )
-            .await?;
+            let (tokens, _refreshed) =
+                maybe_refresh_tokens(auth_path, &acct.label, &acct.oauth, config, client).await?;
             Ok(Some(ServerAuth::from_oauth(&tokens)))
         }
-        super::ResolvedCredential::ApiKey(key) => {
-            Ok(Some(ServerAuth::from_api_key(&key.key)))
-        }
+        super::ResolvedCredential::ApiKey(key) => Ok(Some(ServerAuth::from_api_key(&key.key))),
     }
 }
 
@@ -218,10 +217,7 @@ pub async fn load_server_auth_with_client(
 /// as "other process didn't update", so masking a parse error is OK in
 /// this narrow branch. Top-level load paths use `get_provider_auth`
 /// directly and propagate the error.
-fn read_tokens_from_disk(
-    auth_path: &std::path::Path,
-    account_label: &str,
-) -> Option<OAuthTokens> {
+fn read_tokens_from_disk(auth_path: &std::path::Path, account_label: &str) -> Option<OAuthTokens> {
     let pa = super::storage::get_provider_auth(auth_path, "anthropic")
         .ok()
         .flatten()?;
@@ -232,12 +228,11 @@ fn read_tokens_from_disk(
 }
 
 /// Save refreshed tokens back to auth.json (called while holding file lock).
-fn persist_tokens(
-    auth_path: &std::path::Path,
-    account_label: &str,
-    tokens: &OAuthTokens,
-) {
-    tracing::info!(account = account_label, "persisting refreshed Anthropic account tokens");
+fn persist_tokens(auth_path: &std::path::Path, account_label: &str, tokens: &OAuthTokens) {
+    tracing::info!(
+        account = account_label,
+        "persisting refreshed Anthropic account tokens"
+    );
     if let Err(e) =
         super::storage::save_account_oauth_tokens(auth_path, "anthropic", account_label, tokens)
     {
@@ -287,8 +282,7 @@ async fn maybe_refresh_tokens(
     }
 
     // Acquire file lock (cross-process safety)
-    let _file_lock = super::storage::acquire_auth_file_lock(auth_path)
-        .map_err(AuthError::Io)?;
+    let _file_lock = super::storage::acquire_auth_file_lock(auth_path).map_err(AuthError::Io)?;
 
     // Re-read from disk — another process may have refreshed while we waited.
     // Also prefer disk tokens for refresh (may have a newer refresh_token).
@@ -318,9 +312,7 @@ async fn maybe_refresh_tokens(
                     let client = client.clone();
                     let config = config.clone();
                     let refresh_tok = refresh_tok.to_owned();
-                    async move {
-                        refresh_token_with_client(&config, &refresh_tok, &client).await
-                    }
+                    async move { refresh_token_with_client(&config, &refresh_tok, &client).await }
                 },
             )
             .await
@@ -329,11 +321,7 @@ async fn maybe_refresh_tokens(
 
     match do_refresh(&effective_tokens).await {
         Ok((new_tokens, true)) => {
-            persist_tokens(
-                &auth_path,
-                &account_label_owned,
-                &new_tokens,
-            );
+            persist_tokens(&auth_path, &account_label_owned, &new_tokens);
             Ok((new_tokens, true))
         }
         Ok(not_refreshed) => Ok(not_refreshed),
@@ -342,18 +330,12 @@ async fn maybe_refresh_tokens(
 
             let retry_tokens = read_tokens_from_disk(&auth_path, &account_label_owned);
             match retry_tokens {
-                Some(rt) if now_ms() + buffer_ms < rt.expires_at => {
-                    Ok((rt, true))
-                }
+                Some(rt) if now_ms() + buffer_ms < rt.expires_at => Ok((rt, true)),
                 Some(rt) => {
                     tracing::info!("retrying refresh with updated token from disk");
                     match do_refresh(&rt).await {
                         Ok((new_tokens, true)) => {
-                            persist_tokens(
-                                &auth_path,
-                                &account_label_owned,
-                                &new_tokens,
-                            );
+                            persist_tokens(&auth_path, &account_label_owned, &new_tokens);
                             Ok((new_tokens, true))
                         }
                         Ok(not_refreshed) => Ok(not_refreshed),
@@ -415,7 +397,13 @@ mod tests {
         let path = dir.path().join("auth.json");
 
         // Save API key to auth.json
-        crate::llm::auth::storage::save_named_api_key(&path, "anthropic", "(default)", "sk-file-key").unwrap();
+        crate::llm::auth::storage::save_named_api_key(
+            &path,
+            "anthropic",
+            "(default)",
+            "sk-file-key",
+        )
+        .unwrap();
         let cfg = default_config();
 
         let result = load_server_auth(&path, &cfg).await.unwrap();
@@ -428,7 +416,8 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: now_ms() + 3_600_000,
         };
-        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &tokens)
+            .unwrap();
 
         let result = load_server_auth(&path, &cfg).await.unwrap();
         let auth = result.unwrap();
@@ -441,7 +430,8 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
 
-        crate::llm::auth::storage::save_named_api_key(&path, "anthropic", "(default)", "sk-123").unwrap();
+        crate::llm::auth::storage::save_named_api_key(&path, "anthropic", "(default)", "sk-123")
+            .unwrap();
         let cfg = default_config();
 
         let result = load_server_auth(&path, &cfg).await.unwrap();
@@ -471,7 +461,8 @@ mod tests {
             refresh_token: "ref".to_string(),
             expires_at: now_ms() + 3_600_000, // 1 hour from now
         };
-        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &tokens).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &tokens)
+            .unwrap();
 
         let cfg = default_config();
         let result = load_server_auth(&path, &cfg).await.unwrap();
@@ -491,11 +482,21 @@ mod tests {
             refresh_token: "old-ref".to_string(),
             expires_at: 0, // long expired
         };
-        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &expired_tokens)
-            .unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path,
+            "anthropic",
+            "test",
+            &expired_tokens,
+        )
+        .unwrap();
         // Also save an API key (should NOT be used as fallback)
-        crate::llm::auth::storage::save_named_api_key(&path, "anthropic", "(default)", "sk-should-not-use")
-            .unwrap();
+        crate::llm::auth::storage::save_named_api_key(
+            &path,
+            "anthropic",
+            "(default)",
+            "sk-should-not-use",
+        )
+        .unwrap();
 
         let cfg = default_config();
         let result = load_server_auth(&path, &cfg).await;
@@ -524,8 +525,13 @@ mod tests {
         };
         crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "work", &tokens1)
             .unwrap();
-        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "personal", &tokens2)
-            .unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path,
+            "anthropic",
+            "personal",
+            &tokens2,
+        )
+        .unwrap();
 
         let cfg = default_config();
         let result = load_server_auth(&path, &cfg).await.unwrap();
@@ -543,9 +549,8 @@ mod tests {
             refresh_token: "ref-alice".to_string(),
             expires_at: now_ms() + 3_600_000,
         };
-        crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "alice", &tokens,
-        ).unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "alice", &tokens)
+            .unwrap();
 
         let cfg = default_config();
         let result = load_server_auth(&path, &cfg).await.unwrap();
@@ -576,9 +581,9 @@ mod tests {
             status: 503,
             message: "server_error".to_string(),
         }));
-        assert!(!is_stale_token_error(&AuthError::Io(std::io::Error::other(
-            "test",
-        ))));
+        assert!(!is_stale_token_error(&AuthError::Io(
+            std::io::Error::other("test",)
+        )));
     }
 
     #[test]
@@ -592,7 +597,10 @@ mod tests {
             expires_at: now_ms() + 3_600_000,
         };
         crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "user@host", &tokens,
+            &path,
+            "anthropic",
+            "user@host",
+            &tokens,
         )
         .unwrap();
 
@@ -614,7 +622,10 @@ mod tests {
             expires_at: 0,
         };
         crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "user@host", &expired,
+            &path,
+            "anthropic",
+            "user@host",
+            &expired,
         )
         .unwrap();
 
@@ -625,16 +636,18 @@ mod tests {
             expires_at: now_ms() + 3_600_000,
         };
         crate::llm::auth::storage::save_account_oauth_tokens(
-            &path, "anthropic", "user@host", &fresh,
+            &path,
+            "anthropic",
+            "user@host",
+            &fresh,
         )
         .unwrap();
 
         let cfg = default_config();
         let client = reqwest::Client::new();
-        let (tokens, refreshed) =
-            maybe_refresh_tokens(&path, "user@host", &expired, &cfg, &client)
-                .await
-                .unwrap();
+        let (tokens, refreshed) = maybe_refresh_tokens(&path, "user@host", &expired, &cfg, &client)
+            .await
+            .unwrap();
 
         // Should return the fresh tokens from disk without making HTTP call
         assert!(refreshed);

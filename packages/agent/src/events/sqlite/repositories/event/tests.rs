@@ -163,8 +163,7 @@ fn get_by_session() {
         EventRepo::insert(&conn, &event).unwrap();
     }
 
-    let events =
-        EventRepo::get_by_session(&conn, "sess_1", &ListEventsOptions::default()).unwrap();
+    let events = EventRepo::get_by_session(&conn, "sess_1", &ListEventsOptions::default()).unwrap();
     assert_eq!(events.len(), 5);
     assert_eq!(events[0].sequence, 1);
     assert_eq!(events[4].sequence, 5);
@@ -573,8 +572,7 @@ fn get_by_workspace_and_types_basic() {
     .unwrap();
 
     let types = ["message.user"];
-    let results =
-        EventRepo::get_by_workspace_and_types(&conn, "ws_1", &types, None, None).unwrap();
+    let results = EventRepo::get_by_workspace_and_types(&conn, "ws_1", &types, None, None).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].id, "evt_1");
 }
@@ -582,8 +580,7 @@ fn get_by_workspace_and_types_basic() {
 #[test]
 fn get_by_workspace_and_types_empty_types() {
     let conn = setup();
-    let results =
-        EventRepo::get_by_workspace_and_types(&conn, "ws_1", &[], None, None).unwrap();
+    let results = EventRepo::get_by_workspace_and_types(&conn, "ws_1", &[], None, None).unwrap();
     assert!(results.is_empty());
 }
 
@@ -752,8 +749,7 @@ fn get_by_workspaces_and_types_excludes_others() {
 fn get_by_workspaces_and_types_empty_ids() {
     let conn = setup();
     let results =
-        EventRepo::get_by_workspaces_and_types(&conn, &[], &["message.user"], None, None)
-            .unwrap();
+        EventRepo::get_by_workspaces_and_types(&conn, &[], &["message.user"], None, None).unwrap();
     assert!(results.is_empty());
 }
 
@@ -817,8 +813,7 @@ fn count_by_workspaces_and_types_basic() {
 #[test]
 fn count_by_workspaces_and_types_empty_ids() {
     let conn = setup();
-    let count =
-        EventRepo::count_by_workspaces_and_types(&conn, &[], &["message.user"]).unwrap();
+    let count = EventRepo::count_by_workspaces_and_types(&conn, &[], &["message.user"]).unwrap();
     assert_eq!(count, 0);
 }
 
@@ -884,8 +879,7 @@ fn get_all_by_types_with_limit_offset() {
         .unwrap();
     }
 
-    let results =
-        EventRepo::get_all_by_types(&conn, &["message.user"], Some(2), Some(1)).unwrap();
+    let results = EventRepo::get_all_by_types(&conn, &["message.user"], Some(2), Some(1)).unwrap();
     assert_eq!(results.len(), 2);
 }
 
@@ -1209,11 +1203,13 @@ fn query_events_by_model() {
     )
     .unwrap();
 
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM events WHERE session_id = 'sess_1' AND model = 'claude-opus-4-6'",
-        [],
-        |row| row.get(0),
-    ).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM events WHERE session_id = 'sess_1' AND model = 'claude-opus-4-6'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(
         count, 2,
         "should find exactly 2 events with claude-opus-4-6 model"

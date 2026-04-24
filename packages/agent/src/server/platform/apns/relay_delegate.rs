@@ -121,12 +121,7 @@ mod tests {
         Arc::new(EventStore::new(pool))
     }
 
-    fn register(
-        store: &EventStore,
-        token: &str,
-        env: &str,
-        bundle: &str,
-    ) {
+    fn register(store: &EventStore, token: &str, env: &str, bundle: &str) {
         let conn = store.pool().get().unwrap();
         DeviceTokenRepo::register(&conn, token, None, None, env, bundle).unwrap();
     }

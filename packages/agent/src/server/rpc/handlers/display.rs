@@ -52,13 +52,17 @@ impl MethodHandler for StopStreamHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::runtime::orchestrator::process_manager::ProcessManager;
+    use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::tools::traits::{ManagedProcessConfig, ProcessKind, ProcessManagerOps};
     use serde_json::json;
     use std::sync::Arc;
 
-    fn boxed_delayed(ms: u64) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::tools::traits::ManagedProcessResult> + Send>> {
+    fn boxed_delayed(
+        ms: u64,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = crate::tools::traits::ManagedProcessResult> + Send>,
+    > {
         Box::pin(async move {
             tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
             crate::tools::traits::ManagedProcessResult {
@@ -84,7 +88,10 @@ mod tests {
             blocking_timeout_ms: None,
             sandbox: false,
         };
-        let _ = pm.spawn_managed("sess-1", "tc1", config, boxed_delayed(5000)).await.unwrap();
+        let _ = pm
+            .spawn_managed("sess-1", "tc1", config, boxed_delayed(5000))
+            .await
+            .unwrap();
 
         let mut ctx = make_test_context();
         ctx.process_manager = Some(pm);

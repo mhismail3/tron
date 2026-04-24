@@ -27,14 +27,16 @@ static DANGER_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     .map(|p| Regex::new(p).expect("danger pattern must compile"))
     .collect()
 });
-use serde_json::{Value, json};
 use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
+use serde_json::{Value, json};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{BlobStore, ProcessOptions, ProcessRunner, ToolContext, TronTool};
 use crate::tools::utils::schema::ToolSchemaBuilder;
 use crate::tools::utils::truncation::estimate_tokens;
-use crate::tools::utils::validation::{get_optional_bool, get_optional_string, get_optional_u64, validate_required_string};
+use crate::tools::utils::validation::{
+    get_optional_bool, get_optional_string, get_optional_u64, validate_required_string,
+};
 
 const DEFAULT_BLOCKING_TIMEOUT_MS: u64 = 60_000;
 const MAX_BLOCKING_TIMEOUT_MS: u64 = 600_000;
@@ -45,7 +47,7 @@ const INTERACTIVE_DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const MAX_OUTPUT_CHARS: usize = 5_000_000;
 
 use crate::tools::utils::truncation::{
-    safe_char_boundary, truncate_head_tail, HEAD_CHARS, INLINE_OUTPUT_LIMIT, TAIL_CHARS,
+    HEAD_CHARS, INLINE_OUTPUT_LIMIT, TAIL_CHARS, safe_char_boundary, truncate_head_tail,
 };
 
 /// The `Bash` tool executes shell commands.
@@ -101,12 +103,19 @@ impl BashTool {
                 }
             }
             // Suspicious: hidden directory path (e.g., ~/.malware/bin)
-            if seg.contains("/.") && !seg.contains("/.tron") && !seg.contains("/.cargo")
-                && !seg.contains("/.local") && !seg.contains("/.nvm")
-                && !seg.contains("/.npm") && !seg.contains("/.bun")
-                && !seg.contains("/.pyenv") && !seg.contains("/.rbenv")
-                && !seg.contains("/.rustup") && !seg.contains("/.volta")
-                && !seg.contains("/.go") && !seg.contains("/.deno")
+            if seg.contains("/.")
+                && !seg.contains("/.tron")
+                && !seg.contains("/.cargo")
+                && !seg.contains("/.local")
+                && !seg.contains("/.nvm")
+                && !seg.contains("/.npm")
+                && !seg.contains("/.bun")
+                && !seg.contains("/.pyenv")
+                && !seg.contains("/.rbenv")
+                && !seg.contains("/.rustup")
+                && !seg.contains("/.volta")
+                && !seg.contains("/.go")
+                && !seg.contains("/.deno")
             {
                 return true;
             }
@@ -148,7 +157,9 @@ impl BashTool {
         })?;
 
         // Kill timeout: 2x blocking timeout, minimum 120s, capped at 1 hour.
-        let kill_timeout_ms = (blocking_timeout_ms * 2).max(MIN_KILL_TIMEOUT_MS).min(MAX_KILL_TIMEOUT_MS);
+        let kill_timeout_ms = (blocking_timeout_ms * 2)
+            .max(MIN_KILL_TIMEOUT_MS)
+            .min(MAX_KILL_TIMEOUT_MS);
 
         let config = crate::tools::traits::ManagedProcessConfig {
             label: command.to_owned(),
@@ -181,7 +192,7 @@ impl BashTool {
         let forwarder_tool_call_id = ctx.tool_call_id.clone();
         let forwarder_session_id = ctx.session_id.clone();
         let forwarder_turn = ctx.turn;
-        let _ = tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let mut throttle = ProgressThrottle::default();
             while let Some(chunk) = output_rx.recv().await {
                 buffer_for_forwarder.push(chunk.clone());
@@ -213,7 +224,7 @@ impl BashTool {
                 }
             }
             buffer_for_forwarder.close();
-        });
+        }));
 
         let runner = self.runner.clone();
         let cmd = command.to_owned();
@@ -222,7 +233,11 @@ impl BashTool {
         let working_dir = ctx.working_directory.clone();
         let cancel = ctx.cancellation.clone();
 
-        let task: std::pin::Pin<Box<dyn std::future::Future<Output = crate::tools::traits::ManagedProcessResult> + Send>> = Box::pin(async move {
+        let task: std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = crate::tools::traits::ManagedProcessResult> + Send,
+            >,
+        > = Box::pin(async move {
             let start = std::time::Instant::now();
             let opts = ProcessOptions {
                 working_directory: working_dir,
@@ -240,7 +255,9 @@ impl BashTool {
                 Ok(output) => {
                     let mut combined = output.stdout;
                     if !output.stderr.is_empty() {
-                        if !combined.is_empty() { combined.push('\n'); }
+                        if !combined.is_empty() {
+                            combined.push('\n');
+                        }
                         combined.push_str(&output.stderr);
                     }
                     crate::tools::traits::ManagedProcessResult {
@@ -268,12 +285,7 @@ impl BashTool {
         });
 
         let handle = pm
-            .spawn_managed(
-                &ctx.session_id,
-                &ctx.tool_call_id,
-                config,
-                task,
-            )
+            .spawn_managed(&ctx.session_id, &ctx.tool_call_id, config, task)
             .await?;
 
         let process_id = handle.process_id.clone();
@@ -287,9 +299,14 @@ impl BashTool {
             Some(result) if result.user_cancelled => {
                 // User interrupted from iOS — tell the agent not to retry.
                 let output = if result.output.is_empty() {
-                    format!("[Interrupted by user] Command `{command}` was cancelled. Do not retry — the user intentionally stopped this command.")
+                    format!(
+                        "[Interrupted by user] Command `{command}` was cancelled. Do not retry — the user intentionally stopped this command."
+                    )
                 } else {
-                    format!("{}\n\n[Interrupted by user] Command was cancelled.", result.output)
+                    format!(
+                        "{}\n\n[Interrupted by user] Command was cancelled.",
+                        result.output
+                    )
                 };
 
                 Ok(TronToolResult {
@@ -310,11 +327,8 @@ impl BashTool {
             Some(result) => {
                 // Completed within blocking timeout — inline the result.
                 let exit_code = result.exit_code.unwrap_or(-1);
-                let error_class = classify_bash_error(
-                    result.exit_code,
-                    &result.output,
-                    result.timed_out,
-                );
+                let error_class =
+                    classify_bash_error(result.exit_code, &result.output, result.timed_out);
                 let mut details = json!({
                     "command": command,
                     "exitCode": exit_code,
@@ -336,7 +350,8 @@ impl BashTool {
             }
             None => {
                 // Backgrounded — process continues running.
-                let user_initiated = handle.backgrounded == Some(crate::tools::traits::BackgroundReason::UserAction);
+                let user_initiated =
+                    handle.backgrounded == Some(crate::tools::traits::BackgroundReason::UserAction);
                 let message = if user_initiated {
                     format!(
                         "[Backgrounded by user] Process {process_id}\nCommand: {command}\n\n\
@@ -453,7 +468,14 @@ fn last_stdout_line_for_progress(chunk: &str) -> String {
 fn is_sensitive_prompt(prompt: &str) -> bool {
     let lower = prompt.to_lowercase();
     // Single-word triggers (unambiguous)
-    let single_words = ["password", "passphrase", "secret", "token", "credential", "pin"];
+    let single_words = [
+        "password",
+        "passphrase",
+        "secret",
+        "token",
+        "credential",
+        "pin",
+    ];
     for word in single_words {
         if lower.contains(word) {
             return true;
@@ -468,7 +490,6 @@ fn is_sensitive_prompt(prompt: &str) -> bool {
     }
     false
 }
-
 
 #[async_trait]
 impl TronTool for BashTool {
@@ -537,9 +558,18 @@ impl TronTool for BashTool {
             "Execute a shell command. Returns stdout/stderr. \
              Commands timeout after `timeout` ms (default 60000).",
         )
-        .required_property("command", json!({"type": "string", "description": "The command to execute"}))
-        .property("timeout", json!({"type": "number", "description": "Timeout in ms (default 60000)"}))
-        .property("description", json!({"type": "string", "description": "What the command does"}))
+        .required_property(
+            "command",
+            json!({"type": "string", "description": "The command to execute"}),
+        )
+        .property(
+            "timeout",
+            json!({"type": "number", "description": "Timeout in ms (default 60000)"}),
+        )
+        .property(
+            "description",
+            json!({"type": "string", "description": "What the command does"}),
+        )
         .build()
     }
 
@@ -588,8 +618,7 @@ impl TronTool for BashTool {
             ));
         }
 
-        let shell = get_optional_string(&params, "shell")
-            .unwrap_or_else(|| "bash".to_string());
+        let shell = get_optional_string(&params, "shell").unwrap_or_else(|| "bash".to_string());
 
         // Validate shell
         let shell = match shell.as_str() {
@@ -617,8 +646,8 @@ impl TronTool for BashTool {
 
         // Interactive mode: shorter default timeout, capped at PTY_MAX_TIMEOUT_MS
         let timeout_ms = if interactive {
-            let base = get_optional_u64(&params, "timeout")
-                .unwrap_or(INTERACTIVE_DEFAULT_TIMEOUT_MS);
+            let base =
+                get_optional_u64(&params, "timeout").unwrap_or(INTERACTIVE_DEFAULT_TIMEOUT_MS);
             base.min(PTY_MAX_TIMEOUT_MS)
         } else {
             timeout_ms
@@ -634,9 +663,7 @@ impl TronTool for BashTool {
 
         if !direct_run {
             return self
-                .execute_managed(
-                    &command, timeout_ms, &description, &shell, &env_vars, ctx,
-                )
+                .execute_managed(&command, timeout_ms, &description, &shell, &env_vars, ctx)
                 .await;
         }
 
@@ -644,7 +671,12 @@ impl TronTool for BashTool {
         let sandbox_mounts: Vec<String> = params
             .get("sandboxMounts")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
             .unwrap_or_default();
 
         // If sandbox mode is enabled, create a sandbox workspace and override working_directory
@@ -652,8 +684,8 @@ impl TronTool for BashTool {
         let mut active_sandbox_mode: Option<&str> = None;
         let sandbox_workspace = if let Some(sandbox_val) = sandbox_mode {
             // Handle both boolean true and string "true" from LLMs
-            let is_lightweight = sandbox_val.as_bool() == Some(true)
-                || sandbox_val.as_str() == Some("true");
+            let is_lightweight =
+                sandbox_val.as_bool() == Some(true) || sandbox_val.as_str() == Some("true");
             let is_docker = sandbox_val.as_str() == Some("docker");
 
             if is_lightweight {
@@ -671,14 +703,18 @@ impl TronTool for BashTool {
                 // Apply settings: use configured default image and network
                 let docker_config = crate::tools::system::sandbox::DockerSandboxConfig {
                     image: self.sandbox_default_image.clone(),
-                    mounts: sandbox_mounts.iter().map(|m| (m.clone(), m.clone(), "ro".to_string())).collect(),
+                    mounts: sandbox_mounts
+                        .iter()
+                        .map(|m| (m.clone(), m.clone(), "ro".to_string()))
+                        .collect(),
                     network: self.sandbox_network_enabled,
                     ..Default::default()
                 };
                 if let Err(e) = crate::tools::system::sandbox::check_docker_available().await {
                     return Ok(error_result(e));
                 }
-                let docker_cmd = crate::tools::system::sandbox::build_docker_command(&command, &docker_config);
+                let docker_cmd =
+                    crate::tools::system::sandbox::build_docker_command(&command, &docker_config);
                 // Replace command with docker command, run normally
                 let opts = ProcessOptions {
                     working_directory: ctx.working_directory.clone(),
@@ -694,10 +730,16 @@ impl TronTool for BashTool {
                 let docker_output = self.runner.run_command(&docker_cmd, &opts).await?;
                 let mut combined = docker_output.stdout;
                 if !docker_output.stderr.is_empty() {
-                    if !combined.is_empty() { combined.push('\n'); }
+                    if !combined.is_empty() {
+                        combined.push('\n');
+                    }
                     combined.push_str(&docker_output.stderr);
                 }
-                let is_error = if docker_output.exit_code != 0 { Some(true) } else { None };
+                let is_error = if docker_output.exit_code != 0 {
+                    Some(true)
+                } else {
+                    None
+                };
                 let docker_error_class = classify_bash_error(
                     Some(docker_output.exit_code),
                     &docker_output.stderr,
@@ -765,11 +807,8 @@ impl TronTool for BashTool {
         }
 
         // Classify error before consuming stderr below.
-        let error_class = classify_bash_error(
-            Some(output.exit_code),
-            &output.stderr,
-            output.timed_out,
-        );
+        let error_class =
+            classify_bash_error(Some(output.exit_code), &output.stderr, output.timed_out);
         let timed_out_flag = output.timed_out;
 
         // Combine stdout + stderr
@@ -856,7 +895,6 @@ impl TronTool for BashTool {
         })
     }
 }
-
 
 #[cfg(test)]
 #[path = "bash_tests.rs"]

@@ -523,10 +523,7 @@ mod tests {
             .iter()
             .position(|p| p.contains("Follow @browser"))
             .unwrap();
-        let skill_idx = parts
-            .iter()
-            .position(|p| p.contains("<skills>"))
-            .unwrap();
+        let skill_idx = parts.iter().position(|p| p.contains("<skills>")).unwrap();
         assert!(activation_idx < skill_idx);
     }
 
@@ -544,12 +541,7 @@ mod tests {
                 .iter()
                 .any(|p| p.contains("Follow @browser"))
         );
-        assert!(
-            !grouped
-                .stable
-                .iter()
-                .any(|p| p.contains("Follow @browser"))
-        );
+        assert!(!grouped.stable.iter().any(|p| p.contains("Follow @browser")));
     }
 
     #[test]

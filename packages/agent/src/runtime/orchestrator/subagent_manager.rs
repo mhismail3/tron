@@ -6,22 +6,22 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::core::events::{BaseEvent, TronEvent};
+use crate::events::{EventStore, EventType};
+use crate::llm::provider::ProviderFactory;
 use crate::runtime::guardrails::GuardrailEngine;
 use crate::runtime::hooks::engine::HookEngine;
+use crate::tools::errors::ToolError;
+use crate::tools::registry::ToolRegistry;
+use crate::tools::traits::{
+    SubagentConfig, SubagentHandle, SubagentMode, SubagentResult, SubagentSpawner, WaitMode,
+};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
-use crate::core::events::{BaseEvent, TronEvent};
-use crate::events::{EventStore, EventType};
-use crate::llm::provider::ProviderFactory;
-use crate::tools::errors::ToolError;
-use crate::tools::registry::ToolRegistry;
-use crate::tools::traits::{
-    SubagentConfig, SubagentHandle, SubagentMode, SubagentResult, SubagentSpawner, WaitMode,
-};
 
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::orchestrator::session_manager::SessionManager;
@@ -166,7 +166,8 @@ pub struct SubagentManager {
     /// enforced on the spawned child. INVARIANT: if unset, `skills` on a
     /// `SubagentConfig` are silently ignored (documented as a wiring
     /// pitfall — see `main.rs::build_services` for the canonical setup).
-    skill_registry: std::sync::OnceLock<Arc<parking_lot::RwLock<crate::skills::registry::SkillRegistry>>>,
+    skill_registry:
+        std::sync::OnceLock<Arc<parking_lot::RwLock<crate::skills::registry::SkillRegistry>>>,
 }
 
 impl SubagentManager {
@@ -398,10 +399,7 @@ impl SubagentManager {
         });
 
         if let Some(timeout) = config.blocking_timeout_ms {
-            if let Some(result) = self
-                .wait_for_tracker_result(&tracker, timeout)
-                .await?
-            {
+            if let Some(result) = self.wait_for_tracker_result(&tracker, timeout).await? {
                 if result.status == "failed" {
                     return Err(ToolError::Internal {
                         message: result.output,
@@ -595,7 +593,11 @@ impl SubagentSpawner for SubagentManager {
         });
 
         if let Some(timeout) = config.blocking_timeout_ms {
-            let effective_timeout = if timeout > 0 { timeout } else { config.timeout_ms };
+            let effective_timeout = if timeout > 0 {
+                timeout
+            } else {
+                config.timeout_ms
+            };
             if let Some(result) = self
                 .wait_for_tracker_result(&tracker, effective_timeout)
                 .await?
@@ -659,7 +661,10 @@ impl crate::tools::traits::SubagentOps for SubagentManager {
             .await
     }
 
-    fn get_subagent_result(&self, session_id: &str) -> Option<crate::tools::traits::SubagentResult> {
+    fn get_subagent_result(
+        &self,
+        session_id: &str,
+    ) -> Option<crate::tools::traits::SubagentResult> {
         self.subagents
             .get(session_id)
             .and_then(|t| t.result.lock().clone())
@@ -675,7 +680,6 @@ fn truncate(s: &str, max: usize) -> &str {
 fn elapsed_ms(start: &Instant) -> u64 {
     start.elapsed().as_millis() as u64
 }
-
 
 #[cfg(test)]
 #[path = "subagent_manager_tests.rs"]

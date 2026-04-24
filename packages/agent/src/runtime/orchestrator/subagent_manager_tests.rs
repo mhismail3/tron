@@ -1,7 +1,4 @@
 use super::*;
-use crate::runtime::agent::event_emitter::EventEmitter;
-use async_trait::async_trait;
-use futures::stream;
 use crate::core::content::AssistantContent;
 use crate::core::events::{AssistantMessage, StreamEvent};
 use crate::core::messages::TokenUsage;
@@ -9,6 +6,9 @@ use crate::llm::models::types::Provider as ProviderKind;
 use crate::llm::provider::{
     Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
 };
+use crate::runtime::agent::event_emitter::EventEmitter;
+use async_trait::async_trait;
+use futures::stream;
 
 struct MockProvider;
 #[async_trait]
@@ -119,10 +119,7 @@ fn make_subagent_manager(
     struct FixedProviderFactory(Arc<dyn Provider>);
     #[async_trait]
     impl ProviderFactory for FixedProviderFactory {
-        async fn create_for_model(
-            &self,
-            _model: &str,
-        ) -> Result<Arc<dyn Provider>, ProviderError> {
+        async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
             Ok(self.0.clone())
         }
     }
@@ -508,9 +505,15 @@ async fn spawn_subsession_error_provider() {
     let (manager, _, _) = make_subagent_manager(Arc::new(ErrorProvider));
     let config = make_subsession_config("summarize", "parent-001");
     let result = manager.spawn_subsession(config).await;
-    assert!(result.is_err(), "provider error should produce Err, not Ok with error as output");
+    assert!(
+        result.is_err(),
+        "provider error should produce Err, not Ok with error as output"
+    );
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("expired"), "error should contain provider message, got: {err_msg}");
+    assert!(
+        err_msg.contains("expired"),
+        "error should contain provider message, got: {err_msg}"
+    );
 }
 
 #[tokio::test]
@@ -573,7 +576,10 @@ async fn spawn_subsession_provider_creation_failure_ends_child_session() {
         .spawn_subsession(make_subsession_config("task", "parent-001"))
         .await;
 
-    assert!(result.is_err(), "provider creation failure should produce Err");
+    assert!(
+        result.is_err(),
+        "provider creation failure should produce Err"
+    );
     let err_msg = result.unwrap_err().to_string();
     assert!(
         err_msg.contains("Provider creation failed"),

@@ -37,7 +37,8 @@ impl MethodHandler for ActivateHandler {
         let skill_name = require_string_param(params.as_ref(), "skillName")?;
 
         // Verify session exists
-        let _ = ctx.session_manager
+        let _ = ctx
+            .session_manager
             .get_session(&session_id)
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
@@ -50,10 +51,12 @@ impl MethodHandler for ActivateHandler {
         // Look up skill in registry
         let (source, service, tokens) = {
             let registry = ctx.skill_registry.read();
-            let skill = registry.get(&skill_name).ok_or_else(|| RpcError::NotFound {
-                code: errors::NOT_FOUND.into(),
-                message: format!("Skill '{skill_name}' not found"),
-            })?;
+            let skill = registry
+                .get(&skill_name)
+                .ok_or_else(|| RpcError::NotFound {
+                    code: errors::NOT_FOUND.into(),
+                    message: format!("Skill '{skill_name}' not found"),
+                })?;
             (
                 skill.source.to_string(),
                 skill.service.clone(),
@@ -120,7 +123,8 @@ impl MethodHandler for DeactivateHandler {
         let skill_name = require_string_param(params.as_ref(), "skillName")?;
 
         // Verify session exists
-        let _ = ctx.session_manager
+        let _ = ctx
+            .session_manager
             .get_session(&session_id)
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
@@ -178,7 +182,8 @@ impl MethodHandler for ActiveHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
         // Verify session exists
-        let _ = ctx.session_manager
+        let _ = ctx
+            .session_manager
             .get_session(&session_id)
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
@@ -484,10 +489,7 @@ mod tests {
 
         let skills = result["skills"].as_array().unwrap();
         assert_eq!(skills.len(), 2);
-        let names: Vec<&str> = skills
-            .iter()
-            .map(|s| s["name"].as_str().unwrap())
-            .collect();
+        let names: Vec<&str> = skills.iter().map(|s| s["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"browser"));
         assert!(names.contains(&"git"));
     }
@@ -522,7 +524,11 @@ mod tests {
             .await
             .unwrap();
 
-        let tracker = reconstruct_tracker(&ctx.event_store, &session_id, &crate::settings::types::CompactionPolicy::ClearAll);
+        let tracker = reconstruct_tracker(
+            &ctx.event_store,
+            &session_id,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
         assert!(tracker.has_skill("browser"));
         assert_eq!(tracker.count(), 1);
     }
@@ -545,7 +551,11 @@ mod tests {
             .unwrap();
 
         // Verify active
-        let tracker = reconstruct_tracker(&ctx.event_store, &session_id, &crate::settings::types::CompactionPolicy::ClearAll);
+        let tracker = reconstruct_tracker(
+            &ctx.event_store,
+            &session_id,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
         assert!(tracker.has_skill("browser"));
 
         // Deactivate
@@ -558,7 +568,11 @@ mod tests {
             .unwrap();
 
         // Verify not active, pending removal
-        let tracker = reconstruct_tracker(&ctx.event_store, &session_id, &crate::settings::types::CompactionPolicy::ClearAll);
+        let tracker = reconstruct_tracker(
+            &ctx.event_store,
+            &session_id,
+            &crate::settings::types::CompactionPolicy::ClearAll,
+        );
         assert!(!tracker.has_skill("browser"));
         assert!(tracker.pending_removal_notices().contains("browser"));
     }
@@ -666,12 +680,9 @@ mod tests {
             .unwrap();
 
         let registry = ctx.skill_registry.read();
-        let payload = collect_pending_skill_payloads(
-            &ctx.event_store,
-            &session_id,
-            Some(&*registry),
-        )
-        .expect("skills_json should be Some");
+        let payload =
+            collect_pending_skill_payloads(&ctx.event_store, &session_id, Some(&*registry))
+                .expect("skills_json should be Some");
         let arr = payload.as_array().unwrap();
         let probe = arr.iter().find(|s| s["name"] == "probe").unwrap();
         assert_eq!(probe["service"], "claude");
@@ -698,12 +709,9 @@ mod tests {
         let _ = ctx.skill_registry.write().remove("ephemeral");
 
         let registry = ctx.skill_registry.read();
-        let payload = collect_pending_skill_payloads(
-            &ctx.event_store,
-            &session_id,
-            Some(&*registry),
-        )
-        .expect("skills_json should be Some");
+        let payload =
+            collect_pending_skill_payloads(&ctx.event_store, &session_id, Some(&*registry))
+                .expect("skills_json should be Some");
         let arr = payload.as_array().unwrap();
         let skill = arr.iter().find(|s| s["name"] == "ephemeral").unwrap();
         assert_eq!(skill["service"], "unknown");

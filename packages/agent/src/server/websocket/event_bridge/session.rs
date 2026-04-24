@@ -1,5 +1,5 @@
-use serde_json::json;
 use crate::core::events::TronEvent;
+use serde_json::json;
 
 use super::routed::{BridgedEvent, global, session_scoped, set_opt};
 
@@ -13,7 +13,11 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             }
             Some(global(event, "agent.complete", Some(data)))
         }
-        TronEvent::AgentReady { .. } => Some(global(event, "agent.ready", Some(json!({ "agentPhase": "idle" })))),
+        TronEvent::AgentReady { .. } => Some(global(
+            event,
+            "agent.ready",
+            Some(json!({ "agentPhase": "idle" })),
+        )),
         TronEvent::Error {
             error,
             context,
@@ -183,10 +187,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "eventId": event_id,
             })),
         )),
-        TronEvent::MemoryAutoRetainTriggered {
-            interval_fired,
-            ..
-        } => Some(session_scoped(
+        TronEvent::MemoryAutoRetainTriggered { interval_fired, .. } => Some(session_scoped(
             event,
             "agent.memory_auto_retain_triggered",
             Some(json!({
@@ -486,7 +487,11 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             });
             set_opt(&mut data, "mergeCommit", merge_commit);
             set_opt(&mut data, "oldBranchDeleteError", old_branch_delete_error);
-            Some(session_scoped(event, "worktree.session_finalized", Some(data)))
+            Some(session_scoped(
+                event,
+                "worktree.session_finalized",
+                Some(data),
+            ))
         }
         TronEvent::WorktreeMergeStarted {
             source_branch,
@@ -619,9 +624,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             })),
         )),
         TronEvent::WorktreePostRebaseStashConflict {
-            stash_ref,
-            paths,
-            ..
+            stash_ref, paths, ..
         } => Some(session_scoped(
             event,
             "worktree.post_rebase_stash_conflict",

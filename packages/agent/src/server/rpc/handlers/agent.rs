@@ -1,10 +1,10 @@
 //! Agent handlers: prompt, abort.
 
+#[cfg(test)]
+use crate::events::EventType;
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
-#[cfg(test)]
-use crate::events::EventType;
 
 use crate::server::rpc::agent_commands::AgentCommandService;
 use crate::server::rpc::context::RpcContext;
@@ -86,7 +86,10 @@ impl MethodHandler for PromptHandler {
         // Failures are logged but never propagated: the user's prompt must not
         // fail because history couldn't be written. Prompt text is never logged.
         let source = opt_string(params.as_ref(), "source");
-        let is_cron = source.as_deref().map(|s| s.starts_with("cron")).unwrap_or(false);
+        let is_cron = source
+            .as_deref()
+            .map(|s| s.starts_with("cron"))
+            .unwrap_or(false);
         let prompt_library_settings = crate::settings::get_settings().prompt_library.clone();
         if !is_cron && prompt_library_settings.history_enabled {
             let pool = ctx.event_store.pool().clone();
@@ -164,7 +167,10 @@ pub struct AbortToolHandler;
 
 #[async_trait]
 impl MethodHandler for AbortToolHandler {
-    #[instrument(skip(self, ctx), fields(method = "agent.abortTool", session_id, tool_call_id))]
+    #[instrument(
+        skip(self, ctx),
+        fields(method = "agent.abortTool", session_id, tool_call_id)
+    )]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let tool_call_id = require_string_param(params.as_ref(), "toolCallId")?;
@@ -222,7 +228,11 @@ impl MethodHandler for StatusHandler {
         }
 
         let run_id = ctx.orchestrator.get_run_id(&session_id);
-        let phase = if run_id.is_some() { "processing" } else { "idle" };
+        let phase = if run_id.is_some() {
+            "processing"
+        } else {
+            "idle"
+        };
 
         let current_tool = ctx
             .orchestrator

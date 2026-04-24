@@ -440,8 +440,8 @@ fn strip_code_fences(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use crate::core::content::UserContent;
+    use serde_json::json;
 
     // -- truncate --
 

@@ -1,5 +1,5 @@
-use super::*;
 use super::oauth::parse_oauth_tokens;
+use super::*;
 
 /// Update auth for a provider or service.
 pub struct UpdateAuthHandler;
@@ -23,10 +23,8 @@ impl MethodHandler for UpdateAuthHandler {
         let masked_state = ctx
             .run_blocking("auth.update", move || {
                 // Acquire file lock for write
-                let _lock = acquire_auth_file_lock(&auth_path).map_err(|e| {
-                    RpcError::Internal {
-                        message: format!("Failed to acquire auth lock: {e}"),
-                    }
+                let _lock = acquire_auth_file_lock(&auth_path).map_err(|e| RpcError::Internal {
+                    message: format!("Failed to acquire auth lock: {e}"),
                 })?;
 
                 if let Some(ref provider) = provider {
@@ -107,7 +105,10 @@ fn update_standard_provider(
             // Save as account with default label
             let tokens = parse_oauth_tokens(oauth)?;
             crate::llm::auth::storage::save_account_oauth_tokens(
-                auth_path, provider, "(default)", &tokens,
+                auth_path,
+                provider,
+                "(default)",
+                &tokens,
             )
             .map_err(map_auth_error)?;
         }
@@ -116,10 +117,7 @@ fn update_standard_provider(
     Ok(())
 }
 
-fn update_google_provider(
-    auth_path: &Path,
-    params: Option<&Value>,
-) -> Result<(), RpcError> {
+fn update_google_provider(auth_path: &Path, params: Option<&Value>) -> Result<(), RpcError> {
     let params = params.ok_or_else(|| RpcError::InvalidParams {
         message: "Missing parameters".into(),
     })?;
@@ -186,11 +184,7 @@ fn update_google_provider(
     Ok(())
 }
 
-fn update_service(
-    auth_path: &Path,
-    service: &str,
-    params: Option<&Value>,
-) -> Result<(), RpcError> {
+fn update_service(auth_path: &Path, service: &str, params: Option<&Value>) -> Result<(), RpcError> {
     let params = params.ok_or_else(|| RpcError::InvalidParams {
         message: "Missing parameters".into(),
     })?;

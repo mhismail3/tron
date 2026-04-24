@@ -34,11 +34,11 @@ pub mod cron;
 pub mod device;
 pub mod display;
 pub mod events;
-pub(crate) mod job;
 pub mod filesystem;
 pub mod git;
 pub mod git_workflow;
 pub mod import;
+pub(crate) mod job;
 pub mod logs;
 pub mod mcp;
 pub mod memory;
@@ -96,10 +96,7 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("session.reconstruct", session::ReconstructHandler);
     registry.register("session.archive", session::ArchiveSessionHandler);
     registry.register("session.unarchive", session::UnarchiveSessionHandler);
-    registry.register(
-        "session.archiveOlderThan",
-        session::ArchiveOlderThanHandler,
-    );
+    registry.register("session.archiveOlderThan", session::ArchiveOlderThanHandler);
     registry.register("session.export", session::ExportSessionHandler);
     // Agent
     registry.register("agent.prompt", agent::PromptHandler);
@@ -256,14 +253,8 @@ fn register_platform(registry: &mut MethodRegistry) {
         "worktree.getCommittedDiff",
         worktree::GetCommittedDiffHandler,
     );
-    registry.register(
-        "worktree.deleteBranch",
-        worktree::DeleteBranchHandler,
-    );
-    registry.register(
-        "worktree.pruneBranches",
-        worktree::PruneBranchesHandler,
-    );
+    registry.register("worktree.deleteBranch", worktree::DeleteBranchHandler);
+    registry.register("worktree.pruneBranches", worktree::PruneBranchesHandler);
     registry.register("worktree.stageFiles", worktree::StageFilesHandler);
     registry.register("worktree.unstageFiles", worktree::UnstageFilesHandler);
     registry.register("worktree.discardFiles", worktree::DiscardFilesHandler);
@@ -309,32 +300,20 @@ fn register_platform(registry: &mut MethodRegistry) {
         "worktree.finalizeSession",
         git_workflow::FinalizeSessionHandler,
     );
-    registry.register(
-        "worktree.rebaseOnMain",
-        git_workflow::RebaseOnMainHandler,
-    );
+    registry.register("worktree.rebaseOnMain", git_workflow::RebaseOnMainHandler);
     registry.register("worktree.startMerge", git_workflow::StartMergeHandler);
-    registry.register(
-        "worktree.listConflicts",
-        git_workflow::ListConflictsHandler,
-    );
+    registry.register("worktree.listConflicts", git_workflow::ListConflictsHandler);
     registry.register(
         "worktree.resolveConflict",
         git_workflow::ResolveConflictHandler,
     );
-    registry.register(
-        "worktree.continueMerge",
-        git_workflow::ContinueMergeHandler,
-    );
+    registry.register("worktree.continueMerge", git_workflow::ContinueMergeHandler);
     registry.register("worktree.abortMerge", git_workflow::AbortMergeHandler);
     registry.register(
         "worktree.resolveConflictsWithSubagent",
         git_workflow::ResolveConflictsWithSubagentHandler,
     );
-    registry.register(
-        "repo.listSessions",
-        git_workflow::ListRepoSessionsHandler,
-    );
+    registry.register("repo.listSessions", git_workflow::ListRepoSessionsHandler);
     registry.register("repo.getDivergence", git_workflow::GetDivergenceHandler);
 
     // Sandbox
@@ -377,8 +356,8 @@ fn register_platform(registry: &mut MethodRegistry) {
 // params.rs; the typed `WorktreeError` → `RpcError` mapper lives in
 // error_mapping.rs. Both are re-exported under this module's namespace
 // so handler files can keep using `super::*` imports.
-mod params;
 mod error_mapping;
+mod params;
 
 pub(crate) use error_mapping::{
     map_auth_error, map_cron_error, map_event_store_error, map_import_error, map_worktree_error,

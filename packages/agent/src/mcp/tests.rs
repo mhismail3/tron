@@ -29,7 +29,11 @@ mod integration {
     ///
     /// This is more robust than piping to cat because it actually processes
     /// the JSON-RPC protocol.
-    fn mock_server_script(tools_json: &str, call_result_json: &str, protocol_version: &str) -> String {
+    fn mock_server_script(
+        tools_json: &str,
+        call_result_json: &str,
+        protocol_version: &str,
+    ) -> String {
         format!(
             r#"#!/usr/bin/env bash
 set -e
@@ -99,14 +103,16 @@ done
                 "description": "List all tables",
                 "inputSchema": {"type": "object"}
             }
-        ]).to_string()
+        ])
+        .to_string()
     }
 
     fn default_call_result() -> String {
         json!({
             "content": [{"type": "text", "text": "result: 42"}],
             "isError": false
-        }).to_string()
+        })
+        .to_string()
     }
 
     // -----------------------------------------------------------------------
@@ -115,11 +121,8 @@ done
 
     #[tokio::test]
     async fn client_connects_to_stdio_server() {
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let config = mock_config("test-server", &script);
 
         let client = McpClient::connect_stdio(&config).await;
@@ -138,11 +141,8 @@ done
 
     #[tokio::test]
     async fn client_discovers_tools() {
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let config = mock_config("discover-test", &script);
         let client = McpClient::connect_stdio(&config).await.unwrap();
 
@@ -157,15 +157,15 @@ done
 
     #[tokio::test]
     async fn client_calls_tool() {
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let config = mock_config("call-test", &script);
         let client = McpClient::connect_stdio(&config).await.unwrap();
 
-        let result = client.call_tool("query", json!({"sql": "SELECT 1"})).await.unwrap();
+        let result = client
+            .call_tool("query", json!({"sql": "SELECT 1"}))
+            .await
+            .unwrap();
         assert!(!result.is_error);
         assert_eq!(result.content.len(), 1);
         match &result.content[0] {
@@ -283,7 +283,10 @@ while true; do read -r line 2>/dev/null || exit 0; done
 
         let result = client.list_tools().await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err().kind, McpErrorKind::ConnectionLost));
+        assert!(matches!(
+            result.unwrap_err().kind,
+            McpErrorKind::ConnectionLost
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -292,11 +295,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
 
     #[tokio::test]
     async fn bridge_tool_definition_matches_schema() {
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let config = mock_config("bridge-def-test", &script);
         let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
 
@@ -319,11 +319,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
 
     #[tokio::test]
     async fn bridge_tool_execute_forwards_params() {
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let config = mock_config("bridge-exec-test", &script);
         let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
 
@@ -339,11 +336,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
 
     #[tokio::test]
     async fn bridge_tool_name_prefixed_with_server() {
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let config = mock_config("prefix-test", &script);
         let client = Arc::new(McpClient::connect_stdio(&config).await.unwrap());
 
@@ -351,7 +345,11 @@ while true; do read -r line 2>/dev/null || exit 0; done
         let bridges = create_bridge_tools("github", &tools, &client);
 
         for bridge in &bridges {
-            assert!(bridge.name().starts_with("github."), "Tool name should be prefixed: {}", bridge.name());
+            assert!(
+                bridge.name().starts_with("github."),
+                "Tool name should be prefixed: {}",
+                bridge.name()
+            );
         }
 
         client.shutdown().await;
@@ -363,11 +361,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
 
     #[tokio::test]
     async fn manager_starts_configured_servers() {
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let configs = vec![mock_config("mgr-test", &script)];
         let mut manager = McpServerManager::new(configs);
 
@@ -387,11 +382,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
 
     #[tokio::test]
     async fn manager_skips_failing_server_continues_others() {
-        let good_script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let good_script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let configs = vec![
             McpServerConfig {
                 name: "bad".into(),
@@ -421,11 +413,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
 
     #[tokio::test]
     async fn manager_restarts_server() {
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let configs = vec![mock_config("restart-test", &script)];
         let mut manager = McpServerManager::new(configs);
 
@@ -437,18 +426,18 @@ while true; do read -r line 2>/dev/null || exit 0; done
         let new_defs = manager.manual_restart("restart-test").await.unwrap();
         assert_eq!(new_defs.len(), 2);
         assert!(manager.is_connected("restart-test"));
-        assert_eq!(manager.health("restart-test"), Some(McpServerHealth::Healthy));
+        assert_eq!(
+            manager.health("restart-test"),
+            Some(McpServerHealth::Healthy)
+        );
 
         manager.shutdown_all().await;
     }
 
     #[tokio::test]
     async fn manager_health_tracking_through_failures() {
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let configs = vec![mock_config("health-test", &script)];
         let mut manager = McpServerManager::new(configs);
         let _ = manager.start_all().await;
@@ -475,11 +464,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
 
     #[tokio::test]
     async fn manager_stops_servers_on_shutdown() {
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let configs = vec![
             mock_config("s1", &script.clone()),
             mock_config("s2", &script),
@@ -500,11 +486,8 @@ while true; do read -r line 2>/dev/null || exit 0; done
     async fn tool_index_populated_at_startup() {
         use crate::mcp::tool_index::ToolIndex;
 
-        let script = mock_server_script(
-            &default_tools_json(),
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script =
+            mock_server_script(&default_tools_json(), &default_call_result(), "2024-11-05");
         let configs = vec![mock_config("reg-test", &script)];
         let mut manager = McpServerManager::new(configs);
 
@@ -574,17 +557,17 @@ done
         let error_result = json!({
             "content": [{"type": "text", "text": "Error: table not found"}],
             "isError": true
-        }).to_string();
+        })
+        .to_string();
 
-        let script = mock_server_script(
-            &default_tools_json(),
-            &error_result,
-            "2024-11-05",
-        );
+        let script = mock_server_script(&default_tools_json(), &error_result, "2024-11-05");
         let config = mock_config("error-result-test", &script);
         let client = McpClient::connect_stdio(&config).await.unwrap();
 
-        let result = client.call_tool("query", json!({"sql": "SELECT 1"})).await.unwrap();
+        let result = client
+            .call_tool("query", json!({"sql": "SELECT 1"}))
+            .await
+            .unwrap();
         assert!(result.is_error);
         match &result.content[0] {
             McpContentBlock::Text { text } => assert!(text.contains("table not found")),
@@ -600,11 +583,7 @@ done
 
     #[tokio::test]
     async fn client_handles_empty_tool_list() {
-        let script = mock_server_script(
-            "[]",
-            &default_call_result(),
-            "2024-11-05",
-        );
+        let script = mock_server_script("[]", &default_call_result(), "2024-11-05");
         let config = mock_config("empty-tools", &script);
         let client = McpClient::connect_stdio(&config).await.unwrap();
 
@@ -682,7 +661,8 @@ done
         // Two tool sets that will drift between calls.
         let first_tools = json!([
             {"name": "query", "description": "Run SQL query", "inputSchema": {"type": "object"}}
-        ]).to_string();
+        ])
+        .to_string();
         let second_tools = json!([
             {"name": "query", "description": "Run SQL query", "inputSchema": {"type": "object"}},
             {"name": "list_tables", "description": "List all tables", "inputSchema": {"type": "object"}}
@@ -690,11 +670,8 @@ done
 
         let tmp_dir = tempfile::tempdir().unwrap();
         let state_file = tmp_dir.path().join("drift-state.txt");
-        let script = drifting_mock_server_script(
-            state_file.to_str().unwrap(),
-            &first_tools,
-            &second_tools,
-        );
+        let script =
+            drifting_mock_server_script(state_file.to_str().unwrap(), &first_tools, &second_tools);
         let config = mock_config("drift-srv", &script);
         let settings_path = tmp_dir.path().join("settings.json");
 
@@ -722,10 +699,7 @@ done
 
         // Index must now contain BOTH tools.
         let post_drift_matches = router.search("list", None);
-        let names: Vec<&str> = post_drift_matches
-            .iter()
-            .map(|m| m.tool.as_str())
-            .collect();
+        let names: Vec<&str> = post_drift_matches.iter().map(|m| m.tool.as_str()).collect();
         assert!(
             names.contains(&"list_tables"),
             "post-drift index must contain list_tables; got {names:?}"
@@ -742,7 +716,8 @@ done
         // unchanged even across calls.
         let first_tools = json!([
             {"name": "query", "description": "Run SQL query", "inputSchema": {"type": "object"}}
-        ]).to_string();
+        ])
+        .to_string();
         let second_tools = json!([
             {"name": "query", "description": "Run SQL query", "inputSchema": {"type": "object"}},
             {"name": "list_tables", "description": "List all tables", "inputSchema": {"type": "object"}}
@@ -750,11 +725,8 @@ done
 
         let tmp_dir = tempfile::tempdir().unwrap();
         let state_file = tmp_dir.path().join("drift-state.txt");
-        let script = drifting_mock_server_script(
-            state_file.to_str().unwrap(),
-            &first_tools,
-            &second_tools,
-        );
+        let script =
+            drifting_mock_server_script(state_file.to_str().unwrap(), &first_tools, &second_tools);
         let config = mock_config("no-ttl-srv", &script);
         let settings_path = tmp_dir.path().join("settings.json");
 

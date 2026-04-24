@@ -484,12 +484,12 @@ async fn compaction_preserves_memory_content() {
     cm.execute_compaction(&summarizer, None).await.unwrap();
     let after = cm.get_full_memory_content();
 
-    assert_eq!(
-        before, after,
-        "compaction must not mutate memory_content"
-    );
+    assert_eq!(before, after, "compaction must not mutate memory_content");
     assert!(
-        after.as_deref().unwrap_or("").contains("MUST survive compaction"),
+        after
+            .as_deref()
+            .unwrap_or("")
+            .contains("MUST survive compaction"),
         "memory content intact after compaction"
     );
 }

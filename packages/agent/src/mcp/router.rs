@@ -51,8 +51,8 @@ impl McpRouter {
             index.add_server_tools(server, defs);
         }
 
-        let schema_refresh_ttl = (schema_refresh_ttl_ms > 0)
-            .then(|| Duration::from_millis(schema_refresh_ttl_ms));
+        let schema_refresh_ttl =
+            (schema_refresh_ttl_ms > 0).then(|| Duration::from_millis(schema_refresh_ttl_ms));
 
         Self {
             manager,
@@ -154,7 +154,9 @@ impl McpRouter {
                         let client = self.manager.client(server).ok_or_else(|| McpError {
                             server: server.to_string(),
                             kind: crate::mcp::client::McpErrorKind::ConnectionLost,
-                            message: format!("Server '{server}' restart succeeded but client unavailable"),
+                            message: format!(
+                                "Server '{server}' restart succeeded but client unavailable"
+                            ),
                         })?;
 
                         client.call_tool(tool, args).await.inspect(|_| {
@@ -247,12 +249,17 @@ impl McpRouter {
 
     /// Reload configs from settings file, diff against current state.
     pub async fn reload_from_settings(&mut self) -> Result<usize, String> {
-        let settings = crate::settings::load_settings_from_path(&self.settings_path)
-            .unwrap_or_default();
+        let settings =
+            crate::settings::load_settings_from_path(&self.settings_path).unwrap_or_default();
         let new_configs = settings.mcp.servers;
         let new_ttl_ms = settings.mcp.schema_refresh_ttl_ms;
 
-        let current_names: Vec<String> = self.manager.configs().iter().map(|c| c.name.clone()).collect();
+        let current_names: Vec<String> = self
+            .manager
+            .configs()
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
         let new_names: Vec<String> = new_configs.iter().map(|c| c.name.clone()).collect();
 
         // Remove servers no longer in config
@@ -296,10 +303,9 @@ impl McpRouter {
                 "servers": configs
             }
         });
-        if let Err(e) = crate::server::rpc::settings_service::update_settings(
-            &self.settings_path,
-            update,
-        ) {
+        if let Err(e) =
+            crate::server::rpc::settings_service::update_settings(&self.settings_path, update)
+        {
             warn!(error = %e, "failed to persist MCP server configs");
         }
     }
@@ -342,7 +348,9 @@ mod tests {
         let settings_path = dir.path().join("settings.json");
         let mut router = McpRouter::new(Vec::new(), settings_path, 0).await;
 
-        let result = router.call("nonexistent", "tool", serde_json::json!({})).await;
+        let result = router
+            .call("nonexistent", "tool", serde_json::json!({}))
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().message.contains("nonexistent"));
     }

@@ -480,7 +480,11 @@ mod tests {
             .into_iter()
             .filter(|r| r.device_token == token)
             .collect();
-        assert_eq!(rows.len(), 1, "same-identity reregister must stay single-row");
+        assert_eq!(
+            rows.len(),
+            1,
+            "same-identity reregister must stay single-row"
+        );
         assert_eq!(rows[0].bundle_id, "com.tron.mobile.beta");
         assert_eq!(rows[0].environment, "sandbox");
     }

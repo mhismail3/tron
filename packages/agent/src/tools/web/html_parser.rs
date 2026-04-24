@@ -57,8 +57,11 @@ pub fn parse_html(html: &str, _base_url: Option<&str>) -> HtmlParseResult {
 /// silently dropping the selector (which would look like "that document
 /// doesn't have a title" at runtime).
 fn static_selector(pattern: &'static str) -> Selector {
-    Selector::parse(pattern)
-        .unwrap_or_else(|e| panic!("html_parser: static CSS selector failed to compile: pattern={pattern:?} error={e:?}"))
+    Selector::parse(pattern).unwrap_or_else(|e| {
+        panic!(
+            "html_parser: static CSS selector failed to compile: pattern={pattern:?} error={e:?}"
+        )
+    })
 }
 
 fn extract_title(doc: &Html) -> String {

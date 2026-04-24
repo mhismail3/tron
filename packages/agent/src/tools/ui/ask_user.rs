@@ -4,9 +4,9 @@
 //! turn-stopping tool: execution returns immediately and the user's answer
 //! arrives as the next prompt.
 
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{ToolContext, TronTool};
@@ -297,7 +297,9 @@ mod tests {
     async fn result_contains_question_count() {
         let tool = AskUserQuestionTool::new();
         let questions: Vec<Value> = (1..=3)
-            .map(|i| json!({"question": format!("Q{i}"), "options": [{"label":"A"}, {"label":"B"}]}))
+            .map(
+                |i| json!({"question": format!("Q{i}"), "options": [{"label":"A"}, {"label":"B"}]}),
+            )
             .collect();
         let r = tool
             .execute(json!({"questions": questions}), &make_ctx())
@@ -320,7 +322,10 @@ mod tests {
             .await
             .unwrap();
         let text = extract_text(&r);
-        assert!(!text.contains("favorite color"), "question text leaked: {text}");
+        assert!(
+            !text.contains("favorite color"),
+            "question text leaked: {text}"
+        );
     }
 
     #[tokio::test]
@@ -373,7 +378,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            r.details.as_ref().and_then(|d| d.get("questionCount")).and_then(Value::as_u64),
+            r.details
+                .as_ref()
+                .and_then(|d| d.get("questionCount"))
+                .and_then(Value::as_u64),
             Some(2)
         );
     }
@@ -392,7 +400,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            r.details.as_ref().and_then(|d| d.get("context")).and_then(Value::as_str),
+            r.details
+                .as_ref()
+                .and_then(|d| d.get("context"))
+                .and_then(Value::as_str),
             Some("keep for retrieval")
         );
     }

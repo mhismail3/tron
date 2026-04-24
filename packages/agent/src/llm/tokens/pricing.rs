@@ -232,13 +232,12 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         "kimi-k2.5" => kimi_tier(0.60, 3.00),
 
         // Kimi — K2 standard ($0.60/$2.50)
-        "kimi-k2-0905-preview"
-        | "kimi-k2-0711-preview"
-        | "kimi-k2-thinking" => kimi_tier(0.60, 2.50),
+        "kimi-k2-0905-preview" | "kimi-k2-0711-preview" | "kimi-k2-thinking" => {
+            kimi_tier(0.60, 2.50)
+        }
 
         // Kimi — K2 turbo ($1.15/$8.00)
-        "kimi-k2-turbo-preview"
-        | "kimi-k2-thinking-turbo" => kimi_tier(1.15, 8.00),
+        "kimi-k2-turbo-preview" | "kimi-k2-thinking-turbo" => kimi_tier(1.15, 8.00),
 
         // Kimi — Moonshot V1 legacy
         "moonshot-v1-8k" => kimi_tier(0.20, 2.00),

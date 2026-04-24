@@ -97,8 +97,7 @@ fn recover_single_turn(
     if !session_exists {
         warn!(
             session_id,
-            turn,
-            "session no longer exists, deleting orphaned journal"
+            turn, "session no longer exists, deleting orphaned journal"
         );
         fs::remove_file(&journal_path)?;
         cleanup_empty_session_dir(&journal_path);
@@ -109,11 +108,7 @@ fn recover_single_turn(
     let recovered = match StreamingJournal::load_recovery(session_id, turn)? {
         Some(r) => r,
         None => {
-            debug!(
-                session_id,
-                turn,
-                "journal empty or corrupted, deleting"
-            );
+            debug!(session_id, turn, "journal empty or corrupted, deleting");
             fs::remove_file(&journal_path)?;
             cleanup_empty_session_dir(&journal_path);
             return Ok(false);
@@ -142,7 +137,10 @@ fn recover_single_turn(
     }
 
     if content.is_empty() {
-        debug!(session_id, turn, "recovered journal had no content, skipping persist");
+        debug!(
+            session_id,
+            turn, "recovered journal had no content, skipping persist"
+        );
         fs::remove_file(&journal_path)?;
         cleanup_empty_session_dir(&journal_path);
         return Ok(false);
@@ -252,7 +250,10 @@ mod tests {
         // Remove one file — dir still has another
         fs::remove_file(&f1).unwrap();
         cleanup_empty_session_dir(&f1);
-        assert!(session_dir.exists(), "dir should remain (still has turn_2.wal)");
+        assert!(
+            session_dir.exists(),
+            "dir should remain (still has turn_2.wal)"
+        );
     }
 
     #[test]

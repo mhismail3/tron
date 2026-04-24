@@ -1,5 +1,5 @@
-use serde_json::json;
 use crate::core::events::TronEvent;
+use serde_json::json;
 
 use super::routed::{BridgedEvent, session_scoped};
 
@@ -59,9 +59,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             })),
         )),
         TronEvent::ProcessStatusUpdate {
-            process_id,
-            status,
-            ..
+            process_id, status, ..
         } => Some(session_scoped(
             event,
             "process.status_update",

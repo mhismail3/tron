@@ -1,10 +1,10 @@
 //! Transcription handlers: transcribe.audio, transcribe.listModels, transcribe.downloadModel.
 
+use crate::transcription::TranscriptionResult;
 use async_trait::async_trait;
 use base64::Engine;
 use serde_json::Value;
 use tracing::{debug, instrument, warn};
-use crate::transcription::TranscriptionResult;
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;

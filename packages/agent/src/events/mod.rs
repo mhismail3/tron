@@ -23,11 +23,11 @@
 #[path = "event/envelope.rs"]
 pub mod envelope;
 pub mod errors;
-pub mod redaction;
 #[path = "event/factory.rs"]
 pub mod factory;
 #[path = "event/reconstruct.rs"]
 pub mod reconstruct;
+pub mod redaction;
 pub mod sqlite;
 pub mod store;
 pub mod types;

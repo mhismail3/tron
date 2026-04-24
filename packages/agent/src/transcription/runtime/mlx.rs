@@ -295,7 +295,9 @@ impl MlxEngine {
         let slot_idx = lease.idx();
 
         for attempt in 0..2 {
-            let result = self.send_request_on(slot_idx, &request_line, &request_id).await;
+            let result = self
+                .send_request_on(slot_idx, &request_line, &request_id)
+                .await;
             match result {
                 Ok(r) => return Ok(r),
                 Err(TranscriptionError::Sidecar(ref msg))
@@ -407,12 +409,6 @@ impl MlxEngine {
                 ))
             }
         }
-    }
-
-    /// Number of worker slots in the pool (for diagnostics/tests).
-    #[cfg(test)]
-    pub(crate) fn pool_size(&self) -> usize {
-        self.pool.size()
     }
 }
 

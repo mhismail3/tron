@@ -295,10 +295,7 @@ mod tests {
         });
         let api: ApiSettings = serde_json::from_value(json).unwrap();
         assert!(api.kimi.is_some());
-        assert_eq!(
-            api.kimi.unwrap().base_url,
-            "https://custom.moonshot.ai/v1"
-        );
+        assert_eq!(api.kimi.unwrap().base_url, "https://custom.moonshot.ai/v1");
     }
 
     #[test]
@@ -323,10 +320,7 @@ mod tests {
         });
         let api: ApiSettings = serde_json::from_value(json).unwrap();
         assert!(api.ollama.is_some());
-        assert_eq!(
-            api.ollama.unwrap().base_url,
-            "http://192.168.1.100:11434"
-        );
+        assert_eq!(api.ollama.unwrap().base_url, "http://192.168.1.100:11434");
     }
 
     #[test]

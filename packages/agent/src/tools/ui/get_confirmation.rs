@@ -4,9 +4,9 @@
 //! reason, and risk level. Interactive and turn-stopping: execution returns
 //! immediately and the user's decision arrives as the next prompt.
 
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{ToolContext, TronTool};
@@ -312,7 +312,10 @@ mod tests {
             .unwrap();
         assert_eq!(r.is_error, Some(true));
         let text = extract_text(&r);
-        assert!(text.contains("Invalid riskLevel"), "expected validation error: {text}");
+        assert!(
+            text.contains("Invalid riskLevel"),
+            "expected validation error: {text}"
+        );
     }
 
     #[tokio::test]

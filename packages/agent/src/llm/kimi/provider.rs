@@ -8,11 +8,11 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tracing::{debug, error, instrument};
 
+use crate::core::messages::Context;
 use crate::llm::compose_context_parts;
 use crate::llm::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::core::messages::Context;
 
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{ChatCompletionChunk, KimiStreamState, process_chunk};
@@ -102,11 +102,7 @@ impl KimiProvider {
     }
 
     /// Build the request body for the chat completions API.
-    fn build_request_body(
-        &self,
-        context: &Context,
-        options: &ProviderStreamOptions,
-    ) -> Value {
+    fn build_request_body(&self, context: &Context, options: &ProviderStreamOptions) -> Value {
         let supports_images = self.model_supports_images();
         let messages = convert_messages(&context.messages, supports_images);
 
@@ -137,7 +133,8 @@ impl KimiProvider {
         }
 
         // Thinking configuration (only for thinking-capable models)
-        let thinking_enabled = options.enable_thinking == Some(true) && self.model_supports_thinking();
+        let thinking_enabled =
+            options.enable_thinking == Some(true) && self.model_supports_thinking();
         if thinking_enabled {
             // Force temperature=1.0, top_p=0.95 when thinking is enabled (K2.5 constraint)
             body["temperature"] = json!(1.0);

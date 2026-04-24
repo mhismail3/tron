@@ -32,13 +32,17 @@ impl MethodHandler for BackgroundHandler {
         let job_id = require_string_param(params.as_ref(), "jobId")?;
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
-        let pm = ctx.process_manager.as_ref().ok_or_else(|| RpcError::Internal {
-            message: "Process manager not available".into(),
-        })?;
+        let pm = ctx
+            .process_manager
+            .as_ref()
+            .ok_or_else(|| RpcError::Internal {
+                message: "Process manager not available".into(),
+            })?;
 
-        pm.promote_to_background(&job_id).map_err(|e| RpcError::Internal {
-            message: format!("Failed to background: {e}"),
-        })?;
+        pm.promote_to_background(&job_id)
+            .map_err(|e| RpcError::Internal {
+                message: format!("Failed to background: {e}"),
+            })?;
 
         // Persist notification for context injection on next turn.
         let label = pm
@@ -48,7 +52,13 @@ impl MethodHandler for BackgroundHandler {
             .map(|p| p.label)
             .unwrap_or_default();
 
-        persist_user_action(&ctx.event_store, &session_id, &job_id, "backgrounded", &label);
+        persist_user_action(
+            &ctx.event_store,
+            &session_id,
+            &job_id,
+            "backgrounded",
+            &label,
+        );
 
         Ok(json!({
             "jobId": job_id,
@@ -73,13 +83,15 @@ impl MethodHandler for CancelHandler {
 
         // Try job manager (routes to process or subagent), fall back to process manager.
         if let Some(ref jm) = ctx.job_manager {
-            jm.cancel_job(&job_id, true).map_err(|e| RpcError::Internal {
-                message: format!("Failed to cancel: {e}"),
-            })?;
+            jm.cancel_job(&job_id, true)
+                .map_err(|e| RpcError::Internal {
+                    message: format!("Failed to cancel: {e}"),
+                })?;
         } else if let Some(ref pm) = ctx.process_manager {
-            pm.cancel_process(&job_id, true).map_err(|e| RpcError::Internal {
-                message: format!("Failed to cancel: {e}"),
-            })?;
+            pm.cancel_process(&job_id, true)
+                .map_err(|e| RpcError::Internal {
+                    message: format!("Failed to cancel: {e}"),
+                })?;
         } else {
             return Err(RpcError::Internal {
                 message: "No job manager available".into(),
@@ -140,9 +152,8 @@ impl MethodHandler for ListHandler {
 pub struct SubscribeHandler;
 
 /// Tracks active output subscriptions so they can be cancelled on unsubscribe.
-static ACTIVE_SUBSCRIPTIONS: std::sync::LazyLock<
-    dashmap::DashMap<String, CancellationToken>,
-> = std::sync::LazyLock::new(dashmap::DashMap::new);
+static ACTIVE_SUBSCRIPTIONS: std::sync::LazyLock<dashmap::DashMap<String, CancellationToken>> =
+    std::sync::LazyLock::new(dashmap::DashMap::new);
 
 #[async_trait]
 impl MethodHandler for SubscribeHandler {
@@ -151,13 +162,19 @@ impl MethodHandler for SubscribeHandler {
         let job_id = require_string_param(params.as_ref(), "jobId")?;
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
-        let registry = ctx.output_buffer_registry.as_ref().ok_or_else(|| RpcError::Internal {
-            message: "Output buffer registry not available".into(),
-        })?;
+        let registry = ctx
+            .output_buffer_registry
+            .as_ref()
+            .ok_or_else(|| RpcError::Internal {
+                message: "Output buffer registry not available".into(),
+            })?;
 
-        let (buffer, tool_call_id) = registry.get(&job_id).ok_or_else(|| RpcError::InvalidParams {
-            message: format!("No output buffer for job: {job_id}"),
-        })?;
+        let (buffer, tool_call_id) =
+            registry
+                .get(&job_id)
+                .ok_or_else(|| RpcError::InvalidParams {
+                    message: format!("No output buffer for job: {job_id}"),
+                })?;
 
         // Cancel any existing subscription for this job.
         if let Some((_, old_cancel)) = ACTIVE_SUBSCRIPTIONS.remove(&job_id) {
@@ -170,10 +187,10 @@ impl MethodHandler for SubscribeHandler {
         let emitter = ctx.orchestrator.broadcast().clone();
 
         let sub_job_id = job_id.clone();
-        let _ = tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             run_subscriber(buffer, &tool_call_id, &session_id, &emitter, cancel).await;
             let _ = ACTIVE_SUBSCRIPTIONS.remove(&sub_job_id);
-        });
+        }));
 
         Ok(json!({
             "subscribed": true,

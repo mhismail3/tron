@@ -13,7 +13,10 @@
 
 ```bash
 # REQUIRED before completing any task
-cd packages/agent && cargo check && cargo test -- --quiet
+cd packages/agent && cargo fmt --all -- --check && cargo check && cargo test -- --quiet
+
+# Full Rust CI before broad/server-side commits
+scripts/tron ci fmt check clippy test
 
 # iOS
 cd packages/ios-app && xcodegen generate

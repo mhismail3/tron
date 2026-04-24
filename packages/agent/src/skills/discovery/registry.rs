@@ -432,10 +432,10 @@ mod tests {
         let fp_before = SkillFingerprint::compute(wd);
 
         // Add a new skill
-        let skill_dir = skills_dir.join("new-skill");
-        std::fs::create_dir_all(&skill_dir).unwrap();
+        let new_skill_path = skills_dir.join("new-skill");
+        std::fs::create_dir_all(&new_skill_path).unwrap();
         std::fs::write(
-            skill_dir.join("SKILL.md"),
+            new_skill_path.join("SKILL.md"),
             "---\nname: New Skill\ndescription: A test\n---\nContent",
         )
         .unwrap();
@@ -448,9 +448,9 @@ mod tests {
     fn fingerprint_changes_when_skill_md_modified() {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join(".tron/skills");
-        let skill_dir = skills_dir.join("test-skill");
-        std::fs::create_dir_all(&skill_dir).unwrap();
-        let skill_md = skill_dir.join("SKILL.md");
+        let test_skill_path = skills_dir.join("test-skill");
+        std::fs::create_dir_all(&test_skill_path).unwrap();
+        let skill_md = test_skill_path.join("SKILL.md");
         std::fs::write(&skill_md, "---\nname: Test\n---\nOriginal").unwrap();
 
         let wd = dir.path().to_str().unwrap();
@@ -468,10 +468,10 @@ mod tests {
     fn fingerprint_changes_when_skill_removed() {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join(".tron/skills");
-        let skill_dir = skills_dir.join("doomed");
-        std::fs::create_dir_all(&skill_dir).unwrap();
+        let doomed_skill_path = skills_dir.join("doomed");
+        std::fs::create_dir_all(&doomed_skill_path).unwrap();
         std::fs::write(
-            skill_dir.join("SKILL.md"),
+            doomed_skill_path.join("SKILL.md"),
             "---\nname: Doomed\n---\nContent",
         )
         .unwrap();
@@ -479,7 +479,7 @@ mod tests {
         let wd = dir.path().to_str().unwrap();
         let fp_before = SkillFingerprint::compute(wd);
 
-        std::fs::remove_dir_all(&skill_dir).unwrap();
+        std::fs::remove_dir_all(&doomed_skill_path).unwrap();
 
         let fp_after = SkillFingerprint::compute(wd);
         assert_ne!(fp_before, fp_after);
@@ -526,10 +526,10 @@ mod tests {
         assert!(!registry.has("hot-skill"));
 
         // Add a new skill to the project skills dir
-        let skill_dir = skills_dir.join("hot-skill");
-        std::fs::create_dir_all(&skill_dir).unwrap();
+        let hot_skill_path = skills_dir.join("hot-skill");
+        std::fs::create_dir_all(&hot_skill_path).unwrap();
         std::fs::write(
-            skill_dir.join("SKILL.md"),
+            hot_skill_path.join("SKILL.md"),
             "---\nname: Hot Skill\ndescription: Just added\n---\n# Hot Skill",
         )
         .unwrap();
@@ -554,9 +554,9 @@ mod tests {
     fn refresh_if_stale_detects_skill_content_edit() {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join(".tron/skills");
-        let skill_dir = skills_dir.join("edited-skill");
-        std::fs::create_dir_all(&skill_dir).unwrap();
-        let skill_md = skill_dir.join("SKILL.md");
+        let edited_skill_path = skills_dir.join("edited-skill");
+        std::fs::create_dir_all(&edited_skill_path).unwrap();
+        let skill_md = edited_skill_path.join("SKILL.md");
         std::fs::write(
             &skill_md,
             "---\nname: Edited Skill\ndescription: Original description\n---\n# Original body\n",
@@ -761,10 +761,7 @@ mod tests {
 
         assert!(registry.refresh_if_stale(wd));
         assert!(registry.has("new-skill"));
-        assert_eq!(
-            registry.get("new-skill").unwrap().scope_dir,
-            "packages/foo"
-        );
+        assert_eq!(registry.get("new-skill").unwrap().scope_dir, "packages/foo");
     }
 
     #[test]
@@ -782,7 +779,11 @@ mod tests {
         // Add a claude-global skill
         let skill = home.path().join(".claude/skills/new-claude-skill");
         std::fs::create_dir_all(&skill).unwrap();
-        std::fs::write(skill.join("SKILL.md"), "---\nname: new-claude-skill\n---\nbody\n").unwrap();
+        std::fs::write(
+            skill.join("SKILL.md"),
+            "---\nname: new-claude-skill\n---\nbody\n",
+        )
+        .unwrap();
 
         let fp_after = SkillFingerprint::compute_for_home(home_str, working_str);
 
@@ -806,10 +807,17 @@ mod tests {
 
         let skill = home.path().join(".tron/skills/new-tron-skill");
         std::fs::create_dir_all(&skill).unwrap();
-        std::fs::write(skill.join("SKILL.md"), "---\nname: new-tron-skill\n---\nbody\n").unwrap();
+        std::fs::write(
+            skill.join("SKILL.md"),
+            "---\nname: new-tron-skill\n---\nbody\n",
+        )
+        .unwrap();
 
         let fp_after = SkillFingerprint::compute_for_home(home_str, working_str);
 
-        assert_ne!(fp_before, fp_after, "fingerprint must flip when ~/.tron/skills changes");
+        assert_ne!(
+            fp_before, fp_after,
+            "fingerprint must flip when ~/.tron/skills changes"
+        );
     }
 }

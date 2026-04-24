@@ -68,10 +68,10 @@ impl MethodHandler for GetBranchesHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
-        let branches =
-            ctx.event_store
-                .get_branches(&session_id)
-                .map_err(map_event_store_error)?;
+        let branches = ctx
+            .event_store
+            .get_branches(&session_id)
+            .map_err(map_event_store_error)?;
 
         let wire: Vec<Value> = branches
             .iter()
@@ -104,10 +104,10 @@ impl MethodHandler for GetSubtreeHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let event_id = require_string_param(params.as_ref(), "eventId")?;
 
-        let descendants =
-            ctx.event_store
-                .get_descendants(&event_id)
-                .map_err(map_event_store_error)?;
+        let descendants = ctx
+            .event_store
+            .get_descendants(&event_id)
+            .map_err(map_event_store_error)?;
 
         let nodes: Vec<Value> = descendants
             .iter()
@@ -137,10 +137,10 @@ impl MethodHandler for GetAncestorsHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let event_id = require_string_param(params.as_ref(), "eventId")?;
 
-        let ancestors =
-            ctx.event_store
-                .get_ancestors(&event_id)
-                .map_err(map_event_store_error)?;
+        let ancestors = ctx
+            .event_store
+            .get_ancestors(&event_id)
+            .map_err(map_event_store_error)?;
 
         let nodes: Vec<Value> = ancestors
             .iter()

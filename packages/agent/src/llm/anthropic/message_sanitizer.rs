@@ -217,9 +217,9 @@ fn is_valid_tool_result_content(content: &ToolResultMessageContent) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Map;
     use crate::core::content::AssistantContent;
     use crate::core::messages::{Message, ToolResultMessageContent};
+    use serde_json::Map;
 
     fn tool_use(id: &str, name: &str) -> AssistantContent {
         AssistantContent::ToolUse {

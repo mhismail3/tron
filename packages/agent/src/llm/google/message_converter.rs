@@ -3,10 +3,10 @@
 //! Handles text, images, PDFs, tool calls (with `thoughtSignature`), and tool results.
 //! Sanitizes JSON schemas by removing unsupported properties (`additionalProperties`, `$schema`).
 
-use crate::llm::id_remapping::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
 use crate::core::content::{AssistantContent, UserContent};
 use crate::core::messages::{Context, Message, ToolResultMessageContent, UserMessageContent};
 use crate::core::tools::Tool;
+use crate::llm::id_remapping::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
 
 use super::types::{
     FunctionCallData, FunctionDeclaration, FunctionResponseData, GeminiContent, GeminiPart,
@@ -282,9 +282,9 @@ fn truncate_tool_result(content: &str) -> String {
 #[allow(unused_results)]
 mod tests {
     use super::*;
-    use serde_json::Map;
     use crate::core::content::AssistantContent;
     use crate::core::messages::UserMessageContent;
+    use serde_json::Map;
 
     fn ctx(messages: Vec<Message>) -> Context {
         Context {

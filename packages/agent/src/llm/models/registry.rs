@@ -7,13 +7,13 @@
 //! **Single source of truth**: provider type files (`anthropic/types.rs`, etc.) own all
 //! model metadata. This module derives lookups from those registries — no static arrays.
 
+use crate::core::messages::Provider;
 use crate::llm::anthropic::types::{all_claude_model_ids, get_claude_model};
 use crate::llm::google::types::{all_gemini_model_ids, get_gemini_model};
 use crate::llm::kimi::types::{all_kimi_model_ids, get_kimi_model};
 use crate::llm::minimax::types::{all_minimax_model_ids, get_minimax_model};
 use crate::llm::ollama::types::{all_ollama_model_ids, get_ollama_model};
 use crate::llm::openai::types::{all_openai_model_ids, get_openai_model};
-use crate::core::messages::Provider;
 
 /// Detect which provider serves a given model ID.
 ///
@@ -31,9 +31,7 @@ pub fn detect_provider_from_model(model_id: &str) -> Option<Provider> {
             "openai" | "openai-codex" if get_openai_model(bare_model).is_some() => {
                 Some(Provider::OpenAi)
             }
-            "google" | "gemini" if get_gemini_model(bare_model).is_some() => {
-                Some(Provider::Google)
-            }
+            "google" | "gemini" if get_gemini_model(bare_model).is_some() => Some(Provider::Google),
             "minimax" if get_minimax_model(bare_model).is_some() => Some(Provider::MiniMax),
             "kimi" | "moonshot" if get_kimi_model(bare_model).is_some() => Some(Provider::Kimi),
             "ollama" if get_ollama_model(bare_model).is_some() => Some(Provider::Ollama),
@@ -497,10 +495,7 @@ mod tests {
 
     #[test]
     fn detect_registry_lookup_kimi() {
-        assert_eq!(
-            detect_provider_from_model(KIMI_K2_5),
-            Some(Provider::Kimi)
-        );
+        assert_eq!(detect_provider_from_model(KIMI_K2_5), Some(Provider::Kimi));
     }
 
     #[test]
@@ -578,10 +573,7 @@ mod tests {
 
     #[test]
     fn kimi_models_no_document_support() {
-        assert_eq!(
-            model_supports_documents(KIMI_K2_5),
-            DocumentSupport::None
-        );
+        assert_eq!(model_supports_documents(KIMI_K2_5), DocumentSupport::None);
     }
 
     #[test]

@@ -19,7 +19,14 @@ fn setup() -> EventStore {
 fn create_session_basic() {
     let store = setup();
     let result = store
-        .create_session("claude-opus-4-6", "/tmp/project", Some("Test"), None, None, None)
+        .create_session(
+            "claude-opus-4-6",
+            "/tmp/project",
+            Some("Test"),
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     assert!(result.session.id.starts_with("sess_"));
@@ -1109,7 +1116,14 @@ fn update_spawn_info_links_subagent_and_lists_it() {
         )
         .unwrap();
     let child = store
-        .create_session("claude-opus-4-6", "/tmp/project", Some("Child"), None, None, None)
+        .create_session(
+            "claude-opus-4-6",
+            "/tmp/project",
+            Some("Child"),
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let updated = store
@@ -1609,12 +1623,7 @@ fn get_events_by_workspace_and_types_cross_session() {
         .unwrap();
 
     let result = store
-        .get_events_by_workspace_and_types(
-            &cr1.session.workspace_id,
-            &["message.user"],
-            None,
-            None,
-        )
+        .get_events_by_workspace_and_types(&cr1.session.workspace_id, &["message.user"], None, None)
         .unwrap();
     assert_eq!(result.len(), 2);
 }
@@ -2077,9 +2086,11 @@ fn event_rows_to_session_events_skips_unknown_event_types() {
 fn setup_file_backed() -> (EventStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let config = ConnectionConfig { pool_size: 2, ..ConnectionConfig::default() };
-    let pool =
-        connection::new_file(db_path.to_str().unwrap(), &config).unwrap();
+    let config = ConnectionConfig {
+        pool_size: 2,
+        ..ConnectionConfig::default()
+    };
+    let pool = connection::new_file(db_path.to_str().unwrap(), &config).unwrap();
     {
         let conn = pool.get().unwrap();
         run_migrations(&conn).unwrap();
@@ -2704,7 +2715,10 @@ fn get_activity_summary_hook_subagent_filtered() {
     let lines = store
         .get_session_activity_summaries(&cr.session.id)
         .unwrap();
-    assert!(lines.is_empty(), "Hook subagent events should be filtered out");
+    assert!(
+        lines.is_empty(),
+        "Hook subagent events should be filtered out"
+    );
 }
 
 #[test]

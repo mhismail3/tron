@@ -172,7 +172,10 @@ mod tests {
                 BroadcastEventType::AgentMemoryUpdated,
                 "agent.memory_updated",
             ),
-            (BroadcastEventType::AgentSkillDeactivated, "agent.skill_deactivated"),
+            (
+                BroadcastEventType::AgentSkillDeactivated,
+                "agent.skill_deactivated",
+            ),
             (BroadcastEventType::AgentTodosUpdated, "agent.todos_updated"),
             (BroadcastEventType::EventNew, "event.new"),
         ];
@@ -290,11 +293,8 @@ mod tests {
 
     #[test]
     fn create_envelope_no_session_id() {
-        let envelope = create_event_envelope(
-            BroadcastEventType::EventNew,
-            serde_json::json!({}),
-            None,
-        );
+        let envelope =
+            create_event_envelope(BroadcastEventType::EventNew, serde_json::json!({}), None);
 
         assert!(envelope.session_id.is_none());
     }

@@ -50,11 +50,7 @@ pub fn classify_fs_error(error: &io::Error, path: &str) -> &'static str {
 
 /// Build a structured fs error with `errorClass`, `error`, and `path` in
 /// `tool.details`. The text body carries the same message the agent sees.
-pub fn fs_error_result(
-    error: &io::Error,
-    path: &str,
-    operation: &str,
-) -> TronToolResult {
+pub fn fs_error_result(error: &io::Error, path: &str, operation: &str) -> TronToolResult {
     let message = match error.kind() {
         io::ErrorKind::NotFound => format!("File not found: {path}"),
         io::ErrorKind::PermissionDenied => format!("Permission denied: {path}"),
@@ -94,11 +90,7 @@ pub fn fs_error_from_message(
     fs_error_tool_result(&msg, error_class, path)
 }
 
-fn fs_error_tool_result(
-    message: &str,
-    error_class: &str,
-    path: &str,
-) -> TronToolResult {
+fn fs_error_tool_result(message: &str, error_class: &str, path: &str) -> TronToolResult {
     TronToolResult {
         content: ToolResultBody::Blocks(vec![ToolResultContent::text(message)]),
         details: Some(json!({

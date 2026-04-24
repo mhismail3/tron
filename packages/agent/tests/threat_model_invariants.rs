@@ -76,8 +76,8 @@ fn repo_root() -> PathBuf {
 
 fn assert_site(root: &Path, relative: &str, keyword: &str) {
     let path = root.join(relative);
-    let content = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+    let content =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
     assert!(
         content.contains("INVARIANT"),
         "{relative} must contain an INVARIANT marker (trusted-local [T] finding)"
@@ -109,11 +109,33 @@ fn every_registered_site_exists() {
     let crate_root = crate_root();
     for (rel, _) in TRUST_BOUNDARY_SITES {
         let path = crate_root.join(rel);
-        assert!(path.is_file(), "registered site {rel} does not exist at {path:?}");
+        assert!(
+            path.is_file(),
+            "registered site {rel} does not exist at {path:?}"
+        );
     }
     let repo_root = repo_root();
     for (rel, _) in TRUST_BOUNDARY_REPO_SITES {
         let path = repo_root.join(rel);
-        assert!(path.is_file(), "registered repo site {rel} does not exist at {path:?}");
+        assert!(
+            path.is_file(),
+            "registered repo site {rel} does not exist at {path:?}"
+        );
     }
+}
+
+#[test]
+fn installed_pre_commit_hook_enforces_rustfmt_and_personal_info_guard() {
+    let hook_installer = repo_root().join("scripts").join("install-hooks.sh");
+    let content = std::fs::read_to_string(&hook_installer)
+        .unwrap_or_else(|e| panic!("failed to read {hook_installer:?}: {e}"));
+
+    assert!(
+        content.contains("cargo fmt --all -- --check"),
+        "pre-commit hook must block Rust formatting drift"
+    );
+    assert!(
+        content.contains("personal-info-guard.sh\" --staged"),
+        "pre-commit hook must keep the staged personal-info guard"
+    );
 }

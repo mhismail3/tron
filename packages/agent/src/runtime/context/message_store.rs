@@ -152,9 +152,9 @@ impl Default for MessageStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::core::content::AssistantContent;
     use crate::core::messages::Message;
+    use std::sync::Arc;
 
     // -- Construction --
 

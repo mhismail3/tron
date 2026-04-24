@@ -13,8 +13,8 @@ use crate::worktree::errors::{Result, WorktreeError};
 use crate::worktree::merge as scm_merge;
 use crate::worktree::types::{FinalizeSessionResult, MergeStrategy};
 
-use super::repo_lock::LockedOp;
 use super::WorktreeCoordinator;
+use super::repo_lock::LockedOp;
 
 impl WorktreeCoordinator {
     /// Finalise a session: merge its branch into `target_branch`. When
@@ -34,11 +34,13 @@ impl WorktreeCoordinator {
         preserve_old: bool,
         rebranch: bool,
     ) -> Result<FinalizeSessionResult> {
-        let info = self
-            .state
-            .lock()
-            .active_info(session_id)
-            .ok_or_else(|| WorktreeError::NotFound { session_id: session_id.to_string() })?;
+        let info =
+            self.state
+                .lock()
+                .active_info(session_id)
+                .ok_or_else(|| WorktreeError::NotFound {
+                    session_id: session_id.to_string(),
+                })?;
 
         let _guard = self
             .acquire_repo_lock(&info.repo_root, session_id, LockedOp::FinalizeSession)
@@ -126,4 +128,3 @@ impl WorktreeCoordinator {
         Ok(result)
     }
 }
-

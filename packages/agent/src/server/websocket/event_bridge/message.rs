@@ -1,5 +1,5 @@
-use serde_json::json;
 use crate::core::events::TronEvent;
+use serde_json::json;
 
 use super::routed::{BridgedEvent, session_scoped};
 
@@ -41,9 +41,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             })),
         )),
         TronEvent::MessageDequeued {
-            queue_id,
-            reason,
-            ..
+            queue_id, reason, ..
         } => Some(session_scoped(
             event,
             "agent.message_dequeued",
@@ -52,11 +50,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "reason": reason,
             })),
         )),
-        TronEvent::QueuedMessageSent {
-            text,
-            queue_id,
-            ..
-        } => Some(session_scoped(
+        TronEvent::QueuedMessageSent { text, queue_id, .. } => Some(session_scoped(
             event,
             "agent.queued_message_sent",
             Some(json!({

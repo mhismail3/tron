@@ -30,12 +30,12 @@ use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{
     map_worktree_error, opt_bool, opt_string, opt_u64, require_string_param,
 };
-use std::path::PathBuf;
 use crate::server::rpc::registry::MethodHandler;
 use crate::worktree::types::{
     ConflictResolution, MergeStrategy, RebaseOnMainResult, SyncBlockReason, SyncOutcome,
 };
 use crate::worktree::{ConflictedFile, WorktreeCoordinator, WorktreeError};
+use std::path::PathBuf;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -80,9 +80,7 @@ fn parse_rebase_strategy(s: Option<&str>) -> Result<MergeStrategy, RpcError> {
             message: "rebaseOnMain does not accept 'squash'".into(),
         }),
         Some(other) => Err(RpcError::InvalidParams {
-            message: format!(
-                "strategy must be 'rebase' or 'merge'; got '{other}'"
-            ),
+            message: format!("strategy must be 'rebase' or 'merge'; got '{other}'"),
         }),
     }
 }
@@ -167,9 +165,7 @@ fn sync_outcome_json(o: &SyncOutcome) -> Value {
                     "notOnDefaultBranch",
                     json!({ "current": current, "expected": expected }),
                 ),
-                SyncBlockReason::RemoteError(m) => {
-                    ("remoteError", json!({ "message": m }))
-                }
+                SyncBlockReason::RemoteError(m) => ("remoteError", json!({ "message": m })),
             };
             let mut out = json!({ "outcome": "blocked", "reason": kind });
             if let (Some(o), Some(e)) = (out.as_object_mut(), extras.as_object()) {
@@ -231,8 +227,7 @@ impl MethodHandler for PushHandler {
         let force_with_lease = opt_bool(params.as_ref(), "forceWithLease").unwrap_or(false);
         let set_upstream = opt_bool(params.as_ref(), "setUpstream").unwrap_or(true);
         let dry_run = opt_bool(params.as_ref(), "dryRun").unwrap_or(false);
-        let override_protected =
-            opt_bool(params.as_ref(), "overrideProtected").unwrap_or(false);
+        let override_protected = opt_bool(params.as_ref(), "overrideProtected").unwrap_or(false);
 
         let protected: Vec<String> = params
             .as_ref()
@@ -243,9 +238,7 @@ impl MethodHandler for PushHandler {
                     .filter_map(|v| v.as_str().map(String::from))
                     .collect()
             })
-            .unwrap_or_else(|| {
-                vec!["main".into(), "master".into(), "develop".into()]
-            });
+            .unwrap_or_else(|| vec!["main".into(), "master".into(), "develop".into()]);
 
         let coord = require_coordinator(ctx)?;
         let fallback = session_working_dir(ctx, &session_id);
@@ -360,8 +353,8 @@ impl MethodHandler for FinalizeSessionHandler {
                 code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             })?;
-        let source_branch = opt_string(params.as_ref(), "sourceBranch")
-            .unwrap_or_else(|| info.branch.clone());
+        let source_branch =
+            opt_string(params.as_ref(), "sourceBranch").unwrap_or_else(|| info.branch.clone());
         let target_branch = opt_string(params.as_ref(), "targetBranch")
             .or(info.base_branch.clone())
             .unwrap_or_else(|| "main".into());
@@ -422,8 +415,7 @@ impl MethodHandler for RebaseOnMainHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Parse strategy BEFORE touching the coordinator so "squash" is
         // rejected at the RPC boundary (plan requirement).
-        let strategy =
-            parse_rebase_strategy(opt_string(params.as_ref(), "strategy").as_deref())?;
+        let strategy = parse_rebase_strategy(opt_string(params.as_ref(), "strategy").as_deref())?;
         let main_branch = opt_string(params.as_ref(), "mainBranch");
 
         let coord = require_coordinator(ctx)?;
@@ -481,10 +473,7 @@ impl MethodHandler for StartMergeHandler {
             .map_err(|e| map_worktree_error(e))?;
 
         // Probe conflicts so the caller gets the file list up front.
-        let conflicts = coord
-            .list_conflicts(&session_id)
-            .await
-            .unwrap_or_default();
+        let conflicts = coord.list_conflicts(&session_id).await.unwrap_or_default();
         Ok(json!({
             "pending": {
                 "sessionId": pending.session_id,
@@ -510,7 +499,10 @@ impl MethodHandler for ListConflictsHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let coord = require_coordinator(ctx)?;
-        let conflicts = coord.list_conflicts(&session_id).await.map_err(|e| map_worktree_error(e))?;
+        let conflicts = coord
+            .list_conflicts(&session_id)
+            .await
+            .map_err(|e| map_worktree_error(e))?;
         Ok(json!({
             "conflicts": conflicts.iter().map(conflicted_file_json).collect::<Vec<_>>(),
         }))
@@ -623,12 +615,8 @@ impl MethodHandler for ResolveConflictsWithSubagentHandler {
             }));
         };
 
-        let outcome = crate::runtime::subagents::conflict_resolver::spawn(
-            manager,
-            coord,
-            &session_id,
-        )
-        .await;
+        let outcome =
+            crate::runtime::subagents::conflict_resolver::spawn(manager, coord, &session_id).await;
 
         Ok(json!({
             "spawned": outcome.spawned,
@@ -719,10 +707,7 @@ impl MethodHandler for GetDivergenceHandler {
                 code: crate::server::rpc::errors::WORKTREE_NOT_FOUND.into(),
                 message: format!("No worktree found for session '{session_id}'"),
             })?;
-        let main_branch = info
-            .base_branch
-            .clone()
-            .unwrap_or_else(|| "main".into());
+        let main_branch = info.base_branch.clone().unwrap_or_else(|| "main".into());
 
         // Session-vs-main: null if `main_branch` itself doesn't resolve
         // (e.g. detached, renamed default, fresh empty repo).
@@ -817,10 +802,7 @@ mod tests {
     async fn rebase_on_main_rejects_squash_strategy() {
         let ctx = make_test_context();
         let err = RebaseOnMainHandler
-            .handle(
-                Some(json!({"sessionId": "s1", "strategy": "squash"})),
-                &ctx,
-            )
+            .handle(Some(json!({"sessionId": "s1", "strategy": "squash"})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
@@ -967,8 +949,11 @@ mod tests {
     // guard: if a future refactor re-introduces the generic
     // `.map_err(|e| RpcError::Internal{...})?` pattern, these fail.
 
-    async fn push_test_context()
-    -> (tempfile::TempDir, crate::server::rpc::context::RpcContext, String) {
+    async fn push_test_context() -> (
+        tempfile::TempDir,
+        crate::server::rpc::context::RpcContext,
+        String,
+    ) {
         use crate::events::EventStore;
         use crate::runtime::orchestrator::orchestrator::Orchestrator;
         use crate::runtime::orchestrator::session_manager::SessionManager;
@@ -998,10 +983,8 @@ mod tests {
         run(&["-C", &dir, "add", "-A"]);
         run(&["-C", &dir, "commit", "-m", "init"]);
 
-        let pool = crate::events::new_in_memory(
-            &crate::events::ConnectionConfig::default(),
-        )
-        .unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -1014,7 +997,9 @@ mod tests {
             store.clone(),
         ));
 
-        let sid = mgr.create_session("m", &dir, Some("push-test"), None).unwrap();
+        let sid = mgr
+            .create_session("m", &dir, Some("push-test"), None)
+            .unwrap();
         // Acquire a session worktree so active_info resolves.
         match coord.maybe_acquire(&sid, tmp.path()).await.unwrap() {
             AcquireResult::Acquired(_) => {}
@@ -1043,9 +1028,7 @@ mod tests {
             context_artifacts: Arc::new(ContextArtifactsService::new()),
             auth_path: std::path::PathBuf::from("/tmp/tron-test-auth.json"),
             broadcast_manager: None,
-            oauth_flows: Arc::new(tokio::sync::Mutex::new(
-                std::collections::HashMap::new(),
-            )),
+            oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             mcp_router: None,
             display_stream_registry: None,
             process_manager: None,
@@ -1068,10 +1051,7 @@ mod tests {
         // The user-reported bug. Was `INTERNAL_ERROR`; now `PROTECTED_BRANCH`.
         let (_tmp, ctx, sid) = push_test_context().await;
         let err = PushHandler
-            .handle(
-                Some(json!({"sessionId": sid, "branch": "main"})),
-                &ctx,
-            )
+            .handle(Some(json!({"sessionId": sid, "branch": "main"})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(
@@ -1092,10 +1072,7 @@ mod tests {
         // as NO_REMOTE, not INTERNAL_ERROR.
         let (_tmp, ctx, sid) = push_test_context().await;
         let err = PushHandler
-            .handle(
-                Some(json!({"sessionId": sid, "branch": "feature/x"})),
-                &ctx,
-            )
+            .handle(Some(json!({"sessionId": sid, "branch": "feature/x"})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(
@@ -1131,10 +1108,7 @@ mod tests {
     async fn push_handler_missing_session_id_is_invalid_params() {
         // Preserves existing param-validation behavior across the refactor.
         let (_tmp, ctx, _sid) = push_test_context().await;
-        let err = PushHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap_err();
+        let err = PushHandler.handle(Some(json!({})), &ctx).await.unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 

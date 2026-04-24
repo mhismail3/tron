@@ -12,10 +12,10 @@
 //!   - Minimum 85 tokens per image
 //!   - Default 1500 tokens for URL images (typical 1024×1024)
 
-use serde_json::Value;
 use crate::core::content::{AssistantContent, ToolResultContent, UserContent};
 use crate::core::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use crate::core::tools::Tool;
+use serde_json::Value;
 
 use super::constants::{CHARS_PER_TOKEN, DEFAULT_URL_IMAGE_TOKENS, MIN_IMAGE_TOKENS, RULES_HEADER};
 

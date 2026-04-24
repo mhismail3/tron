@@ -6,10 +6,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use tracing::info;
 use crate::llm::models::registry::{detect_provider_from_model, strip_provider_prefix};
 use crate::llm::provider::{Provider, ProviderError, ProviderFactory};
+use async_trait::async_trait;
+use tracing::info;
 
 // ─── Captured settings ───────────────────────────────────────────────
 
@@ -115,7 +115,9 @@ impl DefaultProviderFactory {
             Ok(Some(auth)) => auth,
             Ok(None) => {
                 return Err(ProviderError::Auth {
-                    message: "no Anthropic auth configured — add credentials in Settings > Providers".into(),
+                    message:
+                        "no Anthropic auth configured — add credentials in Settings > Providers"
+                            .into(),
                 });
             }
             Err(e) => {
@@ -200,7 +202,8 @@ impl DefaultProviderFactory {
             Ok(Some(auth)) => auth,
             Ok(None) => {
                 return Err(ProviderError::Auth {
-                    message: "no OpenAI auth configured — add credentials in Settings > Providers".into(),
+                    message: "no OpenAI auth configured — add credentials in Settings > Providers"
+                        .into(),
                 });
             }
             Err(e) => {
@@ -260,7 +263,8 @@ impl DefaultProviderFactory {
             Ok(Some(auth)) => auth,
             Ok(None) => {
                 return Err(ProviderError::Auth {
-                    message: "no Google auth configured — add credentials in Settings > Providers".into(),
+                    message: "no Google auth configured — add credentials in Settings > Providers"
+                        .into(),
                 });
             }
             Err(e) => {
@@ -326,15 +330,19 @@ impl DefaultProviderFactory {
         ))
     }
     fn create_minimax(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let provider_auth = crate::llm::auth::storage::get_provider_auth(
-            &self.auth_path,
-            "minimax",
-        )
-        .map_err(|e| ProviderError::Auth {
-            message: e.to_string(),
-        })?;
+        let provider_auth =
+            crate::llm::auth::storage::get_provider_auth(&self.auth_path, "minimax").map_err(
+                |e| ProviderError::Auth {
+                    message: e.to_string(),
+                },
+            )?;
         let api_key = if let Some(pa) = provider_auth {
-            if let Some(key) = pa.api_keys.as_ref().and_then(|k| k.first()).map(|k| k.key.clone()) {
+            if let Some(key) = pa
+                .api_keys
+                .as_ref()
+                .and_then(|k| k.first())
+                .map(|k| k.key.clone())
+            {
                 info!("using MiniMax API key from auth.json");
                 key
             } else {
@@ -344,8 +352,7 @@ impl DefaultProviderFactory {
             }
         } else {
             return Err(ProviderError::Auth {
-                message: "no MiniMax auth configured — add API key in Settings > Providers"
-                    .into(),
+                message: "no MiniMax auth configured — add API key in Settings > Providers".into(),
             });
         };
 
@@ -374,15 +381,17 @@ impl DefaultProviderFactory {
     }
 
     fn create_kimi(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let provider_auth = crate::llm::auth::storage::get_provider_auth(
-            &self.auth_path,
-            "kimi",
-        )
-        .map_err(|e| ProviderError::Auth {
+        let provider_auth = crate::llm::auth::storage::get_provider_auth(&self.auth_path, "kimi")
+            .map_err(|e| ProviderError::Auth {
             message: e.to_string(),
         })?;
         let api_key = if let Some(pa) = provider_auth {
-            if let Some(key) = pa.api_keys.as_ref().and_then(|k| k.first()).map(|k| k.key.clone()) {
+            if let Some(key) = pa
+                .api_keys
+                .as_ref()
+                .and_then(|k| k.first())
+                .map(|k| k.key.clone())
+            {
                 info!("using Kimi API key from auth.json");
                 key
             } else {
@@ -392,8 +401,7 @@ impl DefaultProviderFactory {
             }
         } else {
             return Err(ProviderError::Auth {
-                message: "no Kimi auth configured — add API key in Settings > Providers"
-                    .into(),
+                message: "no Kimi auth configured — add API key in Settings > Providers".into(),
             });
         };
 
@@ -414,10 +422,7 @@ impl DefaultProviderFactory {
             }),
         };
         Ok(Arc::new(
-            crate::llm::kimi::provider::KimiProvider::with_client(
-                config,
-                self.http_client.clone(),
-            ),
+            crate::llm::kimi::provider::KimiProvider::with_client(config, self.http_client.clone()),
         ))
     }
 
@@ -469,13 +474,16 @@ impl DefaultProviderFactory {
         // MiniMax/Kimi use simple API keys without credential selection.
         match provider_type {
             ProviderKind::Anthropic => {
-                self.create_anthropic_with_credential(bare_model, credential_override).await
+                self.create_anthropic_with_credential(bare_model, credential_override)
+                    .await
             }
             ProviderKind::OpenAi | ProviderKind::OpenAiCodex => {
-                self.create_openai_with_credential(bare_model, credential_override).await
+                self.create_openai_with_credential(bare_model, credential_override)
+                    .await
             }
             ProviderKind::Google => {
-                self.create_google_with_credential(bare_model, credential_override).await
+                self.create_google_with_credential(bare_model, credential_override)
+                    .await
             }
             ProviderKind::MiniMax => self.create_minimax(bare_model),
             ProviderKind::Kimi => self.create_kimi(bare_model),
@@ -653,8 +661,7 @@ mod tests {
         std::fs::write(&path, "{}").unwrap();
 
         let settings = crate::settings::TronSettings::default();
-        let factory = DefaultProviderFactory::new(&settings)
-            .with_auth_path(path);
+        let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
 
         // No OAuth, no auth.json credentials → should fail with auth error
         let err = expect_auth_error(&factory, "claude-opus-4-6").await;
@@ -676,12 +683,16 @@ mod tests {
             refresh_token: "old-ref".into(),
             expires_at: 0, // long expired
         };
-        crate::llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "test", &expired_tokens)
-            .unwrap();
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path,
+            "anthropic",
+            "test",
+            &expired_tokens,
+        )
+        .unwrap();
 
         let settings = crate::settings::TronSettings::default();
-        let factory = DefaultProviderFactory::new(&settings)
-            .with_auth_path(path);
+        let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
 
         // Should fail — OAuth exists but refresh fails, no API key to fall back to
         let err = expect_auth_error(&factory, "claude-opus-4-6").await;
@@ -698,7 +709,11 @@ mod tests {
         let factory = no_auth_factory();
         // Ollama doesn't need auth — should succeed (create provider, not error)
         let result = factory.create_for_model("gemma4:e4b").await;
-        assert!(result.is_ok(), "Ollama should not require auth: {}", result.err().map_or(String::new(), |e| e.to_string()));
+        assert!(
+            result.is_ok(),
+            "Ollama should not require auth: {}",
+            result.err().map_or(String::new(), |e| e.to_string())
+        );
         let provider = result.unwrap();
         assert_eq!(
             provider.provider_type(),

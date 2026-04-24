@@ -20,8 +20,8 @@ use serde_json::Value;
 
 use crate::events::errors::Result;
 use crate::events::sqlite::row_types::EventRow;
-use crate::events::types::payloads::TokenTotals;
 use crate::events::types::SessionEvent;
+use crate::events::types::payloads::TokenTotals;
 
 mod crud;
 pub(crate) mod extractors;

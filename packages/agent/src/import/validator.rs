@@ -34,10 +34,10 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::import::assembler::{assemble, AssembledItem};
+use crate::import::assembler::{AssembledItem, assemble};
 use crate::import::errors::ImportError;
-use crate::import::parser::{parse_session_detailed, ParseWarning};
-use crate::import::transformer::{transform, TransformResult, TronEventSpec};
+use crate::import::parser::{ParseWarning, parse_session_detailed};
+use crate::import::transformer::{TransformResult, TronEventSpec, transform};
 use crate::import::tree::linearize;
 
 /// Category of a non-fatal import warning.
@@ -117,7 +117,9 @@ impl ImportWarning {
     fn assistant_missing_model() -> Self {
         Self {
             kind: ImportWarningKind::AssistantMissingModel,
-            message: "No assistant message carried a model ID. Imported session uses the default model.".to_string(),
+            message:
+                "No assistant message carried a model ID. Imported session uses the default model."
+                    .to_string(),
         }
     }
 }
@@ -294,8 +296,12 @@ fn detect_tool_orphans(items: &[AssembledItem]) -> Vec<ImportWarning> {
             }
             AssembledItem::UserMessage { record, .. } => {
                 let Some(msg) = &record.message else { continue };
-                let Some(content) = &msg.content else { continue };
-                let Some(blocks) = content.as_array() else { continue };
+                let Some(content) = &msg.content else {
+                    continue;
+                };
+                let Some(blocks) = content.as_array() else {
+                    continue;
+                };
                 for block in blocks {
                     if block.get("type").and_then(Value::as_str) != Some("tool_result") {
                         continue;

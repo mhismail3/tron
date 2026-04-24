@@ -9,14 +9,14 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 
-use crate::runtime::context::context_manager::ContextManager;
-use crate::runtime::context::local_policy;
-use crate::runtime::guardrails::GuardrailEngine;
-use crate::runtime::hooks::engine::HookEngine;
 use crate::core::events::{BaseEvent, TronEvent};
 use crate::core::messages::Context;
 use crate::llm::ProviderHealthTracker;
 use crate::llm::provider::Provider;
+use crate::runtime::context::context_manager::ContextManager;
+use crate::runtime::context::local_policy;
+use crate::runtime::guardrails::GuardrailEngine;
+use crate::runtime::hooks::engine::HookEngine;
 use crate::tools::registry::ToolRegistry;
 
 use metrics::{counter, histogram};
@@ -90,7 +90,8 @@ pub struct TurnParams<'a> {
     /// Optional unified job manager for process + subagent lifecycle.
     pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
     /// Optional output buffer registry for process output streaming.
-    pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    pub output_buffer_registry:
+        Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     /// Optional per-session sequence counter for monotonic event ordering.
     pub sequence_counter: Option<&'a AtomicI64>,
     /// Optional per-tool abort registry. Threaded into `ToolExecutionContext`
@@ -209,15 +210,18 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             );
 
             if let Some(counter) = sequence_counter {
-                let _ = emitter.emit_sequenced(TronEvent::TurnFailed {
-                    base: BaseEvent::now(session_id),
-                    turn,
-                    error: error_msg.clone(),
-                    code: None,
-                    category: Some(category),
-                    recoverable,
-                    partial_content: None,
-                }, counter);
+                let _ = emitter.emit_sequenced(
+                    TronEvent::TurnFailed {
+                        base: BaseEvent::now(session_id),
+                        turn,
+                        error: error_msg.clone(),
+                        code: None,
+                        category: Some(category),
+                        recoverable,
+                        partial_content: None,
+                    },
+                    counter,
+                );
             } else {
                 let _ = emitter.emit(TronEvent::TurnFailed {
                     base: BaseEvent::now(session_id),
@@ -275,24 +279,34 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // 7. Process stream (drain after turn-stopping tools to capture token usage cleanly)
     let turn_stopping_tools = registry.turn_stopping_tool_names();
-    let stream_result =
-        match stream_processor::process_stream(stream, session_id, emitter, cancel, &turn_stopping_tools, sequence_counter, journal.as_mut()).await {
-            Ok(r) => {
-                if let Some(ht) = health_tracker {
-                    ht.record_success(provider_name);
-                }
-                r
+    let stream_result = match stream_processor::process_stream(
+        stream,
+        session_id,
+        emitter,
+        cancel,
+        &turn_stopping_tools,
+        sequence_counter,
+        journal.as_mut(),
+    )
+    .await
+    {
+        Ok(r) => {
+            if let Some(ht) = health_tracker {
+                ht.record_success(provider_name);
             }
-            Err(e) => {
-                if let Some(ht) = health_tracker {
-                    ht.record_failure(provider_name);
-                }
-                histogram!("provider_request_duration_seconds", "provider" => provider_name)
-                    .record(request_start.elapsed().as_secs_f64());
-                let error_msg = e.to_string();
-                error!(session_id, turn, error = %error_msg, "stream failed");
-                if let Some(counter) = sequence_counter {
-                    let _ = emitter.emit_sequenced(TronEvent::TurnFailed {
+            r
+        }
+        Err(e) => {
+            if let Some(ht) = health_tracker {
+                ht.record_failure(provider_name);
+            }
+            histogram!("provider_request_duration_seconds", "provider" => provider_name)
+                .record(request_start.elapsed().as_secs_f64());
+            let error_msg = e.to_string();
+            error!(session_id, turn, error = %error_msg, "stream failed");
+            if let Some(counter) = sequence_counter {
+                let _ = emitter.emit_sequenced(
+                    TronEvent::TurnFailed {
                         base: BaseEvent::now(session_id),
                         turn,
                         error: error_msg.clone(),
@@ -300,26 +314,28 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                         category: Some(e.category().to_owned()),
                         recoverable: e.is_recoverable(),
                         partial_content: None,
-                    }, counter);
-                } else {
-                    let _ = emitter.emit(TronEvent::TurnFailed {
-                        base: BaseEvent::now(session_id),
-                        turn,
-                        error: error_msg.clone(),
-                        code: None,
-                        category: Some(e.category().to_owned()),
-                        recoverable: e.is_recoverable(),
-                        partial_content: None,
-                    });
-                }
-                return TurnResult {
-                    success: false,
-                    error: Some(error_msg),
-                    stop_reason: Some(StopReason::Error),
-                    ..Default::default()
-                };
+                    },
+                    counter,
+                );
+            } else {
+                let _ = emitter.emit(TronEvent::TurnFailed {
+                    base: BaseEvent::now(session_id),
+                    turn,
+                    error: error_msg.clone(),
+                    code: None,
+                    category: Some(e.category().to_owned()),
+                    recoverable: e.is_recoverable(),
+                    partial_content: None,
+                });
             }
-        };
+            return TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
+        }
+    };
 
     // Record provider request duration (covers full stream consumption)
     histogram!("provider_request_duration_seconds", "provider" => provider_name)
@@ -389,9 +405,11 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     // see "response complete" for a message that is missing from the DB
     // on reconnect. Fail the turn with an actionable error instead.
     let has_thinking = {
-        let content_has_thinking = stream_result.message.content.iter().any(|c| {
-            matches!(c, crate::core::content::AssistantContent::Thinking { .. })
-        });
+        let content_has_thinking = stream_result
+            .message
+            .content
+            .iter()
+            .any(|c| matches!(c, crate::core::content::AssistantContent::Thinking { .. }));
         content_has_thinking
     };
 
@@ -742,8 +760,8 @@ mod tests {
 
     // ── build_execution_waves unit tests ──
 
-    use serde_json::Map;
     use crate::core::messages::ToolCall;
+    use serde_json::Map;
 
     fn tc(name: &str) -> ToolCall {
         ToolCall::new(format!("tc-{name}"), name, Map::new())

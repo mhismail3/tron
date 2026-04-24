@@ -3,9 +3,9 @@
 //! Handles CRUD operations, runtime state management, and garbage collection.
 //! All operations use the shared `log.db` connection pool.
 
+use crate::events::ConnectionPool;
 use chrono::{DateTime, Utc};
 use rusqlite::params;
-use crate::events::ConnectionPool;
 
 use crate::cron::errors::CronError;
 use crate::cron::types::{CronJob, CronRun, DeliveryOutcome, JobRuntimeState, RunStatus};
@@ -727,7 +727,9 @@ fn parse_optional_datetime(s: Option<String>) -> Option<DateTime<Utc>> {
     s.and_then(|s| {
         DateTime::parse_from_rfc3339(&s)
             .map(|t| t.to_utc())
-            .map_err(|e| tracing::warn!(error = %e, value = %s, "corrupt datetime in runtime state"))
+            .map_err(
+                |e| tracing::warn!(error = %e, value = %s, "corrupt datetime in runtime state"),
+            )
             .ok()
     })
 }
@@ -762,7 +764,6 @@ fn build_run_filters(
 
     (where_clause, count_params, query_params)
 }
-
 
 #[cfg(test)]
 #[path = "store_tests.rs"]

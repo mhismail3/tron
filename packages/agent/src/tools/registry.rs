@@ -7,9 +7,9 @@
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
 
+use crate::core::tools::Tool;
 use indexmap::IndexMap;
 use tracing::debug;
-use crate::core::tools::Tool;
 
 use crate::tools::traits::TronTool;
 
@@ -124,9 +124,9 @@ impl Default for ToolRegistry {
 
 #[cfg(test)]
 mod tests {
+    use crate::core::tools::{ToolCategory, TronToolResult};
     use async_trait::async_trait;
     use serde_json::Value;
-    use crate::core::tools::{ToolCategory, TronToolResult};
 
     use super::*;
     use crate::tools::errors::ToolError;
@@ -198,8 +198,11 @@ mod tests {
         }
 
         fn definition(&self) -> Tool {
-            ToolSchemaBuilder::new(self.tool_name.clone(), format!("Stopping {}", self.tool_name))
-                .build()
+            ToolSchemaBuilder::new(
+                self.tool_name.clone(),
+                format!("Stopping {}", self.tool_name),
+            )
+            .build()
         }
 
         async fn execute(

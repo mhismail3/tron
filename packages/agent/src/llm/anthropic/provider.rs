@@ -10,10 +10,10 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tracing::{debug, error, info, instrument};
 
+use crate::core::messages::Context;
 use crate::llm::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::core::messages::Context;
 
 use super::cache_pruning::{
     DEFAULT_RECENT_TURNS, DEFAULT_TTL_MS, is_cache_cold, prune_tool_results_for_recache,

@@ -35,10 +35,7 @@ impl MockDeps {
         self
     }
 
-    fn with_token_fn(
-        mut self,
-        f: impl Fn(&Message) -> u64 + Send + Sync + 'static,
-    ) -> Self {
+    fn with_token_fn(mut self, f: impl Fn(&Message) -> u64 + Send + Sync + 'static) -> Self {
         self.token_fn = Some(Box::new(f));
         self
     }
@@ -1083,4 +1080,3 @@ fn local_window_budget_caps_preserved_turns() {
         "budget should cap at 5 turns (10 messages)"
     );
 }
-

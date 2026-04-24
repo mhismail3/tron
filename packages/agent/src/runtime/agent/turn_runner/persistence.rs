@@ -1,14 +1,14 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use serde_json::{Value, json};
-use tracing::{error, warn};
 use crate::core::events::{
     ActivatedRuleInfo, AssistantMessage, BaseEvent, ResponseTokenUsage, ToolCallSummary, TronEvent,
     TurnTokenUsage,
 };
 use crate::core::messages::{Provider, TokenUsage};
 use crate::events::EventType;
+use serde_json::{Value, json};
+use tracing::{error, warn};
 
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::context::context_manager::ContextManager;
@@ -175,16 +175,20 @@ pub(super) fn emit_response_complete(
             provider_type: None,
         });
 
-    emit_maybe_sequenced(emitter, TronEvent::ResponseComplete {
-        base: BaseEvent::now(session_id),
-        turn,
-        stop_reason: stream_result.stop_reason.clone(),
-        token_usage: response_token_usage,
-        has_tool_calls: !stream_result.tool_calls.is_empty(),
-        tool_call_count: stream_result.tool_calls.len() as u32,
-        token_record: token_record_json,
-        model: Some(model_name.to_owned()),
-    }, sequence_counter);
+    emit_maybe_sequenced(
+        emitter,
+        TronEvent::ResponseComplete {
+            base: BaseEvent::now(session_id),
+            turn,
+            stop_reason: stream_result.stop_reason.clone(),
+            token_usage: response_token_usage,
+            has_tool_calls: !stream_result.tool_calls.is_empty(),
+            tool_call_count: stream_result.tool_calls.len() as u32,
+            token_record: token_record_json,
+            model: Some(model_name.to_owned()),
+        },
+        sequence_counter,
+    );
 }
 
 pub(super) fn add_assistant_message_to_context(
@@ -448,10 +452,14 @@ pub(super) fn emit_tool_use_batch(
         })
         .collect();
 
-    emit_maybe_sequenced(emitter, TronEvent::ToolUseBatch {
-        base: BaseEvent::now(session_id),
-        tool_calls: summaries,
-    }, sequence_counter);
+    emit_maybe_sequenced(
+        emitter,
+        TronEvent::ToolUseBatch {
+            base: BaseEvent::now(session_id),
+            tool_calls: summaries,
+        },
+        sequence_counter,
+    );
 }
 
 #[cfg(test)]
@@ -462,10 +470,10 @@ mod tests {
     //! subscribers with an event the DB never recorded, so reconstruction on
     //! reconnect would diverge from what live clients already rendered.
     use super::*;
+    use crate::events::EventStore;
     use crate::events::sqlite::connection::{self, ConnectionConfig};
     use crate::events::sqlite::migrations::run_migrations;
     use crate::events::sqlite::repositories::event::ListEventsOptions;
-    use crate::events::EventStore;
     use crate::runtime::types::StreamResult;
     use std::sync::Arc;
     use std::sync::atomic::AtomicI64;
@@ -516,7 +524,14 @@ mod tests {
     async fn emit_turn_start_persists_before_broadcasting() {
         let mut h = harness().await;
 
-        emit_turn_start(&h.emitter, Some(&h.persister), &h.session_id, 1, Some(&h.counter)).await;
+        emit_turn_start(
+            &h.emitter,
+            Some(&h.persister),
+            &h.session_id,
+            1,
+            Some(&h.counter),
+        )
+        .await;
 
         // Collect the broadcast event.
         let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), h.rx.recv())
@@ -562,7 +577,14 @@ mod tests {
         h.persister.worker_handle.abort();
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-        emit_turn_start(&h.emitter, Some(&h.persister), &h.session_id, 1, Some(&h.counter)).await;
+        emit_turn_start(
+            &h.emitter,
+            Some(&h.persister),
+            &h.session_id,
+            1,
+            Some(&h.counter),
+        )
+        .await;
 
         // A broadcast would arrive immediately if the emit fired — give it a
         // short window, then confirm no event appeared.
@@ -698,13 +720,9 @@ mod tests {
         // failure mode to guard against.
         let h = harness().await;
         let payload = json!({ "content": [], "turn": 1 });
-        let result = persist_completed_assistant_message(
-            None,
-            &h.session_id,
-            payload,
-            Some(&h.counter),
-        )
-        .await;
+        let result =
+            persist_completed_assistant_message(None, &h.session_id, payload, Some(&h.counter))
+                .await;
         assert!(result.is_ok());
     }
 
@@ -760,6 +778,10 @@ mod tests {
 
         h.persister.flush().await.unwrap();
         let persisted = persisted_events(&h.store, &h.session_id, "rules.activated");
-        assert_eq!(persisted.len(), 1, "expected exactly one rules.activated row");
+        assert_eq!(
+            persisted.len(),
+            1,
+            "expected exactly one rules.activated row"
+        );
     }
 }

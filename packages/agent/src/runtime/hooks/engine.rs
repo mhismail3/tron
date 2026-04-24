@@ -376,7 +376,9 @@ impl HookEngine {
         discovered: Vec<DiscoveredHook>,
         default_timeout_ms: u64,
         llm_model: &str,
-        subagent_manager: Option<&Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>>,
+        subagent_manager: Option<
+            &Arc<crate::runtime::orchestrator::subagent_manager::SubagentManager>,
+        >,
         event_emitter: Option<&Arc<crate::runtime::agent::event_emitter::EventEmitter>>,
     ) {
         for hook in discovered {
@@ -794,7 +796,10 @@ mod tests {
         engine.set_error_policy(HookErrorPolicy::Block);
 
         let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
-        assert!(result.is_blocked(), "errorPolicy=Block must synthesize a Block");
+        assert!(
+            result.is_blocked(),
+            "errorPolicy=Block must synthesize a Block"
+        );
         let reason = result.reason.unwrap_or_default();
         assert!(
             reason.contains("errored") && reason.contains("guard"),
@@ -1165,14 +1170,18 @@ mod tests {
         engine.load_discovered_hooks(hooks, 5000, "haiku", None, None);
 
         assert_eq!(engine.registry().count(), 2);
-        assert!(engine
-            .registry()
-            .get_by_name("project:session-start")
-            .is_some());
-        assert!(engine
-            .registry()
-            .get_by_name("project:post-tool-use")
-            .is_some());
+        assert!(
+            engine
+                .registry()
+                .get_by_name("project:session-start")
+                .is_some()
+        );
+        assert!(
+            engine
+                .registry()
+                .get_by_name("project:post-tool-use")
+                .is_some()
+        );
     }
 
     #[tokio::test]

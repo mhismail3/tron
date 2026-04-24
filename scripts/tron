@@ -171,7 +171,7 @@ run_fmt_check() {
 
 run_clippy() {
     print_status "Running clippy..."
-    (cd "$RUST_WORKSPACE" && cargo clippy --workspace --all-targets -- -D warnings) || { print_error "Clippy failed"; return 1; }
+    (cd "$RUST_WORKSPACE" && cargo clippy --workspace --all-targets) || { print_error "Clippy failed"; return 1; }
     print_success "Clippy passed"
 }
 

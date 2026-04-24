@@ -72,8 +72,8 @@ impl SessionReconstructService {
         let sid = session_id.clone();
 
         // 1. Load events and pending queue from DB (blocking — SQLite)
-        let (events, has_more, session_metadata, pending_queue) =
-            ctx.run_blocking("session.reconstruct.load", move || {
+        let (events, has_more, session_metadata, pending_queue) = ctx
+            .run_blocking("session.reconstruct.load", move || {
                 // Verify session exists
                 let session = session_manager
                     .get_session(&sid)
@@ -121,8 +121,7 @@ impl SessionReconstructService {
 
                 // Load pending queue state (derived from message.queued/dequeued events)
                 let pending_queue =
-                    PromptQueueService::get_pending_queue(&event_store, &sid)
-                        .unwrap_or_default();
+                    PromptQueueService::get_pending_queue(&event_store, &sid).unwrap_or_default();
 
                 Ok((events, has_more, metadata, pending_queue))
             })
@@ -135,8 +134,16 @@ impl SessionReconstructService {
             if let Some(ref s) = state {
                 debug!(
                     session_id,
-                    tool_count = s.get("toolCalls").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
-                    seq_count = s.get("contentSequence").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
+                    tool_count = s
+                        .get("toolCalls")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0),
+                    seq_count = s
+                        .get("contentSequence")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0),
                     has_streaming = s.get("streaming").map(|v| !v.is_null()).unwrap_or(false),
                     "in-flight state built for running agent"
                 );
@@ -196,7 +203,11 @@ impl SessionReconstructService {
         let (text, tool_calls, content_sequence) =
             orchestrator.turn_accumulators().get_state(session_id)?;
 
-        Some(Self::reconcile_in_flight(text, tool_calls, content_sequence))
+        Some(Self::reconcile_in_flight(
+            text,
+            tool_calls,
+            content_sequence,
+        ))
     }
 
     /// Reconcile in-flight accumulator state against persisted events.
@@ -229,9 +240,7 @@ impl SessionReconstructService {
                 .as_array()
                 .unwrap_or(&vec![])
                 .iter()
-                .filter(|item| {
-                    item.get("type").and_then(|t| t.as_str()) == Some("tool_ref")
-                })
+                .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("tool_ref"))
                 .cloned()
                 .collect();
 
@@ -481,5 +490,4 @@ mod tests {
         assert_eq!(seq.len(), 2);
         assert!(seq.iter().all(|item| item["type"] == "tool_ref"));
     }
-
 }

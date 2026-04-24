@@ -266,11 +266,7 @@ fn count_jsonl_files(dir: &Path) -> usize {
         .map(|entries| {
             entries
                 .filter_map(Result::ok)
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .is_some_and(|ext| ext == "jsonl")
-                })
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "jsonl"))
                 .count()
         })
         .unwrap_or(0)
@@ -305,11 +301,15 @@ fn extract_session_meta(path: &Path, session_uuid: &str) -> Result<ClaudeSession
             }
             RecordKind::Assistant => {
                 message_count += 1;
-                if slug.is_none() && let Some(s) = &record.slug {
+                if slug.is_none()
+                    && let Some(s) = &record.slug
+                {
                     slug = Some(s.clone());
                 }
                 if let Some(msg) = &record.message {
-                    if model.is_none() && let Some(m) = &msg.model {
+                    if model.is_none()
+                        && let Some(m) = &msg.model
+                    {
                         model = Some(m.clone());
                     }
                     let usage = msg.usage.clone().unwrap_or_default();

@@ -34,8 +34,8 @@ pub mod validator;
 pub mod writer;
 
 pub use errors::ImportError;
-pub use parser::{discover_projects, discover_sessions, ClaudeProject, ClaudeSessionMeta};
+pub use parser::{ClaudeProject, ClaudeSessionMeta, discover_projects, discover_sessions};
 pub use validator::{
-    validate_session, ImportPreview, ImportValidation, ImportWarning, ImportWarningKind,
+    ImportPreview, ImportValidation, ImportWarning, ImportWarningKind, validate_session,
 };
-pub use writer::{import_session, ImportResult};
+pub use writer::{ImportResult, import_session};

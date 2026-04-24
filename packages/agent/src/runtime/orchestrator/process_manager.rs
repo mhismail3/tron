@@ -29,15 +29,15 @@ use uuid::Uuid;
 use tracing::{debug, warn};
 
 use crate::core::events::{BaseEvent, TronEvent};
-use crate::tools::utils::truncation::{
-    truncate_head_tail, HEAD_CHARS, INLINE_OUTPUT_LIMIT, TAIL_CHARS,
-};
 use crate::events::{EventStore, EventType};
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{
     BackgroundReason, ManagedProcessConfig, ManagedProcessHandle, ManagedProcessResult,
     ProcessInfo, ProcessManagerOps, ProcessState,
+};
+use crate::tools::utils::truncation::{
+    HEAD_CHARS, INLINE_OUTPUT_LIMIT, TAIL_CHARS, truncate_head_tail,
 };
 
 // =============================================================================
@@ -405,7 +405,9 @@ impl ProcessManagerOps for ProcessManager {
         match state {
             ProcessState::Foreground | ProcessState::Background => {
                 if user_initiated {
-                    tracker.user_cancelled.store(true, std::sync::atomic::Ordering::Release);
+                    tracker
+                        .user_cancelled
+                        .store(true, std::sync::atomic::Ordering::Release);
                 }
                 tracker.cancel.cancel();
                 Ok(())
@@ -536,7 +538,6 @@ impl ProcessManagerOps for ProcessManager {
 // =============================================================================
 // Tests
 // =============================================================================
-
 
 #[cfg(test)]
 #[path = "process_manager_tests.rs"]

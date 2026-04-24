@@ -1225,8 +1225,7 @@ mod tests {
                 s
             }));
         }
-        let written: Vec<UpdaterState> =
-            handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let written: Vec<UpdaterState> = handles.into_iter().map(|h| h.join().unwrap()).collect();
         let final_state = read_update_state(&path).unwrap();
         assert!(
             written.contains(&final_state),

@@ -16,8 +16,7 @@ use super::*;
 use crate::core::events::TronEvent;
 use crate::events::{ConnectionConfig, EventStore, new_in_memory, run_migrations};
 use crate::worktree::types::{
-    AcquireResult, MergeOrigin, MergeStrategy, RebaseOnMainResult, WorktreeConfig,
-    WorktreeInfo,
+    AcquireResult, MergeOrigin, MergeStrategy, RebaseOnMainResult, WorktreeConfig, WorktreeInfo,
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -62,8 +61,7 @@ fn make_store() -> Arc<EventStore> {
 }
 
 /// Build a coordinator with broadcast wired up so tests can assert events.
-fn coord_with_broadcast(
-) -> (Arc<WorktreeCoordinator>, broadcast::Receiver<TronEvent>) {
+fn coord_with_broadcast() -> (Arc<WorktreeCoordinator>, broadcast::Receiver<TronEvent>) {
     let (tx, rx) = broadcast::channel(256);
     let store = make_store();
     let c = Arc::new(WorktreeCoordinator::with_broadcast(
@@ -77,8 +75,7 @@ fn coord_with_broadcast(
 /// Full setup: init repo, create session, acquire worktree.
 /// Returns `(coord, rx, session_id, info, dir)` — keep `dir` alive in
 /// the caller to prevent cleanup.
-async fn setup_session_on_main(
-) -> (
+async fn setup_session_on_main() -> (
     Arc<WorktreeCoordinator>,
     broadcast::Receiver<TronEvent>,
     String,
@@ -118,7 +115,11 @@ async fn advance_main(repo: &std::path::Path, file: &str, content: &str) -> Stri
     run_cmd(repo, &["git", "checkout", "main"]).await;
     std::fs::write(repo.join(file), content).unwrap();
     run_cmd(repo, &["git", "add", "-A"]).await;
-    run_cmd(repo, &["git", "commit", "-m", &format!("advance main: {file}")]).await;
+    run_cmd(
+        repo,
+        &["git", "commit", "-m", &format!("advance main: {file}")],
+    )
+    .await;
     run_cmd(repo, &["git", "rev-parse", "HEAD"]).await
 }
 
@@ -195,7 +196,10 @@ async fn rebase_on_main_pending_merge_exists() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, crate::worktree::errors::WorktreeError::PendingMergeExists),
+        matches!(
+            err,
+            crate::worktree::errors::WorktreeError::PendingMergeExists
+        ),
         "expected PendingMergeExists, got {err:?}"
     );
 }
@@ -222,7 +226,10 @@ async fn rebase_on_main_missing_base_branch_and_no_override() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, crate::worktree::errors::WorktreeError::MissingBaseBranch),
+        matches!(
+            err,
+            crate::worktree::errors::WorktreeError::MissingBaseBranch
+        ),
         "expected MissingBaseBranch, got {err:?}"
     );
 }
@@ -264,11 +271,7 @@ async fn rebase_on_main_clean_rebase_advances_session() {
     let (coord, _rx, session_id, info, dir) = setup_session_on_main().await;
     // Pre: session at some SHA. Advance main.
     let _main_sha = advance_main(dir.path(), "new.txt", "hello").await;
-    let pre_session_head = coord
-        .git
-        .head_commit(&info.worktree_path)
-        .await
-        .unwrap();
+    let pre_session_head = coord.git.head_commit(&info.worktree_path).await.unwrap();
 
     let result = coord
         .rebase_on_main(&session_id, None, MergeStrategy::Rebase)
@@ -302,7 +305,11 @@ async fn rebase_on_main_clean_merge_creates_merge_commit() {
     // Commit something on session first so merge creates a two-parent commit.
     std::fs::write(info.worktree_path.join("s.txt"), "session").unwrap();
     run_cmd(&info.worktree_path, &["git", "add", "-A"]).await;
-    run_cmd(&info.worktree_path, &["git", "commit", "-m", "session commit"]).await;
+    run_cmd(
+        &info.worktree_path,
+        &["git", "commit", "-m", "session commit"],
+    )
+    .await;
 
     let result = coord
         .rebase_on_main(&session_id, None, MergeStrategy::Merge)
@@ -482,7 +489,11 @@ async fn rebase_on_main_stash_persists_sidecar_file_during_rebase() {
     // Session commits a divergent f.txt so the rebase WILL conflict.
     std::fs::write(info.worktree_path.join("f.txt"), "from session\n").unwrap();
     run_cmd(&info.worktree_path, &["git", "add", "-A"]).await;
-    run_cmd(&info.worktree_path, &["git", "commit", "-m", "session f.txt"]).await;
+    run_cmd(
+        &info.worktree_path,
+        &["git", "commit", "-m", "session f.txt"],
+    )
+    .await;
     // Dirty the worktree with an unrelated tracked change so stash runs.
     std::fs::write(info.worktree_path.join("README.md"), "# dirty\n").unwrap();
 
@@ -493,7 +504,9 @@ async fn rebase_on_main_stash_persists_sidecar_file_during_rebase() {
     assert!(matches!(res, RebaseOnMainResult::Conflicts { .. }));
 
     // Sidecar should be on disk.
-    let path = sidecar_path(&info.worktree_path, &session_id).await.unwrap();
+    let path = sidecar_path(&info.worktree_path, &session_id)
+        .await
+        .unwrap();
     assert!(path.exists(), "sidecar file must exist during conflict");
     let body = tokio::fs::read(&path).await.unwrap();
     let sc: SidecarContents = serde_json::from_slice(&body).unwrap();
@@ -512,8 +525,13 @@ async fn rebase_on_main_sidecar_removed_on_clean_completion() {
         .await
         .unwrap();
 
-    let path = sidecar_path(&info.worktree_path, &session_id).await.unwrap();
-    assert!(!path.exists(), "sidecar must be removed after clean completion");
+    let path = sidecar_path(&info.worktree_path, &session_id)
+        .await
+        .unwrap();
+    assert!(
+        !path.exists(),
+        "sidecar must be removed after clean completion"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -533,7 +551,11 @@ async fn setup_conflicted_session() -> (
     // Session commits a divergent f.txt so rebase conflicts.
     std::fs::write(info.worktree_path.join("f.txt"), "session version\n").unwrap();
     run_cmd(&info.worktree_path, &["git", "add", "-A"]).await;
-    run_cmd(&info.worktree_path, &["git", "commit", "-m", "session f.txt"]).await;
+    run_cmd(
+        &info.worktree_path,
+        &["git", "commit", "-m", "session f.txt"],
+    )
+    .await;
     (coord, rx, session_id, info, dir)
 }
 
@@ -740,7 +762,9 @@ async fn recovery_pops_orphaned_stash_when_sidecar_present_but_no_rebase_merge_d
     let _ = coord.rebuild_pending_merges().await;
 
     // Expect: sidecar removed, stash popped (file restored).
-    let sp = sidecar_path(&info.worktree_path, &session_id).await.unwrap();
+    let sp = sidecar_path(&info.worktree_path, &session_id)
+        .await
+        .unwrap();
     assert!(!sp.exists(), "sidecar must be removed");
     let body = std::fs::read_to_string(info.worktree_path.join("README.md")).unwrap();
     assert_eq!(body, "# dirty\n");
@@ -771,7 +795,9 @@ async fn recovery_rebuilds_pending_merge_with_auto_stash_ref_from_sidecar() {
 async fn recovery_removes_corrupted_sidecar_and_logs_warning() {
     let (coord, _rx, session_id, info, _dir) = setup_session_on_main().await;
     // Write a corrupted sidecar (not matching our schema / version).
-    let path = sidecar_path(&info.worktree_path, &session_id).await.unwrap();
+    let path = sidecar_path(&info.worktree_path, &session_id)
+        .await
+        .unwrap();
     tokio::fs::create_dir_all(path.parent().unwrap()).await.ok();
     tokio::fs::write(&path, b"garbage").await.unwrap();
 
@@ -914,8 +940,7 @@ fn merge_aborted_carries_origin_field() {
 
 /// Produce a StashPop pending-merge scenario: rebase runs cleanly, then
 /// the stash pop conflicts on a file main also touched.
-async fn setup_stash_pop_conflict(
-) -> (
+async fn setup_stash_pop_conflict() -> (
     Arc<WorktreeCoordinator>,
     broadcast::Receiver<TronEvent>,
     String,
@@ -961,7 +986,11 @@ async fn stash_pop_conflict_emits_conflict_detected_with_origin_stash_pop() {
     )
     .await;
     match evt {
-        TronEvent::WorktreeConflictDetected { paths, source_branch, .. } => {
+        TronEvent::WorktreeConflictDetected {
+            paths,
+            source_branch,
+            ..
+        } => {
             assert!(paths.iter().any(|p| p == "README.md"));
             assert_eq!(source_branch, "stash");
         }
@@ -1033,7 +1062,10 @@ async fn stash_pop_continue_rejects_unresolved_paths() {
         .continue_merge(&session_id, None)
         .await
         .expect_err("continue should refuse while conflicts remain");
-    assert!(matches!(err, crate::worktree::errors::WorktreeError::Git(_)));
+    assert!(matches!(
+        err,
+        crate::worktree::errors::WorktreeError::Git(_)
+    ));
     // Pending merge must still be present.
     assert!(coord.pending_merge(&session_id).is_some());
 }
@@ -1084,7 +1116,9 @@ async fn stash_pop_abort_resets_working_tree_and_preserves_stash() {
 #[tokio::test]
 async fn stash_pop_sidecar_preserved_until_continue_or_abort() {
     let (coord, _rx, session_id, info, _dir) = setup_stash_pop_conflict().await;
-    let path = sidecar_path(&info.worktree_path, &session_id).await.unwrap();
+    let path = sidecar_path(&info.worktree_path, &session_id)
+        .await
+        .unwrap();
     assert!(
         path.exists(),
         "sidecar must survive across the stash pop conflict so crash recovery can find it"
@@ -1109,7 +1143,9 @@ async fn stash_pop_sidecar_preserved_until_continue_or_abort() {
 #[tokio::test]
 async fn stash_pop_abort_removes_sidecar() {
     let (coord, _rx, session_id, info, _dir) = setup_stash_pop_conflict().await;
-    let path = sidecar_path(&info.worktree_path, &session_id).await.unwrap();
+    let path = sidecar_path(&info.worktree_path, &session_id)
+        .await
+        .unwrap();
     assert!(path.exists());
 
     coord.abort_merge(&session_id).await.unwrap();
@@ -1133,7 +1169,9 @@ async fn stash_pop_crash_recovery_detects_unmerged_index_and_populates_pending()
     assert!(p.auto_stash_ref.is_some());
 
     // Sidecar still present (preserved by recovery for re-crash safety).
-    let path = sidecar_path(&info.worktree_path, &session_id).await.unwrap();
+    let path = sidecar_path(&info.worktree_path, &session_id)
+        .await
+        .unwrap();
     assert!(path.exists());
 }
 

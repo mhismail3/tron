@@ -38,16 +38,18 @@
 //! prevented by the per-bundle `apns-topic` header (above), not by
 //! session-scoping.
 
-pub mod delegate;
 mod config;
+pub mod delegate;
+mod push_helpers;
 pub mod relay;
 pub mod relay_delegate;
-mod push_helpers;
 pub mod sender;
 mod service;
 mod types;
 
-pub use config::{ApnsConfig, load_apns_config, load_push_config, load_relay_config, PushConfig, RelayConfig};
+pub use config::{
+    ApnsConfig, PushConfig, RelayConfig, load_apns_config, load_push_config, load_relay_config,
+};
 pub use sender::{ApnsBatch, PushSender};
 pub use service::ApnsService;
 pub use types::{ApnsNotification, ApnsSendResult};

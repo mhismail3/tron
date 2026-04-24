@@ -79,7 +79,11 @@ pub fn acquire_database_lock(db_path: &Path) -> Result<DatabaseLock, LockError> 
     }
 
     let mut open_opts = OpenOptions::new();
-    let _ = open_opts.create(true).read(true).write(true).truncate(false);
+    let _ = open_opts
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -198,7 +202,10 @@ mod tests {
         let err = acquire_database_lock(&db).unwrap_err();
 
         match err {
-            LockError::AlreadyLocked { holder_pid, db_path } => {
+            LockError::AlreadyLocked {
+                holder_pid,
+                db_path,
+            } => {
                 assert_eq!(holder_pid, std::process::id());
                 assert_eq!(db_path, db);
             }

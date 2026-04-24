@@ -50,7 +50,10 @@ mod tests {
             .iter()
             .map(|s| format!(".{s}/skills"))
             .collect();
-        let actual: Vec<String> = SKILL_RELATIVE_SUBDIRS.iter().map(|s| (*s).to_string()).collect();
+        let actual: Vec<String> = SKILL_RELATIVE_SUBDIRS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
         assert_eq!(actual, expected);
     }
 

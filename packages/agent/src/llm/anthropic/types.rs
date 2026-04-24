@@ -246,7 +246,10 @@ impl ClaudeModelInfo {
 pub fn all_claude_models_api_json() -> Vec<serde_json::Value> {
     let mut entries: Vec<_> = CLAUDE_MODELS.iter().collect();
     entries.sort_by_key(|(_, info)| info.sort_order);
-    entries.into_iter().map(|(id, info)| info.to_api_json(id)).collect()
+    entries
+        .into_iter()
+        .map(|(id, info)| info.to_api_json(id))
+        .collect()
 }
 
 /// Claude model registry.

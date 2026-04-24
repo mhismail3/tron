@@ -126,9 +126,9 @@ fn assign_turns(chain: Vec<ClaudeRecord>) -> Vec<LinearRecord> {
 
         // Skip non-conversation records.
         match kind {
-            RecordKind::Progress
-            | RecordKind::Attachment
-            | RecordKind::FileHistorySnapshot => continue,
+            RecordKind::Progress | RecordKind::Attachment | RecordKind::FileHistorySnapshot => {
+                continue;
+            }
             _ => {}
         }
 

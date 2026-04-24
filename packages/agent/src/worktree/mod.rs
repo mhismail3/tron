@@ -55,10 +55,10 @@
 //!    `abortMerge(StashPop)` `git reset --hard HEAD`s the worktree and
 //!    preserves the stash on the stack.
 
-#[path = "runtime/coordinator/mod.rs"]
-pub mod coordinator;
 #[path = "scm/conflict.rs"]
 pub mod conflict;
+#[path = "runtime/coordinator/mod.rs"]
+pub mod coordinator;
 pub mod errors;
 #[path = "scm/git.rs"]
 pub mod git;
@@ -83,10 +83,10 @@ pub mod types;
 pub use coordinator::{WorktreeCoordinator, count_diff_stats, split_diff_by_file};
 pub use errors::WorktreeError;
 pub use types::{
-    AcquireResult, CommitEntry, CommitOptions, CommitResult, CommittedDiffResult, CommittedFileEntry,
-    ConflictKind, ConflictResolution, ConflictedFile, DeferralReason, DeleteBranchResult,
-    DiffSummary, FinalizeSessionResult, IsolationMode, MergeOrigin, MergeResult, MergeStrategy,
-    PendingMergeState, PruneBranchesResult, PruneFailure, PushOutput, RebaseOnMainResult,
-    ReleaseInfo, SessionBranchInfo, SyncBlockReason, SyncOutcome, WorktreeConfig,
-    WorktreeInfo, WorktreeStatus,
+    AcquireResult, CommitEntry, CommitOptions, CommitResult, CommittedDiffResult,
+    CommittedFileEntry, ConflictKind, ConflictResolution, ConflictedFile, DeferralReason,
+    DeleteBranchResult, DiffSummary, FinalizeSessionResult, IsolationMode, MergeOrigin,
+    MergeResult, MergeStrategy, PendingMergeState, PruneBranchesResult, PruneFailure, PushOutput,
+    RebaseOnMainResult, ReleaseInfo, SessionBranchInfo, SyncBlockReason, SyncOutcome,
+    WorktreeConfig, WorktreeInfo, WorktreeStatus,
 };

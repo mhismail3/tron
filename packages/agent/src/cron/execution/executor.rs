@@ -10,10 +10,10 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::events::ConnectionPool;
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
-use crate::events::ConnectionPool;
 
 use crate::cron::errors::CronError;
 use crate::cron::types::{CronJob, CronRun, ExecutionOutput, Payload, RunStatus, ToolRestrictions};
@@ -302,10 +302,7 @@ async fn execute_shell(
     cancel: CancellationToken,
 ) -> Result<ExecutionOutput, CronError> {
     const MAX_OUTPUT: usize = 1_048_576; // 1MB
-    let dir = working_dir.map_or_else(
-        crate::core::paths::home_dir,
-        String::from,
-    );
+    let dir = working_dir.map_or_else(crate::core::paths::home_dir, String::from);
 
     let mut cmd = tokio::process::Command::new("bash");
     let _ = cmd
@@ -557,7 +554,8 @@ mod tests {
     }
 
     fn make_test_deps() -> ExecutorDeps {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();

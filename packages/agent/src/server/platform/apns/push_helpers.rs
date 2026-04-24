@@ -22,11 +22,9 @@ use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
-use crate::events::sqlite::repositories::device_token::{
-    DeactivatedTokenInfo, DeviceTokenRepo,
-};
-use crate::events::{AppendOptions, ConnectionPool, EventStore, EventType};
+use crate::events::sqlite::repositories::device_token::{DeactivatedTokenInfo, DeviceTokenRepo};
 use crate::events::types::payloads::device::DeviceTokenInvalidatedPayload;
+use crate::events::{AppendOptions, ConnectionPool, EventStore, EventType};
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{Notification, NotifyResult};
 
@@ -152,7 +150,7 @@ pub(crate) fn is_terminal_token_error(result: &ApnsSendResult) -> bool {
     }
     matches!(
         result.reason.as_deref(),
-        Some("BadDeviceToken") | Some("DeviceTokenNotForTopic")
+        Some("BadDeviceToken" | "DeviceTokenNotForTopic")
     )
 }
 
@@ -505,9 +503,19 @@ mod tests {
             dt("bb", "sandbox", "com.tron.mobile.beta"),
         ];
         let groups = group_tokens(&tokens);
-        assert_eq!(groups.len(), 2, "distinct bundles must form distinct groups");
-        let beta = groups.iter().find(|g| g.bundle_id == "com.tron.mobile.beta").unwrap();
-        let prod = groups.iter().find(|g| g.bundle_id == "com.tron.mobile").unwrap();
+        assert_eq!(
+            groups.len(),
+            2,
+            "distinct bundles must form distinct groups"
+        );
+        let beta = groups
+            .iter()
+            .find(|g| g.bundle_id == "com.tron.mobile.beta")
+            .unwrap();
+        let prod = groups
+            .iter()
+            .find(|g| g.bundle_id == "com.tron.mobile")
+            .unwrap();
         assert_eq!(beta.tokens, vec!["bb"]);
         assert_eq!(prod.tokens, vec!["aa"]);
     }
@@ -550,7 +558,10 @@ mod tests {
 
     #[test]
     fn terminal_bad_device_token_is_terminal() {
-        assert!(is_terminal_token_error(&failed(400, Some("BadDeviceToken"))));
+        assert!(is_terminal_token_error(&failed(
+            400,
+            Some("BadDeviceToken")
+        )));
     }
 
     #[test]
@@ -558,47 +569,62 @@ mod tests {
         // *** Regression test for the original bug. ***
         // Without this deactivation, a broken Beta token stays in the DB
         // and keeps failing every NotifyApp call.
-        assert!(is_terminal_token_error(&failed(400, Some("DeviceTokenNotForTopic"))));
+        assert!(is_terminal_token_error(&failed(
+            400,
+            Some("DeviceTokenNotForTopic")
+        )));
     }
 
     #[test]
-    fn terminal_topic_disallowed_is_NOT_terminal() {
+    fn terminal_topic_disallowed_is_not_terminal() {
         // Cert/team config issue — not a per-token failure. Don't punish
         // the user's tokens for a server-side provisioning mistake.
-        assert!(!is_terminal_token_error(&failed(400, Some("TopicDisallowed"))));
+        assert!(!is_terminal_token_error(&failed(
+            400,
+            Some("TopicDisallowed")
+        )));
     }
 
     #[test]
-    fn terminal_other_400_reasons_are_NOT_terminal() {
-        assert!(!is_terminal_token_error(&failed(400, Some("PayloadTooLarge"))));
+    fn terminal_other_400_reasons_are_not_terminal() {
+        assert!(!is_terminal_token_error(&failed(
+            400,
+            Some("PayloadTooLarge")
+        )));
         assert!(!is_terminal_token_error(&failed(400, Some("IdleTimeout"))));
         assert!(!is_terminal_token_error(&failed(400, Some("BadMessageId"))));
     }
 
     #[test]
-    fn terminal_403_is_NOT_terminal() {
+    fn terminal_403_is_not_terminal() {
         // JWT / provider-token issue. Never a per-token failure.
-        assert!(!is_terminal_token_error(&failed(403, Some("ExpiredProviderToken"))));
-        assert!(!is_terminal_token_error(&failed(403, Some("InvalidProviderToken"))));
+        assert!(!is_terminal_token_error(&failed(
+            403,
+            Some("ExpiredProviderToken")
+        )));
+        assert!(!is_terminal_token_error(&failed(
+            403,
+            Some("InvalidProviderToken")
+        )));
     }
 
     #[test]
-    fn terminal_404_is_NOT_terminal() {
+    fn terminal_404_is_not_terminal() {
         assert!(!is_terminal_token_error(&failed(404, None)));
     }
 
     #[test]
-    fn terminal_429_is_NOT_terminal() {
+    fn terminal_429_is_not_terminal() {
         assert!(!is_terminal_token_error(&failed(429, None)));
     }
 
     #[test]
-    fn terminal_500_is_NOT_terminal() {
+    fn terminal_500_is_not_terminal() {
         assert!(!is_terminal_token_error(&failed(500, None)));
     }
 
     #[test]
-    fn terminal_success_is_NOT_terminal() {
+    fn terminal_success_is_not_terminal() {
         let ok = ApnsSendResult {
             success: true,
             device_token: "tok".into(),
@@ -625,8 +651,7 @@ mod tests {
 
     fn register(pool: &crate::events::ConnectionPool, token: &str) {
         let conn = pool.get().unwrap();
-        DeviceTokenRepo::register(&conn, token, None, None, "sandbox", "com.tron.mobile")
-            .unwrap();
+        DeviceTokenRepo::register(&conn, token, None, None, "sandbox", "com.tron.mobile").unwrap();
     }
 
     fn is_active(pool: &crate::events::ConnectionPool, token: &str) -> bool {
@@ -673,7 +698,10 @@ mod tests {
         }];
         process_send_results(&results, &pool, None);
 
-        assert!(!is_active(&pool, &token), "BadDeviceToken should deactivate");
+        assert!(
+            !is_active(&pool, &token),
+            "BadDeviceToken should deactivate"
+        );
     }
 
     #[test]
@@ -715,7 +743,10 @@ mod tests {
         }];
         process_send_results(&results, &pool, None);
 
-        assert!(is_active(&pool, &token), "transient 400 must not deactivate");
+        assert!(
+            is_active(&pool, &token),
+            "transient 400 must not deactivate"
+        );
     }
 
     #[test]
@@ -735,7 +766,10 @@ mod tests {
         }];
         process_send_results(&results, &pool, None);
 
-        assert!(is_active(&pool, &token), "TopicDisallowed must NOT deactivate");
+        assert!(
+            is_active(&pool, &token),
+            "TopicDisallowed must NOT deactivate"
+        );
     }
 
     #[test]
@@ -803,11 +837,7 @@ mod tests {
         (Arc::new(EventStore::new(pool)), session_id)
     }
 
-    fn register_with_session(
-        store: &EventStore,
-        token: &str,
-        session_id: &str,
-    ) {
+    fn register_with_session(store: &EventStore, token: &str, session_id: &str) {
         let conn = store.pool().get().unwrap();
         DeviceTokenRepo::register(
             &conn,
@@ -996,10 +1026,7 @@ mod tests {
         let payload: String = conn
             .query_row(
                 "SELECT payload FROM events WHERE type = ?1 AND session_id = ?2 LIMIT 1",
-                rusqlite::params![
-                    EventType::DeviceTokenInvalidated.as_str(),
-                    session_id
-                ],
+                rusqlite::params![EventType::DeviceTokenInvalidated.as_str(), session_id],
                 |row| row.get(0),
             )
             .unwrap();
@@ -1011,5 +1038,4 @@ mod tests {
         assert_eq!(payload["sessionId"], session_id);
         assert!(payload["timestamp"].is_string());
     }
-
 }

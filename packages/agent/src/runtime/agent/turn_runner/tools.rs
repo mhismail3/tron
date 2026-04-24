@@ -2,14 +2,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use serde_json::json;
-use tokio_util::sync::CancellationToken;
-use tracing::{error, warn};
 use crate::core::events::ActivatedRuleInfo;
 use crate::core::messages::{Message, ToolResultMessageContent};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::traits::ExecutionMode;
+use serde_json::json;
+use tokio_util::sync::CancellationToken;
+use tracing::{error, warn};
 
+use crate::events::EventType;
 use crate::runtime::agent::compaction_handler::CompactionHandler;
 use crate::runtime::agent::event_emitter::EventEmitter;
 use crate::runtime::agent::tool_executor;
@@ -19,7 +20,6 @@ use crate::runtime::hooks::engine::HookEngine;
 use crate::runtime::orchestrator::event_persister::EventPersister;
 use crate::runtime::orchestrator::tool_abort_registry::ToolAbortRegistry;
 use crate::runtime::types::{StreamResult, ToolExecutionResult};
-use crate::events::EventType;
 
 use super::persistence;
 
@@ -45,7 +45,8 @@ pub(super) struct ToolPhaseParams<'a> {
     pub persister_arc: Option<&'a Arc<EventPersister>>,
     pub process_manager: Option<&'a Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     pub job_manager: Option<&'a Arc<dyn crate::tools::traits::JobManagerOps>>,
-    pub output_buffer_registry: Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    pub output_buffer_registry:
+        Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     pub sequence_counter: Option<&'a AtomicI64>,
     pub provider_type: crate::core::messages::Provider,
     /// Optional per-tool abort registry (see `TurnParams::tool_abort_registry`).
@@ -73,7 +74,9 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
     let mut persist_failed = false;
     for tool_call in &params.stream_result.tool_calls {
         if let Some(persister) = params.persister {
-            let seq = params.sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
+            let seq = params
+                .sequence_counter
+                .map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
             if let Err(error) = persister
                 .append_with_sequence(
                     params.session_id,
@@ -173,7 +176,9 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     if let Some(persister) = params.persister {
                         let result_text = extract_result_text(&result);
                         let is_error = result.result.is_error.unwrap_or(false);
-                        let seq = params.sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
+                        let seq = params
+                            .sequence_counter
+                            .map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                         if let Err(error) = persister
                             .append_with_sequence(
                                 params.session_id,
@@ -337,9 +342,9 @@ fn extract_result_content(exec_result: &ToolExecutionResult) -> ToolResultMessag
             ToolResultMessageContent::Text(text.clone())
         }
         crate::core::tools::ToolResultBody::Blocks(blocks) => {
-            let has_images = blocks.iter().any(|b| {
-                matches!(b, crate::core::content::ToolResultContent::Image { .. })
-            });
+            let has_images = blocks
+                .iter()
+                .any(|b| matches!(b, crate::core::content::ToolResultContent::Image { .. }));
             if has_images {
                 ToolResultMessageContent::Blocks(blocks.clone())
             } else {
@@ -412,8 +417,12 @@ mod tests {
         match content {
             ToolResultMessageContent::Blocks(blocks) => {
                 assert_eq!(blocks.len(), 2);
-                assert!(matches!(&blocks[0], ToolResultContent::Text { text } if text == "screenshot taken"));
-                assert!(matches!(&blocks[1], ToolResultContent::Image { data, mime_type } if data == "base64data" && mime_type == "image/png"));
+                assert!(
+                    matches!(&blocks[0], ToolResultContent::Text { text } if text == "screenshot taken")
+                );
+                assert!(
+                    matches!(&blocks[1], ToolResultContent::Image { data, mime_type } if data == "base64data" && mime_type == "image/png")
+                );
             }
             ToolResultMessageContent::Text(_) => panic!("expected Blocks variant"),
         }
@@ -421,9 +430,10 @@ mod tests {
 
     #[test]
     fn extract_result_content_image_only_blocks() {
-        let exec = make_exec_result(ToolResultBody::Blocks(vec![
-            ToolResultContent::image("imgdata", "image/jpeg"),
-        ]));
+        let exec = make_exec_result(ToolResultBody::Blocks(vec![ToolResultContent::image(
+            "imgdata",
+            "image/jpeg",
+        )]));
         let content = extract_result_content(&exec);
         match content {
             ToolResultMessageContent::Blocks(blocks) => {

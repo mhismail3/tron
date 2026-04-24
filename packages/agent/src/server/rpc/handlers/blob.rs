@@ -43,10 +43,7 @@ impl MethodHandler for GetBlobHandler {
                 message: format!("blob not found: {blob_id}"),
             })?;
 
-        let b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &blob.content,
-        );
+        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &blob.content);
 
         Ok(serde_json::json!({
             "blobId": blob_id,

@@ -1,10 +1,10 @@
 //! Shared notification inbox logic used by the RPC handlers.
 
+use crate::events::PooledConnection;
 use rusqlite::{Connection, params};
 use serde::Serialize;
 use serde_json::Value;
 use tracing::warn;
-use crate::events::PooledConnection;
 
 use crate::server::rpc::errors::RpcError;
 
@@ -421,11 +421,7 @@ mod tests {
             &json!({"arguments": {"title": "Cron 1", "body": "b"}}),
         );
 
-        let result = NotificationInboxService::mark_all_read(
-            &conn,
-            Some("sess_user"),
-        )
-        .unwrap();
+        let result = NotificationInboxService::mark_all_read(&conn, Some("sess_user")).unwrap();
         assert_eq!(result.marked, 2, "only sess_user's two events marked");
 
         // Verify sess_cron's event is still unread.
@@ -436,7 +432,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(cron_read, 0, "cross-session notifications must not be marked");
+        assert_eq!(
+            cron_read, 0,
+            "cross-session notifications must not be marked"
+        );
     }
 
     #[test]

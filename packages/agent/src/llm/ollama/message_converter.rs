@@ -125,9 +125,7 @@ fn convert_user_message(content: &UserMessageContent, supports_images: bool) -> 
                 .collect();
 
             // Collapse to simple string if only text
-            if parts.len() == 1
-                && parts[0].get("type").and_then(Value::as_str) == Some("text")
-            {
+            if parts.len() == 1 && parts[0].get("type").and_then(Value::as_str) == Some("text") {
                 ChatMessage {
                     role: "user".into(),
                     content: Some(parts[0]["text"].clone()),
@@ -508,10 +506,12 @@ mod tests {
             extracted_text: None,
         };
         let v = convert_user_block(&block, true).unwrap();
-        assert!(v["text"]
-            .as_str()
-            .unwrap()
-            .contains("content not available"));
+        assert!(
+            v["text"]
+                .as_str()
+                .unwrap()
+                .contains("content not available")
+        );
     }
 
     #[test]
@@ -531,10 +531,12 @@ mod tests {
         };
         let v = convert_user_block(&block, true).unwrap();
         assert_eq!(v["type"], "image_url");
-        assert!(v["image_url"]["url"]
-            .as_str()
-            .unwrap()
-            .starts_with("data:image/png;base64,"));
+        assert!(
+            v["image_url"]["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
     }
 
     #[test]
@@ -586,7 +588,10 @@ mod tests {
         // Serialize the whole message to JSON and verify arguments is an object
         let wire = serde_json::to_value(&result[0]).unwrap();
         let wire_args = &wire["tool_calls"][0]["function"]["arguments"];
-        assert!(wire_args.is_object(), "arguments must be a JSON object on the wire, got: {wire_args}");
+        assert!(
+            wire_args.is_object(),
+            "arguments must be a JSON object on the wire, got: {wire_args}"
+        );
         assert_eq!(wire_args["command"], "echo hello");
     }
 
@@ -660,10 +665,7 @@ mod tests {
         let wire = serde_json::to_value(&result[0]).unwrap();
         let wire_args = &wire["tool_calls"][0]["function"]["arguments"];
         assert!(wire_args.is_object());
-        assert_eq!(
-            wire_args["command"],
-            "echo \"hello\\nworld\" | grep 'test'"
-        );
+        assert_eq!(wire_args["command"], "echo \"hello\\nworld\" | grep 'test'");
     }
 
     #[test]
@@ -850,7 +852,10 @@ mod tests {
         assert_eq!(result.len(), 3);
 
         // Serialize full conversation to verify wire format
-        let wire: Vec<Value> = result.iter().map(|m| serde_json::to_value(m).unwrap()).collect();
+        let wire: Vec<Value> = result
+            .iter()
+            .map(|m| serde_json::to_value(m).unwrap())
+            .collect();
 
         // User message
         assert_eq!(wire[0]["role"], "user");

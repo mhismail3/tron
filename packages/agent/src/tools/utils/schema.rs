@@ -3,8 +3,8 @@
 //! Replaces the repetitive `Map::new()` + `insert()` boilerplate in every
 //! tool's `definition()` method with a concise builder API.
 
-use serde_json::Value;
 use crate::core::tools::{Tool, ToolParameterSchema};
+use serde_json::Value;
 
 /// Fluent builder for [`Tool`] schemas.
 ///

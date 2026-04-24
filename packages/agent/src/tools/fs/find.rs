@@ -5,9 +5,9 @@
 
 use std::fmt::Write;
 
+use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{ToolContext, TronTool};
@@ -37,9 +37,7 @@ fn find_error(message: impl Into<String>) -> TronToolResult {
     let msg = message.into();
     let class = classify_find_error(&msg);
     TronToolResult {
-        content: ToolResultBody::Blocks(vec![
-            crate::core::content::ToolResultContent::text(&msg),
-        ]),
+        content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(&msg)]),
         details: Some(json!({
             "error": msg,
             "errorClass": class,
@@ -582,8 +580,14 @@ mod tests {
 
     #[test]
     fn classify_invalid_glob_patterns() {
-        assert_eq!(classify_find_error("Invalid glob pattern: "), "invalid_pattern");
-        assert_eq!(classify_find_error("invalid pattern: bad"), "invalid_pattern");
+        assert_eq!(
+            classify_find_error("Invalid glob pattern: "),
+            "invalid_pattern"
+        );
+        assert_eq!(
+            classify_find_error("invalid pattern: bad"),
+            "invalid_pattern"
+        );
     }
 
     #[test]

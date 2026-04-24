@@ -167,7 +167,8 @@ impl ComputerUseTool {
             (region_w as u32, region_h as u32)
         } else {
             // Use screen logical dimensions
-            self.screen_bounds().await
+            self.screen_bounds()
+                .await
                 .map(|(w, h)| (w as u32, h as u32))
                 .unwrap_or((1280, 800))
         };
@@ -183,7 +184,9 @@ impl ComputerUseTool {
             Ok(data) => data,
             Err(e) => {
                 let _ = tokio::fs::remove_file(&tmp_path).await;
-                return Ok(error_result(format!("Failed to read resized screenshot: {e}")));
+                return Ok(error_result(format!(
+                    "Failed to read resized screenshot: {e}"
+                )));
             }
         };
         let original_size = resized_png.len();
@@ -198,31 +201,31 @@ impl ComputerUseTool {
         let _ = tokio::fs::remove_file(&tmp_path).await;
 
         let (image_data, mime_type) = match sips_result {
-            Ok(output) if output.exit_code == 0 => {
-                match tokio::fs::read(&jpg_path).await {
-                    Ok(data) if !data.is_empty() && data.len() < resized_png.len() => {
-                        tracing::debug!(
-                            jpeg_bytes = data.len(), png_bytes = original_size,
-                            "Using JPEG (smaller than PNG)"
-                        );
-                        let _ = tokio::fs::remove_file(&jpg_path).await;
-                        (data, "image/jpeg")
-                    }
-                    Ok(data) => {
-                        tracing::debug!(
-                            jpeg_bytes = data.len(), png_bytes = original_size,
-                            "Skipping JPEG (not smaller than PNG), using PNG"
-                        );
-                        let _ = tokio::fs::remove_file(&jpg_path).await;
-                        (resized_png, "image/png")
-                    }
-                    _ => {
-                        tracing::debug!("JPEG read failed, falling back to PNG");
-                        let _ = tokio::fs::remove_file(&jpg_path).await;
-                        (resized_png, "image/png")
-                    }
+            Ok(output) if output.exit_code == 0 => match tokio::fs::read(&jpg_path).await {
+                Ok(data) if !data.is_empty() && data.len() < resized_png.len() => {
+                    tracing::debug!(
+                        jpeg_bytes = data.len(),
+                        png_bytes = original_size,
+                        "Using JPEG (smaller than PNG)"
+                    );
+                    let _ = tokio::fs::remove_file(&jpg_path).await;
+                    (data, "image/jpeg")
                 }
-            }
+                Ok(data) => {
+                    tracing::debug!(
+                        jpeg_bytes = data.len(),
+                        png_bytes = original_size,
+                        "Skipping JPEG (not smaller than PNG), using PNG"
+                    );
+                    let _ = tokio::fs::remove_file(&jpg_path).await;
+                    (resized_png, "image/png")
+                }
+                _ => {
+                    tracing::debug!("JPEG read failed, falling back to PNG");
+                    let _ = tokio::fs::remove_file(&jpg_path).await;
+                    (resized_png, "image/png")
+                }
+            },
             _ => {
                 tracing::debug!("sips compression failed, using original PNG");
                 let _ = tokio::fs::remove_file(&jpg_path).await;
@@ -232,7 +235,11 @@ impl ComputerUseTool {
 
         // Save to persistent screenshots directory so Display tool can reference the file.
         // In tests, ctx.working_directory is /tmp — we save there instead of polluting ~/.tron/.
-        let ext = if mime_type == "image/jpeg" { "jpg" } else { "png" };
+        let ext = if mime_type == "image/jpeg" {
+            "jpg"
+        } else {
+            "png"
+        };
         let now = chrono::Local::now();
         let date = now.format("%Y-%m-%d");
         let time = now.format("%H%M%S");
@@ -258,7 +265,8 @@ impl ComputerUseTool {
         };
 
         // Update throttle timestamp
-        self.last_screenshot_ms.store(Self::now_ms(), Ordering::Relaxed);
+        self.last_screenshot_ms
+            .store(Self::now_ms(), Ordering::Relaxed);
 
         let b64 = base64::engine::general_purpose::STANDARD.encode(&image_data);
 
@@ -295,7 +303,11 @@ impl ComputerUseTool {
         }
         details["screenshotPath"] = json!(saved_path);
 
-        let format_label = if mime_type == "image/jpeg" { "JPEG" } else { "PNG" };
+        let format_label = if mime_type == "image/jpeg" {
+            "JPEG"
+        } else {
+            "PNG"
+        };
         let mut text = format!(
             "Screenshot captured ({} bytes {format_label})",
             image_data.len()

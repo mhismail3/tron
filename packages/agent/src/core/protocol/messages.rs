@@ -855,10 +855,7 @@ mod tests {
             serde_json::to_string(&Provider::MiniMax).unwrap(),
             "\"minimax\""
         );
-        assert_eq!(
-            serde_json::to_string(&Provider::Kimi).unwrap(),
-            "\"kimi\""
-        );
+        assert_eq!(serde_json::to_string(&Provider::Kimi).unwrap(), "\"kimi\"");
         assert_eq!(
             serde_json::to_string(&Provider::Ollama).unwrap(),
             "\"ollama\""

@@ -206,7 +206,9 @@ fn decode_cursor(encoded: String) -> Result<(String, String)> {
         .split_once('|')
         .ok_or_else(|| EventStoreError::InvalidOperation("bad cursor format".into()))?;
     if ts.is_empty() || id.is_empty() {
-        return Err(EventStoreError::InvalidOperation("empty cursor field".into()));
+        return Err(EventStoreError::InvalidOperation(
+            "empty cursor field".into(),
+        ));
     }
     Ok((ts.to_string(), id.to_string()))
 }

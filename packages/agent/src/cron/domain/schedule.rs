@@ -237,7 +237,9 @@ pub fn compute_next_run(schedule: &Schedule, after: DateTime<Utc>) -> Option<Dat
             timezone,
         } => {
             let parsed = CronExpression::parse(expression)
-                .map_err(|e| tracing::warn!(expression, error = %e, "failed to parse cron expression"))
+                .map_err(
+                    |e| tracing::warn!(expression, error = %e, "failed to parse cron expression"),
+                )
                 .ok()?;
             let tz: Tz = timezone
                 .parse()

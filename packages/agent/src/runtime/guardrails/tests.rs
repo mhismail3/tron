@@ -331,7 +331,10 @@ fn path_write_to_tron_system_blocked() {
 fn path_edit_tron_system_db_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_edit_ctx(&format!("{home}/.tron/system/{}/prod.db", crate::core::paths::dirs::DB)));
+    let eval = engine.evaluate(&make_edit_ctx(&format!(
+        "{home}/.tron/system/{}/prod.db",
+        crate::core::paths::dirs::DB
+    )));
     assert!(eval.blocked);
     assert!(
         eval.triggered_rules
@@ -344,9 +347,7 @@ fn path_edit_tron_system_db_blocked() {
 fn path_write_tron_system_auth_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_write_ctx(&format!(
-        "{home}/.tron/system/auth.json"
-    )));
+    let eval = engine.evaluate(&make_write_ctx(&format!("{home}/.tron/system/auth.json")));
     assert!(eval.blocked);
     assert!(
         eval.triggered_rules
@@ -427,7 +428,10 @@ fn path_bash_tee_to_tron_system_blocked() {
 fn path_bash_cp_to_tron_system_db_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
-    let cmd = format!("cp foo.db {home}/.tron/system/{}/prod.db", crate::core::paths::dirs::DB);
+    let cmd = format!(
+        "cp foo.db {home}/.tron/system/{}/prod.db",
+        crate::core::paths::dirs::DB
+    );
     let eval = engine.evaluate(&make_bash_ctx(&cmd));
     assert!(eval.blocked);
 }
@@ -1679,6 +1683,8 @@ fn integration_write_to_tron_skills_allowed() {
 fn integration_read_tool_not_affected_by_path_protection() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_read_ctx(&format!("{home}/.tron/system/deployment/server.log")));
+    let eval = engine.evaluate(&make_read_ctx(&format!(
+        "{home}/.tron/system/deployment/server.log"
+    )));
     assert!(!eval.blocked);
 }

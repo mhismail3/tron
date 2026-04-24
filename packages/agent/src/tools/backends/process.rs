@@ -77,15 +77,21 @@ impl TokioProcessRunner {
         }
 
         // Spawn child in PTY
-        let mut child = pair.slave.spawn_command(cmd).map_err(|e| ToolError::Internal {
-            message: format!("Failed to spawn PTY process: {e}"),
-        })?;
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| ToolError::Internal {
+                message: format!("Failed to spawn PTY process: {e}"),
+            })?;
         // Drop slave so we can detect EOF on the master
         drop(pair.slave);
 
-        let mut reader = pair.master.try_clone_reader().map_err(|e| ToolError::Internal {
-            message: format!("Failed to clone PTY reader: {e}"),
-        })?;
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| ToolError::Internal {
+                message: format!("Failed to clone PTY reader: {e}"),
+            })?;
 
         let pty_input = opts.pty_input.clone();
         let stdin_data = opts.stdin.clone();
@@ -104,8 +110,7 @@ impl TokioProcessRunner {
             let mut buf = [0u8; 4096];
             let mut pattern_idx = 0;
             let stream_tx = pty_stream_tx;
-            let deadline = std::time::Instant::now()
-                + std::time::Duration::from_millis(timeout_ms);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
 
             // Write initial stdin if provided
             if let Some(ref data) = stdin_data
@@ -722,7 +727,10 @@ mod tests {
         let mut opts = default_opts();
         opts.interactive = true;
         opts.timeout_ms = 5_000;
-        let result = runner.run_command("echo 'hello from pty'", &opts).await.unwrap();
+        let result = runner
+            .run_command("echo 'hello from pty'", &opts)
+            .await
+            .unwrap();
         assert_eq!(result.exit_code, 0);
         assert!(result.stdout.contains("hello from pty"));
     }
@@ -765,9 +773,7 @@ mod tests {
         opts.interactive = true;
         opts.timeout_ms = 10_000;
         // Use a bash script that prompts and reads input
-        opts.pty_input = vec![
-            ("continue".into(), "yes\n".into()),
-        ];
+        opts.pty_input = vec![("continue".into(), "yes\n".into())];
         let result = runner
             .run_command(
                 "echo 'Do you want to continue?'; read ANSWER; echo \"Got: $ANSWER\"",
@@ -824,10 +830,7 @@ mod tests {
         // When output_tx is None, should work fine (no streaming)
         let runner = TokioProcessRunner;
         let opts = default_opts(); // output_tx is None
-        let result = runner
-            .run_command("echo hello", &opts)
-            .await
-            .unwrap();
+        let result = runner.run_command("echo hello", &opts).await.unwrap();
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.stdout.trim(), "hello");
     }
@@ -869,7 +872,9 @@ mod tests {
 
         let runner = TokioProcessRunner;
         let mut opts = default_opts();
-        let _ = opts.env.insert("HOME".into(), tmp.path().to_string_lossy().into());
+        let _ = opts
+            .env
+            .insert("HOME".into(), tmp.path().to_string_lossy().into());
         let result = runner
             .run_command("echo $TRON_LOGIN_TEST_VAR", &opts)
             .await
@@ -892,10 +897,7 @@ mod tests {
         assert_eq!(result.exit_code, 0);
         // A login shell should have more than the minimal launchd PATH
         let path = result.stdout.trim();
-        assert!(
-            !path.is_empty(),
-            "PATH should not be empty in login shell"
-        );
+        assert!(!path.is_empty(), "PATH should not be empty in login shell");
         // Verify it contains at least the basics
         assert!(
             path.contains("/usr/bin"),
@@ -955,7 +957,9 @@ mod tests {
 
         let runner = TokioProcessRunner;
         let mut opts = default_opts();
-        let _ = opts.env.insert("HOME".into(), tmp.path().to_string_lossy().into());
+        let _ = opts
+            .env
+            .insert("HOME".into(), tmp.path().to_string_lossy().into());
         let _ = opts.env.insert("FROM_ENV".into(), "injected".into());
         let result = runner
             .run_command("echo $FROM_PROFILE:$FROM_ENV", &opts)
@@ -980,7 +984,9 @@ mod tests {
         let mut opts = default_opts();
         opts.interactive = true;
         opts.timeout_ms = 5_000;
-        let _ = opts.env.insert("HOME".into(), tmp.path().to_string_lossy().into());
+        let _ = opts
+            .env
+            .insert("HOME".into(), tmp.path().to_string_lossy().into());
         let result = runner
             .run_command("echo $PTY_LOGIN_VAR", &opts)
             .await
@@ -1009,7 +1015,10 @@ mod tests {
         let mut opts = default_opts();
         opts.timeout_ms = 200;
         let result = runner.run_command("sleep 60", &opts).await.unwrap();
-        assert!(result.timed_out, "Timeout should still work with login shell");
+        assert!(
+            result.timed_out,
+            "Timeout should still work with login shell"
+        );
     }
 
     #[tokio::test]
@@ -1019,6 +1028,9 @@ mod tests {
             .run_command("exit 42", &default_opts())
             .await
             .unwrap();
-        assert_eq!(result.exit_code, 42, "Exit code should be preserved in login shell");
+        assert_eq!(
+            result.exit_code, 42,
+            "Exit code should be preserved in login shell"
+        );
     }
 }

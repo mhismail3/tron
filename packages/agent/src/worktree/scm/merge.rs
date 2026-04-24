@@ -214,8 +214,14 @@ pub async fn finalize_session(
 ) -> Result<FinalizeSessionResult> {
     // 1. Merge source into target in the repo root (target is checked out
     //    there, not in the session's worktree).
-    let merge = merge_session(repo_root, source_branch, target_branch, strategy.clone(), git)
-        .await?;
+    let merge = merge_session(
+        repo_root,
+        source_branch,
+        target_branch,
+        strategy.clone(),
+        git,
+    )
+    .await?;
     if !merge.success {
         return Err(WorktreeError::MergeConflicts(merge.conflicts.len()));
     }
@@ -475,7 +481,8 @@ mod tests {
         assert!(!out.old_branch_deleted);
         // Old branch should still exist.
         assert!(
-            git.show_ref_verify(dir.path(), "refs/heads/session/s1").await,
+            git.show_ref_verify(dir.path(), "refs/heads/session/s1")
+                .await,
             "preserved branch must still exist"
         );
     }
@@ -503,7 +510,8 @@ mod tests {
         .unwrap();
         assert!(out.old_branch_deleted);
         assert!(
-            !git.show_ref_verify(dir.path(), "refs/heads/session/s1").await,
+            !git.show_ref_verify(dir.path(), "refs/heads/session/s1")
+                .await,
             "old branch must be deleted"
         );
     }
@@ -536,7 +544,8 @@ mod tests {
 
         // New branch must NOT exist.
         assert!(
-            !git.show_ref_verify(dir.path(), "refs/heads/session/s1-followup").await,
+            !git.show_ref_verify(dir.path(), "refs/heads/session/s1-followup")
+                .await,
             "follow-up branch must not be created on conflict"
         );
     }
@@ -563,7 +572,8 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            git.show_ref_verify(dir.path(), "refs/heads/session/s1-followup").await
+            git.show_ref_verify(dir.path(), "refs/heads/session/s1-followup")
+                .await
         );
     }
 
@@ -596,19 +606,18 @@ mod tests {
         assert!(!out.merge_commit.is_empty());
         // Worktree stays on the original session branch.
         assert_eq!(out.new_branch, "session/s1");
-        assert_eq!(
-            git.current_branch(dir.path()).await.unwrap(),
-            "session/s1"
-        );
+        assert_eq!(git.current_branch(dir.path()).await.unwrap(), "session/s1");
         // No follow-up branch was created.
         assert!(
-            !git.show_ref_verify(dir.path(), "refs/heads/session/s1-followup").await,
+            !git.show_ref_verify(dir.path(), "refs/heads/session/s1-followup")
+                .await,
             "follow-up branch must not exist when rebranch=false"
         );
         // Source branch preserved even though caller passed delete=true.
         assert!(!out.old_branch_deleted);
         assert!(
-            git.show_ref_verify(dir.path(), "refs/heads/session/s1").await,
+            git.show_ref_verify(dir.path(), "refs/heads/session/s1")
+                .await,
             "source branch must still exist when rebranch=false"
         );
     }

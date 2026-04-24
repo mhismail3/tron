@@ -35,7 +35,9 @@ pub enum AuthError {
     /// Stored provider auth carries unknown fields (e.g. legacy `endpoint`
     /// from the pre-CCA Google era). The user must re-authenticate so the
     /// stale shape is rewritten.
-    #[error("malformed auth for provider '{provider}': {details}. Re-authenticate via `tron auth {provider}`.")]
+    #[error(
+        "malformed auth for provider '{provider}': {details}. Re-authenticate via `tron auth {provider}`."
+    )]
     MalformedProviderAuth {
         /// Provider identifier (e.g. "google").
         provider: String,
@@ -68,8 +70,9 @@ impl AuthError {
             Self::Http(e) => {
                 e.is_timeout()
                     || e.is_connect()
-                    || e.status()
-                        .is_some_and(|s| s.is_server_error() || s == reqwest::StatusCode::TOO_MANY_REQUESTS)
+                    || e.status().is_some_and(|s| {
+                        s.is_server_error() || s == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    })
             }
             Self::OAuth { status, .. } => matches!(status, 408 | 429 | 502 | 503 | 504),
             Self::TokenExpired(_)
@@ -125,49 +128,73 @@ mod tests {
 
     #[test]
     fn oauth_503_is_transient() {
-        let err = AuthError::OAuth { status: 503, message: "upstream error".into() };
+        let err = AuthError::OAuth {
+            status: 503,
+            message: "upstream error".into(),
+        };
         assert!(err.is_transient());
     }
 
     #[test]
     fn oauth_502_is_transient() {
-        let err = AuthError::OAuth { status: 502, message: "bad gateway".into() };
+        let err = AuthError::OAuth {
+            status: 502,
+            message: "bad gateway".into(),
+        };
         assert!(err.is_transient());
     }
 
     #[test]
     fn oauth_504_is_transient() {
-        let err = AuthError::OAuth { status: 504, message: "timeout".into() };
+        let err = AuthError::OAuth {
+            status: 504,
+            message: "timeout".into(),
+        };
         assert!(err.is_transient());
     }
 
     #[test]
     fn oauth_429_is_transient() {
-        let err = AuthError::OAuth { status: 429, message: "rate limited".into() };
+        let err = AuthError::OAuth {
+            status: 429,
+            message: "rate limited".into(),
+        };
         assert!(err.is_transient());
     }
 
     #[test]
     fn oauth_408_is_transient() {
-        let err = AuthError::OAuth { status: 408, message: "request timeout".into() };
+        let err = AuthError::OAuth {
+            status: 408,
+            message: "request timeout".into(),
+        };
         assert!(err.is_transient());
     }
 
     #[test]
     fn oauth_401_is_not_transient() {
-        let err = AuthError::OAuth { status: 401, message: "unauthorized".into() };
+        let err = AuthError::OAuth {
+            status: 401,
+            message: "unauthorized".into(),
+        };
         assert!(!err.is_transient());
     }
 
     #[test]
     fn oauth_403_is_not_transient() {
-        let err = AuthError::OAuth { status: 403, message: "forbidden".into() };
+        let err = AuthError::OAuth {
+            status: 403,
+            message: "forbidden".into(),
+        };
         assert!(!err.is_transient());
     }
 
     #[test]
     fn oauth_400_is_not_transient() {
-        let err = AuthError::OAuth { status: 400, message: "bad request".into() };
+        let err = AuthError::OAuth {
+            status: 400,
+            message: "bad request".into(),
+        };
         assert!(!err.is_transient());
     }
 

@@ -162,8 +162,12 @@ pub async fn perform_tick(deps: &SchedulerDeps) -> TickReport {
 
     // Call the fetcher + comparator. Any error here is a transport /
     // parse failure; surface via `fetcher_error` and bail out.
-    let outcome_result =
-        check_for_update(&deps.current_version, update_cfg.channel, deps.fetcher.as_ref()).await;
+    let outcome_result = check_for_update(
+        &deps.current_version,
+        update_cfg.channel,
+        deps.fetcher.as_ref(),
+    )
+    .await;
 
     // Load prior state so we can merge the new check result into it.
     // A failed read (corrupt JSON) falls back to the default rather
@@ -651,15 +655,10 @@ mod tests {
 
         let persisted =
             read_update_state(&deps.state_path).expect("state file should exist after tick");
-        assert_eq!(
-            persisted.latest_available_version.as_deref(),
-            Some("0.6.0")
-        );
+        assert_eq!(persisted.latest_available_version.as_deref(), Some("0.6.0"));
         assert_eq!(
             persisted.latest_download_url.as_deref(),
-            Some(
-                "https://github.com/mhismail3/tron/releases/download/mac-v0.6.0/Tron.dmg"
-            )
+            Some("https://github.com/mhismail3/tron/releases/download/mac-v0.6.0/Tron.dmg")
         );
         assert!(persisted.last_check_at.is_some());
     }

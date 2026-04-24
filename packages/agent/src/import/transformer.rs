@@ -5,7 +5,7 @@
 //! or more events (e.g. an assistant message emits `message.assistant`,
 //! one `tool.call` per `tool_use` block, and `stream.turn_end`).
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::core::messages::{Provider, TokenUsage};
 use crate::events::types::EventType;
@@ -86,7 +86,15 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 if is_compact {
                     // Flush pending turn_end before compact boundary
                     if has_pending_turn_end {
-                        flush_turn_end(&mut events, pending_turn, pending_turn_input, pending_turn_output, pending_turn_cache_read, pending_turn_cache_creation, pending_turn_cost);
+                        flush_turn_end(
+                            &mut events,
+                            pending_turn,
+                            pending_turn_input,
+                            pending_turn_output,
+                            pending_turn_cache_read,
+                            pending_turn_cache_creation,
+                            pending_turn_cost,
+                        );
                         has_pending_turn_end = false;
                     }
                     emit_compact_from_user(&record, &mut events);
@@ -100,7 +108,15 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
 
                 // Normal user message — flush pending turn_end from previous turn
                 if has_pending_turn_end && turn > pending_turn {
-                    flush_turn_end(&mut events, pending_turn, pending_turn_input, pending_turn_output, pending_turn_cache_read, pending_turn_cache_creation, pending_turn_cost);
+                    flush_turn_end(
+                        &mut events,
+                        pending_turn,
+                        pending_turn_input,
+                        pending_turn_output,
+                        pending_turn_cache_read,
+                        pending_turn_cache_creation,
+                        pending_turn_cost,
+                    );
                     has_pending_turn_end = false;
                 }
 
@@ -113,7 +129,9 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 }
 
                 let mut payload = json!({ "turn": turn });
-                if let Some(msg) = &record.message && let Some(content) = &msg.content {
+                if let Some(msg) = &record.message
+                    && let Some(content) = &msg.content
+                {
                     payload["content"] = content.clone();
                     if let Some(blocks) = content.as_array() {
                         let image_count = blocks
@@ -148,7 +166,15 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
 
                 // If this assistant is in a new turn, flush the previous turn_end
                 if has_pending_turn_end && am.turn > pending_turn {
-                    flush_turn_end(&mut events, pending_turn, pending_turn_input, pending_turn_output, pending_turn_cache_read, pending_turn_cache_creation, pending_turn_cost);
+                    flush_turn_end(
+                        &mut events,
+                        pending_turn,
+                        pending_turn_input,
+                        pending_turn_output,
+                        pending_turn_cache_read,
+                        pending_turn_cache_creation,
+                        pending_turn_cost,
+                    );
                     has_pending_turn_end = false;
                 }
 
@@ -164,9 +190,11 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 // message.assistant
                 // Normalize content blocks: Claude Code uses "input" for tool_use
                 // but Tron's AssistantContent::ToolUse expects "arguments".
-                let normalized_blocks: Vec<Value> = am.content_blocks.iter().map(|b| {
-                    normalize_assistant_block(b)
-                }).collect();
+                let normalized_blocks: Vec<Value> = am
+                    .content_blocks
+                    .iter()
+                    .map(|b| normalize_assistant_block(b))
+                    .collect();
 
                 // Build tokenRecord (same structure as native sessions) so iOS
                 // can read computed.contextWindowTokens for the context pill.
@@ -246,7 +274,15 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
             AssembledItem::SystemRecord { record, .. } => {
                 // Flush pending turn_end before system records
                 if has_pending_turn_end {
-                    flush_turn_end(&mut events, pending_turn, pending_turn_input, pending_turn_output, pending_turn_cache_read, pending_turn_cache_creation, pending_turn_cost);
+                    flush_turn_end(
+                        &mut events,
+                        pending_turn,
+                        pending_turn_input,
+                        pending_turn_output,
+                        pending_turn_cache_read,
+                        pending_turn_cache_creation,
+                        pending_turn_cost,
+                    );
                     has_pending_turn_end = false;
                 }
 
@@ -300,7 +336,15 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
 
     // Flush final pending turn_end
     if has_pending_turn_end {
-        flush_turn_end(&mut events, pending_turn, pending_turn_input, pending_turn_output, pending_turn_cache_read, pending_turn_cache_creation, pending_turn_cost);
+        flush_turn_end(
+            &mut events,
+            pending_turn,
+            pending_turn_input,
+            pending_turn_output,
+            pending_turn_cache_read,
+            pending_turn_cache_creation,
+            pending_turn_cost,
+        );
     }
 
     TransformResult {
@@ -346,13 +390,12 @@ fn emit_tool_calls(am: &AssembledAssistant, events: &mut Vec<TronEventSpec>) {
 }
 
 /// Emit `tool.result` events from a `tool_result` user record.
-fn emit_tool_results(
-    record: &ClaudeRecord,
-    events: &mut Vec<TronEventSpec>,
-) {
+fn emit_tool_results(record: &ClaudeRecord, events: &mut Vec<TronEventSpec>) {
     let Some(msg) = &record.message else { return };
     let Some(content) = &msg.content else { return };
-    let Some(blocks) = content.as_array() else { return };
+    let Some(blocks) = content.as_array() else {
+        return;
+    };
 
     for block in blocks {
         if block.get("type").and_then(Value::as_str) != Some("tool_result") {
@@ -385,7 +428,6 @@ fn emit_tool_results(
                 "duration": 0,
             }),
         });
-
     }
 }
 
@@ -412,10 +454,7 @@ fn normalize_assistant_block(block: &Value) -> Value {
 }
 
 /// Emit compact.boundary + compact.summary from a compact summary user record.
-fn emit_compact_from_user(
-    record: &ClaudeRecord,
-    events: &mut Vec<TronEventSpec>,
-) {
+fn emit_compact_from_user(record: &ClaudeRecord, events: &mut Vec<TronEventSpec>) {
     events.push(TronEventSpec {
         event_type: EventType::CompactBoundary,
         payload: json!({

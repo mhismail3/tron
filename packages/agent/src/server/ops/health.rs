@@ -76,11 +76,22 @@ pub fn deep_health_check(
         // 2. Settings
         check_settings(&tron_home.join(crate::core::paths::files::SETTINGS_JSON)),
         // 3. Auth
-        check_auth(&tron_home.join(crate::core::paths::dirs::SYSTEM).join(crate::core::paths::files::AUTH_JSON)),
+        check_auth(
+            &tron_home
+                .join(crate::core::paths::dirs::SYSTEM)
+                .join(crate::core::paths::files::AUTH_JSON),
+        ),
         // 4. Skills
         check_skills(&tron_home.join(crate::core::paths::dirs::SKILLS)),
         // 5. Binary
-        check_binary(&tron_home.join(crate::core::paths::dirs::SYSTEM).join(crate::core::paths::dirs::APP_BUNDLE).join("Contents").join("MacOS").join("tron")),
+        check_binary(
+            &tron_home
+                .join(crate::core::paths::dirs::SYSTEM)
+                .join(crate::core::paths::dirs::APP_BUNDLE)
+                .join("Contents")
+                .join("MacOS")
+                .join("tron"),
+        ),
         // 6. Deploy
         check_deploy(deploy_dir),
         // 7. Disk
@@ -507,7 +518,8 @@ mod tests {
 
     #[test]
     fn database_check_fails_when_sessions_query_fails() {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         let check = check_database(&pool);
         assert_eq!(check.name, "database");
         assert_eq!(check.status, "fail");

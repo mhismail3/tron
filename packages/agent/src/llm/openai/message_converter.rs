@@ -10,10 +10,10 @@
 //! - Tool results → `function_call_output` items (truncated at 16k)
 //! - Documents → placeholder text (`OpenAI` doesn't support documents directly)
 
-use crate::llm::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
 use crate::core::content::{AssistantContent, ToolResultContent, UserContent};
 use crate::core::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use crate::core::tools::Tool;
+use crate::llm::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
 
 use super::types::{
     MessageContent, ResponsesInputItem, ResponsesToolEntry, TOOL_RESULT_MAX_LENGTH,
@@ -338,10 +338,10 @@ fn convert_tool_result(
 #[allow(unused_results)]
 mod tests {
     use super::*;
-    use serde_json::{Map, Value, json};
     use crate::core::content::AssistantContent;
     use crate::core::messages::{Message, ToolResultMessageContent, UserMessageContent};
     use crate::core::tools::{Tool, ToolParameterSchema};
+    use serde_json::{Map, Value, json};
 
     fn make_tool(name: &str, desc: &str) -> Tool {
         Tool {

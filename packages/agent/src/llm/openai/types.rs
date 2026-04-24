@@ -500,13 +500,22 @@ impl OpenAIModelInfo {
             "sortOrder": self.sort_order,
         });
         if let Some(cutoff) = self.knowledge_cutoff {
-            let _ = obj.as_object_mut().unwrap().insert("knowledgeCutoff".into(), serde_json::json!(cutoff));
+            let _ = obj
+                .as_object_mut()
+                .unwrap()
+                .insert("knowledgeCutoff".into(), serde_json::json!(cutoff));
         }
         if self.is_deprecated {
-            let _ = obj.as_object_mut().unwrap().insert("isDeprecated".into(), serde_json::json!(true));
+            let _ = obj
+                .as_object_mut()
+                .unwrap()
+                .insert("isDeprecated".into(), serde_json::json!(true));
         }
         if let Some(date) = self.deprecation_date {
-            let _ = obj.as_object_mut().unwrap().insert("deprecationDate".into(), serde_json::json!(date));
+            let _ = obj
+                .as_object_mut()
+                .unwrap()
+                .insert("deprecationDate".into(), serde_json::json!(date));
         }
         obj
     }
@@ -516,7 +525,10 @@ impl OpenAIModelInfo {
 pub fn all_openai_models_api_json() -> Vec<serde_json::Value> {
     let mut entries: Vec<_> = OPENAI_MODELS.iter().collect();
     entries.sort_by_key(|(_, info)| info.sort_order);
-    entries.into_iter().map(|(id, info)| info.to_api_json(id)).collect()
+    entries
+        .into_iter()
+        .map(|(id, info)| info.to_api_json(id))
+        .collect()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

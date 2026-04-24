@@ -12,10 +12,10 @@ use serde_json::json;
 
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{
-    JobInfo, JobKind, JobManagerOps, JobResult, JobState, ManagedProcessResult,
-    ProcessManagerOps, SubagentOps, WaitMode,
+    JobInfo, JobKind, JobManagerOps, JobResult, JobState, ManagedProcessResult, ProcessManagerOps,
+    SubagentOps, WaitMode,
 };
-use crate::tools::utils::truncation::{truncate_tail, WAIT_OUTPUT_LIMIT};
+use crate::tools::utils::truncation::{WAIT_OUTPUT_LIMIT, truncate_tail};
 
 /// Unified job manager delegating to process and subagent backends.
 pub struct JobManager {
@@ -42,9 +42,8 @@ impl JobManager {
 
     /// Convert a `ManagedProcessResult` to a `JobResult`.
     fn process_result_to_job(result: &ManagedProcessResult) -> JobResult {
-        let success = !result.cancelled
-            && !result.timed_out
-            && result.exit_code.map_or(true, |c| c == 0);
+        let success =
+            !result.cancelled && !result.timed_out && result.exit_code.map_or(true, |c| c == 0);
 
         JobResult {
             id: result.process_id.clone(),
@@ -120,8 +119,14 @@ impl JobManagerOps for JobManager {
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
         match mode {
-            WaitMode::All => self.wait_all(&proc_ids, &agent_ids, deadline, timeout_ms).await,
-            WaitMode::Any => self.wait_any(&proc_ids, &agent_ids, deadline, timeout_ms).await,
+            WaitMode::All => {
+                self.wait_all(&proc_ids, &agent_ids, deadline, timeout_ms)
+                    .await
+            }
+            WaitMode::Any => {
+                self.wait_any(&proc_ids, &agent_ids, deadline, timeout_ms)
+                    .await
+            }
         }
     }
 
@@ -196,12 +201,15 @@ impl JobManager {
         // Wait for agents.
         if !agent_ids.is_empty() {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let agent_id_strings: Vec<String> =
-                agent_ids.iter().map(|s| s.to_string()).collect();
+            let agent_id_strings: Vec<String> = agent_ids.iter().map(|s| s.to_string()).collect();
 
             match self
                 .subagent_ops
-                .wait_for_agents(&agent_id_strings, WaitMode::All, remaining.as_millis() as u64)
+                .wait_for_agents(
+                    &agent_id_strings,
+                    WaitMode::All,
+                    remaining.as_millis() as u64,
+                )
                 .await
             {
                 Ok(agent_results) => {
@@ -295,8 +303,7 @@ impl JobManager {
         // Spawn agent waiter (if any).
         if !agent_ids.is_empty() {
             let sm = self.subagent_ops.clone();
-            let agent_id_strings: Vec<String> =
-                agent_ids.iter().map(|s| s.to_string()).collect();
+            let agent_id_strings: Vec<String> = agent_ids.iter().map(|s| s.to_string()).collect();
             let tx = result_tx.clone();
             let remaining_ms = remaining.as_millis() as u64;
             let _handle = tokio::spawn(async move {
@@ -344,8 +351,8 @@ impl JobManager {
 mod tests {
     use super::*;
     use crate::tools::traits::{
-        ManagedProcessConfig, ManagedProcessHandle, ProcessInfo, ProcessKind,
-        SubagentOps, SubagentResult,
+        ManagedProcessConfig, ManagedProcessHandle, ProcessInfo, ProcessKind, SubagentOps,
+        SubagentResult,
     };
     use std::pin::Pin;
 
@@ -746,11 +753,7 @@ mod tests {
         let jm = JobManager::new(pm, sm);
 
         let results = jm
-            .wait_for_jobs(
-                &["proc-a".into(), "ses-123".into()],
-                WaitMode::All,
-                5000,
-            )
+            .wait_for_jobs(&["proc-a".into(), "ses-123".into()], WaitMode::All, 5000)
             .await
             .unwrap();
         assert_eq!(results.len(), 2);
@@ -785,11 +788,7 @@ mod tests {
         let jm = JobManager::new(pm, sm);
 
         let results = jm
-            .wait_for_jobs(
-                &["proc-a".into(), "proc-a".into()],
-                WaitMode::All,
-                5000,
-            )
+            .wait_for_jobs(&["proc-a".into(), "proc-a".into()], WaitMode::All, 5000)
             .await
             .unwrap();
         assert_eq!(results.len(), 1);

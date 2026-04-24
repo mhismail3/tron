@@ -26,8 +26,9 @@ use crate::core::messages::Provider;
 ///
 /// Schema filtering happens in `build_turn_context`; execution-layer
 /// enforcement happens in the tool executor. Both consult this list.
-pub const LOCAL_MODEL_TOOLS: &[&str] =
-    &["Read", "Write", "Edit", "Bash", "Search", "Find", "WebFetch"];
+pub const LOCAL_MODEL_TOOLS: &[&str] = &[
+    "Read", "Write", "Edit", "Bash", "Search", "Find", "WebFetch",
+];
 
 /// Maximum chars of `rules_content` included in the local context.
 pub const LOCAL_RULES_TRUNCATION_CHARS: usize = 500;
@@ -74,7 +75,11 @@ impl ContextPolicy {
     /// Derive the policy from a provider type.
     #[must_use]
     pub fn from_provider(p: Provider) -> Self {
-        if is_local_provider(p) { Self::Local } else { Self::Cloud }
+        if is_local_provider(p) {
+            Self::Local
+        } else {
+            Self::Cloud
+        }
     }
 
     /// Does this policy strip `memory_content`?
@@ -175,7 +180,9 @@ mod tests {
 
     #[test]
     fn all_seven_local_tools_allowed() {
-        for name in ["Read", "Write", "Edit", "Bash", "Search", "Find", "WebFetch"] {
+        for name in [
+            "Read", "Write", "Edit", "Bash", "Search", "Find", "WebFetch",
+        ] {
             assert!(is_local_tool(name), "{name} should be local-allowed");
         }
     }
@@ -236,7 +243,10 @@ mod tests {
 
     #[test]
     fn policy_from_ollama_is_local() {
-        assert_eq!(ContextPolicy::from_provider(Provider::Ollama), ContextPolicy::Local);
+        assert_eq!(
+            ContextPolicy::from_provider(Provider::Ollama),
+            ContextPolicy::Local
+        );
     }
 
     #[test]

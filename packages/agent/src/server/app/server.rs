@@ -138,7 +138,10 @@ impl TronServer {
             .route("/ws", get(ws_upgrade_handler))
             .route("/health/deep", get(deep_health_handler))
             .route("/deploy/status", get(crate::server::deploy::status_handler))
-            .route("/deploy/restart", post(crate::server::deploy::restart_handler))
+            .route(
+                "/deploy/restart",
+                post(crate::server::deploy::restart_handler),
+            )
             .with_state(state)
             // Outermost layers execute first on request, last on response.
             .layer(CatchPanicLayer::new())

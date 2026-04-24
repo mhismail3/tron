@@ -22,9 +22,9 @@
 //! ...preserved messages...
 //! ```
 
-use tracing::{instrument, trace};
 use crate::core::content::AssistantContent;
 use crate::core::messages::{Message, UserMessageContent};
+use tracing::{instrument, trace};
 
 use super::constants::{COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX};
 use super::summarizer::Summarizer;
@@ -78,11 +78,7 @@ pub struct CompactionEngine<D: CompactionDeps> {
 
 impl<D: CompactionDeps> CompactionEngine<D> {
     /// Create a new compaction engine.
-    pub fn new(
-        threshold: f64,
-        preserve_recent_turns: usize,
-        deps: D,
-    ) -> Self {
+    pub fn new(threshold: f64, preserve_recent_turns: usize, deps: D) -> Self {
         Self {
             threshold,
             preserve_recent_turns,
@@ -109,8 +105,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         }
 
         #[allow(clippy::cast_precision_loss)]
-        let token_budget =
-            (self.threshold * self.deps.get_context_limit() as f64) as u64;
+        let token_budget = (self.threshold * self.deps.get_context_limit() as f64) as u64;
 
         let mut turns_seen: usize = 0;
         let mut candidate_split = messages.len(); // default: nothing preserved
@@ -396,7 +391,6 @@ impl<D: CompactionDeps> CompactionEngine<D> {
 // =============================================================================
 // Tests
 // =============================================================================
-
 
 #[cfg(test)]
 #[path = "compaction_engine_tests.rs"]

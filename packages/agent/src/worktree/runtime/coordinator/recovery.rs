@@ -112,8 +112,13 @@ impl WorktreeCoordinator {
             if !self.git.is_git_repo(&repo_root).await {
                 continue;
             }
-            match crate::worktree::recovery::recover_repo(&repo_root, &active_branches, &self.config, &self.git)
-                .await
+            match crate::worktree::recovery::recover_repo(
+                &repo_root,
+                &active_branches,
+                &self.config,
+                &self.git,
+            )
+            .await
             {
                 Ok(recovered) => {
                     // Surface auto-commit SHAs so iOS can offer the
@@ -126,8 +131,7 @@ impl WorktreeCoordinator {
                         let Some(ref sha) = rec.auto_committed_sha else {
                             continue;
                         };
-                        let Some(session_id) =
-                            rec.branch.strip_prefix(&self.config.branch_prefix)
+                        let Some(session_id) = rec.branch.strip_prefix(&self.config.branch_prefix)
                         else {
                             continue;
                         };
@@ -209,17 +213,14 @@ impl WorktreeCoordinator {
             // Read any rebase_on_main sidecar first so we can overlay
             // its metadata on the reconstructed PendingMergeState.
             let sidecars =
-                super::rebase_on_main::read_sidecars_for_worktree(&info.worktree_path)
-                    .await;
+                super::rebase_on_main::read_sidecars_for_worktree(&info.worktree_path).await;
             let sidecar_for_session = sidecars
                 .into_iter()
                 .find(|(sid, _)| sid == &info.session_id)
                 .and_then(|(_, c)| c);
 
-            let reconstructed = crate::worktree::recovery::reconstruct_pending_merge(
-                &info, &self.git,
-            )
-            .await;
+            let reconstructed =
+                crate::worktree::recovery::reconstruct_pending_merge(&info, &self.git).await;
 
             let pending = match (reconstructed, sidecar_for_session.as_ref()) {
                 (None, None) => continue,
@@ -238,11 +239,7 @@ impl WorktreeCoordinator {
                         // never resolved. Synthesise a StashPop pending
                         // merge via the shared helper so the resolver UX
                         // lights up. Keep the sidecar (it's still valid).
-                        self.handle_post_stash_pop(
-                            &info.session_id,
-                            &sc.stash_ref,
-                            Ok(unmerged),
-                        );
+                        self.handle_post_stash_pop(&info.session_id, &sc.stash_ref, Ok(unmerged));
                         restored += 1;
                         continue;
                     }
@@ -250,14 +247,10 @@ impl WorktreeCoordinator {
                     // disk and no unresolved paths. Attempt to pop: a
                     // clean pop restores the user's pre-op state; a
                     // conflicted pop synthesises a StashPop pending merge.
-                    let pop_result =
-                        self.git.stash_pop(&info.worktree_path, &sc.stash_ref).await;
-                    let had_conflicts = matches!(pop_result.as_ref(), Ok(paths) if !paths.is_empty());
-                    self.handle_post_stash_pop(
-                        &info.session_id,
-                        &sc.stash_ref,
-                        pop_result,
-                    );
+                    let pop_result = self.git.stash_pop(&info.worktree_path, &sc.stash_ref).await;
+                    let had_conflicts =
+                        matches!(pop_result.as_ref(), Ok(paths) if !paths.is_empty());
+                    self.handle_post_stash_pop(&info.session_id, &sc.stash_ref, pop_result);
                     if had_conflicts {
                         restored += 1;
                         // Keep the sidecar for subsequent crash recovery.

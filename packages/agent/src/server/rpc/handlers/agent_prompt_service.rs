@@ -1,14 +1,14 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
-use parking_lot::RwLock;
-use serde_json::Value;
-use tracing::{debug, warn};
 use crate::runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
 use crate::runtime::orchestrator::agent_runner::run_agent;
 use crate::runtime::orchestrator::orchestrator::StartedRun;
 use crate::runtime::types::{AgentConfig, RunContext, VolatileTokens};
 use crate::skills::registry::SkillRegistry;
+use parking_lot::RwLock;
+use serde_json::Value;
+use tracing::{debug, warn};
 
 use crate::server::rpc::context::{AgentDeps, RpcContext};
 
@@ -51,7 +51,8 @@ struct PromptRunPlan {
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
     process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
-    output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    output_buffer_registry:
+        Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
     sequence_counter: Option<Arc<AtomicI64>>,
     server_origin: String,
@@ -821,7 +822,15 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     }
 
     debug!(session_id = %session_id, "[hooks] all hooks returned, calling run_agent");
-    let result = run_agent(&mut agent, &effective_prompt, run_context, &hooks, &broadcast, sequence_counter).await;
+    let result = run_agent(
+        &mut agent,
+        &effective_prompt,
+        run_context,
+        &hooks,
+        &broadcast,
+        sequence_counter,
+    )
+    .await;
     orchestrator.remove_compaction_handler(&session_id);
 
     let _ = persister.flush().await;
@@ -878,13 +887,13 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             subagent_manager: subagent_manager.clone(),
         };
         let auto_retain_session_id = session_id.clone();
-        let _ = tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             crate::server::rpc::handlers::memory::auto_retain::maybe_fire(
                 &deps,
                 &auto_retain_session_id,
             )
             .await;
-        });
+        }));
     }
 
     run_cleanup.release();
@@ -992,7 +1001,9 @@ fn drain_prompt_queue(
     worktree_coordinator: Option<Arc<crate::worktree::WorktreeCoordinator>>,
     process_manager: Option<Arc<dyn crate::tools::traits::ProcessManagerOps>>,
     job_manager: Option<Arc<dyn crate::tools::traits::JobManagerOps>>,
-    output_buffer_registry: Option<Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
+    output_buffer_registry: Option<
+        Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>,
+    >,
     hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
     server_origin: String,
 ) {
@@ -1028,7 +1039,11 @@ fn drain_prompt_queue(
         }
         QueueDrainMode::Batched => {
             // Combine all pending into a single prompt
-            let combined = pending.iter().map(|i| i.text.as_str()).collect::<Vec<_>>().join("\n\n");
+            let combined = pending
+                .iter()
+                .map(|i| i.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n");
             (combined, pending, None)
         }
     };
@@ -1052,24 +1067,33 @@ fn drain_prompt_queue(
 
     // Run is registered — NOW it's safe to mark messages as processed.
     for item in &items_to_dequeue {
-        if let Err(e) = PromptQueueService::dequeue(event_store, session_id, &item.queue_id, "processed") {
+        if let Err(e) =
+            PromptQueueService::dequeue(event_store, session_id, &item.queue_id, "processed")
+        {
             warn!(session_id, queue_id = %item.queue_id, error = %e, "failed to dequeue message");
         }
-        let _ = orchestrator.broadcast().emit(crate::core::events::TronEvent::MessageDequeued {
-            base: crate::core::events::BaseEvent::now(session_id),
-            queue_id: item.queue_id.clone(),
-            reason: "processed".into(),
-        });
+        let _ = orchestrator
+            .broadcast()
+            .emit(crate::core::events::TronEvent::MessageDequeued {
+                base: crate::core::events::BaseEvent::now(session_id),
+                queue_id: item.queue_id.clone(),
+                reason: "processed".into(),
+            });
     }
 
     // Broadcast the user message so iOS can render the bubble in real-time.
     // In the normal flow, iOS adds the user bubble locally before the RPC.
     // During auto-drain, the server owns the prompt — this event is how iOS learns about it.
-    let _ = orchestrator.broadcast().emit(crate::core::events::TronEvent::QueuedMessageSent {
-        base: crate::core::events::BaseEvent::now(session_id),
-        text: prompt_text.clone(),
-        queue_id: items_to_dequeue.first().map(|i| i.queue_id.clone()).unwrap_or_default(),
-    });
+    let _ = orchestrator
+        .broadcast()
+        .emit(crate::core::events::TronEvent::QueuedMessageSent {
+            base: crate::core::events::BaseEvent::now(session_id),
+            text: prompt_text.clone(),
+            queue_id: items_to_dequeue
+                .first()
+                .map(|i| i.queue_id.clone())
+                .unwrap_or_default(),
+        });
 
     let sequence_counter = orchestrator.get_sequence_counter(session_id);
 

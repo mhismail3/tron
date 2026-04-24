@@ -34,7 +34,10 @@ mod tests {
     #[test]
     fn extract_plain_text() {
         let b64 = encode(b"Hello, world!");
-        assert_eq!(extract_text(&b64, "text/plain"), Some("Hello, world!".into()));
+        assert_eq!(
+            extract_text(&b64, "text/plain"),
+            Some("Hello, world!".into())
+        );
     }
 
     #[test]

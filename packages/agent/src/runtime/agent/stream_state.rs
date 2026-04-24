@@ -75,14 +75,23 @@ impl StreamState {
         }
     }
 
-    fn handle_text_delta(&mut self, delta: String, session_id: &str, emitter: &EventEmitter, counter: Option<&AtomicI64>) {
+    fn handle_text_delta(
+        &mut self,
+        delta: String,
+        session_id: &str,
+        emitter: &EventEmitter,
+        counter: Option<&AtomicI64>,
+    ) {
         self.record_ttft();
         self.text_acc.push_str(&delta);
         if let Some(counter) = counter {
-            let _ = emitter.emit_sequenced(TronEvent::MessageUpdate {
-                base: BaseEvent::now(session_id),
-                content: delta,
-            }, counter);
+            let _ = emitter.emit_sequenced(
+                TronEvent::MessageUpdate {
+                    base: BaseEvent::now(session_id),
+                    content: delta,
+                },
+                counter,
+            );
         } else {
             let _ = emitter.emit(TronEvent::MessageUpdate {
                 base: BaseEvent::now(session_id),
@@ -91,14 +100,23 @@ impl StreamState {
         }
     }
 
-    fn handle_thinking_delta(&mut self, delta: String, session_id: &str, emitter: &EventEmitter, counter: Option<&AtomicI64>) {
+    fn handle_thinking_delta(
+        &mut self,
+        delta: String,
+        session_id: &str,
+        emitter: &EventEmitter,
+        counter: Option<&AtomicI64>,
+    ) {
         self.record_ttft();
         self.thinking_acc.push_str(&delta);
         if let Some(counter) = counter {
-            let _ = emitter.emit_sequenced(TronEvent::ThinkingDelta {
-                base: BaseEvent::now(session_id),
-                delta,
-            }, counter);
+            let _ = emitter.emit_sequenced(
+                TronEvent::ThinkingDelta {
+                    base: BaseEvent::now(session_id),
+                    delta,
+                },
+                counter,
+            );
         } else {
             let _ = emitter.emit(TronEvent::ThinkingDelta {
                 base: BaseEvent::now(session_id),
@@ -118,10 +136,13 @@ impl StreamState {
         self.thinking_acc.clone_from(&thinking);
         self.thinking_signature = signature;
         if let Some(counter) = counter {
-            let _ = emitter.emit_sequenced(TronEvent::ThinkingEnd {
-                base: BaseEvent::now(session_id),
-                thinking,
-            }, counter);
+            let _ = emitter.emit_sequenced(
+                TronEvent::ThinkingEnd {
+                    base: BaseEvent::now(session_id),
+                    thinking,
+                },
+                counter,
+            );
         } else {
             let _ = emitter.emit(TronEvent::ThinkingEnd {
                 base: BaseEvent::now(session_id),
@@ -150,11 +171,14 @@ impl StreamState {
         self.current_tool_args.clear();
 
         if let Some(counter) = counter {
-            let _ = emitter.emit_sequenced(TronEvent::ToolCallGenerating {
-                base: BaseEvent::now(session_id),
-                tool_call_id,
-                tool_name: name,
-            }, counter);
+            let _ = emitter.emit_sequenced(
+                TronEvent::ToolCallGenerating {
+                    base: BaseEvent::now(session_id),
+                    tool_call_id,
+                    tool_name: name,
+                },
+                counter,
+            );
         } else {
             let _ = emitter.emit(TronEvent::ToolCallGenerating {
                 base: BaseEvent::now(session_id),
@@ -174,12 +198,15 @@ impl StreamState {
     ) {
         self.current_tool_args.push_str(&arguments_delta);
         if let Some(counter) = counter {
-            let _ = emitter.emit_sequenced(TronEvent::ToolCallArgumentDelta {
-                base: BaseEvent::now(session_id),
-                tool_call_id,
-                tool_name: self.current_tool_name.clone(),
-                arguments_delta,
-            }, counter);
+            let _ = emitter.emit_sequenced(
+                TronEvent::ToolCallArgumentDelta {
+                    base: BaseEvent::now(session_id),
+                    tool_call_id,
+                    tool_name: self.current_tool_name.clone(),
+                    arguments_delta,
+                },
+                counter,
+            );
         } else {
             let _ = emitter.emit(TronEvent::ToolCallArgumentDelta {
                 base: BaseEvent::now(session_id),
@@ -275,9 +302,7 @@ impl StreamState {
                     final_message: None,
                 }
             }
-            StreamEvent::Error { error } => {
-                StreamAction::Err(RuntimeError::Internal(error))
-            }
+            StreamEvent::Error { error } => StreamAction::Err(RuntimeError::Internal(error)),
             StreamEvent::SafetyBlock {
                 blocked_categories,
                 error,
@@ -292,14 +317,17 @@ impl StreamState {
                 error,
             } => {
                 if let Some(counter) = sequence_counter {
-                    let _ = emitter.emit_sequenced(TronEvent::ApiRetry {
-                        base: BaseEvent::now(session_id),
-                        attempt,
-                        max_retries,
-                        delay_ms,
-                        error_category: error.category,
-                        error_message: error.message,
-                    }, counter);
+                    let _ = emitter.emit_sequenced(
+                        TronEvent::ApiRetry {
+                            base: BaseEvent::now(session_id),
+                            attempt,
+                            max_retries,
+                            delay_ms,
+                            error_category: error.category,
+                            error_message: error.message,
+                        },
+                        counter,
+                    );
                 } else {
                     let _ = emitter.emit(TronEvent::ApiRetry {
                         base: BaseEvent::now(session_id),
@@ -340,16 +368,17 @@ impl StreamState {
                 self.handle_text_delta(delta, session_id, emitter, sequence_counter);
             }
 
-            StreamEvent::Start
-            | StreamEvent::TextStart
-            | StreamEvent::TextEnd { .. } => {}
+            StreamEvent::Start | StreamEvent::TextStart | StreamEvent::TextEnd { .. } => {}
 
             StreamEvent::ThinkingStart => {
                 tracing::debug!(session_id, "stream_state: received ThinkingStart");
                 if let Some(counter) = sequence_counter {
-                    let _ = emitter.emit_sequenced(TronEvent::ThinkingStart {
-                        base: BaseEvent::now(session_id),
-                    }, counter);
+                    let _ = emitter.emit_sequenced(
+                        TronEvent::ThinkingStart {
+                            base: BaseEvent::now(session_id),
+                        },
+                        counter,
+                    );
                 } else {
                     let _ = emitter.emit(TronEvent::ThinkingStart {
                         base: BaseEvent::now(session_id),
@@ -370,12 +399,28 @@ impl StreamState {
                 thinking,
                 signature,
             } => {
-                tracing::debug!(session_id, thinking_len = thinking.len(), "stream_state: received ThinkingEnd");
-                self.handle_thinking_end(thinking, signature, session_id, emitter, sequence_counter);
+                tracing::debug!(
+                    session_id,
+                    thinking_len = thinking.len(),
+                    "stream_state: received ThinkingEnd"
+                );
+                self.handle_thinking_end(
+                    thinking,
+                    signature,
+                    session_id,
+                    emitter,
+                    sequence_counter,
+                );
             }
 
             StreamEvent::ToolCallStart { tool_call_id, name } => {
-                self.handle_tool_call_start(tool_call_id, name, session_id, emitter, sequence_counter);
+                self.handle_tool_call_start(
+                    tool_call_id,
+                    name,
+                    session_id,
+                    emitter,
+                    sequence_counter,
+                );
             }
 
             StreamEvent::ToolCallDelta {
@@ -428,14 +473,17 @@ impl StreamState {
                 error,
             } => {
                 if let Some(counter) = sequence_counter {
-                    let _ = emitter.emit_sequenced(TronEvent::ApiRetry {
-                        base: BaseEvent::now(session_id),
-                        attempt,
-                        max_retries,
-                        delay_ms,
-                        error_category: error.category,
-                        error_message: error.message,
-                    }, counter);
+                    let _ = emitter.emit_sequenced(
+                        TronEvent::ApiRetry {
+                            base: BaseEvent::now(session_id),
+                            attempt,
+                            max_retries,
+                            delay_ms,
+                            error_category: error.category,
+                            error_message: error.message,
+                        },
+                        counter,
+                    );
                 } else {
                     let _ = emitter.emit(TronEvent::ApiRetry {
                         base: BaseEvent::now(session_id),

@@ -240,9 +240,16 @@ mod tests {
     #[test]
     fn test_stop_context() {
         let factory = make_factory();
-        let ctx = factory.create_stop_context("end_turn", Some("Done."), Some("Hello"), Some("Hi there"));
+        let ctx =
+            factory.create_stop_context("end_turn", Some("Done."), Some("Hello"), Some("Hi there"));
         assert_eq!(ctx.hook_type(), HookType::Stop);
-        if let HookContext::Stop { final_message, last_user_prompt, last_assistant_response, .. } = &ctx {
+        if let HookContext::Stop {
+            final_message,
+            last_user_prompt,
+            last_assistant_response,
+            ..
+        } = &ctx
+        {
             assert_eq!(final_message.as_deref(), Some("Done."));
             assert_eq!(last_user_prompt.as_deref(), Some("Hello"));
             assert_eq!(last_assistant_response.as_deref(), Some("Hi there"));

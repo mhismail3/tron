@@ -351,7 +351,10 @@ mod tests {
         assert_eq!(json["headed"], true);
         let back: BrowserSettings = serde_json::from_value(json).unwrap();
         assert_eq!(back.provider.as_deref(), Some("agent-browser"));
-        assert_eq!(back.executable_path.as_deref(), Some("/usr/local/bin/agent-browser"));
+        assert_eq!(
+            back.executable_path.as_deref(),
+            Some("/usr/local/bin/agent-browser")
+        );
         assert!(back.headed);
     }
 

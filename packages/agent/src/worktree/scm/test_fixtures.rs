@@ -17,8 +17,6 @@
 //! - `diverge` — makes local and its remote have unique commits so fetch
 //!   reports non-zero ahead/behind counts.
 
-#![cfg(test)]
-
 use std::path::Path;
 
 use crate::worktree::git::GitExecutor;
@@ -82,20 +80,27 @@ pub async fn init_repo(dir: &Path) -> GitExecutor {
 ///
 /// Both paths are owned by the caller's `tempdir()` — they share no filesystem
 /// state with other tests.
-pub async fn init_repo_with_origin(
-    work: &Path,
-    origin_bare: &Path,
-) -> GitExecutor {
+pub async fn init_repo_with_origin(work: &Path, origin_bare: &Path) -> GitExecutor {
     // Bare remote first.
     std::fs::create_dir_all(origin_bare).unwrap();
     run_cmd(origin_bare, &["git", "init", "--bare"]).await;
     // Ensure bare default branch matches working repo.
-    run_cmd(origin_bare, &["git", "symbolic-ref", "HEAD", "refs/heads/main"]).await;
+    run_cmd(
+        origin_bare,
+        &["git", "symbolic-ref", "HEAD", "refs/heads/main"],
+    )
+    .await;
 
     let git = init_repo(work).await;
     run_cmd(
         work,
-        &["git", "remote", "add", "origin", &origin_bare.to_string_lossy()],
+        &[
+            "git",
+            "remote",
+            "add",
+            "origin",
+            &origin_bare.to_string_lossy(),
+        ],
     )
     .await;
     run_cmd(work, &["git", "push", "-u", "origin", "main"]).await;
@@ -201,12 +206,7 @@ pub async fn make_rename_conflict(
 /// Set up a "deleted by us" / "deleted by them" conflict: `branch_a` deletes
 /// the file; `branch_b` modifies it. Merging produces a delete/modify
 /// conflict.
-pub async fn make_deleted_by_us_conflict(
-    dir: &Path,
-    branch_a: &str,
-    branch_b: &str,
-    file: &str,
-) {
+pub async fn make_deleted_by_us_conflict(dir: &Path, branch_a: &str, branch_b: &str, file: &str) {
     std::fs::write(dir.join(file), "original content\n").unwrap();
     run_cmd(dir, &["git", "add", "-A"]).await;
     run_cmd(dir, &["git", "commit", "-m", "delete conflict base"]).await;
@@ -277,4 +277,3 @@ fn uuid_like() -> String {
         .unwrap_or(0);
     format!("{nanos:x}")
 }
-

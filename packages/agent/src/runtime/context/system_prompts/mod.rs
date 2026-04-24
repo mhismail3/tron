@@ -307,7 +307,12 @@ pub fn load_system_prompt_from_file(working_directory: &str) -> Option<LoadedSys
 #[must_use]
 pub fn load_global_system_prompt_from(home: &Path) -> Option<LoadedSystemPrompt> {
     use crate::core::paths::{dirs, files};
-    let path = home.join(".tron").join(dirs::WORKSPACE).join(dirs::MEMORY).join(dirs::RULES).join(files::SYSTEM_MD);
+    let path = home
+        .join(".tron")
+        .join(dirs::WORKSPACE)
+        .join(dirs::MEMORY)
+        .join(dirs::RULES)
+        .join(files::SYSTEM_MD);
 
     let Ok(metadata) = fs::metadata(&path) else {
         return None;
@@ -670,7 +675,12 @@ mod tests {
     #[test]
     fn load_global_returns_content_when_file_exists() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
+        let rules_dir = dir
+            .path()
+            .join(".tron")
+            .join(crate::core::paths::dirs::WORKSPACE)
+            .join(crate::core::paths::dirs::MEMORY)
+            .join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         fs::write(rules_dir.join("SYSTEM.md"), "Custom global prompt").unwrap();
 
@@ -681,7 +691,12 @@ mod tests {
     #[test]
     fn load_global_source_is_global() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
+        let rules_dir = dir
+            .path()
+            .join(".tron")
+            .join(crate::core::paths::dirs::WORKSPACE)
+            .join(crate::core::paths::dirs::MEMORY)
+            .join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         fs::write(rules_dir.join("SYSTEM.md"), "prompt").unwrap();
 
@@ -692,7 +707,12 @@ mod tests {
     #[test]
     fn load_global_rejects_oversized_file() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
+        let rules_dir = dir
+            .path()
+            .join(".tron")
+            .join(crate::core::paths::dirs::WORKSPACE)
+            .join(crate::core::paths::dirs::MEMORY)
+            .join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         let big = "x".repeat(150_000);
         fs::write(rules_dir.join("SYSTEM.md"), big).unwrap();
@@ -703,7 +723,12 @@ mod tests {
     #[test]
     fn load_global_returns_none_for_empty_file() {
         let dir = tempfile::tempdir().unwrap();
-        let rules_dir = dir.path().join(".tron").join(crate::core::paths::dirs::WORKSPACE).join(crate::core::paths::dirs::MEMORY).join(crate::core::paths::dirs::RULES);
+        let rules_dir = dir
+            .path()
+            .join(".tron")
+            .join(crate::core::paths::dirs::WORKSPACE)
+            .join(crate::core::paths::dirs::MEMORY)
+            .join(crate::core::paths::dirs::RULES);
         fs::create_dir_all(&rules_dir).unwrap();
         fs::write(rules_dir.join("SYSTEM.md"), "").unwrap();
 

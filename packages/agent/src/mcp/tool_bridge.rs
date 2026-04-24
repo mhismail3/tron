@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
+use crate::core::tools::{Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use crate::core::tools::{Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult};
 
 use crate::mcp::client::{McpClient, McpErrorKind};
 use crate::mcp::types::{McpContentBlock, McpToolDef, McpToolResult};
@@ -66,20 +66,25 @@ impl TronTool for McpToolBridge {
     }
 
     fn definition(&self) -> Tool {
-        let properties = self.input_schema.get("properties")
+        let properties = self
+            .input_schema
+            .get("properties")
             .and_then(Value::as_object)
             .cloned();
-        let required = self.input_schema.get("required")
+        let required = self
+            .input_schema
+            .get("required")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect());
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            });
 
         Tool {
             name: self.prefixed_name.clone(),
-            description: format!(
-                "[MCP: {}] {}",
-                self.server_name,
-                self.description,
-            ),
+            description: format!("[MCP: {}] {}", self.server_name, self.description,),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties,
@@ -90,8 +95,15 @@ impl TronTool for McpToolBridge {
         }
     }
 
-    async fn execute(&self, params: Value, _ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
-        let result = self.client.call_tool(&self.mcp_name, params).await
+    async fn execute(
+        &self,
+        params: Value,
+        _ctx: &ToolContext,
+    ) -> Result<TronToolResult, ToolError> {
+        let result = self
+            .client
+            .call_tool(&self.mcp_name, params)
+            .await
             .map_err(|e| {
                 let msg = match &e.kind {
                     McpErrorKind::ConnectionLost => format!(
@@ -109,12 +121,20 @@ impl TronTool for McpToolBridge {
                 ToolError::Internal { message: msg }
             })?;
 
-        Ok(mcp_result_to_tron_result(&result, &self.server_name, &self.mcp_name))
+        Ok(mcp_result_to_tron_result(
+            &result,
+            &self.server_name,
+            &self.mcp_name,
+        ))
     }
 }
 
 /// Convert an MCP tool result to a `TronToolResult`.
-pub fn mcp_result_to_tron_result(result: &McpToolResult, server: &str, tool: &str) -> TronToolResult {
+pub fn mcp_result_to_tron_result(
+    result: &McpToolResult,
+    server: &str,
+    tool: &str,
+) -> TronToolResult {
     let content = if result.content.is_empty() {
         "(no output)".to_string()
     } else {
@@ -136,9 +156,9 @@ pub fn mcp_result_to_tron_result(result: &McpToolResult, server: &str, tool: &st
     };
 
     TronToolResult {
-        content: ToolResultBody::Blocks(vec![
-            crate::core::content::ToolResultContent::text(content),
-        ]),
+        content: ToolResultBody::Blocks(vec![crate::core::content::ToolResultContent::text(
+            content,
+        )]),
         details: Some(json!({
             "mcpServer": server,
             "mcpTool": tool,
@@ -198,16 +218,25 @@ mod tests {
     #[test]
     fn mcp_tool_def_schema_extraction() {
         let def = sample_tool_def();
-        let properties = def.input_schema.get("properties")
+        let properties = def
+            .input_schema
+            .get("properties")
             .and_then(Value::as_object)
             .cloned();
         assert!(properties.is_some());
         let props = properties.unwrap();
         assert!(props.contains_key("sql"));
 
-        let required = def.input_schema.get("required")
+        let required = def
+            .input_schema
+            .get("required")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect::<Vec<_>>());
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect::<Vec<_>>()
+            });
         assert_eq!(required, Some(vec!["sql".to_string()]));
     }
 
@@ -218,7 +247,9 @@ mod tests {
             description: "Do nothing".into(),
             input_schema: json!({}),
         };
-        let properties = def.input_schema.get("properties")
+        let properties = def
+            .input_schema
+            .get("properties")
             .and_then(Value::as_object)
             .cloned();
         assert!(properties.is_none());

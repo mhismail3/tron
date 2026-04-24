@@ -236,7 +236,9 @@ fn patterns() -> &'static [ErrorPattern] {
             check: |s| s.contains("overloaded"),
             category: ErrorCategory::Server,
             message: "API is overloaded",
-            suggestion: Some("The provider's API is temporarily overloaded — try again in a moment"),
+            suggestion: Some(
+                "The provider's API is temporarily overloaded — try again in a moment",
+            ),
             is_retryable: true,
         },
         // Invalid request

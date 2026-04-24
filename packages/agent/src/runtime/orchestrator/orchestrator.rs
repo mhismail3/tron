@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicI64, Ordering};
 /// `RunRegistry` — exceeding this surfaces as `RuntimeError::ServerBusy`.
 pub const MAX_CONCURRENT_SESSIONS: usize = 50;
 
+use crate::core::events::TronEvent;
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast};
 use tokio_util::sync::CancellationToken;
-use crate::core::events::TronEvent;
 
 use metrics::gauge;
 use tracing::{debug, info, instrument, trace, warn};
@@ -202,7 +202,8 @@ impl Orchestrator {
     ///
     /// Called on session create (start=0) or session resume (start=MAX from DB).
     pub fn init_sequence_counter(&self, session_id: &str, start: i64) {
-        let _ = self.sequence_counters
+        let _ = self
+            .sequence_counters
             .insert(session_id.to_string(), Arc::new(AtomicI64::new(start)));
         trace!(session_id, start, "sequence counter initialized");
     }
@@ -479,11 +480,12 @@ impl Orchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use crate::events::EventStore;
+    use serde_json::json;
 
     fn make_orchestrator() -> Orchestrator {
-        let pool = crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = crate::events::run_migrations(&conn).unwrap();
@@ -800,7 +802,9 @@ mod tests {
         let mut handles = Vec::new();
         for _ in 0..10 {
             let orch = Arc::clone(&orch);
-            handles.push(std::thread::spawn(move || orch.next_sequence("s1").unwrap()));
+            handles.push(std::thread::spawn(move || {
+                orch.next_sequence("s1").unwrap()
+            }));
         }
         let mut results: Vec<i64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
         results.sort_unstable();

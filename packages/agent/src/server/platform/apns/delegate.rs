@@ -6,12 +6,12 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use tracing::debug;
 use crate::events::{ConnectionPool, EventStore};
 use crate::server::platform::apns::{ApnsBatch, ApnsService, PushSender};
 use crate::tools::errors::ToolError;
 use crate::tools::traits::{Notification, NotifyDelegate, NotifyResult};
+use async_trait::async_trait;
+use tracing::debug;
 
 use super::push_helpers;
 
@@ -94,8 +94,8 @@ impl NotifyDelegate for ApnsNotifyDelegate {
 
 #[cfg(test)]
 mod tests {
-    use crate::tools::traits::Notification;
     use crate::server::platform::apns::push_helpers::to_apns_notification;
+    use crate::tools::traits::Notification;
 
     #[test]
     fn maps_notification_fields() {

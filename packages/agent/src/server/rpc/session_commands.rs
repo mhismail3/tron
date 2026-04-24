@@ -2,10 +2,10 @@
 
 use std::time::Instant;
 
-use metrics::{counter, histogram};
-use serde_json::{Value, json};
 use crate::core::events::{BaseEvent, TronEvent};
 use crate::runtime::agent::event_emitter::EventEmitter;
+use metrics::{counter, histogram};
+use serde_json::{Value, json};
 
 use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::{self, RpcError};
@@ -247,10 +247,7 @@ impl SessionCommandService {
     /// `skipped` captures any candidates that failed mid-batch so the caller
     /// can surface them to the user and retry — partial success is explicit
     /// rather than rolled back.
-    pub(crate) async fn archive_older_than(
-        ctx: &RpcContext,
-        days: u32,
-    ) -> Result<Value, RpcError> {
+    pub(crate) async fn archive_older_than(ctx: &RpcContext, days: u32) -> Result<Value, RpcError> {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(i64::from(days));
         let cutoff_rfc = cutoff.to_rfc3339();
 
@@ -267,11 +264,12 @@ impl SessionCommandService {
                     user_only: true,
                     ..Default::default()
                 };
-                let sessions = session_manager
-                    .list_sessions(&filter)
-                    .map_err(|error| RpcError::Internal {
-                        message: error.to_string(),
-                    })?;
+                let sessions =
+                    session_manager
+                        .list_sessions(&filter)
+                        .map_err(|error| RpcError::Internal {
+                            message: error.to_string(),
+                        })?;
                 // RFC3339 strings are lexicographically sortable, so a
                 // string comparison correctly implements "older than cutoff".
                 let ids: Vec<String> = sessions
@@ -306,7 +304,6 @@ impl SessionCommandService {
             "cutoff": cutoff_rfc,
         }))
     }
-
 }
 
 fn spawn_optimistic_context_preload(ctx: &RpcContext, session_id: &str, working_dir: &str) {
@@ -426,7 +423,7 @@ mod tests {
     use crate::runtime::Orchestrator;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
     use crate::skills::registry::SkillRegistry;
-    use crate::worktree::{WorktreeCoordinator, WorktreeConfig, AcquireResult};
+    use crate::worktree::{AcquireResult, WorktreeConfig, WorktreeCoordinator};
 
     async fn run_cmd(dir: &std::path::Path, args: &[&str]) {
         let status = tokio::process::Command::new(args[0])
@@ -453,12 +450,17 @@ mod tests {
     }
 
     /// Build a test context with a worktree coordinator wired up.
-    fn make_context_with_worktree(store: Arc<EventStore>) -> (RpcContext, Arc<WorktreeCoordinator>) {
-        let mgr = Arc::new(crate::runtime::orchestrator::session_manager::SessionManager::new(
+    fn make_context_with_worktree(
+        store: Arc<EventStore>,
+    ) -> (RpcContext, Arc<WorktreeCoordinator>) {
+        let mgr = Arc::new(
+            crate::runtime::orchestrator::session_manager::SessionManager::new(store.clone()),
+        );
+        let orch = Arc::new(Orchestrator::new(mgr.clone()));
+        let coord = Arc::new(WorktreeCoordinator::new(
+            WorktreeConfig::default(),
             store.clone(),
         ));
-        let orch = Arc::new(Orchestrator::new(mgr.clone()));
-        let coord = Arc::new(WorktreeCoordinator::new(WorktreeConfig::default(), store.clone()));
 
         let ctx = RpcContext {
             orchestrator: orch,
@@ -490,7 +492,9 @@ mod tests {
             process_manager: None,
             job_manager: None,
             output_buffer_registry: None,
-            hook_abort_tracker: Arc::new(crate::runtime::hooks::abort_tracker::HookAbortTracker::new()),
+            hook_abort_tracker: Arc::new(
+                crate::runtime::hooks::abort_tracker::HookAbortTracker::new(),
+            ),
             ws_port: 9847,
             onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
             release_fetcher: None,
@@ -531,20 +535,32 @@ mod tests {
             other => panic!("expected Acquired, got {other:?}"),
         };
         assert!(wt_path.exists(), "worktree dir should exist after acquire");
-        assert!(coord.get_info(&sid).is_some(), "coordinator should track session");
+        assert!(
+            coord.get_info(&sid).is_some(),
+            "coordinator should track session"
+        );
 
         // Archive via command service
-        SessionCommandService::archive(&ctx, sid.clone()).await.unwrap();
+        SessionCommandService::archive(&ctx, sid.clone())
+            .await
+            .unwrap();
 
         // Worktree should be released
-        assert!(coord.get_info(&sid).is_none(), "coordinator should no longer track session");
+        assert!(
+            coord.get_info(&sid).is_none(),
+            "coordinator should no longer track session"
+        );
         assert!(!wt_path.exists(), "worktree directory should be removed");
 
         // worktree.released event should exist
         let events = store
             .get_events_by_type(&sid, &["worktree.released"], None)
             .unwrap();
-        assert_eq!(events.len(), 1, "should have exactly one worktree.released event");
+        assert_eq!(
+            events.len(),
+            1,
+            "should have exactly one worktree.released event"
+        );
 
         // Session should be archived (ended_at set)
         let session = store.get_session(&sid).unwrap().unwrap();
@@ -559,7 +575,9 @@ mod tests {
             .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
 
-        SessionCommandService::archive(&ctx, sid.clone()).await.unwrap();
+        SessionCommandService::archive(&ctx, sid.clone())
+            .await
+            .unwrap();
 
         let session = ctx.event_store.get_session(&sid).unwrap().unwrap();
         assert!(session.ended_at.is_some());
@@ -587,13 +605,21 @@ mod tests {
         };
         assert!(wt_path.exists());
 
-        SessionCommandService::delete(&ctx, sid.clone()).await.unwrap();
+        SessionCommandService::delete(&ctx, sid.clone())
+            .await
+            .unwrap();
 
-        assert!(coord.get_info(&sid).is_none(), "coordinator should no longer track session");
+        assert!(
+            coord.get_info(&sid).is_none(),
+            "coordinator should no longer track session"
+        );
         assert!(!wt_path.exists(), "worktree directory should be removed");
 
         // Session should be fully deleted
-        assert!(store.get_session(&sid).unwrap().is_none(), "session should be deleted");
+        assert!(
+            store.get_session(&sid).unwrap().is_none(),
+            "session should be deleted"
+        );
     }
 
     #[tokio::test]
@@ -604,7 +630,9 @@ mod tests {
             .create_session("model", "/tmp", Some("test"), None)
             .unwrap();
 
-        SessionCommandService::delete(&ctx, sid.clone()).await.unwrap();
+        SessionCommandService::delete(&ctx, sid.clone())
+            .await
+            .unwrap();
 
         assert!(ctx.event_store.get_session(&sid).unwrap().is_none());
     }
@@ -642,7 +670,9 @@ mod tests {
         let ten_days_ago = (chrono::Utc::now() - chrono::Duration::days(10)).to_rfc3339();
         set_last_activity(&ctx.event_store, &stale, &ten_days_ago);
 
-        let result = SessionCommandService::archive_older_than(&ctx, 7).await.unwrap();
+        let result = SessionCommandService::archive_older_than(&ctx, 7)
+            .await
+            .unwrap();
 
         assert_eq!(result["archivedCount"].as_u64().unwrap(), 1);
         let ids: Vec<&str> = result["archivedSessionIds"]
@@ -672,12 +702,16 @@ mod tests {
             .unwrap();
 
         // Pre-archive s1 by hand.
-        SessionCommandService::archive(&ctx, s1.clone()).await.unwrap();
+        SessionCommandService::archive(&ctx, s1.clone())
+            .await
+            .unwrap();
 
         let ten_days_ago = (chrono::Utc::now() - chrono::Duration::days(10)).to_rfc3339();
         set_last_activity(&ctx.event_store, &s1, &ten_days_ago);
 
-        let result = SessionCommandService::archive_older_than(&ctx, 7).await.unwrap();
+        let result = SessionCommandService::archive_older_than(&ctx, 7)
+            .await
+            .unwrap();
         assert_eq!(result["archivedCount"].as_u64().unwrap(), 0);
         assert!(result["archivedSessionIds"].as_array().unwrap().is_empty());
     }
@@ -703,7 +737,9 @@ mod tests {
         set_last_activity(&ctx.event_store, &parent, &ten_days_ago);
         set_last_activity(&ctx.event_store, &subagent, &ten_days_ago);
 
-        let result = SessionCommandService::archive_older_than(&ctx, 7).await.unwrap();
+        let result = SessionCommandService::archive_older_than(&ctx, 7)
+            .await
+            .unwrap();
         let archived_ids: Vec<&str> = result["archivedSessionIds"]
             .as_array()
             .unwrap()
@@ -736,7 +772,9 @@ mod tests {
         set_last_activity(&ctx.event_store, &user_sid, &ten_days_ago);
         set_last_activity(&ctx.event_store, &cron_sid, &ten_days_ago);
 
-        let result = SessionCommandService::archive_older_than(&ctx, 7).await.unwrap();
+        let result = SessionCommandService::archive_older_than(&ctx, 7)
+            .await
+            .unwrap();
         let archived_ids: Vec<&str> = result["archivedSessionIds"]
             .as_array()
             .unwrap()
@@ -754,8 +792,14 @@ mod tests {
     async fn archive_older_than_zero_days_archives_all_active() {
         let ctx = make_test_context();
 
-        let a = ctx.session_manager.create_session("m", "/tmp", Some("a"), None).unwrap();
-        let b = ctx.session_manager.create_session("m", "/tmp", Some("b"), None).unwrap();
+        let a = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("a"), None)
+            .unwrap();
+        let b = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("b"), None)
+            .unwrap();
 
         // Force both timestamps to the past so they unambiguously precede
         // the cutoff even on very fast machines.
@@ -763,7 +807,9 @@ mod tests {
         set_last_activity(&ctx.event_store, &a, &one_hour_ago);
         set_last_activity(&ctx.event_store, &b, &one_hour_ago);
 
-        let result = SessionCommandService::archive_older_than(&ctx, 0).await.unwrap();
+        let result = SessionCommandService::archive_older_than(&ctx, 0)
+            .await
+            .unwrap();
         assert_eq!(result["archivedCount"].as_u64().unwrap(), 2);
 
         for sid in [&a, &b] {
@@ -779,12 +825,18 @@ mod tests {
     async fn archive_older_than_returns_cutoff_in_the_past() {
         let ctx = make_test_context();
         let now = chrono::Utc::now();
-        let result = SessionCommandService::archive_older_than(&ctx, 30).await.unwrap();
+        let result = SessionCommandService::archive_older_than(&ctx, 30)
+            .await
+            .unwrap();
         let cutoff_str = result["cutoff"].as_str().unwrap();
         let cutoff: chrono::DateTime<chrono::Utc> = cutoff_str.parse().unwrap();
         assert!(cutoff < now, "cutoff {cutoff:?} must precede now {now:?}");
         let delta = now - cutoff;
-        assert!(delta.num_days() >= 29 && delta.num_days() <= 31, "cutoff delta {} days", delta.num_days());
+        assert!(
+            delta.num_days() >= 29 && delta.num_days() <= 31,
+            "cutoff delta {} days",
+            delta.num_days()
+        );
     }
 
     /// Empty store: no candidates, no panic, no error. This is how the iOS
@@ -792,7 +844,9 @@ mod tests {
     #[tokio::test]
     async fn archive_older_than_on_empty_store_returns_zero() {
         let ctx = make_test_context();
-        let result = SessionCommandService::archive_older_than(&ctx, 7).await.unwrap();
+        let result = SessionCommandService::archive_older_than(&ctx, 7)
+            .await
+            .unwrap();
         assert_eq!(result["archivedCount"].as_u64().unwrap(), 0);
         assert!(result["archivedSessionIds"].as_array().unwrap().is_empty());
         assert!(result["skipped"].as_array().unwrap().is_empty());
@@ -805,16 +859,27 @@ mod tests {
     async fn archive_older_than_archives_batch_multiple_stale() {
         let ctx = make_test_context();
 
-        let a = ctx.session_manager.create_session("m", "/tmp", Some("a"), None).unwrap();
-        let b = ctx.session_manager.create_session("m", "/tmp", Some("b"), None).unwrap();
-        let c = ctx.session_manager.create_session("m", "/tmp", Some("c"), None).unwrap();
+        let a = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("a"), None)
+            .unwrap();
+        let b = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("b"), None)
+            .unwrap();
+        let c = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("c"), None)
+            .unwrap();
 
         let old = (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339();
         for sid in [&a, &b, &c] {
             set_last_activity(&ctx.event_store, sid, &old);
         }
 
-        let result = SessionCommandService::archive_older_than(&ctx, 7).await.unwrap();
+        let result = SessionCommandService::archive_older_than(&ctx, 7)
+            .await
+            .unwrap();
         assert_eq!(result["archivedCount"].as_u64().unwrap(), 3);
 
         let archived: std::collections::HashSet<&str> = result["archivedSessionIds"]
@@ -827,5 +892,4 @@ mod tests {
         assert!(archived.contains(b.as_str()));
         assert!(archived.contains(c.as_str()));
     }
-
 }

@@ -8,10 +8,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
 use crate::core::tools::{ToolResultBody, TronToolResult};
 use crate::events::EventStore;
 use crate::runtime::orchestrator::event_persister::EventPersister;
+use async_trait::async_trait;
 
 use crate::tools::traits::{FileSystemOps, ToolContext};
 
@@ -77,10 +77,7 @@ pub async fn make_ctx_with_persister() -> (ToolContext, Arc<EventStore>, String)
 ///
 /// Polls until at least one progress event has landed, then waits a short
 /// grace period to collect late arrivals before returning.
-pub async fn drain_progress_events(
-    store: &EventStore,
-    session_id: &str,
-) -> Vec<serde_json::Value> {
+pub async fn drain_progress_events(store: &EventStore, session_id: &str) -> Vec<serde_json::Value> {
     let opts = crate::events::sqlite::repositories::event::ListEventsOptions {
         limit: Some(1000),
         offset: None,
@@ -91,8 +88,10 @@ pub async fn drain_progress_events(
             .unwrap_or_default()
             .into_iter()
             .filter(|e| e.event_type == "tool.progress")
-            .map(|e| serde_json::from_str::<serde_json::Value>(&e.payload)
-                .unwrap_or(serde_json::Value::Null))
+            .map(|e| {
+                serde_json::from_str::<serde_json::Value>(&e.payload)
+                    .unwrap_or(serde_json::Value::Null)
+            })
             .collect::<Vec<_>>()
     };
     for _ in 0..40 {

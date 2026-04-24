@@ -262,10 +262,7 @@ async fn snippet_update_with_no_mutating_fields_errors() {
 async fn snippet_update_missing_id_returns_not_found() {
     let ctx = make_test_context();
     let err = UpdateSnippetHandler
-        .handle(
-            Some(json!({ "id": "nonexistent", "name": "new" })),
-            &ctx,
-        )
+        .handle(Some(json!({ "id": "nonexistent", "name": "new" })), &ctx)
         .await
         .unwrap_err();
     assert!(matches!(err, RpcError::NotFound { .. }));

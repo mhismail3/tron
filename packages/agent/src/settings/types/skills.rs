@@ -144,14 +144,8 @@ mod tests {
 
     #[test]
     fn show_index_json_values() {
-        assert_eq!(
-            serde_json::to_value(ShowIndex::Always).unwrap(),
-            "always"
-        );
-        assert_eq!(
-            serde_json::to_value(ShowIndex::Never).unwrap(),
-            "never"
-        );
+        assert_eq!(serde_json::to_value(ShowIndex::Always).unwrap(), "always");
+        assert_eq!(serde_json::to_value(ShowIndex::Never).unwrap(), "never");
         assert_eq!(
             serde_json::to_value(ShowIndex::WhenNoActiveSkills).unwrap(),
             "whenNoActiveSkills"

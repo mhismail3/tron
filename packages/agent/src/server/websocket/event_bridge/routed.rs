@@ -1,7 +1,7 @@
+use crate::core::events::TronEvent;
 use crate::server::rpc::types::RpcEvent;
 use serde::Serialize;
 use serde_json::{Value, json};
-use crate::core::events::TronEvent;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum BroadcastScope {

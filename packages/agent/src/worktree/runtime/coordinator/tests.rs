@@ -1,10 +1,8 @@
 use super::*;
-use tempfile::tempdir;
 use crate::events::{ConnectionConfig, new_in_memory, run_migrations};
 use crate::worktree::git::GitExecutor;
-use crate::worktree::types::{
-    AcquireResult, CommitOptions, DeferralReason, WorktreeConfig,
-};
+use crate::worktree::types::{AcquireResult, CommitOptions, DeferralReason, WorktreeConfig};
+use tempfile::tempdir;
 
 fn make_store() -> Arc<EventStore> {
     let pool = new_in_memory(&ConnectionConfig::default()).unwrap();
@@ -278,7 +276,10 @@ async fn full_lifecycle() {
     std::fs::write(info.worktree_path.join("work.txt"), "progress").unwrap();
 
     // Commit
-    let commit_result = coord.commit(sid, "wip", CommitOptions::default_stage_all()).await.unwrap();
+    let commit_result = coord
+        .commit(sid, "wip", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
     assert!(commit_result.is_some());
     let cr = commit_result.unwrap();
     assert_eq!(cr.commit_hash.len(), 40);
@@ -330,14 +331,20 @@ async fn get_status_returns_enriched_info() {
     assert_eq!(status.commit_count, 0);
 
     // Commit → committed, no uncommitted
-    coord.commit(sid, "first commit", CommitOptions::default_stage_all()).await.unwrap();
+    coord
+        .commit(sid, "first commit", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
     let status = coord.get_status(sid).await.unwrap().unwrap();
     assert!(!status.has_uncommitted_changes);
     assert_eq!(status.commit_count, 1);
 
     // Second commit
     std::fs::write(info.worktree_path.join("more.txt"), "more").unwrap();
-    coord.commit(sid, "second commit", CommitOptions::default_stage_all()).await.unwrap();
+    coord
+        .commit(sid, "second commit", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
     let status = coord.get_status(sid).await.unwrap().unwrap();
     assert_eq!(status.commit_count, 2);
 }
@@ -377,7 +384,10 @@ async fn commit_populates_files_and_stats() {
     // Create files and commit
     std::fs::write(info.worktree_path.join("new.txt"), "hello\nworld\n").unwrap();
     std::fs::write(info.worktree_path.join("other.txt"), "line1\n").unwrap();
-    coord.commit(sid, "add files", CommitOptions::default_stage_all()).await.unwrap();
+    coord
+        .commit(sid, "add files", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
 
     // Check the persisted event
     let events = store.get_events_since(sid, 0).unwrap();
@@ -539,7 +549,10 @@ async fn list_branches_with_preserved_branch() {
     };
     // Write something so there's a commit
     std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
-    coord.commit("sess-2", "wip", CommitOptions::default_stage_all()).await.unwrap();
+    coord
+        .commit("sess-2", "wip", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
     coord.release("sess-2").await.unwrap();
 
     let branches = coord.list_session_branches(dir.path()).await.unwrap();
@@ -618,7 +631,10 @@ async fn committed_diff_single_commit() {
     };
 
     std::fs::write(info.worktree_path.join("new.txt"), "hello\nworld\n").unwrap();
-    coord.commit("sess-cd2", "add file", CommitOptions::default_stage_all()).await.unwrap();
+    coord
+        .commit("sess-cd2", "add file", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
 
     let diff = coord.get_committed_diff("sess-cd2").await.unwrap().unwrap();
     assert_eq!(diff.commits.len(), 1);
@@ -764,7 +780,10 @@ async fn broadcasts_worktree_events() {
 
     // Commit — should broadcast WorktreeCommit
     std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
-    coord.commit(sid, "wip", CommitOptions::default_stage_all()).await.unwrap();
+    coord
+        .commit(sid, "wip", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
     let event = rx.try_recv().unwrap();
     assert_eq!(event.event_type(), "worktree.commit");
 
@@ -786,7 +805,10 @@ async fn acquire_empty_repo_returns_deferred() {
 
     let result = coord.maybe_acquire("test-empty", dir.path()).await.unwrap();
     assert!(
-        matches!(result, AcquireResult::Deferred(DeferralReason::EmptyRepository)),
+        matches!(
+            result,
+            AcquireResult::Deferred(DeferralReason::EmptyRepository)
+        ),
         "expected Deferred(EmptyRepository), got {result:?}"
     );
 }
@@ -795,12 +817,23 @@ async fn acquire_empty_repo_returns_deferred() {
 async fn acquire_empty_repo_then_commit_then_acquire() {
     let dir = tempdir().unwrap();
     run_cmd(dir.path(), &["git", "init"]).await;
-    run_cmd(dir.path(), &["git", "config", "user.email", "test@test.com"]).await;
+    run_cmd(
+        dir.path(),
+        &["git", "config", "user.email", "test@test.com"],
+    )
+    .await;
     run_cmd(dir.path(), &["git", "config", "user.name", "Test"]).await;
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("test"),
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -829,7 +862,10 @@ async fn deferred_not_tracked_in_state() {
     let store = make_store();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
-    let result = coord.maybe_acquire("test-untracked", dir.path()).await.unwrap();
+    let result = coord
+        .maybe_acquire("test-untracked", dir.path())
+        .await
+        .unwrap();
     assert!(matches!(result, AcquireResult::Deferred(_)));
 
     assert!(coord.get_info("test-untracked").is_none());
@@ -845,7 +881,14 @@ async fn acquire_then_delete_git_dir_returns_passthrough() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("test"),
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -871,11 +914,21 @@ async fn get_status_after_git_dir_deleted_returns_none() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("test"),
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
-    let result = coord.maybe_acquire("test-status", dir.path()).await.unwrap();
+    let result = coord
+        .maybe_acquire("test-status", dir.path())
+        .await
+        .unwrap();
     assert!(matches!(result, AcquireResult::Acquired(_)));
 
     // Delete .git directory
@@ -894,11 +947,21 @@ async fn acquire_then_delete_worktree_dir_detects_staleness() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("test"),
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
-    let result = coord.maybe_acquire("test-wt-gone", dir.path()).await.unwrap();
+    let result = coord
+        .maybe_acquire("test-wt-gone", dir.path())
+        .await
+        .unwrap();
     let wt_path = match &result {
         AcquireResult::Acquired(info) => info.worktree_path.clone(),
         other => panic!("expected Acquired, got {other:?}"),
@@ -925,11 +988,21 @@ async fn get_status_after_worktree_dir_deleted_returns_none() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("test"),
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
-    let result = coord.maybe_acquire("test-wt-status", dir.path()).await.unwrap();
+    let result = coord
+        .maybe_acquire("test-wt-status", dir.path())
+        .await
+        .unwrap();
     let wt_path = match &result {
         AcquireResult::Acquired(info) => info.worktree_path.clone(),
         other => panic!("expected Acquired, got {other:?}"),
@@ -959,7 +1032,10 @@ async fn acquire_empty_repo_lazy_mode_deferred() {
     let coord = WorktreeCoordinator::new(config, store);
 
     // Lazy mode with no other sessions → Passthrough (isolation not triggered)
-    let result = coord.maybe_acquire("test-lazy-empty", dir.path()).await.unwrap();
+    let result = coord
+        .maybe_acquire("test-lazy-empty", dir.path())
+        .await
+        .unwrap();
     assert!(matches!(result, AcquireResult::Passthrough));
 }
 
@@ -971,7 +1047,14 @@ async fn full_lifecycle_git_init_midsession() {
 
     let store = make_store();
     let _ = store
-        .create_session("model", &dir.path().to_string_lossy(), Some("test"), None, None, None)
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("test"),
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
@@ -984,11 +1067,18 @@ async fn full_lifecycle_git_init_midsession() {
 
     // 2. git init (no commits) → Deferred
     run_cmd(dir.path(), &["git", "init"]).await;
-    run_cmd(dir.path(), &["git", "config", "user.email", "test@test.com"]).await;
+    run_cmd(
+        dir.path(),
+        &["git", "config", "user.email", "test@test.com"],
+    )
+    .await;
     run_cmd(dir.path(), &["git", "config", "user.name", "Test"]).await;
     let result = coord.maybe_acquire("test-mid", dir.path()).await.unwrap();
     assert!(
-        matches!(result, AcquireResult::Deferred(DeferralReason::EmptyRepository)),
+        matches!(
+            result,
+            AcquireResult::Deferred(DeferralReason::EmptyRepository)
+        ),
         "expected Deferred for empty repo, got {result:?}"
     );
 
@@ -1057,8 +1147,7 @@ async fn rename_branch_updates_state_and_git() {
         .get_events_by_type(sid, &["worktree.renamed"], None)
         .unwrap();
     assert_eq!(events.len(), 1);
-    let payload: serde_json::Value =
-        serde_json::from_str(&events[0].payload).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
     assert_eq!(payload["oldBranch"], old_branch);
     assert_eq!(payload["newBranch"], "session/fuzzy-purple-elephant");
 }
@@ -1102,9 +1191,7 @@ async fn rename_branch_collision_returns_error() {
     // Create a branch that will collide
     run_cmd(dir.path(), &["git", "branch", "session/taken-name"]).await;
 
-    let result = coord
-        .rename_branch(sid, "session/taken-name")
-        .await;
+    let result = coord.rename_branch(sid, "session/taken-name").await;
     assert!(result.is_err());
 
     // Original state preserved on failure
@@ -1137,7 +1224,10 @@ async fn rename_branch_then_release_preserves_new_name() {
     };
 
     std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
-    coord.commit(sid, "wip", CommitOptions::default_stage_all()).await.unwrap();
+    coord
+        .commit(sid, "wip", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
 
     coord
         .rename_branch(sid, "session/cool-branch-name")
@@ -1289,7 +1379,10 @@ async fn list_branches_after_rename_shows_correct_base_branch() {
     };
 
     std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
-    coord.commit(sid, "wip", CommitOptions::default_stage_all()).await.unwrap();
+    coord
+        .commit(sid, "wip", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
 
     coord
         .rename_branch(sid, "session/pretty-new-name")
@@ -1328,7 +1421,10 @@ async fn list_branches_after_rename_and_release_shows_base_branch() {
     };
 
     std::fs::write(info.worktree_path.join("work.txt"), "data").unwrap();
-    coord.commit(sid, "wip", CommitOptions::default_stage_all()).await.unwrap();
+    coord
+        .commit(sid, "wip", CommitOptions::default_stage_all())
+        .await
+        .unwrap();
 
     coord
         .rename_branch(sid, "session/released-rename")
@@ -1389,11 +1485,7 @@ async fn delete_branch_with_dirty_worktree_auto_commits() {
     init_repo(dir.path()).await;
 
     let git = GitExecutor::new(30_000);
-    let wt_path = dir
-        .path()
-        .join(".worktrees")
-        .join("session")
-        .join("dirty1");
+    let wt_path = dir.path().join(".worktrees").join("session").join("dirty1");
     git.worktree_add(dir.path(), &wt_path, "session/dirty1", "HEAD")
         .await
         .unwrap();
@@ -1601,19 +1693,26 @@ async fn prune_removes_worktree_linked_branches() {
         )
         .unwrap();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
-    let result = coord.maybe_acquire("sess-active", dir.path()).await.unwrap();
+    let result = coord
+        .maybe_acquire("sess-active", dir.path())
+        .await
+        .unwrap();
     let AcquireResult::Acquired(active_info) = result else {
         panic!("expected Acquired");
     };
 
     let prune_result = coord.prune_session_branches(dir.path()).await.unwrap();
     assert!(
-        prune_result.deleted.contains(&"session/orphan-a".to_string()),
+        prune_result
+            .deleted
+            .contains(&"session/orphan-a".to_string()),
         "orphan-a should be deleted: {:?}",
         prune_result.deleted
     );
     assert!(
-        prune_result.deleted.contains(&"session/orphan-b".to_string()),
+        prune_result
+            .deleted
+            .contains(&"session/orphan-b".to_string()),
         "orphan-b should be deleted: {:?}",
         prune_result.deleted
     );
@@ -1655,11 +1754,7 @@ async fn delete_branch_with_stale_worktree_ref() {
     init_repo(dir.path()).await;
 
     let git = GitExecutor::new(30_000);
-    let wt_path = dir
-        .path()
-        .join(".worktrees")
-        .join("session")
-        .join("stale1");
+    let wt_path = dir.path().join(".worktrees").join("session").join("stale1");
     git.worktree_add(dir.path(), &wt_path, "session/stale1", "HEAD")
         .await
         .unwrap();
@@ -1707,7 +1802,10 @@ async fn passthrough_status_resolves_on_main_session() {
 
     let status = coord.passthrough_status(dir.path()).await.unwrap();
     let status = status.expect("passthrough repo should yield status");
-    assert!(!status.isolated, "passthrough status must flag isolated=false");
+    assert!(
+        !status.isolated,
+        "passthrough status must flag isolated=false"
+    );
     // Fresh `git init` default branch name varies by host config; accept
     // the two values we see in CI.
     assert!(
@@ -1715,8 +1813,14 @@ async fn passthrough_status_resolves_on_main_session() {
         "unexpected branch: {}",
         status.branch
     );
-    assert!(status.repo_root.ends_with(dir.path().to_string_lossy().as_ref())
-        || status.repo_root.contains(dir.path().to_string_lossy().as_ref()));
+    assert!(
+        status
+            .repo_root
+            .ends_with(dir.path().to_string_lossy().as_ref())
+            || status
+                .repo_root
+                .contains(dir.path().to_string_lossy().as_ref())
+    );
     assert_eq!(status.commit_count, 0);
 }
 
@@ -1751,10 +1855,7 @@ async fn list_local_branches_errors_without_fallback_for_untracked_session() {
     let store = make_store();
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
 
-    let err = coord
-        .list_local_branches("ghost", None)
-        .await
-        .unwrap_err();
+    let err = coord.list_local_branches("ghost", None).await.unwrap_err();
     assert!(
         matches!(err, crate::worktree::WorktreeError::NotFound { .. }),
         "expected NotFound, got {err:?}"
@@ -1803,7 +1904,10 @@ async fn acquire_for_commit_tests() -> (
         )
         .unwrap();
     let sid = session.session.id.clone();
-    let coord = Arc::new(WorktreeCoordinator::new(WorktreeConfig::default(), store.clone()));
+    let coord = Arc::new(WorktreeCoordinator::new(
+        WorktreeConfig::default(),
+        store.clone(),
+    ));
 
     let result = coord.maybe_acquire(&sid, dir.path()).await.unwrap();
     let info = match result {
@@ -1854,7 +1958,10 @@ async fn coordinator_commit_amend_with_no_changes_still_commits() {
         .unwrap()
         .expect("amend on clean tree must not return None");
 
-    assert_ne!(first.commit_hash, amended.commit_hash, "amend must produce a new SHA");
+    assert_ne!(
+        first.commit_hash, amended.commit_hash,
+        "amend must produce a new SHA"
+    );
 }
 
 #[tokio::test]
@@ -1871,7 +1978,11 @@ async fn coordinator_commit_amend_on_empty_repo_returns_err() {
     // Delete HEAD so the worktree has no commits. A worktree's HEAD lives
     // under <repo>/.git/worktrees/<name>/HEAD. Simplest: point it at a
     // non-existent ref so `git rev-parse --verify HEAD` fails.
-    run_cmd(&wt, &["git", "symbolic-ref", "HEAD", "refs/heads/nonexistent"]).await;
+    run_cmd(
+        &wt,
+        &["git", "symbolic-ref", "HEAD", "refs/heads/nonexistent"],
+    )
+    .await;
 
     let err = coord
         .commit(
@@ -1910,7 +2021,9 @@ async fn coordinator_commit_records_compaction_signal() {
         .get_events_by_session(&sid, &ListEventsOptions::default())
         .unwrap_or_default();
     assert!(
-        events.iter().any(|e| e.event_type == EventType::WorktreeCommit.as_str()),
+        events
+            .iter()
+            .any(|e| e.event_type == EventType::WorktreeCommit.as_str()),
         "expected a WorktreeCommit event to be recorded"
     );
 }
@@ -2016,18 +2129,13 @@ async fn concurrent_acquire_same_session_creates_exactly_one_worktree() {
         let path = dir.path().to_path_buf();
         let sid = sid.clone();
         handles.push(tokio::spawn(async move {
-            coord
-                .maybe_acquire_with_override(&sid, &path, None)
-                .await
+            coord.maybe_acquire_with_override(&sid, &path, None).await
         }));
     }
 
     let results: Vec<_> = futures::future::join_all(handles).await;
     // All must succeed...
-    let acquires: Vec<_> = results
-        .into_iter()
-        .map(|r| r.unwrap().unwrap())
-        .collect();
+    let acquires: Vec<_> = results.into_iter().map(|r| r.unwrap().unwrap()).collect();
     assert_eq!(acquires.len(), 10);
     for r in &acquires {
         assert!(matches!(r, AcquireResult::Acquired(_)));
@@ -2082,10 +2190,7 @@ async fn concurrent_acquire_different_sessions_not_serialized() {
             .unwrap();
         sids.push(r.session.id);
     }
-    let coord = Arc::new(WorktreeCoordinator::new(
-        WorktreeConfig::default(),
-        store,
-    ));
+    let coord = Arc::new(WorktreeCoordinator::new(WorktreeConfig::default(), store));
 
     let start = std::time::Instant::now();
     let mut handles = Vec::new();
@@ -2155,10 +2260,7 @@ async fn parallel_acquire_different_sessions_same_repo_no_git_race() {
             .unwrap();
         sids.push(r.session.id);
     }
-    let coord = Arc::new(WorktreeCoordinator::new(
-        WorktreeConfig::default(),
-        store,
-    ));
+    let coord = Arc::new(WorktreeCoordinator::new(WorktreeConfig::default(), store));
 
     let mut handles = Vec::new();
     for sid in sids {
@@ -2172,8 +2274,7 @@ async fn parallel_acquire_different_sessions_same_repo_no_git_race() {
     // Every acquire must succeed — no Git metadata errors.
     for h in handles {
         let result = h.await.unwrap();
-        result
-            .expect("acquire must not fail due to git metadata race");
+        result.expect("acquire must not fail due to git metadata race");
     }
 
     // Every session's worktree must be tracked.
@@ -2301,10 +2402,7 @@ async fn acquire_releases_lock_after_return() {
 /// event for a session, decoded as JSON. Using the event log directly
 /// (not broadcast) makes the assertion equivalent to what iOS sees on
 /// reconstruction — the whole point of M24.
-fn fetch_auto_recovered_events(
-    store: &EventStore,
-    session_id: &str,
-) -> Vec<serde_json::Value> {
+fn fetch_auto_recovered_events(store: &EventStore, session_id: &str) -> Vec<serde_json::Value> {
     store
         .get_events_by_type(session_id, &["worktree.auto_recovered_commits"], None)
         .unwrap()
@@ -2363,7 +2461,11 @@ async fn auto_recovered_commits_emit_event_on_delete_branch() {
         "delete path destroys the branch after commit"
     );
     let sha = payload["commitHash"].as_str().expect("commitHash present");
-    assert_eq!(sha.len(), 40, "commitHash must be full-length git sha: {sha:?}");
+    assert_eq!(
+        sha.len(),
+        40,
+        "commitHash must be full-length git sha: {sha:?}"
+    );
     assert!(
         sha.chars().all(|c| c.is_ascii_hexdigit()),
         "sha must be hex: {sha:?}"
@@ -2385,12 +2487,13 @@ async fn auto_recovered_commits_emit_event_on_delete_branch() {
     // portable.
     let event_path = payload["path"].as_str().unwrap();
     assert!(
-        event_path.ends_with(&format!(
-            ".worktrees/session/{session_id}",
-        )),
+        event_path.ends_with(&format!(".worktrees/session/{session_id}",)),
         "unexpected event path {event_path:?}"
     );
-    assert!(!wt_path.exists(), "worktree dir must be removed after delete");
+    assert!(
+        !wt_path.exists(),
+        "worktree dir must be removed after delete"
+    );
 }
 
 #[tokio::test]
@@ -2464,7 +2567,10 @@ async fn auto_recovered_commits_skips_when_session_missing() {
     // Delete succeeds — the auto-commit + branch destruction still
     // runs, we just don't emit an event because there's no session
     // row to hang it off of.
-    coord.delete_session_branch(dir.path(), branch).await.unwrap();
+    coord
+        .delete_session_branch(dir.path(), branch)
+        .await
+        .unwrap();
 
     let events = fetch_auto_recovered_events(&store, "ghost-1234");
     assert!(
@@ -2511,8 +2617,12 @@ async fn auto_recovered_commits_from_prune() {
     let b2 = format!("session/{ses2}");
     let wt1 = dir.path().join(".worktrees/session").join(&ses1);
     let wt2 = dir.path().join(".worktrees/session").join(&ses2);
-    git.worktree_add(dir.path(), &wt1, &b1, "HEAD").await.unwrap();
-    git.worktree_add(dir.path(), &wt2, &b2, "HEAD").await.unwrap();
+    git.worktree_add(dir.path(), &wt1, &b1, "HEAD")
+        .await
+        .unwrap();
+    git.worktree_add(dir.path(), &wt2, &b2, "HEAD")
+        .await
+        .unwrap();
     std::fs::write(wt1.join("a.txt"), "dirt-1").unwrap();
     std::fs::write(wt2.join("b.txt"), "dirt-2").unwrap();
 
@@ -2567,11 +2677,21 @@ async fn auto_recovered_commits_from_startup_sweep() {
     // active_branches is empty — coordinator has no in-memory state
     // for this branch, so the sweep treats it as an orphan.
     let total = coord.recover_orphans().await;
-    assert!(total >= 1, "expected at least one recovered worktree, got {total}");
+    assert!(
+        total >= 1,
+        "expected at least one recovered worktree, got {total}"
+    );
 
     let events = fetch_auto_recovered_events(&store, &sid);
-    assert_eq!(events.len(), 1, "sweep should emit exactly one event: {events:?}");
-    assert_eq!(events[0]["branchRemoved"], false, "branch preserved for recoverability");
+    assert_eq!(
+        events.len(),
+        1,
+        "sweep should emit exactly one event: {events:?}"
+    );
+    assert_eq!(
+        events[0]["branchRemoved"], false,
+        "branch preserved for recoverability"
+    );
     let sha = events[0]["commitHash"].as_str().unwrap();
     assert_eq!(sha.len(), 40);
     // Since the branch is preserved, cat-file should resolve the SHA.

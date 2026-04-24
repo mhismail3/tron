@@ -897,8 +897,7 @@ fn sentinel_initiated_by_always_serialized() {
 
 #[test]
 fn restart_request_with_session_id() {
-    let req: DeployRestartRequest =
-        serde_json::from_str(r#"{"sessionId": "sess-abc"}"#).unwrap();
+    let req: DeployRestartRequest = serde_json::from_str(r#"{"sessionId": "sess-abc"}"#).unwrap();
     assert_eq!(req.session_id.as_deref(), Some("sess-abc"));
 }
 

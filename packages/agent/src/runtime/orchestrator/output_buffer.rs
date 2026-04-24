@@ -17,8 +17,8 @@
 //!   Subsequent `push()` calls are no-ops. Subscribers see `is_closed()` and
 //!   drain remaining chunks before exiting.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use dashmap::DashMap;
 use parking_lot::Mutex;
@@ -166,13 +166,9 @@ impl OutputBufferRegistry {
     }
 
     /// Register a buffer for a job.
-    pub fn register(
-        &self,
-        job_id: &str,
-        tool_call_id: &str,
-        buffer: Arc<SharedOutputBuffer>,
-    ) {
-        let _ = self.buffers
+    pub fn register(&self, job_id: &str, tool_call_id: &str, buffer: Arc<SharedOutputBuffer>) {
+        let _ = self
+            .buffers
             .insert(job_id.to_owned(), (buffer, tool_call_id.to_owned()));
     }
 

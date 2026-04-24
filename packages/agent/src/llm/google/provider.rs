@@ -19,20 +19,19 @@ use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use tracing::{debug, error, info, instrument, warn};
 
+use crate::core::messages::Context;
 use crate::llm::auth::{OAuthTokens, calculate_expires_at, should_refresh};
 use crate::llm::compose_context_parts;
 use crate::llm::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::core::messages::Context;
 
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{create_stream_state, process_stream_chunk};
 use super::types::{
-    DEFAULT_API_KEY_BASE_URL,
-    DEFAULT_MAX_OUTPUT_TOKENS, GeminiStreamChunk, GenerationConfig, GoogleApiSettings, GoogleAuth,
-    GoogleConfig, SystemInstruction, SystemPart, ThinkingConfig, default_safety_settings,
-    get_gemini_model, is_gemini_3_model,
+    DEFAULT_API_KEY_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, GeminiStreamChunk, GenerationConfig,
+    GoogleApiSettings, GoogleAuth, GoogleConfig, SystemInstruction, SystemPart, ThinkingConfig,
+    default_safety_settings, get_gemini_model, is_gemini_3_model,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,10 +195,7 @@ impl GoogleProvider {
             .unwrap_or(DEFAULT_API_KEY_BASE_URL);
         match &self.config.auth {
             GoogleAuth::Oauth { .. } => {
-                format!(
-                    "{base}/models/{}:{action}?alt=sse",
-                    self.config.model
-                )
+                format!("{base}/models/{}:{action}?alt=sse", self.config.model)
             }
             GoogleAuth::ApiKey { api_key } => {
                 format!(

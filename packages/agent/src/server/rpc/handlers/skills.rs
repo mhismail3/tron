@@ -110,13 +110,12 @@ impl MethodHandler for RefreshSkillsHandler {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
-    use serde_json::json;
     use crate::skills::types::{SkillFrontmatter, SkillMetadata, SkillSource};
+    use serde_json::json;
 
     fn make_skill(name: &str) -> SkillMetadata {
         SkillMetadata {
@@ -314,7 +313,11 @@ mod tests {
 
         // ~/.claude/skills -> <dotfiles>/claude/skills (the symlink under test)
         std::fs::create_dir_all(fake_home.path().join(".claude")).unwrap();
-        symlink(&real_skills, fake_home.path().join(".claude").join("skills")).unwrap();
+        symlink(
+            &real_skills,
+            fake_home.path().join(".claude").join("skills"),
+        )
+        .unwrap();
 
         // Scan via the home-overriding entry point and verify the skill comes back
         // with its loaded content, tagged as the claude service.

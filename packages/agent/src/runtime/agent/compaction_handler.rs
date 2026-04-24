@@ -14,15 +14,15 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use tokio::sync::Notify;
 
-use crate::runtime::context::context_manager::ContextManager;
-use crate::runtime::context::summarizer::KeywordSummarizer;
-use crate::runtime::hooks::engine::HookEngine;
-use crate::runtime::hooks::types::{HookAction, HookContext};
-use async_trait::async_trait;
 use crate::core::events::HookResult as EventHookResult;
 use crate::core::events::{BaseEvent, CompactionReason, TronEvent};
 use crate::runtime::context::compaction_trigger::CompactionTrigger;
+use crate::runtime::context::context_manager::ContextManager;
+use crate::runtime::context::summarizer::KeywordSummarizer;
 use crate::runtime::context::types::{CompactionTriggerConfig, CompactionTriggerInput};
+use crate::runtime::hooks::engine::HookEngine;
+use crate::runtime::hooks::types::{HookAction, HookContext};
+use async_trait::async_trait;
 
 use metrics::{counter, histogram};
 use tracing::{debug, error, info, warn};
@@ -296,7 +296,14 @@ impl CompactionHandler {
         );
 
         let success = self
-            .execute_compaction(context_manager, hooks, session_id, emitter, reason, sequence_counter)
+            .execute_compaction(
+                context_manager,
+                hooks,
+                session_id,
+                emitter,
+                reason,
+                sequence_counter,
+            )
             .await?;
 
         if success {
@@ -351,11 +358,14 @@ impl CompactionHandler {
         }
 
         if let Some(counter) = sequence_counter {
-            let _ = emitter.emit_sequenced(TronEvent::CompactionStart {
-                base: BaseEvent::now(session_id),
-                reason: reason.clone(),
-                tokens_before,
-            }, counter);
+            let _ = emitter.emit_sequenced(
+                TronEvent::CompactionStart {
+                    base: BaseEvent::now(session_id),
+                    reason: reason.clone(),
+                    tokens_before,
+                },
+                counter,
+            );
         } else {
             let _ = emitter.emit(TronEvent::CompactionStart {
                 base: BaseEvent::now(session_id),
@@ -381,9 +391,7 @@ impl CompactionHandler {
         if tokens_after >= tokens_before && result.is_ok() {
             warn!(
                 session_id,
-                tokens_before,
-                tokens_after,
-                "compaction did not reduce token count"
+                tokens_before, tokens_after, "compaction did not reduce token count"
             );
         }
 
@@ -422,13 +430,16 @@ impl CompactionHandler {
             target_tokens: (context_limit * 7) / 10,
         };
         if let Some(counter) = sequence_counter {
-            let _ = emitter.emit_sequenced(TronEvent::HookTriggered {
-                base: BaseEvent::now(session_id),
-                hook_names: vec![],
-                hook_event: "PreCompact".into(),
-                tool_name: None,
-                tool_call_id: None,
-            }, counter);
+            let _ = emitter.emit_sequenced(
+                TronEvent::HookTriggered {
+                    base: BaseEvent::now(session_id),
+                    hook_names: vec![],
+                    hook_event: "PreCompact".into(),
+                    tool_name: None,
+                    tool_call_id: None,
+                },
+                counter,
+            );
         } else {
             let _ = emitter.emit(TronEvent::HookTriggered {
                 base: BaseEvent::now(session_id),
@@ -447,16 +458,19 @@ impl CompactionHandler {
             HookAction::Continue | HookAction::AddContext => EventHookResult::Continue,
         };
         if let Some(counter) = sequence_counter {
-            let _ = emitter.emit_sequenced(TronEvent::HookCompleted {
-                base: BaseEvent::now(session_id),
-                hook_names: vec![],
-                hook_event: "PreCompact".into(),
-                result: event_result,
-                duration: None,
-                reason: result.reason.clone(),
-                tool_name: None,
-                tool_call_id: None,
-            }, counter);
+            let _ = emitter.emit_sequenced(
+                TronEvent::HookCompleted {
+                    base: BaseEvent::now(session_id),
+                    hook_names: vec![],
+                    hook_event: "PreCompact".into(),
+                    result: event_result,
+                    duration: None,
+                    reason: result.reason.clone(),
+                    tool_name: None,
+                    tool_call_id: None,
+                },
+                counter,
+            );
         } else {
             let _ = emitter.emit(TronEvent::HookCompleted {
                 base: BaseEvent::now(session_id),
@@ -476,15 +490,18 @@ impl CompactionHandler {
         context_manager: &mut ContextManager,
         session_id: &str,
         subagent_manager: Option<&Arc<SubagentManager>>,
-    ) -> Result<crate::runtime::context::types::CompactionResult, Box<dyn std::error::Error + Send + Sync>>
-    {
+    ) -> Result<
+        crate::runtime::context::types::CompactionResult,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         if let Some(manager) = subagent_manager {
             let spawner = SubagentManagerSpawner {
                 manager: manager.clone(),
                 parent_session_id: session_id.to_owned(),
                 working_directory: context_manager.get_working_directory().to_owned(),
-                system_prompt: crate::runtime::context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
-                    .to_string(),
+                system_prompt:
+                    crate::runtime::context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
+                        .to_string(),
                 model: None,
             };
             let summarizer = crate::runtime::context::llm_summarizer::LlmSummarizer::new(spawner);
@@ -520,7 +537,10 @@ impl CompactionHandler {
 
         let mut messages = context_manager.get_messages();
         if messages.len() >= 2 {
-            if let crate::core::messages::Message::Assistant { ref mut content, .. } = messages[1] {
+            if let crate::core::messages::Message::Assistant {
+                ref mut content, ..
+            } = messages[1]
+            {
                 if let Some(crate::core::content::AssistantContent::Text { text, .. }) =
                     content.first_mut()
                 {
@@ -702,18 +722,21 @@ impl CompactionHandler {
             }
             Err(e) => {
                 if let Some(counter) = sequence_counter {
-                    let _ = emitter.emit_sequenced(TronEvent::CompactionComplete {
-                        base: BaseEvent::now(session_id),
-                        success: false,
-                        tokens_before,
-                        tokens_after: tokens_before,
-                        compression_ratio: 1.0,
-                        reason: Some(reason),
-                        summary: Some(format!("Compaction failed: {e}")),
-                        estimated_context_tokens: Some(tokens_before),
-                        preserved_turns: None,
-                        summarized_turns: None,
-                    }, counter);
+                    let _ = emitter.emit_sequenced(
+                        TronEvent::CompactionComplete {
+                            base: BaseEvent::now(session_id),
+                            success: false,
+                            tokens_before,
+                            tokens_after: tokens_before,
+                            compression_ratio: 1.0,
+                            reason: Some(reason),
+                            summary: Some(format!("Compaction failed: {e}")),
+                            estimated_context_tokens: Some(tokens_before),
+                            preserved_turns: None,
+                            summarized_turns: None,
+                        },
+                        counter,
+                    );
                 } else {
                     let _ = emitter.emit(TronEvent::CompactionComplete {
                         base: BaseEvent::now(session_id),
@@ -860,17 +883,25 @@ mod tests {
         Arc::new(crate::events::EventStore::new(pool))
     }
 
-    async fn make_persister_and_session()
-        -> (Arc<crate::runtime::orchestrator::event_persister::EventPersister>, Arc<crate::events::EventStore>, String)
-    {
+    async fn make_persister_and_session() -> (
+        Arc<crate::runtime::orchestrator::event_persister::EventPersister>,
+        Arc<crate::events::EventStore>,
+        String,
+    ) {
         let store = make_event_store_for_test();
         let session = store
-            .create_session("test-model", "/tmp", Some("compaction-h13"), None, None, None)
+            .create_session(
+                "test-model",
+                "/tmp",
+                Some("compaction-h13"),
+                None,
+                None,
+                None,
+            )
             .unwrap();
-        let persister =
-            Arc::new(crate::runtime::orchestrator::event_persister::EventPersister::new(
-                store.clone(),
-            ));
+        let persister = Arc::new(
+            crate::runtime::orchestrator::event_persister::EventPersister::new(store.clone()),
+        );
         (persister, store, session.session.id)
     }
 
@@ -908,7 +939,10 @@ mod tests {
             None,
         )
         .await;
-        assert!(persist_ok, "successful compaction with ok persister returns true");
+        assert!(
+            persist_ok,
+            "successful compaction with ok persister returns true"
+        );
 
         let opts = crate::events::sqlite::repositories::event::ListEventsOptions::default();
         let events = store.get_events_by_session(&session_id, &opts).unwrap();
@@ -1004,7 +1038,9 @@ mod tests {
         let opts = crate::events::sqlite::repositories::event::ListEventsOptions::default();
         let events = store.get_events_by_session(&session_id, &opts).unwrap();
         assert!(
-            !events.iter().any(|e| e.event_type == "compact.summary_staging"),
+            !events
+                .iter()
+                .any(|e| e.event_type == "compact.summary_staging"),
             "failed compaction must not persist staging"
         );
         assert!(
@@ -1048,5 +1084,4 @@ mod tests {
         // Verify set_persister works through &self (not &mut self)
         assert!(handler.persister.lock().unwrap().is_none());
     }
-
 }

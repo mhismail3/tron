@@ -23,16 +23,13 @@ pub const BRANCH_NAME_GEN_ID: &str = "builtin:branch-name-gen";
 /// Built-in hook ID: suggest follow-up prompts when the agent finishes.
 pub const SUGGEST_PROMPTS_ID: &str = "builtin:suggest-prompts";
 
-const TITLE_GEN_PROMPT: &str =
-    "Generate a 3-5 word title describing what the agent is doing in this session, from the agent's perspective, in present continuous tense (e.g. \"Looking up gold prices\", \"Fixing login bug\", \"Drafting release notes\"). Prefer short, common words. Base it on the user's prompt (in the 'prompt' field of the event context). Return ONLY the title text, nothing else.";
+const TITLE_GEN_PROMPT: &str = "Generate a 3-5 word title describing what the agent is doing in this session, from the agent's perspective, in present continuous tense (e.g. \"Looking up gold prices\", \"Fixing login bug\", \"Drafting release notes\"). Prefer short, common words. Base it on the user's prompt (in the 'prompt' field of the event context). Return ONLY the title text, nothing else.";
 
-const BRANCH_NAME_GEN_PROMPT: &str =
-    "Generate a random memorable 3-word branch name in the format word-word-word (lowercase, hyphen-separated). \
+const BRANCH_NAME_GEN_PROMPT: &str = "Generate a random memorable 3-word branch name in the format word-word-word (lowercase, hyphen-separated). \
      Use the pattern adjective-adjective-noun or adjective-noun-noun. Examples: fuzzy-purple-elephant, \
      quick-silver-falcon, gentle-autumn-river. Return ONLY the 3-word name, nothing else.";
 
-const SUGGEST_PROMPTS_PROMPT: &str =
-    "Based on the conversation context below, generate 3-5 short follow-up prompts the user might send next.\n\n\
+const SUGGEST_PROMPTS_PROMPT: &str = "Based on the conversation context below, generate 3-5 short follow-up prompts the user might send next.\n\n\
      Rules:\n\
      - Each suggestion: 4-8 words, one per line\n\
      - No bullets, numbers, or prefixes — just the raw text\n\
@@ -194,7 +191,10 @@ mod tests {
     #[test]
     fn test_branch_name_gen_hook_type() {
         let builtins = list_builtins();
-        let branch_gen = builtins.iter().find(|b| b.id == BRANCH_NAME_GEN_ID).unwrap();
+        let branch_gen = builtins
+            .iter()
+            .find(|b| b.id == BRANCH_NAME_GEN_ID)
+            .unwrap();
         assert_eq!(branch_gen.hook_type, HookType::WorktreeAcquired);
     }
 

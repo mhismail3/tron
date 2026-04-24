@@ -152,7 +152,11 @@ mod tests {
 
         let result = list_notes(dir.path().to_str().unwrap(), 10, 0);
         let notes = result["notes"].as_array().unwrap();
-        assert_eq!(notes.len(), 2, "all .md files in voice-notes dir should be listed");
+        assert_eq!(
+            notes.len(),
+            2,
+            "all .md files in voice-notes dir should be listed"
+        );
     }
 
     #[test]

@@ -136,7 +136,7 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 | SETTINGS | `~/.tron/system/settings.json` | Server configuration |
 | AUTH | `~/.tron/system/auth.json` | API keys and OAuth tokens |
 | VAULT | `~/.tron/workspace/vault/` | Encrypted credential store |
-| DEPLOYMENT | `~/.tron/system/deployment/` | Deploy scripts, `tron-cli`, rollback state, optional APNs key + `apns.json` |
+| DEPLOYMENT | `~/.tron/system/deployment/` | Dev/deploy/update artifacts and rollback state; absent or empty after a normal Mac installer flow |
 | TRANSCRIPTION | `~/.tron/system/transcription/` | Speech-to-text sidecar: `worker.py`, `venv/`, `models/hf/` |
 | BINARY | `~/.tron/system/Tron.app/Contents/MacOS/tron` | Server binary |
 

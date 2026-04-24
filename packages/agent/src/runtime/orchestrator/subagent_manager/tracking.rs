@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::tools::errors::ToolError;
+use crate::tools::traits::{SubagentResult, WaitMode};
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
-use crate::tools::errors::ToolError;
-use crate::tools::traits::{SubagentResult, WaitMode};
 
 use crate::tools::traits::{JobInfo, JobKind, JobState};
 
@@ -64,9 +64,7 @@ impl SubagentManager {
     pub fn list_active_jobs(&self, parent_session_id: &str) -> Vec<JobInfo> {
         self.subagents
             .iter()
-            .filter(|entry| {
-                entry.value().parent_session_id == parent_session_id
-            })
+            .filter(|entry| entry.value().parent_session_id == parent_session_id)
             .map(|entry| {
                 let t = entry.value();
                 let state = if t.result.lock().is_some() {

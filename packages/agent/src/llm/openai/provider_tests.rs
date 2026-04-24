@@ -83,9 +83,8 @@ fn provider_base_url_config_overrides_settings() {
 #[test]
 fn extract_account_id_from_valid_jwt() {
     let header = base64url_encode(r#"{"alg":"RS256","typ":"JWT"}"#);
-    let payload = base64url_encode(
-        r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_123456"}}"#,
-    );
+    let payload =
+        base64url_encode(r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_123456"}}"#);
     let token = format!("{header}.{payload}.signature");
     assert_eq!(extract_account_id(&token), "acct_123456");
 }
@@ -129,7 +128,10 @@ fn should_refresh_when_expired() {
         refresh_token: "r".into(),
         expires_at: crate::llm::auth::now_ms().saturating_sub(600_000),
     };
-    assert!(crate::llm::auth::should_refresh(&tokens, TOKEN_EXPIRY_BUFFER_MS));
+    assert!(crate::llm::auth::should_refresh(
+        &tokens,
+        TOKEN_EXPIRY_BUFFER_MS
+    ));
 }
 
 #[test]
@@ -139,7 +141,10 @@ fn should_refresh_within_buffer() {
         refresh_token: "r".into(),
         expires_at: crate::llm::auth::now_ms() + 120_000,
     };
-    assert!(crate::llm::auth::should_refresh(&tokens, TOKEN_EXPIRY_BUFFER_MS));
+    assert!(crate::llm::auth::should_refresh(
+        &tokens,
+        TOKEN_EXPIRY_BUFFER_MS
+    ));
 }
 
 #[test]
@@ -163,7 +168,10 @@ fn should_refresh_at_exact_boundary() {
         expires_at: crate::llm::auth::now_ms() + TOKEN_EXPIRY_BUFFER_MS,
     };
     // Shared version uses >=, so at exact boundary it refreshes (safer)
-    assert!(crate::llm::auth::should_refresh(&tokens, TOKEN_EXPIRY_BUFFER_MS));
+    assert!(crate::llm::auth::should_refresh(
+        &tokens,
+        TOKEN_EXPIRY_BUFFER_MS
+    ));
 }
 
 // ── build_headers ────────────────────────────────────────────────
@@ -186,9 +194,8 @@ fn build_headers_has_required_fields() {
 #[test]
 fn build_headers_includes_account_id() {
     let header = base64url_encode(r#"{"alg":"RS256"}"#);
-    let payload = base64url_encode(
-        r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_789"}}"#,
-    );
+    let payload =
+        base64url_encode(r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_789"}}"#);
     let jwt = format!("{header}.{payload}.sig");
 
     let tokens = crate::llm::auth::OAuthTokens {
@@ -234,9 +241,8 @@ fn platform_headers_omit_codex_headers() {
 #[test]
 fn platform_headers_no_account_id_even_with_jwt() {
     let header = base64url_encode(r#"{"alg":"RS256"}"#);
-    let payload = base64url_encode(
-        r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_789"}}"#,
-    );
+    let payload =
+        base64url_encode(r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_789"}}"#);
     let jwt = format!("{header}.{payload}.sig");
 
     let tokens = crate::llm::auth::OAuthTokens {

@@ -110,8 +110,7 @@ pub fn enrich_interactive_tool_statuses(events: &mut [Value]) {
             fields.get("toolStatus").and_then(Value::as_str),
         ) && matches!(status, "approved" | "denied" | "answered")
         {
-            let user_fields =
-                build_user_message_metadata(tool_name.as_str(), &fields);
+            let user_fields = build_user_message_metadata(tool_name.as_str(), &fields);
             inject_into_payload(&mut events[user_idx], user_fields);
         }
 
@@ -286,10 +285,7 @@ fn extract_questions(tool_call_event: &Value) -> Vec<(String, String)> {
 /// - `(no selection)` → empty selectedValues, nil otherValue
 /// - comma-space split (`", "`) for multi-select values
 /// - questions that fail to match the original params list are dropped
-fn parse_answers(
-    user_msg: Option<&str>,
-    questions: &[(String, String)],
-) -> Map<String, Value> {
+fn parse_answers(user_msg: Option<&str>, questions: &[(String, String)]) -> Map<String, Value> {
     let mut out = Map::new();
     let Some(msg) = user_msg else {
         let _ = out.insert("toolStatus".into(), json!("pending"));
@@ -405,7 +401,9 @@ mod tests {
     fn confirmation_approved_with_note() {
         let mut events = vec![
             make_tool_call("GetConfirmation", "tc1", json!({"action": "delete file"})),
-            make_user_msg("[Confirmation response]\n\nAction: delete file\nDecision: Approved\nNote: go ahead"),
+            make_user_msg(
+                "[Confirmation response]\n\nAction: delete file\nDecision: Approved\nNote: go ahead",
+            ),
         ];
         enrich_interactive_tool_statuses(&mut events);
         let p = &events[0]["payload"];
@@ -532,9 +530,7 @@ mod tests {
         let args = json!({"questions": [{"id": "q1", "question": "Why?"}]});
         let mut events = vec![
             make_tool_call("AskUserQuestion", "tc1", args),
-            make_user_msg(
-                "[Answers to your questions]\n\n**Why?**\nAnswer: [Other] custom reason",
-            ),
+            make_user_msg("[Answers to your questions]\n\n**Why?**\nAnswer: [Other] custom reason"),
         ];
         enrich_interactive_tool_statuses(&mut events);
         let parsed = events[0]["payload"]["parsedAnswers"][0].clone();
@@ -593,14 +589,18 @@ mod tests {
         let args = json!({"questions": [{"id": "q1", "question": "Color?"}]});
         let mut events = vec![
             make_tool_call("AskUserQuestion", "tc1", args),
-            make_user_msg(
-                "[Answers to your questions]\n\n**Different question?**\nAnswer: x",
-            ),
+            make_user_msg("[Answers to your questions]\n\n**Different question?**\nAnswer: x"),
         ];
         enrich_interactive_tool_statuses(&mut events);
         // Status is still answered (marker present) but parsedAnswers is empty.
         assert_eq!(events[0]["payload"]["toolStatus"], "answered");
-        assert_eq!(events[0]["payload"]["parsedAnswers"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            events[0]["payload"]["parsedAnswers"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     #[test]
@@ -611,7 +611,9 @@ mod tests {
         ]});
         let mut events = vec![
             make_tool_call("AskUserQuestion", "tc1", args),
-            make_user_msg("[Answers to your questions]\n\n**A?**\nAnswer: yes\n\n**B?**\nAnswer: no"),
+            make_user_msg(
+                "[Answers to your questions]\n\n**A?**\nAnswer: yes\n\n**B?**\nAnswer: no",
+            ),
         ];
         enrich_interactive_tool_statuses(&mut events);
         let parsed = events[0]["payload"]["parsedAnswers"].as_array().unwrap();
@@ -795,9 +797,7 @@ mod tests {
         let args = json!({"questions": [{"id": "q1", "question": "Color?"}]});
         let mut events = vec![
             make_tool_call("AskUserQuestion", "tc1", args),
-            make_user_msg(
-                "[Answers to your questions]\n\n**Different?**\nAnswer: x",
-            ),
+            make_user_msg("[Answers to your questions]\n\n**Different?**\nAnswer: x"),
         ];
         enrich_interactive_tool_statuses(&mut events);
         let user_payload = &events[1]["payload"];
@@ -808,9 +808,11 @@ mod tests {
     // ── Subagent results back-fill ──────────────────────────────────────
 
     fn make_subagent_results_content(agents: &[(&str, bool)]) -> String {
-        let mut s = String::from("# Completed Sub-Agent Results\n\n\
+        let mut s = String::from(
+            "# Completed Sub-Agent Results\n\n\
             The following sub-agent(s) have completed since your last turn. \
-            Review their results and incorporate them into your response.\n\n");
+            Review their results and incorporate them into your response.\n\n",
+        );
         for (id, success) in agents {
             let icon = if *success { "+" } else { "x" };
             s.push_str(&format!(
@@ -838,11 +840,8 @@ mod tests {
 
     #[test]
     fn subagent_results_multiple_agents_correct_count() {
-        let content = make_subagent_results_content(&[
-            ("sub-1", true),
-            ("sub-2", true),
-            ("sub-3", true),
-        ]);
+        let content =
+            make_subagent_results_content(&[("sub-1", true), ("sub-2", true), ("sub-3", true)]);
         let mut events = vec![make_user_msg(&content)];
         enrich_interactive_tool_statuses(&mut events);
         assert_eq!(events[0]["payload"]["subagentCount"], 3);
@@ -850,10 +849,7 @@ mod tests {
 
     #[test]
     fn subagent_results_mixed_success_failure_counted() {
-        let content = make_subagent_results_content(&[
-            ("sub-1", true),
-            ("sub-2", false),
-        ]);
+        let content = make_subagent_results_content(&[("sub-1", true), ("sub-2", false)]);
         let mut events = vec![make_user_msg(&content)];
         enrich_interactive_tool_statuses(&mut events);
         assert_eq!(events[0]["payload"]["subagentCount"], 2);

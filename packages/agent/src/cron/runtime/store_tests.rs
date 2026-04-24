@@ -491,7 +491,10 @@ fn row_to_job_corrupt_schedule_returns_error() {
     drop(conn);
 
     let result = get_job(&pool, "cron_bad");
-    assert!(result.is_err(), "corrupt schedule_json should return error, not default");
+    assert!(
+        result.is_err(),
+        "corrupt schedule_json should return error, not default"
+    );
 }
 
 #[test]
@@ -508,7 +511,10 @@ fn row_to_job_corrupt_payload_returns_error() {
     drop(conn);
 
     let result = get_job(&pool, "cron_bad2");
-    assert!(result.is_err(), "corrupt payload_json should return error, not default");
+    assert!(
+        result.is_err(),
+        "corrupt payload_json should return error, not default"
+    );
 }
 
 #[test]
@@ -525,7 +531,10 @@ fn row_to_job_corrupt_tags_returns_error() {
     drop(conn);
 
     let result = get_job(&pool, "cron_bad3");
-    assert!(result.is_err(), "corrupt tags_json should return error, not default");
+    assert!(
+        result.is_err(),
+        "corrupt tags_json should return error, not default"
+    );
 }
 
 #[test]
@@ -586,7 +595,10 @@ fn row_to_job_corrupt_created_at_returns_error() {
     drop(conn);
 
     let result = get_job(&pool, "cron_bad4");
-    assert!(result.is_err(), "corrupt created_at should return error, not default to now");
+    assert!(
+        result.is_err(),
+        "corrupt created_at should return error, not default to now"
+    );
 }
 
 // ── F1: Targeted UPDATE/DELETE on stale id surfaces NotFound ──────────
