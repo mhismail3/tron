@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Top-level wizard. Reads the current `WizardStep` from `WizardState`
-/// and dispatches to a per-step view. The shell (header + footer +
-/// back button) is shared by `WizardShell`.
+/// and dispatches to a per-step view. The shell (top-bar with progress,
+/// glass canvas, animated step transitions) is shared by `WizardShell`.
 ///
 /// Pass `initialStep` to override the persisted last-visited step. The
 /// menu-bar's "Show pairing info…" path uses this to remount the wizard
@@ -36,68 +36,102 @@ struct WizardView: View {
         }
         .environment(state)
         .onAppear {
-            // Detect existing install on entry so the welcome step's
-            // power-user shortcut is wired correctly.
             state.existingInstallStatus = setup.detectExistingInstall()
         }
     }
 }
 
-/// Shared chrome around every step: rounded card, header, footer, back
-/// button. Mirrors the iOS `OnboardingShell` layout for visual
-/// consistency.
+/// Shared chrome — single liquid-glass canvas with the system traffic
+/// lights floating in the top-left and a slim progress bar in the
+/// top-right. No separator between the top region and the content; the
+/// whole window is one continuous surface.
+///
+/// Layout:
+/// ```
+/// ┌───────────────────────────────────┐
+/// │ ●●●            ████░░░░░░         │
+/// │                                   │
+/// │      [step content fills here]    │
+/// │                                   │
+/// └───────────────────────────────────┘
+/// ```
 struct WizardShell<Content: View>: View {
     @Bindable var state: WizardState
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            // ScrollView is defensive — content fits comfortably at the
-            // window's ideal size (640×860) but small displays or
-            // user-shrunk windows fall back to scrolling instead of
-            // clipping.
-            ScrollView {
-                content()
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 24)
-                    .frame(maxWidth: .infinity)
+        ZStack(alignment: .top) {
+            // Per-step content fills the full window so it can lay out
+            // its own title at the top-left (with breathing room for
+            // the traffic lights) and its CTAs at the bottom.
+            content()
+                .padding(.top, 36)        // clear the traffic-light row
+                .padding(.bottom, 24)
+                .padding(.horizontal, 32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .trailing)),
+                    removal: .opacity.combined(with: .move(edge: .leading))
+                ))
+                .id(state.step) // re-mount per step so transitions fire
+
+            // Top bar — only the progress pill, anchored top-right and
+            // vertically centred with the per-step title row in
+            // `content()` (which sits at `.padding(.top, 36)` and is
+            // ~28pt tall thanks to the 28pt logo). Matching the pill's
+            // top padding to the content's puts it on the same baseline
+            // as the title.
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                if state.step != .done {
+                    progressPill
+                }
             }
+            .padding(.top, 36)
+            .padding(.horizontal, 32)
         }
-        .frame(
-            minWidth: 580, idealWidth: 640,
-            minHeight: 780, idealHeight: 860
-        )
-        .background(.windowBackground)
+        // Pinned to the same fixed dimensions the WindowGroup uses in
+        // `TronMacApp.swift` — the window is non-resizable, so every
+        // step gets exactly this much canvas. If a step needs more
+        // breathing room, it's the step's job to abbreviate, not the
+        // shell's job to grow.
+        .frame(width: 480, height: 360)
+        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: state.step)
     }
+
+    // MARK: - Progress pill (top-right)
 
     @ViewBuilder
-    private var header: some View {
-        HStack {
-            if state.step != .welcome && state.step != .done {
-                Button {
-                    state.goBack()
-                } label: {
-                    Label("Back", systemImage: "chevron.left")
-                        .labelStyle(.titleAndIcon)
-                }
-                .buttonStyle(.borderless)
-            }
-            Spacer()
-            ProgressView(value: progressFraction)
-                .frame(maxWidth: 200)
-            Spacer()
-            // Right-side balancer for centered progress
-            Color.clear.frame(width: 60)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    private var progressFraction: Double {
+    private var progressPill: some View {
         let cases = WizardStep.allCases
-        guard let i = cases.firstIndex(of: state.step) else { return 0 }
-        return Double(i + 1) / Double(cases.count)
+        let current = (cases.firstIndex(of: state.step) ?? 0) + 1
+        let total = cases.count
+        let fraction = Double(current) / Double(total)
+
+        HStack(spacing: 8) {
+            Text("\(current) / \(total)")
+                .font(.system(.caption2, design: .monospaced).weight(.medium))
+                .foregroundStyle(Color.tronEmerald.opacity(0.85))
+                .monospacedDigit()
+            ZStack(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(Color.tronEmerald.opacity(0.18))
+                    .frame(width: 80, height: 4)
+                Capsule(style: .continuous)
+                    .fill(LinearGradient.tronEmeraldGradient)
+                    .frame(width: max(4, 80 * fraction), height: 4)
+                    .animation(.spring(response: 0.5, dampingFraction: 0.8), value: fraction)
+            }
+        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 10)
+        .background(
+            Capsule(style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(Color.tronEmerald.opacity(0.18), lineWidth: 0.5)
+                )
+        )
     }
 }

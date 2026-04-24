@@ -9,16 +9,55 @@ struct TronMacApp: App {
         WindowGroup {
             RootView()
                 .environment(\.environmentSetup, EnvironmentSetup.live)
-                .frame(
-                    minWidth: 580, idealWidth: 640,
-                    minHeight: 780, idealHeight: 860
-                )
+                // App-wide tint — every system control (focus rings,
+                // default buttons, toggles) inherits emerald instead
+                // of system blue. Custom controls in
+                // `WizardButtonStyle.swift` reach for `.tronEmerald`
+                // directly so they stay emerald even if a sub-view
+                // overrides the tint locally.
+                .tint(Color.tronEmerald)
+                // Locked to a single fixed size — no resize handles.
+                // Every wizard step lays out against the same canvas so
+                // the design is fully predictable. The matching
+                // `.windowResizability(.contentSize)` below tells SwiftUI
+                // to honour this as the window's actual size, and
+                // `WindowConfigurator` strips `.resizable` from the
+                // style mask as a belt-and-braces measure.
+                .frame(width: 480, height: 360)
+                // `.containerBackground(_:for: .window)` paints the
+                // material at the WINDOW level — under the entire
+                // SwiftUI content view, on top of nothing. On macOS 26
+                // (Tahoe) `.regularMaterial` automatically picks up the
+                // Liquid Glass treatment with the live wallpaper bleed-
+                // through; on older macOS it falls back to vibrancy.
+                // Combined with the early-running `WindowConfigurator`
+                // that flips `isOpaque = false`, this gives the
+                // single-canvas glass look without a separate titlebar
+                // region.
+                .containerBackground(.regularMaterial, for: .window)
+                .configureHostingWindow { window in
+                    window.isOpaque = false
+                    window.backgroundColor = .clear
+                    window.titlebarAppearsTransparent = true
+                    window.titleVisibility = .hidden
+                    window.isMovableByWindowBackground = true
+                    window.styleMask.insert(.fullSizeContentView)
+                    // Strip the resize affordance entirely — paired with
+                    // the fixed `.frame(...)` and `.contentSize`
+                    // resizability above, the user has no way to drag
+                    // the window larger.
+                    window.styleMask.remove(.resizable)
+                    // Anti-aliased rounded corners on the content view's
+                    // layer so the glass clips cleanly against the
+                    // wallpaper instead of showing a hard rectangular
+                    // edge against the material.
+                    window.contentView?.wantsLayer = true
+                    window.contentView?.layer?.cornerRadius = 16
+                    window.contentView?.layer?.masksToBounds = true
+                }
         }
-        // `.contentMinSize` honors the content's minimum as the window's
-        // floor while still allowing the user to drag the window larger.
-        // (`.contentSize` would lock the window to exactly the content
-        // size — no resize handles, and the window opens at the min.)
-        .windowResizability(.contentMinSize)
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
         .commandsRemoved()
     }
 }
@@ -63,9 +102,13 @@ struct RootView: View {
             case .wizard:
                 NSApp.setActivationPolicy(.regular)
                 NSApp.activate(ignoringOtherApps: true)
-                if let window = NSApp.windows.first {
-                    window.makeKeyAndOrderFront(nil)
-                }
+                // Window chrome (transparency, hidden titlebar, rounded
+                // corners) is configured via `WindowConfigurator` in the
+                // SwiftUI body — it runs synchronously on the first
+                // layout pass, before the window is shown, avoiding a
+                // one-frame flash of opaque chrome that this `.task`
+                // path used to produce.
+                NSApp.windows.first?.makeKeyAndOrderFront(nil)
             case .menuBarOnly:
                 NSApp.setActivationPolicy(.accessory)
                 wizardEntryStep = nil

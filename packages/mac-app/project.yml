@@ -2,7 +2,7 @@ name: TronMac
 options:
   bundleIdPrefix: com.tron
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "15.0"
   developmentLanguage: en
   generateEmptyDirectories: true
   createIntermediateGroups: true
