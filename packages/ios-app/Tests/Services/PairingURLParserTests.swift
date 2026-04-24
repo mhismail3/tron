@@ -154,4 +154,68 @@ struct PairingURLParserTests {
         case .failure: break
         }
     }
+
+    // MARK: - PairingPayload.distributing(currentLabel:defaultLabel:)
+
+    /// `distributing(...)` is the shared field-distribution rule used by both
+    /// `OnboardingState.acceptPairingPayload` and `AddOrEditServerSheet`'s
+    /// add-mode paste closure. These tests pin the "what counts as
+    /// user-edited" semantics so the two surfaces don't drift.
+    @Suite("distributing(currentLabel:defaultLabel:)")
+    struct DistributingTests {
+
+        private func payload(label: String?) -> PairingURLParser.PairingPayload {
+            .init(host: "100.64.0.1", port: 9847, token: "tok", label: label)
+        }
+
+        @Test("Empty current label accepts payload's label")
+        func emptyAcceptsPayloadLabel() {
+            let result = payload(label: "From QR").distributing(currentLabel: "")
+            #expect(result.host == "100.64.0.1")
+            #expect(result.port == "9847")
+            #expect(result.token == "tok")
+            #expect(result.label == "From QR")
+        }
+
+        @Test("Default label 'My Mac' accepts payload's label (placeholder semantics)")
+        func defaultLabelAcceptsPayloadLabel() {
+            let result = payload(label: "Friend's Mac").distributing(currentLabel: "My Mac")
+            #expect(result.label == "Friend's Mac")
+        }
+
+        @Test("Custom user label is preserved over payload's label")
+        func customLabelWins() {
+            let result = payload(label: "From QR").distributing(currentLabel: "Custom Name")
+            #expect(result.label == "Custom Name")
+        }
+
+        @Test("Empty payload label leaves current label untouched")
+        func emptyPayloadLabelIsNoOp() {
+            let result = payload(label: nil).distributing(currentLabel: "Custom Name")
+            #expect(result.label == "Custom Name")
+
+            let result2 = payload(label: "").distributing(currentLabel: "Custom Name")
+            #expect(result2.label == "Custom Name")
+        }
+
+        @Test("Empty current AND empty payload label resolves to empty (no synthesis)")
+        func bothEmptyStaysEmpty() {
+            let result = payload(label: nil).distributing(currentLabel: "")
+            #expect(result.label == "")
+        }
+
+        @Test("Custom defaultLabel parameter is honored")
+        func customDefaultLabelHonored() {
+            // Imagine a future surface that uses "New Server" as its placeholder.
+            let result = payload(label: "From QR")
+                .distributing(currentLabel: "New Server", defaultLabel: "New Server")
+            #expect(result.label == "From QR")
+        }
+
+        @Test("Port is stringified for direct binding to a TextField")
+        func portIsStringified() {
+            let result = payload(label: nil).distributing(currentLabel: "")
+            #expect(result.port == "9847")
+        }
+    }
 }

@@ -37,11 +37,13 @@ actor ServerStatusPoller {
     }
 
     /// Performs a single status probe synchronously. Used by tests +
-    /// the wizard's "wait for server" loop.
+    /// the wizard's "wait for server" loop. The tone mapping mirrors
+    /// the INVARIANT documented on `ServerPingResult`.
     static func singleSnapshot(setup: EnvironmentSetup) async -> ServerStatusSnapshot {
         let token = setup.readBearerToken()
-        let info = await setup.pingServer(token)
-        if let info {
+        let result = await setup.pingServer(token)
+        switch result {
+        case .success(let info):
             return ServerStatusSnapshot(
                 tone: .running,
                 version: info.version,
@@ -49,15 +51,30 @@ actor ServerStatusPoller {
                 tailscaleIP: info.tailscaleIp ?? setup.readTailscaleIPFromSettings(),
                 bearerToken: token
             )
+        case .unauthorized:
+            return ServerStatusSnapshot(
+                tone: .unauthorized,
+                version: nil,
+                port: setup.serverPort,
+                tailscaleIP: setup.readTailscaleIPFromSettings(),
+                bearerToken: token
+            )
+        case .unreachable, .timeout:
+            return ServerStatusSnapshot(
+                tone: .stopped,
+                version: nil,
+                port: setup.serverPort,
+                tailscaleIP: setup.readTailscaleIPFromSettings(),
+                bearerToken: token
+            )
+        case .malformedResponse:
+            return ServerStatusSnapshot(
+                tone: .unknown,
+                version: nil,
+                port: setup.serverPort,
+                tailscaleIP: setup.readTailscaleIPFromSettings(),
+                bearerToken: token
+            )
         }
-        // Distinguish "no token" (unauthorized) from "no server" (stopped).
-        let tone: MenuBarTone = (token == nil) ? .stopped : .unauthorized
-        return ServerStatusSnapshot(
-            tone: tone,
-            version: nil,
-            port: setup.serverPort,
-            tailscaleIP: setup.readTailscaleIPFromSettings(),
-            bearerToken: token
-        )
     }
 }

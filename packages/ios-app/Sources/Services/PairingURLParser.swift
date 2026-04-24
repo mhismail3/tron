@@ -98,3 +98,37 @@ enum PairingURLParser {
     }
 }
 
+extension PairingURLParser.PairingPayload {
+    /// Apply this payload to a 4-field pairing form, preserving the user's
+    /// label if they've already customized it.
+    ///
+    /// The default label (`"My Mac"`) is treated as the placeholder, not a
+    /// user-typed value — so a payload's label can override it. Anything
+    /// else the user typed wins over the URL's label.
+    ///
+    /// Returns the (host, port, token, label) tuple to commit. Used by both
+    /// the onboarding pairing step (via `OnboardingState.acceptPairingPayload`)
+    /// and the settings re-pair sheet (`AddOrEditServerSheet` in add mode)
+    /// so the "what counts as user-edited" rule has one source of truth.
+    /// Re-pair (`.edit`) mode bypasses this helper entirely — identity
+    /// fields are locked there and only the token is refreshed.
+    func distributing(
+        currentLabel: String,
+        defaultLabel: String = "My Mac"
+    ) -> (host: String, port: String, token: String, label: String) {
+        let resolvedLabel: String
+        if currentLabel.isEmpty || currentLabel == defaultLabel,
+           let pastedLabel = label, !pastedLabel.isEmpty {
+            resolvedLabel = pastedLabel
+        } else {
+            resolvedLabel = currentLabel
+        }
+        return (
+            host: host,
+            port: String(port),
+            token: token,
+            label: resolvedLabel
+        )
+    }
+}
+

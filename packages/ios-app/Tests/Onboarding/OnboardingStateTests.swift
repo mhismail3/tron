@@ -179,6 +179,36 @@ struct OnboardingStateTests {
         #expect(defaults.string(forKey: OnboardingState.stepStorageKey) == "welcome")
     }
 
+    @Test("reset() clears cachedConnectionPresets so migration can't silently re-skip")
+    func resetClearsCachedPresets() {
+        // Migration contract (rules/onboarding.md → "Migration"): if
+        // `cachedConnectionPresets` survives a reset, the next launch
+        // re-flips `onboardingComplete=true` via
+        // `OnboardingMigrationDecider.runMigrationIfNeeded()` and the user
+        // never sees the wizard they explicitly asked to re-run.
+        let defaults = ephemeralDefaults()
+        let preset = ConnectionPreset(
+            id: "p1", label: "Mac", host: "100.64.0.1", port: 9847
+        )
+        let data = try! JSONEncoder().encode([preset])
+        defaults.set(data, forKey: OnboardingState.cachedPresetsKey)
+        defaults.set(true, forKey: OnboardingState.completionStorageKey)
+
+        let state = OnboardingState(defaults: defaults)
+        state.reset()
+
+        #expect(defaults.data(forKey: OnboardingState.cachedPresetsKey) == nil,
+                "reset() must clear the cached-presets key — see rules/onboarding.md Migration contract")
+        // Sanity: post-reset, the migration decider should NOT auto-mark
+        // complete on the next launch.
+        let presetCount = OnboardingMigrationDecider.cachedPresetCount(defaults: defaults)
+        #expect(presetCount == 0)
+        #expect(OnboardingMigrationDecider.shouldAutoMarkComplete(
+            hasCompletedOnboarding: false,
+            cachedPresetCount: presetCount
+        ) == false)
+    }
+
     // MARK: - Helpers
 
     /// Returns an isolated UserDefaults suite so tests don't leak state into

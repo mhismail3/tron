@@ -7,6 +7,15 @@ struct PairingInfoStep: View {
 
     @State private var qrImage: NSImage?
     @State private var qrPayloadString: String?
+    @State private var failureReason: PairingFailureReason?
+
+    /// Why we couldn't render a pairing payload. Drives the warning
+    /// panel copy so the user knows whether to wait (server still
+    /// starting) vs. fix Tailscale.
+    enum PairingFailureReason {
+        case noToken
+        case noTailscaleIP
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -86,8 +95,8 @@ struct PairingInfoStep: View {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Server not yet reachable").font(.headline)
-                            Text("If you skipped the install step, make sure Tron is running. Otherwise wait a few seconds and tap Refresh.")
+                            Text(failureHeadline).font(.headline)
+                            Text(failureBody)
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
                     }.padding(.vertical, 8)
@@ -125,28 +134,61 @@ struct PairingInfoStep: View {
         return "\(value.prefix(4))…\(value.suffix(4))"
     }
 
+    private var failureHeadline: String {
+        switch failureReason {
+        case .noTailscaleIP: return "Tailscale IP not detected"
+        case .noToken, .none: return "Server not yet reachable"
+        }
+    }
+
+    private var failureBody: String {
+        switch failureReason {
+        case .noTailscaleIP:
+            return "The server is running but we can't read this Mac's Tailscale IP. Open Tailscale and confirm you're signed in, then tap Refresh."
+        case .noToken, .none:
+            return "If you skipped the install step, make sure Tron is running. Otherwise wait a few seconds and tap Refresh."
+        }
+    }
+
     private func refresh() {
         Task {
             // Resolve the pairing payload by combining the on-disk
             // bearer token with the server's `system.getInfo` response.
+            // We accept `.success` only; on `.unauthorized` the server
+            // is up but our local token is stale (rotation without
+            // restart), so we still surface the info from settings
+            // rather than block the user.
+            //
+            // Both `host` and `token` must be real before we render
+            // pairing info — a placeholder/fallback IP would mislead
+            // the user into typing a non-routable address into iOS.
             let token = setup.readBearerToken()
-            let info = await setup.pingServer(token)
+            let info = await setup.pingServer(token).info
             let host = info?.tailscaleIp
                 ?? setup.readTailscaleIPFromSettings()
-                ?? "100.64.0.1"
             let port = info?.port ?? setup.serverPort
 
-            if let token, !token.isEmpty {
-                let payload = PairingPayload(host: host, port: port, token: token, label: "My Mac")
-                state.pairingPayload = payload
-                if let url = PairingURLBuilder.makeURL(payload) {
-                    qrPayloadString = url.absoluteString
-                    qrImage = QRCodeGenerator.makeImage(payload: url.absoluteString, size: 220)
-                }
-            } else {
+            guard let token, !token.isEmpty else {
                 state.pairingPayload = nil
                 qrPayloadString = nil
                 qrImage = nil
+                failureReason = .noToken
+                return
+            }
+            guard let host, !host.isEmpty else {
+                state.pairingPayload = nil
+                qrPayloadString = nil
+                qrImage = nil
+                failureReason = .noTailscaleIP
+                return
+            }
+
+            let payload = PairingPayload(host: host, port: port, token: token, label: "My Mac")
+            state.pairingPayload = payload
+            failureReason = nil
+            if let url = PairingURLBuilder.makeURL(payload) {
+                qrPayloadString = url.absoluteString
+                qrImage = QRCodeGenerator.makeImage(payload: url.absoluteString, size: 220)
             }
         }
     }

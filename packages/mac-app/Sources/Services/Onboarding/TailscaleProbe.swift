@@ -17,7 +17,7 @@ enum TailscaleProbe {
         await probe(
             tailscaleAppExists: { FileManager.default.fileExists(atPath: $0.path) },
             cliPaths: defaultCLIPaths,
-            runProcess: TailscaleProbe.runIPCommand
+            runProcess: { url in await Subprocess.run(executable: url, arguments: ["ip", "-4"]) }
         )
     }
 
@@ -58,40 +58,6 @@ enum TailscaleProbe {
         URL(fileURLWithPath: "/opt/homebrew/bin/tailscale"),
     ]
 
-    /// Live `Process` invocation - kept private so the test seam is
-    /// exclusively `runProcess`.
-    static func runIPCommand(_ executable: URL) async -> ProcessResult {
-        await withCheckedContinuation { continuation in
-            let process = Process()
-            process.executableURL = executable
-            process.arguments = ["ip", "-4"]
-
-            let outputPipe = Pipe()
-            let errorPipe = Pipe()
-            process.standardOutput = outputPipe
-            process.standardError = errorPipe
-
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(returning: ProcessResult(exitCode: -1, stdout: "", stderr: error.localizedDescription))
-                return
-            }
-
-            process.terminationHandler = { proc in
-                let outData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                let errData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                let stdout = String(data: outData, encoding: .utf8) ?? ""
-                let stderr = String(data: errData, encoding: .utf8) ?? ""
-                continuation.resume(returning: ProcessResult(
-                    exitCode: Int(proc.terminationStatus),
-                    stdout: stdout,
-                    stderr: stderr
-                ))
-            }
-        }
-    }
-
     static func isIPv4(_ candidate: String) -> Bool {
         let parts = candidate.split(separator: ".")
         guard parts.count == 4 else { return false }
@@ -99,17 +65,5 @@ enum TailscaleProbe {
             guard let value = Int(part), value >= 0, value <= 255 else { return false }
         }
         return true
-    }
-}
-
-struct ProcessResult: Equatable, Sendable {
-    var exitCode: Int
-    var stdout: String
-    var stderr: String
-
-    init(exitCode: Int, stdout: String, stderr: String) {
-        self.exitCode = exitCode
-        self.stdout = stdout
-        self.stderr = stderr
     }
 }

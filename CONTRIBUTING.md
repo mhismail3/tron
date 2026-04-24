@@ -70,8 +70,13 @@ For Beta TestFlight builds, the maintainer uses the `/publish` skill (App ID
 
 The Mac SwiftUI wrapper lives at `packages/mac-app/`. It's a SwiftUI app that
 bundles the headless Rust agent as `Contents/Resources/tron-agent` and presents
-a first-run wizard + menu bar icon. Dev builds produce `Tron-Dev.app` (bundle
-ID `com.tron.mac.dev`); release builds ship as a notarized DMG.
+a first-run wizard + menu bar icon. Both Debug and Release configurations
+build `TronMac.app` (the bundle name follows the XcodeGen target); Debug uses
+bundle ID `com.tron.mac.dev` (lives in DerivedData), Release uses
+`com.tron.mac` and ships as a notarized DMG (`Tron.app` to the end user). This
+is wholly separate from `tron dev`'s headless agent at
+`~/.tron/system/deployment/Tron-Dev.app` (`com.tron.agent`) — see
+[`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants).
 
 ```bash
 cd packages/mac-app

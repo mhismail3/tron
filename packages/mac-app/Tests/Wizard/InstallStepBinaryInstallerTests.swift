@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import Darwin
 @testable import TronMac
 
 /// Tests `BinaryInstaller` (lifted out of `InstallStep.swift`) — the
@@ -117,6 +118,46 @@ struct BinaryInstallerTests {
         try BinaryInstaller.writePlist(plan: plan)
         let body = try String(contentsOf: plist, encoding: .utf8)
         #expect(body == "<plist version=\"1.0\"/>")
+    }
+
+    @Test("install strips com.apple.quarantine xattr from copied binary")
+    func installStripsQuarantine() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+
+        let source = tmp.appendingPathComponent("tron-agent", isDirectory: false)
+        try Data([0x7f, 0x45, 0x4c, 0x46]).write(to: source)
+        // Tag the source with the same xattr Gatekeeper would add to a
+        // freshly-downloaded DMG payload. The format is the canonical
+        // 5-field LaunchServices quarantine string.
+        let qBytes = "0083;65bc8a01;Tron;|com.tron.mac".data(using: .utf8)!
+        try qBytes.withUnsafeBytes { buf in
+            guard let base = buf.baseAddress else { return }
+            let rc = source.path.withCString { cPath in
+                Darwin.setxattr(cPath, "com.apple.quarantine", base, buf.count, 0, 0)
+            }
+            #expect(rc == 0, "setxattr setup failed; cannot exercise the strip code path")
+        }
+
+        let bundle = tmp.appendingPathComponent("Tron.app", isDirectory: true)
+        let binary = bundle.appendingPathComponent("Contents/MacOS/tron", isDirectory: false)
+        let plan = InstallPlan(
+            sourceBinary: source,
+            targetBundle: bundle,
+            targetBinary: binary,
+            plistPath: tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false),
+            plistContents: "<plist/>",
+            requiresLoad: true
+        )
+        try BinaryInstaller.install(plan: plan)
+
+        // After install, the destination must NOT carry quarantine.
+        var buffer = [UInt8](repeating: 0, count: 256)
+        let size = binary.path.withCString { cPath in
+            Darwin.getxattr(cPath, "com.apple.quarantine", &buffer, buffer.count, 0, 0)
+        }
+        // -1 with errno ENOATTR (93 on Darwin) is the expected outcome.
+        #expect(size == -1, "expected no quarantine xattr on installed binary, got \(size) bytes")
     }
 
     @Test("writePlist overwrites existing file")

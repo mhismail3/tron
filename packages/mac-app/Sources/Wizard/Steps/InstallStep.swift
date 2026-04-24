@@ -1,4 +1,5 @@
 import SwiftUI
+import Darwin
 
 struct InstallStep: View {
     @Bindable var state: WizardState
@@ -223,12 +224,17 @@ struct InstallStep: View {
     }
 
     /// Polls `system.ping` for up to 30 s on a 1 s cadence. Returns true
-    /// the moment the server responds.
+    /// the moment the server responds. Treats `.unauthorized` as a
+    /// success signal too — the server is alive; the wizard moves on
+    /// and the pairing step will surface the token.
     private func waitForPing() async -> Bool {
         let token = setup.readBearerToken()
         for _ in 0..<30 {
-            if let _ = await setup.pingServer(token) {
+            switch await setup.pingServer(token) {
+            case .success, .unauthorized:
                 return true
+            case .unreachable, .timeout, .malformedResponse:
+                break
             }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
@@ -291,15 +297,33 @@ enum BinaryInstaller {
             try fm.copyItem(at: plan.sourceBinary, to: tmp)
             // Mark executable.
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tmp.path)
+            // Strip any quarantine xattr the copy inherited from the
+            // source (DMG mount, dev build copied via AirDrop, etc.).
+            // Without this, Gatekeeper refuses to exec the binary at
+            // launchctl bootstrap time. Best-effort — ENOATTR ("no
+            // such attribute") is normal and ignored.
+            clearQuarantine(at: tmp)
 
             if fm.fileExists(atPath: plan.targetBinary.path) {
                 _ = try fm.replaceItemAt(plan.targetBinary, withItemAt: tmp)
             } else {
                 try fm.moveItem(at: tmp, to: plan.targetBinary)
             }
+            // After the atomic rename, the destination inode is the
+            // one we cleaned. Clean again as defence-in-depth in case
+            // replaceItemAt resurrected the destination's old xattrs.
+            clearQuarantine(at: plan.targetBinary)
         } catch {
             try? fm.removeItem(at: tmp)
             throw Failure.copyFailed(error.localizedDescription)
+        }
+    }
+
+    /// Removes the `com.apple.quarantine` extended attribute from
+    /// `path`. Internal so tests can verify the call.
+    static func clearQuarantine(at path: URL) {
+        _ = path.path.withCString { cPath in
+            Darwin.removexattr(cPath, "com.apple.quarantine", 0)
         }
     }
 

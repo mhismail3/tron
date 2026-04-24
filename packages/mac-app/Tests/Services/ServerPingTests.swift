@@ -55,3 +55,50 @@ struct ServerPingDecodeTests {
         #expect(info.paired == false)
     }
 }
+
+@Suite("ServerPingResult")
+struct ServerPingResultTests {
+    @Test("info accessor returns nil for non-success cases")
+    func infoAccessorNilForFailures() {
+        #expect(ServerPingResult.unauthorized.info == nil)
+        #expect(ServerPingResult.unreachable.info == nil)
+        #expect(ServerPingResult.timeout.info == nil)
+        #expect(ServerPingResult.malformedResponse.info == nil)
+    }
+
+    @Test("info accessor returns the wrapped ServerInfo on success")
+    func infoAccessorSuccess() throws {
+        let info = ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true)
+        let result = ServerPingResult.success(info)
+        #expect(result.info?.version == "0.5.0")
+        #expect(result.info?.port == 9847)
+    }
+
+    @Test("equality holds for matching cases")
+    func equality() {
+        #expect(ServerPingResult.unauthorized == ServerPingResult.unauthorized)
+        #expect(ServerPingResult.unreachable == ServerPingResult.unreachable)
+        #expect(ServerPingResult.unauthorized != ServerPingResult.unreachable)
+    }
+}
+
+/// Tests that the live `ServerPing.ping` correctly classifies network
+/// failures. We can't simulate every URLError code without real
+/// fixtures, but we can hit a closed port to confirm the
+/// `.unreachable` mapping.
+@Suite("ServerPing — live network classification")
+struct ServerPingLiveTests {
+    @Test("ping against a closed port returns .unreachable, never falsely .unauthorized")
+    func closedPortIsUnreachable() async throws {
+        // Port 1 is reserved + always closed on the loopback interface.
+        let result = await ServerPing.ping(host: "127.0.0.1", port: 1, token: "anything", timeout: 1)
+        switch result {
+        case .unreachable, .timeout:
+            // Either is correct — loopback connect refuses immediately
+            // on most systems but timeout is acceptable too.
+            break
+        case .success, .unauthorized, .malformedResponse:
+            Issue.record("expected .unreachable/.timeout for closed port, got \(result)")
+        }
+    }
+}

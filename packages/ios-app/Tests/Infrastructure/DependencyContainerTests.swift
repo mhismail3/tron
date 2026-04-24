@@ -231,4 +231,74 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssertFalse(container.isInitialized)
     }
 
+    // MARK: - Telemetry Client Wiring (Phase 7)
+
+    /// The container must initialize `telemetryClient` from the persisted
+    /// opt-in (default OFF) on every fresh build. Other call sites depend
+    /// on this being non-nil immediately after init — there's no second
+    /// "telemetry-ready" hook.
+    func test_telemetryClient_initializedFromPersistedOptIn_off() async throws {
+        UserDefaults.standard.set(false, forKey: OnboardingState.telemetryConsentStorageKey)
+        defer { UserDefaults.standard.removeObject(forKey: OnboardingState.telemetryConsentStorageKey) }
+
+        let container = DependencyContainer()
+        XCTAssertNotNil(container.telemetryClient)
+        XCTAssertFalse(
+            container.telemetryClient.isEnabled,
+            "Telemetry default is OFF — container should hand out a Null client"
+        )
+    }
+
+    /// Toggling `telemetryEnabled` mid-session should rebuild the client
+    /// (no app restart). The rebuild fires through
+    /// `UserDefaults.didChangeNotification` posted to the main queue.
+    /// We poll briefly because notification delivery is asynchronous.
+    func test_telemetryClient_rebuildsOnPersistedToggle() async throws {
+        UserDefaults.standard.set(false, forKey: OnboardingState.telemetryConsentStorageKey)
+        defer { UserDefaults.standard.removeObject(forKey: OnboardingState.telemetryConsentStorageKey) }
+
+        let container = DependencyContainer()
+        let before = ObjectIdentifier(container.telemetryClient as AnyObject)
+
+        UserDefaults.standard.set(true, forKey: OnboardingState.telemetryConsentStorageKey)
+
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline,
+              ObjectIdentifier(container.telemetryClient as AnyObject) == before {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertNotEqual(
+            ObjectIdentifier(container.telemetryClient as AnyObject),
+            before,
+            "Toggling telemetry on should rebuild the client without an app restart"
+        )
+    }
+
+    /// Writing the same value (or any other UserDefaults key) must NOT
+    /// rebuild the client — that would tear up the live sink on every
+    /// `@AppStorage` write across the app.
+    func test_telemetryClient_doesNotRebuildOnUnrelatedDefaultsChange() async throws {
+        UserDefaults.standard.set(false, forKey: OnboardingState.telemetryConsentStorageKey)
+        defer { UserDefaults.standard.removeObject(forKey: OnboardingState.telemetryConsentStorageKey) }
+
+        let container = DependencyContainer()
+        let before = ObjectIdentifier(container.telemetryClient as AnyObject)
+
+        // Touch an unrelated key that the container's notification
+        // observer will see flying past.
+        let canaryKey = "test_telemetry_canary_\(UUID().uuidString)"
+        UserDefaults.standard.set("ignored", forKey: canaryKey)
+        defer { UserDefaults.standard.removeObject(forKey: canaryKey) }
+
+        // Give the main queue a chance to drain any pending notifications.
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(
+            ObjectIdentifier(container.telemetryClient as AnyObject),
+            before,
+            "Unrelated defaults writes must not rebuild the telemetry client"
+        )
+    }
+
 }

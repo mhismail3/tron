@@ -1,6 +1,6 @@
 # Mac App Development
 
-> Last verified: 2026-04-23 (Phase 5)
+> Last verified: 2026-04-23 (Phases 5, 5.5, 7, 8)
 
 ## Setup
 
@@ -19,7 +19,14 @@ xcodegen generate
 open TronMac.xcodeproj
 ```
 
-Dev builds produce `Tron-Dev.app` (bundle ID `com.tron.mac.dev`); Release builds produce `Tron.app` (bundle ID `com.tron.mac`). Both manage the same LaunchAgent (`com.tron.server`) and port (9847) — single-instance lock ensures they don't coexist at runtime. See [architecture.md](./architecture.md) for the full rationale.
+Build products differ between configurations:
+
+- **Debug** → `TronMac.app` (bundle ID `com.tron.mac.dev`, executable `TronMac`). Lives in `~/Library/Developer/Xcode/DerivedData/.../Build/Products/Debug/TronMac.app`. The default `PRODUCT_NAME = $(TARGET_NAME)` is intentionally left untouched here so the `TronMacTests` target's `BUNDLE_LOADER` / `TEST_HOST` (which reference `TronMac.app/Contents/MacOS/TronMac`) keep resolving without configuration drift.
+- **Release** → `Tron.app` (bundle ID `com.tron.mac`, executable `Tron`). `Configuration/Release.xcconfig` sets `PRODUCT_NAME = Tron` so the archived bundle matches both the `.github/workflows/release-mac.yml` `APP_BUNDLE: Tron.app` expectation and the `/Applications/Tron.app` end-user surface. Built by the DMG pipeline and shipped notarized.
+
+Both configurations manage the same LaunchAgent (`com.tron.server`) and port (`9847`) — the wrapper's `~/.tron/system/.mac-wrapper.lock` ensures only one wrapper runs at a time, regardless of which configuration built it.
+
+> **Disambiguation**: the Debug-config `TronMac.app` (workflow 2 — wizard dogfood) is unrelated to `Tron-Dev.app` at `~/.tron/system/deployment/Tron-Dev.app`, which is workflow 3's headless agent built by `tron dev` (bundle ID `com.tron.agent`, no SwiftUI). See [architecture.md → Workflows & Variants](./architecture.md#workflows--variants) for the canonical three-workflow breakdown.
 
 ## Local dev loop
 
@@ -91,14 +98,18 @@ To simulate the menu-bar-only mode without onboarding, just `touch ~/.tron/syste
 
 Defined in `.github/workflows/release-mac.yml`. Broadly:
 
-1. `cargo build --release --bin tron --locked` (Ubuntu or macOS runner — cross-compile is avoided for code-signing reasons).
+1. `cargo build --release --bin tron --locked` on the same `macos-14` runner (cross-compile is avoided for code-signing reasons).
 2. `bash packages/mac-app/scripts/bundle-agent.sh --skip-build --source target/release/tron`.
 3. `xcodegen generate` inside `packages/mac-app/`.
 4. `xcodebuild -scheme TronMac -configuration Release archive -archivePath build/TronMac.xcarchive`.
-5. Export the `.app`, code-sign with Developer ID, notarize via `xcrun notarytool`, staple, package into DMG via `create-dmg`.
-6. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg`.
+5. Export the `.app`, code-sign inside-out with Developer ID (no `--deep` on the re-sign — `--deep` would clobber the helper signature; it's used only for read-only `--verify`), notarize via `xcrun notarytool submit --keychain-profile tron-notarize` (credentials live ONLY in an isolated path-based keychain at `$RUNNER_TEMP/tron-build.keychain-db`, never on argv), staple, package into DMG via `create-dmg`.
+6. Optional dSYM upload via `sentry-cli` (Phase 7; `continue-on-error` so a missing DSN doesn't fail the release).
+7. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg --clobber` (idempotent on re-run).
+8. `if: always()` cleanup: remove the keychain from the search list, delete it, dd-overwrite the password file, remove `cert.p12`.
 
-See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml) (added in Phase 6).
+PR builds (no tag) take a dry-run path: same `xcodebuild archive` + DMG assembly but ad-hoc-signed (`-`) so fork PRs without certs still validate the pipeline.
+
+See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml) (added in Phase 6, hardened in Phase 8).
 
 ## Common tasks
 
@@ -141,6 +152,6 @@ swiftformat packages/mac-app/Sources packages/mac-app/Tests
 |---|---|
 | `Bundle.main.url(forResource: "tron-agent")` returns nil | `Sources/Resources/tron-agent` not staged before `xcodegen generate`. Run `bash scripts/bundle-agent.sh` then regenerate. |
 | `BUILD FAILED` with "No such file or directory" for `tron-agent` | Same as above — resource file reference stale after a clean. Run `xcodegen generate` again. |
-| `SingleInstanceLock.acquire()` returns false on first launch | Stale lock file with a PID no longer alive. `rm ~/.tron/system/Tron.app.lock` and relaunch. |
+| `SingleInstanceLock.acquire()` returns false on first launch | Stale lock file with a PID no longer alive (rare — `fcntl(F_SETLK)` locks are kernel-released on process exit, so this only happens if the file's perms got broken). `rm ~/.tron/system/.mac-wrapper.lock` and relaunch. |
 | Wizard restarts every launch | `touchOnboardedSentinel` is not being called OR `~/.tron/system/` is not writable. Check permissions. |
 | `launchctl bootstrap` fails with 119 | LaunchAgent already loaded. Unload first: `launchctl bootout gui/$(id -u)/com.tron.server`. |

@@ -3,9 +3,17 @@ import SwiftUI
 /// Top-level wizard. Reads the current `WizardStep` from `WizardState`
 /// and dispatches to a per-step view. The shell (header + footer +
 /// back button) is shared by `WizardShell`.
+///
+/// Pass `initialStep` to override the persisted last-visited step. The
+/// menu-bar's "Show pairing info…" path uses this to remount the wizard
+/// directly at `.pairingInfo` after the user has already onboarded.
 struct WizardView: View {
     @Environment(\.environmentSetup) private var setup
-    @State private var state = WizardState()
+    @State private var state: WizardState
+
+    init(initialStep: WizardStep? = nil) {
+        _state = State(initialValue: WizardState(initialStep: initialStep))
+    }
 
     var body: some View {
         WizardShell(state: state) {
@@ -46,6 +54,10 @@ struct WizardShell<Content: View>: View {
         VStack(spacing: 0) {
             header
             Divider()
+            // ScrollView is defensive — content fits comfortably at the
+            // window's ideal size (640×860) but small displays or
+            // user-shrunk windows fall back to scrolling instead of
+            // clipping.
             ScrollView {
                 content()
                     .padding(.horizontal, 32)
@@ -53,7 +65,10 @@ struct WizardShell<Content: View>: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .frame(minWidth: 540, minHeight: 720)
+        .frame(
+            minWidth: 580, idealWidth: 640,
+            minHeight: 780, idealHeight: 860
+        )
         .background(.windowBackground)
     }
 

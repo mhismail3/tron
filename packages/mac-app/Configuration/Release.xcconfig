@@ -11,3 +11,11 @@ MTL_ENABLE_DEBUG_INFO = NO
 
 // Production variant - DMG installs to /Applications/Tron.app
 PRODUCT_BUNDLE_IDENTIFIER = com.tron.mac
+
+// Override the default `PRODUCT_NAME = $(TARGET_NAME)` (= "TronMac") so the
+// archived bundle is `Tron.app` with executable `Tron` — matching the
+// `APP_BUNDLE: Tron.app` expectation in `.github/workflows/release-mac.yml`
+// (line 98) and the `/Applications/Tron.app` end-user surface. Debug keeps
+// the default so the `TronMacTests` target's `BUNDLE_LOADER`/`TEST_HOST`
+// (which reference `TronMac.app/Contents/MacOS/TronMac`) keeps resolving.
+PRODUCT_NAME = Tron

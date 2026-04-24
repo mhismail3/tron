@@ -85,9 +85,12 @@ enum TelemetryEvent {
     }
 }
 
-/// Abstract telemetry sink. Production code uses
-/// `TelemetryClientFactory.shared` which returns `NullTelemetryClient`
-/// until the PostHog SDK is wired in (plan follow-up). Tests inject
+/// Abstract telemetry sink. Production code reads
+/// `DependencyContainer.telemetryClient`, which is built via
+/// `TelemetryClientFactory.make(enabled:)` from the persisted opt-in and
+/// rebuilt in place when the toggle flips (no app restart needed). Until
+/// the PostHog SDK is wired in (plan follow-up) every call site still
+/// resolves to a `NullTelemetryClient`. Tests inject
 /// `InMemoryTelemetryClient` to assert emission.
 protocol TelemetryClient: AnyObject {
     var isEnabled: Bool { get }
@@ -123,10 +126,17 @@ final class InMemoryTelemetryClient: TelemetryClient {
     }
 }
 
-/// Factory that the app queries for a live client. Injects based on
-/// `@AppStorage("telemetryEnabled")` and returns a
-/// `NullTelemetryClient` when opted-out. Once the PostHog SDK is
-/// wired in, replace the `enabled` branch with the SDK-backed client.
+/// Factory that the app queries for a live client. The container
+/// (`DependencyContainer`) calls this on init using the persisted
+/// `@AppStorage("telemetryEnabled")` value AND on every flip of that
+/// key (via a `UserDefaults.didChangeNotification` observer), so a
+/// toggle in Privacy → Telemetry replaces the live sink mid-session
+/// without an app restart. Returns `NullTelemetryClient` when
+/// opted-out — that's the contract the rest of the codebase relies on
+/// (call sites can `client.track(...)` unconditionally).
+///
+/// Once the PostHog SDK is wired in, replace the `enabled` branch with
+/// the SDK-backed client; the wiring above is already in place.
 enum TelemetryClientFactory {
     static func make(enabled: Bool) -> TelemetryClient {
         if enabled {

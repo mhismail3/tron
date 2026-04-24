@@ -137,11 +137,18 @@ struct AddOrEditServerSheet: View {
             Spacer()
             Group {
                 let pasteAwareBinding = binding.pasteAware { payload in
-                    host = payload.host
-                    port = String(payload.port)
-                    token = payload.token
-                    if let pastedLabel = payload.label, label.isEmpty {
-                        label = pastedLabel
+                    if mode.isEdit {
+                        // Re-pair: identity fields are locked. Only refresh
+                        // the token. Pasting a URL from a *different* server
+                        // would otherwise silently mutate the locked
+                        // host/port/label.
+                        token = payload.token
+                    } else {
+                        let distributed = payload.distributing(currentLabel: label)
+                        host = distributed.host
+                        port = distributed.port
+                        token = distributed.token
+                        label = distributed.label
                     }
                     inlineError = nil
                 }
@@ -168,11 +175,12 @@ struct AddOrEditServerSheet: View {
         .onTapGesture { if !locked { focusedField = field } }
     }
 
-    // The paste-aware binding helper was extracted to
-    // `Extensions/Binding+PasteAware.swift` (Phase 4.5) so the
-    // onboarding `PairingStep` and this re-pair sheet share the same
-    // tron://pair-detection code path. The closure above is the only
-    // sheet-specific bit (mutating local @State).
+    // Paste detection lives in `Extensions/Binding+PasteAware.swift`
+    // and field-distribution lives in
+    // `PairingURLParser.PairingPayload.distributing(currentLabel:)` so the
+    // onboarding `PairingStep` (via `OnboardingState.acceptPairingPayload`)
+    // and this re-pair sheet share both the tron://pair-detection AND the
+    // "what counts as user-edited" rule.
 
     private func advanceFocus(from field: Field) {
         switch field {
@@ -189,7 +197,7 @@ struct AddOrEditServerSheet: View {
         let labelOk = !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hostOk = !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let tokenOk = !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let portOk = Int(port).map { (1...65_535).contains($0) } ?? false
+        let portOk = Int(port.trimmingCharacters(in: .whitespacesAndNewlines)).map { (1...65_535).contains($0) } ?? false
         return labelOk && hostOk && portOk && tokenOk
     }
 

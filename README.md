@@ -337,7 +337,11 @@ All messages use JSON-RPC 2.0 framing:
 
 These fields are additive; older clients that ignore them continue to work unchanged.
 
-`system.checkForUpdates` / `system.getUpdateStatus` / `system.applyUpdate` drive the user-mode auto-updater (see Section "Deployment → User-mode auto-update"). All three are no-ops when `server.update.enabled` is `false` (the safe default); they return structured `{ disabled: true, reason }` responses so iOS + Mac menu-bar UIs can render a "Updates are disabled" state instead of a spurious error.
+`system.checkForUpdates` / `system.getUpdateStatus` / `system.applyUpdate` drive the user-mode auto-updater (see Section "Deployment → User-mode auto-update"). Each has a deliberately tame default response so iOS + Mac menu-bar UIs render a meaningful empty state instead of a spurious error:
+
+- `system.checkForUpdates` returns `{ available: false, disabled: true, channel, currentVersion }` when `server.update.enabled` is `false` (the safe default) — no GitHub fetch is performed.
+- `system.getUpdateStatus` is a pure read of `settings.server.update` + `~/.tron/system/updater-state.json`; it always succeeds and exposes `enabled: false` plus null `latestAvailableVersion` for un-opted-in users.
+- `system.applyUpdate` is wired today as a stub that returns `{ status: "noop", message, currentVersion }` regardless of the flag. The install pipeline (lock `deploy.lock` → backup `.bak` → atomic swap → `launchctl kickstart` → post-install ping → rollback on failure) lands with the DMG release work in Phase 6; until then the supported upgrade path is a manual DMG drag-install. The wire shape will not change when the pipeline lands — only `status` flips from `"noop"` to `"installing"`.
 
 ### Core (63)
 
@@ -563,7 +567,7 @@ The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection
 | Google    | `llm/google/`    | OAuth, API key            | Cloud Code Assist OAuth, Gemini API key |
 | MiniMax   | `llm/minimax/`   | API key only              | — |
 | Kimi      | `llm/kimi/`      | API key only              | — |
-| Ollama    | `llm/ollama/`    | None (local)              | Requires Ollama running locally. See `docs/local-llm-setup.md` |
+| Ollama    | `llm/ollama/`    | None (local)              | Requires Ollama running locally on the same Mac as the agent |
 
 ### Multi-Account
 
@@ -794,9 +798,22 @@ packages/mac-app/Sources/
 | Uninstall Tron… | Confirm dialog + `tron uninstall` |
 | Quit Tron | Quits wrapper; server keeps running via LaunchAgent |
 
-### Dev Variant
+### Variants & Workflows
 
-`Tron-Dev.app` (bundle ID `com.tron.mac.dev`) installs to `~/.tron/system/deployment/Tron-Dev.app` and shares the same `~/.tron/` state tree as production. A single-instance lock via `NSDistributedNotificationCenter` prevents two wrappers from managing the same server concurrently.
+The wrapper coexists with the production install and with the legacy `tron dev` agent-only workflow. Three distinct artifacts share `port 9847` and the `~/.tron/system/` data tree:
+
+| Workflow | Build product | Bundle ID | Lives at | What it is |
+|---|---|---|---|---|
+| **Production (DMG)** | `Tron.app` | `com.tron.mac` | `/Applications/Tron.app` | Notarized SwiftUI wrapper + bundled headless agent — what end users install |
+| **Wizard dogfood** (Xcode Run / `xcodebuild -configuration Debug`) | `TronMac.app` | `com.tron.mac.dev` | `~/Library/Developer/Xcode/DerivedData/.../Build/Products/Debug/TronMac.app` | Same SwiftUI wrapper, debug-profile bundled agent — used by contributors testing the UI |
+| **Agent dev** (`tron dev`) | `Tron-Dev.app` (no SwiftUI — just a `.app` wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/system/deployment/Tron-Dev.app` | Headless agent only — used by contributors iterating on the Rust server without rebuilding the wrapper |
+
+Mutual exclusion:
+- Two wrappers (workflows 1 + 2) — guarded by `~/.tron/system/.mac-wrapper.lock` (`fcntl(F_SETLK, F_WRLCK)`); second instance terminates.
+- Two agents — guarded by `~/.tron/system/database/log.db.lock` (cross-process exclusive `flock`).
+- Port `9847` — `tron dev` calls `launchctl bootout com.tron.server` before binding, so the production agent is paused while dev-mode runs.
+
+A contributor can have the DMG installed AND switch to `tron dev` for agent iteration without uninstalling — the wrapper's menu bar shows "Server stopped" while `tron dev` runs; quitting `tron dev` and re-bootstrapping `com.tron.server` restores production behavior. See [`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants) for the full breakdown including the on-disk artifacts each workflow shares.
 
 ### Documentation
 
@@ -815,7 +832,7 @@ The Mac wizard surfaces three system permissions. Each is probed with a real sys
 | Notifications | Agent-completion alerts on the Mac when long-running sessions finish | Yes | `UNUserNotificationCenter` auth request |
 | Accessibility | ComputerUse tool (mouse/keyboard control); optional today, plumbed for future | No | `AXIsProcessTrusted()` |
 
-Skipping a required permission shows a confirm dialog describing the consequence (e.g. "Tron cannot read files in Documents; most Read tool calls will fail"). The wizard does not block — users can always grant later from `/Applications/Tron.app` menu bar → "Permissions…" (or re-run the wizard via `tron reset-onboarding`).
+Skipping a required permission shows a confirm dialog describing the consequence (e.g. "Tron cannot read files in Documents; most Read tool calls will fail"). The wizard does not block — users can always grant later from `/Applications/Tron.app` menu bar → "Permissions…" (or re-run the wizard by deleting `~/.tron/system/.onboarded` and re-launching `Tron.app`).
 
 ---
 

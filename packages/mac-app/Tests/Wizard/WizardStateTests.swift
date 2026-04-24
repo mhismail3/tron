@@ -145,4 +145,26 @@ struct WizardStateTests {
         let state = WizardState(defaults: defaults)
         #expect(state.step == .welcome)
     }
+
+    @Test("initialStep override wins over persisted step")
+    func initialStepOverride() {
+        let (defaults, cleanup) = Self.isolatedDefaults()
+        defer { cleanup() }
+        // Pre-seed defaults with a different step.
+        defaults.set(WizardStep.tailscale.rawValue, forKey: WizardState.stepStorageKey)
+        // Override should win.
+        let state = WizardState(defaults: defaults, initialStep: .pairingInfo)
+        #expect(state.step == .pairingInfo)
+        // And it should also be persisted, so kill+relaunch lands here.
+        #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.pairingInfo.rawValue)
+    }
+
+    @Test("initialStep nil falls back to persisted step (no overwrite)")
+    func initialStepNilHonorsPersisted() {
+        let (defaults, cleanup) = Self.isolatedDefaults()
+        defer { cleanup() }
+        defaults.set(WizardStep.permissions.rawValue, forKey: WizardState.stepStorageKey)
+        let state = WizardState(defaults: defaults, initialStep: nil)
+        #expect(state.step == .permissions)
+    }
 }

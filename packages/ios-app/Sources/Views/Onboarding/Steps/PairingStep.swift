@@ -202,10 +202,13 @@ struct PairingStep: View {
         let plan = PairingPersistor.plan(payload: payload, existing: existing)
 
         // 1. Keychain: write the bearer keyed on the (possibly-new) preset id.
+        //    Surface as `.keychainFailed` (NOT `.unauthorized`) so the user
+        //    sees an honest "device storage" error instead of being told
+        //    their (validated) token is wrong.
         do {
             try dependencies.presetTokenStore.setToken(plan.token, forPresetId: plan.activePreset.id)
         } catch {
-            state.pairingError = .unauthorized
+            state.pairingError = .keychainFailed(error.localizedDescription)
             state.isConnecting = false
             return
         }

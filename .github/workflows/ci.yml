@@ -110,11 +110,15 @@ jobs:
           cargo fmt --version
           cargo clippy --version
 
-      # fmt + clippy are ADVISORY for now: the existing tree has accumulated
-      # ~2k fmt diffs and ~1k clippy warnings predating this CI pipeline.
-      # They surface in PR checks as ⚠️ but don't block. A dedicated cleanup
-      # pass will apply `cargo fmt` workspace-wide and tighten clippy to
-      # `-D warnings`, at which point `continue-on-error` here is removed.
+      # fmt + clippy are ADVISORY: the tree has ~2k fmt diffs and ~1k clippy
+      # warnings predating this CI pipeline. They surface in PR checks as ⚠️
+      # but do NOT block merge. Promoting either to enforcing requires a
+      # workspace-wide cleanup commit first (a `cargo fmt` baseline + a
+      # clippy-warning triage pass). Until then, removing `continue-on-error`
+      # would red-line every PR — keep advisory state.
+      #
+      # Tracked as an out-of-scope follow-up; do not edit `continue-on-error`
+      # without first running the workspace cleanup.
       - name: cargo fmt --check (advisory)
         continue-on-error: true
         run: cargo fmt --check

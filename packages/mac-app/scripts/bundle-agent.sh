@@ -93,8 +93,16 @@ source_bin="$(resolve_source)"
 # --- build step ----------------------------------------------------------
 
 if [ "$skip_build" -eq 0 ] && [ -z "$source_override" ]; then
-    echo "==> cargo build --$profile --bin tron --locked"
-    (cd "$AGENT_DIR" && cargo build --"$profile" --bin tron --locked) || { echo "cargo build failed" >&2; exit 1; }
+    # Cargo's `--debug` flag does NOT exist (dev is the default profile —
+    # omit any flag, or use `--profile dev`). Only `--release` is a
+    # shorthand. Branch explicitly so we never pass an invalid flag.
+    case "$profile" in
+        release) cargo_args=(build --release --bin tron --locked) ;;
+        debug)   cargo_args=(build           --bin tron --locked) ;;
+        *)       echo "error: unknown profile '$profile' for cargo invocation" >&2; exit 64 ;;
+    esac
+    echo "==> cargo ${cargo_args[*]}"
+    (cd "$AGENT_DIR" && cargo "${cargo_args[@]}") || { echo "cargo build failed" >&2; exit 1; }
 fi
 
 if [ ! -x "$source_bin" ]; then

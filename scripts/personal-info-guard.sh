@@ -70,10 +70,23 @@ scan_pattern() {
     local hits
 
     if [ "$mode" = "--staged" ]; then
-        # Only check what's staged for commit
-        hits=$(git diff --cached --name-only -z \
-            | xargs -0 git grep -nE "$pattern" -- 2>/dev/null \
-            | grep -vE "$(IFS=\|; printf '%s' "${ALLOWLIST_PATHS[*]}" | sed 's|\*|.*|g')" \
+        # Pre-commit gate: scan the *staged blobs*, not the working tree.
+        # The two can differ when the developer staged file A v1, then kept
+        # editing it on disk to v2 — only v1 is about to be committed.
+        # `git grep --cached` reads from the index, which is exactly what
+        # `git commit` will record.
+        #
+        # Restrict to files actually staged (added/modified/copied/renamed —
+        # `--diff-filter=ACMR`) so we don't re-scan the entire index every
+        # commit. `xargs -0r` avoids invoking grep with zero args (which
+        # would scan everything) when the staged set is empty.
+        local staged_files
+        staged_files=$(git diff --cached --name-only --diff-filter=ACMR -z)
+        if [ -z "$staged_files" ]; then
+            return
+        fi
+        hits=$(printf '%s' "$staged_files" \
+            | xargs -0r git grep --cached -nE "$pattern" -- "${EXCLUDE_ARGS[@]}" 2>/dev/null \
             || true)
     else
         # Full repo scan via git grep (respects .gitignore)

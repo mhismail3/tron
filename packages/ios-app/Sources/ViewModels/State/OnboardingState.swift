@@ -152,14 +152,16 @@ final class OnboardingState {
 
     /// Apply a parsed pairing payload to the form. Preserves the user's
     /// label if they've typed something other than the default.
+    ///
+    /// Delegates the field-distribution rule (including the "treat 'My Mac'
+    /// as placeholder" semantics) to `PairingPayload.distributing(...)` so
+    /// the same logic powers `AddOrEditServerSheet` (add mode).
     func acceptPairingPayload(_ payload: PairingURLParser.PairingPayload) {
-        pairingHost = payload.host
-        pairingPort = String(payload.port)
-        pairingToken = payload.token
-        if pairingLabel == "My Mac" || pairingLabel.isEmpty,
-           let label = payload.label, !label.isEmpty {
-            pairingLabel = label
-        }
+        let distributed = payload.distributing(currentLabel: pairingLabel)
+        pairingHost = distributed.host
+        pairingPort = distributed.port
+        pairingToken = distributed.token
+        pairingLabel = distributed.label
         pairingError = nil
     }
 
@@ -172,10 +174,17 @@ final class OnboardingState {
 
     /// Reset the wizard to its initial state. Used by tests and the
     /// "Re-run onboarding" debug action in the diagnostics page.
+    ///
+    /// **Migration contract**: clears `cachedConnectionPresets` alongside
+    /// the completion / step keys so that `OnboardingMigrationDecider`
+    /// (which auto-completes onboarding when cached presets exist) does
+    /// NOT silently re-skip the wizard on the next launch. See
+    /// `packages/ios-app/.claude/rules/onboarding.md` ("Migration").
     func reset() {
         defaults.set(false, forKey: Self.completionStorageKey)
         defaults.set(false, forKey: Self.telemetryConsentStorageKey)
         defaults.set(OnboardingStep.initial.rawValue, forKey: Self.stepStorageKey)
+        defaults.removeObject(forKey: Self.cachedPresetsKey)
         step = .initial
         pairingHost = ""
         pairingPort = AppConstants.prodPort

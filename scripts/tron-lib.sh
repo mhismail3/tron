@@ -70,11 +70,22 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-print_status()  { echo -e "${BLUE}▸${NC} $1"; }
-print_success() { echo -e "${GREEN}✓${NC} $1"; }
-print_error()   { echo -e "${RED}✗${NC} $1"; }
-print_warning() { echo -e "${YELLOW}!${NC} $1"; }
-print_header()  { echo -e "\n${CYAN}$1${NC}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; }
+# INVARIANT: every print_* helper writes to stderr (>&2). Stdout is
+# reserved for machine-readable output — `tron install --gui-helper`
+# emits one NDJSON event per line on stdout, and any decorative print
+# from a helper called transitively (codesign_bundle, notarize_bundle,
+# ensure_default_configs, …) would corrupt that stream. Routing to
+# stderr lets us keep the gating-by-flag pattern as a UX nicety while
+# making the stdout contract structurally enforced rather than
+# discipline-enforced.
+print_status()  { echo -e "${BLUE}▸${NC} $1" >&2; }
+print_success() { echo -e "${GREEN}✓${NC} $1" >&2; }
+print_error()   { echo -e "${RED}✗${NC} $1" >&2; }
+print_warning() { echo -e "${YELLOW}!${NC} $1" >&2; }
+# Neutral informational tone — used by self-update CLI paths to explain
+# what's happening without implying an action started/succeeded.
+print_info()    { echo -e "${DIM}ℹ${NC} $1" >&2; }
+print_header()  { echo -e "\n${CYAN}$1${NC}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2; }
 
 #=============================================================================
 # UTILITY FUNCTIONS

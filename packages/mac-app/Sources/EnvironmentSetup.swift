@@ -42,9 +42,12 @@ struct EnvironmentSetup: Sendable {
     var detectExistingInstall: @Sendable () -> ExistingInstallStatus
 
     /// Performs a single `system.ping` against the running server.
-    /// Returns the parsed ServerInfo on success, nil otherwise. Honors
-    /// the supplied bearer token (nil for legacy unauthenticated hosts).
-    var pingServer: @Sendable (String?) async -> ServerInfo?
+    /// Returns a classified `ServerPingResult` so the caller can
+    /// distinguish "server is down" from "token rejected" — the menu
+    /// bar tone + wizard recovery copy depend on this distinction.
+    /// Honors the supplied bearer token (nil for legacy unauthenticated
+    /// hosts).
+    var pingServer: @Sendable (String?) async -> ServerPingResult
 
     /// LaunchAgent control surface - load/unload/restart/check.
     var launchAgentManager: LaunchAgentManaging

@@ -134,6 +134,85 @@ struct PairingValidationTests {
         #expect(incompatible.contains("0.5.0"))
     }
 
+    // MARK: - keychainFailed regression coverage
+    //
+    // `.keychainFailed` is emitted by `PairingStep.connect()` when the
+    // Keychain `setToken` write throws AFTER a successful probe. The
+    // architectural intent (see source `///` comment on the case) is that
+    // the user sees an honest "device storage" message rather than being
+    // told their (validated) token is wrong. These tests guard that intent
+    // so a future refactor can't quietly collapse `.keychainFailed` into
+    // `.unauthorized`.
+
+    @Test("keychainFailed user-facing message includes the wrapped detail")
+    func keychainFailedMessageIncludesDetail() {
+        let detail = "errSecMissingEntitlement"
+        let message = PairingStepValidator.Failure.keychainFailed(detail).userFacingMessage
+        // The detail (here, the localized description of the underlying
+        // Keychain error) must round-trip into the user message so support
+        // requests carry the actual OS error code.
+        #expect(message.contains(detail))
+        // And the message must blame storage, not the token, so the user
+        // doesn't go re-copying their (correct) bearer.
+        #expect(message.lowercased().contains("keychain"))
+        #expect(!message.lowercased().contains("wrong"))
+    }
+
+    @Test("keychainFailed is distinct from unauthorized in messaging")
+    func keychainFailedDistinctFromUnauthorized() {
+        let keychain = PairingStepValidator.Failure.keychainFailed("any").userFacingMessage
+        let unauthorized = PairingStepValidator.Failure.unauthorized.userFacingMessage
+        // The two messages must not collapse — `.unauthorized` blames the
+        // token, `.keychainFailed` blames device storage.
+        #expect(keychain != unauthorized)
+        #expect(!keychain.lowercased().contains("wrong pairing token"))
+    }
+
+    @Test("keychainFailed Equatable: same detail equal, different detail unequal")
+    func keychainFailedEquatable() {
+        let a = PairingStepValidator.Failure.keychainFailed("errSecAuthFailed")
+        let b = PairingStepValidator.Failure.keychainFailed("errSecAuthFailed")
+        let c = PairingStepValidator.Failure.keychainFailed("errSecMissingEntitlement")
+        #expect(a == b)
+        #expect(a != c)
+        // Cross-case inequality: a Keychain failure must never be equal to
+        // a fundamentally different classification (auth/network/etc).
+        #expect(a != .unauthorized)
+        #expect(a != .unreachable("h"))
+        #expect(a != .missingFields)
+    }
+
+    @Test("classify never produces keychainFailed (it's caller-emitted, not network-derived)")
+    func classifyNeverEmitsKeychainFailed() {
+        // `.keychainFailed` is constructed at the call site
+        // (`PairingStep.connect()`), never inferred from a probe error.
+        // Guarding this prevents a future refactor from accidentally
+        // routing Keychain failures through `classify` (where they'd be
+        // misclassified as `.unreachable`).
+        for sample in [
+            NSError(domain: NSURLErrorDomain, code: -1004, userInfo: nil),
+            NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut, userInfo: nil),
+            NSError(domain: "errSecAuthFailed", code: -25293, userInfo: nil),
+        ] as [NSError] {
+            let classified = PairingStepValidator.classify(error: sample, hostHint: "h")
+            if case .keychainFailed = classified {
+                Issue.record("classify must never produce .keychainFailed; got \(classified) for \(sample)")
+            }
+        }
+        // And the typed PairingStepConnectError cases must also never
+        // route to .keychainFailed:
+        for typed: PairingStepConnectError in [
+            .unauthorized,
+            .incompatible(serverVersion: "0.4.9"),
+            .network(NSError(domain: NSURLErrorDomain, code: -1004, userInfo: nil)),
+        ] {
+            let classified = PairingStepValidator.classify(error: typed, hostHint: "h")
+            if case .keychainFailed = classified {
+                Issue.record("classify(typed:) must never produce .keychainFailed; got \(classified) for \(typed)")
+            }
+        }
+    }
+
     // MARK: - Failure classification helper
 
     @Test("Classify NSURLErrorCannotConnectToHost as .unreachable")

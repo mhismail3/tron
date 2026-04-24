@@ -5,7 +5,7 @@ import AppKit
 /// `FeedbackComposer.present`. Isolated so AppDelegate stays small.
 ///
 /// Flow:
-/// 1. Resolve `tron` CLI binary path (same resolver the wizard uses).
+/// 1. Resolve `tron` CLI binary path via the shared `TronCLI` helper.
 /// 2. Run `tron logs --tail 200 --json`; capture stdout, parse
 ///    `[LogEntry]`.
 /// 3. Read `CFBundleShortVersionString` + `CFBundleVersion` from the
@@ -31,12 +31,12 @@ enum MenuBarFeedbackAction {
     // MARK: - Log fetch
 
     static func fetchRecentLogs(tronBinary: URL? = nil) async -> [FeedbackComposer.LogEntry] {
-        guard let tron = tronBinary ?? resolveTronBinary() else {
+        guard let tron = tronBinary ?? TronCLI.resolveBinary() else {
             NSLog("[feedback] tron binary not found; skipping log attachment")
             return []
         }
 
-        let result = await runProcess(
+        let result = await Subprocess.run(
             executable: tron,
             arguments: ["logs", "--tail", String(FeedbackComposer.defaultLogTailLimit), "--json"]
         )
@@ -65,54 +65,6 @@ enum MenuBarFeedbackAction {
             }
         }
         return entries
-    }
-
-    // MARK: - Process runner
-
-    private static func resolveTronBinary() -> URL? {
-        // Preferred: `~/.local/bin/tron` symlink planted by `tron install`.
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let candidates = [
-            home.appendingPathComponent(".local/bin/tron"),
-            URL(fileURLWithPath: "/usr/local/bin/tron"),
-            URL(fileURLWithPath: "/opt/homebrew/bin/tron"),
-        ]
-        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate.path) {
-            return candidate
-        }
-        return nil
-    }
-
-    private static func runProcess(executable: URL, arguments: [String]) async -> ProcessResult {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = executable
-                process.arguments = arguments
-                let stdoutPipe = Pipe()
-                let stderrPipe = Pipe()
-                process.standardOutput = stdoutPipe
-                process.standardError = stderrPipe
-
-                do {
-                    try process.run()
-                    process.waitUntilExit()
-                    let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                    let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                    continuation.resume(returning: ProcessResult(
-                        exitCode: Int(process.terminationStatus),
-                        stdout: stdout,
-                        stderr: stderr
-                    ))
-                } catch {
-                    continuation.resume(returning: ProcessResult(
-                        exitCode: -1,
-                        stdout: "",
-                        stderr: "process failed: \(error.localizedDescription)"
-                    ))
-                }
-            }
-        }
     }
 
     // MARK: - Bundle helpers

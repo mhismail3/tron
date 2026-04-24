@@ -45,10 +45,20 @@ final class WizardState {
     /// disk.
     var pairingPayload: PairingPayload?
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, initialStep: WizardStep? = nil) {
         self.defaults = defaults
-        let raw = defaults.string(forKey: Self.stepStorageKey)
-        self.step = raw.flatMap(WizardStep.init(rawValue:)) ?? .welcome
+        if let initialStep {
+            // Caller (e.g. RootView re-mounting WizardView in response
+            // to "Show pairing info…" from the menu bar) wins over the
+            // persisted last-visited step. We still WRITE the override
+            // back to defaults so kill+relaunch lands the user where
+            // they were when the override was applied.
+            self.step = initialStep
+            defaults.set(initialStep.rawValue, forKey: Self.stepStorageKey)
+        } else {
+            let raw = defaults.string(forKey: Self.stepStorageKey)
+            self.step = raw.flatMap(WizardStep.init(rawValue:)) ?? .welcome
+        }
     }
 
     /// Advances to the next step in the canonical sequence. Skips

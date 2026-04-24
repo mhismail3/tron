@@ -1,6 +1,6 @@
 # Mac App Architecture
 
-> Last verified: 2026-04-23 (Phase 5)
+> Last verified: 2026-04-23 (Phases 5, 5.5, 7, 8)
 
 ## Overview
 
@@ -25,13 +25,19 @@ packages/mac-app/
 │   ├── EnvironmentSetup.swift      # Sendable DI struct (live + test values)
 │   ├── Info.plist                  # Bundle metadata (LSUIElement = YES)
 │   ├── MenuBar/
-│   │   ├── MenuBarController.swift # NSStatusItem lifecycle + timer
-│   │   └── MenuBarItemBuilder.swift # Pure builder: snapshot → [MenuItemDescriptor]
+│   │   ├── MenuBarActionHandler.swift # routes menu-item descriptors → side effects (subprocess, NSWorkspace, notifications)
+│   │   ├── MenuBarController.swift    # NSStatusItem lifecycle + timer
+│   │   └── MenuBarItemBuilder.swift   # Pure builder: snapshot → [MenuItemDescriptor]
 │   ├── Resources/                  # tron-agent is staged here by CI
 │   ├── Services/
 │   │   ├── LaunchAgentManaging.swift # protocol + LiveLaunchAgentManager (shells launchctl)
 │   │   ├── Models.swift            # TailscaleStatus, PermissionStatus, ExistingInstallStatus…
 │   │   ├── TronPaths.swift         # Single source of truth for all on-disk paths
+│   │   ├── Feedback/
+│   │   │   ├── FeedbackComposer.swift      # pure: Mailto URL + log-tail extraction
+│   │   │   └── MenuBarFeedbackAction.swift # menu-bar handler (NSWorkspace.open the Mailto URL)
+│   │   ├── Observability/
+│   │   │   └── SentryRedactor.swift        # beforeSend hook: strip paths, mask tokens, drop chat content (Phase 7)
 │   │   ├── Onboarding/
 │   │   │   ├── ExistingInstallDetector.swift
 │   │   │   ├── InstallPlanner.swift    # pure-value plan + plist renderer
@@ -41,10 +47,11 @@ packages/mac-app/
 │   │   │   ├── PairingURLBuilder.swift # builds `tron://pair?…` URL
 │   │   │   └── QRCodeGenerator.swift   # CoreImage CIQRCodeGenerator wrapper
 │   │   └── Server/
-│   │       ├── BearerTokenReader.swift     # reads auth-token.json (+ legacy fallback)
-│   │       ├── ServerPing.swift            # one-shot system.ping over WS
+│   │       ├── BearerTokenReader.swift     # reads auth-token.json (+ legacy plain-string fallback) with 0o600 permission guard
+│   │       ├── ServerPing.swift            # one-shot system.ping over WS → ServerPingResult (success/unauthorized/unreachable/timeout/malformedResponse)
 │   │       ├── ServerStatusPoller.swift    # 30s periodic poll for menu bar
-│   │       └── SingleInstanceLock.swift    # fcntl(F_SETLK) advisory lock
+│   │       ├── SingleInstanceLock.swift    # fcntl(F_SETLK) advisory lock
+│   │       └── TronCLI.swift               # single source of truth for resolving the `tron` binary on PATH
 │   └── Wizard/
 │       ├── WizardState.swift       # @Observable, step persistence, navigation
 │       ├── WizardView.swift        # NavigationStack + per-step dispatcher
@@ -87,11 +94,13 @@ Example: `InstallPlanner.plan(sourceBinary:paths:existingInstall:) -> Result<Ins
 
 ### Single-instance lock via POSIX `fcntl`
 
-`SingleInstanceLock.acquire()` opens `~/.tron/system/Tron.app.lock` and tries `fcntl(F_SETLK, F_WRLCK)`. Second instance's call fails, `AppDelegate` logs + `NSApp.terminate(nil)`. Lock is automatically released on process exit (kernel drops fd locks with the process).
+`SingleInstanceLock.acquire()` opens `~/.tron/system/.mac-wrapper.lock` and tries `fcntl(F_SETLK, F_WRLCK)`. Second instance's call fails, `AppDelegate` logs + `NSApp.terminate(nil)`. Lock is automatically released on process exit (kernel drops fd locks with the process). Re-acquire from the same process is idempotent (returns true if a valid `fileDescriptor` is already held). The lock guards the wrapper (`com.tron.mac` / `com.tron.mac.dev`) only — the headless agent (`com.tron.agent`) has its own per-process locks under `~/.tron/system/database/log.db.lock`.
+
+**XCTest bypass**: `AppDelegate.applicationDidFinishLaunching` checks for `XCTestSessionIdentifier` in the process environment and skips `SingleInstanceLock.acquire()` entirely when it's set. Without this, `xcodebuild test` would fail to launch the test host whenever a real `Tron.app` is running on the same machine — a routine state for any contributor who dogfoods. The bypass is benign in production because Xcode never sets that env var outside test runs.
 
 ### Sendable concurrency hygiene
 
-`SingleInstanceLock` is `@unchecked Sendable` because all mutable `fileDescriptor` access is funneled through a private serial `DispatchQueue.sync`. `MockLaunchAgentManager` uses `OSAllocatedUnfairLock<State>` (NSLock is unavailable in async contexts on Swift 6). `AppDelegate` is `@MainActor` — the `NotificationCenter` observer hops via `Task { @MainActor [weak self] in … }`.
+`SingleInstanceLock` is `@unchecked Sendable` because all mutable `fileDescriptor` access is funneled through a private `NSLock` (swapped from `DispatchQueue.sync` to avoid GCD overhead from `@MainActor` callers; semantically clearer for a single-writer guard). `MockLaunchAgentManager` uses `OSAllocatedUnfairLock<State>`. `AppDelegate` is `@MainActor` — the `NotificationCenter` observer hops via `Task { @MainActor [weak self] in … }`.
 
 ## Data Flow
 
@@ -126,10 +135,14 @@ TronMacApp.main()
                 └─ MenuBarController
                     ├─ NSStatusItem with template icon
                     └─ 30s Timer → ServerStatusPoller.snapshot()
-                         ├─ setup.pingServer(token)
+                         ├─ setup.pingServer(token) → ServerPingResult
                          ├─ setup.readBearerToken()
                          └─ setup.readTailscaleIPFromSettings()
 ```
+
+### Menu-bar → wizard re-entry (post-onboarding)
+
+The "Show pairing info…" menu item reopens the wizard at `pairingInfo` without going through `AppDelegate`. Mode + activation policy are owned by `RootView` (SwiftUI `@State`); `AppDelegate` only owns the LaunchAgent and `.onboarded` sentinel side. See [`.claude/rules/wizard-steps.md`](../.claude/rules/wizard-steps.md) for the full sequence.
 
 ### Install pipeline (wizard's `InstallStep`)
 
@@ -148,18 +161,67 @@ TronMacApp.main()
 - **`Tron.app` never builds the Rust agent.** The binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing → wizard surfaces `sourceBinaryMissing` with a "reinstall the DMG" message.
 - **All atomic writes use tempfile + `replaceItemAt` (matching the Rust agent's `tempfile::Builder → sync_all → rename`).** See `OnboardedSentinelWriter.touch` and `BinaryInstaller.install`.
 - **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth-token.json`, `settings.json`, `.onboarded`) or a WS RPC call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
-- **Single port (`9847`) for all variants.** `Tron.app` (prod) and `Tron-Dev.app` (debug, at `~/.tron/system/deployment/`) manage the same LaunchAgent label and port. Dev and release builds of the wrapper are mutually-exclusive instances (single-instance lock).
+- **Single port (`9847`) and single LaunchAgent label (`com.tron.server`) across every workflow.** The DMG-installed `Tron.app` (`com.tron.mac`), the Xcode-built `TronMac.app` dogfood wrapper (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/system/deployment/Tron-Dev.app` (`com.tron.agent`) are all distinct on-disk artifacts that share the same server port and `~/.tron/system/` data tree. Mutual exclusion is enforced at runtime: the wrapper's `.mac-wrapper.lock` rejects a second wrapper, the agent's `log.db.lock` rejects a second agent, and `tron dev` explicitly stops the LaunchAgent before binding 9847. See [Workflows & Variants](#workflows--variants) below for the full breakdown.
 - **TronPaths is the single source of truth.** If any path is referenced elsewhere, that's a bug. See `packages/agent/src/core/foundation/paths.rs` for the Rust-side mirror.
 
-## Relationship with `scripts/tron`
+## Workflows & Variants
 
-Two install paths co-exist:
+Three distinct workflows operate against the same `~/.tron/system/` data tree and share `port 9847` + `com.tron.server` LaunchAgent. Mutual exclusion at runtime keeps them from colliding.
+
+### The three workflows
+
+| Workflow | Audience | Build product | Bundle ID | On-disk path | What it ships | Server install path |
+|---|---|---|---|---|---|---|
+| **1. Production (DMG)** | End users downloading from GitHub Releases | `Tron.app` (notarized + stapled DMG) | `com.tron.mac` | `/Applications/Tron.app` | SwiftUI wrapper (wizard + menu bar) AND the embedded headless agent | `~/.tron/system/Tron.app/Contents/MacOS/tron` (copied during wizard's Install step) |
+| **2. Wizard dogfood (Xcode Run)** | Contributors testing the wrapper UI | `TronMac.app` (Debug build, Xcode/xcodebuild) | `com.tron.mac.dev` | `~/Library/Developer/Xcode/DerivedData/TronMac-*/Build/Products/Debug/TronMac.app` | Same SwiftUI wrapper as Production but with a debug-profile bundled agent (faster recompiles) | Same as Production — wizard's Install step copies the bundled agent to `~/.tron/system/Tron.app/Contents/MacOS/tron` |
+| **3. Agent dev (`tron dev`)** | Contributors iterating on the Rust agent without wrapper UI | `Tron-Dev.app` (no SwiftUI — just a `.app` bundle wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/system/deployment/Tron-Dev.app` | Headless Rust agent only (no menu bar, no wizard) | Takes over port 9847 in-process; the system-wide LaunchAgent is stopped first |
+
+> **Naming guard.** `TronMac.app` (workflow 2's build product) and `Tron-Dev.app` (workflow 3's agent bundle) are unrelated. Workflow 2 is the wrapper UI compiled in Debug mode; workflow 3 is just the Rust agent recompiled in dev. They share neither code nor purpose.
+
+> **Why Debug builds `TronMac.app` but Release builds `Tron.app`.** The XcodeGen target is `TronMac` (so `PRODUCT_NAME` defaults to `TronMac` for both configs), but `Configuration/Release.xcconfig` overrides it with `PRODUCT_NAME = Tron`. This produces the `Tron.app` bundle the DMG pipeline (`.github/workflows/release-mac.yml:98 → APP_BUNDLE: Tron.app`) and the `/Applications/Tron.app` end-user surface both expect. Debug intentionally keeps the default so the `TronMacTests` target's `BUNDLE_LOADER` / `TEST_HOST` (which reference `TronMac.app/Contents/MacOS/TronMac`) keep resolving without configuration drift.
+
+### What every workflow shares
+
+- **Port `9847`** — the WS bind. Always exclusive — see "Mutual exclusion" below.
+- **LaunchAgent label `com.tron.server`** — the launchd job that owns the production server. Workflows 1 and 2 both load it (production install path is identical). Workflow 3 stops it before binding the port itself.
+- **`~/.tron/system/`** data tree — settings, auth, bearer token, sentinel, sessions, log database. Wrappers in workflows 1 and 2 mutate the wrapper-side files (`.onboarded`, `.mac-wrapper.lock`); the agent (any workflow) owns the rest.
+- **`auth-token.json`** — bearer issued by the agent on first start. Same token regardless of which workflow started the agent.
+- **`~/.tron/skills/`** — managed skills synced from `packages/agent/skills/` by `tron install` / `tron dev` (NOT by the wrapper).
+
+### Mutual exclusion (how they coexist without conflict)
+
+| Layer | Guard | What it prevents |
+|---|---|---|
+| Wrapper instance | `~/.tron/system/.mac-wrapper.lock` (`fcntl(F_SETLK, F_WRLCK)`) | Two SwiftUI wrappers running at once (workflow 1 + 2 simultaneously). Second instance logs + terminates. |
+| Agent instance | `~/.tron/system/database/log.db.lock` (cross-process exclusive `flock`) | Two Rust agents running at once. Server refuses to start if held. |
+| Port `9847` | OS-level bind | Workflow 3 starting `tron dev` on top of workflow 1/2's running agent — `tron dev` first calls `launchctl bootout` on `com.tron.server`, then binds. |
+| LaunchAgent | `launchctl bootout` / `bootstrap` | One job per session is enforced by launchd; double-load returns 119 (handled by `LaunchAgentManaging`). |
+
+**Result**: a contributor can have the production DMG installed AND switch to `tron dev` to iterate on the agent without uninstalling anything. The DMG wrapper's menu bar shows "Server stopped" while `tron dev` runs; quitting `tron dev` and `launchctl bootstrap`-ing `com.tron.server` restores production behavior.
+
+### Switching between workflows
+
+```bash
+# Start production (after DMG install or workflow 2's wizard completion):
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tron.server.plist
+
+# Switch to agent dev (kills production agent, takes over port):
+tron dev          # builds Tron-Dev.app, stops com.tron.server, binds 9847
+
+# Stop agent dev and resume production:
+# (Ctrl-C the tron dev process)
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tron.server.plist
+```
+
+The wrapper (workflow 1 or 2) does not need to be relaunched — its `ServerStatusPoller` picks up the running agent on the next 30s tick.
+
+### Two paths to the same install
+
+Both wizard and CLI produce the same on-disk artifacts (`~/.tron/system/Tron.app/Contents/MacOS/tron`, `~/Library/LaunchAgents/com.tron.server.plist`, `~/.tron/system/auth-token.json` generated by the agent on first start, `~/.tron/system/.onboarded` sentinel):
 
 | Path | Used by | Starts via | Notes |
 |---|---|---|---|
-| Wizard (`Sources/Wizard/Steps/InstallStep.swift`) | DMG users | `LaunchAgentManaging.load` in-process | Self-sufficient; does not shell out to `scripts/tron` |
-| CLI (`scripts/tron install`) | Contributors | `launchd_start` at end of script | Supports `--gui-helper` (machine-readable JSON events) for headless contexts |
+| Wizard (`Sources/Wizard/Steps/InstallStep.swift`) | DMG users (workflow 1), wizard dogfood (workflow 2) | `LaunchAgentManaging.load` in-process | Self-sufficient; does not shell out to `scripts/tron` |
+| CLI (`scripts/tron install`) | Contributors who don't want the wrapper UI | `launchd_start` at end of script | Supports `--gui-helper` (machine-readable JSON events) for headless contexts |
 
-Both paths produce the same on-disk artifacts (`~/.tron/system/Tron.app/Contents/MacOS/tron`, `~/Library/LaunchAgents/com.tron.server.plist`, `~/.tron/system/auth-token.json` generated by the agent on first start, `~/.tron/system/.onboarded` sentinel).
-
-See [development.md](./development.md) for local dev + CI commands.
+See [development.md](./development.md) for local dev + CI commands and the [README "Mac App" section](../../../README.md#mac-app-tronapp) for end-user-facing documentation.

@@ -27,6 +27,10 @@ enum PairingStepValidator {
         case unauthorized
         /// Server replied to `system.ping` with `CLIENT_VERSION_UNSUPPORTED`.
         case incompatibleServer(String)
+        /// Token validated and server reachable, but the Keychain write
+        /// failed. Distinct from `.unauthorized` so the user message
+        /// blames device storage rather than the (correct) token.
+        case keychainFailed(String)
 
         var userFacingMessage: String {
             switch self {
@@ -40,6 +44,8 @@ enum PairingStepValidator {
                 return "Wrong pairing token. Open the Tron menu bar on your Mac and copy the token again."
             case .incompatibleServer(let serverVersion):
                 return "Server version \(serverVersion) is older than this app supports. Update Tron on your Mac."
+            case .keychainFailed(let detail):
+                return "Could not save the pairing token to Keychain: \(detail)"
             }
         }
     }

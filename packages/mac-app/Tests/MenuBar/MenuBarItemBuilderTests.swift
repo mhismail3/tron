@@ -23,7 +23,7 @@ struct MenuBarItemBuilderTests {
             probeTailscale: { .notInstalled },
             probePermission: { _ in .notDetermined },
             detectExistingInstall: { .none },
-            pingServer: { _ in nil },
+            pingServer: { _ in .unreachable },
             launchAgentManager: MockLaunchAgentManager(),
             touchOnboardedSentinel: { }
         )

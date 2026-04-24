@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-04-06
+> Last verified: 2026-04-23 (post-Phases 3, 4, 7)
 
 ## Overview
 
@@ -30,10 +30,16 @@ Sources/
 │   ├── Messages/           # Message models
 │   └── RPC/                # RPC types and codables
 ├── Services/               # Network, state management
-│   ├── Network/            # RPC, WebSocket, deep links
+│   ├── Network/            # RPC, WebSocket (with Bearer auth), deep links
 │   ├── Events/             # Event store, sync
 │   ├── Audio/              # Recording, transcription
-│   └── Notifications/      # Push notifications
+│   ├── Feedback/           # Mailto composer + log-tail attachment (Phase 7)
+│   ├── Notifications/      # Push notifications
+│   ├── Observability/      # Sentry redactor + TelemetryClient (Phase 7)
+│   ├── Onboarding/         # Migration decider + pairing validator/probe/persistor
+│   ├── PairingURLParser.swift  # tron://pair?host&port&token&label parser + builder
+│   ├── Parsing/            # Tool result parsers (delegated by ToolResultParser)
+│   └── Storage/            # KeychainItem + PresetTokenStore (per-preset bearer tokens)
 ├── ViewModels/             # View state management
 │   ├── Chat/               # ChatViewModel and extensions
 │   ├── Handlers/           # Event handling coordinators

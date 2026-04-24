@@ -27,12 +27,33 @@
 #   MACOS_CERT_P12_BASE64   base64-encoded Developer ID Application cert
 #   MACOS_CERT_PASSWORD     password protecting the .p12
 #   NOTARIZE_APPLE_ID       Apple ID email for notarytool
-#   NOTARIZE_TEAM_ID        Apple Developer team ID (MYGKXH6TY4)
+#   NOTARIZE_TEAM_ID        Apple Developer team ID
 #   NOTARIZE_APP_PASSWORD   app-specific password for the Apple ID
 #
-# All five must be present for notarization to run. In dry-run mode
-# (workflow_dispatch with `dry_run=true`) missing secrets are tolerated
-# and the job short-circuits before the notarization step.
+# Optional secrets (warned-and-skipped when absent):
+#
+#   SENTRY_AUTH_TOKEN       org/project token with project:write — uploads dSYMs
+#   SENTRY_ORG              Sentry organization slug (defaults to "tron")
+#   SENTRY_PROJECT_MAC      Sentry project slug for the Mac app (defaults to "tron-mac")
+#
+# All five required secrets must be present for notarization to run. In
+# dry-run mode (workflow_dispatch with `dry_run=true`) missing secrets
+# are tolerated and the job short-circuits before the notarization step.
+#
+# ─── Secret handling INVARIANT ──────────────────────────────────────────
+#
+# Passwords are NEVER passed on the argv of `security` or `notarytool`
+# beyond the unavoidable `security import -P` (the .p12 unwrap has no
+# stdin variant on macOS). For notarytool we use a one-time
+# `store-credentials --keychain-profile` so the submit step's argv
+# carries only the profile name, not the Apple ID / app-password.
+#
+# The build keychain is created with a unique random password, isolated
+# from the runner's `login.keychain`, and DESTROYED in an `if: always()`
+# cleanup step so it doesn't outlive the job even if a later step
+# fails. Keychain default is restored to `login.keychain-db` to leave
+# the runner in a known state for subsequent jobs (fork PRs share
+# runners; ephemerality is best-effort).
 #
 # ─── Rollback ───────────────────────────────────────────────────────────
 #
@@ -166,50 +187,134 @@ jobs:
         run: xcodegen generate
 
       # ── Code signing setup ─────────────────────────────────────────
-      - name: Import codesign cert
+      #
+      # Creates an isolated `tron-build.keychain-db` with a random
+      # unlock password, imports the .p12, and stashes notarytool
+      # credentials as a keychain-profile so subsequent steps don't
+      # need to re-pass the Apple ID / app password on argv.
+      #
+      # `set +x` is the default; do not enable it here — bash xtrace
+      # would echo the import command (including `-P`) into the runner
+      # log even though GitHub auto-masks the env var value.
+      - name: Import codesign cert + notarytool keychain profile
         if: steps.drymode.outputs.dry_run != 'true'
         env:
-          CERT_B64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-          CERT_PW:  ${{ secrets.MACOS_CERT_PASSWORD }}
+          CERT_B64:     ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PW:      ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_ID:     ${{ secrets.NOTARIZE_APPLE_ID }}
+          TEAM_ID:      ${{ secrets.NOTARIZE_TEAM_ID }}
+          APP_PASSWORD: ${{ secrets.NOTARIZE_APP_PASSWORD }}
         run: |
-          set -euo pipefail
-          KEYCHAIN=build.keychain
-          KEYCHAIN_PW=$(openssl rand -hex 16)
-          echo "$CERT_B64" | base64 --decode > /tmp/cert.p12
+          set -eu
+          # Path-based keychain (the `-db` suffix is required on
+          # macOS 12+ for `security` to address it by absolute path).
+          KEYCHAIN="$RUNNER_TEMP/tron-build.keychain-db"
+          KEYCHAIN_PW=$(openssl rand -hex 32)
+          # Persist the keychain pw to a file readable only by the
+          # runner user so the cleanup step can re-unlock for delete.
+          # Mode 600; cleared in the always-step.
+          umask 077
+          KEYCHAIN_PW_FILE="$RUNNER_TEMP/keychain.pw"
+          printf '%s' "$KEYCHAIN_PW" > "$KEYCHAIN_PW_FILE"
+
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          # Decode without echoing — base64 reads CERT_B64 from env
+          # (auto-masked). `-d` with `-` is portable across BSD/GNU.
+          printf '%s' "$CERT_B64" | base64 -d > "$CERT_PATH"
+
           security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
-          security default-keychain -s "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          # Lock auto-relock to 6h so a hung notarize doesn't expose
+          # the cert indefinitely if cleanup fails.
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security import /tmp/cert.p12 \
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+
+          # Insert the new keychain at the FRONT of the search list
+          # without displacing login.keychain — so the cleanup step
+          # restores cleanly even if it crashes mid-job.
+          ORIG_LIST=$(security list-keychains -d user | tr -d '"' | tr '\n' ' ')
+          # shellcheck disable=SC2086 # search list is intentionally word-split
+          security list-keychains -d user -s "$KEYCHAIN" $ORIG_LIST
+          # The default keychain stays as the runner's login keychain;
+          # we never call `security default-keychain -s ...` so a
+          # failure here cannot strand the runner.
+
+          security import "$CERT_PATH" \
             -k "$KEYCHAIN" \
             -P "$CERT_PW" \
             -T /usr/bin/codesign \
             -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PW" "$KEYCHAIN"
-          rm -f /tmp/cert.p12
-          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
-          # Capture the signing identity so later steps can pass --sign <id>.
-          security find-identity -v -p codesigning "$KEYCHAIN" | tee /tmp/identities.txt
+          # Allow codesign to access the imported key without a UI
+          # password prompt during the signing steps.
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PW" "$KEYCHAIN"
+          rm -f "$CERT_PATH"
+
+          {
+            echo "KEYCHAIN=$KEYCHAIN"
+            echo "KEYCHAIN_PW_FILE=$KEYCHAIN_PW_FILE"
+            echo "NOTARYTOOL_PROFILE=tron-notarize"
+          } >> "$GITHUB_ENV"
+
+          # Capture the Developer ID Application identity hash for
+          # use as `--sign <hash>` in later codesign invocations.
+          security find-identity -v -p codesigning "$KEYCHAIN" > /tmp/identities.txt
           ident=$(grep "Developer ID Application" /tmp/identities.txt | head -1 | awk '{print $2}')
-          if [[ -z "$ident" ]]; then echo "::error::no Developer ID Application identity found"; exit 1; fi
+          if [[ -z "$ident" ]]; then
+            echo "::error::no Developer ID Application identity found"
+            exit 1
+          fi
           echo "SIGN_IDENT=$ident" >> "$GITHUB_ENV"
 
+          # Stash notarytool creds in the build keychain as a profile.
+          # Subsequent submit calls reference `--keychain-profile
+          # tron-notarize --keychain $KEYCHAIN`, so the Apple ID /
+          # app-password never appear on the submit argv.
+          xcrun notarytool store-credentials tron-notarize \
+            --apple-id "$APPLE_ID" \
+            --team-id  "$TEAM_ID" \
+            --password "$APP_PASSWORD" \
+            --keychain "$KEYCHAIN"
+
       # ── Archive + export ───────────────────────────────────────────
+      #
+      # Two signing paths:
+      #   - Real release: CODE_SIGN_STYLE=Manual + the imported
+      #     Developer ID identity. Notarization-ready.
+      #   - Dry-run: ad-hoc sign (`-`). Produces a runnable archive
+      #     suitable for layout/build verification but unsigned for
+      #     distribution. Without this, dry-run on a fork (no cert)
+      #     would fail the archive step entirely.
       - name: xcodebuild archive
         working-directory: packages/mac-app
         run: |
           set -euo pipefail
           ARCHIVE_PATH=$(pwd)/build/TronMac.xcarchive
-          xcodebuild archive \
-            -project TronMac.xcodeproj \
-            -scheme TronMac \
-            -configuration Release \
-            -archivePath "$ARCHIVE_PATH" \
-            -destination 'generic/platform=macOS' \
-            CODE_SIGN_STYLE=Manual \
-            ${SIGN_IDENT:+CODE_SIGN_IDENTITY="$SIGN_IDENT"} \
-            DEVELOPMENT_TEAM="${{ secrets.NOTARIZE_TEAM_ID }}" \
-            -quiet
+          if [[ "${{ steps.drymode.outputs.dry_run }}" == "true" ]]; then
+            xcodebuild archive \
+              -project TronMac.xcodeproj \
+              -scheme TronMac \
+              -configuration Release \
+              -archivePath "$ARCHIVE_PATH" \
+              -destination 'generic/platform=macOS' \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="-" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              -quiet
+          else
+            xcodebuild archive \
+              -project TronMac.xcodeproj \
+              -scheme TronMac \
+              -configuration Release \
+              -archivePath "$ARCHIVE_PATH" \
+              -destination 'generic/platform=macOS' \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="$SIGN_IDENT" \
+              OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN" \
+              DEVELOPMENT_TEAM="${{ secrets.NOTARIZE_TEAM_ID }}" \
+              -quiet
+          fi
           echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
 
       - name: Locate exported .app
@@ -223,51 +328,114 @@ jobs:
           test -f "$APP_PATH/Contents/Resources/tron-agent" \
             || { echo "::error::tron-agent missing from Resources/"; exit 1; }
 
-      # Sign the embedded helper first (inside-out signing is required for
-      # hardened runtime + notarization). Xcode already signed the outer
-      # app bundle during archive, but the embedded binary ships unsigned
-      # because it's staged as a plain resource — re-sign explicitly.
+      # Inside-out signing — required for hardened runtime + notarization.
+      #
+      # Step 1: sign the embedded helper.  Step 2: sign the OUTER bundle
+      # WITHOUT `--deep` so the helper's signature is preserved. The
+      # earlier `--deep` flag was a footgun: it recursively re-signs every
+      # already-signed binary, blowing away the hardened-runtime + entitlements
+      # we just applied to `tron-agent`. Apple has deprecated `--deep` for
+      # exactly this reason (`man codesign`, "DEEP DEPRECATION").
+      #
+      # Verification uses `--deep` because it's a read-only walk and we
+      # want to confirm the entire bundle tree validates.
       - name: Sign embedded tron-agent helper
         if: steps.drymode.outputs.dry_run != 'true'
         run: |
           set -euo pipefail
           codesign --force --timestamp --options runtime \
+            --keychain "$KEYCHAIN" \
             --sign "$SIGN_IDENT" \
             "$APP_PATH/Contents/Resources/tron-agent"
-          codesign --verify --strict "$APP_PATH/Contents/Resources/tron-agent"
+          codesign --verify --strict --verbose=2 "$APP_PATH/Contents/Resources/tron-agent"
 
       - name: Re-sign Tron.app with hardened runtime
         if: steps.drymode.outputs.dry_run != 'true'
         run: |
           set -euo pipefail
+          # `--preserve-metadata=entitlements,requirements,flags` would
+          # also work, but explicit re-sign with the entitlements file
+          # is more legible and guarantees the file-on-disk wins.
           codesign --force --timestamp --options runtime \
-            --deep \
+            --keychain "$KEYCHAIN" \
             --sign "$SIGN_IDENT" \
             --entitlements "$MAC_APP_DIR/TronMac.entitlements" \
             "$APP_PATH"
+          # Read-only verification of the whole tree; `--deep` here is
+          # safe (it doesn't re-sign).
           codesign --verify --strict --deep --verbose=2 "$APP_PATH"
+          # Defence in depth: confirm the helper's signature is still
+          # the one we applied above (not silently re-signed by Xcode
+          # or replaced by `--deep`).
+          codesign --display --verbose=2 "$APP_PATH/Contents/Resources/tron-agent"
 
       # ── Notarize + staple ─────────────────────────────────────────
+      #
+      # Credentials reference the `tron-notarize` profile stored in the
+      # build keychain by the import step — argv carries only the
+      # profile name, never the Apple ID or app-password.
       - name: Notarize
         if: steps.drymode.outputs.dry_run != 'true'
-        env:
-          APPLE_ID:     ${{ secrets.NOTARIZE_APPLE_ID }}
-          TEAM_ID:      ${{ secrets.NOTARIZE_TEAM_ID }}
-          APP_PASSWORD: ${{ secrets.NOTARIZE_APP_PASSWORD }}
         run: |
           set -euo pipefail
-          ZIP_PATH=/tmp/TronApp-notarize.zip
+          ZIP_PATH="$RUNNER_TEMP/TronApp-notarize.zip"
           ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
           xcrun notarytool submit "$ZIP_PATH" \
-            --apple-id "$APPLE_ID" \
-            --team-id  "$TEAM_ID" \
-            --password "$APP_PASSWORD" \
+            --keychain-profile "$NOTARYTOOL_PROFILE" \
+            --keychain "$KEYCHAIN" \
             --wait
           rm -f "$ZIP_PATH"
 
       - name: Staple
         if: steps.drymode.outputs.dry_run != 'true'
         run: xcrun stapler staple "$APP_PATH"
+
+      # ── dSYM upload (Sentry) ──────────────────────────────────────
+      #
+      # Symbolicates Mac crashes in Sentry. Skipped when SENTRY_AUTH_TOKEN
+      # is unset (forks, dry-run, or before Sentry is provisioned).
+      # Failures are non-fatal — a release without symbol upload is still
+      # shippable; we just lose stack-frame symbol resolution for crashes
+      # in this build.
+      - name: Upload dSYMs to Sentry
+        if: |
+          steps.drymode.outputs.dry_run != 'true' &&
+          env.SENTRY_AUTH_TOKEN != ''
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG:        ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT:    ${{ secrets.SENTRY_PROJECT_MAC }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          : "${SENTRY_ORG:=tron}"
+          : "${SENTRY_PROJECT:=tron-mac}"
+          # Install sentry-cli if not present (the macos-15 image ships
+          # without it).
+          if ! command -v sentry-cli >/dev/null 2>&1; then
+            brew install getsentry/tools/sentry-cli
+          fi
+          DSYM_DIR="$ARCHIVE_PATH/dSYMs"
+          if [[ ! -d "$DSYM_DIR" ]]; then
+            echo "::warning::no dSYMs found at $DSYM_DIR — skipping upload"
+            exit 0
+          fi
+          sentry-cli debug-files upload \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            --include-sources \
+            --wait \
+            "$DSYM_DIR"
+          # Tag the release in Sentry so the dSYMs are associated with
+          # the version users see in their crash dialog.
+          sentry-cli releases new \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            "tron-mac@${{ steps.ver.outputs.version }}"
+          sentry-cli releases finalize \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            "tron-mac@${{ steps.ver.outputs.version }}"
 
       # ── DMG assembly ──────────────────────────────────────────────
       - name: Build DMG
@@ -304,10 +472,19 @@ jobs:
       - name: Sign DMG
         if: steps.drymode.outputs.dry_run != 'true'
         run: |
+          set -euo pipefail
           codesign --force --timestamp \
+            --keychain "$KEYCHAIN" \
             --sign "$SIGN_IDENT" \
             "${{ steps.dmg.outputs.dmg_path }}"
           codesign --verify --strict --verbose=2 "${{ steps.dmg.outputs.dmg_path }}"
+
+      # Stapling the DMG (post-notarize, post-sign) embeds the
+      # notarization ticket so first-run on an offline Mac doesn't
+      # have to round-trip to Apple.
+      - name: Staple DMG
+        if: steps.drymode.outputs.dry_run != 'true'
+        run: xcrun stapler staple "${{ steps.dmg.outputs.dmg_path }}"
 
       - name: Generate SHA256 manifest
         shell: bash
@@ -340,7 +517,14 @@ jobs:
             ${{ steps.dmg.outputs.dmg_path }}.sha256
           retention-days: 30
 
-      - name: Create GitHub Release (draft)
+      # Idempotent: re-running the same tag (e.g. after fixing a CI
+      # config bug and re-pushing the tag) replaces the assets on the
+      # existing draft instead of failing with "release already exists".
+      # If the release was already published (not a draft), we still
+      # upload + clobber — but we DO NOT change its publish state, so
+      # operators can recover an over-eager publish without deleting
+      # the release first.
+      - name: Create or update GitHub Release (draft)
         if: |
           steps.drymode.outputs.dry_run != 'true' &&
           github.event_name == 'push'
@@ -348,12 +532,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "${{ steps.ver.outputs.tag }}" \
-            "${{ steps.dmg.outputs.dmg_path }}" \
-            "${{ steps.dmg.outputs.dmg_path }}.sha256" \
-            --draft \
-            --title "Tron Mac ${{ steps.ver.outputs.version }}" \
-            --notes "Automated release. See CHANGELOG for details; edit this draft before publishing."
+          TAG="${{ steps.ver.outputs.tag }}"
+          DMG="${{ steps.dmg.outputs.dmg_path }}"
+          SHA="${{ steps.dmg.outputs.dmg_path }}.sha256"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists — uploading assets with --clobber"
+            gh release upload "$TAG" "$DMG" "$SHA" --clobber
+          else
+            gh release create "$TAG" "$DMG" "$SHA" \
+              --draft \
+              --title "Tron Mac ${{ steps.ver.outputs.version }}" \
+              --notes "Automated release. See CHANGELOG for details; edit this draft before publishing."
+          fi
 
       - name: Summary
         shell: bash
@@ -372,3 +563,44 @@ jobs:
             cat "${{ steps.dmg.outputs.dmg_path }}.sha256"
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Cleanup (always) ───────────────────────────────────────────
+      #
+      # Destroys the build keychain and shreds the password file even
+      # when an earlier step failed. Without this, the cert + notarytool
+      # creds linger on a runner that may be re-used for an unrelated
+      # job (GitHub-hosted runners are nominally ephemeral, but
+      # self-hosted runners on a fork are not — defence-in-depth is
+      # cheap and we lose nothing by always cleaning up).
+      #
+      # Idempotent: every operation tolerates the keychain or file
+      # being absent (the import step may have failed before creating
+      # them, or the dry-run path skipped them entirely).
+      - name: Tear down build keychain
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${KEYCHAIN:-}" && -f "$KEYCHAIN" ]]; then
+            # Remove from the search list before delete so a later
+            # step (e.g. another job in this runner) doesn't trip on
+            # a stale path entry.
+            ORIG_LIST=$(security list-keychains -d user | tr -d '"' | tr '\n' ' ')
+            NEW_LIST=$(echo "$ORIG_LIST" | tr ' ' '\n' | grep -vF "$KEYCHAIN" | tr '\n' ' ')
+            # shellcheck disable=SC2086 # search list is intentionally word-split
+            security list-keychains -d user -s $NEW_LIST 2>/dev/null || true
+            security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+            echo "deleted $KEYCHAIN"
+          fi
+          if [[ -n "${KEYCHAIN_PW_FILE:-}" && -f "$KEYCHAIN_PW_FILE" ]]; then
+            # Best-effort overwrite; `rm` alone leaves the bytes on disk
+            # for SSD wear-leveling reasons but the file is unreadable
+            # to other users by mode-600 anyway. The shred is for
+            # operators reading the runner's disk image post-job.
+            dd if=/dev/urandom of="$KEYCHAIN_PW_FILE" bs=64 count=1 conv=notrunc 2>/dev/null || true
+            rm -f "$KEYCHAIN_PW_FILE"
+            echo "shredded $KEYCHAIN_PW_FILE"
+          fi
+          # Drop any stray cert path that might have survived a mid-step crash.
+          rm -f "$RUNNER_TEMP/cert.p12" 2>/dev/null || true
+          exit 0

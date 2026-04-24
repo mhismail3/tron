@@ -5,8 +5,6 @@ struct PermissionsStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
 
-    @State private var probing = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Grant permissions")

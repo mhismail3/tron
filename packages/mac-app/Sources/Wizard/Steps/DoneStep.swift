@@ -1,7 +1,9 @@
 import SwiftUI
+import os.log
 
 struct DoneStep: View {
     @Bindable var state: WizardState
+    @Environment(\.environmentSetup) private var setup
 
     var body: some View {
         VStack(spacing: 24) {
@@ -29,9 +31,20 @@ struct DoneStep: View {
             .keyboardShortcut(.defaultAction)
         }
         .onAppear {
-            // touch sentinel atomically so the next launch lands in
-            // menu-bar mode.
-            try? OnboardedSentinelWriter.touch(at: TronPaths.onboardedMarkerPath)
+            // Touch the sentinel atomically so the next launch lands
+            // in menu-bar mode. Routes through `setup` so tests can
+            // substitute a no-op without touching disk.
+            //
+            // Failure is rare (disk full, perms tampered) but real —
+            // if we silently swallow it the user clicks "Open menu
+            // bar", quits, relaunches, and lands back at the wizard
+            // with no breadcrumb. NSLog at least surfaces the cause
+            // in Console.app.
+            do {
+                try setup.touchOnboardedSentinel()
+            } catch {
+                NSLog("[Tron] Failed to write onboarded sentinel: \(error.localizedDescription)")
+            }
         }
     }
 }

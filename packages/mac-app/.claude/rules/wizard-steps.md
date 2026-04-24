@@ -21,8 +21,15 @@ TronMacApp @main
   └─ AppDelegate.applicationDidFinishLaunching
        ├─ SingleInstanceLock.acquire()   ← fails → terminate with log
        └─ setup.onboardedSentinelExists()
-            ├─ false → RootView → WizardView    (this rule's domain)
-            └─ true  → installMenuBar            (menu-bar mode)
+            ├─ false → RootView (mode=.wizard) → WizardView    (this rule's domain)
+            └─ true  → installMenuBar  +  RootView (mode=.menuBarOnly)
+
+RootView (SwiftUI)
+  └─ switch mode in: .loading | .wizard | .menuBarOnly
+       wizard         → WizardView(initialStep: wizardEntryStep)
+                        + NSApp.setActivationPolicy(.regular)
+       menuBarOnly    → MenuBarHostView (1×1 hidden window placeholder)
+                        + NSApp.setActivationPolicy(.accessory)
 
 WizardView
   └─ switch state.step in:
@@ -33,6 +40,24 @@ DoneStep "Finish"
   └─ post .tronWizardDidComplete          ← AppDelegate hops to menu bar
 ```
 
+### Menu-bar → wizard re-entry (post-onboarding)
+
+Once a user has completed onboarding, the menu-bar's "Show pairing info…" item reopens the wizard at `pairingInfo`. The flow keeps SwiftUI in charge of mode and activation policy — `AppDelegate` only owns the LaunchAgent / sentinel side.
+
+```
+MenuBarItemBuilder posts .tronWizardShowPairingInfo
+  └─ MenuBarHostView observes the notification (SwiftUI .onReceive)
+       └─ calls onShowPairingInfo() (closure passed by RootView)
+            └─ RootView seeds wizardEntryStep = .pairingInfo
+            └─ RootView flips mode = .wizard
+                 └─ .task(id: mode) restores activation policy + window
+                 └─ WizardView is constructed with initialStep: .pairingInfo
+                      └─ WizardState(initialStep:) overrides persisted step AND
+                         writes the override back so kill+relaunch lands here
+```
+
+This replaces the earlier `presentPairingInfoWindow(setup:)` AppDelegate path that tried to construct a fresh `WizardView` outside the SwiftUI scene graph (it couldn't render because the window wasn't in the WindowGroup).
+
 ## Step Catalog
 
 | Step | View | Blocks advance? | Key side effect |
@@ -40,9 +65,9 @@ DoneStep "Finish"
 | `welcome` | `WelcomeStep` | NO | none — also exposes "I already have Tron running" skip-to-pairing |
 | `tailscale` | `TailscaleStep` | NO ("I have Tailscale" advances regardless) | `TailscaleProbe.probe()` populates `state.tailscaleStatus` |
 | `existingInstall` | `ExistingInstallStep` | NO (auto-skips if installed) | reads `ExistingInstallDetector` snapshot set on `WizardView.onAppear` |
-| `permissions` | `PermissionsStep` | FDA + Notifications REQUIRED (skip → confirm dialog); Accessibility skippable | `PermissionProbe.probe(…)` on appear + re-probe on return from System Settings |
+| `permissions` | `PermissionsStep` | FDA + Notifications REQUIRED (Continue button hard-disabled until granted); Accessibility skippable | `PermissionProbe.probe(…)` on appear + re-probe on return from System Settings. Plan §A.4 envisions a skip-with-confirm-dialog path — not yet implemented |
 | `install` | `InstallStep` | YES — must reach `.success` or `.alreadyInstalled` | copies `Bundle.main.url("tron-agent")` → `~/.tron/system/Tron.app/Contents/MacOS/tron`; writes plist; `launchctl bootstrap`; polls `system.ping` |
-| `pairingInfo` | `PairingInfoStep` | NO (display-only) | reads `auth-token.json` + `settings.json`; generates QR via `QRCodeGenerator`; copy actions |
+| `pairingInfo` | `PairingInfoStep` | NO (display-only); "I'm paired" disabled until both bearer token AND a real Tailscale IP are resolved | reads `auth-token.json` + `settings.json` (no placeholder fallback — surfaces a `PairingFailureReason` to differentiate "no token" vs "no Tailscale IP"); generates QR via `QRCodeGenerator`; copy actions |
 | `done` | `DoneStep` | NO | flips the gate via `touchOnboardedSentinel` + `state.complete()` |
 
 Ordering is canonical via `WizardStep.allCases`. Any reorder needs matching updates in `WizardState.advance()`, `WizardView.swift` dispatcher, and `WizardStepTests`.
@@ -56,6 +81,8 @@ Ordering is canonical via `WizardStep.allCases`. Any reorder needs matching upda
 | `~/.tron/system/.onboarded` | File (on-disk) | filesystem | delete the file |
 
 The Mac side does NOT use iCloud-synced UserDefaults — `@Observable` + injected `UserDefaults.standard` only. The onboarding completion is gated on the **file** sentinel, not the UserDefaults bool, because the CLI-install path (`scripts/tron install`) doesn't touch UserDefaults.
+
+`WizardState(defaults:initialStep:)` accepts an optional `initialStep` override. When set (the menu-bar re-entry path supplies `.pairingInfo`), the override wins over the persisted step AND is written back to the same UserDefaults key, so a subsequent kill+relaunch lands the user on the overridden step rather than wherever they were before. When `initialStep` is nil, behavior is unchanged: read the persisted rawValue, fall back to `.welcome` on absent / unparseable values.
 
 ## Install Pipeline (hardest step)
 
@@ -105,16 +132,20 @@ The InstallStep view has its own auto-skip branch on entry: if `state.existingIn
 - **No wizard step writes to `~/.tron/system/auth-token.json`.** That file is owned by the agent; the wizard only reads it. If the file is missing on the Pairing step, the user sees "(not generated)" and the pipeline has failed earlier.
 - **Navigation is strictly forward via `state.advance()` + bounded backward via `state.goBack()`.** No direct `state.step = .foo` writes outside WizardState.
 - **Power-user skip (`state.skipToPairing()`) goes directly to `.pairingInfo`.** Used by the Welcome step's "I already have Tron running" button.
+- **Mode + activation policy live in `RootView`, not `AppDelegate`.** The "Show pairing info…" menu-bar action posts a notification observed by `MenuBarHostView`, which signals `RootView` via a closure to flip mode and seed `wizardEntryStep`. AppDelegate observes only LaunchAgent / sentinel events, never SwiftUI mode.
 
 ## Key Files
 
-- `Sources/Wizard/WizardState.swift` — the `@Observable` step machine
-- `Sources/Wizard/WizardView.swift` — dispatcher + shared chrome
+- `Sources/Wizard/WizardState.swift` — the `@Observable` step machine; accepts `initialStep:` override at init
+- `Sources/Wizard/WizardView.swift` — dispatcher + shared chrome; `init(initialStep:)` forwards to `WizardState`
 - `Sources/Wizard/Steps/*.swift` — one per `WizardStep` case
+- `Sources/TronMacApp.swift` — `RootView` owns mode + `wizardEntryStep`; `MenuBarHostView` observes `.tronWizardShowPairingInfo`
+- `Sources/MenuBar/MenuBarItemBuilder.swift` — emits the `.tronWizardShowPairingInfo` notification
 - `Sources/Services/Onboarding/InstallPlanner.swift` — pure planner + plist renderer
 - `Sources/Services/Onboarding/{ExistingInstallDetector,PermissionProbe,TailscaleProbe}.swift`
+- `Sources/Services/Server/TronCLI.swift` — single source of truth for `tron` binary resolution (used by menu-bar actions + feedback)
 - `Tests/Wizard/{WizardState,WizardStep,InstallStepBinaryInstaller,MockLaunchAgentManager}Tests.swift`
-- `Tests/Services/{InstallPlanner,BearerTokenReader,…}Tests.swift`
+- `Tests/Services/{InstallPlanner,BearerTokenReader,TronCLIResolver,…}Tests.swift`
 
 ## References
 
