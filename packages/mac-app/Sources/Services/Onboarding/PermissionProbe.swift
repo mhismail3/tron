@@ -1,7 +1,7 @@
 import Foundation
 import AppKit
-import UserNotifications
 import ApplicationServices
+import CoreGraphics
 
 /// Probes the three TCC permissions the wizard surfaces during the
 /// Permissions step. None of the probes prompt - they only read current
@@ -13,8 +13,8 @@ enum PermissionProbe {
             return probeFullDiskAccess()
         case .accessibility:
             return probeAccessibility()
-        case .notifications:
-            return await probeNotifications()
+        case .screenRecording:
+            return probeScreenRecording()
         }
     }
 
@@ -65,23 +65,22 @@ enum PermissionProbe {
         AXIsProcessTrusted() ? .granted : .denied
     }
 
-    // MARK: - Notifications
+    // MARK: - Screen Recording
 
-    static func probeNotifications() async -> PermissionStatus {
-        await withCheckedContinuation { continuation in
-            UNUserNotificationCenter.current().getNotificationSettings { settings in
-                switch settings.authorizationStatus {
-                case .authorized, .provisional, .ephemeral:
-                    continuation.resume(returning: .granted)
-                case .denied:
-                    continuation.resume(returning: .denied)
-                case .notDetermined:
-                    continuation.resume(returning: .notDetermined)
-                @unknown default:
-                    continuation.resume(returning: .probeUnavailable)
-                }
-            }
-        }
+    /// `CGPreflightScreenCaptureAccess()` returns the current grant
+    /// state without prompting, matching the synchronous semantics of
+    /// `AXIsProcessTrusted()` above. We intentionally avoid
+    /// `CGRequestScreenCaptureAccess()` — that one prompts the first
+    /// time and then flips the state permanently in TCC, which would
+    /// race the "Open System Settings" deep-link UX we use everywhere
+    /// else.
+    ///
+    /// TCC only distinguishes "granted" from "not granted" for Screen
+    /// Recording, so we collapse `.notDetermined` and `.denied` both
+    /// to `.denied` — the wizard treats either as "needs grant" and
+    /// sends the user to the same Settings pane.
+    static func probeScreenRecording() -> PermissionStatus {
+        CGPreflightScreenCaptureAccess() ? .granted : .denied
     }
 }
 
@@ -94,8 +93,8 @@ enum PermissionDeepLink {
             return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
         case .accessibility:
             return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        case .notifications:
-            return URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!
+        case .screenRecording:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         }
     }
 }

@@ -57,12 +57,34 @@ struct InstallPipelineStageOrderingTests {
 
 @Suite("Permission ordering")
 struct PermissionOrderingTests {
-    @Test("FDA, notifications, accessibility")
+    @Test("FDA, screen recording, accessibility")
     func canonicalOrder() {
         #expect(Permission.allCases == [
             .fullDiskAccess,
-            .notifications,
+            .screenRecording,
             .accessibility,
         ])
+    }
+}
+
+@Suite("WizardStep preferred heights")
+struct WizardStepPreferredHeightTests {
+    @Test("every step has a plausible height in [280, 560]")
+    func heightsAreInRange() {
+        // Guards against accidental 0/negative heights and against
+        // runaway numbers that would break the 480×H canvas.
+        for step in WizardStep.allCases {
+            let h = step.preferredHeight
+            #expect(h >= 280, "\(step) height \(h) is below the 280pt floor")
+            #expect(h <= 560, "\(step) height \(h) is above the 560pt ceiling")
+        }
+    }
+
+    @Test("Permissions is the tallest step (three cards)")
+    func permissionsIsTallest() {
+        let heights = WizardStep.allCases.map { $0.preferredHeight }
+        let max = heights.max() ?? 0
+        #expect(WizardStep.permissions.preferredHeight == max,
+                "Permissions must be tallest so all three cards fit without scrolling")
     }
 }

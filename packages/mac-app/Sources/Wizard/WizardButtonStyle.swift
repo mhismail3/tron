@@ -177,6 +177,91 @@ struct WizardSecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// Compact icon-led variant of the primary CTA. Same skeuomorphic
+/// emerald language — gradient fill, top/bottom bevel pair, dual
+/// drop shadows — scaled down for in-row actions like the
+/// Permissions step's "Open Settings" deep links. Intentionally
+/// understated (narrower stroke, shorter shadow) so three of these
+/// sitting inside GroupBox rows don't steal focus from the primary
+/// Continue button in the bottom bar.
+///
+/// Sized for a 28pt-tall SF Symbol: 40pt square with a 9pt corner
+/// radius; pressed/hover states mirror the primary's physics on a
+/// smaller amplitude.
+struct WizardTertiaryButtonStyle: ButtonStyle {
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 40, height: 40)
+            .background(skeuomorphicBackground(pressed: configuration.isPressed))
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.72), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.15), value: isHovering)
+            .onHover { isHovering = $0 }
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func skeuomorphicBackground(pressed: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+
+        ZStack {
+            shape
+                .fill(LinearGradient(
+                    colors: [Color.tronMint, Color.tronEmeraldDeep],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ))
+                .brightness(pressed ? -0.05 : (isHovering ? 0.03 : 0))
+
+            // Softer bevel than the primary — a quieter accent that
+            // reads as "related to the primary" without trying to
+            // out-shine it.
+            shape
+                .strokeBorder(
+                    LinearGradient(
+                        colors: pressed
+                            ? [Color.black.opacity(0.25), Color.clear]
+                            : [Color.white.opacity(0.32), Color.clear],
+                        startPoint: .top,
+                        endPoint: UnitPoint(x: 0.5, y: 0.5)
+                    ),
+                    lineWidth: 0.8
+                )
+                .blendMode(pressed ? .normal : .plusLighter)
+
+            shape
+                .strokeBorder(
+                    LinearGradient(
+                        colors: pressed
+                            ? [Color.clear, Color.white.opacity(0.18)]
+                            : [Color.clear, Color.black.opacity(0.22)],
+                        startPoint: UnitPoint(x: 0.5, y: 0.5),
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.8
+                )
+                .blendMode(pressed ? .plusLighter : .normal)
+        }
+        .compositingGroup()
+        .shadow(
+            color: Color.tronEmerald.opacity(pressed ? 0.14 : (isHovering ? 0.36 : 0.22)),
+            radius: pressed ? 2 : (isHovering ? 9 : 6),
+            x: 0,
+            y: pressed ? 1 : (isHovering ? 4 : 2)
+        )
+        .shadow(
+            color: Color.black.opacity(pressed ? 0.06 : 0.14),
+            radius: pressed ? 1 : 3,
+            x: 0,
+            y: pressed ? 0 : 1
+        )
+    }
+}
+
 extension ButtonStyle where Self == WizardPrimaryButtonStyle {
     static var wizardPrimary: WizardPrimaryButtonStyle { WizardPrimaryButtonStyle() }
 }
@@ -185,4 +270,7 @@ extension ButtonStyle where Self == WizardLinkButtonStyle {
 }
 extension ButtonStyle where Self == WizardSecondaryButtonStyle {
     static var wizardSecondary: WizardSecondaryButtonStyle { WizardSecondaryButtonStyle() }
+}
+extension ButtonStyle where Self == WizardTertiaryButtonStyle {
+    static var wizardTertiary: WizardTertiaryButtonStyle { WizardTertiaryButtonStyle() }
 }

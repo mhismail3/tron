@@ -45,6 +45,24 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .done: return .symbol("checkmark.seal.fill")
         }
     }
+
+    /// Preferred height of the wizard canvas for this step. The shell
+    /// reads this and animates the window frame between steps so dense
+    /// steps (Permissions, Install, PairingInfo) get enough room for
+    /// their cards without scrolling, and sparse steps (Welcome, Done,
+    /// ExistingInstall) don't float in dead space. Width stays pinned
+    /// at 480 for every step — only height varies.
+    var preferredHeight: CGFloat {
+        switch self {
+        case .welcome: return 360
+        case .tailscale: return 360
+        case .existingInstall: return 340
+        case .permissions: return 480
+        case .install: return 400
+        case .pairingInfo: return 420
+        case .done: return 320
+        }
+    }
 }
 
 /// Discriminated source for the icon rendered in `WizardShell`'s
@@ -57,9 +75,16 @@ enum HeaderIcon: Equatable, Sendable {
 }
 
 /// Permission categories the wizard probes during the Permissions step.
+///
+/// `screenRecording` replaced `notifications` once we verified the Mac
+/// wrapper never posts a local notification (all APNS-driven alerts
+/// flow to the iOS companion app). The Rust agent's Computer-Use tool
+/// calls `screencapture(1)` for every screenshot, which requires
+/// Screen Recording — see
+/// `packages/agent/src/tools/ui/computer_use/permissions.rs`.
 enum Permission: String, CaseIterable, Sendable {
     case fullDiskAccess
-    case notifications
+    case screenRecording
     case accessibility
 }
 

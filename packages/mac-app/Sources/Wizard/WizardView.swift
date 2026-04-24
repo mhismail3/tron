@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Top-level wizard. Reads the current `WizardStep` from `WizardState`
 /// and dispatches to a per-step view. The shell (top-bar with progress,
@@ -145,15 +146,27 @@ struct WizardShell<Content: View>: View {
                 .padding(.top, 18)
                 .padding(.trailing, 32)
         }
-        // Pinned to the same fixed dimensions the WindowGroup uses in
-        // `TronMacApp.swift` — the window is non-resizable, so every
-        // step gets exactly this much canvas. Trimmed from 400 → 360
-        // to remove the dead bottom space that empty steps (Welcome,
-        // Done) made obvious. The densest steps (Permissions,
-        // PairingInfo) compensate via internal scrolling / a smaller
-        // QR so the layout still fits.
-        .frame(width: 480, height: 360)
+        // Per-step canvas: width stays 480 but height is driven by
+        // `displayStep.preferredHeight` so dense steps (Permissions,
+        // Install, PairingInfo) get enough room without scrolling and
+        // sparse steps (ExistingInstall, Done) don't float in dead
+        // space. `.windowResizability(.contentSize)` on the scene
+        // propagates the new content size out to `NSWindow`, and the
+        // `.animation` below animates BOTH the content transition
+        // AND the frame delta, producing a smooth spring-driven
+        // window resize as the user navigates.
+        .frame(width: 480, height: displayStep.preferredHeight)
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: displayStep)
+        .onChange(of: displayStep) { _, newStep in
+            // SwiftUI's implicit window resize via `.contentSize`
+            // doesn't always interpolate smoothly (AppKit can choose
+            // to snap instead of animate). Manually driving
+            // `NSWindow.setFrame(_:display:animate:)` guarantees the
+            // window chrome tracks the content animation on every
+            // step change. We keep the top edge pinned so the
+            // wizard doesn't jitter upward as it grows.
+            animateHostingWindow(to: newStep.preferredHeight)
+        }
         // Two-phase direction+step update (see struct doc). Phase 1
         // runs synchronously: write the new direction, which re-renders
         // the CURRENTLY-mounted chrome so its `.transition(slideTransition)`
@@ -320,13 +333,17 @@ struct WizardShell<Content: View>: View {
         return "Continue"
     }
 
-    /// Mirrors the gate previously implemented privately by
-    /// `PermissionsStep`: FDA + Notifications must both be granted;
-    /// Accessibility is skippable.
+    /// Gate for the Permissions step's Continue button. All three
+    /// categories (FDA, Screen Recording, Accessibility) must be
+    /// granted — the Rust agent's Computer-Use tool refuses to run
+    /// without every one of them (see
+    /// `packages/agent/src/tools/ui/computer_use/permissions.rs`),
+    /// so we'd rather hold the wizard here than let the user land
+    /// on a half-working install.
     private var permissionsCanContinue: Bool {
-        let fda = state.permissionStatuses[.fullDiskAccess] ?? .notDetermined
-        let notif = state.permissionStatuses[.notifications] ?? .notDetermined
-        return fda == .granted && notif == .granted
+        Permission.allCases.allSatisfy { permission in
+            state.permissionStatuses[permission] == .granted
+        }
     }
 
     /// Mirrors the gate previously implemented privately by
@@ -374,6 +391,43 @@ struct WizardShell<Content: View>: View {
                         .strokeBorder(Color.tronEmerald.opacity(0.18), lineWidth: 0.5)
                 )
         )
+    }
+
+    // MARK: - Animated window resize
+
+    /// Drives `NSWindow.setFrame(_:display:animate:)` so the window
+    /// chrome resizes in lockstep with the SwiftUI frame spring.
+    /// Pins the window's TOP edge (subtracts the height delta from
+    /// the origin Y, since AppKit frames anchor at the bottom-left)
+    /// so the wizard grows/shrinks downward instead of jumping
+    /// upward. Width stays pinned at 480pt.
+    private func animateHostingWindow(to targetHeight: CGFloat) {
+        guard let window = Self.findHostingWindow() else { return }
+        var frame = window.frame
+        let delta = targetHeight - frame.height
+        frame.size.height = targetHeight
+        frame.size.width = 480
+        frame.origin.y -= delta
+        NSAnimationContext.runAnimationGroup { context in
+            // Match the SwiftUI `.animation(.spring(response: 0.42, ...))`
+            // above so the window, header slide, and body transition
+            // all finish within roughly the same frame budget. AppKit
+            // doesn't expose a spring curve; ease-in-out at 0.35s is
+            // the closest visual match.
+            context.duration = 0.35
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+            window.animator().setFrame(frame, display: true)
+        }
+    }
+
+    /// Locates the wizard window among `NSApp.windows`. The wizard
+    /// app has exactly one visible `WindowGroup` instance at a time
+    /// (the menu-bar mode orders its own 1×1 window out), so
+    /// picking the first key or visible non-panel window is enough.
+    private static func findHostingWindow() -> NSWindow? {
+        if let key = NSApp.keyWindow, !(key is NSPanel) { return key }
+        return NSApp.windows.first { $0.isVisible && !($0 is NSPanel) }
     }
 
     // MARK: - Direction-aware slide transition

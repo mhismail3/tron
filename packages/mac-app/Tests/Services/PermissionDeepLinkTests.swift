@@ -16,10 +16,10 @@ struct PermissionDeepLinkTests {
         #expect(url.absoluteString == "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
     }
 
-    @Test("Notifications URL points at notifications pane")
-    func notificationsURL() {
-        let url = PermissionDeepLink.url(for: .notifications)
-        #expect(url.absoluteString == "x-apple.systempreferences:com.apple.preference.notifications")
+    @Test("Screen Recording URL points at Privacy_ScreenCapture pane")
+    func screenRecordingURL() {
+        let url = PermissionDeepLink.url(for: .screenRecording)
+        #expect(url.absoluteString == "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
     }
 
     @Test("each Permission has a deep link")
