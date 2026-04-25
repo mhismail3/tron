@@ -118,7 +118,7 @@ struct ExistingInstallStep: View {
                 Text("Keep auth and settings; remove app and LaunchAgent.")
                     .font(TronTypography.wizardCaption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .layoutPriority(1)
             Spacer(minLength: 12)

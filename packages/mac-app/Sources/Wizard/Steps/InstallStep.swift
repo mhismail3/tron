@@ -18,17 +18,13 @@ struct InstallStep: View {
     @State private var installStatusText: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: InstallStepLayout.sectionSpacing) {
             Text(InstallStepContent.intro)
                 .font(TronTypography.wizardBody)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            VStack(spacing: 8) {
-                ForEach(InstallPipelineStage.allCases, id: \.self) { stage in
-                    stageRow(stage)
-                }
-            }
+            stageProgressArea
 
             if let outcome = state.installOutcome, outcome != .success, outcome != .alreadyInstalled {
                 WizardInfoCard {
@@ -42,8 +38,6 @@ struct InstallStep: View {
                     }
                 }
             }
-
-            Spacer(minLength: 0)
 
             if installIsComplete {
                 installCompleteBanner
@@ -138,6 +132,37 @@ struct InstallStep: View {
         }
     }
 
+    private var visibleStages: [InstallPipelineStage] {
+        if installIsComplete {
+            return InstallPipelineStage.allCases
+        }
+        return InstallPipelineStage.allCases.filter { stage in
+            stageState(for: stage) != .pending
+        }
+    }
+
+    private var stageProgressArea: some View {
+        Group {
+            if visibleStages.isEmpty {
+                Text(InstallStepContent.notStartedPlaceholder)
+                    .font(TronTypography.wizardSubheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .transition(.opacity)
+            } else {
+                VStack(spacing: installIsComplete ? InstallStepLayout.completedStageSpacing : InstallStepLayout.runningStageSpacing) {
+                    ForEach(visibleStages, id: \.self) { stage in
+                        stageRow(stage)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+                .padding(.top, installIsComplete ? 2 : 0)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
+        .animation(WizardLayout.transitionAnimation, value: visibleStages)
+    }
+
     private func runPipeline(requestID: Int) async {
         guard !state.installIsRunning else { return }
         guard state.hasUnhandledInstallRequest else {
@@ -154,6 +179,7 @@ struct InstallStep: View {
         defer { state.installIsRunning = false }
         // Reset state.
         resetStagesToPending()
+        stages[.copyBinary] = .running
         state.installOutcome = nil
 
         // 1. Locate the bundled binary.
@@ -202,7 +228,6 @@ struct InstallStep: View {
         // 2. Prepare app bundle: copy binary, write Info.plist/resources,
         // strip quarantine, and ad-hoc sign the assembled bundle so macOS
         // TCC binds grants to `com.tron.server`.
-        stages[.copyBinary] = .running
         await paceStage()
         do {
             try BinaryInstaller.install(plan: plan)
@@ -409,7 +434,7 @@ struct InstallStep: View {
         HStack(alignment: .center, spacing: WizardCardLayout.iconTextSpacing) {
             Image(systemName: "checkmark.seal.fill")
                 .foregroundStyle(Color.tronSuccess)
-                .font(.callout)
+                .font(.system(size: 17, weight: .semibold))
                 .frame(width: WizardCardLayout.iconColumnWidth, alignment: .center)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Tron is installed")
@@ -421,9 +446,10 @@ struct InstallStep: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
         .padding(.horizontal, WizardCardLayout.horizontalInset)
         .wizardGlassCard()
+        .padding(.top, 8)
     }
 
     private func refreshInstallStatus() async {
@@ -445,20 +471,24 @@ struct InstallStep: View {
 }
 
 enum InstallStepContent {
-    static let intro = "Install the server binary and files. Nothing is written until you press Install; then Tron prepares the app bundle, writes the LaunchAgent, loads it with launchd, and waits for the first heartbeat."
+    static let intro = "Install Tron Server on this Mac. It runs quietly in the background so your iPhone can connect."
+    static let notStartedPlaceholder = "Installation not started"
     static let stagePaceDelayNanoseconds: UInt64 = 350_000_000
 
     static func label(for stage: InstallPipelineStage) -> String {
         switch stage {
-        case .copyBinary: return "Prepare server app"
-        case .writePlist: return "Write LaunchAgent plist"
-        case .loadAgent: return "Load LaunchAgent"
-        case .awaitPing: return "Wait for first heartbeat"
+        case .copyBinary: return "Prepare server"
+        case .writePlist: return "Add startup item"
+        case .loadAgent: return "Start server"
+        case .awaitPing: return "Confirm it's running"
         }
     }
 }
 
 enum InstallStepLayout {
+    static let sectionSpacing: CGFloat = 18
+    static let runningStageSpacing: CGFloat = 8
+    static let completedStageSpacing: CGFloat = 10
     static let stageIconColumnWidth: CGFloat = 24
     static let stageRowMinHeight: CGFloat = 28
     static let stageIconGlyphSize: CGFloat = 14

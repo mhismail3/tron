@@ -64,11 +64,16 @@ struct InstallPipelineStageOrderingTests {
 
     @Test("each install stage has visible labels and deliberate pacing")
     func installStageCopyAndPacing() {
-        #expect(InstallStepContent.intro.contains("Nothing is written until you press Install"))
+        #expect(InstallStepContent.intro == "Install Tron Server on this Mac. It runs quietly in the background so your iPhone can connect.")
+        #expect(InstallStepContent.notStartedPlaceholder == "Installation not started")
         #expect(InstallStepContent.stagePaceDelayNanoseconds >= 300_000_000)
         #expect(InstallStepContent.stagePaceDelayNanoseconds <= 600_000_000)
+        #expect(InstallStepLayout.sectionSpacing >= 16)
+        #expect(InstallStepLayout.completedStageSpacing > InstallStepLayout.runningStageSpacing)
         #expect(InstallStepLayout.stageIconColumnWidth == 24)
         #expect(InstallStepLayout.stageRowMinHeight >= 28)
+        #expect(InstallStepContent.label(for: .writePlist) == "Add startup item")
+        #expect(InstallStepContent.label(for: .loadAgent) == "Start server")
         for stage in InstallPipelineStage.allCases {
             #expect(!InstallStepContent.label(for: stage).isEmpty)
         }
@@ -87,6 +92,25 @@ struct InstallPipelineStageOrderingTests {
         #expect(source.contains("stageState(for: stage)"))
         #expect(source.contains("case .success, .alreadyInstalled:"))
         #expect(source.contains("private func stageIcon"))
+    }
+
+    @Test("install progress is hidden until stages actually start")
+    func installProgressRevealsOnlyActiveStages() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let step = packageRoot.appending(path: "Sources/Wizard/Steps/InstallStep.swift")
+        let source = try String(contentsOf: step, encoding: .utf8)
+
+        #expect(source.contains("private var visibleStages"))
+        #expect(source.contains("stageState(for: stage) != .pending"))
+        #expect(source.contains("private var stageProgressArea"))
+        #expect(source.contains("Text(InstallStepContent.notStartedPlaceholder)"))
+        #expect(source.contains("ForEach(visibleStages"))
+        #expect(source.contains("stages[.copyBinary] = .running"))
+        #expect(source.contains("completedStageSpacing"))
+        #expect(!source.contains("maxHeight: .infinity, alignment: .topLeading"))
     }
 
     @Test("completed install page shows a status banner")
@@ -286,7 +310,7 @@ struct WizardVisualLayoutTests {
         #expect(source.contains("private var cleanupCard"))
         #expect(source.contains("Need a fresh start?"))
         #expect(source.contains("Keep auth and settings; remove app and LaunchAgent."))
-        #expect(source.contains(".lineLimit(1)"))
+        #expect(source.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(source.contains(".buttonStyle(.wizardTertiary)"))
         #expect(source.contains("trash.fill"))
         #expect(!source.contains("Divider()"))
@@ -308,7 +332,14 @@ struct WizardVisualLayoutTests {
         )
         #expect(layout.contains("WizardGlassCardBackground"))
         #expect(layout.contains(".ultraThinMaterial"))
+        #expect(layout.contains("Color.tronEmerald.opacity(0.055)"))
         #expect(layout.contains("wizardGlassCard"))
+        #expect(layout.contains(".fixedSize(horizontal: false, vertical: true)"))
+        #expect(layout.contains(".layoutPriority(1)"))
+        let cardBackgroundStart = try #require(layout.range(of: "struct WizardGlassCardBackground"))
+        let cardBackgroundEnd = try #require(layout.range(of: "extension View"))
+        let cardBackgroundSource = layout[cardBackgroundStart.lowerBound..<cardBackgroundEnd.lowerBound]
+        #expect(!cardBackgroundSource.contains("LinearGradient"))
 
         for path in [
             "Sources/Wizard/Steps/TailscaleStep.swift",

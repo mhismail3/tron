@@ -52,26 +52,17 @@ struct WizardGlassCardBackground: ViewModifier {
                 shape
                     .fill(.ultraThinMaterial)
                     .overlay(
-                        shape.fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.18),
-                                    Color.white.opacity(0.06),
-                                    Color.tronEmerald.opacity(0.08),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        shape.fill(Color.tronEmerald.opacity(0.055))
                     )
             }
             .overlay {
-                shape.strokeBorder(Color.white.opacity(0.24), lineWidth: 0.7)
+                shape.strokeBorder(Color.white.opacity(0.18), lineWidth: 0.7)
             }
             .overlay {
-                shape.strokeBorder(Color.tronEmerald.opacity(0.16), lineWidth: 0.8)
+                shape.strokeBorder(Color.tronEmerald.opacity(0.28), lineWidth: 0.8)
             }
-            .shadow(color: Color.black.opacity(0.10), radius: 12, x: 0, y: 6)
+            .shadow(color: Color.tronEmerald.opacity(0.08), radius: 10, x: 0, y: 3)
+            .shadow(color: Color.black.opacity(0.14), radius: 14, x: 0, y: 8)
     }
 }
 
@@ -128,8 +119,12 @@ struct WizardIconTextRow<Icon: View, Content: View, Trailing: View>: View {
             icon()
                 .frame(width: WizardCardLayout.iconColumnWidth, alignment: .center)
             content()
-            Spacer(minLength: 12)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+            Spacer(minLength: 0)
             trailing()
+                .fixedSize()
         }
     }
 }
