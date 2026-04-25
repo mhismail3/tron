@@ -381,6 +381,7 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
     private var appIcon = NSImage.tronFallbackAppIcon
     private var mouseDownPoint: NSPoint?
     private var didStartDrag = false
+    private var dragStartedInMouseSequence = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -438,6 +439,7 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
     override func mouseDown(with event: NSEvent) {
         mouseDownPoint = convert(event.locationInWindow, from: nil)
         didStartDrag = false
+        dragStartedInMouseSequence = false
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -451,6 +453,7 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
         }
 
         didStartDrag = true
+        dragStartedInMouseSequence = true
 
         let item = NSDraggingItem(pasteboardWriter: Self.dragPasteboardItem(for: appURL))
         let dragRect = iconDrawingRect
@@ -461,7 +464,16 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard !didStartDrag, let appURL, FileManager.default.fileExists(atPath: appURL.path) else {
+        defer {
+            mouseDownPoint = nil
+            dragStartedInMouseSequence = false
+        }
+
+        guard !didStartDrag,
+              !dragStartedInMouseSequence,
+              let appURL,
+              FileManager.default.fileExists(atPath: appURL.path)
+        else {
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting([appURL])
@@ -472,6 +484,15 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
         sourceOperationMaskFor context: NSDraggingContext
     ) -> NSDragOperation {
         .copy
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        didStartDrag = false
+        mouseDownPoint = nil
     }
 
     private static func dragPasteboardItem(for appURL: URL) -> NSPasteboardItem {

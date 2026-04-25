@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Top-level wizard. Reads the current `WizardStep` from `WizardState`
 /// and dispatches to a per-step view. The shell (top-bar with progress,
@@ -151,6 +152,7 @@ struct WizardShell<Content: View>: View {
     /// chrome re-renders with the fresh direction attached before
     /// `displayStep` changes identity (Phase 2).
     @State private var displayDirection: WizardSlideDirection
+    @State private var hostingWindow: NSWindow?
 
     init(state: WizardState, @ViewBuilder content: @escaping (WizardStep) -> Content) {
         self.state = state
@@ -201,6 +203,10 @@ struct WizardShell<Content: View>: View {
         // room, and every horizontal page slide runs inside identical
         // clipping geometry.
         .frame(width: WizardLayout.width, height: WizardLayout.height)
+        .configureHostingWindow { window in
+            hostingWindow = window
+            applyWindowBackgroundDragPolicy(for: displayStep, window: window)
+        }
         // Two-phase direction+step update (see struct doc). Phase 1
         // runs synchronously: write the new direction, which re-renders
         // the CURRENTLY-mounted chrome so its `.transition(slideTransition)`
@@ -218,8 +224,25 @@ struct WizardShell<Content: View>: View {
             displayDirection = state.slideDirection
             DispatchQueue.main.async {
                 displayStep = newStep
+                applyWindowBackgroundDragPolicy(for: newStep)
             }
         }
+        .onChange(of: displayStep) { _, newStep in
+            applyWindowBackgroundDragPolicy(for: newStep)
+        }
+        .onDisappear {
+            hostingWindow?.isMovableByWindowBackground = true
+        }
+    }
+
+    /// The glass window normally allows background dragging so the
+    /// titlebar-less canvas still feels movable. Permissions is the
+    /// exception: its Screen Recording row contains a real app-bundle
+    /// drag source, and AppKit can otherwise interpret click-hold as a
+    /// window move before the shortcut starts its file drag.
+    private func applyWindowBackgroundDragPolicy(for step: WizardStep, window: NSWindow? = nil) {
+        guard let window = window ?? hostingWindow else { return }
+        window.isMovableByWindowBackground = step != .permissions
     }
 
     // MARK: - Header (icon + title + progress)

@@ -486,7 +486,10 @@ struct WizardVisualLayoutTests {
         #expect(source.contains("appShortcutHitSize"))
         #expect(source.contains("mouseDownCanMoveWindow"))
         #expect(source.contains("shouldDelayWindowOrdering"))
+        #expect(source.contains("dragStartedInMouseSequence"))
         #expect(source.contains("beginDraggingSession"))
+        #expect(source.contains("endedAt screenPoint"))
+        #expect(source.contains("!dragStartedInMouseSequence"))
         #expect(source.contains("NSDraggingItem(pasteboardWriter:"))
         #expect(source.contains("NSPasteboardItem()"))
         #expect(source.contains("NSFilenamesPboardType"))
@@ -495,6 +498,22 @@ struct WizardVisualLayoutTests {
         #expect(source.contains("Drag Tron.app into the Screen Recording list"))
         #expect(source.contains("appIconLiftShadow"))
         #expect(!source.contains("emeraldShortcutShadow"))
+    }
+
+    @Test("permissions step disables background window dragging for shortcut drags")
+    func permissionsStepDisablesBackgroundWindowDraggingForShortcutDrags() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let wizardView = packageRoot.appending(path: "Sources/Wizard/WizardView.swift")
+        let source = try String(contentsOf: wizardView, encoding: .utf8)
+
+        #expect(source.contains("applyWindowBackgroundDragPolicy"))
+        #expect(source.contains(".configureHostingWindow"))
+        #expect(source.contains("window.isMovableByWindowBackground = step != .permissions"))
+        #expect(source.contains("applyWindowBackgroundDragPolicy(for: newStep)"))
+        #expect(source.contains("hostingWindow?.isMovableByWindowBackground = true"))
     }
 
     @Test("primary button has a distinct disabled visual state")
