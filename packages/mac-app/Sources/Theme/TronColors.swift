@@ -64,7 +64,7 @@ extension Color {
 
     // MARK: - Semantic
 
-    /// Success / "good to go" green — used by existing-install banner.
+    /// Success / "good to go" green used by wizard status cards.
     static let tronSuccess = Color(lightHex: "#059669", darkHex: "#10B981")
 }
 

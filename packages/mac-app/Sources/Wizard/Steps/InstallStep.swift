@@ -12,7 +12,6 @@ struct InstallStep: View {
 
     @State private var stages: [InstallPipelineStage: StageState] = [:]
     @State private var cleanupIsRunning = false
-    @State private var cleanupMessage: String?
     @State private var cleanupError: String?
     @State private var showCleanupConfirmation = false
     @State private var installStatusText: String?
@@ -50,6 +49,7 @@ struct InstallStep: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(WizardLayout.transitionAnimation, value: installIsComplete)
         .task {
             // Auto-skip if we know an existing install is fully present.
             // This path is observational: it does not copy, write, or
@@ -88,7 +88,16 @@ struct InstallStep: View {
     }
 
     private var installIsComplete: Bool {
-        state.installOutcome == .success || state.installOutcome == .alreadyInstalled
+        if state.installOutcome == .success || state.installOutcome == .alreadyInstalled {
+            return true
+        }
+        return currentInstallRunSucceeded
+    }
+
+    private var currentInstallRunSucceeded: Bool {
+        InstallPipelineStage.allCases.allSatisfy { stage in
+            stages[stage] == .succeeded
+        }
     }
 
     private var shouldUseDetectedInstallLayout: Bool {
@@ -169,7 +178,6 @@ struct InstallStep: View {
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
-                .padding(.top, installIsComplete ? 2 : 0)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
@@ -293,8 +301,10 @@ struct InstallStep: View {
         await paceStage()
         let pingOK = await waitForPing()
         if pingOK {
-            stages[.awaitPing] = .succeeded
-            state.installOutcome = .success
+            withAnimation(WizardLayout.transitionAnimation) {
+                stages[.awaitPing] = .succeeded
+                state.installOutcome = .success
+            }
             state.existingInstallStatus = setup.detectExistingInstall()
         } else {
             stages[.awaitPing] = .failed("Server did not respond within 30 seconds")
@@ -404,6 +414,7 @@ struct InstallStep: View {
     private var installedSummary: some View {
         installedSummaryCards
             .padding(.top, InstallStepLayout.installedSummaryTopPadding)
+            .transition(InstallStepLayout.installedSummaryTransition)
     }
 
     @ViewBuilder
@@ -461,12 +472,6 @@ struct InstallStep: View {
 
     @ViewBuilder
     private var cleanupFeedback: some View {
-        if let cleanupMessage {
-            Text(cleanupMessage)
-                .font(TronTypography.wizardCaption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
         if let cleanupError {
             Text(cleanupError)
                 .font(TronTypography.wizardCaption)
@@ -478,7 +483,6 @@ struct InstallStep: View {
     private func runCleanup() {
         guard !cleanupIsRunning else { return }
         cleanupIsRunning = true
-        cleanupMessage = nil
         cleanupError = nil
 
         Task {
@@ -487,7 +491,6 @@ struct InstallStep: View {
                 cleanupIsRunning = false
                 switch outcome {
                 case .success:
-                    cleanupMessage = outcome.userMessage
                     state.existingInstallStatus = setup.detectExistingInstall()
                     state.resetInstallRunState()
                     resetStagesToPending()
@@ -573,17 +576,26 @@ enum InstallStepContent {
 }
 
 enum InstallStepLayout {
-    static let sectionSpacing: CGFloat = 18
-    static let runningStageSpacing: CGFloat = 8
-    static let completedStageSpacing: CGFloat = 10
-    static let installedSummarySpacing: CGFloat = 12
-    static let installedSummaryTopPadding: CGFloat = 8
+    static let sectionSpacing: CGFloat = 16
+    static let runningStageSpacing: CGFloat = 6
+    static let completedStageSpacing: CGFloat = 4
+    static let installedSummarySpacing: CGFloat = 11
+    static let installedSummaryTopPadding: CGFloat = 0
     static let detectedSummaryTopPadding: CGFloat = 72
-    static let installCompleteBannerVerticalPadding: CGFloat = 16
-    static let cleanupCardVerticalPadding: CGFloat = 14
+    static let installCompleteBannerVerticalPadding: CGFloat = 14
+    static let cleanupCardVerticalPadding: CGFloat = 12
     static let stageIconColumnWidth: CGFloat = 24
-    static let stageRowMinHeight: CGFloat = 28
-    static let stageIconGlyphSize: CGFloat = 14
+    static let stageRowMinHeight: CGFloat = 24
+    static let stageIconGlyphSize: CGFloat = 13
+
+    static var installedSummaryTransition: AnyTransition {
+        .asymmetric(
+            insertion: .opacity
+                .combined(with: .move(edge: .bottom))
+                .combined(with: .scale(scale: 0.98, anchor: .top)),
+            removal: .opacity
+        )
+    }
 }
 
 /// Applies the launchd step after the plist has been written. A loaded

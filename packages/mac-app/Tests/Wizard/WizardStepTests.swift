@@ -67,9 +67,10 @@ struct InstallPipelineStageOrderingTests {
         #expect(InstallStepContent.stagePaceDelayNanoseconds >= 300_000_000)
         #expect(InstallStepContent.stagePaceDelayNanoseconds <= 600_000_000)
         #expect(InstallStepLayout.sectionSpacing >= 16)
-        #expect(InstallStepLayout.completedStageSpacing > InstallStepLayout.runningStageSpacing)
+        #expect(InstallStepLayout.completedStageSpacing <= InstallStepLayout.runningStageSpacing)
         #expect(InstallStepLayout.stageIconColumnWidth == 24)
-        #expect(InstallStepLayout.stageRowMinHeight >= 28)
+        #expect(InstallStepLayout.stageRowMinHeight >= 22)
+        #expect(InstallStepLayout.stageIconGlyphSize <= 13)
         #expect(InstallStepContent.label(for: .writePlist) == "Add startup item")
         #expect(InstallStepContent.label(for: .loadAgent) == "Start server")
         for stage in InstallPipelineStage.allCases {
@@ -127,8 +128,15 @@ struct InstallPipelineStageOrderingTests {
         #expect(source.contains("Tron is installed"))
         #expect(source.contains("Current status:"))
         #expect(source.contains("refreshInstallStatus"))
+        #expect(source.contains("private var currentInstallRunSucceeded"))
+        #expect(source.contains("InstallPipelineStage.allCases.allSatisfy"))
         #expect(source.contains("installCleanupCard"))
         #expect(source.contains("installedSummaryCards"))
+        #expect(source.contains("installedSummaryTransition"))
+        #expect(source.contains(".animation(WizardLayout.transitionAnimation, value: installIsComplete)"))
+        #expect(source.contains("withAnimation(WizardLayout.transitionAnimation)"))
+        #expect(source.contains("stages[.awaitPing] = .succeeded"))
+        #expect(!source.contains("cleanupMessage"))
         #expect(source.contains("Need a fresh start?"))
         #expect(source.contains(".buttonStyle(.wizardTertiary)"))
     }
@@ -201,11 +209,8 @@ struct WizardStepPreferredHeightTests {
 
 @Suite("Wizard visual layout tokens")
 struct WizardVisualLayoutTests {
-    @Test("welcome page centers its middle content as one unit")
-    func welcomeCentersMiddleContentAsOneUnit() throws {
-        #expect(WelcomeStepLayout.middleGroupSpacing > 0)
-        #expect(WelcomeStepLayout.middleGroupSpacing < 64)
-
+    @Test("welcome page shows only centered intro copy")
+    func welcomePageShowsOnlyCenteredIntroCopy() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -213,11 +218,15 @@ struct WizardVisualLayoutTests {
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/WelcomeStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
-        #expect(source.contains("VStack(spacing: WelcomeStepLayout.middleGroupSpacing)"))
+        #expect(source.contains("Text(copy)"))
+        #expect(source.contains(".multilineTextAlignment(.center)"))
         #expect(source.contains("alignment: .center"))
-        #expect(WelcomeStepLayout.detectedBannerIconWidth < WizardCardLayout.iconColumnWidth)
-        #expect(WelcomeStepLayout.detectedBannerIconSpacing < WizardCardLayout.iconTextSpacing)
-        #expect(source.contains("WelcomeStepLayout.detectedBannerIconWidth"))
+        #expect(!source.contains("existingInstallBanner"))
+        #expect(!source.contains("Existing Tron install detected"))
+        #expect(!source.contains("WizardInfoCard"))
+        #expect(!source.contains("WizardIconTextRow"))
+        #expect(!source.contains("existingInstallStatus"))
+        #expect(!source.contains("WelcomeStepLayout"))
         #expect(!source.contains(".offset(y:"))
     }
 
@@ -306,6 +315,7 @@ struct WizardVisualLayoutTests {
     func installCleanupUsesSeparateIconCard() throws {
         #expect(InstallStepLayout.cleanupCardVerticalPadding > WizardCardLayout.verticalInset)
         #expect(InstallStepLayout.detectedSummaryTopPadding > InstallStepLayout.installedSummaryTopPadding)
+        #expect(InstallStepLayout.installedSummaryTopPadding == 0)
 
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -356,13 +366,6 @@ struct WizardVisualLayoutTests {
             #expect(source.contains("WizardInfoCard"))
             #expect(source.contains("WizardIconTextRow"))
         }
-
-        let welcome = try String(
-            contentsOf: packageRoot.appending(path: "Sources/Wizard/Steps/WelcomeStep.swift"),
-            encoding: .utf8
-        )
-        #expect(welcome.contains("WelcomeStepLayout.detectedBannerIconSpacing"))
-        #expect(welcome.contains("WelcomeStepLayout.detectedBannerHorizontalPadding"))
 
         let install = try String(
             contentsOf: packageRoot.appending(path: "Sources/Wizard/Steps/InstallStep.swift"),

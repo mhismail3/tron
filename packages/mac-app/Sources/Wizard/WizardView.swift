@@ -20,7 +20,7 @@ struct WizardView: View {
         WizardShell(state: state) { step in
             switch step {
             case .welcome:
-                WelcomeStep(state: state)
+                WelcomeStep()
             case .tailscale:
                 TailscaleStep(state: state)
             case .permissions:
