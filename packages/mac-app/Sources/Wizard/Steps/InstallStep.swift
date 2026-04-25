@@ -5,8 +5,7 @@ import Darwin
 /// the bottom action bar. Its primary CTA starts as "Install" and
 /// only advances as "Continue" after `installOutcome ∈ {.success,
 /// .alreadyInstalled}`. This view contributes the description, the
-/// ready confirmation copy, the per-stage progress list, and an error
-/// summary on failure.
+/// per-stage progress list, and an error summary on failure.
 struct InstallStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
@@ -19,29 +18,10 @@ struct InstallStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Copies Tron Server into ~/.tron/system/Tron.app, drops a LaunchAgent so it starts at login, and waits for the first heartbeat. Permissions come next — granting them before the server exists wouldn't stick.")
-                .font(.body)
+            Text(InstallStepContent.intro)
+                .font(TronTypography.wizardBody)
                 .foregroundStyle(.secondary)
-
-            if shouldShowReadyCard {
-                GroupBox {
-                    Label {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Ready to install")
-                                .font(.headline)
-                            Text("Nothing is written until you press Install. The next action copies the bundled server, writes the LaunchAgent plist, loads it with launchd, and waits for the server to answer.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(Color.tronEmerald)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
-                }
-            }
+                .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 8) {
                 ForEach(InstallPipelineStage.allCases, id: \.self) { stage in
@@ -53,7 +33,7 @@ struct InstallStep: View {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(outcomeDescription(outcome))
-                            .font(.subheadline)
+                            .font(TronTypography.wizardBodySmall)
                             .foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -71,10 +51,15 @@ struct InstallStep: View {
             // touch launchd. Partial/clean states wait for explicit user
             // confirmation via the shell's Install CTA.
             prepareAlreadyInstalledStateIfNeeded()
+            prepareTerminalInstallStateIfNeeded()
         }
         .task(id: state.installRequestID) {
             guard state.installRequestID > 0 else { return }
-            await runPipeline()
+            guard state.hasUnhandledInstallRequest else {
+                prepareTerminalInstallStateIfNeeded()
+                return
+            }
+            await runPipeline(requestID: state.installRequestID)
         }
         .confirmationDialog(
             "Clean up install artifacts?",
@@ -88,20 +73,6 @@ struct InstallStep: View {
         } message: {
             Text("This unloads the LaunchAgent and removes the installed Tron.app plus plist. Auth, settings, sessions, and database files are preserved.")
         }
-    }
-
-    private var shouldShowReadyCard: Bool {
-        state.installRequestID == 0
-            && !state.installIsRunning
-            && state.installOutcome == nil
-            && !isAlreadyInstalled
-    }
-
-    private var isAlreadyInstalled: Bool {
-        if case .installed = state.existingInstallStatus {
-            return true
-        }
-        return false
     }
 
     private func resetStagesToPending() {
@@ -123,8 +94,42 @@ struct InstallStep: View {
         }
     }
 
-    private func runPipeline() async {
+    private func prepareTerminalInstallStateIfNeeded() {
+        switch state.installOutcome {
+        case .success, .alreadyInstalled:
+            markAlreadyInstalledStagesSucceeded()
+        case nil:
+            if stages.isEmpty {
+                resetStagesToPending()
+            }
+        default:
+            break
+        }
+    }
+
+    private func stageState(for stage: InstallPipelineStage) -> StageState {
+        if let explicitState = stages[stage] {
+            return explicitState
+        }
+        switch state.installOutcome {
+        case .success, .alreadyInstalled:
+            // Re-entering this page after a successful install should
+            // render completed rows on the first body pass. Updating
+            // them later from `.task` makes the icons pop separately
+            // from the page transition.
+            return .succeeded
+        default:
+            return .pending
+        }
+    }
+
+    private func runPipeline(requestID: Int) async {
         guard !state.installIsRunning else { return }
+        guard state.hasUnhandledInstallRequest else {
+            prepareTerminalInstallStateIfNeeded()
+            return
+        }
+        state.markInstallRequestHandled(requestID)
         if case .installed = state.existingInstallStatus {
             prepareAlreadyInstalledStateIfNeeded()
             return
@@ -183,6 +188,7 @@ struct InstallStep: View {
         // strip quarantine, and ad-hoc sign the assembled bundle so macOS
         // TCC binds grants to `com.tron.server`.
         stages[.copyBinary] = .running
+        await paceStage()
         do {
             try BinaryInstaller.install(plan: plan)
             stages[.copyBinary] = .succeeded
@@ -194,6 +200,7 @@ struct InstallStep: View {
 
         // 3. Write plist.
         stages[.writePlist] = .running
+        await paceStage()
         do {
             try BinaryInstaller.writePlist(plan: plan)
             stages[.writePlist] = .succeeded
@@ -205,6 +212,7 @@ struct InstallStep: View {
 
         // 4. Load agent.
         stages[.loadAgent] = .running
+        await paceStage()
         if plan.requiresLoad {
             let outcome = await InstallLaunchAgentRunner.ensureLoaded(
                 manager: setup.launchAgentManager,
@@ -229,6 +237,7 @@ struct InstallStep: View {
 
         // 5. Await ping.
         stages[.awaitPing] = .running
+        await paceStage()
         let pingOK = await waitForPing()
         if pingOK {
             stages[.awaitPing] = .succeeded
@@ -241,31 +250,50 @@ struct InstallStep: View {
 
     @ViewBuilder
     private func stageRow(_ stage: InstallPipelineStage) -> some View {
-        let stateForStage = stages[stage] ?? .pending
-        HStack(spacing: 12) {
-            Group {
-                switch stateForStage {
-                case .pending:
-                    Image(systemName: "circle").foregroundStyle(.secondary)
-                case .running:
-                    ProgressView().controlSize(.small)
-                case .succeeded:
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                case .failed(let message):
-                    Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
-                        .help(message)
-                }
-            }
-            .frame(width: 24, height: 24)
+        let stateForStage = stageState(for: stage)
+        HStack(alignment: .center, spacing: 12) {
+            stageIcon(stateForStage)
+                .frame(
+                    width: InstallStepLayout.stageIconColumnWidth,
+                    height: InstallStepLayout.stageRowMinHeight,
+                    alignment: .center
+                )
             VStack(alignment: .leading, spacing: 2) {
                 Text(label(for: stage))
-                    .font(.body)
+                    .font(TronTypography.wizardBody)
                 if case .failed(let message) = stateForStage {
-                    Text(message).font(.caption).foregroundStyle(.red)
+                    Text(message).font(TronTypography.wizardCaption).foregroundStyle(.red)
                 }
             }
+            .frame(minHeight: InstallStepLayout.stageRowMinHeight, alignment: .center)
             Spacer()
         }
+    }
+
+    @ViewBuilder
+    private func stageIcon(_ stateForStage: StageState) -> some View {
+        switch stateForStage {
+        case .pending:
+            Image(systemName: "circle")
+                .font(.system(size: InstallStepLayout.stageIconGlyphSize, weight: .regular))
+                .foregroundStyle(.secondary)
+        case .running:
+            ProgressView()
+                .controlSize(.small)
+        case .succeeded:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: InstallStepLayout.stageIconGlyphSize, weight: .semibold))
+                .foregroundStyle(.green)
+        case .failed(let message):
+            Image(systemName: "xmark.octagon.fill")
+                .font(.system(size: InstallStepLayout.stageIconGlyphSize, weight: .semibold))
+                .foregroundStyle(.red)
+                .help(message)
+        }
+    }
+
+    private func paceStage() async {
+        try? await Task.sleep(nanoseconds: InstallStepContent.stagePaceDelayNanoseconds)
     }
 
     enum StageState: Equatable {
@@ -273,12 +301,7 @@ struct InstallStep: View {
     }
 
     private func label(for stage: InstallPipelineStage) -> String {
-        switch stage {
-        case .copyBinary: return "Prepare server app"
-        case .writePlist: return "Write LaunchAgent plist"
-        case .loadAgent: return "Load LaunchAgent"
-        case .awaitPing: return "Wait for first heartbeat"
-        }
+        InstallStepContent.label(for: stage)
     }
 
     private func outcomeDescription(_ outcome: InstallOutcome) -> String {
@@ -297,9 +320,9 @@ struct InstallStep: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Clean up and retry")
-                    .font(.subheadline.weight(.semibold))
+                    .font(TronTypography.wizardSubheadline)
                 Text("Remove only the app bundle and LaunchAgent; keep auth, settings, and database files.")
-                    .font(.caption)
+                    .font(TronTypography.wizardCaption)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 12)
@@ -315,12 +338,12 @@ struct InstallStep: View {
 
         if let cleanupMessage {
             Text(cleanupMessage)
-                .font(.caption)
+                .font(TronTypography.wizardCaption)
                 .foregroundStyle(.secondary)
         }
         if let cleanupError {
             Text(cleanupError)
-                .font(.caption)
+                .font(TronTypography.wizardCaption)
                 .foregroundStyle(.red)
         }
     }
@@ -339,8 +362,7 @@ struct InstallStep: View {
                 case .success:
                     cleanupMessage = outcome.userMessage
                     state.existingInstallStatus = setup.detectExistingInstall()
-                    state.installOutcome = nil
-                    state.installRequestID = 0
+                    state.resetInstallRunState()
                     resetStagesToPending()
                 case .failed:
                     cleanupError = outcome.userMessage
@@ -366,6 +388,26 @@ struct InstallStep: View {
         }
         return false
     }
+}
+
+enum InstallStepContent {
+    static let intro = "Install the server binary and files. Nothing is written until you press Install; then Tron prepares the app bundle, writes the LaunchAgent, loads it with launchd, and waits for the first heartbeat."
+    static let stagePaceDelayNanoseconds: UInt64 = 350_000_000
+
+    static func label(for stage: InstallPipelineStage) -> String {
+        switch stage {
+        case .copyBinary: return "Prepare server app"
+        case .writePlist: return "Write LaunchAgent plist"
+        case .loadAgent: return "Load LaunchAgent"
+        case .awaitPing: return "Wait for first heartbeat"
+        }
+    }
+}
+
+enum InstallStepLayout {
+    static let stageIconColumnWidth: CGFloat = 24
+    static let stageRowMinHeight: CGFloat = 28
+    static let stageIconGlyphSize: CGFloat = 14
 }
 
 /// Applies the launchd step after the plist has been written. A loaded

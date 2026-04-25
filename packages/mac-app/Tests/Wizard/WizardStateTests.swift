@@ -27,6 +27,8 @@ struct WizardStateTests {
         #expect(state.permissionStatuses.isEmpty)
         #expect(state.installOutcome == nil)
         #expect(state.installRequestID == 0)
+        #expect(state.handledInstallRequestID == 0)
+        #expect(state.hasUnhandledInstallRequest == false)
         #expect(state.installIsRunning == false)
         #expect(state.pairingPayload == nil)
         #expect(state.tailscaleStatus == nil)
@@ -140,6 +142,8 @@ struct WizardStateTests {
         #expect(state.step == .welcome)
         #expect(state.installOutcome == nil)
         #expect(state.installRequestID == 0)
+        #expect(state.handledInstallRequestID == 0)
+        #expect(state.hasUnhandledInstallRequest == false)
         #expect(state.installIsRunning == false)
         #expect(state.pairingPayload == nil)
         #expect(state.tailscaleStatus == nil)
@@ -308,8 +312,31 @@ struct WizardStateTests {
 
         state.requestInstall()
         #expect(state.installRequestID == 1)
+        #expect(state.hasUnhandledInstallRequest == true)
+        state.markInstallRequestHandled(state.installRequestID)
+        #expect(state.handledInstallRequestID == 1)
+        #expect(state.hasUnhandledInstallRequest == false)
         state.requestInstall()
         #expect(state.installRequestID == 2)
+        #expect(state.hasUnhandledInstallRequest == true)
+    }
+
+    @Test("resetInstallRunState clears install request replay tracking")
+    func resetInstallRunStateClearsReplayTracking() {
+        let (defaults, cleanup) = Self.isolatedDefaults()
+        defer { cleanup() }
+        let state = WizardState(defaults: defaults)
+        state.installOutcome = .success
+        state.requestInstall()
+        state.markInstallRequestHandled(state.installRequestID)
+        state.installIsRunning = true
+
+        state.resetInstallRunState()
+        #expect(state.installOutcome == nil)
+        #expect(state.installRequestID == 0)
+        #expect(state.handledInstallRequestID == 0)
+        #expect(state.hasUnhandledInstallRequest == false)
+        #expect(state.installIsRunning == false)
     }
 
     @Test("reset returns slideDirection to forward (default)")

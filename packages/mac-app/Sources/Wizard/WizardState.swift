@@ -62,6 +62,17 @@ final class WizardState {
     /// what increments this value and lets `InstallStep` run.
     var installRequestID: Int = 0
 
+    /// Highest install request ID the Install step has consumed. This
+    /// keeps the pipeline idempotent across back/forward navigation:
+    /// SwiftUI remounts `InstallStep` when the user returns to page 4,
+    /// but a previously handled request must not run again unless the
+    /// user presses Install/Retry and creates a new request ID.
+    private(set) var handledInstallRequestID: Int = 0
+
+    var hasUnhandledInstallRequest: Bool {
+        installRequestID > handledInstallRequestID
+    }
+
     /// True only while the Install step is actively mutating disk or
     /// launchd. `WizardShell` reads this to turn the primary CTA into a
     /// disabled "Installing…" affordance instead of letting a second
@@ -172,6 +183,7 @@ final class WizardState {
         existingInstallStatus = .none
         installOutcome = nil
         installRequestID = 0
+        handledInstallRequestID = 0
         installIsRunning = false
         pairingPayload = nil
     }
@@ -181,6 +193,17 @@ final class WizardState {
     /// disk/launchd state; view appearance is observational only.
     func requestInstall() {
         installRequestID += 1
+    }
+
+    func markInstallRequestHandled(_ requestID: Int) {
+        handledInstallRequestID = max(handledInstallRequestID, requestID)
+    }
+
+    func resetInstallRunState() {
+        installOutcome = nil
+        installRequestID = 0
+        handledInstallRequestID = 0
+        installIsRunning = false
     }
 
     /// Single mutation point for step + direction. Centralises the

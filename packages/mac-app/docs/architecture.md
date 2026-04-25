@@ -28,7 +28,13 @@ packages/mac-app/
 │   │   ├── MenuBarActionHandler.swift # routes menu-item descriptors → side effects (subprocess, NSWorkspace, notifications)
 │   │   ├── MenuBarController.swift    # NSStatusItem lifecycle + timer
 │   │   └── MenuBarItemBuilder.swift   # Pure builder: snapshot → [MenuItemDescriptor]
-│   ├── Resources/                  # tron-agent + AppIcon.icns staged into the wrapper bundle
+│   ├── Resources/                  # tron-agent + AppIcon.icns + bundled fonts staged into the wrapper bundle
+│   │   └── Fonts/
+│   │       └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
+│   ├── Theme/
+│   │   ├── TronColors.swift        # emerald palette + shared gradients
+│   │   ├── TronFontLoader.swift    # CoreText registration for bundled fonts
+│   │   └── TronTypography.swift    # compact Mac wizard type tokens
 │   ├── Services/
 │   │   ├── LaunchAgentManaging.swift # protocol + LiveLaunchAgentManager (shells launchctl)
 │   │   ├── Models.swift            # TailscaleStatus, PermissionStatus, ExistingInstallStatus…
@@ -92,6 +98,10 @@ Example: `InstallPlanner.plan(sourceBinary:paths:existingInstall:) -> Result<Ins
 ### Protocol-bounded subprocess surface
 
 `LaunchAgentManaging` is the only subprocess-style interface — load/unload/restart/isLoaded. `LiveLaunchAgentManager` shells `launchctl`; `MockLaunchAgentManager` records calls and returns configured outcomes. Everything else (permission probes, Tailscale checks) is internal to the wrapper.
+
+### Wizard visual system
+
+The wizard uses a single glass canvas with pinned chrome: the header row, progress pill, and bottom actions never participate in body measurement. The header is one `HStack` that owns the step icon, title, and progress pill, so all three share the same vertical center and the progress pill cannot drift during AppKit window resizes. The progress indicator has one flat outer capsule, bare `X / 7` text, and a tactile bar; avoid nesting another pill around the count. The bar fill is drawn by one animatable Canvas-backed `WizardProgressTrack`, so growth/shrink animation happens inside a single rendered track instead of moving as a separate SwiftUI subview while AppKit resizes between height bands. `TronTypography` registers and uses the bundled Exo 2 face for wizard title/body/button text across every step, while terminal/token surfaces stay monospaced. The welcome page centers its intro copy and optional detected-install banner as one middle group, and the banner sizes to its content instead of spanning the window. Tailscale and Existing Install center their body groups in the space between title and buttons. Existing Install recovery appears as its own compact "Need a fresh start?" cleanup card below the install status card, pads its copy away from the left edge, and uses the same square tertiary icon button style as the Permissions settings buttons. Permissions rows omit individual "Required" badges, align the Re-check link icon with the row status icons, and rely on the disabled branch of `WizardPrimaryButtonStyle` to make blocked Continue buttons visibly inactive.
 
 ### Single-instance lock via POSIX `fcntl`
 
@@ -157,7 +167,8 @@ The "Show pairing info…" menu item reopens the wizard at `pairingInfo` without
 ### Install pipeline (wizard's `InstallStep`)
 
 ```
-0. Wait for user: Install CTA increments WizardState.installRequestID
+0. Wait for user: Install CTA increments WizardState.installRequestID; no disk or launchd mutation happens before this
+   - WizardState.handledInstallRequestID suppresses replay when page 4 remounts after back/forward navigation
 1. Locate source: Bundle.main.url(forResource: "tron-agent")
 2. Plan:          InstallPlanner.plan(…) → Result<InstallPlan, Failure>
 3. Prepare app:   BinaryInstaller.install(plan:)   [tempfile + rename, chmod 755, write Info.plist/resources, codesign -]
@@ -165,6 +176,13 @@ The "Show pairing info…" menu item reopens the wizard at `pairingInfo` without
 5. Load agent:    launchctl bootstrap, or kickstart -k when label is already loaded
 6. Await ping:    poll setup.pingServer(token) for 30s on 1s cadence, ignoring connection events
 → state.installOutcome set; Pairing step unblocks when .success | .alreadyInstalled
+
+The UI intentionally paces quick stages for a few hundred milliseconds
+so the install does not visually jump from pending to three green checks
+before the user can understand the sequence.
+When revisiting the page after success, row state is derived
+synchronously from terminal `installOutcome` so the completed icons are
+part of the page transition rather than a post-mount update.
 
 Recovery action:
 ExistingInstallStep / failed InstallStep → InstallArtifactCleaner.clean(...)
@@ -178,6 +196,8 @@ ExistingInstallStep / failed InstallStep → InstallArtifactCleaner.clean(...)
 
 - **`Tron.app` never builds the Rust agent.** The binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing → wizard surfaces `sourceBinaryMissing` with a "reinstall the DMG" message.
 - **The Install step is not an `onAppear` side effect.** Landing on the page is read-only; the user must press Install before the wrapper copies the binary, writes the LaunchAgent plist, or calls launchd.
+- **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
+- **Welcome install detection must not relayout the hero.** `WelcomeStep` overlays the existing-install banner below the centered copy; it must not switch the first page to a top-leading stack when detection completes.
 - **The inner server bundle must be signed before launchd starts it.** `BinaryInstaller.install` ad-hoc signs `~/.tron/system/Tron.app` after writing `Info.plist` and resources so `codesign -dv` reports `Identifier=com.tron.server`, a bound Info.plist, and sealed resources. Accessibility TCC can flip grants back off when the bundle is left with only the executable's linker-generated ad-hoc identity.
 - **Cleanup preserves user data.** The installer recovery action unloads the LaunchAgent, removes the installed app bundle + plist, and removes an empty legacy `deployment/` directory if present. It never removes auth, settings, sessions, databases, workspace files, or non-empty dev/deploy/update artifacts.
 - **A loaded LaunchAgent label is not proof that the new binary is running.** After writing the plist, `.alreadyLoaded` is followed by `launchctl kickstart -k gui/<uid>/com.tron.server` so stale processes left from interrupted installs consume the just-copied bundle.

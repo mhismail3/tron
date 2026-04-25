@@ -36,7 +36,7 @@ struct PairingInfoStep: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text("Open Tron on your iPhone, tap “I have Tron running”, then scan the QR or enter the values manually.")
-                    .font(.subheadline)
+                    .font(TronTypography.wizardBodySmall)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -100,7 +100,7 @@ struct PairingInfoStep: View {
                 // Truncate the middle of the URL so both ends (the
                 // host and the token tail) stay legible.
                 Text(qrPayloadString)
-                    .font(.caption2.monospaced())
+                    .font(TronTypography.wizardCodeCaption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -121,9 +121,9 @@ struct PairingInfoStep: View {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(failureHeadline).font(.subheadline.weight(.semibold))
+                            Text(failureHeadline).font(TronTypography.wizardSubheadline)
                             Text(failureBody)
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }.padding(.vertical, 6)
@@ -136,10 +136,10 @@ struct PairingInfoStep: View {
     @ViewBuilder
     private func pairingRow(label: String, value: String, masked: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(TronTypography.wizardCaption).foregroundStyle(.secondary)
             HStack {
                 Text(masked ? maskValue(value) : value)
-                    .font(.callout.monospaced())
+                    .font(TronTypography.wizardCodeValue)
                 Spacer()
                 Button {
                     let pb = NSPasteboard.general

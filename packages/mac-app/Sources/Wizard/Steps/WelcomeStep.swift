@@ -6,39 +6,30 @@ import SwiftUI
 /// description text plus a contextual banner if an existing install
 /// has already been detected on disk.
 ///
-/// Layout note: when no banner is showing, the description is centered
-/// both vertically and horizontally so the welcome screen reads as a
-/// proper hero moment rather than a leading paragraph adrift in white
-/// space. The instant an existing install is detected, we revert to a
-/// top-leading layout so the description and banner stack as a normal
-/// reading column.
+/// Layout note: the description and optional existing-install banner
+/// are treated as one centered middle unit so detection state cannot
+/// push the bottom buttons or snap the page from centered to leading.
 struct WelcomeStep: View {
     @Bindable var state: WizardState
 
-    private let copy = "Tron is an agent that lives on your Mac. You talk to Tron from your iPhone."
+    private let copy = "Tron is an agent that lives on your Mac.\nYou talk to Tron from your iPhone."
 
     var body: some View {
-        if case .installed(let version) = state.existingInstallStatus {
-            VStack(alignment: .leading, spacing: 16) {
-                descriptionText
+        VStack(spacing: WelcomeStepLayout.middleGroupSpacing) {
+            descriptionText
+                .multilineTextAlignment(.center)
+
+            if case .installed(let version) = state.existingInstallStatus {
                 existingInstallBanner(version: version)
-                Spacer(minLength: 0)
-            }
-        } else {
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                descriptionText
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                Spacer(minLength: 0)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     @ViewBuilder
     private var descriptionText: some View {
         Text(copy)
-            .font(.system(.body, design: .rounded))
+            .font(TronTypography.wizardBody)
             .foregroundStyle(.secondary)
             .lineSpacing(4)
             .fixedSize(horizontal: false, vertical: true)
@@ -46,23 +37,23 @@ struct WelcomeStep: View {
 
     @ViewBuilder
     private func existingInstallBanner(version: String?) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: "checkmark.seal.fill")
                 .foregroundStyle(Color.tronSuccess)
                 .font(.callout)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Existing Tron install detected")
-                    .font(.system(.subheadline, design: .rounded).weight(.medium))
+                    .font(TronTypography.wizardSubheadline)
                     .foregroundStyle(Color.tronEmerald)
                 if let version {
                     Text("Version \(version) — onboarding will skip the install step.")
-                        .font(.caption)
+                        .font(TronTypography.wizardCaption)
                         .foregroundStyle(.secondary)
                 }
             }
-            Spacer(minLength: 0)
         }
-        .padding(10)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -72,4 +63,8 @@ struct WelcomeStep: View {
                 )
         )
     }
+}
+
+enum WelcomeStepLayout {
+    static let middleGroupSpacing: CGFloat = 48
 }

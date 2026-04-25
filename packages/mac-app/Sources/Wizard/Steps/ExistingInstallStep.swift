@@ -15,23 +15,32 @@ struct ExistingInstallStep: View {
     @State private var showCleanupConfirmation = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Before installing, we check for an existing setup. If we find one, we skip the install step to preserve your settings, sessions, and auth tokens.")
-                .font(.body)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
 
-            statusCard
-
-            if let cleanupMessage {
-                Text(cleanupMessage)
-                    .font(.caption)
+            VStack(alignment: .leading, spacing: ExistingInstallStepLayout.contentSpacing) {
+                Text("Before installing, we check for an existing setup. If we find one, we skip the install step to preserve your settings, sessions, and auth tokens.")
+                    .font(TronTypography.wizardBody)
                     .foregroundStyle(.secondary)
+
+                statusCard
+
+                if shouldShowCleanupCard {
+                    cleanupCard
+                }
+
+                if let cleanupMessage {
+                    Text(cleanupMessage)
+                        .font(TronTypography.wizardCaption)
+                        .foregroundStyle(.secondary)
+                }
+                if let cleanupError {
+                    Text(cleanupError)
+                        .font(TronTypography.wizardCaption)
+                        .foregroundStyle(.red)
+                }
             }
-            if let cleanupError {
-                Text(cleanupError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Spacer(minLength: 0)
         }
@@ -71,7 +80,6 @@ struct ExistingInstallStep: View {
                         title: "Partial install detected",
                         body: reason + ". This usually means a previous install was interrupted or removed after launchd state was written. Continuing will replace the plist and install Tron.app; your auth and settings are preserved."
                     )
-                    cleanupControls
                 case .installed(let version):
                     cardRow(
                         icon: "checkmark.seal.fill",
@@ -80,31 +88,50 @@ struct ExistingInstallStep: View {
                         body: version.map { "Version \($0). The install step will be skipped." }
                             ?? "Existing install detected. The install step will be skipped."
                     )
-                    cleanupControls
                 }
             }
         }
     }
 
+    private var shouldShowCleanupCard: Bool {
+        switch state.existingInstallStatus {
+        case .partial, .installed:
+            return true
+        case .none:
+            return false
+        }
+    }
+
+    @ViewBuilder
+    private var cleanupCard: some View {
+        GroupBox {
+            cleanupControls
+                .padding(.vertical, ExistingInstallStepLayout.cardVerticalPadding)
+                .padding(.leading, ExistingInstallStepLayout.cleanupCardLeadingPadding)
+        }
+    }
+
     @ViewBuilder
     private var cleanupControls: some View {
-        Divider()
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Need a clean retry?")
-                    .font(.subheadline.weight(.semibold))
-                Text("Remove only the app bundle and LaunchAgent; keep auth, settings, and database files.")
-                    .font(.caption)
+                Text("Need a fresh start?")
+                    .font(TronTypography.wizardSubheadline)
+                Text("Keep auth and settings; remove app and LaunchAgent.")
+                    .font(TronTypography.wizardCaption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            .layoutPriority(1)
             Spacer(minLength: 12)
             Button {
                 showCleanupConfirmation = true
             } label: {
-                Label(cleanupIsRunning ? "Cleaning..." : "Clean up", systemImage: "trash")
+                Image(systemName: cleanupIsRunning ? "hourglass" : "trash.fill")
             }
-            .buttonStyle(.bordered)
-            .tint(.red)
+            .buttonStyle(.wizardTertiary)
+            .help(cleanupIsRunning ? "Cleaning up install artifacts" : "Clean up install artifacts")
+            .accessibilityLabel(cleanupIsRunning ? "Cleaning up install artifacts" : "Clean up install artifacts")
             .disabled(cleanupIsRunning)
         }
     }
@@ -123,8 +150,7 @@ struct ExistingInstallStep: View {
                 case .success:
                     cleanupMessage = outcome.userMessage
                     state.existingInstallStatus = setup.detectExistingInstall()
-                    state.installOutcome = nil
-                    state.installRequestID = 0
+                    state.resetInstallRunState()
                 case .failed:
                     cleanupError = outcome.userMessage
                 }
@@ -134,14 +160,20 @@ struct ExistingInstallStep: View {
 
     @ViewBuilder
     private func cardRow(icon: String, iconColor: Color, title: String, body: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: icon).font(.title).foregroundStyle(iconColor)
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.headline)
-                Text(body).font(.subheadline).foregroundStyle(.secondary)
+                Text(title).font(TronTypography.wizardHeadline)
+                Text(body).font(TronTypography.wizardBodySmall).foregroundStyle(.secondary)
             }
             Spacer()
         }
         .padding(.vertical, 8)
     }
+}
+
+enum ExistingInstallStepLayout {
+    static let contentSpacing: CGFloat = 12
+    static let cardVerticalPadding: CGFloat = 2
+    static let cleanupCardLeadingPadding: CGFloat = 14
 }

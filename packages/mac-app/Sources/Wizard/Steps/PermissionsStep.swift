@@ -39,22 +39,19 @@ struct PermissionsStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Grant these three permissions to \(TronPaths.agentDisplayName) in System Settings. Come back here when you're done — Tron picks up the grants automatically.")
-                .font(.body)
+                .font(TronTypography.wizardBody)
                 .foregroundStyle(.secondary)
 
             VStack(spacing: 10) {
                 permissionRow(.fullDiskAccess,
                               title: "Full Disk Access",
-                              detail: "Lets Tron read and edit files outside the sandbox.",
-                              required: true)
+                              detail: "Lets Tron read and edit files outside the sandbox.")
                 permissionRow(.screenRecording,
                               title: "Screen Recording",
-                              detail: "Lets Tron take screenshots for its Computer-Use tool.",
-                              required: true)
+                              detail: "Lets Tron take screenshots for its Computer-Use tool.")
                 permissionRow(.accessibility,
                               title: "Accessibility",
-                              detail: "Lets Tron send clicks and keystrokes.",
-                              required: true)
+                              detail: "Lets Tron send clicks and keystrokes.")
             }
             .padding(.vertical, 1)
 
@@ -65,6 +62,7 @@ struct PermissionsStep: View {
                       systemImage: restarting ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
             }
             .buttonStyle(.wizardLink)
+            .padding(.leading, PermissionsStepLayout.recheckLeadingPadding)
             .disabled(restarting)
         }
         .task { await startPolling() }
@@ -75,23 +73,14 @@ struct PermissionsStep: View {
     // MARK: - Row + badge
 
     @ViewBuilder
-    private func permissionRow(_ permission: Permission, title: String, detail: String, required: Bool) -> some View {
+    private func permissionRow(_ permission: Permission, title: String, detail: String) -> some View {
         let status = state.permissionStatuses[permission] ?? .notDetermined
         GroupBox {
             HStack(alignment: .center, spacing: 12) {
                 statusBadge(status)
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(title).font(.headline)
-                        if required {
-                            Text("Required")
-                                .font(.caption)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(.red.opacity(0.15), in: Capsule())
-                                .foregroundStyle(.red)
-                        }
-                    }
-                    Text(detail).font(.subheadline).foregroundStyle(.secondary)
+                    Text(title).font(TronTypography.wizardHeadline)
+                    Text(detail).font(TronTypography.wizardBodySmall).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button {
@@ -248,4 +237,8 @@ struct PermissionsStep: View {
             await refreshAll(kickstart: true)
         }
     }
+}
+
+enum PermissionsStepLayout {
+    static let recheckLeadingPadding: CGFloat = 12
 }

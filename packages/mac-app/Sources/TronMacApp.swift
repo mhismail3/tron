@@ -5,6 +5,10 @@ import AppKit
 struct TronMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    init() {
+        TronFontLoader.registerFonts()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

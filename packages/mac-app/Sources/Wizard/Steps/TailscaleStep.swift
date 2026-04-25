@@ -14,25 +14,30 @@ struct TailscaleStep: View {
     @State private var pollTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Tron uses Tailscale as a private mesh network so your iPhone can reach this Mac without exposing it to the public internet.")
-                .font(.body)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
 
-            statusCard
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Tron uses Tailscale as a private mesh network so your iPhone can reach this Mac without exposing it to the public internet.")
+                    .font(TronTypography.wizardBody)
+                    .foregroundStyle(.secondary)
 
-            // Tertiary action: only relevant before Tailscale is up.
-            // Inlined here (rather than living in the shell's bottom
-            // bar) so it slides with the rest of the body content
-            // and disappears cleanly once the user signs in.
-            if !(state.tailscaleStatus?.isReady ?? false) {
-                Button {
-                    NSWorkspace.shared.open(URL(string: "https://tailscale.com/download/mac")!)
-                } label: {
-                    Label("Open Tailscale download", systemImage: "arrow.down.circle")
+                statusCard
+
+                // Tertiary action: only relevant before Tailscale is up.
+                // Inlined here (rather than living in the shell's bottom
+                // bar) so it slides with the rest of the body content
+                // and disappears cleanly once the user signs in.
+                if !(state.tailscaleStatus?.isReady ?? false) {
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://tailscale.com/download/mac")!)
+                    } label: {
+                        Label("Open Tailscale download", systemImage: "arrow.down.circle")
+                    }
+                    .buttonStyle(.wizardLink)
                 }
-                .buttonStyle(.wizardLink)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Spacer(minLength: 0)
         }
@@ -43,15 +48,15 @@ struct TailscaleStep: View {
     @ViewBuilder
     private var statusCard: some View {
         GroupBox {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 Image(systemName: iconName)
                     .font(.title)
                     .foregroundStyle(iconColor)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(headline)
-                        .font(.headline)
+                        .font(TronTypography.wizardHeadline)
                     Text(subheadline)
-                        .font(.subheadline)
+                        .font(TronTypography.wizardBodySmall)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()

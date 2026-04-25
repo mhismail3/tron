@@ -73,6 +73,16 @@ This replaces the earlier `presentPairingInfoWindow(setup:)` AppDelegate path th
 
 Ordering is canonical via `WizardStep.allCases`. Any reorder needs matching updates in `WizardState.advance()`, `WizardView.swift` dispatcher, and `WizardStepTests`.
 
+### Visual shell
+
+`WizardShell` owns the shared chrome: one pinned header row (icon + title + progress), bottom action bar, and animated step body. The header/progress/bottom layers are pinned so body changes cannot move controls; the header row is a single center-aligned `HStack` so the step icon, title, and progress pill share one vertical center on every page. The progress shell uses one flat outer capsule; the `X / 7` count is bare text with no nested pill, while the bar itself carries the tactile treatment. The progress fill is drawn by one animatable Canvas-backed `WizardProgressTrack`, so growth/shrink animation happens inside a single rendered track instead of moving as a separate SwiftUI subview during step transitions/window resizes. Wizard typography uses the bundled Exo 2 font and registers it at app startup via `TronFontLoader`; all non-code step copy should go through `TronTypography` tokens rather than ad-hoc `.font(.body)` / `.font(.headline)` calls.
+
+Welcome has two data states (`.installed` detected vs not detected), but only one optical layout: the intro copy and optional existing-install banner are centered together as one middle group. The banner is intrinsic-width, not full-width, and should not use offset-based positioning. Do not restore a leading VStack for the installed state; that is what caused the first-page jump during dogfood.
+
+Tailscale and Existing Install keep their description/card groups vertically centered in the middle band between the title row and pinned buttons. Their GroupBox rows use center-aligned leading icons so status symbols sit optically in the middle of each container row. Existing Install recovery is a separate compact "Need a fresh start?" cleanup card below the detected-install status card; it uses the same `wizardTertiary` square icon button language as the Permissions settings buttons and adds explicit left padding so the retry copy does not hug the card edge.
+
+Permissions rows do not show separate "Required" badges; the page intro already says all three grants are required. The inline Re-check action is left-padded to align its icon with the permission status column. Disabled primary buttons use the non-emerald disabled visual branch in `WizardPrimaryButtonStyle`, not just the active button at reduced opacity.
+
 ## State Persistence
 
 | Key | Type | Storage | Reset by |
@@ -101,7 +111,7 @@ The install step is split into three pure pieces + one view:
 3. **`LaunchAgentManaging.load(plistPath:label:) -> LaunchAgentOutcome` + `InstallLaunchAgentRunner.ensureLoaded(...)`**
    Protocol surface for `launchctl`. Live implementation shells out; mock records calls and returns configured outcomes. During install, `.alreadyLoaded` is treated as a stale-job signal and followed by `restart(label:)` / `launchctl kickstart -k` so launchd uses the plist and binary just written.
 
-4. **`InstallStep` view** — displays a ready card on entry and does not mutate disk or launchd until `WizardState.requestInstall()` increments `installRequestID`. After that explicit user action, it orchestrates (1)-(3) as a four-stage progress UI (`copyBinary` / prepare app → `writePlist` → `loadAgent` → `awaitPing`). The ping client uses a string request ID (matching the Rust RPC wire type), ignores `connection.established` / broadcast frames, and waits for the matching response. Each stage has a pending/running/succeeded/failed(String) state and a retry path. Failure surfaces an `InstallOutcome` that the Pairing step uses for gating.
+4. **`InstallStep` view** — explains the install in the main intro copy and does not mutate disk or launchd until `WizardState.requestInstall()` increments `installRequestID`. `WizardState.handledInstallRequestID` records the latest consumed request so remounting page 4 after navigating back from Permissions cannot replay the pipeline; only a new Install/Retry click creates new work. Completed rows are derived synchronously from terminal `installOutcome` on first render so check icons slide with the rest of page 4 instead of popping in from a later `.task`. After that explicit user action, it orchestrates (1)-(3) as a four-stage progress UI (`copyBinary` / prepare app → `writePlist` → `loadAgent` → `awaitPing`). Fast stages intentionally hold the running state briefly so users can perceive the sequence instead of watching three checks appear at once. The ping client uses a string request ID (matching the Rust RPC wire type), ignores `connection.established` / broadcast frames, and waits for the matching response. Each stage has a pending/running/succeeded/failed(String) state and a retry path. Failure surfaces an `InstallOutcome` that the Pairing step uses for gating.
 
 5. **`InstallArtifactCleaner.clean(...)`** — installer recovery only. It unloads `com.tron.server` when launchd has it loaded, removes `~/.tron/system/Tron.app` and `~/Library/LaunchAgents/com.tron.server.plist`, removes an empty legacy `~/.tron/system/deployment/` directory, and preserves auth, settings, database, sessions, workspace files, and non-empty dev/deploy/update artifacts. Exposed from Existing Install and failed Install UI.
 
@@ -132,7 +142,9 @@ Failed install outcomes also surface the cleanup action so the user can unload/r
 ## Invariants
 
 - **The wizard NEVER shells out to `scripts/tron install`.** Everything is native Swift via `EnvironmentSetup` so tests don't need a subshell.
+- **Welcome keeps one centered hero position.** Existing-install detection may add the banner below the copy, but it must not change the copy alignment or push the bottom action bar.
 - **The install pipeline is user-confirmed.** `InstallStep` may mark a fully existing install as `.alreadyInstalled` on entry, but it never copies binaries, writes plists, or invokes launchd from view appearance alone.
+- **Handled install requests never replay on remount.** SwiftUI may recreate `InstallStep` when users go Back from Permissions and forward again, but an `installRequestID` at or below `handledInstallRequestID` is display-only.
 - **Skip install must skip the install page.** The Existing Install CTA calls `WizardState.skipInstall()` for `.installed`, not generic `advance()`, because the canonical next step is still `.install`.
 - **Deployment artifacts are not installer artifacts.** The wizard writes `~/.tron/system/Tron.app` and the LaunchAgent plist only. `~/.tron/system/deployment/` is for `tron dev`, deploy, and update state and may be absent or empty after onboarding.
 - **Cleanup preserves user data.** `InstallArtifactCleaner` removes only LaunchAgent/app artifacts plus an empty legacy `deployment/` directory; auth tokens, provider auth, settings, databases, sessions, workspace files, and non-empty dev/deploy/update artifacts are out of scope.

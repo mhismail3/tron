@@ -13,12 +13,13 @@ import SwiftUI
 /// than mechanical; hover lifts both the glow and the highlight a
 /// touch so the cursor's intent is acknowledged before commitment.
 struct WizardPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
     @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(.body, design: .rounded).weight(.semibold))
-            .foregroundStyle(.white)
+            .font(TronTypography.wizardButton)
+            .foregroundStyle(isEnabled ? Color.white : Color.secondary.opacity(0.72))
             // Auto-sized rectangle — the wizard docks the primary CTA
             // in the bottom-right corner alongside a left-docked
             // secondary button, so a `maxWidth: .infinity` would push
@@ -28,12 +29,12 @@ struct WizardPrimaryButtonStyle: ButtonStyle {
             .frame(minWidth: 132)
             .padding(.vertical, 11)
             .padding(.horizontal, 24)
-            .background(skeuomorphicBackground(pressed: configuration.isPressed))
-            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .background(skeuomorphicBackground(pressed: isEnabled && configuration.isPressed))
+            .scaleEffect(isEnabled && configuration.isPressed ? 0.98 : 1.0)
             .animation(.spring(response: 0.32, dampingFraction: 0.72), value: configuration.isPressed)
             .animation(.easeOut(duration: 0.18), value: isHovering)
-            .onHover { isHovering = $0 }
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .onHover { isHovering = isEnabled && $0 }
+            .contentShape(RoundedRectangle(cornerRadius: WizardLayout.buttonCornerRadius, style: .continuous))
     }
 
     /// Composes the four-layer skeuomorphic stack: gradient fill, top
@@ -43,59 +44,82 @@ struct WizardPrimaryButtonStyle: ButtonStyle {
     /// punching through to whatever sits below the button.
     @ViewBuilder
     private func skeuomorphicBackground(pressed: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: WizardLayout.buttonCornerRadius, style: .continuous)
 
         ZStack {
-            // Layer 1 — base gradient. Always mint→emeraldDeep top-to-
-            // bottom; the "pressed" feel comes from inverting the
-            // bevels (Layers 2 + 3) and from the brightness wash, not
-            // from re-coloring the fill. Real-world buttons don't
-            // change material when pressed, only the way light catches
-            // their edges.
-            shape
-                .fill(LinearGradient(
-                    colors: [Color.tronMint, Color.tronEmeraldDeep],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ))
-                .brightness(pressed ? -0.05 : (isHovering ? 0.03 : 0))
-
-            // Layer 2 — top-edge bevel. Resting: a faint white stroke
-            // along the top half implies light coming from above.
-            // Pressed: a faint dark stroke along the top implies the
-            // button has been pushed down so the upper edge is now
-            // recessed and shadowed.
-            shape
-                .strokeBorder(
-                    LinearGradient(
-                        colors: pressed
-                            ? [Color.black.opacity(0.30), Color.clear]
-                            : [Color.white.opacity(0.42), Color.clear],
+            if !isEnabled {
+                shape
+                    .fill(LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.36),
+                            Color.black.opacity(0.04),
+                        ],
                         startPoint: .top,
-                        endPoint: UnitPoint(x: 0.5, y: 0.5)
-                    ),
-                    lineWidth: 1
-                )
-                .blendMode(pressed ? .normal : .plusLighter)
-
-            // Layer 3 — bottom-edge bevel, mirror of Layer 2. Resting:
-            // a faint dark stroke at the bottom implies the lower
-            // edge is shadowed (because light is coming from above).
-            // Pressed: a faint white stroke at the bottom implies the
-            // button has been pushed in and the lower edge now
-            // catches light from below.
-            shape
-                .strokeBorder(
-                    LinearGradient(
-                        colors: pressed
-                            ? [Color.clear, Color.white.opacity(0.22)]
-                            : [Color.clear, Color.black.opacity(0.28)],
-                        startPoint: UnitPoint(x: 0.5, y: 0.5),
                         endPoint: .bottom
-                    ),
-                    lineWidth: 1
-                )
-                .blendMode(pressed ? .plusLighter : .normal)
+                    ))
+                shape
+                    .strokeBorder(Color.black.opacity(0.12), lineWidth: 0.8)
+                shape
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.35), Color.clear],
+                            startPoint: .top,
+                            endPoint: UnitPoint(x: 0.5, y: 0.5)
+                        ),
+                        lineWidth: 0.8
+                    )
+            } else {
+                // Layer 1 — base gradient. Always mint→emeraldDeep top-to-
+                // bottom; the "pressed" feel comes from inverting the
+                // bevels (Layers 2 + 3) and from the brightness wash, not
+                // from re-coloring the fill. Real-world buttons don't
+                // change material when pressed, only the way light catches
+                // their edges.
+                shape
+                    .fill(LinearGradient(
+                        colors: [Color.tronMint, Color.tronEmeraldDeep],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ))
+                    .brightness(pressed ? -0.05 : (isHovering ? 0.03 : 0))
+
+                // Layer 2 — top-edge bevel. Resting: a faint white stroke
+                // along the top half implies light coming from above.
+                // Pressed: a faint dark stroke along the top implies the
+                // button has been pushed down so the upper edge is now
+                // recessed and shadowed.
+                shape
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: pressed
+                                ? [Color.black.opacity(0.30), Color.clear]
+                                : [Color.white.opacity(0.42), Color.clear],
+                            startPoint: .top,
+                            endPoint: UnitPoint(x: 0.5, y: 0.5)
+                        ),
+                        lineWidth: 1
+                    )
+                    .blendMode(pressed ? .normal : .plusLighter)
+
+                // Layer 3 — bottom-edge bevel, mirror of Layer 2. Resting:
+                // a faint dark stroke at the bottom implies the lower
+                // edge is shadowed (because light is coming from above).
+                // Pressed: a faint white stroke at the bottom implies the
+                // button has been pushed in and the lower edge now
+                // catches light from below.
+                shape
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: pressed
+                                ? [Color.clear, Color.white.opacity(0.22)]
+                                : [Color.clear, Color.black.opacity(0.28)],
+                            startPoint: UnitPoint(x: 0.5, y: 0.5),
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+                    .blendMode(pressed ? .plusLighter : .normal)
+            }
         }
         .compositingGroup()
         // Outer shadow 1 — branded emerald glow. Bright and wide on
@@ -103,7 +127,7 @@ struct WizardPrimaryButtonStyle: ButtonStyle {
         // press so the button reads as flush with the surface.
         .shadow(
             color: Color.tronEmerald.opacity(pressed ? 0.18 : (isHovering ? 0.50 : 0.32)),
-            radius: pressed ? 3 : (isHovering ? 14 : 9),
+            radius: isEnabled ? (pressed ? 3 : (isHovering ? 14 : 9)) : 0,
             x: 0,
             y: pressed ? 1 : (isHovering ? 6 : 3)
         )
@@ -111,10 +135,10 @@ struct WizardPrimaryButtonStyle: ButtonStyle {
         // the gradient that the colored glow alone can't provide;
         // also shrinks on press.
         .shadow(
-            color: Color.black.opacity(pressed ? 0.08 : 0.20),
-            radius: pressed ? 1 : 4,
+            color: Color.black.opacity(isEnabled ? (pressed ? 0.08 : 0.20) : 0.08),
+            radius: isEnabled ? (pressed ? 1 : 4) : 1,
             x: 0,
-            y: pressed ? 0 : 2
+            y: isEnabled ? (pressed ? 0 : 2) : 0.5
         )
     }
 }
@@ -128,7 +152,7 @@ struct WizardLinkButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(.callout, design: .rounded).weight(.medium))
+            .font(TronTypography.wizardSecondaryButton)
             .foregroundStyle(textColor(pressed: configuration.isPressed))
             .padding(.vertical, 6)
             .contentShape(Rectangle())
@@ -144,7 +168,7 @@ struct WizardLinkButtonStyle: ButtonStyle {
     }
 }
 
-/// Secondary CTA: emerald-outlined capsule. Used when a step has two
+/// Secondary CTA: emerald-outlined rounded rectangle. Used when a step has two
 /// equally-weighted actions (e.g. "Skip" / "Continue"). The stroke +
 /// label both use emerald so secondary buttons read as part of the
 /// brand even when sitting beside the gradient-filled primary CTA.
@@ -153,18 +177,18 @@ struct WizardSecondaryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(.body, design: .rounded).weight(.medium))
+            .font(TronTypography.wizardSecondaryButton)
             .foregroundStyle(Color.tronEmerald)
             .padding(.vertical, 10)
             .padding(.horizontal, 22)
             .background(
-                Capsule(style: .continuous)
+                RoundedRectangle(cornerRadius: WizardLayout.buttonCornerRadius, style: .continuous)
                     .strokeBorder(
                         Color.tronEmerald.opacity(isHovering ? 0.65 : 0.35),
                         lineWidth: 1
                     )
                     .background(
-                        Capsule(style: .continuous)
+                        RoundedRectangle(cornerRadius: WizardLayout.buttonCornerRadius, style: .continuous)
                             .fill(Color.tronEmerald.opacity(configuration.isPressed ? 0.18 : (isHovering ? 0.10 : 0)))
                     )
             )
@@ -172,7 +196,7 @@ struct WizardSecondaryButtonStyle: ButtonStyle {
             .animation(.spring(response: 0.32, dampingFraction: 0.72), value: configuration.isPressed)
             .animation(.easeOut(duration: 0.15), value: isHovering)
             .onHover { isHovering = $0 }
-            .contentShape(Capsule())
+            .contentShape(RoundedRectangle(cornerRadius: WizardLayout.buttonCornerRadius, style: .continuous))
     }
 }
 

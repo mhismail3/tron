@@ -43,16 +43,71 @@ struct WizardView: View {
     }
 }
 
+private struct WizardProgressTrack: View, @MainActor Animatable {
+    var fraction: Double
+
+    var animatableData: Double {
+        get { fraction }
+        set { fraction = newValue }
+    }
+
+    private var clampedFraction: Double {
+        min(1, max(0, fraction))
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size).insetBy(dx: 0.4, dy: 0.4)
+            let radius = rect.height / 2
+            let track = Path(roundedRect: rect, cornerRadius: radius)
+            let fillWidth = max(WizardLayout.progressBarMinFillWidth, rect.width * clampedFraction)
+            let fillRect = CGRect(
+                x: rect.minX,
+                y: rect.minY,
+                width: min(rect.width, fillWidth),
+                height: rect.height
+            )
+            let fill = Path(roundedRect: fillRect, cornerRadius: radius)
+
+            context.fill(track, with: .color(Color.tronEmerald.opacity(0.11)))
+            context.fill(fill, with: .linearGradient(
+                Gradient(colors: [Color.tronMint, Color.tronEmeraldDeep]),
+                startPoint: CGPoint(x: fillRect.midX, y: fillRect.minY),
+                endPoint: CGPoint(x: fillRect.midX, y: fillRect.maxY)
+            ))
+            context.stroke(fill, with: .linearGradient(
+                Gradient(colors: [
+                    Color.white.opacity(0.52),
+                    Color.black.opacity(0.22),
+                ]),
+                startPoint: CGPoint(x: fillRect.midX, y: fillRect.minY),
+                endPoint: CGPoint(x: fillRect.midX, y: fillRect.maxY)
+            ), lineWidth: 0.6)
+            context.stroke(track, with: .linearGradient(
+                Gradient(colors: [
+                    Color.black.opacity(0.16),
+                    Color.white.opacity(0.32),
+                ]),
+                startPoint: CGPoint(x: rect.midX, y: rect.minY),
+                endPoint: CGPoint(x: rect.midX, y: rect.maxY)
+            ), lineWidth: 0.8)
+        }
+        .shadow(color: Color.white.opacity(0.55), radius: 1, x: 0, y: -1)
+        .shadow(color: Color.black.opacity(0.12), radius: 1.5, x: 0, y: 1)
+        .drawingGroup()
+    }
+}
+
 /// Shared chrome — single liquid-glass canvas with the system traffic
-/// lights floating in the top-left, a pinned progress pill in the top-
-/// right, a transitioning content stack (icon + title, body), and a
-/// pinned secondary/primary action bar.
+/// lights floating in the top-left, a pinned header row (step icon +
+/// title + progress), a transitioning body, and a pinned
+/// secondary/primary action bar.
 ///
 /// Layout invariants:
 /// ```
 /// ┌────────────────────────────────────────┐
-/// │ ●●●                            [pill]  │
-/// │ [icon] Title                           │
+/// │ ●●●                                    │
+/// │ [icon] Title                    [pill] │
 /// │                                        │
 /// │   [step body fills here]               │
 /// │                                        │
@@ -60,12 +115,12 @@ struct WizardView: View {
 /// └────────────────────────────────────────┘
 /// ```
 ///
-/// - The pill is pinned in the top-right and never participates in the
-///   slide transition; only its capsule fill animates as the step
-///   ordinal changes.
-/// - Header (icon + title) and body content share a single
-///   `.id(displayStep)` so they re-mount and slide together as one
-///   cohesive unit.
+/// - The header row is pinned, so the icon, title, and progress pill
+///   share one vertical center on every step. The title/icon group
+///   transitions inside that row; the progress fill animates inside
+///   one stable Canvas-backed track.
+/// - Body content owns a single `.id(displayStep)` so it re-mounts and
+///   slides as one cohesive unit.
 /// - The bottom action bar is an overlay pinned to
 ///   `WizardLayout.bottomPadding` + `WizardLayout.horizontalPadding`.
 ///   Step bodies cannot push it around during measurement.
@@ -107,24 +162,22 @@ struct WizardShell<Content: View>: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            // Layer 1 (content plane): header + body re-mount on every
-            // `displayStep` change and slide as one cohesive group. The
-            // bottom inset reserves permanent space for Layer 2's pinned
-            // action bar, so dynamic body measurement cannot move the
-            // Back/Continue buttons even for a single frame.
-            VStack(spacing: 0) {
-                stepHeader
-                content(displayStep)
-                    .padding(.top, WizardLayout.headerBodySpacing)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-            .padding(.top, WizardLayout.topPadding)
-            .padding(.horizontal, WizardLayout.horizontalPadding)
-            .padding(.bottom, WizardLayout.bottomPadding + WizardLayout.bottomBarHeight)
-            .id(displayStep)
-            .transition(slideTransition)
-            .animation(WizardLayout.transitionAnimation, value: displayStep)
+        ZStack(alignment: .top) {
+            // Layer 1 (content plane): body content re-mounts on every
+            // `displayStep` change and slides as one cohesive group.
+            // The top inset reserves permanent space for Layer 3's
+            // pinned header row, and the bottom inset reserves Layer
+            // 2's pinned action bar. Dynamic body measurement cannot
+            // move the Back/Continue buttons or the progress pill even
+            // for a single frame.
+            content(displayStep)
+                .padding(.top, WizardLayout.topPadding + WizardLayout.headerHeight + WizardLayout.headerBodySpacing)
+                .padding(.horizontal, WizardLayout.horizontalPadding)
+                .padding(.bottom, WizardLayout.bottomPadding + WizardLayout.bottomBarHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .id(displayStep)
+                .transition(slideTransition)
+                .animation(WizardLayout.transitionAnimation, value: displayStep)
 
             // Layer 2 (pinned): bottom bar has an explicit height and
             // absolute bottom alignment inside the 480×H canvas. Only
@@ -136,22 +189,14 @@ struct WizardShell<Content: View>: View {
                 .padding(.bottom, WizardLayout.bottomPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
 
-            // Layer 3 (pinned): the pill stays fixed in the top-right
-            // corner. Only its progress fill width animates as the
-            // step ordinal moves; the pill itself never re-mounts, so
-            // it doesn't slide.
-            //
-            // The `.frame(height: 28)` matches the icon-row height in
-            // `stepHeader` so the pill capsule (which is intrinsically
-            // ~24pt tall) vertically center-aligns with the icon and
-            // title within a 28pt-high optical row. Both this layer
-            // and the chrome above use `.padding(.top, 18)`, so the
-            // 28pt frame sits at the same Y as the icon row and their
-            // optical centers land at the same pixel.
-            progressPill
-                .frame(height: WizardLayout.headerHeight)
+            // Layer 3 (pinned): one real header row owns icon, title,
+            // and progress. Keeping the pill in this row fixes the
+            // resize-frame where the progress track looked detached
+            // from the title chrome during page 3 → 4 growth.
+            headerBar
                 .padding(.top, WizardLayout.topPadding)
-                .padding(.trailing, WizardLayout.horizontalPadding)
+                .padding(.horizontal, WizardLayout.horizontalPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         // Per-step canvas: width stays 480 but height is driven by
         // `displayStep.preferredHeight` so dense steps (Permissions,
@@ -194,23 +239,35 @@ struct WizardShell<Content: View>: View {
         }
     }
 
-    // MARK: - Header (icon + title)
+    // MARK: - Header (icon + title + progress)
 
     @ViewBuilder
-    private var stepHeader: some View {
+    private var headerBar: some View {
+        HStack(alignment: .center, spacing: 12) {
+            ZStack(alignment: .leading) {
+                stepTitleGroup
+                    .id(displayStep)
+                    .transition(slideTransition)
+                    .animation(WizardLayout.transitionAnimation, value: displayStep)
+            }
+            .frame(maxWidth: .infinity, maxHeight: WizardLayout.headerHeight, alignment: .leading)
+            .clipped()
+
+            progressPill
+        }
+        .frame(height: WizardLayout.headerHeight, alignment: .center)
+    }
+
+    @ViewBuilder
+    private var stepTitleGroup: some View {
         HStack(spacing: 12) {
             stepIcon
             Text(displayStep.displayTitle)
-                .font(.system(.title2, design: .rounded).weight(.semibold))
+                .font(TronTypography.wizardTitle)
                 .foregroundStyle(Color.tronEmerald)
             Spacer(minLength: 12)
         }
-        // Reserve trailing space so a long title (e.g. "Pair your
-        // iPhone") doesn't collide with the pinned pill in Layer 2.
-        // The pill is ~120pt wide + 32pt padding from the right edge
-        // = ~152pt; 140pt of reserved space leaves a small visible
-        // gap between title and pill on the longest-title step.
-        .padding(.trailing, WizardLayout.progressPillReservedWidth)
+        .frame(height: WizardLayout.headerHeight, alignment: .center)
     }
 
     @ViewBuilder
@@ -221,13 +278,13 @@ struct WizardShell<Content: View>: View {
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 28, height: 28)
+                .frame(width: 28, height: WizardLayout.headerHeight, alignment: .center)
                 .foregroundStyle(Color.tronEmerald)
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald)
-                .frame(width: 28, height: 28)
+                .frame(width: 28, height: WizardLayout.headerHeight, alignment: .center)
         }
     }
 
@@ -388,30 +445,40 @@ struct WizardShell<Content: View>: View {
         let fraction = Double(current) / Double(total)
 
         HStack(spacing: 8) {
-            Text("\(current) / \(total)")
-                .font(.system(.caption2, design: .monospaced).weight(.medium))
-                .foregroundStyle(Color.tronEmerald.opacity(0.85))
-                .monospacedDigit()
-            ZStack(alignment: .leading) {
-                Capsule(style: .continuous)
-                    .fill(Color.tronEmerald.opacity(0.18))
-                    .frame(width: WizardLayout.progressBarWidth, height: WizardLayout.progressBarHeight)
-                Capsule(style: .continuous)
-                    .fill(LinearGradient.tronEmeraldGradient)
-                    .frame(width: max(4, WizardLayout.progressBarWidth * fraction), height: WizardLayout.progressBarHeight)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.8), value: fraction)
-            }
+            progressCount(current: current, total: total)
+            progressTrack(fraction: fraction)
         }
-        .padding(.vertical, 5)
-        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
         .background(
             Capsule(style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(Color.tronEmerald.opacity(0.06))
                 .overlay(
                     Capsule(style: .continuous)
-                        .strokeBorder(Color.tronEmerald.opacity(0.18), lineWidth: 0.5)
+                        .strokeBorder(Color.tronEmerald.opacity(0.14), lineWidth: 0.6)
                 )
         )
+    }
+
+    @ViewBuilder
+    private func progressCount(current: Int, total: Int) -> some View {
+        Text("\(current) / \(total)")
+            .font(TronTypography.wizardProgress)
+            .foregroundStyle(Color.tronEmerald.opacity(0.90))
+            .monospacedDigit()
+            .shadow(color: Color.white.opacity(0.42), radius: 0.5, x: 0, y: -0.5)
+            .shadow(color: Color.black.opacity(0.10), radius: 1, x: 0, y: 0.5)
+    }
+
+    @ViewBuilder
+    private func progressTrack(fraction: Double) -> some View {
+        WizardProgressTrack(fraction: fraction)
+            .frame(
+                width: WizardLayout.progressBarWidth,
+                height: WizardLayout.progressBarHeight,
+                alignment: .leading
+            )
+            .animation(WizardLayout.progressAnimation, value: fraction)
     }
 
     // MARK: - Animated window resize

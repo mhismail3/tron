@@ -15,11 +15,13 @@ enum WizardLayout {
     static let headerHeight: CGFloat = 28
     static let headerBodySpacing: CGFloat = 18
     static let bottomBarHeight: CGFloat = 54
-    static let progressPillReservedWidth: CGFloat = 140
-    static let progressBarWidth: CGFloat = 80
-    static let progressBarHeight: CGFloat = 4
+    static let buttonCornerRadius: CGFloat = 11
+    static let progressBarWidth: CGFloat = 82
+    static let progressBarHeight: CGFloat = 8
+    static let progressBarMinFillWidth: CGFloat = progressBarHeight
 
     static let transitionAnimation = Animation.spring(response: 0.42, dampingFraction: 0.86)
+    static let progressAnimation = transitionAnimation
     static let resizeDuration: TimeInterval = 0.42
 
     static func contentHeightDelta(from oldStep: WizardStep, to newStep: WizardStep) -> CGFloat {
