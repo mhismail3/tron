@@ -13,6 +13,7 @@
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::Value;
 use tracing::{instrument, warn};
 
@@ -257,6 +258,55 @@ impl MethodHandler for ProbePermissionsHandler {
             "screenRecording": snapshot.screen_recording.wire_token(),
             "accessibility":   snapshot.accessibility.wire_token(),
         }))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RequestPermissionParams {
+    permission: String,
+}
+
+/// `system.requestPermission` — user-initiated TCC prompt for the agent.
+///
+/// The Mac wrapper uses this only after the user clicks a permission
+/// gear button. Probing remains non-prompting (`system.probePermissions`);
+/// this handler is the opt-in path for macOS categories that require
+/// the target process to ask once before System Settings shows a row.
+///
+/// Currently supported:
+/// - `"screenRecording"`: calls `CGRequestScreenCaptureAccess()` inside
+///   the launchd agent so the Screen Recording list contains Tron Server,
+///   not the SwiftUI wrapper.
+pub struct RequestPermissionHandler;
+
+#[async_trait]
+impl MethodHandler for RequestPermissionHandler {
+    #[instrument(skip(self, _ctx), fields(method = "system.requestPermission"))]
+    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+        let Some(params) = params else {
+            return Err(RpcError::InvalidParams {
+                message: "params required".into(),
+            });
+        };
+        let params: RequestPermissionParams =
+            serde_json::from_value(params).map_err(|e| RpcError::InvalidParams {
+                message: format!("invalid params: {e}"),
+            })?;
+
+        match params.permission.as_str() {
+            "screenRecording" => {
+                let status =
+                    crate::tools::ui::computer_use::request_screen_recording_access().await;
+                Ok(serde_json::json!({
+                    "permission": "screenRecording",
+                    "status": status.wire_token(),
+                }))
+            }
+            other => Err(RpcError::InvalidParams {
+                message: format!("unsupported permission request: {other}"),
+            }),
+        }
     }
 }
 
@@ -622,6 +672,23 @@ mod tests {
                 "{key} must be one of granted/denied/unknown, got {token:?}",
             );
         }
+    }
+
+    #[tokio::test]
+    async fn request_permission_rejects_unsupported_permission() {
+        let ctx = make_test_context();
+        let err = RequestPermissionHandler
+            .handle(
+                Some(serde_json::json!({ "permission": "fullDiskAccess" })),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, RpcError::InvalidParams { .. }),
+            "unsupported permission requests must fail as invalid params, got {err:?}",
+        );
     }
 
     #[tokio::test]

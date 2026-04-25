@@ -15,6 +15,7 @@ struct InstallStep: View {
     @State private var cleanupMessage: String?
     @State private var cleanupError: String?
     @State private var showCleanupConfirmation = false
+    @State private var installStatusText: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -30,7 +31,7 @@ struct InstallStep: View {
             }
 
             if let outcome = state.installOutcome, outcome != .success, outcome != .alreadyInstalled {
-                GroupBox {
+                WizardInfoCard {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(outcomeDescription(outcome))
                             .font(TronTypography.wizardBodySmall)
@@ -39,11 +40,14 @@ struct InstallStep: View {
 
                         cleanupControls
                     }
-                    .padding(.vertical, 8)
                 }
             }
 
             Spacer(minLength: 0)
+
+            if installIsComplete {
+                installCompleteBanner
+            }
         }
         .task {
             // Auto-skip if we know an existing install is fully present.
@@ -61,6 +65,13 @@ struct InstallStep: View {
             }
             await runPipeline(requestID: state.installRequestID)
         }
+        .task(id: state.installOutcome) {
+            guard installIsComplete else {
+                installStatusText = nil
+                return
+            }
+            await refreshInstallStatus()
+        }
         .confirmationDialog(
             "Clean up install artifacts?",
             isPresented: $showCleanupConfirmation,
@@ -73,6 +84,10 @@ struct InstallStep: View {
         } message: {
             Text("This unloads the LaunchAgent and removes the installed Tron.app plus plist. Auth, settings, sessions, and database files are preserved.")
         }
+    }
+
+    private var installIsComplete: Bool {
+        state.installOutcome == .success || state.installOutcome == .alreadyInstalled
     }
 
     private func resetStagesToPending() {
@@ -387,6 +402,45 @@ struct InstallStep: View {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
         return false
+    }
+
+    @ViewBuilder
+    private var installCompleteBanner: some View {
+        HStack(alignment: .center, spacing: WizardCardLayout.iconTextSpacing) {
+            Image(systemName: "checkmark.seal.fill")
+                .foregroundStyle(Color.tronSuccess)
+                .font(.callout)
+                .frame(width: WizardCardLayout.iconColumnWidth, alignment: .center)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Tron is installed")
+                    .font(TronTypography.wizardSubheadline)
+                    .foregroundStyle(Color.tronEmerald)
+                Text("Current status: \(installStatusText ?? "Checking...")")
+                    .font(TronTypography.wizardCaption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, WizardCardLayout.horizontalInset)
+        .wizardGlassCard()
+    }
+
+    private func refreshInstallStatus() async {
+        installStatusText = "Checking..."
+        let token = setup.readBearerToken()
+        switch await setup.pingServer(token) {
+        case .success(let info):
+            installStatusText = "Running on port \(info.port)"
+        case .unauthorized:
+            installStatusText = "Running; token needs refresh"
+        case .unreachable:
+            installStatusText = "Not reachable"
+        case .timeout:
+            installStatusText = "Timed out"
+        case .malformedResponse:
+            installStatusText = "Unexpected response"
+        }
     }
 }
 

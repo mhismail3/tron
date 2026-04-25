@@ -310,7 +310,7 @@ Source-control operations (sync main, push, switch branches, finalize a session 
 
 ## RPC API
 
-Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **166 methods** across three groups.
+Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **167 methods** across three groups.
 
 ### Connection
 
@@ -339,6 +339,8 @@ These fields are additive; older clients that ignore them continue to work uncha
 
 `system.probePermissions` returns a non-prompting snapshot of the agent's macOS TCC grants for the three wizard-surfaced permissions — Full Disk Access, Screen Recording, Accessibility. Each value is one of `"granted"`, `"denied"`, or `"unknown"`. The Mac wizard polls this RPC every ~2 s and rechecks when the app regains focus. A `launchctl kickstart -k` is reserved for a consumed Settings round-trip from one of the wizard's permission buttons, so focus changes inside System Settings do not repeatedly restart the agent. Implementation uses native `AXIsProcessTrusted()` / `CGPreflightScreenCaptureAccess()` FFI — no subprocess, no prompt.
 
+`system.requestPermission` is the user-initiated prompt companion for the Mac wizard. It currently supports `{ "permission": "screenRecording" }`, which calls `CGRequestScreenCaptureAccess()` inside the launchd agent so macOS adds the installed Tron Server app to the Screen Recording list. It is never used for polling or startup.
+
 `system.checkForUpdates` / `system.getUpdateStatus` / `system.applyUpdate` drive the user-mode auto-updater (see Section "Deployment → User-mode auto-update"). Each has a deliberately tame default response so iOS + Mac menu-bar UIs render a meaningful empty state instead of a spurious error:
 
 - `system.checkForUpdates` returns `{ available: false, disabled: true, channel, currentVersion }` when `server.update.enabled` is `false` (the safe default) — no GitHub fetch is performed.
@@ -349,7 +351,7 @@ These fields are additive; older clients that ignore them continue to work uncha
 
 | Group | Count | Methods |
 |-------|------:|---------|
-| `system` | 8 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown`, `system.probePermissions`, `system.checkForUpdates`, `system.getUpdateStatus`, `system.applyUpdate` |
+| `system` | 9 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown`, `system.probePermissions`, `system.requestPermission`, `system.checkForUpdates`, `system.getUpdateStatus`, `system.applyUpdate` |
 | `blob` | 1 | `blob.get` |
 | `session` | 13 | `session.create`, `session.resume`, `session.list`, `session.delete`, `session.fork`, `session.getHead`, `session.getState`, `session.getHistory`, `session.reconstruct`, `session.archive`, `session.unarchive`, `session.archiveOlderThan`, `session.export` |
 | `agent` | 10 | `agent.prompt`, `agent.abort`, `agent.abortTool`, `agent.status`, `agent.queuePrompt`, `agent.dequeuePrompt`, `agent.clearQueue`, `agent.deliverSubagentResults`, `agent.submitConfirmation`, `agent.submitAnswers` |
@@ -834,7 +836,7 @@ The Mac wizard surfaces three system permissions after the server is installed, 
 | Screen Recording | ComputerUse screenshots and visual inspection | Yes | `CGPreflightScreenCaptureAccess()` in the agent |
 | Accessibility | ComputerUse mouse/keyboard control | Yes | `AXIsProcessTrusted()` in the agent |
 
-The install step only prepares the signed server bundle, writes/loads the LaunchAgent, and waits for the first heartbeat. The inner app bundle is ad-hoc signed after its `Info.plist` and resources are written so TCC binds grants to `com.tron.server` instead of Cargo's raw executable signature. Ordinary agent startup does not probe TCC or open System Settings, so macOS permission prompts cannot appear while the user is still on the install step. The wizard begins polling `system.probePermissions` only on the Permissions step, about every 2 seconds. When the user returns from a Settings pane opened by one of the wizard's permission buttons, the wrapper consumes that return, runs `launchctl kickstart -k gui/<uid>/com.tron.server` only if the permission was previously missing, waits for the agent to answer, and re-probes so new grants take effect without asking the user to manually quit the server.
+The install step only prepares the signed server bundle, writes/loads the LaunchAgent, and waits for the first heartbeat. The inner app bundle is ad-hoc signed after its `Info.plist` and resources are written so TCC binds grants to `com.tron.server` instead of Cargo's raw executable signature. Ordinary agent startup does not probe TCC or open System Settings, so macOS permission prompts cannot appear while the user is still on the install step. The wizard begins polling `system.probePermissions` only on the Permissions step, about every 2 seconds. When the user clicks the Screen Recording settings button, the wrapper first sends `system.requestPermission` so the agent itself asks macOS for capture access and appears in the Screen Recording list; then the wrapper opens the Settings pane. When the user returns from a Settings pane opened by one of the wizard's permission buttons, the wrapper consumes that return, runs `launchctl kickstart -k gui/<uid>/com.tron.server` only if the permission was previously missing, waits for the agent to answer, and re-probes so new grants take effect without asking the user to manually quit the server.
 
 ---
 

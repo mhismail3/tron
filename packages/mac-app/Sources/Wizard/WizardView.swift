@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 /// Top-level wizard. Reads the current `WizardStep` from `WizardState`
 /// and dispatches to a per-step view. The shell (top-bar with progress,
@@ -120,7 +119,8 @@ private struct WizardProgressTrack: View, @MainActor Animatable {
 ///   transitions inside that row; the progress fill animates inside
 ///   one stable Canvas-backed track.
 /// - Body content owns a single `.id(displayStep)` so it re-mounts and
-///   slides as one cohesive unit.
+///   slides as one cohesive unit. The shell keeps one fixed-height
+///   viewport, so every page slides across the same clipping geometry.
 /// - The bottom action bar is an overlay pinned to
 ///   `WizardLayout.bottomPadding` + `WizardLayout.horizontalPadding`.
 ///   Step bodies cannot push it around during measurement.
@@ -190,34 +190,19 @@ struct WizardShell<Content: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
 
             // Layer 3 (pinned): one real header row owns icon, title,
-            // and progress. Keeping the pill in this row fixes the
-            // resize-frame where the progress track looked detached
-            // from the title chrome during page 3 → 4 growth.
+            // and progress. Keeping the pill in this row prevents the
+            // progress track from drifting away from the title chrome
+            // during page transitions.
             headerBar
                 .padding(.top, WizardLayout.topPadding)
                 .padding(.horizontal, WizardLayout.horizontalPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        // Per-step canvas: width stays 480 but height is driven by
-        // `displayStep.preferredHeight` so dense steps (Permissions,
-        // Install, PairingInfo) get enough room without scrolling and
-        // sparse steps (ExistingInstall, Done) don't float in dead
-        // space. `.windowResizability(.contentSize)` on the scene
-        // propagates the new content size out to `NSWindow`. The
-        // sliding content owns its own animation above; the manual
-        // AppKit resize below only runs when the preferred content
-        // height actually changes.
-        .frame(width: WizardLayout.width, height: displayStep.preferredHeight)
-        .onChange(of: displayStep) { oldStep, newStep in
-            // SwiftUI's implicit window resize via `.contentSize`
-            // doesn't always interpolate smoothly (AppKit can choose
-            // to snap instead of animate). Manually driving
-            // `NSWindow.setFrame(_:display:animate:)` guarantees the
-            // window chrome tracks the content animation on every
-            // step change. We keep the top edge pinned so the
-            // wizard doesn't jitter upward as it grows.
-            animateHostingWindow(from: oldStep, to: newStep)
-        }
+        // Fixed wizard canvas: width stays 480 and height stays at the
+        // tallest step's requirement. Lower-density pages get breathing
+        // room, and every horizontal page slide runs inside identical
+        // clipping geometry.
+        .frame(width: WizardLayout.width, height: WizardLayout.height)
         // Two-phase direction+step update (see struct doc). Phase 1
         // runs synchronously: write the new direction, which re-renders
         // the CURRENTLY-mounted chrome so its `.transition(slideTransition)`
@@ -479,52 +464,6 @@ struct WizardShell<Content: View>: View {
                 alignment: .leading
             )
             .animation(WizardLayout.progressAnimation, value: fraction)
-    }
-
-    // MARK: - Animated window resize
-
-    /// Drives `NSWindow.setFrame(_:display:animate:)` so the window
-    /// chrome resizes in lockstep with the SwiftUI content transition.
-    /// Pins the window's TOP edge (subtracts the height delta from
-    /// the origin Y, since AppKit frames anchor at the bottom-left)
-    /// so the wizard grows/shrinks downward instead of jumping
-    /// upward. Width stays pinned by the SwiftUI content size.
-    ///
-    /// The delta is step-to-step CONTENT height, not
-    /// `window.frame.height`. AppKit frame height includes titlebar /
-    /// full-size-content-view accounting, so comparing that directly to
-    /// `WizardStep.preferredHeight` made same-height transitions look
-    /// like real resizes on the first click.
-    private func animateHostingWindow(from oldStep: WizardStep, to newStep: WizardStep) {
-        guard WizardLayout.shouldResizeWindow(from: oldStep, to: newStep) else { return }
-        guard let window = Self.findHostingWindow() else { return }
-        let delta = WizardLayout.contentHeightDelta(from: oldStep, to: newStep)
-        var frame = window.frame
-        frame.size.height += delta
-        frame.origin.y -= delta
-        NSAnimationContext.runAnimationGroup { context in
-            // Match the SwiftUI transition animation above so the
-            // window, header slide, and body transition
-            // all finish within the same frame budget. AppKit doesn't
-            // expose a spring curve directly; duration-matching the
-            // spring's `response` parameter and using ease-in-ease-out
-            // is the closest visual match, and keeps the window chrome
-            // from lagging the SwiftUI content by a frame or two at
-            // the end of the animation.
-            context.duration = WizardLayout.resizeDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            context.allowsImplicitAnimation = true
-            window.animator().setFrame(frame, display: true)
-        }
-    }
-
-    /// Locates the wizard window among `NSApp.windows`. The wizard
-    /// app has exactly one visible `WindowGroup` instance at a time
-    /// (the menu-bar mode orders its own 1×1 window out), so
-    /// picking the first key or visible non-panel window is enough.
-    private static func findHostingWindow() -> NSWindow? {
-        if let key = NSApp.keyWindow, !(key is NSPanel) { return key }
-        return NSApp.windows.first { $0.isVisible && !($0 is NSPanel) }
     }
 
     // MARK: - Direction-aware slide transition

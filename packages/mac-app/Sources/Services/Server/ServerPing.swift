@@ -333,6 +333,119 @@ enum PermissionProbeRPC {
     }
 }
 
+/// One-shot `system.requestPermission` RPC client. This is deliberately
+/// separate from `PermissionProbeRPC`: probing must stay silent, while
+/// this request is called only after a user clicks a Permissions-step
+/// gear button.
+enum PermissionRequestRPC {
+    static func request(
+        _ permission: Permission,
+        host: String,
+        port: Int,
+        token: String?,
+        timeout: TimeInterval = 4
+    ) async -> Bool {
+        guard let url = URLComponents(string: "ws://\(host):\(port)/ws")?.url else {
+            return false
+        }
+
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        if let token, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+
+        let task = session.webSocketTask(with: request)
+        task.resume()
+        defer { task.cancel(with: .goingAway, reason: nil) }
+
+        let requestID = "mac-request-permission-\(permission.rawValue)"
+        let payload: [String: Any] = [
+            "id": requestID,
+            "method": "system.requestPermission",
+            "params": ["permission": permission.rawValue],
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
+              let str = String(data: data, encoding: .utf8) else {
+            return false
+        }
+
+        do {
+            try await task.send(.string(str))
+            for _ in 0..<8 {
+                let message = try await task.receive()
+                guard let raw = messageData(from: message) else { return false }
+                switch decodeFrame(raw, expectedID: requestID) {
+                case .result(let responsePermission, _):
+                    return responsePermission == permission
+                case .ignore:
+                    continue
+                case .error, .malformed:
+                    return false
+                }
+            }
+            return false
+        } catch {
+            return false
+        }
+    }
+
+    enum ResponseFrame: Equatable {
+        case result(Permission, PermissionStatus)
+        case ignore
+        case error
+        case malformed
+    }
+
+    static func decodeFrame(_ data: Data, expectedID: String) -> ResponseFrame {
+        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+            return .malformed
+        }
+        guard responseID(json["id"], matches: expectedID) else {
+            return .ignore
+        }
+        if json["error"] != nil || json["success"] as? Bool == false {
+            return .error
+        }
+        guard let result = json["result"] as? [String: Any],
+              let rawPermission = result["permission"] as? String,
+              let permission = Permission(rawValue: rawPermission) else {
+            return .malformed
+        }
+
+        let status: PermissionStatus
+        switch result["status"] as? String {
+        case "granted":
+            status = .granted
+        case "denied":
+            status = .denied
+        default:
+            status = .probeUnavailable
+        }
+        return .result(permission, status)
+    }
+
+    private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {
+        switch message {
+        case .data(let data):
+            return data
+        case .string(let string):
+            return Data(string.utf8)
+        @unknown default:
+            return nil
+        }
+    }
+
+    private static func responseID(_ value: Any?, matches expectedID: String) -> Bool {
+        if let string = value as? String {
+            return string == expectedID
+        }
+        return false
+    }
+}
+
 /// Captures the HTTP upgrade response status code via the URLSession
 /// delegate callbacks. Thread-safe via NSLock so it can be touched from
 /// the URLSession's delegate queue and the awaiter.

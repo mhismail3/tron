@@ -101,7 +101,7 @@ Example: `InstallPlanner.plan(sourceBinary:paths:existingInstall:) -> Result<Ins
 
 ### Wizard visual system
 
-The wizard uses a single glass canvas with pinned chrome: the header row, progress pill, and bottom actions never participate in body measurement. The header is one `HStack` that owns the step icon, title, and progress pill, so all three share the same vertical center and the progress pill cannot drift during AppKit window resizes. The progress indicator has one flat outer capsule, bare `X / 7` text, and a tactile bar; avoid nesting another pill around the count. The bar fill is drawn by one animatable Canvas-backed `WizardProgressTrack`, so growth/shrink animation happens inside a single rendered track instead of moving as a separate SwiftUI subview while AppKit resizes between height bands. `TronTypography` registers and uses the bundled Exo 2 face for wizard title/body/button text across every step, while terminal/token surfaces stay monospaced. The welcome page centers its intro copy and optional detected-install banner as one middle group, and the banner sizes to its content instead of spanning the window. Tailscale and Existing Install center their body groups in the space between title and buttons. Existing Install recovery appears as its own compact "Need a fresh start?" cleanup card below the install status card, pads its copy away from the left edge, and uses the same square tertiary icon button style as the Permissions settings buttons. Permissions rows omit individual "Required" badges, align the Re-check link icon with the row status icons, and rely on the disabled branch of `WizardPrimaryButtonStyle` to make blocked Continue buttons visibly inactive.
+The wizard uses a single glass canvas with pinned chrome: the header row, progress pill, and bottom actions never participate in body measurement. The shell reports one fixed `480 × WizardLayout.height` content size, where `WizardLayout.height` is the tallest step's preferred height, so every horizontal page transition runs inside one stable viewport and the window never grows mid-slide. The header is one `HStack` that owns the step icon, title, and progress pill, so all three share the same vertical center. The progress indicator has one flat outer capsule, bare `X / 7` text, and a tactile bar; avoid nesting another pill around the count. The bar fill is drawn by one animatable Canvas-backed `WizardProgressTrack`, so growth/shrink animation happens inside a single rendered track instead of moving as a separate SwiftUI subview during page transitions. `TronTypography` registers and uses the bundled Exo 2 face for wizard title/body/button text across every step, while terminal/token surfaces stay monospaced. The welcome page centers its intro copy and optional detected-install banner as one middle group, and the banner sizes to its content instead of spanning the window. Tailscale and Existing Install center their body groups in the space between title and buttons. Icon-led cards use `WizardInfoCard` + `WizardIconTextRow`, whose horizontal inset equals the icon-to-text gap and whose fixed icon column prevents wide SF Symbols from visually hugging the card's left edge. Card backgrounds go through `WizardGlassCardBackground` / `.wizardGlassCard()` so dark-mode containers keep a visible liquid-glass fill, border, and shadow instead of flattening into the window. Existing Install recovery appears as its own compact "Need a fresh start?" cleanup card below the install status card, pads its copy away from the left edge, and uses the same square tertiary icon button style as the Permissions settings buttons. Permissions rows omit individual "Required" badges, align the Re-check link icon with the row status icons, and rely on the disabled branch of `WizardPrimaryButtonStyle` to make blocked Continue buttons visibly inactive.
 
 ### Single-instance lock via POSIX `fcntl`
 
@@ -139,10 +139,14 @@ The install heartbeat is intentionally permission-neutral: the LaunchAgent
 may start the server, but ordinary agent startup must not probe TCC or open
 System Settings. The Permissions step is the first place the wrapper asks the
 agent for `system.probePermissions`, so Full Disk Access, Screen Recording,
-and Accessibility prompts cannot race the install progress UI. The step
-rechecks on app activation, but it only kickstarts launchd after consuming a
-Settings round-trip opened by one of the wizard's permission buttons; focus
-changes inside System Settings are not restart signals.
+and Accessibility prompts cannot race the install progress UI. Screen
+Recording has one user-initiated exception: when the user clicks that row's
+settings button, the wrapper first sends `system.requestPermission` so the
+agent process calls `CGRequestScreenCaptureAccess()` and macOS creates the
+Tron Server row in the Screen Recording list. The step rechecks on app
+activation, but it only kickstarts launchd after consuming a Settings
+round-trip opened by one of the wizard's permission buttons; focus changes
+inside System Settings are not restart signals.
 
 ### Subsequent launches (menu-bar-only path)
 
@@ -183,6 +187,9 @@ before the user can understand the sequence.
 When revisiting the page after success, row state is derived
 synchronously from terminal `installOutcome` so the completed icons are
 part of the page transition rather than a post-mount update.
+After success or an already-installed skip, the page shows a bottom
+banner that confirms Tron is installed and refreshes the current server
+status through `setup.pingServer`.
 
 Recovery action:
 ExistingInstallStep / failed InstallStep → InstallArtifactCleaner.clean(...)
@@ -194,7 +201,7 @@ ExistingInstallStep / failed InstallStep → InstallArtifactCleaner.clean(...)
 
 ## Key Invariants
 
-- **`Tron.app` never builds the Rust agent.** The binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing → wizard surfaces `sourceBinaryMissing` with a "reinstall the DMG" message.
+- **`Tron.app` never builds the Rust agent.** The binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing → wizard surfaces `sourceBinaryMissing` with a "reinstall the DMG" message. Any agent-side RPC/TCC/install change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/tron-agent`.
 - **The Install step is not an `onAppear` side effect.** Landing on the page is read-only; the user must press Install before the wrapper copies the binary, writes the LaunchAgent plist, or calls launchd.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` overlays the existing-install banner below the centered copy; it must not switch the first page to a top-leading stack when detection completes.

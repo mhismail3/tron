@@ -5,10 +5,11 @@
 // `system.probePermissions` in `server::rpc::handlers::system`.
 //
 // The key design rule: probes must NEVER prompt. The Mac wrapper drives
-// prompting via System Settings deep links; a probe that itself triggers
-// a TCC dialog would race with that UX and confuse users. That's why
-// `check_accessibility` uses `AXIsProcessTrusted()` (no options dict)
-// rather than `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])`,
+// prompting via explicit user actions on the Permissions step; a probe
+// that itself triggers a TCC dialog would race with that UX and confuse
+// users. That's why `check_accessibility` uses `AXIsProcessTrusted()`
+// (no options dict) rather than
+// `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])`,
 // and why ordinary server startup never calls these probes.
 
 /// Result of probing a single macOS TCC permission.
@@ -113,6 +114,12 @@ unsafe extern "C" {
     /// Recording access in the TCC database, `0` otherwise. Does NOT
     /// prompt, unlike `CGRequestScreenCaptureAccess`. macOS 10.15+.
     fn CGPreflightScreenCaptureAccess() -> u8;
+
+    /// Prompts for Screen Recording access for the current process.
+    /// This is intentionally NOT used by polling probes; the Mac
+    /// wrapper calls it only after the user clicks the Screen Recording
+    /// settings button so macOS creates the TCC row for Tron Server.
+    fn CGRequestScreenCaptureAccess() -> u8;
 }
 
 // ─── Async check functions (thin wrappers with timeouts) ───
@@ -170,6 +177,39 @@ pub async fn check_screen_recording() -> PermissionStatus {
     {
         PermissionStatus::Unknown {
             reason: "screen-recording probe is macOS-only".into(),
+        }
+    }
+}
+
+/// Explicit Screen Recording request via `CGRequestScreenCaptureAccess()`.
+///
+/// macOS only adds an application to the Screen Recording list after
+/// that exact process asks for the permission. Opening System Settings
+/// from the wrapper is not enough, and asking from the wrapper would
+/// add `TronMac.app`/`Tron.app` instead of the launchd server. This
+/// prompt path exists so the wrapper can ask the already-installed
+/// agent to create its own TCC row after the user clicks the Screen
+/// Recording gear button.
+#[allow(unsafe_code)]
+pub async fn request_screen_recording_access() -> PermissionStatus {
+    #[cfg(target_os = "macos")]
+    {
+        let granted =
+            tokio::task::spawn_blocking(|| unsafe { CGRequestScreenCaptureAccess() } != 0)
+                .await
+                .unwrap_or(false);
+        if granted {
+            PermissionStatus::Granted
+        } else {
+            PermissionStatus::Denied {
+                guidance: "System Settings > Privacy & Security > Screen Recording".into(),
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        PermissionStatus::Unknown {
+            reason: "screen-recording request is macOS-only".into(),
         }
     }
 }

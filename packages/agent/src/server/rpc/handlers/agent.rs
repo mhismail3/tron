@@ -1,4 +1,20 @@
-//! Agent handlers: prompt, abort.
+//! Agent RPC handlers.
+//!
+//! ## Submodules
+//!
+//! - `prompt_runtime`: blocking SQLite reads, prompt bootstrap, session resume,
+//!   skill context assembly, and the final `SessionUpdated` payload snapshot.
+//! - `prompt_service`: active-run lifecycle, prompt execution, hook dispatch,
+//!   event persistence, and completion broadcasts.
+//!
+//! ## Invariants
+//!
+//! - `agent.prompt` starts exactly one orchestrator run per session and always
+//!   releases the run guard when execution ends.
+//! - Completion should emit a best-effort `session_updated` event after SQLite
+//!   persistence flushes. The snapshot read retries transient SQLite
+//!   busy/locked errors so clients do not miss the final inactive/status update
+//!   during high-concurrency test and dogfood runs.
 
 #[cfg(test)]
 use crate::events::EventType;

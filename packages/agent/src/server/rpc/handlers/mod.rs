@@ -76,6 +76,7 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("system.getDiagnostics", system::GetDiagnosticsHandler);
     registry.register("system.shutdown", system::ShutdownHandler);
     registry.register("system.probePermissions", system::ProbePermissionsHandler);
+    registry.register("system.requestPermission", system::RequestPermissionHandler);
     // System — user-mode auto-updater (Plan §H.2, Phase 5.5)
     registry.register("system.checkForUpdates", system::CheckForUpdatesHandler);
     registry.register("system.getUpdateStatus", system::GetUpdateStatusHandler);
@@ -387,6 +388,7 @@ mod tests {
         assert!(reg.has_method("mcp.addServer"));
         assert!(reg.has_method("mcp.reload"));
         // Phase 5.5 auto-updater RPCs
+        assert!(reg.has_method("system.requestPermission"));
         assert!(reg.has_method("system.checkForUpdates"));
         assert!(reg.has_method("system.getUpdateStatus"));
         assert!(reg.has_method("system.applyUpdate"));
@@ -398,8 +400,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            166,
-            "expected 166 methods, got {}",
+            167,
+            "expected 167 methods, got {}",
             reg.methods().len()
         );
     }

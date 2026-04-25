@@ -63,7 +63,7 @@ struct ExistingInstallStep: View {
 
     @ViewBuilder
     private var statusCard: some View {
-        GroupBox {
+        WizardInfoCard {
             VStack(alignment: .leading, spacing: 12) {
                 switch state.existingInstallStatus {
                 case .none:
@@ -104,10 +104,8 @@ struct ExistingInstallStep: View {
 
     @ViewBuilder
     private var cleanupCard: some View {
-        GroupBox {
+        WizardInfoCard(verticalPadding: ExistingInstallStepLayout.cleanupCardVerticalPadding) {
             cleanupControls
-                .padding(.vertical, ExistingInstallStepLayout.cardVerticalPadding)
-                .padding(.leading, ExistingInstallStepLayout.cleanupCardLeadingPadding)
         }
     }
 
@@ -160,20 +158,18 @@ struct ExistingInstallStep: View {
 
     @ViewBuilder
     private func cardRow(icon: String, iconColor: Color, title: String, body: String) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        WizardIconTextRow {
             Image(systemName: icon).font(.title).foregroundStyle(iconColor)
+        } content: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(TronTypography.wizardHeadline)
                 Text(body).font(TronTypography.wizardBodySmall).foregroundStyle(.secondary)
             }
-            Spacer()
         }
-        .padding(.vertical, 8)
     }
 }
 
 enum ExistingInstallStepLayout {
     static let contentSpacing: CGFloat = 12
-    static let cardVerticalPadding: CGFloat = 2
-    static let cleanupCardLeadingPadding: CGFloat = 14
+    static let cleanupCardVerticalPadding: CGFloat = 8
 }

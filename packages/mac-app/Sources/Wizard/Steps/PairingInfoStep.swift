@@ -117,16 +117,19 @@ struct PairingInfoStep: View {
                 pairingRow(label: "Port", value: String(payload.port))
                 pairingRow(label: "Pairing token", value: payload.token, masked: true)
             } else {
-                GroupBox {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                WizardInfoCard {
+                    WizardIconTextRow(alignment: .top) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.title)
+                            .foregroundStyle(.orange)
+                    } content: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(failureHeadline).font(TronTypography.wizardSubheadline)
                             Text(failureBody)
                                 .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                    }.padding(.vertical, 6)
+                    }
                 }
             }
         }

@@ -45,6 +45,11 @@ struct EnvironmentSetup: Sendable {
     /// unreachable (e.g. mid-`launchctl kickstart`).
     var probeAgentPermissions: @Sendable () async -> [Permission: PermissionStatus]
 
+    /// Asks the AGENT process to create a macOS TCC prompt/list row for
+    /// a permission that requires the target binary to request access.
+    /// This is user-initiated only; probes remain non-prompting.
+    var requestAgentPermission: @Sendable (Permission) async -> Bool
+
     /// Detects whether a CLI-installed Tron is already present at the
     /// canonical paths.
     var detectExistingInstall: @Sendable () -> ExistingInstallStatus
@@ -93,6 +98,14 @@ struct EnvironmentSetup: Sendable {
         },
         probeAgentPermissions: {
             await PermissionProbeRPC.probeAll(
+                host: "127.0.0.1",
+                port: TronPaths.defaultServerPort,
+                token: BearerTokenReader.read(at: TronPaths.bearerTokenPath)
+            )
+        },
+        requestAgentPermission: { permission in
+            await PermissionRequestRPC.request(
+                permission,
                 host: "127.0.0.1",
                 port: TronPaths.defaultServerPort,
                 token: BearerTokenReader.read(at: TronPaths.bearerTokenPath)

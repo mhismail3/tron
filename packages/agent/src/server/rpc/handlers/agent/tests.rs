@@ -1081,18 +1081,15 @@ async fn prompt_emits_session_updated_after_completion() {
         .await
         .unwrap();
 
-    let found = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    let found = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            match rx.try_recv() {
+            match rx.recv().await {
                 Ok(crate::core::events::TronEvent::SessionUpdated { base, .. }) => {
                     if base.session_id == sid {
                         break true;
                     }
                 }
-                Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
-                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(err) => panic!("unexpected broadcast error: {err}"),
             }
         }

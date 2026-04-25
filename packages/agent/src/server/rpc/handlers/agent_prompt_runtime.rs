@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::events::types::payloads::skill::{SkillsClearedMode, SkillsClearedPayload};
 use crate::events::{ActivitySummaryLine, EventStore, EventType, MessagePreview};
@@ -267,6 +268,18 @@ pub struct SessionUpdateData {
     pub session: crate::events::sqlite::row_types::SessionRow,
     pub preview: Option<MessagePreview>,
     pub activity_lines: Vec<ActivitySummaryLine>,
+}
+
+const SESSION_UPDATE_LOAD_ATTEMPTS: usize = 40;
+const SESSION_UPDATE_LOAD_RETRY_DELAY: Duration = Duration::from_millis(25);
+
+fn session_update_read_error_is_busy(error: &crate::events::EventStoreError) -> bool {
+    matches!(error, crate::events::EventStoreError::Busy { .. })
+        || matches!(
+            error,
+            crate::events::EventStoreError::Sqlite(sqlite_error)
+                if crate::events::sqlite::contention::is_rusqlite_busy(sqlite_error)
+        )
 }
 
 fn load_prompt_context_artifacts(
@@ -977,37 +990,100 @@ pub struct SkillContextResult {
 }
 
 pub async fn load_session_update_data(
-    session_manager: Arc<SessionManager>,
+    _session_manager: Arc<SessionManager>,
     event_store: Arc<EventStore>,
     session_id: String,
 ) -> Result<Option<SessionUpdateData>, RpcError> {
     run_blocking_task("agent.prompt.session_update", move || {
-        let session =
-            session_manager
-                .get_session(&session_id)
-                .map_err(|error| RpcError::Internal {
-                    message: error.to_string(),
-                })?;
-        let Some(session) = session else {
-            return Ok(None);
-        };
+        let mut last_busy_error = None;
 
-        let preview = event_store
-            .get_session_message_previews(&[session_id.as_str()])
-            .ok()
-            .and_then(|mut previews| previews.remove(&session_id));
+        for attempt in 1..=SESSION_UPDATE_LOAD_ATTEMPTS {
+            match load_session_update_data_once(&event_store, &session_id) {
+                Ok(data) => return Ok(data),
+                Err(error)
+                    if session_update_read_error_is_busy(&error)
+                        && attempt < SESSION_UPDATE_LOAD_ATTEMPTS =>
+                {
+                    last_busy_error = Some(error);
+                    std::thread::sleep(SESSION_UPDATE_LOAD_RETRY_DELAY);
+                }
+                Err(error) => {
+                    return Err(RpcError::Internal {
+                        message: error.to_string(),
+                    });
+                }
+            }
+        }
 
-        let activity_lines = event_store
-            .get_session_activity_summaries(&session_id)
-            .unwrap_or_default();
-
-        Ok(Some(SessionUpdateData {
-            session,
-            preview,
-            activity_lines,
-        }))
+        Err(RpcError::Internal {
+            message: last_busy_error
+                .map(|error| error.to_string())
+                .unwrap_or_else(|| "session update data unavailable".to_string()),
+        })
     })
     .await
+}
+
+fn load_session_update_data_once(
+    event_store: &EventStore,
+    session_id: &str,
+) -> crate::events::Result<Option<SessionUpdateData>> {
+    let Some(session) = event_store.get_session(session_id)? else {
+        return Ok(None);
+    };
+
+    let preview = match event_store.get_session_message_previews(&[session_id]) {
+        Ok(mut previews) => previews.remove(session_id),
+        Err(error) if session_update_read_error_is_busy(&error) => return Err(error),
+        Err(_) => None,
+    };
+
+    let activity_lines = match event_store.get_session_activity_summaries(session_id) {
+        Ok(lines) => lines,
+        Err(error) if session_update_read_error_is_busy(&error) => return Err(error),
+        Err(_) => Vec::new(),
+    };
+
+    Ok(Some(SessionUpdateData {
+        session,
+        preview,
+        activity_lines,
+    }))
+}
+
+#[cfg(test)]
+mod session_update_data_tests {
+    use super::*;
+
+    #[test]
+    fn session_update_busy_detection_covers_busy_and_locked_reads() {
+        let busy = crate::events::EventStoreError::Busy {
+            operation: "session_update",
+            attempts: 3,
+        };
+        let locked = crate::events::EventStoreError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ffi::ErrorCode::DatabaseLocked,
+                extended_code: rusqlite::ffi::ErrorCode::DatabaseLocked as i32,
+            },
+            None,
+        ));
+        let other = crate::events::EventStoreError::Sqlite(rusqlite::Error::QueryReturnedNoRows);
+
+        assert!(session_update_read_error_is_busy(&busy));
+        assert!(session_update_read_error_is_busy(&locked));
+        assert!(!session_update_read_error_is_busy(&other));
+    }
+
+    #[test]
+    fn session_update_retry_budget_stays_bounded() {
+        assert!(SESSION_UPDATE_LOAD_ATTEMPTS >= 20);
+        assert!(SESSION_UPDATE_LOAD_RETRY_DELAY <= Duration::from_millis(50));
+        assert!(
+            SESSION_UPDATE_LOAD_RETRY_DELAY * SESSION_UPDATE_LOAD_ATTEMPTS as u32
+                <= Duration::from_secs(2)
+        );
+    }
 }
 
 #[cfg(test)]

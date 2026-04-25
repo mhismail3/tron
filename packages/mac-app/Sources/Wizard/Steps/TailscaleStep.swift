@@ -47,11 +47,12 @@ struct TailscaleStep: View {
 
     @ViewBuilder
     private var statusCard: some View {
-        GroupBox {
-            HStack(alignment: .center, spacing: 12) {
+        WizardInfoCard {
+            WizardIconTextRow {
                 Image(systemName: iconName)
                     .font(.title)
                     .foregroundStyle(iconColor)
+            } content: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(headline)
                         .font(TronTypography.wizardHeadline)
@@ -59,12 +60,11 @@ struct TailscaleStep: View {
                         .font(TronTypography.wizardBodySmall)
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
+            } trailing: {
                 if probing {
                     ProgressView().controlSize(.small)
                 }
             }
-            .padding(.vertical, 8)
         }
     }
 

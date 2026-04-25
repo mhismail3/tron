@@ -46,23 +46,15 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// Preferred height of the wizard canvas for this step. The shell
-    /// reads this and animates the window frame between steps so dense
-    /// steps (Permissions, Install, PairingInfo) get enough room for
-    /// their cards without scrolling, and sparse steps (Welcome, Done,
-    /// ExistingInstall) don't float in dead space. Width stays pinned
-    /// at 480 for every step — only height varies.
+    /// Minimum height this step needs inside the fixed wizard canvas.
+    /// `WizardShell` keeps the actual window at `WizardLayout.height`
+    /// (the tallest step's height) so horizontal page transitions always
+    /// run inside one stable viewport.
     ///
     /// Heights are deliberately collapsed into bands rather than tuned
     /// per-step: the three lightweight "gate" steps (welcome / tailscale
-    /// / existingInstall) share a single height so the user can walk
-    /// through the opening of the wizard without the window resizing
-    /// between each click. Resizes only happen when the next step
-    /// genuinely needs more room (existingInstall → install,
-    /// install → permissions) or substantially less (pairingInfo → done).
-    /// `WizardShell` further
-    /// no-ops the AppKit resize animation when the delta is < 1pt, so
-    /// steps that share a band stay completely still during navigation.
+    /// / existingInstall) share a single lower-height band, while the
+    /// fixed shell height is set to the tallest permissions page.
     var preferredHeight: CGFloat {
         switch self {
         case .welcome: return 360

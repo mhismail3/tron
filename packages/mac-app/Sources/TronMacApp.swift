@@ -20,17 +20,14 @@ struct TronMacApp: App {
                 // directly so they stay emerald even if a sub-view
                 // overrides the tint locally.
                 .tint(Color.tronEmerald)
-                // Width is pinned at 480 for every step, but height
-                // is driven per-step by `WizardStep.preferredHeight`
-                // so the window grows/shrinks to fit the content.
-                // `RootView` propagates the chosen size per mode
+                // Width is pinned at 480, and wizard height is fixed
+                // to the tallest onboarding step. `RootView`
+                // propagates the chosen size per mode
                 // (loading/wizard/menu-bar-only); `.contentSize`
                 // below tells SwiftUI to size the window to whatever
-                // that content reports, and the wizard's internal
-                // `.animation` on the frame value produces a smooth
-                // spring-driven resize. `WindowConfigurator` still
-                // strips `.resizable` from the style mask so the
-                // user can't drag-resize.
+                // that content reports. `WindowConfigurator` still
+                // strips `.resizable` from the style mask so the user
+                // can't drag-resize.
                 // `.containerBackground(_:for: .window)` paints the
                 // material at the WINDOW level — under the entire
                 // SwiftUI content view, on top of nothing. On macOS 26
@@ -90,19 +87,16 @@ struct RootView: View {
         Group {
             switch mode {
             case .loading:
-                // Pin the loading canvas to a plausible wizard size so
-                // the window opens at roughly the right dimensions
-                // before `WizardView` takes over. Height = 360 matches
-                // the default `WizardStep.preferredHeight` for the
-                // most common opening step (Welcome).
+                // Pin the loading canvas to the final wizard size so
+                // the window does not resize between loading and the
+                // first step.
                 ProgressView("Loading…")
                     .controlSize(.large)
-                    .frame(width: 480, height: 360)
+                    .frame(width: WizardLayout.width, height: WizardLayout.height)
             case .wizard:
-                // `WizardView` → `WizardShell` applies its own per-step
-                // `.frame(width: 480, height: displayStep.preferredHeight)`
-                // with an animated spring, so the window resizes as
-                // the user navigates between steps.
+                // `WizardView` → `WizardShell` applies one fixed
+                // `.frame(width: WizardLayout.width, height: WizardLayout.height)`
+                // so step transitions do not fight window resizing.
                 WizardView(initialStep: wizardEntryStep)
             case .menuBarOnly:
                 MenuBarHostView(onShowPairingInfo: {

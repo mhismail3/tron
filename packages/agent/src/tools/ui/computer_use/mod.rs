@@ -175,7 +175,9 @@ mod codegen;
 mod permissions;
 mod screenshot;
 
-pub use permissions::{PermissionStatus, WizardPermissions, probe_wizard_permissions};
+pub use permissions::{
+    PermissionStatus, WizardPermissions, probe_wizard_permissions, request_screen_recording_access,
+};
 
 // Re-export parse functions for tests
 #[cfg(test)]

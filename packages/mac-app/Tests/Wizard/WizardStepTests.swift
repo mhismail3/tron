@@ -88,6 +88,21 @@ struct InstallPipelineStageOrderingTests {
         #expect(source.contains("case .success, .alreadyInstalled:"))
         #expect(source.contains("private func stageIcon"))
     }
+
+    @Test("completed install page shows a status banner")
+    func completedInstallPageShowsStatusBanner() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let step = packageRoot.appending(path: "Sources/Wizard/Steps/InstallStep.swift")
+        let source = try String(contentsOf: step, encoding: .utf8)
+
+        #expect(source.contains("private var installCompleteBanner"))
+        #expect(source.contains("Tron is installed"))
+        #expect(source.contains("Current status:"))
+        #expect(source.contains("refreshInstallStatus"))
+    }
 }
 
 @Suite("Permission ordering")
@@ -123,13 +138,12 @@ struct WizardStepPreferredHeightTests {
                 "Permissions must be tallest so all three cards fit without scrolling")
     }
 
-    @Test("opening gate steps share one no-resize band")
-    func openingStepsShareNoResizeBand() {
+    @Test("opening gate steps share one lower-height band")
+    func openingStepsShareLowerHeightBand() {
         let gateHeight = WizardStep.welcome.preferredHeight
         #expect(WizardStep.tailscale.preferredHeight == gateHeight)
         #expect(WizardStep.existingInstall.preferredHeight == gateHeight)
-        #expect(WizardLayout.shouldResizeWindow(from: .welcome, to: .tailscale) == false)
-        #expect(WizardLayout.shouldResizeWindow(from: .tailscale, to: .existingInstall) == false)
+        #expect(gateHeight < WizardLayout.height)
     }
 
     @Test("install step leaves room for explicit confirmation without becoming tallest")
@@ -138,11 +152,22 @@ struct WizardStepPreferredHeightTests {
         #expect(WizardStep.install.preferredHeight < WizardStep.permissions.preferredHeight)
     }
 
-    @Test("window resize math is content-delta based")
-    func contentDeltaDrivesResize() {
-        #expect(WizardLayout.contentHeightDelta(from: .welcome, to: .tailscale) == 0)
-        #expect(WizardLayout.contentHeightDelta(from: .existingInstall, to: .install) == 80)
-        #expect(WizardLayout.contentHeightDelta(from: .install, to: .permissions) == 40)
+    @Test("wizard canvas is fixed to the tallest step height")
+    func wizardCanvasUsesTallestStepHeight() throws {
+        let tallestStepHeight = try #require(WizardStep.allCases.map { $0.preferredHeight }.max())
+        #expect(WizardLayout.height == tallestStepHeight)
+        #expect(WizardLayout.height == WizardStep.permissions.preferredHeight)
+
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let wizardView = packageRoot.appending(path: "Sources/Wizard/WizardView.swift")
+        let source = try String(contentsOf: wizardView, encoding: .utf8)
+
+        #expect(source.contains(".frame(width: WizardLayout.width, height: WizardLayout.height)"))
+        #expect(!source.contains("animateHostingWindow"))
+        #expect(!source.contains("displayStep.preferredHeight"))
     }
 }
 
@@ -197,7 +222,7 @@ struct WizardVisualLayoutTests {
         let wizardView = packageRoot.appending(path: "Sources/Wizard/WizardView.swift")
         let source = try String(contentsOf: wizardView, encoding: .utf8)
         let start = try #require(source.range(of: "private func progressTrack"))
-        let end = try #require(source.range(of: "// MARK: - Animated window resize"))
+        let end = try #require(source.range(of: "// MARK: - Direction-aware slide transition"))
         let progressTrackSource = source[start.lowerBound..<end.lowerBound]
 
         #expect(source.contains("private struct WizardProgressTrack: View"))
@@ -249,8 +274,7 @@ struct WizardVisualLayoutTests {
     @Test("existing-install cleanup action is a separate compact card")
     func existingInstallCleanupUsesSeparateIconCard() throws {
         #expect(ExistingInstallStepLayout.contentSpacing <= 12)
-        #expect(ExistingInstallStepLayout.cardVerticalPadding <= 4)
-        #expect(ExistingInstallStepLayout.cleanupCardLeadingPadding >= 14)
+        #expect(ExistingInstallStepLayout.cleanupCardVerticalPadding <= WizardCardLayout.verticalInset)
 
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -268,6 +292,46 @@ struct WizardVisualLayoutTests {
         #expect(!source.contains("Divider()"))
     }
 
+    @Test("icon-led cards use balanced icon padding")
+    func iconLedCardsUseBalancedPadding() throws {
+        #expect(WizardCardLayout.horizontalInset == WizardCardLayout.iconTextSpacing)
+        #expect(WizardCardLayout.iconColumnWidth >= 28)
+        #expect(WizardCardLayout.cornerRadius == 10)
+
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let layout = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Wizard/WizardLayout.swift"),
+            encoding: .utf8
+        )
+        #expect(layout.contains("WizardGlassCardBackground"))
+        #expect(layout.contains(".ultraThinMaterial"))
+        #expect(layout.contains("wizardGlassCard"))
+
+        for path in [
+            "Sources/Wizard/Steps/TailscaleStep.swift",
+            "Sources/Wizard/Steps/ExistingInstallStep.swift",
+            "Sources/Wizard/Steps/PermissionsStep.swift",
+            "Sources/Wizard/Steps/PairingInfoStep.swift",
+        ] {
+            let source = try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
+            #expect(source.contains("WizardInfoCard"))
+            #expect(source.contains("WizardIconTextRow"))
+        }
+
+        for path in [
+            "Sources/Wizard/Steps/WelcomeStep.swift",
+            "Sources/Wizard/Steps/InstallStep.swift",
+        ] {
+            let source = try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
+            #expect(source.contains("WizardCardLayout.iconTextSpacing"))
+            #expect(source.contains("WizardCardLayout.horizontalInset"))
+            #expect(source.contains("WizardCardLayout.iconColumnWidth"))
+        }
+    }
+
     @Test("permissions page has no Required badges and aligns the re-check link")
     func permissionsPageRemovesBadgesAndAlignsRecheck() throws {
         #expect(PermissionsStepLayout.recheckLeadingPadding > 0)
@@ -281,6 +345,20 @@ struct WizardVisualLayoutTests {
 
         #expect(!source.contains("Required"))
         #expect(source.contains(".padding(.leading, PermissionsStepLayout.recheckLeadingPadding)"))
+    }
+
+    @Test("screen recording settings click asks agent to create the TCC row")
+    func screenRecordingSettingsClickRequestsAgentPermission() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let step = packageRoot.appending(path: "Sources/Wizard/Steps/PermissionsStep.swift")
+        let source = try String(contentsOf: step, encoding: .utf8)
+
+        #expect(source.contains("openPermissionSettings"))
+        #expect(source.contains("permission == .screenRecording"))
+        #expect(source.contains("setup.requestAgentPermission(permission)"))
     }
 
     @Test("primary button has a distinct disabled visual state")

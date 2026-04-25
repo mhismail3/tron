@@ -75,20 +75,17 @@ struct PermissionsStep: View {
     @ViewBuilder
     private func permissionRow(_ permission: Permission, title: String, detail: String) -> some View {
         let status = state.permissionStatuses[permission] ?? .notDetermined
-        GroupBox {
-            HStack(alignment: .center, spacing: 12) {
+        WizardInfoCard {
+            WizardIconTextRow {
                 statusBadge(status)
+            } content: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(TronTypography.wizardHeadline)
                     Text(detail).font(TronTypography.wizardBodySmall).foregroundStyle(.secondary)
                 }
-                Spacer()
+            } trailing: {
                 Button {
-                    pendingSettingsReturn = PermissionSettingsReturn(
-                        permission: permission,
-                        statusBeforeOpen: status
-                    )
-                    NSWorkspace.shared.open(PermissionDeepLink.url(for: permission))
+                    openPermissionSettings(permission, statusBeforeOpen: status)
                 } label: {
                     Image(systemName: "gearshape.fill")
                 }
@@ -96,7 +93,6 @@ struct PermissionsStep: View {
                 .help("Open Settings")
                 .accessibilityLabel("Open Settings for \(title)")
             }
-            .padding(.vertical, 6)
         }
     }
 
@@ -112,6 +108,35 @@ struct PermissionsStep: View {
         case .probeUnavailable:
             Image(systemName: "minus.circle.fill").font(.title).foregroundStyle(.secondary)
         }
+    }
+
+    /// Opens the relevant Settings pane. Screen Recording gets one
+    /// extra step first: macOS does not add an app to that list just
+    /// because Settings opened. The process that needs capture access
+    /// must request it once, so we ask the already-installed agent to
+    /// call `CGRequestScreenCaptureAccess()` before showing the pane.
+    private func openPermissionSettings(_ permission: Permission, statusBeforeOpen: PermissionStatus) {
+        guard permission == .screenRecording, statusBeforeOpen != .granted else {
+            openSettingsPane(permission, statusBeforeOpen: statusBeforeOpen)
+            return
+        }
+
+        Task {
+            async let requestSucceeded = setup.requestAgentPermission(permission)
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            await MainActor.run {
+                openSettingsPane(permission, statusBeforeOpen: statusBeforeOpen)
+            }
+            _ = await requestSucceeded
+        }
+    }
+
+    private func openSettingsPane(_ permission: Permission, statusBeforeOpen: PermissionStatus) {
+        pendingSettingsReturn = PermissionSettingsReturn(
+            permission: permission,
+            statusBeforeOpen: statusBeforeOpen
+        )
+        NSWorkspace.shared.open(PermissionDeepLink.url(for: permission))
     }
 
     // MARK: - Polling + kickstart lifecycle
@@ -240,5 +265,6 @@ struct PermissionsStep: View {
 }
 
 enum PermissionsStepLayout {
-    static let recheckLeadingPadding: CGFloat = 12
+    static let recheckLeadingPadding: CGFloat = WizardCardLayout.horizontalInset
+        + ((WizardCardLayout.iconColumnWidth - 16) / 2)
 }

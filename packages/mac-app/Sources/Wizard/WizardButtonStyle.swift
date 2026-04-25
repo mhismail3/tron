@@ -205,7 +205,7 @@ struct WizardSecondaryButtonStyle: ButtonStyle {
 /// drop shadows — scaled down for in-row actions like the
 /// Permissions step's "Open Settings" deep links. Intentionally
 /// understated (narrower stroke, shorter shadow) so three of these
-/// sitting inside GroupBox rows don't steal focus from the primary
+/// sitting inside wizard info-card rows don't steal focus from the primary
 /// Continue button in the bottom bar.
 ///
 /// Sized for a 28pt-tall SF Symbol: 40pt square with a 9pt corner

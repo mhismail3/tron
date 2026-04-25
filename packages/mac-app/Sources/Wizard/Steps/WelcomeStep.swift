@@ -37,10 +37,11 @@ struct WelcomeStep: View {
 
     @ViewBuilder
     private func existingInstallBanner(version: String?) -> some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: WizardCardLayout.iconTextSpacing) {
             Image(systemName: "checkmark.seal.fill")
                 .foregroundStyle(Color.tronSuccess)
                 .font(.callout)
+                .frame(width: WizardCardLayout.iconColumnWidth, alignment: .center)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Existing Tron install detected")
                     .font(TronTypography.wizardSubheadline)
@@ -53,15 +54,8 @@ struct WelcomeStep: View {
             }
         }
         .padding(.vertical, 10)
-        .padding(.horizontal, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Color.tronEmerald.opacity(0.25), lineWidth: 0.5)
-                )
-        )
+        .padding(.horizontal, WizardCardLayout.horizontalInset)
+        .wizardGlassCard()
     }
 }
 

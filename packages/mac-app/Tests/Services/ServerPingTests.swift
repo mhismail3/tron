@@ -112,6 +112,42 @@ struct PermissionProbeRPCDecodeFrameTests {
     }
 }
 
+@Suite("PermissionRequestRPC.decodeFrame")
+struct PermissionRequestRPCDecodeFrameTests {
+    @Test("connection.established event is ignored while waiting for request response")
+    func connectionEstablishedIsIgnored() {
+        let body = """
+        {"type":"connection.established","timestamp":"2026-04-24T17:40:42Z","data":{"clientId":"abc"}}
+        """
+        #expect(PermissionRequestRPC.decodeFrame(
+            Data(body.utf8),
+            expectedID: "mac-request-permission-screenRecording"
+        ) == .ignore)
+    }
+
+    @Test("string-id permission request response decodes status")
+    func stringIDResponseDecodesStatus() {
+        let body = """
+        {"id":"mac-request-permission-screenRecording","success":true,"result":{"permission":"screenRecording","status":"denied"}}
+        """
+        #expect(PermissionRequestRPC.decodeFrame(
+            Data(body.utf8),
+            expectedID: "mac-request-permission-screenRecording"
+        ) == .result(.screenRecording, .denied))
+    }
+
+    @Test("matching permission request RPC error is not success")
+    func rpcErrorFrameIsError() {
+        let body = """
+        {"id":"mac-request-permission-screenRecording","success":false,"error":{"code":"INVALID_PARAMS","message":"nope"}}
+        """
+        #expect(PermissionRequestRPC.decodeFrame(
+            Data(body.utf8),
+            expectedID: "mac-request-permission-screenRecording"
+        ) == .error)
+    }
+}
+
 @Suite("ServerPingResult")
 struct ServerPingResultTests {
     @Test("info accessor returns nil for non-success cases")
