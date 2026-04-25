@@ -61,7 +61,7 @@ If you ship the wrapper without the staged binary, `InstallStep` surfaces `.sour
 
 If you change Rust agent code that the Mac wrapper depends on — RPC handlers, onboarding/install behavior, permission/TCC probes, or anything used before pairing — rerun `packages/mac-app/scripts/bundle-agent.sh` before launching the Mac app from Xcode. Xcode copies the already-staged `Sources/Resources/tron-agent`; it does not rebuild that binary for you. Forgetting this step makes the Swift UI talk to an older embedded server, which is especially confusing when testing new RPCs such as `system.requestPermission`.
 
-If the installer is interrupted after writing launch artifacts, use the cleanup action on the Existing Install step or failed Install step. Cleanup unloads `com.tron.server`, removes `~/.tron/system/Tron.app` plus `~/Library/LaunchAgents/com.tron.server.plist`, and removes `~/.tron/system/deployment/` only when it is empty legacy state. Auth, settings, databases, workspace files, and non-empty dev/deploy/update artifacts are preserved.
+If the installer is interrupted after writing launch artifacts, use the cleanup action on the Install step. Cleanup unloads `com.tron.server`, removes `~/.tron/system/Tron.app` plus `~/Library/LaunchAgents/com.tron.server.plist`, and removes `~/.tron/system/deployment/` only when it is empty. Auth, settings, databases, workspace files, and non-empty dev/deploy/update artifacts are preserved.
 
 ### Building
 

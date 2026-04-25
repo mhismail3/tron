@@ -74,15 +74,18 @@ extension View {
 
 struct WizardInfoCard<Content: View>: View {
     var verticalPadding = WizardCardLayout.verticalInset
+    var horizontalPadding = WizardCardLayout.horizontalInset
     var fillWidth = true
     @ViewBuilder var content: () -> Content
 
     init(
         verticalPadding: CGFloat = WizardCardLayout.verticalInset,
+        horizontalPadding: CGFloat = WizardCardLayout.horizontalInset,
         fillWidth: Bool = true,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.verticalPadding = verticalPadding
+        self.horizontalPadding = horizontalPadding
         self.fillWidth = fillWidth
         self.content = content
     }
@@ -90,7 +93,7 @@ struct WizardInfoCard<Content: View>: View {
     var body: some View {
         content()
             .padding(.vertical, verticalPadding)
-            .padding(.horizontal, WizardCardLayout.horizontalInset)
+            .padding(.horizontal, horizontalPadding)
             .frame(maxWidth: fillWidth ? .infinity : nil, alignment: .leading)
             .wizardGlassCard()
     }
@@ -98,26 +101,32 @@ struct WizardInfoCard<Content: View>: View {
 
 struct WizardIconTextRow<Icon: View, Content: View, Trailing: View>: View {
     var alignment: VerticalAlignment = .center
+    var iconColumnWidth = WizardCardLayout.iconColumnWidth
+    var iconTextSpacing = WizardCardLayout.iconTextSpacing
     @ViewBuilder var icon: () -> Icon
     @ViewBuilder var content: () -> Content
     @ViewBuilder var trailing: () -> Trailing
 
     init(
         alignment: VerticalAlignment = .center,
+        iconColumnWidth: CGFloat = WizardCardLayout.iconColumnWidth,
+        iconTextSpacing: CGFloat = WizardCardLayout.iconTextSpacing,
         @ViewBuilder icon: @escaping () -> Icon,
         @ViewBuilder content: @escaping () -> Content,
         @ViewBuilder trailing: @escaping () -> Trailing
     ) {
         self.alignment = alignment
+        self.iconColumnWidth = iconColumnWidth
+        self.iconTextSpacing = iconTextSpacing
         self.icon = icon
         self.content = content
         self.trailing = trailing
     }
 
     var body: some View {
-        HStack(alignment: alignment, spacing: WizardCardLayout.iconTextSpacing) {
+        HStack(alignment: alignment, spacing: iconTextSpacing) {
             icon()
-                .frame(width: WizardCardLayout.iconColumnWidth, alignment: .center)
+                .frame(width: iconColumnWidth, alignment: .center)
             content()
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -132,10 +141,14 @@ struct WizardIconTextRow<Icon: View, Content: View, Trailing: View>: View {
 extension WizardIconTextRow where Trailing == EmptyView {
     init(
         alignment: VerticalAlignment = .center,
+        iconColumnWidth: CGFloat = WizardCardLayout.iconColumnWidth,
+        iconTextSpacing: CGFloat = WizardCardLayout.iconTextSpacing,
         @ViewBuilder icon: @escaping () -> Icon,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.alignment = alignment
+        self.iconColumnWidth = iconColumnWidth
+        self.iconTextSpacing = iconTextSpacing
         self.icon = icon
         self.content = content
         self.trailing = { EmptyView() }

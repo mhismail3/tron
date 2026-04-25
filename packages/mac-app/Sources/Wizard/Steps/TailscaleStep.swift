@@ -15,12 +15,12 @@ struct TailscaleStep: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 0)
-
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: TailscaleStepLayout.contentSpacing) {
                 Text("Tron uses Tailscale as a private mesh network so your iPhone can reach this Mac without exposing it to the public internet.")
                     .font(TronTypography.wizardBody)
                     .foregroundStyle(.secondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 statusCard
 
@@ -38,6 +38,7 @@ struct TailscaleStep: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, TailscaleStepLayout.contentTopPadding)
 
             Spacer(minLength: 0)
         }
@@ -47,7 +48,7 @@ struct TailscaleStep: View {
 
     @ViewBuilder
     private var statusCard: some View {
-        WizardInfoCard {
+        WizardInfoCard(verticalPadding: TailscaleStepLayout.statusCardVerticalPadding) {
             WizardIconTextRow {
                 Image(systemName: iconName)
                     .font(.title)
@@ -119,4 +120,10 @@ struct TailscaleStep: View {
             }
         }
     }
+}
+
+enum TailscaleStepLayout {
+    static let contentTopPadding: CGFloat = 108
+    static let contentSpacing: CGFloat = 22
+    static let statusCardVerticalPadding: CGFloat = 16
 }

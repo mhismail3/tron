@@ -23,8 +23,6 @@ struct WizardView: View {
                 WelcomeStep(state: state)
             case .tailscale:
                 TailscaleStep(state: state)
-            case .existingInstall:
-                ExistingInstallStep(state: state)
             case .permissions:
                 PermissionsStep(state: state)
             case .install:
@@ -330,18 +328,6 @@ struct WizardShell<Content: View>: View {
             }
             .buttonStyle(.wizardPrimary)
             .keyboardShortcut(.defaultAction)
-        case .existingInstall:
-            Button {
-                if case .installed = state.existingInstallStatus {
-                    state.skipInstall()
-                } else {
-                    state.advance()
-                }
-            } label: {
-                Text(existingInstallContinueLabel)
-            }
-            .buttonStyle(.wizardPrimary)
-            .keyboardShortcut(.defaultAction)
         case .permissions:
             Button {
                 state.advance()
@@ -382,11 +368,6 @@ struct WizardShell<Content: View>: View {
             .buttonStyle(.wizardPrimary)
             .keyboardShortcut(.defaultAction)
         }
-    }
-
-    private var existingInstallContinueLabel: String {
-        if case .installed = state.existingInstallStatus { return "Skip install" }
-        return "Continue"
     }
 
     /// Gate for the Permissions step's Continue button. All three

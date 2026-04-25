@@ -24,25 +24,32 @@ struct InstallStep: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            stageProgressArea
+            if shouldUseDetectedInstallLayout {
+                detectedInstallSummary
+            } else {
+                stageProgressArea
 
-            if let outcome = state.installOutcome, outcome != .success, outcome != .alreadyInstalled {
-                WizardInfoCard {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(outcomeDescription(outcome))
-                            .font(TronTypography.wizardBodySmall)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                if let outcome = state.installOutcome, outcome != .success, outcome != .alreadyInstalled {
+                    WizardInfoCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(outcomeDescription(outcome))
+                                .font(TronTypography.wizardBodySmall)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
-                        cleanupControls
+                            cleanupControls(.retry)
+                        }
                     }
                 }
-            }
 
-            if installIsComplete {
-                installCompleteBanner
+                if installIsComplete {
+                    installedSummary
+                }
+
+                cleanupFeedback
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task {
             // Auto-skip if we know an existing install is fully present.
             // This path is observational: it does not copy, write, or
@@ -84,6 +91,10 @@ struct InstallStep: View {
         state.installOutcome == .success || state.installOutcome == .alreadyInstalled
     }
 
+    private var shouldUseDetectedInstallLayout: Bool {
+        state.installOutcome == .alreadyInstalled
+    }
+
     private func resetStagesToPending() {
         for stage in InstallPipelineStage.allCases {
             stages[stage] = .pending
@@ -98,15 +109,17 @@ struct InstallStep: View {
 
     private func prepareAlreadyInstalledStateIfNeeded() {
         if case .installed = state.existingInstallStatus, state.installOutcome == nil {
-            markAlreadyInstalledStagesSucceeded()
+            stages.removeAll()
             state.installOutcome = .alreadyInstalled
         }
     }
 
     private func prepareTerminalInstallStateIfNeeded() {
         switch state.installOutcome {
-        case .success, .alreadyInstalled:
+        case .success:
             markAlreadyInstalledStagesSucceeded()
+        case .alreadyInstalled:
+            stages.removeAll()
         case nil:
             if stages.isEmpty {
                 resetStagesToPending()
@@ -121,7 +134,7 @@ struct InstallStep: View {
             return explicitState
         }
         switch state.installOutcome {
-        case .success, .alreadyInstalled:
+        case .success:
             // Re-entering this page after a successful install should
             // render completed rows on the first body pass. Updating
             // them later from `.task` makes the icons pop separately
@@ -133,7 +146,7 @@ struct InstallStep: View {
     }
 
     private var visibleStages: [InstallPipelineStage] {
-        if installIsComplete {
+        if state.installOutcome == .success {
             return InstallPipelineStage.allCases
         }
         return InstallPipelineStage.allCases.filter { stage in
@@ -282,6 +295,7 @@ struct InstallStep: View {
         if pingOK {
             stages[.awaitPing] = .succeeded
             state.installOutcome = .success
+            state.existingInstallStatus = setup.detectExistingInstall()
         } else {
             stages[.awaitPing] = .failed("Server did not respond within 30 seconds")
             state.installOutcome = .awaitPingTimedOut
@@ -355,36 +369,109 @@ struct InstallStep: View {
         }
     }
 
-    @ViewBuilder
-    private var cleanupControls: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Clean up and retry")
-                    .font(TronTypography.wizardSubheadline)
-                Text("Remove only the app bundle and LaunchAgent; keep auth, settings, and database files.")
-                    .font(TronTypography.wizardCaption)
-                    .foregroundStyle(.secondary)
+    private enum CleanupVariant {
+        case retry
+        case freshStart
+
+        var title: String {
+            switch self {
+            case .retry: return "Clean up and retry"
+            case .freshStart: return "Need a fresh start?"
             }
-            Spacer(minLength: 12)
-            Button {
-                showCleanupConfirmation = true
-            } label: {
-                Label(cleanupIsRunning ? "Cleaning..." : "Clean up", systemImage: "trash")
-            }
-            .buttonStyle(.bordered)
-            .tint(.red)
-            .disabled(cleanupIsRunning)
         }
 
+        var body: String {
+            switch self {
+            case .retry:
+                return "Remove only the app bundle and LaunchAgent; keep auth, settings, and database files."
+            case .freshStart:
+                return "Keep auth and settings; remove app and LaunchAgent."
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var detectedInstallSummary: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            installedSummaryCards
+                .padding(.top, InstallStepLayout.detectedSummaryTopPadding)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var installedSummary: some View {
+        installedSummaryCards
+            .padding(.top, InstallStepLayout.installedSummaryTopPadding)
+    }
+
+    @ViewBuilder
+    private var installedSummaryCards: some View {
+        VStack(alignment: .leading, spacing: InstallStepLayout.installedSummarySpacing) {
+            installCompleteBanner
+            installCleanupCard
+        }
+    }
+
+    @ViewBuilder
+    private var installCleanupCard: some View {
+        WizardInfoCard(verticalPadding: InstallStepLayout.cleanupCardVerticalPadding) {
+            cleanupControls(.freshStart)
+        }
+    }
+
+    @ViewBuilder
+    private func cleanupControls(_ variant: CleanupVariant) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(variant.title)
+                    .font(TronTypography.wizardSubheadline)
+                Text(variant.body)
+                    .font(TronTypography.wizardCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .layoutPriority(1)
+            Spacer(minLength: 12)
+            switch variant {
+            case .retry:
+                Button {
+                    showCleanupConfirmation = true
+                } label: {
+                    Label(cleanupIsRunning ? "Cleaning..." : "Clean up", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .disabled(cleanupIsRunning)
+            case .freshStart:
+                Button {
+                    showCleanupConfirmation = true
+                } label: {
+                    Image(systemName: cleanupIsRunning ? "hourglass" : "trash.fill")
+                }
+                .buttonStyle(.wizardTertiary)
+                .help(cleanupIsRunning ? "Cleaning up install artifacts" : "Clean up install artifacts")
+                .accessibilityLabel(cleanupIsRunning ? "Cleaning up install artifacts" : "Clean up install artifacts")
+                .disabled(cleanupIsRunning)
+            }
+        }
+
+    }
+
+    @ViewBuilder
+    private var cleanupFeedback: some View {
         if let cleanupMessage {
             Text(cleanupMessage)
                 .font(TronTypography.wizardCaption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         if let cleanupError {
             Text(cleanupError)
                 .font(TronTypography.wizardCaption)
                 .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -404,6 +491,7 @@ struct InstallStep: View {
                     state.existingInstallStatus = setup.detectExistingInstall()
                     state.resetInstallRunState()
                     resetStagesToPending()
+                    installStatusText = nil
                 case .failed:
                     cleanupError = outcome.userMessage
                 }
@@ -446,10 +534,9 @@ struct InstallStep: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, InstallStepLayout.installCompleteBannerVerticalPadding)
         .padding(.horizontal, WizardCardLayout.horizontalInset)
         .wizardGlassCard()
-        .padding(.top, 8)
     }
 
     private func refreshInstallStatus() async {
@@ -489,6 +576,11 @@ enum InstallStepLayout {
     static let sectionSpacing: CGFloat = 18
     static let runningStageSpacing: CGFloat = 8
     static let completedStageSpacing: CGFloat = 10
+    static let installedSummarySpacing: CGFloat = 12
+    static let installedSummaryTopPadding: CGFloat = 8
+    static let detectedSummaryTopPadding: CGFloat = 72
+    static let installCompleteBannerVerticalPadding: CGFloat = 16
+    static let cleanupCardVerticalPadding: CGFloat = 14
     static let stageIconColumnWidth: CGFloat = 24
     static let stageRowMinHeight: CGFloat = 28
     static let stageIconGlyphSize: CGFloat = 14

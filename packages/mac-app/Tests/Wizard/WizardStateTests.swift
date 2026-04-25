@@ -40,7 +40,7 @@ struct WizardStateTests {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
         let state = WizardState(defaults: defaults)
-        let expected: [WizardStep] = [.tailscale, .existingInstall, .install, .permissions, .pairingInfo, .done]
+        let expected: [WizardStep] = [.tailscale, .install, .permissions, .pairingInfo, .done]
         for step in expected {
             state.advance()
             #expect(state.step == step, "after advance, expected \(step) got \(state.step)")
@@ -61,8 +61,8 @@ struct WizardStateTests {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
         let state = WizardState(defaults: defaults)
-        state.advance(); state.advance() // welcome → tailscale → existingInstall
-        #expect(state.step == .existingInstall)
+        state.advance(); state.advance() // welcome → tailscale → install
+        #expect(state.step == .install)
         state.goBack()
         #expect(state.step == .tailscale)
     }
@@ -85,21 +85,6 @@ struct WizardStateTests {
         #expect(state.step == .pairingInfo)
     }
 
-    @Test("skipInstall bypasses install and records already-installed outcome")
-    func skipInstallBypassesInstall() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance()
-        state.advance()
-        #expect(state.step == .existingInstall)
-
-        state.skipInstall()
-        #expect(state.step == .permissions)
-        #expect(state.installOutcome == .alreadyInstalled)
-        #expect(state.slideDirection == .forward)
-    }
-
     @Test("complete sets the done step + persists onboardingComplete=true")
     func completeFlips() async {
         let (defaults, cleanup) = Self.isolatedDefaults()
@@ -115,12 +100,12 @@ struct WizardStateTests {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
         let state = WizardState(defaults: defaults)
-        state.advance(); state.advance() // existingInstall
-        #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.existingInstall.rawValue)
+        state.advance(); state.advance() // install
+        #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.install.rawValue)
 
         // Re-instantiating from the same defaults resumes there.
         let revived = WizardState(defaults: defaults)
-        #expect(revived.step == .existingInstall)
+        #expect(revived.step == .install)
     }
 
     @Test("reset wipes all transient state and persistent flags")
@@ -184,15 +169,6 @@ struct WizardStateTests {
         #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.pairingInfo.rawValue)
     }
 
-    @Test("initialStep nil falls back to persisted step (no overwrite)")
-    func initialStepNilHonorsPersisted() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        defaults.set(WizardStep.existingInstall.rawValue, forKey: WizardState.stepStorageKey)
-        let state = WizardState(defaults: defaults, initialStep: nil)
-        #expect(state.step == .existingInstall)
-    }
-
     // MARK: - Cold-resume clamp
     //
     // Post-install steps depend on transient state (`installOutcome`,
@@ -233,9 +209,9 @@ struct WizardStateTests {
         #expect(state.step == .welcome)
     }
 
-    @Test("safe-to-resume steps (welcome/tailscale/existingInstall/install) do NOT clamp")
+    @Test("safe-to-resume steps (welcome/tailscale/install) do NOT clamp")
     func safeToResumeNotClamped() {
-        for step in [WizardStep.welcome, .tailscale, .existingInstall, .install] {
+        for step in [WizardStep.welcome, .tailscale, .install] {
             let (defaults, cleanup) = Self.isolatedDefaults()
             defer { cleanup() }
             defaults.set(step.rawValue, forKey: WizardState.stepStorageKey)
@@ -281,15 +257,6 @@ struct WizardStateTests {
         #expect(state.slideDirection == .forward)
     }
 
-    @Test("skipInstall sets slideDirection to forward")
-    func skipInstallForwardDirection() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.skipInstall()
-        #expect(state.slideDirection == .forward)
-    }
-
     @Test("complete sets slideDirection to forward")
     func completeForwardDirection() async {
         let (defaults, cleanup) = Self.isolatedDefaults()
@@ -305,7 +272,7 @@ struct WizardStateTests {
         defer { cleanup() }
         let state = WizardState(defaults: defaults)
         #expect(state.installRequestID == 0)
-        state.advance(); state.advance(); state.advance() // install
+        state.advance(); state.advance() // install
         #expect(state.step == .install)
         #expect(state.installRequestID == 0)
         #expect(state.installOutcome == nil)

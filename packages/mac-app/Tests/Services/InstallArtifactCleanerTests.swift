@@ -38,7 +38,7 @@ struct InstallArtifactCleanerTests {
         #expect(manager.calls.map(\.kind) == [.isLoaded, .unload])
     }
 
-    @Test("clean removes empty legacy deployment directory")
+    @Test("clean removes empty deployment directory")
     func cleanRemovesEmptyDeploymentDirectory() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }

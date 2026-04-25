@@ -48,8 +48,9 @@ final class WizardState {
     /// every time the view becomes active.
     var permissionStatuses: [Permission: PermissionStatus] = [:]
 
-    /// Existing-install detection result. Set on entry to the Welcome
-    /// step so we can decide whether to skip the Install step.
+    /// Existing-install detection result. Set on entry so the combined
+    /// Install step can either install, repair a partial install, or show
+    /// the already-installed/reset state without a placeholder page.
     var existingInstallStatus: ExistingInstallStatus = .none
 
     /// Outcome of the install pipeline. Set when the install step
@@ -64,7 +65,7 @@ final class WizardState {
 
     /// Highest install request ID the Install step has consumed. This
     /// keeps the pipeline idempotent across back/forward navigation:
-    /// SwiftUI remounts `InstallStep` when the user returns to page 4,
+    /// SwiftUI remounts `InstallStep` when the user returns to it,
     /// but a previously handled request must not run again unless the
     /// user presses Install/Retry and creates a new request ID.
     private(set) var handledInstallRequestID: Int = 0
@@ -104,9 +105,6 @@ final class WizardState {
             // cold boot the user lands mid-wizard with greyed-out
             // Continue buttons and nothing to click. Clamp them back to
             // welcome so onboarding always has a coherent entry point.
-            // This also fixes a class of migration bugs where reordering
-            // the canonical step sequence leaves the persisted raw value
-            // pointing at a different step than the user left off on.
             self.step = Self.isSafeToResume(persisted) ? persisted : .welcome
             if self.step != persisted {
                 defaults.set(self.step.rawValue, forKey: Self.stepStorageKey)
@@ -115,13 +113,13 @@ final class WizardState {
     }
 
     /// Steps the wizard can cold-resume at without transient runtime
-    /// state. Pre-install steps are always safe; post-install steps
+    /// state. Pre-permissions steps are always safe; post-install steps
     /// assume `installOutcome` / `pairingPayload` / `permissionStatuses`
     /// from an earlier navigation, so cold-booting into them strands the
     /// user behind a disabled Continue button.
     private static func isSafeToResume(_ step: WizardStep) -> Bool {
         switch step {
-        case .welcome, .tailscale, .existingInstall, .install:
+        case .welcome, .tailscale, .install:
             return true
         case .permissions, .pairingInfo, .done:
             return false
@@ -151,16 +149,6 @@ final class WizardState {
     /// step on the assumption the server is already installed.
     func skipToPairing() {
         navigate(to: .pairingInfo, direction: .forward)
-    }
-
-    /// Existing-install shortcut: when the detector has confirmed a
-    /// complete server app + LaunchAgent, the "Skip install" CTA should
-    /// bypass the install page entirely. Landing on Install would imply
-    /// there is still work to confirm or run, which is both confusing
-    /// and historically led users to re-run an already-satisfied step.
-    func skipInstall() {
-        installOutcome = .alreadyInstalled
-        navigate(to: .permissions, direction: .forward)
     }
 
     /// Marks the wizard complete and notifies AppDelegate to swap to

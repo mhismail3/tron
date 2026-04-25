@@ -337,7 +337,7 @@ Messages use the server's WebSocket RPC framing. Request IDs are strings and are
 
 These fields are additive; older clients that ignore them continue to work unchanged.
 
-`system.probePermissions` returns a non-prompting snapshot of the agent's macOS TCC grants for the three wizard-surfaced permissions — Full Disk Access, Screen Recording, Accessibility. Each value is one of `"granted"`, `"denied"`, or `"unknown"`. The Mac wizard polls this RPC every ~2 s and rechecks when the app regains focus. A `launchctl kickstart -k` is reserved for a consumed Settings round-trip from one of the wizard's permission buttons, so focus changes inside System Settings do not repeatedly restart the agent. Implementation uses native `AXIsProcessTrusted()` / `CGPreflightScreenCaptureAccess()` FFI — no subprocess, no prompt.
+`system.probePermissions` returns a non-prompting snapshot of the agent's macOS TCC grants for the three wizard-surfaced permissions — Full Disk Access, Screen Recording, Accessibility. Each value is one of `"granted"`, `"denied"`, or `"unknown"`. The Mac wizard polls this RPC every ~2 s, rechecks when the app regains focus, and starts a short-lived kickstart+probe watcher only after the user opens one of the wizard's permission Settings panes. The manual Re-check action uses the same stronger refresh path as a fallback, while ordinary focus changes remain plain probes so System Settings navigation does not repeatedly restart the agent. Implementation uses native `AXIsProcessTrusted()` / `CGPreflightScreenCaptureAccess()` FFI — no subprocess, no prompt.
 
 `system.requestPermission` is the user-initiated prompt companion for the Mac wizard. It currently supports `{ "permission": "screenRecording" }`, which calls `CGRequestScreenCaptureAccess()` inside the launchd agent so macOS adds the installed Tron Server app to the Screen Recording list. It is never used for polling or startup.
 
@@ -762,7 +762,7 @@ packages/mac-app/Sources/
 +-- Wizard/                    First-run flow
 |   +-- WizardState.swift      @Observable state machine + `WizardStep` enum
 |   +-- WizardView.swift       NavigationStack shell
-|   +-- Steps/                 Welcome, Tailscale, ExistingInstall, Install, Permissions, Pairing, Done
+|   +-- Steps/                 Welcome, Tailscale, Install, Permissions, Pairing, Done
 +-- MenuBar/                   NSStatusItem controller, status polling, copy actions, update submenu
 +-- Services/
 |   +-- Server/                Bearer-token reader, `system.ping` client, status poller
@@ -780,11 +780,10 @@ packages/mac-app/Sources/
 
 1. **Welcome** — introduces Tron.
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` + signed-in state via `tailscale ip -4`.
-3. **Existing-install detection** — detects the installed server binary, provider auth, and stale LaunchAgent state without clobbering user data.
-4. **Install** — waits for the explicit Install CTA, then prepares and ad-hoc signs the inner `~/.tron/system/Tron.app` server bundle, writes the LaunchAgent plist, bootstraps or kickstarts `com.tron.server`, and polls `system.ping` while ignoring initial `connection.established` frames.
-5. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, rechecks on app-focus return, and kickstarts the agent at most once per wizard-opened Settings round-trip when the permission was previously missing.
-6. **Pairing** — displays Tailscale IP + port + bearer token with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>`.
-7. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
+3. **Install** — detects whether the server is already installed, waits for the explicit Install CTA when work is needed, then prepares and ad-hoc signs the inner `~/.tron/system/Tron.app` server bundle, writes the LaunchAgent plist, bootstraps or kickstarts `com.tron.server`, and polls `system.ping` while ignoring initial `connection.established` frames.
+4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, polls the agent, starts a short-lived grant watcher after wizard-opened Settings panes, and keeps Re-check as a kickstart+probe fallback.
+5. **Pairing** — displays Tailscale IP + port + bearer token with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>`.
+6. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
 
 ### Menu-bar Actions
 
@@ -804,7 +803,7 @@ packages/mac-app/Sources/
 
 ### Variants & Workflows
 
-The wrapper coexists with the production install and with the legacy `tron dev` agent-only workflow. Three distinct artifacts share `port 9847` and the `~/.tron/system/` data tree:
+The wrapper coexists with the production install and with the `tron dev` agent-only workflow. Three distinct artifacts share `port 9847` and the `~/.tron/system/` data tree:
 
 | Workflow | Build product | Bundle ID | Lives at | What it is |
 |---|---|---|---|---|
@@ -836,7 +835,7 @@ The Mac wizard surfaces three system permissions after the server is installed, 
 | Screen Recording | ComputerUse screenshots and visual inspection | Yes | `CGPreflightScreenCaptureAccess()` in the agent |
 | Accessibility | ComputerUse mouse/keyboard control | Yes | `AXIsProcessTrusted()` in the agent |
 
-The install step only prepares the signed server bundle, writes/loads the LaunchAgent, and waits for the first heartbeat. The inner app bundle is ad-hoc signed after its `Info.plist` and resources are written so TCC binds grants to `com.tron.server` instead of Cargo's raw executable signature. Ordinary agent startup does not probe TCC or open System Settings, so macOS permission prompts cannot appear while the user is still on the install step. The wizard begins polling `system.probePermissions` only on the Permissions step, about every 2 seconds. When the user clicks the Screen Recording settings button, the wrapper first sends `system.requestPermission` so the agent itself asks macOS for capture access and appears in the Screen Recording list; then the wrapper opens the Settings pane. When the user returns from a Settings pane opened by one of the wizard's permission buttons, the wrapper consumes that return, runs `launchctl kickstart -k gui/<uid>/com.tron.server` only if the permission was previously missing, waits for the agent to answer, and re-probes so new grants take effect without asking the user to manually quit the server.
+The install step only prepares the signed server bundle, writes/loads the LaunchAgent, and waits for the first heartbeat. The inner app bundle is ad-hoc signed after its `Info.plist` and resources are written so TCC binds grants to `com.tron.server` instead of Cargo's raw executable signature. Ordinary agent startup does not probe TCC or open System Settings, so macOS permission prompts cannot appear while the user is still on the install step. The wizard begins polling `system.probePermissions` only on the Permissions step, about every 2 seconds. When the user clicks the Screen Recording settings button, the wrapper first sends `system.requestPermission` so the agent itself asks macOS for capture access and can appear in the Screen Recording list; then the wrapper opens the Settings pane. Because System Settings can still require manual app insertion, the Screen Recording row also exposes a clickable/draggable `~/.tron/system/Tron.app` shortcut next to the settings button: click reveals it in Finder, drag starts an AppKit file drag with both `public.file-url` and `NSFilenamesPboardType` payloads for the manual-add list. Any wizard-opened Settings pane starts a short-lived watcher that silently kickstarts, waits for the agent, and re-probes until that specific grant turns green; the user-facing Re-check button runs the same refresh and labels it "Checking permissions…" while active.
 
 ---
 

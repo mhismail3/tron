@@ -19,7 +19,6 @@ struct WizardStepOrderingTests {
         #expect(WizardStep.allCases == [
             .welcome,
             .tailscale,
-            .existingInstall,
             .install,
             .permissions,
             .pairingInfo,
@@ -31,7 +30,6 @@ struct WizardStepOrderingTests {
     func rawValuesStable() {
         #expect(WizardStep.welcome.rawValue == "welcome")
         #expect(WizardStep.tailscale.rawValue == "tailscale")
-        #expect(WizardStep.existingInstall.rawValue == "existingInstall")
         #expect(WizardStep.permissions.rawValue == "permissions")
         #expect(WizardStep.install.rawValue == "install")
         #expect(WizardStep.pairingInfo.rawValue == "pairingInfo")
@@ -79,8 +77,8 @@ struct InstallPipelineStageOrderingTests {
         }
     }
 
-    @Test("install stage rows restore terminal status synchronously on remount")
-    func installStageRowsRestoreTerminalStatusSynchronously() throws {
+    @Test("successful install stage rows restore synchronously on remount")
+    func successfulInstallStageRowsRestoreSynchronously() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -90,7 +88,9 @@ struct InstallPipelineStageOrderingTests {
 
         #expect(source.contains("private func stageState(for stage"))
         #expect(source.contains("stageState(for: stage)"))
-        #expect(source.contains("case .success, .alreadyInstalled:"))
+        #expect(source.contains("case .success:"))
+        #expect(source.contains("case .alreadyInstalled:"))
+        #expect(source.contains("stages.removeAll()"))
         #expect(source.contains("private func stageIcon"))
     }
 
@@ -110,7 +110,8 @@ struct InstallPipelineStageOrderingTests {
         #expect(source.contains("ForEach(visibleStages"))
         #expect(source.contains("stages[.copyBinary] = .running"))
         #expect(source.contains("completedStageSpacing"))
-        #expect(!source.contains("maxHeight: .infinity, alignment: .topLeading"))
+        #expect(source.contains("if shouldUseDetectedInstallLayout"))
+        #expect(source.contains("private var detectedInstallSummary"))
     }
 
     @Test("completed install page shows a status banner")
@@ -126,6 +127,10 @@ struct InstallPipelineStageOrderingTests {
         #expect(source.contains("Tron is installed"))
         #expect(source.contains("Current status:"))
         #expect(source.contains("refreshInstallStatus"))
+        #expect(source.contains("installCleanupCard"))
+        #expect(source.contains("installedSummaryCards"))
+        #expect(source.contains("Need a fresh start?"))
+        #expect(source.contains(".buttonStyle(.wizardTertiary)"))
     }
 }
 
@@ -166,13 +171,12 @@ struct WizardStepPreferredHeightTests {
     func openingStepsShareLowerHeightBand() {
         let gateHeight = WizardStep.welcome.preferredHeight
         #expect(WizardStep.tailscale.preferredHeight == gateHeight)
-        #expect(WizardStep.existingInstall.preferredHeight == gateHeight)
         #expect(gateHeight < WizardLayout.height)
     }
 
     @Test("install step leaves room for explicit confirmation without becoming tallest")
     func installStepConfirmationBand() {
-        #expect(WizardStep.install.preferredHeight > WizardStep.existingInstall.preferredHeight)
+        #expect(WizardStep.install.preferredHeight > WizardStep.tailscale.preferredHeight)
         #expect(WizardStep.install.preferredHeight < WizardStep.permissions.preferredHeight)
     }
 
@@ -211,6 +215,9 @@ struct WizardVisualLayoutTests {
 
         #expect(source.contains("VStack(spacing: WelcomeStepLayout.middleGroupSpacing)"))
         #expect(source.contains("alignment: .center"))
+        #expect(WelcomeStepLayout.detectedBannerIconWidth < WizardCardLayout.iconColumnWidth)
+        #expect(WelcomeStepLayout.detectedBannerIconSpacing < WizardCardLayout.iconTextSpacing)
+        #expect(source.contains("WelcomeStepLayout.detectedBannerIconWidth"))
         #expect(!source.contains(".offset(y:"))
     }
 
@@ -295,25 +302,24 @@ struct WizardVisualLayoutTests {
         #expect(WizardLayout.buttonCornerRadius == 11)
     }
 
-    @Test("existing-install cleanup action is a separate compact card")
-    func existingInstallCleanupUsesSeparateIconCard() throws {
-        #expect(ExistingInstallStepLayout.contentSpacing <= 12)
-        #expect(ExistingInstallStepLayout.cleanupCardVerticalPadding <= WizardCardLayout.verticalInset)
+    @Test("installed-state cleanup action is a separate compact icon card")
+    func installCleanupUsesSeparateIconCard() throws {
+        #expect(InstallStepLayout.cleanupCardVerticalPadding > WizardCardLayout.verticalInset)
+        #expect(InstallStepLayout.detectedSummaryTopPadding > InstallStepLayout.installedSummaryTopPadding)
 
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let step = packageRoot.appending(path: "Sources/Wizard/Steps/ExistingInstallStep.swift")
+        let step = packageRoot.appending(path: "Sources/Wizard/Steps/InstallStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
-        #expect(source.contains("private var cleanupCard"))
+        #expect(source.contains("private var installCleanupCard"))
         #expect(source.contains("Need a fresh start?"))
         #expect(source.contains("Keep auth and settings; remove app and LaunchAgent."))
         #expect(source.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(source.contains(".buttonStyle(.wizardTertiary)"))
         #expect(source.contains("trash.fill"))
-        #expect(!source.contains("Divider()"))
     }
 
     @Test("icon-led cards use balanced icon padding")
@@ -343,7 +349,6 @@ struct WizardVisualLayoutTests {
 
         for path in [
             "Sources/Wizard/Steps/TailscaleStep.swift",
-            "Sources/Wizard/Steps/ExistingInstallStep.swift",
             "Sources/Wizard/Steps/PermissionsStep.swift",
             "Sources/Wizard/Steps/PairingInfoStep.swift",
         ] {
@@ -352,20 +357,66 @@ struct WizardVisualLayoutTests {
             #expect(source.contains("WizardIconTextRow"))
         }
 
-        for path in [
-            "Sources/Wizard/Steps/WelcomeStep.swift",
-            "Sources/Wizard/Steps/InstallStep.swift",
-        ] {
-            let source = try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
-            #expect(source.contains("WizardCardLayout.iconTextSpacing"))
-            #expect(source.contains("WizardCardLayout.horizontalInset"))
-            #expect(source.contains("WizardCardLayout.iconColumnWidth"))
-        }
+        let welcome = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Wizard/Steps/WelcomeStep.swift"),
+            encoding: .utf8
+        )
+        #expect(welcome.contains("WelcomeStepLayout.detectedBannerIconSpacing"))
+        #expect(welcome.contains("WelcomeStepLayout.detectedBannerHorizontalPadding"))
+
+        let install = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Wizard/Steps/InstallStep.swift"),
+            encoding: .utf8
+        )
+        #expect(install.contains("WizardCardLayout.iconTextSpacing"))
+        #expect(install.contains("WizardCardLayout.horizontalInset"))
+        #expect(install.contains("WizardCardLayout.iconColumnWidth"))
+    }
+
+    @Test("low-density install and Tailscale pages use top-biased breathing room")
+    func lowDensityPagesUseTopBiasedBreathingRoom() throws {
+        #expect(TailscaleStepLayout.contentTopPadding > 64)
+        #expect(TailscaleStepLayout.contentSpacing > WizardCardLayout.verticalInset)
+        #expect(TailscaleStepLayout.statusCardVerticalPadding > WizardCardLayout.verticalInset)
+        #expect(InstallStepLayout.detectedSummaryTopPadding > 48)
+        #expect(InstallStepLayout.installedSummarySpacing > WizardCardLayout.verticalInset)
+
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let tailscale = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Wizard/Steps/TailscaleStep.swift"),
+            encoding: .utf8
+        )
+        #expect(tailscale.contains(".padding(.top, TailscaleStepLayout.contentTopPadding)"))
+        #expect(tailscale.contains("WizardInfoCard(verticalPadding: TailscaleStepLayout.statusCardVerticalPadding)"))
+
+        let install = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Wizard/Steps/InstallStep.swift"),
+            encoding: .utf8
+        )
+        #expect(install.contains(".padding(.top, InstallStepLayout.detectedSummaryTopPadding)"))
+        #expect(install.contains("alignment: .topLeading"))
     }
 
     @Test("permissions page has no Required badges and aligns the re-check link")
     func permissionsPageRemovesBadgesAndAlignsRecheck() throws {
         #expect(PermissionsStepLayout.recheckLeadingPadding > 0)
+        #expect(PermissionsStepLayout.cardHorizontalPadding < WizardCardLayout.horizontalInset)
+        #expect(PermissionsStepLayout.iconTextSpacing < WizardCardLayout.iconTextSpacing)
+        #expect(PermissionsStepLayout.statusIconColumnWidth < WizardCardLayout.iconColumnWidth)
+        #expect(PermissionsStepLayout.cardHorizontalPadding > 9)
+        #expect(PermissionsStepLayout.cardHorizontalPadding < WizardCardLayout.horizontalInset)
+        #expect(PermissionsStepLayout.appShortcutHitSize >= 40)
+        #expect(PermissionsStepLayout.appShortcutHitSize > PermissionsStepLayout.appShortcutIconSize)
+        #expect(PermissionsStepLayout.trailingControlSpacing <= 5)
+        #expect(PermissionsStepContent.intro == "Tron needs these permissions to use your computer for you.")
+        #expect(PermissionsStepContent.defaultInstruction == "Click gear and enable Tron.")
+        #expect(PermissionsStepContent.screenRecordingInstruction == "Click gear, then drag this icon into the first app list.")
+        #expect(PermissionsStepContent.initialProbeDelayNanoseconds >= 500_000_000)
+        #expect(PermissionsStepContent.initialProbeDelayNanoseconds < 1_000_000_000)
 
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -375,7 +426,32 @@ struct WizardVisualLayoutTests {
         let source = try String(contentsOf: step, encoding: .utf8)
 
         #expect(!source.contains("Required"))
+        #expect(source.contains("Lets Tron read and edit files."))
+        #expect(source.contains("Lets Tron see your screen."))
+        #expect(source.contains("Lets Tron click and type for you."))
+        #expect(source.contains("instruction: PermissionsStepContent.defaultInstruction"))
+        #expect(source.contains("instruction: PermissionsStepContent.screenRecordingInstruction"))
+        #expect(source.contains("horizontalPadding: PermissionsStepLayout.cardHorizontalPadding"))
+        #expect(source.contains("iconColumnWidth: PermissionsStepLayout.statusIconColumnWidth"))
+        #expect(source.contains("iconTextSpacing: PermissionsStepLayout.iconTextSpacing"))
+        #expect(source.contains(".minimumScaleFactor(0.92)"))
+        #expect(source.contains(".minimumScaleFactor(0.88)"))
+        #expect(source.contains(".allowsTightening(true)"))
+        #expect(source.contains("if state.permissionStatuses.isEmpty"))
+        #expect(source.contains("PermissionsStepContent.initialProbeDelayNanoseconds"))
+        #expect(source.contains("if Task.isCancelled { return }"))
+        #expect(source.contains("Button {"))
+        #expect(source.contains("Task { await refreshAll(kickstart: true, showActivity: true) }"))
+        #expect(source.contains("startSettingsGrantWatch(for: permission)"))
+        #expect(source.contains("settingsGrantWatchTask?.cancel()"))
+        #expect(source.contains("await refreshAll(kickstart: true, showActivity: false)"))
+        #expect(source.contains("state.permissionStatuses[permission] == .granted"))
+        #expect(PermissionsStepContent.settingsGrantWatchAttempts >= 30)
+        #expect(PermissionsStepContent.settingsGrantWatchIntervalNanoseconds <= 1_000_000_000)
+        #expect(source.contains("Checking permissions…"))
+        #expect(!source.contains("Restarting Tron Server"))
         #expect(source.contains(".padding(.leading, PermissionsStepLayout.recheckLeadingPadding)"))
+        #expect(source.contains(".fixedSize(horizontal: false, vertical: true)"))
     }
 
     @Test("screen recording settings click asks agent to create the TCC row")
@@ -390,6 +466,32 @@ struct WizardVisualLayoutTests {
         #expect(source.contains("openPermissionSettings"))
         #expect(source.contains("permission == .screenRecording"))
         #expect(source.contains("setup.requestAgentPermission(permission)"))
+    }
+
+    @Test("screen recording row exposes draggable installed app shortcut")
+    func screenRecordingRowExposesDraggableAppShortcut() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let step = packageRoot.appending(path: "Sources/Wizard/Steps/PermissionsStep.swift")
+        let source = try String(contentsOf: step, encoding: .utf8)
+
+        #expect(source.contains("ScreenRecordingAppShortcut(appURL: setup.installedBundle)"))
+        #expect(source.contains("NSViewRepresentable"))
+        #expect(source.contains("DraggableAppShortcutView: NSView"))
+        #expect(source.contains("appShortcutHitSize"))
+        #expect(source.contains("mouseDownCanMoveWindow"))
+        #expect(source.contains("shouldDelayWindowOrdering"))
+        #expect(source.contains("beginDraggingSession"))
+        #expect(source.contains("NSDraggingItem(pasteboardWriter:"))
+        #expect(source.contains("NSPasteboardItem()"))
+        #expect(source.contains("NSFilenamesPboardType"))
+        #expect(source.contains("forType: .fileURL"))
+        #expect(source.contains("NSWorkspace.shared.activateFileViewerSelecting([appURL])"))
+        #expect(source.contains("Drag Tron.app into the Screen Recording list"))
+        #expect(source.contains("appIconLiftShadow"))
+        #expect(!source.contains("emeraldShortcutShadow"))
     }
 
     @Test("primary button has a distinct disabled visual state")

@@ -1,12 +1,10 @@
 import Foundation
 
-/// Steps in the first-run wizard. Order is canonical; tests in
-/// `WizardStepTests` pin `OnboardingStep.allCases` to prevent silent
-/// reorderings.
+/// Steps in the first-run wizard. `allCases` is the canonical flow;
+/// tests in `WizardStepTests` pin it to prevent silent reorderings.
 enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     case welcome
     case tailscale
-    case existingInstall
     case install
     case permissions
     case pairingInfo
@@ -22,7 +20,6 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         switch self {
         case .welcome: return "Tron Installer"
         case .tailscale: return "Tailscale"
-        case .existingInstall: return "Existing install"
         case .permissions: return "Permissions"
         case .install: return "Install Tron"
         case .pairingInfo: return "Pair your iPhone"
@@ -38,7 +35,6 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         switch self {
         case .welcome: return .asset("TronLogo")
         case .tailscale: return .symbol("network")
-        case .existingInstall: return .symbol("magnifyingglass")
         case .permissions: return .symbol("lock.shield.fill")
         case .install: return .symbol("arrow.down.circle.fill")
         case .pairingInfo: return .symbol("qrcode")
@@ -52,14 +48,13 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     /// run inside one stable viewport.
     ///
     /// Heights are deliberately collapsed into bands rather than tuned
-    /// per-step: the three lightweight "gate" steps (welcome / tailscale
-    /// / existingInstall) share a single lower-height band, while the
-    /// fixed shell height is set to the tallest permissions page.
+    /// per-step: the lightweight opening steps share a single lower-height
+    /// band, while the fixed shell height is set to the tallest
+    /// permissions page.
     var preferredHeight: CGFloat {
         switch self {
         case .welcome: return 360
         case .tailscale: return 360
-        case .existingInstall: return 360
         case .permissions: return 480
         case .install: return 440
         case .pairingInfo: return 420

@@ -101,7 +101,9 @@ Example: `InstallPlanner.plan(sourceBinary:paths:existingInstall:) -> Result<Ins
 
 ### Wizard visual system
 
-The wizard uses a single glass canvas with pinned chrome: the header row, progress pill, and bottom actions never participate in body measurement. The shell reports one fixed `480 × WizardLayout.height` content size, where `WizardLayout.height` is the tallest step's preferred height, so every horizontal page transition runs inside one stable viewport and the window never grows mid-slide. The header is one `HStack` that owns the step icon, title, and progress pill, so all three share the same vertical center. The progress indicator has one flat outer capsule, bare `X / 7` text, and a tactile bar; avoid nesting another pill around the count. The bar fill is drawn by one animatable Canvas-backed `WizardProgressTrack`, so growth/shrink animation happens inside a single rendered track instead of moving as a separate SwiftUI subview during page transitions. `TronTypography` registers and uses the bundled Exo 2 face for wizard title/body/button text across every step, while terminal/token surfaces stay monospaced. The welcome page centers its intro copy and optional detected-install banner as one middle group, and the banner sizes to its content instead of spanning the window. Tailscale and Existing Install center their body groups in the space between title and buttons. Icon-led cards use `WizardInfoCard` + `WizardIconTextRow`, whose horizontal inset equals the icon-to-text gap, whose fixed icon column prevents wide SF Symbols from visually hugging the card's left edge, and whose text column wraps instead of truncating subtext. Card backgrounds go through `WizardGlassCardBackground` / `.wizardGlassCard()` so dark-mode containers keep a subtle transparent emerald fill, glassy border, and shadow instead of a visible gradient or a flat window blend. Existing Install recovery appears as its own compact "Need a fresh start?" cleanup card below the install status card, pads its copy away from the left edge, and uses the same square tertiary icon button style as the Permissions settings buttons. Permissions rows omit individual "Required" badges, align the Re-check link icon with the row status icons, and rely on the disabled branch of `WizardPrimaryButtonStyle` to make blocked Continue buttons visibly inactive.
+The wizard uses a single glass canvas with pinned chrome: the header row, progress pill, and bottom actions never participate in body measurement. The shell reports one fixed `480 × WizardLayout.height` content size, where `WizardLayout.height` is the tallest step's preferred height, so every horizontal page transition runs inside one stable viewport and the window never grows mid-slide. The header is one `HStack` that owns the step icon, title, and progress pill, so all three share the same vertical center. The progress indicator has one flat outer capsule, bare `X / total` text, and a tactile bar; avoid nesting another pill around the count. The bar fill is drawn by one animatable Canvas-backed `WizardProgressTrack`, so growth/shrink animation happens inside a single rendered track instead of moving as a separate SwiftUI subview during page transitions. `TronTypography` registers and uses the bundled Exo 2 face for wizard title/body/button text across every step, while terminal/token surfaces stay monospaced. The welcome page centers its intro copy and optional detected-install banner as one middle group, and the banner sizes to its content instead of spanning the window. Shared icon-led cards use `WizardInfoCard` + `WizardIconTextRow`, whose default horizontal inset equals the icon-to-text gap, whose fixed icon column prevents wide SF Symbols from visually hugging the card's left edge, and whose text column wraps instead of truncating subtext. Card backgrounds go through `WizardGlassCardBackground` / `.wizardGlassCard()` so dark-mode containers keep a subtle transparent emerald fill, glassy border, and shadow instead of a visible gradient or a flat window blend. Install recovery appears as its own compact "Need a fresh start?" cleanup card below the install status card, pads its copy away from the left edge, and uses the same square tertiary icon button style as the Permissions settings buttons. Permissions rows omit individual "Required" badges, use the short intro "Tron needs these permissions to use your computer for you.", and use moderate card padding plus tightened text so the "Lets Tron…" subtext and smaller instruction line stay clean in the 480pt wizard. The Screen Recording row also shows a draggable `Tron.app` shortcut next to the settings button; it reveals `~/.tron/system/Tron.app` on click and uses a plain AppKit `NSView` file drag with both `public.file-url` and `NSFilenamesPboardType` payloads for the System Settings manual-add path. The shortcut draws only the app icon with a lift shadow, but keeps a larger invisible hit target whose `mouseDownCanMoveWindow` is false so dragging the shortcut cannot move the installer window. Re-check aligns to the permission status column and uses the disabled branch of `WizardPrimaryButtonStyle` to make blocked Continue buttons visibly inactive.
+
+Low-density steps are deliberately top-biased rather than perfectly centered: Tailscale starts its copy/card group below the header with extra card padding, and the already-installed Install state places the two status/recovery cards in an upper content band. This keeps sparse pages from collapsing into a small cluster in the middle of the canvas. The welcome detected-install banner is the exception to the shared icon-card geometry: it is a compact pill, so it uses its own narrower icon column and tighter icon/text spacing while remaining centered with the intro copy.
 
 ### Single-instance lock via POSIX `fcntl`
 
@@ -124,7 +126,7 @@ TronMacApp.main()
        └─ setup.onboardedSentinelExists() → false
            └─ RootView → WizardView
                 └─ WizardState.step = .welcome
-                    → .tailscale → .existingInstall → .install
+                    → .tailscale → .install
                     → .permissions → .pairingInfo → .done
                 └─ DoneStep taps "Finish"
                     ├─ setup.touchOnboardedSentinel()  ← atomic tempfile+rename
@@ -143,10 +145,11 @@ and Accessibility prompts cannot race the install progress UI. Screen
 Recording has one user-initiated exception: when the user clicks that row's
 settings button, the wrapper first sends `system.requestPermission` so the
 agent process calls `CGRequestScreenCaptureAccess()` and macOS creates the
-Tron Server row in the Screen Recording list. The step rechecks on app
-activation, but it only kickstarts launchd after consuming a Settings
-round-trip opened by one of the wizard's permission buttons; focus changes
-inside System Settings are not restart signals.
+Tron Server row in the Screen Recording list. Any wizard-opened Settings
+pane starts a short-lived watcher that kickstarts/reprobes until that
+specific permission turns green. App activation is still only a plain
+recheck unless it is consuming a Settings return from this step; focus
+changes inside System Settings are not restart signals.
 
 ### Subsequent launches (menu-bar-only path)
 
@@ -172,7 +175,7 @@ The "Show pairing info…" menu item reopens the wizard at `pairingInfo` without
 
 ```
 0. Wait for user: Install CTA increments WizardState.installRequestID; no disk or launchd mutation happens before this
-   - WizardState.handledInstallRequestID suppresses replay when page 4 remounts after back/forward navigation
+   - WizardState.handledInstallRequestID suppresses replay when the install page remounts after back/forward navigation
 1. Locate source: Bundle.main.url(forResource: "tron-agent")
 2. Plan:          InstallPlanner.plan(…) → Result<InstallPlan, Failure>
 3. Prepare app:   BinaryInstaller.install(plan:)   [tempfile + rename, chmod 755, write Info.plist/resources, codesign -]
@@ -190,15 +193,16 @@ instead of listing future pending work.
 When revisiting the page after success, row state is derived
 synchronously from terminal `installOutcome` so the completed icons are
 part of the page transition rather than a post-mount update.
-After success or an already-installed skip, the page shows a bottom
-banner that confirms Tron is installed and refreshes the current server
-status through `setup.pingServer`.
+After success or an already-installed detection, the page shows a bottom
+banner that confirms Tron is installed, refreshes the current server
+status through `setup.pingServer`, and exposes the fresh-start cleanup
+card on the same page.
 
 Recovery action:
-ExistingInstallStep / failed InstallStep → InstallArtifactCleaner.clean(...)
+Failed/completed InstallStep → InstallArtifactCleaner.clean(...)
 → launchctl bootout com.tron.server when loaded
 → remove ~/.tron/system/Tron.app and ~/Library/LaunchAgents/com.tron.server.plist
-→ remove ~/.tron/system/deployment/ only when it is empty legacy state
+→ remove ~/.tron/system/deployment/ only when it is empty
 → preserve auth.json, auth-token.json, settings.json, database/, and workspace/
 ```
 
@@ -209,9 +213,9 @@ ExistingInstallStep / failed InstallStep → InstallArtifactCleaner.clean(...)
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` overlays the existing-install banner below the centered copy; it must not switch the first page to a top-leading stack when detection completes.
 - **The inner server bundle must be signed before launchd starts it.** `BinaryInstaller.install` ad-hoc signs `~/.tron/system/Tron.app` after writing `Info.plist` and resources so `codesign -dv` reports `Identifier=com.tron.server`, a bound Info.plist, and sealed resources. Accessibility TCC can flip grants back off when the bundle is left with only the executable's linker-generated ad-hoc identity.
-- **Cleanup preserves user data.** The installer recovery action unloads the LaunchAgent, removes the installed app bundle + plist, and removes an empty legacy `deployment/` directory if present. It never removes auth, settings, sessions, databases, workspace files, or non-empty dev/deploy/update artifacts.
+- **Cleanup preserves user data.** The installer recovery action unloads the LaunchAgent, removes the installed app bundle + plist, and removes an empty `deployment/` directory if present. It never removes auth, settings, sessions, databases, workspace files, or non-empty dev/deploy/update artifacts.
 - **A loaded LaunchAgent label is not proof that the new binary is running.** After writing the plist, `.alreadyLoaded` is followed by `launchctl kickstart -k gui/<uid>/com.tron.server` so stale processes left from interrupted installs consume the just-copied bundle.
-- **App activation is a recheck by default.** The Permissions step records which permission Settings pane it opened and consumes that return once; repeated focus changes from System Settings only refresh the RPC snapshot.
+- **App activation is a recheck by default.** The Permissions step records which permission Settings pane it opened and consumes that return once; repeated focus changes from System Settings only refresh the RPC snapshot. Immediate grant detection comes from the gear-button grant watcher, while the visible Re-check button is a fallback that labels the stronger kickstart+probe path as "Checking permissions...".
 - **All atomic writes use tempfile + `replaceItemAt` (matching the Rust agent's `tempfile::Builder → sync_all → rename`).** See `OnboardedSentinelWriter.touch` and `BinaryInstaller.install`.
 - **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth-token.json`, `settings.json`, `.onboarded`) or a WS RPC call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
 - **Single port (`9847`) and single LaunchAgent label (`com.tron.server`) across every workflow.** The DMG-installed `Tron.app` (`com.tron.mac`), the Xcode-built `TronMac.app` dogfood wrapper (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/system/deployment/Tron-Dev.app` (`com.tron.agent`) are all distinct on-disk artifacts that share the same server port and `~/.tron/system/` data tree. The installer does not write deployment artifacts; `deployment/` is for local dev/deploy/update state and may be absent or empty after a normal install. Mutual exclusion is enforced at runtime: the wrapper's `.mac-wrapper.lock` rejects a second wrapper, the agent's `log.db.lock` rejects a second agent, and `tron dev` explicitly stops the LaunchAgent before binding 9847. See [Workflows & Variants](#workflows--variants) below for the full breakdown.
