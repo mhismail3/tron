@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Step 4 of the wizard — the heart of onboarding.
+/// Pairing sheet — the only required iOS onboarding action.
 ///
 /// User enters (host, port, token, label). On Connect:
 ///   1. `PairingStepValidator.validate(...)` trims + classifies bad input.
@@ -16,26 +16,30 @@ import SwiftUI
 ///        - Write token to `PresetTokenStore` keyed on the new preset id.
 ///        - Write `serverHost` / `serverPort` UserDefaults.
 ///        - Push the `connectionPresets[]` update to the server (via
-///          `settings.set`) so the new preset survives reinstalls.
+///          `settings.update`) so the new preset survives reinstalling the
+///          iOS app.
 ///        - Recreate the RPC client via
 ///          `dependencies.updateServerSettings(host:port:)`.
-///   4. Advance to the Provider step.
+///   4. Complete onboarding and dismiss the sheet.
 ///
 /// **Universal-paste**: any `tron://pair?…` URL pasted into ANY of the
-/// three text fields auto-distributes via `OnboardingState.acceptPairingPayload`.
+/// four text fields auto-distributes via `OnboardingState.acceptPairingPayload`.
 /// Implemented through the shared `pasteAware()` helper extracted in
 /// Phase 4.5.
 struct PairingStep: View {
     @Bindable var state: OnboardingState
     let dependencies: DependencyContainer
+    let onPaired: () -> Void
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         OnboardingShell(
-            title: "Pair with your Mac",
-            subtitle: "Open Tron.app on your Mac. Copy the host, port, and token from the pairing screen — or paste the full pairing link into any field.",
-            onBack: { state.goBack() },
+            title: "Connect your Mac",
+            subtitle: "Open the pairing screen on your Mac, then enter the Tailscale IP, port, and token shown there.",
+            showsBackButton: false,
             content: {
-                VStack(alignment: .leading, spacing: TronSpacing.large) {
+                VStack(alignment: .leading, spacing: TronSpacing.section) {
+                    setupNote
                     pairingForm
                     if let error = state.pairingError {
                         errorCard(error)
@@ -43,13 +47,20 @@ struct PairingStep: View {
                 }
             },
             footer: {
-                OnboardingPrimaryButton(
-                    title: state.isConnecting ? "Connecting…" : "Connect",
-                    systemImage: state.isConnecting ? nil : "link",
-                    isLoading: state.isConnecting,
-                    isEnabled: !state.isConnecting,
-                    action: connect
-                )
+                VStack(spacing: TronSpacing.sm) {
+                    OnboardingPrimaryButton(
+                        title: state.isConnecting ? "Connecting…" : "Connect",
+                        systemImage: state.isConnecting ? nil : "link",
+                        isLoading: state.isConnecting,
+                        isEnabled: !state.isConnecting,
+                        action: connect
+                    )
+                    OnboardingSecondaryButton(
+                        title: "Need the Mac app?",
+                        systemImage: "arrow.down.circle",
+                        action: { openURL(AppConstants.dmgDownloadPage) }
+                    )
+                }
             }
         )
     }
@@ -57,8 +68,25 @@ struct PairingStep: View {
     // MARK: - Form
 
     @ViewBuilder
+    private var setupNote: some View {
+        HStack(alignment: .top, spacing: TronSpacing.md) {
+            Image(systemName: "checkmark.shield.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .frame(width: 24)
+            Text("Make sure Tailscale is on for both devices and Tron Server is running on your Mac.")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(Color.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(TronSpacing.section)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronCard()
+    }
+
+    @ViewBuilder
     private var pairingForm: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.section) {
+        VStack(alignment: .leading, spacing: TronSpacing.md) {
             field(
                 label: "Tailscale IP or hostname",
                 placeholder: "100.64.0.1 or mac-name.tail-scale.ts.net",
@@ -121,7 +149,7 @@ struct PairingStep: View {
             .textContentType(contentType)
             .autocorrectionDisabled(true)
             .textInputAutocapitalization(.never)
-            .padding(.vertical, TronSpacing.xl)
+            .padding(.vertical, TronSpacing.md)
             .padding(.horizontal, TronSpacing.section)
             .background(
                 RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
@@ -215,20 +243,22 @@ struct PairingStep: View {
 
         // 2. Cache the updated preset list locally so the bearer-resolver
         //    closure (called on the next WS upgrade) can find the active
-        //    preset even before the server settings.set round-trip completes.
+        //    preset even before the server settings.update round-trip completes.
         cachePresets(plan.updatedPresets)
 
         // 3. Switch the active server. updateServerSettings() rebuilds the
         //    RPC client with the new URL + bearer-token resolver in one go.
         dependencies.updateServerSettings(host: plan.activeHost, port: plan.activePort)
 
-        // 4. Push the preset list to the server so it survives reinstalls.
-        //    Best-effort — the local cache already covers this session.
+        // 4. Push the preset list to the server so it survives reinstalling
+        //    the iOS app. Best-effort — the local cache covers this session.
         Task { try? await pushPresetList(plan.updatedPresets) }
 
-        // 5. Mark connecting=false and walk forward.
+        // 5. Mark connecting=false and complete the sheet.
         state.isConnecting = false
-        state.advance()
+        dependencies.telemetryClient.track(.pairingCompleted)
+        state.complete()
+        onPaired()
     }
 
     // MARK: - Cached preset helpers

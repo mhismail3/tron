@@ -147,8 +147,8 @@ final class WebSocketService {
     private var deployRestartExpectedMs: Int = 0
 
     /// Bearer token resolver invoked on every WS upgrade. `nil` means "send
-    /// no Authorization header" — used by legacy / un-paired presets that
-    /// haven't completed the bearer pairing flow.
+    /// no Authorization header" — used by presets that have not completed
+    /// bearer pairing on this device.
     private let bearerTokenProvider: BearerTokenProvider?
 
     /// URLSession delegate that notices HTTP 401 on the upgrade and routes
@@ -786,14 +786,33 @@ final class WebSocketSessionDelegate: NSObject, URLSessionWebSocketDelegate, @un
     @MainActor
     private func owner() -> WebSocketService? { ownerRef }
 
-    /// On any task completion (including failed upgrades), inspect the HTTP
-    /// response. A 401 means the bearer token is wrong/missing/rotated —
-    /// route to `markUnauthorized` so the state machine parks for re-pair.
+    /// URLSession exposes failed WebSocket upgrade responses most reliably
+    /// through task metrics. A 401 means the bearer token is
+    /// wrong/missing/rotated — route to `markUnauthorized` so the state
+    /// machine parks for re-pair.
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didFinishCollecting metrics: URLSessionTaskMetrics
+    ) {
+        for transaction in metrics.transactionMetrics {
+            if let response = transaction.response {
+                record(response: response)
+            }
+        }
+    }
+
+    /// Some failed upgrades only expose their response at completion, so
+    /// keep this as a second chance after metrics collection.
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard
-            let httpResponse = task.response as? HTTPURLResponse,
-            httpResponse.statusCode == 401
-        else {
+        if let response = task.response {
+            record(response: response)
+        }
+    }
+
+    private func record(response: URLResponse) {
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 401 else {
             return
         }
         Task { @MainActor in

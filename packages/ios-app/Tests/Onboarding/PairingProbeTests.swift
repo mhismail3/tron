@@ -160,6 +160,56 @@ struct PairingProbeTests {
         }
     }
 
+    @Test("classifyFrame(): ignores connection.established before matching ping response")
+    func classifyFrameIgnoresConnectionEstablishedEvent() {
+        let event = """
+        {
+            "type": "connection.established",
+            "timestamp": "2026-04-26T00:00:00Z",
+            "data": { "clientId": "c" }
+        }
+        """.data(using: .utf8)!
+
+        let frame = URLSessionPairingProbe.classifyFrame(
+            envelope: event,
+            expectedRequestId: "pairing-ping"
+        )
+
+        #expect(frame == .ignore)
+    }
+
+    @Test("classifyFrame(): ignores non-matching RPC response ids")
+    func classifyFrameIgnoresOtherResponses() {
+        let response = """
+        { "id": "other", "success": true, "result": { "pong": true } }
+        """.data(using: .utf8)!
+
+        let frame = URLSessionPairingProbe.classifyFrame(
+            envelope: response,
+            expectedRequestId: "pairing-ping"
+        )
+
+        #expect(frame == .ignore)
+    }
+
+    @Test("classifyFrame(): classifies matching ping response")
+    func classifyFrameMatchesPingResponse() {
+        let response = """
+        {
+            "id": "pairing-ping",
+            "success": true,
+            "result": { "pong": true, "serverVersion": "0.5.0" }
+        }
+        """.data(using: .utf8)!
+
+        let frame = URLSessionPairingProbe.classifyFrame(
+            envelope: response,
+            expectedRequestId: "pairing-ping"
+        )
+
+        #expect(frame == .outcome(.ok(serverVersion: "0.5.0")))
+    }
+
     // MARK: - Outcome → PairingStepConnectError bridge
 
     @Test("toConnectError(): .unauthorized → PairingStepConnectError.unauthorized")
@@ -189,5 +239,58 @@ struct PairingProbeTests {
     func bridgeOkIsNil() {
         let err = PairingProbeOutcome.ok(serverVersion: "0.5.0").toConnectError()
         #expect(err == nil)
+    }
+
+    // MARK: - Upgrade auth response sniffing
+
+    @Test("ProbeSessionDelegate records HTTP 401 upgrade responses")
+    func delegateRecordsUnauthorizedResponse() throws {
+        let delegate = ProbeSessionDelegate()
+        let url = try #require(URL(string: "ws://127.0.0.1:9847/ws"))
+        let response = try #require(HTTPURLResponse(
+            url: url,
+            statusCode: 401,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+
+        #expect(delegate.observedUnauthorized == false)
+        delegate.record(response: response)
+        #expect(delegate.observedUnauthorized == true)
+    }
+
+    @Test("ProbeSessionDelegate ignores non-401 responses")
+    func delegateIgnoresNonUnauthorizedResponse() throws {
+        let delegate = ProbeSessionDelegate()
+        let url = try #require(URL(string: "ws://127.0.0.1:9847/ws"))
+        let response = try #require(HTTPURLResponse(
+            url: url,
+            statusCode: 101,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+
+        delegate.record(response: response)
+        #expect(delegate.observedUnauthorized == false)
+    }
+
+    @Test("ProbeSessionDelegate wait catches a 401 that arrives after the transport error")
+    func delegateWaitsBrieflyForUnauthorizedResponse() async throws {
+        let delegate = ProbeSessionDelegate()
+        let url = try #require(URL(string: "ws://127.0.0.1:9847/ws"))
+        let response = try #require(HTTPURLResponse(
+            url: url,
+            statusCode: 401,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+
+        Task {
+            try? await Task.sleep(for: .milliseconds(20))
+            delegate.record(response: response)
+        }
+
+        let observed = await delegate.waitForUnauthorized(timeout: .milliseconds(250))
+        #expect(observed)
     }
 }

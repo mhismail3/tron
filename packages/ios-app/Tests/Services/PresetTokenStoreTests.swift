@@ -108,18 +108,16 @@ struct PresetTokenStoreTests {
         #expect(store.token(forPresetId: id) == nil)
     }
 
-    // MARK: - Migration (existing presets without bearers)
+    // MARK: - Missing token
 
-    @Test("legacy preset without a stored token is treated as un-paired")
-    func legacyPresetMigration() {
+    @Test("preset without a stored token is treated as unpaired")
+    func presetWithoutTokenIsUnpaired() {
         let store = PresetTokenStore()
-        let legacyId = "legacy-preset-id-no-keychain-entry-\(UUID().uuidString)"
-        // Simulates a TestFlight user upgrading to the bearer-auth build:
-        // their connectionPresets exist server-side but no Keychain entry
-        // exists yet. Token lookup MUST return nil so WebSocketService can
-        // attempt connect without a header, get 401, and route the user to
-        // the .unauthorized re-pair flow.
-        #expect(store.token(forPresetId: legacyId) == nil)
+        let presetId = "preset-id-no-keychain-entry-\(UUID().uuidString)"
+        // Token lookup MUST return nil so WebSocketService can attempt
+        // connect without a header, get 401, and route the user to the
+        // .unauthorized re-pair flow.
+        #expect(store.token(forPresetId: presetId) == nil)
     }
 
     // MARK: - Preset rename / id stability

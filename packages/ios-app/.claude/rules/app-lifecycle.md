@@ -11,29 +11,24 @@ paths:
 
 # App Lifecycle
 
-App startup, first-run gating, scene phase, and deep links.
+App startup, first-run pairing sheet, scene phase, and deep links.
 
 ## Startup Sequence
 
-The path is gated at three points: pre-`init()` static work, async DI
-container initialization, and the first-run / onboarding-complete flag.
+Startup has three pieces: pre-`init()` static work, async DI container
+initialization, and the first-run pairing-sheet flag.
 
 1. `TronMobileApp.init()` (synchronous, before `body` evaluates):
    - `TronFontLoader.registerFonts()`
    - `EventRegistry.shared.registerAll()` — must run before any events arrive.
-   - `OnboardingMigrationDecider.runMigrationIfNeeded()` — flips
-     `@AppStorage("onboardingComplete")=true` for existing TestFlight
-     users that already have cached `connectionPresets[]`. Pure idempotent
-     check — never undoes an explicit reset.
 2. `WindowGroup` body — `rootContent()` switches on `initializer.state`:
    - `.loading` → `ProgressView`
    - `.failed(message)` → `InitializationErrorView` with retry
    - `.ready` → `readyContent()`
-3. `readyContent()` — first-run gate on `@AppStorage("onboardingComplete")`:
-   - `false` → `OnboardingFlowView` (the wizard owns its own state and
-     calls `state.complete()` to flip the flag).
-   - `true` → `ContentView` (chat) plus a `.task` that does the
-     existing-user push-notification reconnect check.
+3. `readyContent()` always mounts `ContentView`; when
+   `@AppStorage("onboardingComplete")` is false it presents
+   `OnboardingFlowView` as a medium-detent sheet. Successful pairing
+   calls `state.complete()` to flip the flag and dismiss the sheet.
 
 `AppInitializer.initialize { try await container.initialize() }` runs
 on `WindowGroup.task`. The DI container build (DB, services) is the only
@@ -41,23 +36,21 @@ step that can fail with a user-actionable error; everything else is
 either declarative state or registered-once globals.
 
 **Push-notification permission flow** intentionally does NOT trigger
-silently from `initializeApp()`. It runs from inside the onboarding
-`NotificationsStep` (so the user gets context first) AND from the
-existing-user `.task` on `ContentView` (which only re-checks status +
-registers an existing token, never prompts).
+silently from `initializeApp()` or onboarding. Users enable it from
+Settings. Startup and post-pairing only re-check status and register an
+already-authorized token; they never prompt.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `App/TronMobileApp.swift` | App entry, scene setup, first-run gate |
+| `App/TronMobileApp.swift` | App entry, scene setup, dashboard root, onboarding sheet |
 | `App/AppDelegate.swift` | APNs device-token + remote-notification routing |
 | `Services/AppInitializer.swift` | Two-phase init state machine (loading/ready/failed) |
 | `Services/Container/DependencyContainer.swift` | Service initialization |
 | `Services/DeepLinking/DeepLinkRouter.swift` | URL/notification routing |
-| `Services/Onboarding/OnboardingMigrationDecider.swift` | One-shot migration for legacy installs |
-| `ViewModels/State/OnboardingState.swift` | `@Observable` wizard state, AppStorage keys |
-| `Views/Onboarding/OnboardingFlowView.swift` | Step coordinator |
+| `ViewModels/State/OnboardingState.swift` | `@Observable` pairing-sheet state, AppStorage keys |
+| `Views/Onboarding/OnboardingFlowView.swift` | Pairing-sheet step coordinator |
 
 ## First-run Gate
 
@@ -66,17 +59,9 @@ registers an existing token, never prompts).
 ```
 
 The literal key `"onboardingComplete"` is also exposed as
-`OnboardingState.completionStorageKey` so test code and the migration
-decider don't drift from the AppStorage binding.
-
-Migration: `OnboardingMigrationDecider` runs synchronously inside
-`init()` BEFORE `@AppStorage` reads, so the flag iOS reads on first
-post-upgrade launch already reflects the migration. It only flips the
-flag when `cachedConnectionPresets` (the `SettingsState.cachedPresetsKey`
-literal `"cachedConnectionPresets"`) has at least one entry AND the flag
-isn't already true. Reset paths (e.g. diagnostics page) intentionally
-clear `onboardingComplete` AND that cache, so the migration won't
-silently re-skip the wizard.
+`OnboardingState.completionStorageKey` so test code does not drift from
+the AppStorage binding. `false` means the dashboard still mounts, with
+the pairing sheet presented above it.
 
 ## Deep Link Handling
 
@@ -89,7 +74,7 @@ URL scheme: `tron://`
 | Voice Notes | `tron://voice-notes` |
 | Notification inbox | `tron://notifications/{toolCallId}` |
 | Share extension | `tron://share` |
-| Pairing (onboarding QR) | `tron://pair?host=…&port=…&token=…[&label=…]` — handled by `PairingURLParser` inside the onboarding step, NOT by `DeepLinkRouter` |
+| Pairing (Mac QR) | `tron://pair?host=…&port=…&token=…[&label=…]` — handled by `TronMobileApp` before `DeepLinkRouter` |
 
 Flow:
 1. `onOpenURL` in `TronMobileApp` OR APNs payload via
@@ -98,9 +83,9 @@ Flow:
    parses to a `DeepLinkIntent` and stores it in `pendingIntent`.
 3. The `.onChange(of: container.deepLinkRouter.pendingIntent)` handler
    in `TronMobileApp.body` consumes the intent and dispatches.
-4. Pairing URLs are intercepted by the universal-paste helper
-   (`Binding<String>.pasteAware`) inside the onboarding form and the
-   re-pair sheet — they never reach `DeepLinkRouter`.
+4. Pairing URLs are intercepted by `TronMobileApp.handlePairingURL`,
+   which fills the onboarding form and presents the sheet. Paste still
+   works inside the form via `Binding<String>.pasteAware`.
 
 ## Scene Phase
 
@@ -149,14 +134,12 @@ failures (session-not-found, version-incompatible).
 ## Rules
 
 - `EventRegistry` must register before any events arrive.
-- Migration decider must run synchronously inside `init()` before
-  `@AppStorage` is observed.
-- Push-notification permission requests live in `NotificationsStep` AND
-  the post-onboarding `.task` — never silently behind `ContentView`.
+- Push-notification permission requests live in Settings. Startup and
+  post-pairing may only register an already-authorized token.
 - Device-token registration waits for RPC connection
   (`onChange(of: container.rpcClient.connectionState)`).
-- `ContentView` only mounts when `onboardingComplete == true`. Don't
-  bypass the gate.
+- `ContentView` mounts regardless of `onboardingComplete`; the sheet is
+  the first-run affordance.
 - `.unauthorized` is a parked state. No auto-retry on foreground.
 
 ---
@@ -168,13 +151,12 @@ Update this rule when:
 - Adding deep link routes
 - Modifying scene phase handling
 - Adding/changing onboarding steps
-- Changing the first-run gate or migration logic
+- Changing the first-run gate
 - Adding `ConnectionState` cases or changing pill/toast routing
 
 Verification:
 ```bash
 grep -l "EventRegistry.shared.registerAll" packages/ios-app/Sources/App/
 grep -l "DeepLinkRouter" packages/ios-app/Sources/App/TronMobileApp.swift
-grep -l "OnboardingMigrationDecider.runMigrationIfNeeded" packages/ios-app/Sources/App/TronMobileApp.swift
 grep -l "onboardingComplete" packages/ios-app/Sources/App/TronMobileApp.swift packages/ios-app/Sources/ViewModels/State/OnboardingState.swift
 ```

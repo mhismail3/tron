@@ -9,9 +9,6 @@ import Foundation
 /// See plan §F "Telemetry (PostHog, opt-in)" for the full schema.
 enum TelemetryEvent {
     case appInstalled
-    case onboardingStarted
-    case onboardingStepCompleted(step: String)
-    case onboardingCompleted
     case pairingCompleted
     case providerAuthenticated(provider: String)
     case sessionStarted
@@ -24,9 +21,6 @@ enum TelemetryEvent {
     var name: String {
         switch self {
         case .appInstalled: return "app_installed"
-        case .onboardingStarted: return "onboarding_started"
-        case .onboardingStepCompleted: return "onboarding_step_completed"
-        case .onboardingCompleted: return "onboarding_completed"
         case .pairingCompleted: return "pairing_completed"
         case .providerAuthenticated: return "provider_authenticated"
         case .sessionStarted: return "session_started"
@@ -40,11 +34,8 @@ enum TelemetryEvent {
 
     var properties: [String: Any] {
         switch self {
-        case .appInstalled, .onboardingStarted, .onboardingCompleted,
-             .pairingCompleted, .sessionStarted, .feedbackSubmitted:
+        case .appInstalled, .pairingCompleted, .sessionStarted, .feedbackSubmitted:
             return [:]
-        case .onboardingStepCompleted(let step):
-            return ["step": step]
         case .providerAuthenticated(let provider):
             return ["provider": provider]
         case .sessionCompleted(let durationSeconds, let messageCount):
@@ -70,9 +61,6 @@ enum TelemetryEvent {
     static var allCasesForDocumentation: [TelemetryEvent] {
         [
             .appInstalled,
-            .onboardingStarted,
-            .onboardingStepCompleted(step: ""),
-            .onboardingCompleted,
             .pairingCompleted,
             .providerAuthenticated(provider: ""),
             .sessionStarted,

@@ -238,8 +238,8 @@ final class DependencyContainerTests: XCTestCase {
     /// on this being non-nil immediately after init — there's no second
     /// "telemetry-ready" hook.
     func test_telemetryClient_initializedFromPersistedOptIn_off() async throws {
-        UserDefaults.standard.set(false, forKey: OnboardingState.telemetryConsentStorageKey)
-        defer { UserDefaults.standard.removeObject(forKey: OnboardingState.telemetryConsentStorageKey) }
+        UserDefaults.standard.set(false, forKey: SettingsState.telemetryEnabledStorageKey)
+        defer { UserDefaults.standard.removeObject(forKey: SettingsState.telemetryEnabledStorageKey) }
 
         let container = DependencyContainer()
         XCTAssertNotNil(container.telemetryClient)
@@ -254,13 +254,13 @@ final class DependencyContainerTests: XCTestCase {
     /// `UserDefaults.didChangeNotification` posted to the main queue.
     /// We poll briefly because notification delivery is asynchronous.
     func test_telemetryClient_rebuildsOnPersistedToggle() async throws {
-        UserDefaults.standard.set(false, forKey: OnboardingState.telemetryConsentStorageKey)
-        defer { UserDefaults.standard.removeObject(forKey: OnboardingState.telemetryConsentStorageKey) }
+        UserDefaults.standard.set(false, forKey: SettingsState.telemetryEnabledStorageKey)
+        defer { UserDefaults.standard.removeObject(forKey: SettingsState.telemetryEnabledStorageKey) }
 
         let container = DependencyContainer()
         let before = ObjectIdentifier(container.telemetryClient as AnyObject)
 
-        UserDefaults.standard.set(true, forKey: OnboardingState.telemetryConsentStorageKey)
+        UserDefaults.standard.set(true, forKey: SettingsState.telemetryEnabledStorageKey)
 
         let deadline = Date().addingTimeInterval(2.0)
         while Date() < deadline,
@@ -279,8 +279,8 @@ final class DependencyContainerTests: XCTestCase {
     /// rebuild the client — that would tear up the live sink on every
     /// `@AppStorage` write across the app.
     func test_telemetryClient_doesNotRebuildOnUnrelatedDefaultsChange() async throws {
-        UserDefaults.standard.set(false, forKey: OnboardingState.telemetryConsentStorageKey)
-        defer { UserDefaults.standard.removeObject(forKey: OnboardingState.telemetryConsentStorageKey) }
+        UserDefaults.standard.set(false, forKey: SettingsState.telemetryEnabledStorageKey)
+        defer { UserDefaults.standard.removeObject(forKey: SettingsState.telemetryEnabledStorageKey) }
 
         let container = DependencyContainer()
         let before = ObjectIdentifier(container.telemetryClient as AnyObject)

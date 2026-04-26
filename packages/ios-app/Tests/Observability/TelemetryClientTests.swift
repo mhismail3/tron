@@ -9,9 +9,8 @@ struct TelemetryClientTests {
     @Test("NullTelemetryClient drops events silently — no state retained")
     func nullClientDropsEvents() {
         let client = NullTelemetryClient()
-        client.track(.onboardingStarted)
-        client.track(.onboardingStepCompleted(step: "welcome"))
-        client.track(.onboardingCompleted)
+        client.track(.appInstalled)
+        client.track(.pairingCompleted)
         // No assertion needed — contract is "no observable side effect."
         // The test pins the API shape so swapping in the real SDK is
         // a one-line change in TelemetryClientFactory.
@@ -20,18 +19,18 @@ struct TelemetryClientTests {
     @Test("InMemoryTelemetryClient records emitted events when enabled")
     func inMemoryRecordsWhenEnabled() {
         let client = InMemoryTelemetryClient(enabled: true)
-        client.track(.onboardingStarted)
+        client.track(.appInstalled)
         client.track(.pairingCompleted)
         #expect(client.recordedEvents.count == 2)
-        if case .onboardingStarted = client.recordedEvents[0] { /* ok */ } else {
-            Issue.record("expected onboardingStarted event at index 0")
+        if case .appInstalled = client.recordedEvents[0] { /* ok */ } else {
+            Issue.record("expected appInstalled event at index 0")
         }
     }
 
     @Test("InMemoryTelemetryClient drops events when disabled — opt-in off by default")
     func inMemoryDropsWhenDisabled() {
         let client = InMemoryTelemetryClient(enabled: false)
-        client.track(.onboardingStarted)
+        client.track(.appInstalled)
         client.track(.pairingCompleted)
         #expect(client.recordedEvents.isEmpty)
     }
@@ -41,18 +40,16 @@ struct TelemetryClientTests {
         var clock = Date(timeIntervalSince1970: 0)
         let bucket = TokenBucket(capacity: 2, refillPerSecond: 0.0, now: { clock })
         let client = InMemoryTelemetryClient(enabled: true, rateLimiter: bucket)
-        client.track(.onboardingStarted)
-        client.track(.onboardingStarted)
-        client.track(.onboardingStarted) // dropped by limiter
+        client.track(.appInstalled)
+        client.track(.appInstalled)
+        client.track(.appInstalled) // dropped by limiter
         #expect(client.recordedEvents.count == 2)
         _ = clock // keep unused-var warning away
     }
 
     @Test("TelemetryEvent name is stable — schema pinned")
     func eventNamesAreStable() {
-        #expect(TelemetryEvent.onboardingStarted.name == "onboarding_started")
-        #expect(TelemetryEvent.onboardingStepCompleted(step: "welcome").name == "onboarding_step_completed")
-        #expect(TelemetryEvent.onboardingCompleted.name == "onboarding_completed")
+        #expect(TelemetryEvent.appInstalled.name == "app_installed")
         #expect(TelemetryEvent.pairingCompleted.name == "pairing_completed")
         #expect(TelemetryEvent.providerAuthenticated(provider: "anthropic").name == "provider_authenticated")
         #expect(TelemetryEvent.feedbackSubmitted.name == "feedback_submitted")
@@ -61,9 +58,6 @@ struct TelemetryClientTests {
 
     @Test("TelemetryEvent properties expose expected metadata")
     func eventPropertiesExposed() {
-        let event = TelemetryEvent.onboardingStepCompleted(step: "pairing")
-        #expect(event.properties["step"] as? String == "pairing")
-
         let providerEvent = TelemetryEvent.providerAuthenticated(provider: "openai")
         #expect(providerEvent.properties["provider"] as? String == "openai")
     }

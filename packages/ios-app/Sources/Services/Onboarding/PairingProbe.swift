@@ -2,7 +2,7 @@ import Foundation
 
 /// Result of one PairingProbe attempt — narrow enum so the caller can
 /// branch on every outcome without inspecting NSError details.
-enum PairingProbeOutcome: Equatable {
+enum PairingProbeOutcome: Equatable, Sendable {
     /// `system.ping` returned success. The optional `serverVersion` lets
     /// the UI confirm "you're talking to Tron 0.5.0".
     case ok(serverVersion: String?)
@@ -98,35 +98,28 @@ final class URLSessionPairingProbe: PairingProbing {
         let task = session.webSocketTask(with: request)
         task.resume()
 
+        let requestId = UUID().uuidString
         let payload = Self.pingRequestData(
             protocolVersion: 1,
             clientVersion: AppConstants.appVersion,
-            requestId: UUID().uuidString
+            requestId: requestId
         )
 
         do {
             try await task.send(.data(payload))
         } catch {
             // Most likely a connection-refused or 401 — drain the delegate.
-            return Self.classifyTransportError(error, delegate: delegate)
+            return await Self.classifyTransportError(error, delegate: delegate)
         }
 
         do {
-            let message = try await Self.receiveWithTimeout(
+            return try await Self.receivePingResponseWithTimeout(
                 task: task,
+                requestId: requestId,
                 seconds: probeTimeout
             )
-            switch message {
-            case .data(let data):
-                return Self.classify(envelope: data)
-            case .string(let text):
-                let data = text.data(using: .utf8) ?? Data()
-                return Self.classify(envelope: data)
-            @unknown default:
-                return .unreachable(reason: "Unexpected message type from server")
-            }
         } catch {
-            return Self.classifyTransportError(error, delegate: delegate)
+            return await Self.classifyTransportError(error, delegate: delegate)
         }
     }
 
@@ -172,6 +165,31 @@ final class URLSessionPairingProbe: PairingProbing {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return .unreachable(reason: "Server returned an unparseable response")
         }
+        return classifyResponseObject(object)
+    }
+
+    /// Classify one incoming WebSocket frame while waiting for the
+    /// specific `system.ping` response this probe sent. Tron emits a
+    /// `connection.established` event immediately after the WS upgrade;
+    /// the production RPC client ignores events and matches by request id,
+    /// so the probe must do the same or it will report a healthy server as
+    /// unreachable.
+    nonisolated static func classifyFrame(
+        envelope data: Data,
+        expectedRequestId: String
+    ) -> PairingProbeFrame {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .outcome(.unreachable(reason: "Server returned an unparseable response"))
+        }
+
+        guard responseID(object["id"], matches: expectedRequestId) else {
+            return .ignore
+        }
+
+        return .outcome(classifyResponseObject(object))
+    }
+
+    private nonisolated static func classifyResponseObject(_ object: [String: Any]) -> PairingProbeOutcome {
         if let success = object["success"] as? Bool, success {
             let result = object["result"] as? [String: Any]
             let serverVersion = result?["serverVersion"] as? String
@@ -190,14 +208,21 @@ final class URLSessionPairingProbe: PairingProbing {
         return .unreachable(reason: "Server returned an unexpected response")
     }
 
+    private nonisolated static func responseID(_ value: Any?, matches expectedID: String) -> Bool {
+        if let string = value as? String {
+            return string == expectedID
+        }
+        return false
+    }
+
     /// Translate a thrown URLSession / WebSocketTask error into the
     /// outcome enum. If the upgrade was rejected with 401 the delegate
     /// will have observed it; otherwise we treat as `.unreachable`.
     nonisolated private static func classifyTransportError(
         _ error: Error,
         delegate: ProbeSessionDelegate
-    ) -> PairingProbeOutcome {
-        if delegate.observedUnauthorized {
+    ) async -> PairingProbeOutcome {
+        if await delegate.waitForUnauthorized(timeout: .milliseconds(250)) {
             return .unauthorized
         }
         let nsError = error as NSError
@@ -207,15 +232,30 @@ final class URLSessionPairingProbe: PairingProbing {
         return .unreachable(reason: nsError.localizedDescription)
     }
 
-    /// Wrap `URLSessionWebSocketTask.receive()` in a timeout so the probe
-    /// can't hang forever if the server accepts the upgrade but never
-    /// emits a ping reply.
-    private static func receiveWithTimeout(
+    /// Receive frames until the matching ping response arrives. The server
+    /// can emit event frames first, especially `connection.established`, so
+    /// reading a single frame is not enough.
+    private static func receivePingResponseWithTimeout(
         task: URLSessionWebSocketTask,
+        requestId: String,
         seconds: TimeInterval
-    ) async throws -> URLSessionWebSocketTask.Message {
-        try await withThrowingTaskGroup(of: URLSessionWebSocketTask.Message.self) { group in
-            group.addTask { try await task.receive() }
+    ) async throws -> PairingProbeOutcome {
+        try await withThrowingTaskGroup(of: PairingProbeOutcome.self) { group in
+            group.addTask {
+                while !Task.isCancelled {
+                    let message = try await task.receive()
+                    guard let data = Self.messageData(from: message) else {
+                        return .unreachable(reason: "Unexpected message type from server")
+                    }
+                    switch Self.classifyFrame(envelope: data, expectedRequestId: requestId) {
+                    case .ignore:
+                        continue
+                    case .outcome(let outcome):
+                        return outcome
+                    }
+                }
+                throw CancellationError()
+            }
             group.addTask {
                 try await Task.sleep(for: .seconds(seconds))
                 throw NSError(
@@ -231,9 +271,25 @@ final class URLSessionPairingProbe: PairingProbing {
             return result
         }
     }
+
+    private nonisolated static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {
+        switch message {
+        case .data(let data):
+            return data
+        case .string(let text):
+            return Data(text.utf8)
+        @unknown default:
+            return nil
+        }
+    }
 }
 
 // MARK: - URLSession delegate (401 sniffer)
+
+enum PairingProbeFrame: Equatable {
+    case ignore
+    case outcome(PairingProbeOutcome)
+}
 
 /// Internal delegate the probe attaches to its ephemeral URLSession so
 /// it can detect HTTP 401 on the WS upgrade. The probe is `@MainActor`
@@ -243,12 +299,51 @@ final class ProbeSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchec
     /// Set true if any task in this session received a 401 HTTP response
     /// (which is what a `auth.enforced=true` server emits when the
     /// `Authorization` header is missing or wrong).
-    private(set) var observedUnauthorized: Bool = false
+    var observedUnauthorized: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _observedUnauthorized
+    }
+
+    private let lock = NSLock()
+    private var _observedUnauthorized: Bool = false
+
+    func waitForUnauthorized(timeout: Duration) async -> Bool {
+        if observedUnauthorized {
+            return true
+        }
+        try? await Task.sleep(for: timeout)
+        return observedUnauthorized
+    }
+
+    private func markUnauthorized() {
+        lock.lock()
+        _observedUnauthorized = true
+        lock.unlock()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didFinishCollecting metrics: URLSessionTaskMetrics
+    ) {
+        for transaction in metrics.transactionMetrics {
+            if let response = transaction.response {
+                record(response: response)
+            }
+        }
+    }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let httpResponse = task.response as? HTTPURLResponse,
+        if let response = task.response {
+            record(response: response)
+        }
+    }
+
+    func record(response: URLResponse) {
+        if let httpResponse = response as? HTTPURLResponse,
            httpResponse.statusCode == 401 {
-            observedUnauthorized = true
+            markUnauthorized()
         }
     }
 }

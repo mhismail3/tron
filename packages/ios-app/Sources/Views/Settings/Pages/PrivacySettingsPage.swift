@@ -4,8 +4,8 @@ import SwiftUI
 ///
 /// Hosts:
 /// - Telemetry opt-in toggle (default OFF, stored in
-///   `@AppStorage("telemetryEnabled")` under the key shared by
-///   `OnboardingState.telemetryConsentStorageKey`).
+///   `@AppStorage("telemetryEnabled")` under
+///   `SettingsState.telemetryEnabledStorageKey`).
 /// - Event list — rendered from `TelemetryEvent.allCasesForDocumentation`
 ///   so the page is always in sync with the code.
 /// - "Send feedback" — opens the system mail composer with a redacted
@@ -18,7 +18,7 @@ import SwiftUI
 /// toggle off stops emission immediately, even for long-lived
 /// instances of the client.
 struct PrivacySettingsPage: View {
-    @AppStorage(OnboardingState.telemetryConsentStorageKey) private var telemetryEnabled = false
+    @AppStorage(SettingsState.telemetryEnabledStorageKey) private var telemetryEnabled = false
 
     @State private var showMailComposer = false
     @State private var mailSubject = ""

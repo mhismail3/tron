@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// Shared chrome for every onboarding step view.
+/// Shared chrome for the onboarding sheet.
 ///
-/// Every step inside `OnboardingFlowView` is a content view wrapped in
-/// `OnboardingShell` — this keeps the layout, safe-area handling,
-/// typography, and button styling identical across the wizard so the
-/// only thing each step has to think about is its own copy + form.
+/// The sheet is intentionally compact: one header, one scrollable content
+/// area, and a footer pinned to the bottom. It can grow to the large
+/// detent for keyboard entry but starts as a medium overlay above the
+/// dashboard.
 ///
 /// Layout:
 ///
@@ -52,29 +52,37 @@ struct OnboardingShell<Content: View, Footer: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            topBar
+            if showsBackButton, onBack != nil {
+                topBar
+            }
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: TronSpacing.lg) {
-                    headerBlock
-                    content
-                }
-                .padding(.horizontal, TronSpacing.xl)
-                .padding(.top, TronSpacing.lg)
-                .padding(.bottom, TronSpacing.xl)
-                .frame(maxWidth: 600, alignment: .leading) // iPad: cap width to a comfortable column
-                .frame(maxWidth: .infinity, alignment: .leading)
+                bodyStack
+                    .padding(.horizontal, TronSpacing.xl)
+                    .padding(.top, showsBackButton ? TronSpacing.md : TronSpacing.xl)
+                    .padding(.bottom, TronSpacing.lg)
+                    .frame(maxWidth: 600, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .scrollDismissesKeyboard(.interactively)
 
             footer
                 .padding(.horizontal, TronSpacing.xl)
-                .padding(.vertical, TronSpacing.lg)
+                .padding(.top, TronSpacing.md)
+                .padding(.bottom, TronSpacing.lg)
                 .frame(maxWidth: 600)
                 .frame(maxWidth: .infinity)
-                .background(Color.tronBackground.ignoresSafeArea(edges: .bottom))
+                .background(.ultraThinMaterial)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .tronScreenBackground()
+    }
+
+    @ViewBuilder
+    private var bodyStack: some View {
+        VStack(alignment: .leading, spacing: TronSpacing.lg) {
+            headerBlock
+            content
+        }
     }
 
     // MARK: - Top bar
@@ -100,7 +108,7 @@ struct OnboardingShell<Content: View, Footer: View>: View {
         }
         .padding(.horizontal, TronSpacing.xl)
         .padding(.top, TronSpacing.md)
-        .frame(height: 36)
+        .frame(height: 34)
     }
 
     // MARK: - Header
@@ -118,6 +126,7 @@ struct OnboardingShell<Content: View, Footer: View>: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -185,20 +194,5 @@ struct OnboardingSecondaryButton: View {
             .foregroundStyle(Color.tronTextSecondary)
         }
         .buttonStyle(.plain)
-    }
-}
-
-/// Helper: small tagged label used to mark optional steps. Sits next to
-/// the title or above a Skip button.
-struct OnboardingOptionalBadge: View {
-    var body: some View {
-        Text("Optional")
-            .font(TronTypography.sans(size: 11, weight: .semibold))
-            .foregroundStyle(Color.tronTextMuted)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(
-                Capsule().fill(Color.tronSurfaceElevated)
-            )
     }
 }

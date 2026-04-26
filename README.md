@@ -164,7 +164,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 1. Install [Tailscale](https://tailscale.com) and sign in on the Mac that will host the agent.
 2. Download the latest `Tron-mac-v*.dmg` from [GitHub Releases](https://github.com/mhismail3/tron/releases) and drag `Tron.app` into `/Applications`.
 3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, and displays pairing info (Tailscale IP + port + bearer token + QR code).
-4. On iPhone, install the Tron TestFlight build and run the onboarding flow. Scan the QR or paste the three pairing fields.
+4. On iPhone, install the Tron TestFlight build. The app opens to the dashboard and presents a pairing sheet; scan the QR or paste the pairing fields from the Mac app.
 
 The wizard and menu bar surface everything else (`Check for updates…`, `Send feedback…`, `Restart server`, etc.) — you never need the CLI unless you want to.
 
@@ -719,7 +719,7 @@ packages/ios-app/Sources/
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Onboarding gate**: `TronMobileApp.readyContent()` branches on `@AppStorage("onboardingComplete")` — false routes to `OnboardingFlowView`, true routes to `ContentView`. Existing TestFlight upgrades auto-set the flag when `connectionPresets` is non-empty so returning users skip the welcome flow.
+- **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView` as a medium-detent pairing sheet.
 - **Multi-server bearer model**: Each entry in `connectionPresets[]` has its own bearer token, stored in Keychain via `PresetTokenStore` keyed by preset ID. `WebSocketService` attaches the active preset's token as `Authorization: Bearer <token>` on upgrade. A new `ConnectionState.unauthorized` surfaces a "Re-pair this server" tap in `ConnectionStatusPill`.
 - **Telemetry + feedback**: `SentryRedactor` scrubs bearer tokens, file paths, and chat content before crash events leave the device. `FeedbackComposer` builds a redacted log tail and hands it to `MFMailComposeViewController` via `FeedbackMailView`. Opt-in toggle on the Privacy settings page stores to `@AppStorage("telemetryEnabled")` (default OFF).
 
@@ -745,7 +745,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 - `development.md` — Xcode setup, builds, testing
 - `events.md` — Event plugin system
 - `apns.md` — Push notification setup
-- `onboarding.md` — First-run flow: welcome → Tailscale → Mac install → pairing → provider → telemetry → notifications
+- `onboarding.md` — First-run pairing sheet, QR/deep-link handling, and per-preset bearer persistence
 
 ---
 

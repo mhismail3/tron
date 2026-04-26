@@ -10,15 +10,9 @@ import Foundation
 ///
 /// **Key type:** `ConnectionPreset.id` is `String` (server-driven labels are
 /// stable across rename), so token storage keys on the raw string id rather
-/// than a UUID. Existing presets that lose their id (e.g. server side rebuilt
-/// the preset list with new ids) will appear as legacy / un-paired and the
-/// user is routed back through the re-pair flow.
-///
-/// **Migration note:** when the iOS app upgrades and discovers existing
-/// `connectionPresets` from server-side settings but no bearer tokens, the
-/// first WS connect attempt fails 401 and `ConnectionStatusPill` enters the
-/// `.unauthorized` state, prompting the user to re-pair. Per-preset tokens
-/// are populated as the user re-pairs each server.
+/// than a UUID. A preset without a token is unpaired: the first WS connect
+/// attempt fails 401 and `ConnectionStatusPill` enters `.unauthorized`,
+/// prompting the user to re-pair that server.
 struct PresetTokenStore {
     /// Keychain service prefix for per-preset tokens. The Keychain account
     /// field carries the preset id.
@@ -33,9 +27,7 @@ struct PresetTokenStore {
     }
 
     /// Look up the stored bearer token for the given preset id, or `nil` if
-    /// no token has been stored yet (e.g. legacy preset from before bearer
-    /// auth shipped, or the user has not yet completed pairing for this
-    /// server).
+    /// no token has been stored yet.
     func token(forPresetId id: String) -> String? {
         makeItem(for: id).get()
     }

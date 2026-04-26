@@ -180,9 +180,8 @@ struct ConnectionSettingsPage: View {
         // Listen for re-pair-this-server requests from the chat-side
         // ConnectionStatusPill (`.unauthorized` tap). The notification
         // carries the active host:port pair; we resolve it to the matching
-        // preset and open the sheet in edit mode. If no preset matches
-        // (e.g. legacy direct-connect users), we fall back to add-mode
-        // pre-filled with the current host/port.
+        // preset and open the sheet in edit mode. If no preset matches,
+        // we open add-mode pre-filled with the current host/port.
         .onReceive(NotificationCenter.default.publisher(for: .rePairCurrentServer)) { _ in
             openRePairForActiveServer()
         }

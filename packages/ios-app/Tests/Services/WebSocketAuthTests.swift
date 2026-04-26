@@ -34,10 +34,10 @@ struct WebSocketAuthTests {
 
     @Test("upgrade request omits Authorization when provider returns nil")
     func upgradeRequestOmitsHeaderWhenNil() {
-        // Mirrors the legacy / un-paired preset case: server-provided preset
-        // exists but no bearer in Keychain. The header must not be sent so
-        // the server's 401 response triggers `.unauthorized` rather than the
-        // request being silently rejected with the wrong token.
+        // Mirrors an unpaired preset: a server entry exists but no bearer is
+        // in Keychain. The header must not be sent so the server's 401
+        // response triggers `.unauthorized` rather than the request being
+        // silently rejected with the wrong token.
         let ws = WebSocketService(serverURL: makeURL()) { nil }
 
         let request = ws.makeUpgradeRequest()
@@ -141,10 +141,10 @@ struct WebSocketAuthTests {
         }
     }
 
-    // MARK: - Migration path: legacy preset → no header → 401 → .unauthorized
+    // MARK: - Unpaired preset path
 
-    @Test("migration: nil-token provider produces no header and accepts a 401-driven .unauthorized transition")
-    func migrationFlowNoTokenToUnauthorized() {
+    @Test("nil-token provider produces no header and accepts a 401-driven .unauthorized transition")
+    func nilTokenProviderToUnauthorized() {
         // Compose the contract: a provider returning nil produces a request
         // with no Authorization header. The integration with URLSessionDelegate
         // (Phase 3.5) marks the resulting 401 as `.unauthorized`. The unit

@@ -1,246 +1,160 @@
-# Onboarding (iOS first-run wizard)
+# Onboarding (iOS pairing sheet)
 
 > Reference companion to `.claude/rules/onboarding.md` (load-on-demand
-> rule consumed by Claude). This file is the human-readable narrative —
+> rule consumed by Claude). This file is the human-readable narrative;
 > when in doubt, the rule is normative.
 
-The iOS app gates `ContentView` behind a multi-step wizard on first
-launch. The wizard collects a Tailscale-reachable Mac address, a bearer
-token, optional model-provider auth, telemetry consent, and notification
-permission — then hands off to the chat experience.
+The iOS app always opens to the normal dashboard after initialization.
+Fresh installs present a medium-detent pairing sheet above the dashboard
+when `@AppStorage("onboardingComplete")` is false. Pairing is the only
+required first-run action on iOS: Mac installation, macOS permissions,
+and the QR/token generation happen in the Mac app; providers,
+notifications, telemetry, and feedback live in Settings.
 
 ---
 
 ## Flow Diagram
 
 ```
-                        ┌──────────────────────────────────────┐
-                        │      TronMobileApp (App entry)       │
-                        │                                      │
-                        │  init():                             │
-                        │   • TronFontLoader.registerFonts()   │
-                        │   • EventRegistry.shared.registerAll │
-                        │   • OnboardingMigrationDecider.run() │◀──── one-shot:
-                        │                                      │      cachedPresets non-empty
-                        │  body → WindowGroup.task:            │      ⇒ flips onboardingComplete
-                        │   • container.initialize()           │
-                        └──────────────┬───────────────────────┘
-                                       │
-                                       ▼
-                          ┌──────────────────────────────┐
-                          │  AppInitializer.state        │
-                          ├──────────────────────────────┤
-                          │ .loading  → ProgressView     │
-                          │ .failed   → InitErrorView    │
-                          │ .ready    → readyContent()   │
-                          └──────────────┬───────────────┘
-                                         │
-                          ┌──────────────▼───────────────────────┐
-                          │  @AppStorage("onboardingComplete")   │
-                          ├──────────────────────────────────────┤
-                          │  true  → ContentView (chat)          │
-                          │  false → OnboardingFlowView          │
-                          └──────────────┬───────────────────────┘
-                                         │
-                                         ▼
-                          ┌──────────────────────────────────────┐
-                          │       OnboardingFlowView             │
-                          │  switch state.step:                  │
-                          │                                      │
-                          │   welcome ───── "I have Tron" ─────┐ │
-                          │      │                             │ │
-                          │      ▼                             │ │
-                          │   tailscale                        │ │
-                          │      │                             │ │
-                          │      ▼                             │ │
-                          │   macInstall                       │ │
-                          │      │                             │ │
-                          │      ▼ ◀───────────────────────────┘ │
-                          │   pairing  ─── connect succeeds ─┐   │
-                          │      │   (validate → probe →     │   │
-                          │      │    persist plan)          │   │
-                          │      ▼                           │   │
-                          │   provider  ── skip / connect ──┘   │
-                          │      │                              │
-                          │      ▼                              │
-                          │   telemetryConsent                  │
-                          │      │                              │
-                          │      ▼                              │
-                          │   notifications                     │
-                          │      │                              │
-                          │      ▼                              │
-                          │   done  ── "Get started" ─────┐    │
-                          │                                │    │
-                          │   state.complete()             │    │
-                          │      └─ defaults.set(true,     │    │
-                          │           onboardingComplete)  │    │
-                          └────────────────────────────────┘────┘
-                                                           │
-                                                           ▼
-                                                    ContentView
+TronMobileApp.init()
+  ├─ TronFontLoader.registerFonts()
+  └─ EventRegistry.shared.registerAll()
+
+WindowGroup.task
+  └─ AppInitializer.initialize { DependencyContainer.initialize() }
+
+readyContent()
+  ├─ always mounts ContentView
+  └─ sheet(isPresented: !onboardingComplete)
+       └─ OnboardingFlowView
+            └─ PairingStep
+                 ├─ validate host / port / token / label
+                 ├─ probe ws://host:port/ws with Authorization: Bearer token
+                 ├─ send system.ping
+                 ├─ persist preset + Keychain bearer
+                 ├─ rebuild RPC client for the paired server
+                 └─ state.complete() → dismiss sheet
 ```
+
+Pairing URLs (`tron://pair?host=…&port=…&token=…[&label=…]`) are
+handled in two places:
+
+- `TronMobileApp.onOpenURL` accepts QR/deep-link launches, fills the
+  pairing form, and presents the sheet at the large detent.
+- `Binding<String>.pasteAware` lets the user paste the full pairing URL
+  into any pairing field and auto-distributes the values.
 
 ---
 
-## Step Sequence
+## Pairing
 
-| Order | Step | View | Key behavior |
-|-------|------|------|---------------|
-| 1 | `welcome` | `WelcomeStep` | Branding + two CTAs (start / skip-to-pairing) |
-| 2 | `tailscale` | `TailscaleStep` | Tailscale prerequisite, App Store deep link |
-| 3 | `macInstall` | `MacInstallStep` | DMG download URL + "Continue when installed" |
-| 4 | `pairing` | `PairingStep` | Three text fields + universal-paste; Connect runs validate → probe → persist |
-| 5 | `provider` | `ProviderStep` | OAuth via `OAuthLoginSheet` for Anthropic/OpenAI/Google; Skip is first-class |
-| 6 | `telemetryConsent` | `TelemetryConsentStep` | Two cards (sent / not sent); both buttons advance |
-| 7 | `notifications` | `NotificationsStep` | Allow vs Skip; Allow calls `pushNotificationService.requestAuthorization()` |
-| 8 | `done` | `DoneStep` | "Get started" → `state.complete()` flips the gate |
-
-A power-user shortcut on `welcome` skips straight to `pairing` for
-users who already have Tron running.
-
----
-
-## Pairing — the Hard Step
-
-`PairingStep` is the only step that mutates persistent storage AND can
-fail mid-flight. It's split into pure helpers so each branch is
-testable without RPC, Keychain, or SwiftUI:
+`PairingStep` is the only onboarding step that mutates persistent
+storage and can fail mid-flight. It is split into pure helpers so the
+branches are testable without SwiftUI or live networking:
 
 ```
-   user taps Connect
-        │
-        ▼
-   PairingStepValidator.validate(...)         ── pure, returns Result<Payload, Failure>
-        │   .failure  → state.pairingError = ...
-        │
-        │   .success(payload)
-        ▼
-   dependencies.pairingProbe.probe(...)        ── one-shot WS upgrade + system.ping
-        │   .unauthorized | .incompatible | .unreachable → classify + show
-        │
-        │   .ok
-        ▼
-   PairingPersistor.plan(payload, existing)    ── pure, returns Plan
-        │
-        ▼
-   side effects (View applies the plan):
-     1. presetTokenStore.setToken(...)
-     2. UserDefaults cache write (cachedConnectionPresets)
-     3. dependencies.updateServerSettings(host:port:)
-     4. best-effort settings.update RPC (push presets to server)
-        │
-        ▼
-   state.advance() → provider step
+user taps Connect
+  │
+  ▼
+PairingStepValidator.validate(...)
+  │  .failure → state.pairingError
+  │
+  ▼
+dependencies.pairingProbe.probe(...)
+  │  .unauthorized | .incompatible | .unreachable → classify + show
+  │
+  ▼
+PairingPersistor.plan(payload, existing)
+  │
+  ▼
+side effects:
+  1. presetTokenStore.setToken(...)
+  2. cache updated connectionPresets in UserDefaults
+  3. dependencies.updateServerSettings(host:port:)
+  4. best-effort settings.update RPC to persist presets on the server
+  5. state.complete()
 ```
 
-Universal-paste: at every text field on this step, pasting a
-`tron://pair?host=…&port=…&token=…[&label=…]` URL fires
-`OnboardingState.acceptPairingPayload(_)` instead of writing the URL
-literal to the field. The same `Binding+PasteAware` helper powers the
-Settings re-pair sheet.
+`URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
+pairing bearer token and sends `system.ping`. The server emits a
+`connection.established` event immediately after upgrade, so the probe
+matches the `system.ping` response by request id and ignores unrelated
+event frames before classifying:
+
+- `.ok` when the server replies successfully.
+- `.unauthorized` when the WebSocket upgrade gets HTTP 401.
+- `.incompatible` when `system.ping` returns
+  `CLIENT_VERSION_UNSUPPORTED`.
+- `.unreachable` for DNS, timeout, refused connection, and malformed
+  responses.
+
+If the Mac looks healthy but the iPhone reports unreachable, check that
+Tailscale is connected on the iPhone and signed into the same tailnet.
+The Mac server logs should show an inbound WebSocket connection when the
+phone reaches it.
 
 ---
 
 ## Persistence Keys
 
-All keys live exactly once, on `OnboardingState` (or `SettingsState`
-for the cache) — never duplicated as inline string literals.
+All keys live exactly once on `OnboardingState` or `SettingsState`.
+Never duplicate these literals inline.
 
 | Key | Purpose | Type |
 |-----|---------|------|
-| `onboardingComplete` | First-run gate | Bool |
-| `onboardingStep` | Resume marker | String (rawValue) |
-| `telemetryEnabled` | Consent flag (default OFF) | Bool |
+| `onboardingComplete` | Presents/dismisses the first-run pairing sheet | Bool |
 | `cachedConnectionPresets` | Local copy of server-side preset list | Data (JSON) |
 
-`@AppStorage` uses `UserDefaults.standard` (NOT
-`NSUbiquitousKeyValueStore`). Cross-device iCloud sync of the gate
-would falsely mark a peer device as onboarded — see Section N.18 of
-the onboarding plan for the rationale.
+`telemetryEnabled` belongs to `SettingsState.telemetryEnabledStorageKey`
+because privacy/telemetry is configured from Settings, not onboarding.
 
----
-
-## Existing-User Migration
-
-`OnboardingMigrationDecider.runMigrationIfNeeded()` runs synchronously
-inside `TronMobileApp.init()`, BEFORE the `@AppStorage` flag is read.
-On first launch with this build:
-
-- If `cachedConnectionPresets` is non-empty AND `onboardingComplete`
-  is false → flip the flag to true. (TestFlight users with existing
-  presets bypass the wizard.)
-- Otherwise → no-op. (Fresh installs hit the wizard normally; users
-  who explicitly reset onboarding stay in the wizard.)
-
-Tests in `Tests/Onboarding/OnboardingMigrationTests.swift` cover both
-paths plus a canary that pins
-`OnboardingState.cachedPresetsKey == SettingsState.cachedPresetsKey`.
+`@AppStorage` uses `UserDefaults.standard`, not
+`NSUbiquitousKeyValueStore`. Onboarding completion is per-device:
+pairing an iPad must not silently mark an iPhone as paired.
 
 ---
 
 ## Per-Preset Bearer Tokens
 
-Every `ConnectionPreset.id` gets a distinct Keychain slot at
-`com.tron.mobile.bearer.<presetId>`. The bearer is written by the
-pairing step (and the re-pair sheet) and read by the WS upgrade
-handler when it builds the `Authorization: Bearer …` header.
+Every `ConnectionPreset.id` has a Keychain slot at
+`com.tron.mobile.bearer.<presetId>`. The pairing sheet and settings
+re-pair sheet write the token; `WebSocketService` reads it when building
+the `Authorization: Bearer …` upgrade header.
 
-Accessibility class: `accessibleAfterFirstUnlock`. Background
-reconnects after reboot can read the bearer before the user unlocks —
-trade-off documented in `PresetTokenStore` (see plan Section N.17).
-
----
-
-## Re-Entrancy
-
-The wizard is kill-and-relaunch safe at every step boundary:
-
-- `OnboardingState.step` persists on every `didSet`. Resume jumps
-  back to the saved step.
-- Form-field state on `OnboardingState` doesn't persist. Killing
-  mid-form drops typed values (the user re-types or re-pastes).
-- `pairing` only advances after probe + persist succeed — no half-state
-  is reachable.
-- Provider/telemetry/notifications skip paths are first-class; killing
-  inside any of them resumes at that step (not the next).
+Keychain accessibility is `accessibleAfterFirstUnlock` so background
+reconnects after reboot can read the token once the device has been
+unlocked at least once.
 
 ---
 
 ## File Map
 
 ```
+Sources/App/TronMobileApp.swift
+  └── owns the dashboard + onboarding sheet presentation
+
 Sources/Views/Onboarding/
-  ├── OnboardingFlowView.swift          ← step dispatcher
-  ├── OnboardingShell.swift             ← shared chrome
+  ├── OnboardingFlowView.swift
+  ├── OnboardingShell.swift
   └── Steps/
-      ├── WelcomeStep.swift
-      ├── TailscaleStep.swift
-      ├── MacInstallStep.swift
-      ├── PairingStep.swift
-      ├── ProviderStep.swift
-      ├── TelemetryConsentStep.swift
-      ├── NotificationsStep.swift
-      └── DoneStep.swift
+      └── PairingStep.swift
 
 Sources/Services/Onboarding/
-  ├── OnboardingMigrationDecider.swift  ← one-shot legacy-install flag flip
-  ├── PairingStepValidator.swift        ← pure validation
-  ├── PairingProbe.swift                ← WS bearer probe + system.ping
-  └── PairingPersistor.swift            ← pure persist plan
+  ├── PairingStepValidator.swift
+  ├── PairingProbe.swift
+  └── PairingPersistor.swift
 
-Sources/Services/PairingURLParser.swift  ← tron://pair?… parse + builder
+Sources/Services/PairingURLParser.swift
 Sources/Services/Storage/PresetTokenStore.swift
 Sources/Services/Storage/KeychainItem.swift
-Sources/Extensions/Binding+PasteAware.swift  ← shared with re-pair sheet
+Sources/Extensions/Binding+PasteAware.swift
 Sources/ViewModels/State/OnboardingState.swift
 
 Tests/Onboarding/
-  ├── OnboardingStepTests.swift         ← step ordering + skipToPairing()
-  ├── OnboardingStateTests.swift        ← persistence + reset()
-  ├── OnboardingMigrationTests.swift    ← migration decider + canary
-  ├── PairingPersistorTests.swift       ← pure plan branches
-  ├── PairingProbeTests.swift           ← probe outcome classification
-  ├── PairingValidationTests.swift      ← validator branches
-  ├── PairingURLParserTests.swift       ← parser happy path + every error
-  └── BindingPasteAwareTests.swift      ← universal-paste helper safety
+  ├── OnboardingStateTests.swift
+  ├── PairingPersistorTests.swift
+  ├── PairingProbeTests.swift
+  ├── PairingValidationTests.swift
+  ├── PairingURLParserTests.swift
+  └── BindingPasteAwareTests.swift
 ```

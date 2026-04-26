@@ -110,15 +110,18 @@ final class SettingsState {
 
     // MARK: - Preset Cache
 
+    /// UserDefaults key for the iOS-only telemetry opt-in. Kept with
+    /// settings/privacy ownership because telemetry is configured from
+    /// Settings, not onboarding.
+    nonisolated static let telemetryEnabledStorageKey = "telemetryEnabled"
+
     /// UserDefaults key for the cached `[ConnectionPreset]`. Internal so the
     /// `DependencyContainer` bearer-token resolver can read it directly on
     /// the WS-upgrade synchronous path (avoids a round-trip through the
     /// async `SettingsState.load`).
     ///
-    /// `nonisolated` so non-main-actor helpers (e.g. `OnboardingMigrationDecider`,
-    /// the canary test that pins this string against `OnboardingState.cachedPresetsKey`)
-    /// can read it without crossing actor boundaries. The string is a value type;
-    /// no isolation is needed.
+    /// `nonisolated` so synchronous helpers can read it without crossing
+    /// actor boundaries. The string is a value type; no isolation is needed.
     nonisolated static let cachedPresetsKey = "cachedConnectionPresets"
 
     private func loadCachedPresets() {

@@ -39,7 +39,7 @@ enum PairingStepValidator {
             case .invalidPort:
                 return "Port must be a number between 1 and 65535."
             case .unreachable(let host):
-                return "Can't reach \(host). Check that the Mac is online and on Tailscale."
+                return "Can't reach \(host). Check that Tailscale is connected on this iPhone and the Mac is online."
             case .unauthorized:
                 return "Wrong pairing token. Open the Tron menu bar on your Mac and copy the token again."
             case .incompatibleServer(let serverVersion):

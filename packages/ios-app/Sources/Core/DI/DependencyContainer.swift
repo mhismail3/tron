@@ -192,7 +192,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         // below to UserDefaults.didChangeNotification so flipping the toggle
         // mid-session rebuilds the client without an app restart.
         let telemetryEnabled = UserDefaults.standard.bool(
-            forKey: OnboardingState.telemetryConsentStorageKey
+            forKey: SettingsState.telemetryEnabledStorageKey
         )
         lastTelemetryEnabledState = telemetryEnabled
         telemetryClient = TelemetryClientFactory.make(enabled: telemetryEnabled)
@@ -274,7 +274,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// every key write and the container has many of them.
     private func refreshTelemetryClientIfChanged() {
         let nowEnabled = UserDefaults.standard.bool(
-            forKey: OnboardingState.telemetryConsentStorageKey
+            forKey: SettingsState.telemetryEnabledStorageKey
         )
         guard nowEnabled != lastTelemetryEnabledState else { return }
         lastTelemetryEnabledState = nowEnabled
@@ -443,10 +443,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// matches against the cached connection-presets list, and looks up the
     /// per-preset token in Keychain.
     ///
-    /// Returns `nil` when no preset matches (legacy un-paired install). The
-    /// server in `auth.enforced=false` mode still accepts; in `enforced=true`
-    /// mode the server returns 401 → `WebSocketService` parks in
-    /// `.unauthorized` → user re-pairs via `ConnectionStatusPill` CTA.
+    /// Returns `nil` when no paired preset matches. The server in
+    /// `auth.enforced=false` mode still accepts; in `enforced=true` mode
+    /// the server returns 401 → `WebSocketService` parks in `.unauthorized`
+    /// → user re-pairs via `ConnectionStatusPill` CTA.
     @MainActor
     private static func resolveBearerToken(presetTokenStore: PresetTokenStore) -> String? {
         let host = UserDefaults.standard.string(forKey: "serverHost") ?? AppConstants.defaultHost

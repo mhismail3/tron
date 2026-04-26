@@ -1533,16 +1533,7 @@ async fn e2e_sequential_prompts_after_abort() {
     // Abort
     let _ = rpc_call(&mut ws, 3, "agent.abort", Some(json!({"sessionId": sid}))).await;
 
-    tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            if !server.rpc_context().orchestrator.has_active_run(&sid) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await
-    .expect("aborted run should self-clean");
+    wait_until_run_cleared(&server, &sid).await;
 
     // Second prompt should work now
     let resp2 = rpc_call(
@@ -1580,31 +1571,39 @@ async fn collect_events(ws: &mut WsStream, dur: Duration) -> Vec<Value> {
     events
 }
 
+const PROMPT_STATE_TIMEOUT: Duration = Duration::from_secs(20);
+const PROMPT_STATE_POLL: Duration = Duration::from_millis(10);
+
 /// Wait until agent.getState shows not busy, with a timeout.
 async fn wait_until_not_busy(ws: &mut WsStream, sid: &str, id_start: u64) {
-    for i in 0..20 {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let resp = rpc_call(
-            ws,
-            id_start + i,
-            "session.reconstruct",
-            Some(json!({"sessionId": sid})),
-        )
-        .await;
-        if resp["result"]["isRunning"] == false {
-            return;
+    tokio::time::timeout(PROMPT_STATE_TIMEOUT, async {
+        let mut i = 0;
+        loop {
+            tokio::time::sleep(PROMPT_STATE_POLL).await;
+            let resp = rpc_call(
+                ws,
+                id_start + i,
+                "session.reconstruct",
+                Some(json!({"sessionId": sid})),
+            )
+            .await;
+            if resp["result"]["isRunning"] == false {
+                break;
+            }
+            i += 1;
         }
-    }
-    panic!("session {sid} still busy after 2s");
+    })
+    .await
+    .unwrap_or_else(|_| panic!("session {sid} still busy after prompt-state timeout"));
 }
 
 async fn wait_until_active_run(server: &Arc<TronServer>, sid: &str) {
-    tokio::time::timeout(Duration::from_secs(2), async {
+    tokio::time::timeout(PROMPT_STATE_TIMEOUT, async {
         loop {
             if server.rpc_context().orchestrator.has_active_run(sid) {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            tokio::time::sleep(PROMPT_STATE_POLL).await;
         }
     })
     .await
@@ -1612,14 +1611,17 @@ async fn wait_until_active_run(server: &Arc<TronServer>, sid: &str) {
 }
 
 async fn wait_until_run_cleared(server: &Arc<TronServer>, sid: &str) {
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // Prompt cleanup is usually immediate, but this integration binary runs a
+    // busy WebSocket/server suite concurrently. Keep the poll interval tight so
+    // success is fast while giving heavily loaded CI enough scheduler headroom.
+    tokio::time::timeout(PROMPT_STATE_TIMEOUT, async {
         loop {
             if !server.rpc_context().orchestrator.has_active_run(sid)
                 && !server.rpc_context().orchestrator.is_session_busy(sid)
             {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            tokio::time::sleep(PROMPT_STATE_POLL).await;
         }
     })
     .await
