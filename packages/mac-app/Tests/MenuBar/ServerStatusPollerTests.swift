@@ -22,6 +22,7 @@ struct ServerStatusPollerTests {
             onboardedSentinelExists: { false },
             readBearerToken: { token },
             readTailscaleIPFromSettings: { tailscaleFromSettings },
+            cacheTailscaleIP: { _ in },
             probeTailscale: { .notInstalled },
             probePermission: { _ in .notDetermined },
             probeAgentPermissions: { [:] },

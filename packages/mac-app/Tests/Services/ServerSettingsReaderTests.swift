@@ -58,3 +58,39 @@ struct ServerSettingsReaderTests {
         #expect(ServerSettingsReader.tailscaleIP(at: path) == "100.1.2.3")
     }
 }
+
+@Suite("ServerSettingsWriter")
+struct ServerSettingsWriterTests {
+    @Test("creates missing settings file with Tailscale IP cache")
+    func createsMissingSettings() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let path = tmp.appendingPathComponent("nested/settings.json", isDirectory: false)
+
+        try ServerSettingsWriter.cacheTailscaleIP(" 100.95.255.62 ", at: path)
+
+        #expect(ServerSettingsReader.tailscaleIP(at: path) == "100.95.255.62")
+    }
+
+    @Test("preserves existing settings while updating Tailscale IP")
+    func preservesExistingSettings() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let path = tmp.appendingPathComponent("settings.json", isDirectory: false)
+        try Data(
+            #"{"server":{"defaultModel":"claude-sonnet-4-6"},"tools":{"bash":{"defaultTimeoutMs":120000}}}"#.utf8
+        ).write(to: path)
+
+        try ServerSettingsWriter.cacheTailscaleIP("100.64.0.9", at: path)
+
+        let data = try Data(contentsOf: path)
+        let root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let server = try #require(root["server"] as? [String: Any])
+        let tools = try #require(root["tools"] as? [String: Any])
+        let bash = try #require(tools["bash"] as? [String: Any])
+
+        #expect(server["tailscaleIp"] as? String == "100.64.0.9")
+        #expect(server["defaultModel"] as? String == "claude-sonnet-4-6")
+        #expect(bash["defaultTimeoutMs"] as? Int == 120000)
+    }
+}

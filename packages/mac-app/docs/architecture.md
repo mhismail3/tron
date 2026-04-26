@@ -54,7 +54,7 @@ packages/mac-app/
 │   │   │   ├── PairingURLBuilder.swift # builds `tron://pair?…` URL
 │   │   │   └── QRCodeGenerator.swift   # CoreImage CIQRCodeGenerator wrapper
 │   │   └── Server/
-│   │       ├── BearerTokenReader.swift     # reads auth-token.json (+ legacy plain-string fallback) with 0o600 permission guard
+│   │       ├── BearerTokenReader.swift     # reads auth-token.json; caches pairing Tailscale IP in settings.json
 │   │       ├── ServerPing.swift            # one-shot string-id system.ping over WS → ServerPingResult; skips broadcast/event frames
 │   │       ├── ServerStatusPoller.swift    # 30s periodic poll for menu bar
 │   │       ├── SingleInstanceLock.swift    # fcntl(F_SETLK) advisory lock
@@ -150,6 +150,14 @@ pane starts a short-lived watcher that kickstarts/reprobes until that
 specific permission turns green. App activation is still only a plain
 recheck unless it is consuming a Settings return from this step; focus
 changes inside System Settings are not restart signals.
+
+The Pairing step does not require a pre-existing `settings.json`. It
+reads the agent-issued `auth-token.json`, confirms the server is answering
+`system.ping`, probes the current Mac Tailscale state live, and only then
+caches `server.tailscaleIp` into `settings.json` for future wrapper/menu-bar
+reads and later server settings reloads. If the cache write fails, the freshly
+resolved QR payload still works; settings are a fallback/cache, not a
+prerequisite for first-run pairing.
 
 ### Subsequent launches (menu-bar-only path)
 

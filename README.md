@@ -332,7 +332,7 @@ Messages use the server's WebSocket RPC framing. Request IDs are strings and are
 `system.getInfo` returns the running daemon's `version`, `uptime` (seconds), `activeSessions` count, `platform` / `arch`, plus three additive fields used by the iOS pairing flow:
 
 - `port` — WebSocket listening port (mirrors the `--port` CLI flag).
-- `tailscaleIp` — value of `server.tailscaleIp` from `settings.json`, or `null` if unset. iOS uses this to pre-fill the host field when scanning a QR code that omits it.
+- `tailscaleIp` — cached `server.tailscaleIp` from `settings.json`, or `null` if unset. The Mac pairing wizard resolves Tailscale live on fresh installs, then writes this cache for later wrapper/menu-bar reads and future server settings reloads.
 - `paired` — `true` once `~/.tron/system/.onboarded` exists. The sentinel is touched by the Mac wizard at the end of its install flow OR on the first successful WS auth.
 
 These fields are additive; older clients that ignore them continue to work unchanged.
@@ -475,7 +475,7 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
     "defaultModel": "claude-sonnet-4-6",
     "transcription": { "enabled": true },
     "connectionPresets": [],        // iOS quick-connect host/port presets
-    "tailscaleIp": null,            // Surfaced via system.getInfo so iOS pairing UI can pre-fill
+    "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
     "auth": {
       "enforced": false             // Phase 2 flag: when true, every WS upgrade requires `Authorization: Bearer <token>`
     },
@@ -767,7 +767,7 @@ packages/mac-app/Sources/
 +-- Services/
 |   +-- Server/                Bearer-token reader, `system.ping` client, status poller
 |   +-- Onboarding/            Install planner, permission/Tailscale probes, existing-install detection
-|   +-- Pairing/               settings.json + auth-token.json readers; QR + tron:// URL generation
+|   +-- Pairing/               Tailscale live probe + auth-token reader; QR + tron:// URL generation
 |   +-- Feedback/              FeedbackComposer + NSSharingService mail compose
 |   +-- Observability/         SentryRedactor (shared pattern with iOS)
 |   +-- LaunchAgentManaging.swift
@@ -779,10 +779,10 @@ packages/mac-app/Sources/
 ### Wizard Steps
 
 1. **Welcome** — introduces Tron.
-2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` + signed-in state via `tailscale ip -4`.
+2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
 3. **Install** — detects whether the server is already installed, waits for the explicit Install CTA when work is needed, then prepares and ad-hoc signs the inner `~/.tron/system/Tron.app` server bundle, writes the LaunchAgent plist, bootstraps or kickstarts `com.tron.server`, and polls `system.ping` while ignoring initial `connection.established` frames.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, polls the agent, starts a short-lived grant watcher after wizard-opened Settings panes, and keeps Re-check as a kickstart+probe fallback.
-5. **Pairing** — displays Tailscale IP + port + bearer token with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>`.
+5. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), and displays host + port + token with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>`.
 6. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
 
 ### Menu-bar Actions
@@ -873,7 +873,7 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 +-- skills/                       Global skills (SKILL.md files); managed entries have a .managed sentinel
 +-- system/
 |   +-- Tron.app/                 macOS app bundle (Contents/MacOS/tron is the server binary)
-|   +-- settings.json             User settings (deep-merged over defaults)
+|   +-- settings.json             User settings (deep-merged over defaults); may be created by Mac pairing to cache server.tailscaleIp
 |   +-- auth.json                 LLM provider OAuth tokens + API keys (mode 600)
 |   +-- auth-token.json           WebSocket bearer token (mode 600, atomic writes; rotated by `tron auth rotate`)
 |   +-- .onboarded                First-run sentinel; presence drives `system.getInfo.paired` (Phase 2)

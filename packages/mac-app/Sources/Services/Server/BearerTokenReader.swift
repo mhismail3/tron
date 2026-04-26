@@ -109,6 +109,87 @@ enum ServerSettingsReader {
     }
 }
 
+/// Writes the wrapper-owned pairing cache into `settings.json`.
+///
+/// The Rust agent can boot entirely from compiled defaults, so a fresh
+/// install must not need this file before pairing. The Mac wrapper only
+/// creates/updates the minimal `server.tailscaleIp` key after it has
+/// resolved the current live Tailscale address, preserving any settings
+/// the user or iOS app already wrote.
+enum ServerSettingsWriter {
+    enum Failure: Error, LocalizedError, Equatable {
+        case emptyTailscaleIP
+        case malformedSettings
+        case writeFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .emptyTailscaleIP:
+                return "Tailscale IP was empty"
+            case .malformedSettings:
+                return "settings.json is not a JSON object"
+            case .writeFailed(let reason):
+                return reason
+            }
+        }
+    }
+
+    static func cacheTailscaleIP(_ ip: String, at path: URL) throws {
+        let trimmed = ip.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw Failure.emptyTailscaleIP
+        }
+
+        var root = try readRootObject(at: path)
+        var server = root["server"] as? [String: Any] ?? [:]
+        server["tailscaleIp"] = trimmed
+        root["server"] = server
+
+        let data: Data
+        do {
+            data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        } catch {
+            throw Failure.writeFailed(error.localizedDescription)
+        }
+        try write(data, to: path)
+    }
+
+    private static func readRootObject(at path: URL) throws -> [String: Any] {
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return [:]
+        }
+        do {
+            let data = try Data(contentsOf: path)
+            guard !data.isEmpty else { return [:] }
+            guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw Failure.malformedSettings
+            }
+            return root
+        } catch let failure as Failure {
+            throw failure
+        } catch {
+            throw Failure.writeFailed(error.localizedDescription)
+        }
+    }
+
+    private static func write(_ data: Data, to path: URL) throws {
+        let fm = FileManager.default
+        let parent = path.deletingLastPathComponent()
+        do {
+            try fm.createDirectory(at: parent, withIntermediateDirectories: true)
+            let tmp = parent.appendingPathComponent(".settings.\(UUID().uuidString).tmp", isDirectory: false)
+            try data.write(to: tmp, options: [.atomic])
+            if fm.fileExists(atPath: path.path) {
+                _ = try fm.replaceItemAt(path, withItemAt: tmp)
+            } else {
+                try fm.moveItem(at: tmp, to: path)
+            }
+        } catch {
+            throw Failure.writeFailed(error.localizedDescription)
+        }
+    }
+}
+
 /// Atomic-write the `.onboarded` sentinel using the same
 /// `tempfile + sync + rename` recipe as the Rust agent.
 enum OnboardedSentinelWriter {

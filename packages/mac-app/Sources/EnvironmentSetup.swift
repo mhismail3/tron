@@ -25,8 +25,15 @@ struct EnvironmentSetup: Sendable {
     var readBearerToken: @Sendable () -> String?
 
     /// Reads `server.tailscaleIp` from `~/.tron/system/settings.json`.
-    /// Returns nil if missing/unset.
+    /// Returns nil if missing/unset. Pairing treats this as a fallback
+    /// cache only; fresh installs resolve Tailscale live first.
     var readTailscaleIPFromSettings: @Sendable () -> String?
+
+    /// Writes `server.tailscaleIp` into `~/.tron/system/settings.json`
+    /// without disturbing any existing settings. Best-effort cache for
+    /// later server/menu-bar reads; pairing must not depend on this
+    /// write succeeding.
+    var cacheTailscaleIP: @Sendable (String) -> Void
 
     /// Probes Tailscale on the host - app installed AND `tailscale ip -4`
     /// returns at least one address.
@@ -89,6 +96,17 @@ struct EnvironmentSetup: Sendable {
         },
         readTailscaleIPFromSettings: {
             ServerSettingsReader.tailscaleIP(at: TronPaths.settingsPath)
+        },
+        cacheTailscaleIP: { ip in
+            do {
+                try ServerSettingsWriter.cacheTailscaleIP(ip, at: TronPaths.settingsPath)
+            } catch {
+                NSLog(
+                    "[EnvironmentSetup] failed to cache Tailscale IP in %@: %@",
+                    TronPaths.settingsPath.path,
+                    error.localizedDescription
+                )
+            }
         },
         probeTailscale: {
             await TailscaleProbe.probe()

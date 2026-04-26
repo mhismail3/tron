@@ -20,6 +20,7 @@ struct MenuBarItemBuilderTests {
             onboardedSentinelExists: { false },
             readBearerToken: { nil },
             readTailscaleIPFromSettings: { nil },
+            cacheTailscaleIP: { _ in },
             probeTailscale: { .notInstalled },
             probePermission: { _ in .notDetermined },
             probeAgentPermissions: { [:] },

@@ -457,6 +457,35 @@ struct WizardVisualLayoutTests {
         #expect(source.contains(".fixedSize(horizontal: false, vertical: true)"))
     }
 
+    @Test("pairing page resolves Tailscale live and treats settings as cache")
+    func pairingPageResolvesTailscaleLiveAndCachesSettings() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let step = packageRoot.appending(path: "Sources/Wizard/Steps/PairingInfoStep.swift")
+        let source = try String(contentsOf: step, encoding: .utf8)
+
+        #expect(source.contains("Fresh installs do not have settings.json yet"))
+        #expect(source.contains("setup.probeTailscale()"))
+        #expect(source.contains("state.tailscaleStatus = liveTailscale"))
+        #expect(source.contains("state.tailscaleStatus?.displayIP"))
+        #expect(source.contains("setup.cacheTailscaleIP(host)"))
+        #expect(source.contains("setup.readTailscaleIPFromSettings()"))
+        #expect(source.contains("Pairing info unavailable"))
+        #expect(source.contains("same account"))
+        #expect(source.contains("enter the values manually"))
+        #expect(source.contains("Fresh installs do not need a pre-existing settings.json."))
+        #expect(source.contains("PairingInfoStepLayout.initialResolveDelayNanoseconds"))
+        #expect(source.contains("WizardInfoCard("))
+        #expect(source.contains("valueCardVerticalPadding"))
+        #expect(source.contains("valueColumnWidth"))
+        #expect(source.contains("private var pairingCluster"))
+        #expect(source.contains(".frame(maxWidth: .infinity, alignment: .center)"))
+        #expect(source.contains(".wizardGlassCard()"))
+        #expect(!source.contains("qrPayloadString"))
+    }
+
     @Test("screen recording settings click asks agent to create the TCC row")
     func screenRecordingSettingsClickRequestsAgentPermission() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
