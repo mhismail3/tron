@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("serverPort") private var serverPort = ""
     @AppStorage("confirmArchive") private var confirmArchive = true
     @AppStorage("autoMarkNotificationsRead") private var autoMarkRead = true
+    @AppStorage(OnboardingState.completionStorageKey) private var onboardingComplete = false
 
     // Convenience accessors
     private var rpcClient: RPCClient { dependencies.rpcClient }
@@ -100,7 +101,8 @@ struct SettingsView: View {
                         onPortChange: { newPort in
                             dependencies.updateServerSettings(host: serverHost, port: newPort)
                         },
-                        updateServerSetting: updateServerSetting
+                        updateServerSetting: updateServerSetting,
+                        onAllPresetsRemoved: resetToOnboardingAfterLastPresetRemoved
                     )
                 case .agent:
                     ContextSettingsPage(
@@ -382,6 +384,15 @@ struct SettingsView: View {
         }
     }
 
+    private func resetToOnboardingAfterLastPresetRemoved() {
+        serverHost = AppConstants.defaultHost
+        serverPort = ""
+        dependencies.updateServerSettings(host: AppConstants.defaultHost, port: Self.defaultPort)
+        onboardingComplete = false
+        activePage = nil
+        dismiss()
+    }
+
     private func archiveAllSessions() {
         isArchivingAll = true
         Task {
@@ -392,8 +403,9 @@ struct SettingsView: View {
 
     private func updateServerSetting(_ build: () -> ServerSettingsUpdate) {
         let update = build()
+        let client = rpcClient
         Task {
-            try? await rpcClient.settings.update(update)
+            try? await client.settings.update(update)
         }
     }
 }

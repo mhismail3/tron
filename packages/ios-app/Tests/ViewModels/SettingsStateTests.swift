@@ -67,6 +67,19 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertTrue(state.connectionPresets.isEmpty)
     }
 
+    func testReplaceConnectionPresetsUpdatesMemoryAndCache() throws {
+        let state = SettingsState()
+        let presets = [
+            ConnectionPreset(id: "p1", label: "Server A", host: "10.0.0.1", port: 9847),
+        ]
+
+        state.replaceConnectionPresets(presets)
+
+        XCTAssertEqual(state.connectionPresets, presets)
+        let cached = try XCTUnwrap(UserDefaults.standard.data(forKey: SettingsState.cachedPresetsKey))
+        XCTAssertEqual(try JSONDecoder().decode([ConnectionPreset].self, from: cached), presets)
+    }
+
     // MARK: - Update Settings (Phase 5.5 — auto-update parity)
 
     func testUpdateSettingsInitialDefaults() {

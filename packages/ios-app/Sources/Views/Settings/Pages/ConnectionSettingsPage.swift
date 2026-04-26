@@ -7,6 +7,7 @@ struct ConnectionSettingsPage: View {
     let onHostSubmit: () -> Void
     let onPortChange: (String) -> Void
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
+    let onAllPresetsRemoved: () -> Void
 
     @Environment(\.dependencies) private var dependencies
     @FocusState private var focusedField: Field?
@@ -171,11 +172,11 @@ struct ConnectionSettingsPage: View {
             .adaptivePresentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }
-        .alert("Remove preset?", isPresented: removalAlertBinding, presenting: presetPendingRemoval) { preset in
-            Button("Remove", role: .destructive) { handleRemove(preset) }
+        .alert("Forget this Mac?", isPresented: removalAlertBinding, presenting: presetPendingRemoval) { preset in
+            Button("Forget", role: .destructive) { handleRemove(preset) }
             Button("Cancel", role: .cancel) {}
         } message: { preset in
-            Text("Removes \(preset.label) from your presets and deletes its bearer token from this device. The Mac server is unaffected.")
+            Text("Removes \(preset.label) from this iPhone and from the Mac's saved connection list. If no saved Macs remain, onboarding opens again.")
         }
         // Listen for re-pair-this-server requests from the chat-side
         // ConnectionStatusPill (`.unauthorized` tap). The notification
@@ -217,7 +218,7 @@ struct ConnectionSettingsPage: View {
                 Button(role: .destructive) {
                     presetPendingRemoval = preset
                 } label: {
-                    Label("Remove", systemImage: "trash")
+                    Label("Forget this Mac", systemImage: "trash")
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -293,7 +294,7 @@ struct ConnectionSettingsPage: View {
     private func handleSheetCommit(presets: [ConnectionPreset], active: ConnectionPreset) {
         // 1. Update the cached SettingsState immediately so the UI doesn't
         //    flicker waiting for the server round-trip.
-        settingsState.connectionPresets = presets
+        settingsState.replaceConnectionPresets(presets)
 
         // 2. Persist to the server.
         updateServerSetting {
@@ -317,20 +318,44 @@ struct ConnectionSettingsPage: View {
     }
 
     private func handleRemove(_ preset: ConnectionPreset) {
-        let updated = settingsState.connectionPresets.filter { $0.id != preset.id }
-        settingsState.connectionPresets = updated
+        let plan = ConnectionPresetRemoval.plan(
+            removing: preset,
+            from: settingsState.connectionPresets,
+            activeHost: serverHost,
+            activePort: serverPort
+        )
+        settingsState.replaceConnectionPresets(plan.updatedPresets)
 
         updateServerSetting {
             var update = ServerSettingsUpdate()
-            update.server = ServerSettingsUpdate.ServerUpdate(connectionPresets: updated)
+            update.server = ServerSettingsUpdate.ServerUpdate(connectionPresets: plan.updatedPresets)
             return update
         }
 
         // Drop the bearer token from Keychain. Best-effort — failures here
         // would leave a dangling Keychain entry but don't affect correctness.
         try? dependencies.presetTokenStore.remove(presetId: preset.id)
+        unregisterPushTokenFromCurrentServerIfNeeded(plan.removedWasActive)
 
         presetPendingRemoval = nil
+
+        if let next = plan.nextActivePreset {
+            applyPreset(next)
+        } else if plan.shouldReturnToOnboarding {
+            onAllPresetsRemoved()
+        }
+    }
+
+    private func unregisterPushTokenFromCurrentServerIfNeeded(_ shouldUnregister: Bool) {
+        guard shouldUnregister,
+              let deviceToken = dependencies.pushNotificationService.deviceToken else {
+            return
+        }
+
+        let client = dependencies.rpcClient
+        Task {
+            try? await client.misc.unregisterDeviceToken(deviceToken)
+        }
     }
 
     private var removalAlertBinding: Binding<Bool> {

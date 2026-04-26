@@ -11,7 +11,7 @@ paths:
 
 # App Lifecycle
 
-App startup, first-run pairing sheet, scene phase, and deep links.
+App startup, first-run onboarding sheet, scene phase, and deep links.
 
 ## Startup Sequence
 
@@ -49,8 +49,8 @@ already-authorized token; they never prompt.
 | `Services/AppInitializer.swift` | Two-phase init state machine (loading/ready/failed) |
 | `Services/Container/DependencyContainer.swift` | Service initialization |
 | `Services/DeepLinking/DeepLinkRouter.swift` | URL/notification routing |
-| `ViewModels/State/OnboardingState.swift` | `@Observable` pairing-sheet state, AppStorage keys |
-| `Views/Onboarding/OnboardingFlowView.swift` | Pairing-sheet step coordinator |
+| `ViewModels/State/OnboardingState.swift` | `@Observable` onboarding-sheet state, AppStorage keys |
+| `Views/Onboarding/OnboardingFlowView.swift` | Three-page onboarding sheet coordinator |
 
 ## First-run Gate
 
@@ -61,7 +61,7 @@ already-authorized token; they never prompt.
 The literal key `"onboardingComplete"` is also exposed as
 `OnboardingState.completionStorageKey` so test code does not drift from
 the AppStorage binding. `false` means the dashboard still mounts, with
-the pairing sheet presented above it.
+the onboarding sheet presented above it.
 
 ## Deep Link Handling
 
@@ -84,8 +84,9 @@ Flow:
 3. The `.onChange(of: container.deepLinkRouter.pendingIntent)` handler
    in `TronMobileApp.body` consumes the intent and dispatches.
 4. Pairing URLs are intercepted by `TronMobileApp.handlePairingURL`,
-   which fills the onboarding form and presents the sheet. Paste still
-   works inside the form via `Binding<String>.pasteAware`.
+   which fills the onboarding form, jumps to the connect page, and
+   presents the sheet. Paste still works inside the form via
+   `Binding<String>.pasteAware`.
 
 ## Scene Phase
 

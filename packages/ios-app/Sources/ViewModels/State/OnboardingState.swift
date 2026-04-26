@@ -18,6 +18,16 @@ import Observation
 @MainActor
 final class OnboardingState {
 
+    enum Step: Int, CaseIterable, Hashable {
+        case welcome
+        case installMac
+        case connect
+
+        var number: Int { rawValue + 1 }
+        static var totalCount: Int { allCases.count }
+        var counterText: String { "\(number) / \(Self.totalCount)" }
+    }
+
     // MARK: - Storage keys
 
     // `nonisolated` so tests and app bootstrap code can read this key
@@ -26,6 +36,8 @@ final class OnboardingState {
     nonisolated static let completionStorageKey = "onboardingComplete"
 
     // MARK: - Pairing inputs
+
+    var currentStep: Step = .welcome
 
     var pairingHost: String = ""
     var pairingPort: String = AppConstants.prodPort
@@ -62,6 +74,7 @@ final class OnboardingState {
     /// the same logic powers `AddOrEditServerSheet` (add mode).
     func acceptPairingPayload(_ payload: PairingURLParser.PairingPayload) {
         let distributed = payload.distributing(currentLabel: pairingLabel)
+        currentStep = .connect
         pairingHost = distributed.host
         pairingPort = distributed.port
         pairingToken = distributed.token
@@ -69,10 +82,21 @@ final class OnboardingState {
         pairingError = nil
     }
 
+    func goToNextStep() {
+        guard let next = Step(rawValue: currentStep.rawValue + 1) else { return }
+        currentStep = next
+    }
+
+    func goToPreviousStep() {
+        guard let previous = Step(rawValue: currentStep.rawValue - 1) else { return }
+        currentStep = previous
+    }
+
     /// Reset the sheet to its initial state. Used by tests and any
     /// explicit "run onboarding again" debug path.
     func reset() {
         defaults.set(false, forKey: Self.completionStorageKey)
+        currentStep = .welcome
         pairingHost = ""
         pairingPort = AppConstants.prodPort
         pairingToken = ""

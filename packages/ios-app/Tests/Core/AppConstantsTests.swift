@@ -27,4 +27,11 @@ final class AppConstantsTests: XCTestCase {
         let url = AppConstants.fallbackServerURL
         XCTAssertEqual(url.port, 9847)
     }
+
+    func testDmgDownloadPage_isGitHubReleasesURL() {
+        let url = AppConstants.dmgDownloadPage
+        XCTAssertEqual(url.scheme, "https")
+        XCTAssertEqual(url.host, "github.com")
+        XCTAssertTrue(url.path.hasSuffix("/tron/releases"))
+    }
 }

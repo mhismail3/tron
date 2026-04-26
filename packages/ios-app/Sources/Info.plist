@@ -25,7 +25,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Tron uses the microphone to record voice for transcription.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Tron uses the camera to capture photos for including in your messages.</string>
+	<string>Tron uses the camera to scan Mac pairing QR codes and capture photos for messages.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

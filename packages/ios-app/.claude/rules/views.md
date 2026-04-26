@@ -16,7 +16,7 @@ SwiftUI view composition patterns.
 | `Views/Chat/` | Core chat interface (ChatView, ContentView) |
 | `Views/Tools/` | Tool chips + detail sheets (paired) |
 | `Views/Components/` | Reusable UI components |
-| `Views/Onboarding/` | First-run pairing sheet (`OnboardingFlowView`, `OnboardingShell`, `Steps/PairingStep.swift`) |
+| `Views/Onboarding/` | First-run swipeable onboarding sheet (`OnboardingFlowView`, `OnboardingShell`, `QRCodeScannerSheet`, `Steps/PairingStep.swift`) |
 | `Views/Settings/` | Settings pages including `PrivacySettingsPage` (telemetry + feedback), `ConnectionSettingsPage` (preset + re-pair) |
 | `Views/{Feature}/` | Feature-specific views |
 

@@ -1,15 +1,15 @@
-# Onboarding (iOS pairing sheet)
+# Onboarding (iOS sheet)
 
 > Reference companion to `.claude/rules/onboarding.md` (load-on-demand
 > rule consumed by Claude). This file is the human-readable narrative;
 > when in doubt, the rule is normative.
 
 The iOS app always opens to the normal dashboard after initialization.
-Fresh installs present a medium-detent pairing sheet above the dashboard
-when `@AppStorage("onboardingComplete")` is false. Pairing is the only
-required first-run action on iOS: Mac installation, macOS permissions,
-and the QR/token generation happen in the Mac app; providers,
-notifications, telemetry, and feedback live in Settings.
+Fresh installs present a medium-detent onboarding sheet above the
+dashboard when `@AppStorage("onboardingComplete")` is false. The sheet
+has three swipeable pages: a welcome page, a Mac install link page, and
+the connect page. The connect page is the only page that persists
+anything.
 
 ---
 
@@ -27,7 +27,10 @@ readyContent()
   ├─ always mounts ContentView
   └─ sheet(isPresented: !onboardingComplete)
        └─ OnboardingFlowView
+            ├─ WelcomeOnboardingPage
+            ├─ InstallMacOnboardingPage
             └─ PairingStep
+                 ├─ scan QR / paste URL / enter fields
                  ├─ validate host / port / token / label
                  ├─ probe ws://host:port/ws with Authorization: Bearer token
                  ├─ send system.ping
@@ -37,10 +40,13 @@ readyContent()
 ```
 
 Pairing URLs (`tron://pair?host=…&port=…&token=…[&label=…]`) are
-handled in two places:
+handled in three places:
 
 - `TronMobileApp.onOpenURL` accepts QR/deep-link launches, fills the
-  pairing form, and presents the sheet at the large detent.
+  pairing form, jumps to the connect page, and presents the sheet at the
+  large detent.
+- `QRCodeScannerSheet` scans the Mac QR code, parses the same URL shape,
+  and fills the connect page.
 - `Binding<String>.pasteAware` lets the user paste the full pairing URL
   into any pairing field and auto-distributes the values.
 
@@ -93,6 +99,26 @@ Tailscale is connected on the iPhone and signed into the same tailnet.
 The Mac server logs should show an inbound WebSocket connection when the
 phone reaches it.
 
+## QR Scanning
+
+`QRCodeScannerSheet` uses `AVCaptureMetadataOutput` for live QR detection
+and returns only the raw code string. `PairingStep` is responsible for
+parsing with `PairingURLParser`, so scanning, paste, manual links, and
+deep links all converge on one parser and one `OnboardingState` mutation.
+The sheet reuses the chat camera sheet's compact medium-detent camera
+presentation. Camera permission copy in `Info.plist` covers both pairing
+QR scans and chat photo capture.
+
+## Forgetting a Mac
+
+Settings → Server → preset menu → "Forget this Mac" is the clean reset path
+for a paired server. It removes that preset from the Mac's
+`settings.json` (`server.connectionPresets`), deletes the matching iOS
+Keychain bearer token, and unregisters this device's push token when the
+forgotten Mac is the active server. If another preset remains, iOS switches
+to it. If no presets remain, the app resets `onboardingComplete` to `false`
+and shows the onboarding sheet again.
+
 ---
 
 ## Persistence Keys
@@ -102,7 +128,7 @@ Never duplicate these literals inline.
 
 | Key | Purpose | Type |
 |-----|---------|------|
-| `onboardingComplete` | Presents/dismisses the first-run pairing sheet | Bool |
+| `onboardingComplete` | Presents/dismisses the first-run onboarding sheet | Bool |
 | `cachedConnectionPresets` | Local copy of server-side preset list | Data (JSON) |
 
 `telemetryEnabled` belongs to `SettingsState.telemetryEnabledStorageKey`
@@ -117,7 +143,7 @@ pairing an iPad must not silently mark an iPhone as paired.
 ## Per-Preset Bearer Tokens
 
 Every `ConnectionPreset.id` has a Keychain slot at
-`com.tron.mobile.bearer.<presetId>`. The pairing sheet and settings
+`com.tron.mobile.bearer.<presetId>`. The onboarding sheet and settings
 re-pair sheet write the token; `WebSocketService` reads it when building
 the `Authorization: Bearer …` upgrade header.
 
@@ -136,6 +162,7 @@ Sources/App/TronMobileApp.swift
 Sources/Views/Onboarding/
   ├── OnboardingFlowView.swift
   ├── OnboardingShell.swift
+  ├── QRCodeScannerSheet.swift
   └── Steps/
       └── PairingStep.swift
 

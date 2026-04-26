@@ -1,90 +1,82 @@
 import SwiftUI
 
-/// Pairing sheet — the only required iOS onboarding action.
-///
-/// User enters (host, port, token, label). On Connect:
-///   1. `PairingStepValidator.validate(...)` trims + classifies bad input.
-///   2. `dependencies.pairingProbe.probe(...)` opens a one-shot WS upgrade
-///      with `Authorization: Bearer <token>` and sends `system.ping`.
-///      Result is classified into one of:
-///        - `.ok` — proceed to commit
-///        - `.unauthorized` — show `.unauthorized` failure
-///        - `.incompatible` — show `.incompatibleServer(version)` failure
-///        - `.unreachable` — show `.unreachable(host)` failure
-///   3. On `.ok`, `PairingPersistor.plan(...)` produces the side-effect
-///      plan, and the View applies it:
-///        - Write token to `PresetTokenStore` keyed on the new preset id.
-///        - Write `serverHost` / `serverPort` UserDefaults.
-///        - Push the `connectionPresets[]` update to the server (via
-///          `settings.update`) so the new preset survives reinstalling the
-///          iOS app.
-///        - Recreate the RPC client via
-///          `dependencies.updateServerSettings(host:port:)`.
-///   4. Complete onboarding and dismiss the sheet.
-///
-/// **Universal-paste**: any `tron://pair?…` URL pasted into ANY of the
-/// four text fields auto-distributes via `OnboardingState.acceptPairingPayload`.
-/// Implemented through the shared `pasteAware()` helper extracted in
-/// Phase 4.5.
+/// Final onboarding page: scan, paste, or manually enter the Mac pairing
+/// details, verify the server with `system.ping`, then persist the active
+/// connection preset.
+@available(iOS 26.0, *)
 struct PairingStep: View {
     @Bindable var state: OnboardingState
     let dependencies: DependencyContainer
     let onPaired: () -> Void
-    @Environment(\.openURL) private var openURL
+
+    @State private var showQRScanner = false
+    @State private var scanError: String?
 
     var body: some View {
-        OnboardingShell(
+        OnboardingPage(
+            systemImage: "qrcode",
             title: "Connect your Mac",
-            subtitle: "Open the pairing screen on your Mac, then enter the Tailscale IP, port, and token shown there.",
-            showsBackButton: false,
-            content: {
-                VStack(alignment: .leading, spacing: TronSpacing.section) {
-                    setupNote
-                    pairingForm
-                    if let error = state.pairingError {
-                        errorCard(error)
-                    }
+            subtitle: "Scan the QR code from the Mac pairing screen, or enter the details manually."
+        ) {
+            VStack(alignment: .leading, spacing: TronSpacing.section) {
+                scanCard
+                pairingForm
+
+                if let scanError {
+                    errorCard(scanError)
                 }
-            },
-            footer: {
-                VStack(spacing: TronSpacing.sm) {
-                    OnboardingPrimaryButton(
-                        title: state.isConnecting ? "Connecting…" : "Connect",
-                        systemImage: state.isConnecting ? nil : "link",
-                        isLoading: state.isConnecting,
-                        isEnabled: !state.isConnecting,
-                        action: connect
-                    )
-                    OnboardingSecondaryButton(
-                        title: "Need the Mac app?",
-                        systemImage: "arrow.down.circle",
-                        action: { openURL(AppConstants.dmgDownloadPage) }
-                    )
+                if let error = state.pairingError {
+                    errorCard(error.userFacingMessage)
                 }
+
+                OnboardingPrimaryButton(
+                    title: state.isConnecting ? "Connecting..." : "Connect",
+                    systemImage: state.isConnecting ? nil : "link",
+                    isLoading: state.isConnecting,
+                    isEnabled: !state.isConnecting,
+                    action: connect
+                )
+                .padding(.top, TronSpacing.sm)
             }
-        )
-    }
-
-    // MARK: - Form
-
-    @ViewBuilder
-    private var setupNote: some View {
-        HStack(alignment: .top, spacing: TronSpacing.md) {
-            Image(systemName: "checkmark.shield.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.tronEmerald)
-                .frame(width: 24)
-            Text("Make sure Tailscale is on for both devices and Tron Server is running on your Mac.")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(Color.tronTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(TronSpacing.section)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .tronCard()
+        .sheet(isPresented: $showQRScanner) {
+            QRCodeScannerSheet { code in
+                applyScannedCode(code)
+            }
+        }
     }
 
-    @ViewBuilder
+    // MARK: - Content
+
+    private var scanCard: some View {
+        OnboardingGlassCard {
+            HStack(alignment: .center, spacing: TronSpacing.section) {
+                Image(systemName: "checkmark.shield.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                    .foregroundStyle(Color.tronEmerald)
+                    .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Use the Mac pairing screen")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                    Text("Make sure Tailscale is on for both devices and Tron Server is running.")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                OnboardingIconButton(
+                    systemImage: "qrcode.viewfinder",
+                    accessibilityLabel: "Scan pairing QR code",
+                    action: { showQRScanner = true }
+                )
+            }
+        }
+    }
+
     private var pairingForm: some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
             field(
@@ -103,7 +95,7 @@ struct PairingStep: View {
             )
             field(
                 label: "Pairing token",
-                placeholder: "Paste from Tron menu bar",
+                placeholder: "Paste from Tron on your Mac",
                 text: $state.pairingToken,
                 keyboard: .asciiCapable,
                 contentType: nil,
@@ -119,7 +111,6 @@ struct PairingStep: View {
         }
     }
 
-    @ViewBuilder
     private func field(
         label: String,
         placeholder: String,
@@ -128,13 +119,15 @@ struct PairingStep: View {
         contentType: UITextContentType?,
         isSecure: Bool = false
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             Text(label)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(Color.tronTextSecondary)
                 .textCase(.uppercase)
+
             Group {
                 let pasteAware = text.pasteAware { payload in
+                    scanError = nil
                     state.acceptPairingPayload(payload)
                 }
                 if isSecure {
@@ -151,27 +144,25 @@ struct PairingStep: View {
             .textInputAutocapitalization(.never)
             .padding(.vertical, TronSpacing.md)
             .padding(.horizontal, TronSpacing.section)
-            .background(
-                RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
-                    .fill(Color.tronSurfaceElevated)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
-                    .stroke(Color.tronBorder, lineWidth: 0.5)
+            .glassEffect(
+                .regular.tint(Color.tronOverlay(0.18)),
+                in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
             )
         }
     }
 
-    @ViewBuilder
-    private func errorCard(_ failure: PairingStepValidator.Failure) -> some View {
+    private func errorCard(_ message: String) -> some View {
         HStack(alignment: .top, spacing: TronSpacing.md) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 16))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(Color.tronError)
-            Text(failure.userFacingMessage)
+                .frame(width: 24)
+
+            Text(message)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(Color.tronTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
+
             Spacer(minLength: 0)
         }
         .padding(TronSpacing.section)
@@ -186,10 +177,23 @@ struct PairingStep: View {
         )
     }
 
+    // MARK: - QR
+
+    private func applyScannedCode(_ code: String) {
+        switch PairingURLParser.parse(code) {
+        case .success(let payload):
+            scanError = nil
+            state.acceptPairingPayload(payload)
+        case .failure:
+            scanError = "That QR code does not look like a Tron pairing code."
+        }
+    }
+
     // MARK: - Connect action
 
     private func connect() {
         state.pairingError = nil
+        scanError = nil
         state.isConnecting = true
 
         switch PairingStepValidator.validate(
@@ -225,14 +229,9 @@ struct PairingStep: View {
     }
 
     private func commit(payload: PairingURLParser.PairingPayload) async {
-        // Plan the side effects — pure, no I/O yet.
         let existing = readCachedPresets()
         let plan = PairingPersistor.plan(payload: payload, existing: existing)
 
-        // 1. Keychain: write the bearer keyed on the (possibly-new) preset id.
-        //    Surface as `.keychainFailed` (NOT `.unauthorized`) so the user
-        //    sees an honest "device storage" error instead of being told
-        //    their (validated) token is wrong.
         do {
             try dependencies.presetTokenStore.setToken(plan.token, forPresetId: plan.activePreset.id)
         } catch {
@@ -241,20 +240,10 @@ struct PairingStep: View {
             return
         }
 
-        // 2. Cache the updated preset list locally so the bearer-resolver
-        //    closure (called on the next WS upgrade) can find the active
-        //    preset even before the server settings.update round-trip completes.
         cachePresets(plan.updatedPresets)
-
-        // 3. Switch the active server. updateServerSettings() rebuilds the
-        //    RPC client with the new URL + bearer-token resolver in one go.
         dependencies.updateServerSettings(host: plan.activeHost, port: plan.activePort)
-
-        // 4. Push the preset list to the server so it survives reinstalling
-        //    the iOS app. Best-effort — the local cache covers this session.
         Task { try? await pushPresetList(plan.updatedPresets) }
 
-        // 5. Mark connecting=false and complete the sheet.
         state.isConnecting = false
         dependencies.telemetryClient.track(.pairingCompleted)
         state.complete()
@@ -280,9 +269,6 @@ struct PairingStep: View {
     }
 
     private func pushPresetList(_ presets: [ConnectionPreset]) async throws {
-        // `connectionPresets` lives under the nested `server` block on
-        // `ServerSettingsUpdate` — settings deep-merge replaces arrays
-        // wholesale so we send the full post-edit list.
         let update = ServerSettingsUpdate(
             server: ServerSettingsUpdate.ServerUpdate(connectionPresets: presets)
         )
@@ -292,4 +278,4 @@ struct PairingStep: View {
 
 // Universal-paste detection lives in `Extensions/Binding+PasteAware.swift`
 // so the same code paths the Settings re-pair sheet uses are exercised by
-// the onboarding form (Phase 4.5).
+// the onboarding form.

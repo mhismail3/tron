@@ -1,141 +1,167 @@
 import SwiftUI
+import UIKit
 
-/// Shared chrome for the onboarding sheet.
+/// Shared building blocks for the first-run onboarding sheet.
 ///
-/// The sheet is intentionally compact: one header, one scrollable content
-/// area, and a footer pinned to the bottom. It can grow to the large
-/// detent for keyboard entry but starts as a medium overlay above the
-/// dashboard.
-///
-/// Layout:
-///
-///   ┌──────────────────────────────────────────────────┐
-///   │  [<- back]                                       │  ← compact bar
-///   │                                                  │
-///   │  Title (largeTitle, primary)                     │
-///   │  Subtitle (body, secondary, optional)            │
-///   │                                                  │
-///   │  ─── content slot ──────────────────────────     │  ← pushed up;
-///   │                                                  │     ScrollView
-///   │                                                  │     so long copy
-///   │                                                  │     never clips
-///   │  ─── footer slot (primary + secondary CTA) ──    │  ← pinned bottom
-///   └──────────────────────────────────────────────────┘
-///
-/// **Why a shell + slots** (vs a per-step bespoke layout): keeps the
-/// progressive-disclosure invariants in one file (back button is always
-/// top-left, primary action is always bottom). Designers can tweak the
-/// spec once and every step inherits the change.
-struct OnboardingShell<Content: View, Footer: View>: View {
-    let title: String
-    let subtitle: String?
-    let showsBackButton: Bool
-    let onBack: (() -> Void)?
-    let content: Content
-    let footer: Footer
-
-    init(
-        title: String,
-        subtitle: String? = nil,
-        showsBackButton: Bool = true,
-        onBack: (() -> Void)? = nil,
-        @ViewBuilder content: () -> Content,
-        @ViewBuilder footer: () -> Footer
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.showsBackButton = showsBackButton
-        self.onBack = onBack
-        self.content = content()
-        self.footer = footer()
-    }
+/// The dashboard always remains mounted underneath this sheet. Onboarding is
+/// a short paged overlay: two lightweight orientation pages, then the pairing
+/// form that performs the actual connection.
+@available(iOS 26.0, *)
+struct OnboardingTopBar: View {
+    let step: OnboardingState.Step
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if showsBackButton, onBack != nil {
-                topBar
-            }
-
-            ScrollView(showsIndicators: false) {
-                bodyStack
-                    .padding(.horizontal, TronSpacing.xl)
-                    .padding(.top, showsBackButton ? TronSpacing.md : TronSpacing.xl)
-                    .padding(.bottom, TronSpacing.lg)
-                    .frame(maxWidth: 600, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .scrollDismissesKeyboard(.interactively)
-
-            footer
-                .padding(.horizontal, TronSpacing.xl)
-                .padding(.top, TronSpacing.md)
-                .padding(.bottom, TronSpacing.lg)
-                .frame(maxWidth: 600)
-                .frame(maxWidth: .infinity)
-                .background(.ultraThinMaterial)
-        }
-        .tronScreenBackground()
-    }
-
-    @ViewBuilder
-    private var bodyStack: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.lg) {
-            headerBlock
-            content
-        }
-    }
-
-    // MARK: - Top bar
-
-    @ViewBuilder
-    private var topBar: some View {
         HStack {
-            if showsBackButton, let onBack = onBack {
-                Button(action: onBack) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.backward")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("Back")
-                            .font(TronTypography.buttonSM)
-                    }
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 4)
-                }
-                .accessibilityLabel("Back to previous step")
-            }
+            Text(step.counterText)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .monospacedDigit()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .glassEffect(
+                    .regular.tint(Color.tronEmerald.opacity(0.18)),
+                    in: Capsule()
+                )
+                .accessibilityLabel("Step \(step.number) of \(OnboardingState.Step.totalCount)")
+
             Spacer(minLength: 0)
         }
         .padding(.horizontal, TronSpacing.xl)
-        .padding(.top, TronSpacing.md)
-        .frame(height: 34)
+        .padding(.top, TronSpacing.lg)
+        .padding(.bottom, TronSpacing.sm)
+    }
+}
+
+@available(iOS 26.0, *)
+struct OnboardingPage<Content: View>: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+    let content: Content
+
+    init(
+        systemImage: String,
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.systemImage = systemImage
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content()
     }
 
-    // MARK: - Header
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: TronSpacing.section) {
+                header
+                content
+            }
+            .padding(.horizontal, TronSpacing.xl)
+            .padding(.bottom, TronSpacing.xl)
+            .frame(maxWidth: 620, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
 
-    @ViewBuilder
-    private var headerBlock: some View {
+    private var header: some View {
         VStack(alignment: .leading, spacing: TronSpacing.sm) {
-            Text(title)
-                .font(TronTypography.largeTitle)
-                .foregroundStyle(Color.tronTextPrimary)
-                .accessibilityAddTraits(.isHeader)
+            HStack(alignment: .center, spacing: TronSpacing.md) {
+                Image(systemName: systemImage)
+                    .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
+                    .foregroundStyle(Color.tronEmerald)
+                    .frame(width: 32, height: 32)
 
-            if let subtitle = subtitle {
+                Text(title)
+                    .font(TronTypography.largeTitle)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+            }
+
+            Text(subtitle)
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(Color.tronTextSecondary)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+struct OnboardingGlassCard<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(TronSpacing.section)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(
+                .regular.tint(Color.tronEmerald.opacity(0.12)),
+                in: RoundedRectangle(cornerRadius: TronSpacing.cornerLG, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: TronSpacing.cornerLG, style: .continuous)
+                    .stroke(Color.tronEmerald.opacity(0.22), lineWidth: 1)
+            )
+    }
+}
+
+@available(iOS 26.0, *)
+struct OnboardingInfoRow: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: TronSpacing.md) {
+            Image(systemName: systemImage)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .frame(width: 26, height: 26)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(subtitle)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                     .foregroundStyle(Color.tronTextSecondary)
-                    .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 }
 
-// MARK: - Reusable button styles for onboarding footers
+@available(iOS 26.0, *)
+struct OnboardingSwipeHint: View {
+    let title: String
 
-/// Big block primary button — the canonical "Continue / Connect / Allow"
-/// affordance at the bottom of every step.
+    var body: some View {
+        HStack(spacing: TronSpacing.sm) {
+            Text(title)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+            Image(systemName: "arrow.left")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+        }
+        .foregroundStyle(Color.tronEmerald)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .glassEffect(
+            .regular.tint(Color.tronEmerald.opacity(0.14)),
+            in: Capsule()
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+@available(iOS 26.0, *)
 struct OnboardingPrimaryButton: View {
     let title: String
     var systemImage: String? = nil
@@ -152,47 +178,43 @@ struct OnboardingPrimaryButton: View {
                         .controlSize(.small)
                         .tint(Color.tronBackground)
                 }
-                if let systemImage = systemImage, !isLoading {
+                if let systemImage, !isLoading {
                     Image(systemName: systemImage)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 }
                 Text(title)
                     .font(TronTypography.button)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .foregroundStyle(Color.tronBackground)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isEnabled ? Color.tronEmerald : Color.tronEmerald.opacity(0.4))
-            )
+            .padding(.vertical, 15)
+            .foregroundStyle(isEnabled ? Color.tronBackground : Color.tronTextMuted)
+            .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerLG, style: .continuous))
         }
         .buttonStyle(.plain)
+        .glassEffect(
+            .regular.tint((isEnabled ? Color.tronEmerald : Color.tronOverlay(0.16)).opacity(isEnabled ? 0.72 : 0.28)).interactive(),
+            in: RoundedRectangle(cornerRadius: TronSpacing.cornerLG, style: .continuous)
+        )
         .disabled(!isEnabled || isLoading)
     }
 }
 
-/// Subtle secondary button rendered below the primary — "Skip", "Open
-/// Tron download", "I already have Tron running", etc.
-struct OnboardingSecondaryButton: View {
-    let title: String
-    var systemImage: String? = nil
+@available(iOS 26.0, *)
+struct OnboardingIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                if let systemImage = systemImage {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 14, weight: .medium))
-                }
-                Text(title)
-                    .font(TronTypography.buttonSM)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .foregroundStyle(Color.tronTextSecondary)
+            Image(systemName: systemImage)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.18)).interactive(), in: Circle())
+        .accessibilityLabel(accessibilityLabel)
     }
 }

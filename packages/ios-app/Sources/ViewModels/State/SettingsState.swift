@@ -135,6 +135,13 @@ final class SettingsState {
         UserDefaults.standard.set(data, forKey: Self.cachedPresetsKey)
     }
 
+    /// Replace the paired-server list and keep the WebSocket bearer-token
+    /// resolver's synchronous UserDefaults cache in lock-step.
+    func replaceConnectionPresets(_ presets: [ConnectionPreset]) {
+        connectionPresets = presets
+        cachePresets(presets)
+    }
+
     // MARK: - Load State
 
     var isLoaded = false
@@ -200,8 +207,7 @@ final class SettingsState {
         rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
         isolationMode = settings.isolationMode
         queueDrainMode = settings.queueDrainMode
-        connectionPresets = settings.connectionPresets
-        cachePresets(settings.connectionPresets)
+        replaceConnectionPresets(settings.connectionPresets)
         hooksLlmModel = settings.hooksLlmModel
         builtinHooks = settings.builtinHooks
         hooksErrorPolicy = settings.hooksErrorPolicy

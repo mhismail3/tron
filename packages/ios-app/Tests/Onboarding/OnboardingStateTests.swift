@@ -14,12 +14,20 @@ struct OnboardingStateTests {
     @Test("Fresh state defaults to empty pairing inputs")
     func defaultsAreSensible() {
         let state = OnboardingState(defaults: ephemeralDefaults())
+        #expect(state.currentStep == .welcome)
         #expect(state.pairingHost.isEmpty)
         #expect(state.pairingPort == AppConstants.prodPort)
         #expect(state.pairingToken.isEmpty)
         #expect(state.pairingLabel == "My Mac")
         #expect(state.isConnecting == false)
         #expect(state.pairingError == nil)
+    }
+
+    @Test("Step counter text is one-based")
+    func stepCounterTextIsOneBased() {
+        #expect(OnboardingState.Step.welcome.counterText == "1 / 3")
+        #expect(OnboardingState.Step.installMac.counterText == "2 / 3")
+        #expect(OnboardingState.Step.connect.counterText == "3 / 3")
     }
 
     @Test("complete() flips the AppStorage flag")
@@ -42,6 +50,7 @@ struct OnboardingStateTests {
             label: "Friend's Mac"
         )
         state.acceptPairingPayload(payload)
+        #expect(state.currentStep == .connect)
         #expect(state.pairingHost == "100.64.0.7")
         #expect(state.pairingPort == "9847")
         #expect(state.pairingToken == "deadbeef")
@@ -69,12 +78,44 @@ struct OnboardingStateTests {
         #expect(state.pairingError == nil)
     }
 
+    // MARK: - Step navigation
+
+    @Test("goToNextStep advances until the final step")
+    func goToNextStepAdvancesUntilFinalStep() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+
+        state.goToNextStep()
+        #expect(state.currentStep == .installMac)
+
+        state.goToNextStep()
+        #expect(state.currentStep == .connect)
+
+        state.goToNextStep()
+        #expect(state.currentStep == .connect)
+    }
+
+    @Test("goToPreviousStep returns until the first step")
+    func goToPreviousStepReturnsUntilFirstStep() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        state.currentStep = .connect
+
+        state.goToPreviousStep()
+        #expect(state.currentStep == .installMac)
+
+        state.goToPreviousStep()
+        #expect(state.currentStep == .welcome)
+
+        state.goToPreviousStep()
+        #expect(state.currentStep == .welcome)
+    }
+
     // MARK: - reset()
 
     @Test("reset() clears completion flag and pairing inputs")
     func resetReturnsToPairing() {
         let defaults = ephemeralDefaults()
         let state = OnboardingState(defaults: defaults)
+        state.currentStep = .connect
         state.pairingHost = "h"
         state.pairingPort = "1"
         state.pairingToken = "t"
@@ -83,6 +124,7 @@ struct OnboardingStateTests {
 
         state.reset()
 
+        #expect(state.currentStep == .welcome)
         #expect(state.pairingHost.isEmpty)
         #expect(state.pairingPort == AppConstants.prodPort)
         #expect(state.pairingToken.isEmpty)
