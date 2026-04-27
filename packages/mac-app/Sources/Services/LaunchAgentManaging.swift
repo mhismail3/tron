@@ -11,6 +11,11 @@ enum LaunchAgentOutcome: Equatable, Sendable {
     case unknown(message: String)
 }
 
+struct LaunchAgentRuntimeInfo: Equatable, Sendable {
+    var pid: Int?
+    var uptime: String?
+}
+
 /// Indirection over `launchctl` so the wizard's install step is
 /// testable without actually invoking the system launchd. Mocks live in
 /// `Tests/Mocks/MockLaunchAgentManager.swift`.
@@ -31,4 +36,8 @@ protocol LaunchAgentManaging: Sendable {
     /// True if `launchctl print gui/$UID/<label>` returns a state row.
     /// Cheaper than load+ping when you only need a yes/no.
     func isLoaded(label: String) async -> Bool
+
+    /// Best-effort process metadata from launchd/ps for diagnostics UI.
+    /// Returns nil when launchd has no loaded service or does not expose a pid.
+    func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo?
 }

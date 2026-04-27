@@ -516,6 +516,42 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         return result.exitCode == 0
     }
 
+    func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo? {
+        let result = await Subprocess.run(
+            executable: URL(fileURLWithPath: "/bin/launchctl"),
+            arguments: ["print", "gui/\(currentUID())/\(label)"]
+        )
+        guard result.exitCode == 0 else { return nil }
+        let pid = parsePID(from: result.stdout)
+        let uptime: String?
+        if let pid {
+            uptime = await processElapsedTime(pid: pid)
+        } else {
+            uptime = nil
+        }
+        return LaunchAgentRuntimeInfo(pid: pid, uptime: uptime)
+    }
+
+    private func parsePID(from launchctlOutput: String) -> Int? {
+        for line in launchctlOutput.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("pid =") else { continue }
+            let digits = trimmed.drop { !$0.isNumber }.prefix { $0.isNumber }
+            return Int(digits)
+        }
+        return nil
+    }
+
+    private func processElapsedTime(pid: Int) async -> String? {
+        let result = await Subprocess.run(
+            executable: URL(fileURLWithPath: "/bin/ps"),
+            arguments: ["-p", "\(pid)", "-o", "etime="]
+        )
+        guard result.exitCode == 0 else { return nil }
+        let uptime = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return uptime.isEmpty ? nil : uptime
+    }
+
     private func currentUID() -> Int {
         Int(getuid())
     }

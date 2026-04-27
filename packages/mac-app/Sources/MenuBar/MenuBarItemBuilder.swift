@@ -5,6 +5,7 @@ import Foundation
 /// into `NSMenuItem` instances. Tests assert the descriptor sequence
 /// without needing AppKit.
 enum MenuItemDescriptor: Equatable {
+    case header(MenuHeaderContent)
     case text(title: String)
     case copy(title: String, value: String)
     case action(title: String, isEnabled: Bool, handler: @MainActor () -> Void)
@@ -14,6 +15,7 @@ enum MenuItemDescriptor: Equatable {
 
     static func == (lhs: MenuItemDescriptor, rhs: MenuItemDescriptor) -> Bool {
         switch (lhs, rhs) {
+        case (.header(let l), .header(let r)): return l == r
         case (.text(let l), .text(let r)): return l == r
         case (.copy(let l1, let l2), .copy(let r1, let r2)): return l1 == r1 && l2 == r2
         case (.action(let l1, let l2, _), .action(let r1, let r2, _)): return l1 == r1 && l2 == r2
@@ -26,6 +28,8 @@ enum MenuItemDescriptor: Equatable {
 
     var title: String {
         switch self {
+        case .header:
+            return "Tron"
         case .text(let title), .copy(let title, _), .action(let title, _, _), .openLink(let title, _), .quit(let title):
             return title
         case .separator:
@@ -41,35 +45,30 @@ enum MenuBarItemBuilder {
     static func build(snapshot: ServerStatusSnapshot, paths: EnvironmentSetup) -> [MenuItemDescriptor] {
         var items: [MenuItemDescriptor] = []
 
-        // Status row (always first).
-        items.append(.text(title: statusTitle(snapshot: snapshot)))
-
-        // Tailscale + port + token rows. All are .copy so a click puts
-        // the value on the clipboard.
-        if let ip = snapshot.tailscaleIP {
-            items.append(.copy(title: "Tailscale: \(ip):\(paths.serverPort)", value: "\(ip):\(paths.serverPort)"))
-        } else {
-            items.append(.text(title: "Tailscale: not available"))
-        }
-
-        if let token = snapshot.bearerToken, !token.isEmpty {
-            items.append(.copy(title: "Pairing token: \(token.truncatedForMenu)", value: token))
-        } else {
-            items.append(.text(title: "Pairing token: (not generated)"))
-        }
-
         let controlsEnabled = !snapshot.state.isBusy
+
+        items.append(.header(headerContent(snapshot: snapshot, paths: paths)))
+        items.append(.separator)
 
         items.append(.action(title: "Show pairing info", isEnabled: true, handler: { @MainActor in
             NotificationCenter.default.post(name: .tronMenuBarShowPairingInfo, object: nil)
         }))
 
-        items.append(.separator)
+        items.append(.openLink(title: "Open Tron folder", url: paths.tronHome))
 
-        // Server control.
-        items.append(.action(title: snapshot.state.restartTitle, isEnabled: controlsEnabled, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarRestartServer, object: nil)
+        items.append(.action(title: "Show logs", isEnabled: true, handler: { @MainActor in
+            NotificationCenter.default.post(name: .tronMenuBarViewLogs, object: nil)
         }))
+
+        items.append(.action(title: "Check for updates", isEnabled: true, handler: { @MainActor in
+            NotificationCenter.default.post(name: .tronMenuBarCheckForUpdates, object: nil)
+        }))
+
+        items.append(.action(title: "Send feedback", isEnabled: true, handler: { @MainActor in
+            NotificationCenter.default.post(name: .tronMenuBarSendFeedback, object: nil)
+        }))
+
+        items.append(.separator)
         if snapshot.state.isRunning {
             items.append(.action(title: "Pause server", isEnabled: controlsEnabled, handler: { @MainActor in
                 NotificationCenter.default.post(name: .tronMenuBarPauseServer, object: nil)
@@ -79,23 +78,9 @@ enum MenuBarItemBuilder {
                 NotificationCenter.default.post(name: .tronMenuBarResumeServer, object: nil)
             }))
         }
-
-        items.append(.action(title: "View logs", isEnabled: true, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarViewLogs, object: nil)
+        items.append(.action(title: snapshot.state.restartTitle, isEnabled: controlsEnabled, handler: { @MainActor in
+            NotificationCenter.default.post(name: .tronMenuBarRestartServer, object: nil)
         }))
-
-        items.append(.openLink(title: "Open Tron folder", url: paths.tronHome))
-
-        items.append(.action(title: "Send feedback", isEnabled: true, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarSendFeedback, object: nil)
-        }))
-
-        items.append(.action(title: "Check for updates", isEnabled: true, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarCheckForUpdates, object: nil)
-        }))
-
-        items.append(.separator)
-
         items.append(.action(title: "Uninstall Tron", isEnabled: true, handler: { @MainActor in
             NotificationCenter.default.post(name: .tronMenuBarUninstall, object: nil)
         }))
@@ -120,6 +105,62 @@ enum MenuBarItemBuilder {
             return "Tron — checking…"
         }
     }
+
+    static func statusLabel(snapshot: ServerStatusSnapshot) -> String {
+        switch snapshot.state {
+        case .running:
+            return "Running"
+        case .busy(let action):
+            return action.rawValue
+        case .paused:
+            return "Paused"
+        case .failed:
+            return "Stopped"
+        case .unauthorized:
+            return "Needs token"
+        case .checking:
+            return "Checking"
+        }
+    }
+
+    static func headerContent(snapshot: ServerStatusSnapshot, paths: EnvironmentSetup) -> MenuHeaderContent {
+        let address = snapshot.tailscaleIP.map { "\($0):\(paths.serverPort)" } ?? "Tailscale unavailable"
+        let health: MenuHeaderContent.Health
+        switch snapshot.state {
+        case .running:
+            health = .healthy
+        case .checking, .busy, .unauthorized:
+            health = .attention
+        case .paused:
+            health = .paused
+        case .failed:
+            health = .stopped
+        }
+        return MenuHeaderContent(
+            endpoint: address,
+            endpointCopyValue: snapshot.tailscaleIP.map { "\($0):\(paths.serverPort)" },
+            status: statusLabel(snapshot: snapshot),
+            health: health,
+            pid: snapshot.processID,
+            uptime: snapshot.uptime
+        )
+    }
+}
+
+struct MenuHeaderContent: Equatable, Sendable {
+    enum Health: Equatable, Sendable {
+        case healthy
+        case attention
+        case paused
+        case stopped
+    }
+
+    var endpoint: String
+    var endpointCopyValue: String?
+    var status: String
+    var health: Health
+    var pid: Int?
+    var uptime: String?
 }
 
 enum ServerBusyAction: String, Equatable, Sendable {
@@ -191,17 +232,6 @@ enum ServerStatusState: Equatable, Sendable {
     }
 }
 
-private extension String {
-    /// Token shown in the menu bar truncated to first 4 + last 4
-    /// (matches plan §A "Pairing token: 7a3f…c9d2").
-    var truncatedForMenu: String {
-        guard count > 9 else { return self }
-        let prefix = self.prefix(4)
-        let suffix = self.suffix(4)
-        return "\(prefix)…\(suffix)"
-    }
-}
-
 /// Snapshot consumed by `MenuBarItemBuilder` and produced by
 /// `ServerStatusPoller`.
 struct ServerStatusSnapshot: Equatable {
@@ -211,13 +241,17 @@ struct ServerStatusSnapshot: Equatable {
     var port: Int?
     var tailscaleIP: String?
     var bearerToken: String?
+    var processID: Int?
+    var uptime: String?
 
     init(
         state: ServerStatusState,
         version: String? = nil,
         port: Int? = nil,
         tailscaleIP: String? = nil,
-        bearerToken: String? = nil
+        bearerToken: String? = nil,
+        processID: Int? = nil,
+        uptime: String? = nil
     ) {
         self.state = state
         self.tone = state.tone
@@ -231,6 +265,8 @@ struct ServerStatusSnapshot: Equatable {
         }
         self.tailscaleIP = tailscaleIP
         self.bearerToken = bearerToken
+        self.processID = processID
+        self.uptime = uptime
     }
 
     static let checking = ServerStatusSnapshot(state: .checking)

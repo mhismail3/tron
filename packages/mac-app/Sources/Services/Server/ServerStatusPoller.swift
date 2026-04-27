@@ -44,10 +44,13 @@ actor ServerStatusPoller {
         let result = await setup.pingServer(token)
         switch result {
         case .success(let info):
+            let runtimeInfo = await setup.launchAgentManager.runtimeInfo(label: TronPaths.launchAgentLabel)
             return ServerStatusSnapshot(
                 state: .running(version: info.version, port: info.port),
                 tailscaleIP: info.tailscaleIp ?? setup.readTailscaleIPFromSettings(),
-                bearerToken: token
+                bearerToken: token,
+                processID: runtimeInfo?.pid,
+                uptime: runtimeInfo?.uptime
             )
         case .unauthorized:
             return ServerStatusSnapshot(

@@ -13,6 +13,7 @@ struct ServerStatusPollerTests {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let launchAgentManager = MockLaunchAgentManager()
         launchAgentManager.loaded = launchAgentLoaded
+        launchAgentManager.runtimeInfo = LaunchAgentRuntimeInfo(pid: 16027, uptime: "01:07:42")
         return EnvironmentSetup(
             tronHome: tmp,
             installedBundle: tmp,
@@ -51,6 +52,8 @@ struct ServerStatusPollerTests {
         #expect(snapshot.port == 9847)
         #expect(snapshot.tailscaleIP == "100.64.0.1")
         #expect(snapshot.bearerToken == "abc123")
+        #expect(snapshot.processID == 16027)
+        #expect(snapshot.uptime == "01:07:42")
     }
 
     @Test("unreachable + launchd unloaded: paused")

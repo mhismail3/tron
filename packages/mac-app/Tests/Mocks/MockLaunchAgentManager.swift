@@ -12,7 +12,7 @@ import os
 /// unavailable in async contexts because it blocks the calling thread.
 final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
     struct Call: Equatable {
-        enum Kind: Equatable { case load, unload, restart, isLoaded }
+        enum Kind: Equatable { case load, unload, restart, isLoaded, runtimeInfo }
         let kind: Kind
         let label: String
         let plistPath: URL?
@@ -24,6 +24,7 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
         var unloadOutcome: LaunchAgentOutcome = .ok
         var restartOutcome: LaunchAgentOutcome = .ok
         var loaded: Bool = false
+        var runtimeInfo: LaunchAgentRuntimeInfo?
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -43,6 +44,10 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
     var loaded: Bool {
         get { state.withLock { $0.loaded } }
         set { state.withLock { $0.loaded = newValue } }
+    }
+    var runtimeInfo: LaunchAgentRuntimeInfo? {
+        get { state.withLock { $0.runtimeInfo } }
+        set { state.withLock { $0.runtimeInfo = newValue } }
     }
 
     var calls: [Call] {
@@ -74,6 +79,13 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
         state.withLock {
             $0.calls.append(Call(kind: .isLoaded, label: label, plistPath: nil))
             return $0.loaded
+        }
+    }
+
+    func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo? {
+        state.withLock {
+            $0.calls.append(Call(kind: .runtimeInfo, label: label, plistPath: nil))
+            return $0.runtimeInfo
         }
     }
 }

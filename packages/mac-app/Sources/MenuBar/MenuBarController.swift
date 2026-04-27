@@ -136,6 +136,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         switch descriptor {
         case .separator:
             return NSMenuItem.separator()
+        case .header(let content):
+            let item = NSMenuItem()
+            let view = MenuBarHeaderView(content: content)
+            item.view = view
+            item.representedObject = view // keep closures alive
+            item.isEnabled = false
+            item.image = nil
+            return item
         case .text(let title):
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             item.isEnabled = false
@@ -163,7 +171,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             return item
         case .quit(let title):
             let wrapper = ActionWrapper { NSApp.terminate(nil) }
-            let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "q")
+            let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "")
             item.target = wrapper
             item.representedObject = wrapper // keep alive
             normalizeMenuItem(item)
@@ -199,6 +207,171 @@ private final class ActionWrapper: NSObject {
     let handler: @MainActor () -> Void
     init(handler: @escaping @MainActor () -> Void) { self.handler = handler }
     @objc func invoke() { handler() }
+}
+
+@MainActor
+private final class MenuBarHeaderView: NSView {
+    private let endpointCopyValue: String?
+    private var uptimeField: NSTextField?
+    private var uptimeSeconds: Int?
+    private var uptimeTask: Task<Void, Never>?
+
+    init(content: MenuHeaderContent) {
+        self.endpointCopyValue = content.endpointCopyValue
+        let diagnosticRows = 2 + (content.pid == nil ? 0 : 1) + (content.uptime == nil ? 0 : 1)
+        let height = CGFloat(26 + diagnosticRows * 17)
+        super.init(frame: NSRect(x: 0, y: 0, width: 202, height: height))
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 202).isActive = true
+        heightAnchor.constraint(equalToConstant: height).isActive = true
+        build(content: content)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        uptimeTask?.cancel()
+    }
+
+    private func build(content: MenuHeaderContent) {
+        let title = NSTextField(labelWithString: "Tron")
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.textColor = .labelColor
+        title.lineBreakMode = .byTruncatingTail
+
+        let addressButton = NSButton(title: content.endpoint, target: self, action: #selector(copyTailscaleAddress))
+        addressButton.isEnabled = content.endpointCopyValue != nil
+        addressButton.isBordered = false
+        addressButton.bezelStyle = .inline
+        addressButton.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        addressButton.contentTintColor = content.endpointCopyValue == nil ? .tertiaryLabelColor : .secondaryLabelColor
+        addressButton.alignment = .left
+        addressButton.lineBreakMode = .byTruncatingMiddle
+        addressButton.setButtonType(.momentaryChange)
+        addressButton.imagePosition = .noImage
+        addressButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let status = diagnosticField(prefix: "Status: ", value: content.status, valueColor: color(for: content.health))
+        status.lineBreakMode = .byTruncatingTail
+
+        var rows: [NSView] = [title, addressButton, status]
+        if let pid = content.pid {
+            let pidField = diagnosticField(prefix: "PID: ", value: "\(pid)", valueColor: .secondaryLabelColor)
+            rows.append(pidField)
+        }
+        if let uptime = content.uptime {
+            let uptimeField = NSTextField(labelWithString: "Uptime: \(uptime)")
+            uptimeField.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+            uptimeField.textColor = .secondaryLabelColor
+            rows.append(uptimeField)
+            self.uptimeField = uptimeField
+            startUptimeTimer(initialUptime: uptime)
+        }
+
+        let body = NSStackView(views: rows)
+        body.translatesAutoresizingMaskIntoConstraints = false
+        body.orientation = .vertical
+        body.alignment = .leading
+        body.spacing = 2
+        addSubview(body)
+
+        NSLayoutConstraint.activate([
+            body.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            body.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            body.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+        ])
+    }
+
+    private func color(for health: MenuHeaderContent.Health) -> NSColor {
+        switch health {
+        case .healthy:
+            return NSColor.systemGreen
+        case .attention:
+            return NSColor.systemYellow
+        case .paused:
+            return NSColor.secondaryLabelColor
+        case .stopped:
+            return NSColor.systemRed
+        }
+    }
+
+    private func diagnosticField(prefix: String, value: String, valueColor: NSColor) -> NSTextField {
+        let field = NSTextField(labelWithString: "\(prefix)\(value)")
+        field.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        field.textColor = .secondaryLabelColor
+        let attributed = NSMutableAttributedString(string: "\(prefix)\(value)", attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 10.5, weight: .regular),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ])
+        attributed.addAttribute(
+            .foregroundColor,
+            value: valueColor,
+            range: NSRange(location: prefix.count, length: value.count)
+        )
+        field.attributedStringValue = attributed
+        return field
+    }
+
+    private func startUptimeTimer(initialUptime: String) {
+        guard let seconds = parseUptime(initialUptime) else { return }
+        uptimeSeconds = seconds
+        uptimeTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                self?.tickUptime()
+            }
+        }
+    }
+
+    private func tickUptime() {
+        guard let seconds = uptimeSeconds else { return }
+        let next = seconds + 1
+        uptimeSeconds = next
+        uptimeField?.stringValue = "Uptime: \(formatUptime(next))"
+    }
+
+    private func parseUptime(_ uptime: String) -> Int? {
+        let dayAndTime = uptime.split(separator: "-", maxSplits: 1).map(String.init)
+        let dayOffset: Int
+        let timePart: String
+        if dayAndTime.count == 2 {
+            dayOffset = (Int(dayAndTime[0]) ?? 0) * 24 * 60 * 60
+            timePart = dayAndTime[1]
+        } else {
+            dayOffset = 0
+            timePart = uptime
+        }
+
+        let parts = timePart.split(separator: ":").compactMap { Int($0) }
+        switch parts.count {
+        case 2:
+            return dayOffset + parts[0] * 60 + parts[1]
+        case 3:
+            return dayOffset + parts[0] * 60 * 60 + parts[1] * 60 + parts[2]
+        default:
+            return nil
+        }
+    }
+
+    private func formatUptime(_ seconds: Int) -> String {
+        let days = seconds / 86_400
+        let remainder = seconds % 86_400
+        let hours = remainder / 3_600
+        let minutes = (remainder % 3_600) / 60
+        let secs = remainder % 60
+        let clock = String(format: "%02d:%02d:%02d", hours, minutes, secs)
+        return days > 0 ? "\(days)-\(clock)" : clock
+    }
+
+    @objc private func copyTailscaleAddress() {
+        guard let endpointCopyValue else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(endpointCopyValue, forType: .string)
+    }
 }
 
 @MainActor
