@@ -11,6 +11,8 @@ struct PairingStep: View {
 
     @State private var showQRScanner = false
     @State private var scanError: String?
+    @State private var pendingScannedPayload: PairingURLParser.PairingPayload?
+    @State private var showsManualEntry = false
 
     var body: some View {
         OnboardingPage(
@@ -18,7 +20,12 @@ struct PairingStep: View {
         ) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
                 qrPairingCard
-                manualEntrySection
+                manualEntryToggle
+
+                if showsManualEntry {
+                    manualEntrySection
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
                 if let scanError {
                     errorCard(scanError)
@@ -28,7 +35,8 @@ struct PairingStep: View {
                 }
             }
         }
-        .sheet(isPresented: $showQRScanner) {
+        .animation(.snappy(duration: 0.24), value: showsManualEntry)
+        .sheet(isPresented: $showQRScanner, onDismiss: connectAfterSuccessfulScan) {
             QRCodeScannerSheet { code in
                 applyScannedCode(code)
             }
@@ -56,44 +64,49 @@ struct PairingStep: View {
 
     private var qrPairingCard: some View {
         OnboardingGlassCard {
-            VStack(alignment: .leading, spacing: TronSpacing.md) {
-                HStack(alignment: .top, spacing: TronSpacing.md) {
-                    Image(systemName: "qrcode.viewfinder")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(Color.tronEmerald)
-                        .frame(width: 34, height: 34)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Scan the Mac QR code")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                        Text("This fills in the host, port, token, and server name automatically.")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            HStack(alignment: .center, spacing: TronSpacing.section) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Scan the Mac QR code")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                    Text("This fills in the host, port, token, and server name automatically.")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Button {
-                    showQRScanner = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "camera.viewfinder")
-                        Text("Scan QR code")
-                    }
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(Color.tronEmerald)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
+                Button(action: openScanner) {
+                    Image(systemName: "camera.viewfinder")
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                        .frame(width: 76, height: 76)
+                        .foregroundStyle(Color.tronEmerald)
+                        .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .glassEffect(
-                    .regular.tint(Color.tronEmerald.opacity(0.16)).interactive(),
+                    .regular.tint(Color.tronEmerald.opacity(0.18)).interactive(),
                     in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
                 )
+                .accessibilityLabel("Scan QR code")
             }
         }
+    }
+
+    private var manualEntryToggle: some View {
+        Button {
+            scanError = nil
+            withAnimation(.snappy(duration: 0.24)) {
+                showsManualEntry.toggle()
+            }
+        } label: {
+            Text(showsManualEntry ? "Hide Manual Entry" : "Enter Manually")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
     }
 
     private var manualEntrySection: some View {
@@ -214,14 +227,30 @@ struct PairingStep: View {
 
     // MARK: - QR
 
+    private func openScanner() {
+        pendingScannedPayload = nil
+        scanError = nil
+        state.pairingError = nil
+        showQRScanner = true
+    }
+
     private func applyScannedCode(_ code: String) {
         switch PairingURLParser.parse(code) {
         case .success(let payload):
             scanError = nil
+            pendingScannedPayload = payload
+            showsManualEntry = false
             state.acceptPairingPayload(payload)
         case .failure:
+            pendingScannedPayload = nil
             scanError = "That QR code does not look like a Tron pairing code."
         }
+    }
+
+    private func connectAfterSuccessfulScan() {
+        guard let payload = pendingScannedPayload else { return }
+        pendingScannedPayload = nil
+        runValidatedConnect(payload)
     }
 
     // MARK: - Connect action
@@ -242,8 +271,15 @@ struct PairingStep: View {
             state.isConnecting = false
             return
         case .success(let payload):
-            Task { await runProbe(payload: payload) }
+            runValidatedConnect(payload)
         }
+    }
+
+    private func runValidatedConnect(_ payload: PairingURLParser.PairingPayload) {
+        state.pairingError = nil
+        scanError = nil
+        state.isConnecting = true
+        Task { await runProbe(payload: payload) }
     }
 
     private func runProbe(payload: PairingURLParser.PairingPayload) async {

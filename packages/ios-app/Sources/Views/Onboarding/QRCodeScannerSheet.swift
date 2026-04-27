@@ -14,7 +14,7 @@ struct QRCodeScannerSheet: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let viewportSize = min(geometry.size.width - 56, geometry.size.height - 150)
+            let viewportSize = scannerViewportSize(for: geometry.size)
 
             VStack(spacing: 16) {
                 Text("Scan Pairing Code")
@@ -36,7 +36,7 @@ struct QRCodeScannerSheet: View {
                 Spacer(minLength: 0)
 
                 controlButtons
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 36)
             }
             .frame(maxWidth: .infinity)
         }
@@ -54,6 +54,13 @@ struct QRCodeScannerSheet: View {
         .onDisappear {
             scannerModel.stopSession()
         }
+    }
+
+    private func scannerViewportSize(for size: CGSize) -> CGFloat {
+        let availableWidth = max(1, size.width - 56)
+        let availableHeight = max(1, size.height - 190)
+        let viewportSize = min(availableWidth, availableHeight)
+        return viewportSize.isFinite ? viewportSize : 1
     }
 
     @ViewBuilder

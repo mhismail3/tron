@@ -65,8 +65,8 @@ after Tailscale says Connected; the pairing probe performs the real
 reachability check.
 
 `acceptPairingPayload(_:)` must jump to `.connect` because deep links,
-QR scans, and pasted pairing URLs should all reveal the populated
-pairing form immediately.
+QR scans, and pasted pairing URLs should all land on the pairing page
+with the values populated.
 
 ## Pairing Path
 
@@ -101,6 +101,9 @@ sheet at the large detent.
 QR scanning is handled by `QRCodeScannerSheet`, which returns the raw
 QR string. `PairingStep` parses it with `PairingURLParser` and applies
 the resulting payload through `OnboardingState.acceptPairingPayload(_:)`.
+The visible pairing page is QR-first: manual entry is hidden behind the
+centered "Enter Manually" action, and successful QR scans automatically
+run the same connect validation after the scanner sheet dismisses.
 
 ## Re-Entrancy
 

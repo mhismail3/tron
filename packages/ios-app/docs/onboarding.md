@@ -33,7 +33,7 @@ readyContent()
             ├─ InstallTailscaleOnboardingPage
             ├─ InstallMacOnboardingPage
             └─ PairingStep
-                 ├─ scan QR / paste URL / enter fields
+                 ├─ scan QR / optionally reveal manual entry
                  ├─ validate host / port / token / server name
                  ├─ probe ws://host:port/ws with Authorization: Bearer token
                  ├─ send system.ping
@@ -49,7 +49,8 @@ handled in three places:
   pairing form, jumps to the connect page, and presents the sheet at the
   large detent.
 - `QRCodeScannerSheet` scans the Mac QR code, parses the same URL shape,
-  and fills the connect page.
+  fills the connect page, and starts the same Connect validation after
+  the camera sheet dismisses.
 - `Binding<String>.pasteAware` lets the user paste the full pairing URL
   into any pairing field and auto-distributes the values.
 
@@ -117,9 +118,15 @@ pairing probe.
 and returns only the raw code string. `PairingStep` is responsible for
 parsing with `PairingURLParser`, so scanning, paste, manual links, and
 deep links all converge on one parser and one `OnboardingState` mutation.
-The sheet reuses the chat camera sheet's compact medium-detent camera
-presentation. Camera permission copy in `Info.plist` covers both pairing
-QR scans and chat photo capture.
+The visible pairing page is QR-first: manual entry stays hidden behind
+the centered "Enter Manually" action until the user asks for it. A valid
+QR scan dismisses the camera sheet, flips the toolbar Connect action into
+its loading state, and automatically runs the normal probe/persist path.
+Invalid scans or failed probes stay on the sheet and show the inline error
+so the user can scan again or reveal manual entry. The scanner reuses the
+chat camera sheet's compact medium-detent camera presentation. Camera
+permission copy in `Info.plist` covers both pairing QR scans and chat
+photo capture.
 
 ## Forgetting a Mac
 
