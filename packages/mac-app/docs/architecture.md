@@ -186,11 +186,13 @@ maps to failed.
 
 Post-onboarding surfaces stay in menu-bar mode. "Show pairing info…" opens a
 pairing-only window that reuses the pairing resolver/QR/copy controls without
-wizard navigation or a progress pill. "View logs" opens a native logs window
-fed by the bundled runtime CLI contract, `tron logs -n 200 -o <tempfile>`,
-with refresh and copy controls. Menu rows use native `NSMenuItem` rendering
-with no item images, so the popup keeps the standard macOS menu spacing used
-by apps like 1Password.
+wizard navigation or a progress pill. The shared pairing surface resolves live
+when it opens, and copy actions quickly swap to a checkmark for two seconds so the user gets
+deterministic visual feedback. "View logs" opens a native logs window fed by
+the bundled runtime CLI contract, `tron logs -n 200 -o <tempfile>`, with refresh
+and copy controls.
+Menu rows use native `NSMenuItem` rendering with no item images, so the popup
+keeps the standard macOS menu spacing used by apps like 1Password.
 "Send feedback" builds a prefilled GitHub issue with app/server context and a
 redacted log tail; oversized issue bodies are copied to the pasteboard and the
 GitHub issue opens with a short note.
