@@ -19,6 +19,7 @@ struct OnboardingStateTests {
         #expect(state.pairingPort == AppConstants.prodPort)
         #expect(state.pairingToken.isEmpty)
         #expect(state.pairingLabel == "My Mac")
+        #expect(state.hasPairedMac == false)
         #expect(state.isConnecting == false)
         #expect(state.pairingError == nil)
     }
@@ -30,6 +31,12 @@ struct OnboardingStateTests {
             .installTailscale,
             .installMac,
             .connect,
+            .workspace,
+            .anthropic,
+            .openAI,
+            .providers,
+            .services,
+            .model,
         ])
     }
 
@@ -39,6 +46,12 @@ struct OnboardingStateTests {
         #expect(OnboardingState.Step.installTailscale.toolbarTitle == "Install Tailscale")
         #expect(OnboardingState.Step.installMac.toolbarTitle == "Install Tron Server")
         #expect(OnboardingState.Step.connect.toolbarTitle == "Connect your Mac")
+        #expect(OnboardingState.Step.workspace.toolbarTitle == "Default workspace")
+        #expect(OnboardingState.Step.anthropic.toolbarTitle == "Anthropic")
+        #expect(OnboardingState.Step.openAI.toolbarTitle == "OpenAI")
+        #expect(OnboardingState.Step.providers.toolbarTitle == "Other providers")
+        #expect(OnboardingState.Step.services.toolbarTitle == "Search services")
+        #expect(OnboardingState.Step.model.toolbarTitle == "Default model")
     }
 
     @Test("complete() flips the AppStorage flag")
@@ -100,11 +113,13 @@ struct OnboardingStateTests {
         state.pairingPort = "1"
         state.pairingToken = "t"
         state.pairingLabel = "L"
+        state.hasPairedMac = true
         defaults.set(true, forKey: OnboardingState.completionStorageKey)
 
         state.reset()
 
         #expect(state.currentStep == .welcome)
+        #expect(state.hasPairedMac == false)
         #expect(state.pairingHost.isEmpty)
         #expect(state.pairingPort == AppConstants.prodPort)
         #expect(state.pairingToken.isEmpty)

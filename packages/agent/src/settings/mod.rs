@@ -7,8 +7,10 @@
 //! 2. **User file** — `~/.tron/system/settings.json` (deep-merged over defaults)
 //! 3. **Environment variables** — `TRON_*` overrides (highest priority)
 //!
-//! Settings are server-authoritative: `~/.tron/system/settings.json` is the source
-//! of truth. iOS reads/writes via `settings.get`/`settings.update` RPC methods.
+//! Settings are server-authoritative: `~/.tron/system/settings.json` stores
+//! sparse user overrides. iOS reads/writes the effective server settings via
+//! `settings.get`, `settings.update`, and `settings.resetToDefaults`.
+//! Device-only iOS preferences stay in the app's local storage, not here.
 //!
 //! The global singleton is reloadable: when `settings.update` writes new
 //! values to disk, [`reload_settings_from_path`] swaps the cached value
@@ -111,7 +113,7 @@ pub fn init_settings(settings: TronSettings) {
 /// and atomically swaps the global cache. All subsequent [`get_settings`]
 /// calls return the new values.
 ///
-/// Called by `UpdateSettingsHandler` after writing to `settings.json`.
+/// Called by settings RPC handlers after writing to `settings.json`.
 pub fn reload_settings_from_path(path: &Path) {
     let new = Arc::new(match load_settings_from_path(path) {
         Ok(s) => s,

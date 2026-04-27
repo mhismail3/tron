@@ -1,4 +1,4 @@
-//! Settings handlers: get, update.
+//! Settings handlers: get, update, reset.
 
 use async_trait::async_trait;
 use serde_json::Value;

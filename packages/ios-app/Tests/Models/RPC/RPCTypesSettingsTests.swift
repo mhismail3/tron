@@ -11,8 +11,11 @@ struct ServerSettingsTests {
     func fullDecode() throws {
         let json = """
         {
-            "models": { "default": "claude-opus-4-6" },
-            "server": { "defaultWorkspace": "/projects", "connectionPresets": [{"id":"p1","label":"Local","host":"127.0.0.1","port":8080}] },
+            "server": {
+                "defaultModel": "claude-opus-4-6",
+                "defaultWorkspace": "/projects",
+                "connectionPresets": [{"id":"p1","label":"Local","host":"127.0.0.1","port":8080}]
+            },
             "context": {
                 "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 },
                 "rules": { "discoverStandaloneFiles": false }
@@ -68,9 +71,9 @@ struct ServerSettingsTests {
 
     // MARK: - Partial Nesting
 
-    @Test("models key present but server key missing")
+    @Test("server key present with only default model")
     func partialNesting() throws {
-        let json = #"{"models":{"default":"claude-opus-4-6"}}"#
+        let json = #"{"server":{"defaultModel":"claude-opus-4-6"}}"#
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.isolationMode == "always") // session default

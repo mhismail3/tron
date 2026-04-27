@@ -91,7 +91,7 @@ struct ServerSettings: Decodable {
     let mcpSchemaRefreshTtlMs: UInt64
 
     private enum CodingKeys: String, CodingKey {
-        case models, server, context, session, hooks, skills, memory, git, promptLibrary, mcp
+        case server, context, session, hooks, skills, memory, git, promptLibrary, mcp
     }
 
     private enum GitKeys: String, CodingKey {
@@ -128,12 +128,8 @@ struct ServerSettings: Decodable {
         case mode
     }
 
-    private enum ModelsKeys: String, CodingKey {
-        case `default`
-    }
-
     private enum ServerKeys: String, CodingKey {
-        case defaultWorkspace, connectionPresets, auth, tailscaleIp, update
+        case defaultModel, defaultWorkspace, connectionPresets, auth, tailscaleIp, update
     }
 
     private enum AuthKeys: String, CodingKey {
@@ -151,15 +147,11 @@ struct ServerSettings: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        // models.default
-        if let modelsContainer = try? container.nestedContainer(keyedBy: ModelsKeys.self, forKey: .models) {
-            defaultModel = (try? modelsContainer.decodeIfPresent(String.self, forKey: .default)) ?? "claude-sonnet-4-6"
-        } else {
-            defaultModel = "claude-sonnet-4-6"
-        }
+        var decodedDefaultModel = "claude-sonnet-4-6"
 
         // server.*
         if let serverContainer = try? container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server) {
+            decodedDefaultModel = (try? serverContainer.decodeIfPresent(String.self, forKey: .defaultModel)) ?? decodedDefaultModel
             defaultWorkspace = try? serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
             connectionPresets = (try? serverContainer.decodeIfPresent([ConnectionPreset].self, forKey: .connectionPresets)) ?? []
             tailscaleIp = try? serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
@@ -197,6 +189,7 @@ struct ServerSettings: Decodable {
             updateAction = "notify"
             updateAllowDowngradeOnRollback = true
         }
+        defaultModel = decodedDefaultModel
 
         // context.*
         if let contextContainer = try? container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context) {

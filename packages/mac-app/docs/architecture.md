@@ -241,6 +241,16 @@ inline so the user knows why the reset did not happen.
 → preserve auth.json, auth-token.json, settings.json, database/, and workspace/
 ```
 
+Menu-bar uninstall uses the packaged runtime CLI directly (`tron-cli uninstall`,
+via `TronCLI.resolveBinary`) and does not require a workspace checkout. It
+removes the LaunchAgent plist, CLI symlink, installed server bundles, backup
+binary, and `~/.tron/system/.onboarded`, then quits the wrapper. By default,
+auth, settings, databases, and workspace files remain intact, so the next app
+launch returns to the onboarding wizard instead of a broken menu-bar-only state.
+The confirmation dialog can pass `--reset-settings` and/or
+`--reset-credentials` to also remove `settings.json` and/or `auth.json`;
+databases and workspace files are still preserved.
+
 ## Key Invariants
 
 - **`Tron.app` never builds the Rust agent.** The binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing → wizard surfaces `sourceBinaryMissing` with a "reinstall the DMG" message. Any agent-side RPC/TCC/install change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/tron-agent`.
@@ -248,7 +258,7 @@ inline so the user knows why the reset did not happen.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` does not render install detection state; the Install step owns that status.
 - **The inner server bundle must be signed before launchd starts it.** `BinaryInstaller.install` ad-hoc signs `~/.tron/system/Tron.app` after writing `Info.plist` and resources so `codesign -dv` reports `Identifier=com.tron.server`, a bound Info.plist, and sealed resources. Accessibility TCC can flip grants back off when the bundle is left with only the executable's linker-generated ad-hoc identity.
-- **Cleanup preserves user data.** The installer recovery action unloads the LaunchAgent, removes the installed app bundle + plist, and removes an empty `deployment/` directory if present. It never removes auth, settings, sessions, databases, workspace files, or non-empty dev/deploy/update artifacts.
+- **Cleanup preserves user data.** The installer recovery action unloads the LaunchAgent, removes the installed app bundle + plist, and removes an empty `deployment/` directory if present. It never removes auth, settings, sessions, databases, workspace files, or non-empty dev/deploy/update artifacts. Menu-bar uninstall may remove `settings.json` and/or `auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
 - **A loaded LaunchAgent label is not proof that the new binary is running.** After writing the plist, `.alreadyLoaded` is followed by `launchctl kickstart -k gui/<uid>/com.tron.server` so stale processes left from interrupted installs consume the just-copied bundle.
 - **App activation is a recheck by default.** The Permissions step records which permission Settings pane it opened and consumes that return once; repeated focus changes from System Settings only refresh the RPC snapshot. Immediate grant detection comes from the gear-button grant watcher, while the visible Re-check button is a fallback that labels the stronger kickstart+probe path as "Checking permissions...".
 - **All atomic writes use tempfile + `replaceItemAt` (matching the Rust agent's `tempfile::Builder → sync_all → rename`).** See `OnboardedSentinelWriter.touch` and `BinaryInstaller.install`.

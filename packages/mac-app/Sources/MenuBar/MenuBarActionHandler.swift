@@ -192,12 +192,65 @@ final class MenuBarActionHandler {
         Your workspace files in ~/.tron/workspace/ and your conversation history in ~/.tron/system/database/ are preserved.
         """
         alert.alertStyle = .warning
+        let resetOptionsStack = NSStackView()
+        resetOptionsStack.orientation = .vertical
+        resetOptionsStack.alignment = .leading
+        resetOptionsStack.spacing = 6
+
+        let resetSettingsCheckbox = NSButton(
+            checkboxWithTitle: "Reset settings",
+            target: nil,
+            action: nil
+        )
+        resetSettingsCheckbox.toolTip = "Also removes ~/.tron/system/settings.json. The database is never removed."
+        let resetCredentialsCheckbox = NSButton(
+            checkboxWithTitle: "Reset saved credentials",
+            target: nil,
+            action: nil
+        )
+        resetCredentialsCheckbox.toolTip = "Also removes ~/.tron/system/auth.json. The database is never removed."
+
+        resetSettingsCheckbox.sizeToFit()
+        resetCredentialsCheckbox.sizeToFit()
+        let checkboxWidth = max(
+            resetSettingsCheckbox.fittingSize.width,
+            resetCredentialsCheckbox.fittingSize.width
+        )
+        let accessoryWidth = max(checkboxWidth, 300)
+        let accessoryHeight = resetSettingsCheckbox.fittingSize.height
+            + resetCredentialsCheckbox.fittingSize.height
+            + resetOptionsStack.spacing
+            + 8
+        let resetOptionsAccessory = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: accessoryWidth,
+            height: accessoryHeight
+        ))
+        resetOptionsStack.translatesAutoresizingMaskIntoConstraints = false
+        resetOptionsStack.addArrangedSubview(resetSettingsCheckbox)
+        resetOptionsStack.addArrangedSubview(resetCredentialsCheckbox)
+        resetOptionsAccessory.addSubview(resetOptionsStack)
+        NSLayoutConstraint.activate([
+            resetOptionsStack.leadingAnchor.constraint(equalTo: resetOptionsAccessory.leadingAnchor),
+            resetOptionsStack.trailingAnchor.constraint(lessThanOrEqualTo: resetOptionsAccessory.trailingAnchor),
+            resetOptionsStack.topAnchor.constraint(equalTo: resetOptionsAccessory.topAnchor, constant: 4),
+            resetOptionsStack.bottomAnchor.constraint(equalTo: resetOptionsAccessory.bottomAnchor, constant: -4),
+        ])
+        alert.accessoryView = resetOptionsAccessory
         alert.addButton(withTitle: "Uninstall")
         alert.addButton(withTitle: "Cancel")
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }
 
-        let result = await runTronCommand(arguments: ["uninstall"])
+        var arguments = ["uninstall"]
+        if resetSettingsCheckbox.state == .on {
+            arguments.append("--reset-settings")
+        }
+        if resetCredentialsCheckbox.state == .on {
+            arguments.append("--reset-credentials")
+        }
+        let result = await runTronCommand(arguments: arguments)
         if result.exitCode == 0 {
             // Quit the wrapper after a successful uninstall — there's
             // nothing left to manage. The user reopens the DMG to reinstall.

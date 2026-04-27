@@ -35,6 +35,7 @@ PROD_PORT=9847
 # File paths
 DEPLOY_DIR="$TRON_HOME/system/deployment"
 DEPLOYED_COMMIT_FILE="$DEPLOY_DIR/deployed-commit"
+ONBOARDED_MARKER_PATH="$TRON_HOME/system/.onboarded"
 
 # Database
 DB_PATH="$TRON_HOME/system/database/log.db"
@@ -113,25 +114,9 @@ ensure_tron_home() {
 }
 
 ensure_default_configs() {
-    if [ ! -f "$TRON_HOME/system/settings.json" ]; then
-        cat > "$TRON_HOME/system/settings.json" << 'EOF'
-{
-  "server": {
-    "defaultModel": "claude-sonnet-4-20250514",
-    "defaultProvider": "anthropic",
-    "port": 9847
-  },
-  "logging": {
-    "dbLogLevel": "info"
-  },
-  "tools": {
-    "bash": { "defaultTimeoutMs": 120000 },
-    "read": { "defaultLimitLines": 2000 }
-  }
-}
-EOF
-        print_success "Created settings.json"
-    fi
+    # settings.json is intentionally not created here. The Rust settings
+    # loader supplies compiled defaults when the file is absent; the file is
+    # reserved for sparse user/app overrides written through settings.update.
 
     if [ ! -f "$TRON_HOME/system/auth.json" ]; then
         cat > "$TRON_HOME/system/auth.json" << 'EOF'
@@ -811,6 +796,72 @@ cmd_restart() {
     service_stop 2>/dev/null || true
     sleep 1
     service_start
+}
+
+cmd_uninstall() {
+    local reset_settings=false
+    local reset_credentials=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --reset-settings)
+                reset_settings=true
+                shift
+                ;;
+            --reset-credentials)
+                reset_credentials=true
+                shift
+                ;;
+            -h|--help)
+                echo "Usage: tron uninstall [--reset-settings] [--reset-credentials]"
+                echo ""
+                echo "Removes the LaunchAgent, CLI entrypoint, runtime bundles, and Mac onboarding marker."
+                echo "Preserves ~/.tron/system/database and ~/.tron/workspace. Optional flags remove"
+                echo "~/.tron/system/settings.json and/or ~/.tron/system/auth.json."
+                return 0
+                ;;
+            *)
+                print_error "Unknown uninstall option: $1"
+                echo "Usage: tron uninstall [--reset-settings] [--reset-credentials]"
+                return 2
+                ;;
+        esac
+    done
+
+    print_header "Uninstalling Tron"
+
+    if service_is_running; then
+        print_status "Stopping service..."
+        launchd_stop "$PLIST_NAME"
+        sleep 1
+    fi
+
+    print_status "Removing launchd service..."
+    rm -f "$PLIST_PATH"
+
+    print_status "Removing CLI entrypoint..."
+    rm -f "$BIN_DIR/tron"
+
+    print_status "Removing installed server bundles..."
+    rm -rf "$INSTALLED_BUNDLE" "$DEV_BUNDLE" "$DEPLOY_DIR/tron.bak"
+
+    print_status "Resetting Mac onboarding state..."
+    rm -f "$ONBOARDED_MARKER_PATH"
+
+    if [ "$reset_settings" = true ]; then
+        print_status "Removing settings..."
+        rm -f "$TRON_HOME/system/settings.json"
+    fi
+
+    if [ "$reset_credentials" = true ]; then
+        print_status "Removing saved credentials..."
+        rm -f "$AUTH_FILE"
+    fi
+
+    echo ""
+    print_success "Tron uninstalled"
+    print_warning "Database and workspace data preserved in: $TRON_HOME"
+    echo ""
 }
 
 cmd_errors() {

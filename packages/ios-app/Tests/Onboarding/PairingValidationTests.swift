@@ -132,6 +132,10 @@ struct PairingValidationTests {
 
         let incompatible = PairingStepValidator.Failure.incompatibleServer("0.5.0").userFacingMessage
         #expect(incompatible.contains("0.5.0"))
+
+        let settings = PairingStepValidator.Failure.settingsFailed("disk full").userFacingMessage
+        #expect(settings.lowercased().contains("server preset"))
+        #expect(settings.contains("disk full"))
     }
 
     // MARK: - keychainFailed regression coverage

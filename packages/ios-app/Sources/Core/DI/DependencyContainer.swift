@@ -411,14 +411,13 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     // MARK: - Settings Reload
 
     /// Fetches settings from the current server and updates @AppStorage values.
-    /// Called after server switch to ensure quickSessionWorkspace and defaultModel
-    /// reflect the new server's configuration.
+    /// Called after server switch to ensure server-backed app globals reflect
+    /// the active server's effective settings rather than carrying values from
+    /// the previously selected Mac.
     func reloadServerSettings() async {
         do {
             let settings = try await rpcClient.settings.get()
-            if let workspace = settings.defaultWorkspace {
-                quickSessionWorkspace = workspace
-            }
+            quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
             if !settings.defaultModel.isEmpty {
                 defaultModel = settings.defaultModel
             }

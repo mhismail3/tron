@@ -6,9 +6,9 @@ import AppKit
 /// fixed action bar, glass canvas, animated step transitions) is shared
 /// by `WizardShell`.
 ///
-/// Pass `initialStep` to override the persisted last-visited step. The
-/// menu-bar's "Show pairing info" path uses this to remount the wizard
-/// directly at `.pairingInfo` after the user has already onboarded.
+/// Pass `initialStep` to override the persisted last-visited step for
+/// wizard-owned recovery paths. The menu-bar pairing action uses its
+/// dedicated pairing-only window instead of remounting this wizard.
 struct WizardView: View {
     @Environment(\.environmentSetup) private var setup
     @State private var state: WizardState

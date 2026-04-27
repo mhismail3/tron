@@ -55,18 +55,6 @@ fn write_settings_json(path: &Path, value: &Value) -> Result<(), RpcError> {
     Ok(())
 }
 
-/// Test-time shim that delegates to the single shared settings lock.
-///
-/// M31 consolidated the global settings reads on `ArcSwapOption`, and at
-/// the same time unified the handful of test-only mutexes that existed
-/// around the process-global singleton. Leaving this shim in place keeps
-/// existing callers compiling; new tests should prefer
-/// [`crate::settings::test_settings_lock`] directly.
-#[cfg(test)]
-pub(crate) fn settings_reload_lock() -> &'static std::sync::Mutex<()> {
-    crate::settings::test_settings_lock()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,7 +73,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_settings_treats_invalid_existing_json_as_empty_object() {
-        let _guard = settings_reload_lock()
+        let _guard = crate::settings::test_settings_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir = tempfile::tempdir().unwrap();

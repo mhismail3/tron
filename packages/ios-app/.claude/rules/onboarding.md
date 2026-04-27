@@ -26,7 +26,13 @@ OnboardingFlowView
   ├─ Welcome page
   ├─ Tailscale iPhone page
   ├─ Mac installer page
-  └─ PairingStep
+  ├─ PairingStep
+  ├─ Default workspace page
+  ├─ Anthropic credentials page
+  ├─ OpenAI credentials page
+  ├─ Other providers page
+  ├─ Search services page
+  └─ Default model page
 
 OnboardingState.complete()
   └─ defaults.set(true, completionStorageKey)
@@ -52,11 +58,17 @@ mark an unpaired peer device as onboarded.
 
 ## Step Model
 
-`OnboardingState.Step` owns the four onboarding pages:
-`welcome -> installTailscale -> installMac -> connect`. The step exists
+`OnboardingState.Step` owns the onboarding pages:
+`welcome -> installTailscale -> installMac -> connect -> workspace ->
+anthropic -> openAI -> providers -> services -> model`. The step exists
 only to drive the sheet selection, toolbar title, floating progress
-dots, and QR deep-link jump target. Pairing side effects still live
-exclusively on the connect page.
+dots, and QR deep-link jump target. Pairing connection side effects still
+live exclusively on the connect page; workspace/auth/model setup happens
+on the pages after the Mac has been reached.
+
+`OnboardingState.hasPairedMac` gates swiping into setup pages. Do not let
+users reach workspace/auth/model setup before the pairing step has
+successfully connected and persisted the active server preset.
 
 iOS cannot reliably introspect whether a third-party Tailscale VPN is
 installed, signed in, and connected without brittle private assumptions.
@@ -84,8 +96,19 @@ The pairing step performs three duties separated into pure helpers:
    plan: active preset, token, host/port, and updated presets.
 
 The view applies the plan in this order: Keychain write → local preset
-cache → `dependencies.updateServerSettings(host:port:)` → best-effort
-`settings.update` → `state.complete()`.
+cache → `dependencies.updateServerSettings(host:port:)` → reconnect
+`RPCClient` → `settings.update(connectionPresets)` → advance to setup pages.
+The update writes only the explicit paired preset. Do not serialize compiled
+defaults into `settings.json`; server defaults stay implicit in Rust and
+`settings.get` returns the effective merged view. Completion is reserved for
+the final model setup page.
+
+After pairing, setup pages reuse existing settings surfaces instead of
+inventing parallel flows: `WorkspaceSelector`, `OAuthLoginSheet`,
+named-provider API-key auth updates, service API-key auth updates, and
+`ModelPickerSheet`. Model setup writes both `server.defaultModel` and
+`memory.retainModel`; provider/service secrets go through `auth.*` and
+therefore land in `auth.json`.
 
 Universal-paste detection lives in
 `Sources/Extensions/Binding+PasteAware.swift`. `PairingStep` and
@@ -130,10 +153,11 @@ switching away.
 | File | Purpose |
 |------|---------|
 | `App/TronMobileApp.swift` | Dashboard root + onboarding sheet presentation |
-| `Views/Onboarding/OnboardingFlowView.swift` | Four-step onboarding sheet root |
+| `Views/Onboarding/OnboardingFlowView.swift` | Onboarding sheet root |
 | `Views/Onboarding/OnboardingShell.swift` | Shared page/card/button chrome |
 | `Views/Onboarding/QRCodeScannerSheet.swift` | Camera QR scanner for Mac pairing URLs |
 | `Views/Onboarding/Steps/PairingStep.swift` | Pairing form + connect action |
+| `Views/Onboarding/Steps/SetupSteps.swift` | Workspace, auth, services, and model setup pages |
 | `ViewModels/State/OnboardingState.swift` | `@Observable` step/form state + completion key |
 | `Services/Onboarding/PairingStepValidator.swift` | Pure trim + classify |
 | `Services/Onboarding/PairingProbe.swift` | One-shot WS bearer probe + `system.ping` |
@@ -150,7 +174,7 @@ switching away.
 - Pre-pairing pages on iOS stay concise. The Mac app still owns Mac
   installation, Tailscale detection, and macOS permission setup.
 - Do not add a separate route stack. `OnboardingState.Step` is only the
-  four-step sheet selection.
+  sheet selection.
 - Pure helpers (`Validator`, `Persistor`, `URLParser`) take primitives
   only — no DI container, no SwiftUI.
 - Pairing storage keys live exactly once on `OnboardingState` /

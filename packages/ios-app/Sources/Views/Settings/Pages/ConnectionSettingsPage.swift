@@ -13,6 +13,8 @@ struct ConnectionSettingsPage: View {
     @FocusState private var focusedField: Field?
     @State private var sheetMode: AddOrEditServerSheet.Mode?
     @State private var presetPendingRemoval: ConnectionPreset?
+    @State private var removingPresetID: String?
+    @State private var removalError: String?
 
     private enum Field {
         case host, port
@@ -30,6 +32,16 @@ struct ConnectionSettingsPage: View {
                     }
 
                     addPresetRow
+
+                    if let removalError {
+                        Text(removalError)
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronError)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                            .padding(.top, 4)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
 
@@ -209,26 +221,32 @@ struct ConnectionSettingsPage: View {
 
             Spacer()
 
-            Menu {
-                Button {
-                    sheetMode = .edit(preset)
+            if removingPresetID == preset.id {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.tronEmerald)
+            } else {
+                Menu {
+                    Button {
+                        sheetMode = .edit(preset)
+                    } label: {
+                        Label("Re-pair", systemImage: "key.fill")
+                    }
+                    Button(role: .destructive) {
+                        presetPendingRemoval = preset
+                    } label: {
+                        Label("Forget this Mac", systemImage: "trash")
+                    }
                 } label: {
-                    Label("Re-pair", systemImage: "key.fill")
+                    Image(systemName: "ellipsis.circle")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronTextSecondary)
+                        .padding(8)
+                        .contentShape(Rectangle())
                 }
-                Button(role: .destructive) {
-                    presetPendingRemoval = preset
-                } label: {
-                    Label("Forget this Mac", systemImage: "trash")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronTextSecondary)
-                    .padding(8)
-                    .contentShape(Rectangle())
+                .accessibilityLabel("Manage \(preset.label)")
+                .accessibilityIdentifier("preset.\(preset.id).menu")
             }
-            .accessibilityLabel("Manage \(preset.label)")
-            .accessibilityIdentifier("preset.\(preset.id).menu")
         }
         .padding(10)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -318,25 +336,47 @@ struct ConnectionSettingsPage: View {
     }
 
     private func handleRemove(_ preset: ConnectionPreset) {
+        guard removingPresetID == nil else { return }
+
         let plan = ConnectionPresetRemoval.plan(
             removing: preset,
             from: settingsState.connectionPresets,
             activeHost: serverHost,
             activePort: serverPort
         )
-        settingsState.replaceConnectionPresets(plan.updatedPresets)
 
-        updateServerSetting {
-            var update = ServerSettingsUpdate()
-            update.server = ServerSettingsUpdate.ServerUpdate(connectionPresets: plan.updatedPresets)
-            return update
+        var update = ServerSettingsUpdate()
+        update.server = ServerSettingsUpdate.ServerUpdate(connectionPresets: plan.updatedPresets)
+
+        removingPresetID = preset.id
+        removalError = nil
+        let client = dependencies.rpcClient
+        Task {
+            do {
+                try await client.settings.update(update)
+                await MainActor.run {
+                    finishRemove(preset: preset, plan: plan)
+                }
+            } catch {
+                await MainActor.run {
+                    removingPresetID = nil
+                    presetPendingRemoval = nil
+                    removalError = "Could not forget \(preset.label): \(error.localizedDescription)"
+                }
+            }
         }
+    }
+
+    @MainActor
+    private func finishRemove(preset: ConnectionPreset, plan: ConnectionPresetRemoval.Plan) {
+        settingsState.replaceConnectionPresets(plan.updatedPresets)
 
         // Drop the bearer token from Keychain. Best-effort — failures here
         // would leave a dangling Keychain entry but don't affect correctness.
         try? dependencies.presetTokenStore.remove(presetId: preset.id)
         unregisterPushTokenFromCurrentServerIfNeeded(plan.removedWasActive)
 
+        removingPresetID = nil
         presetPendingRemoval = nil
 
         if let next = plan.nextActivePreset {

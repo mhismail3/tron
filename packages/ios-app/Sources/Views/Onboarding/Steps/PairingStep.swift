@@ -302,6 +302,11 @@ struct PairingStep: View {
     private func commit(payload: PairingURLParser.PairingPayload) async {
         let existing = readCachedPresets()
         let plan = PairingPersistor.plan(payload: payload, existing: existing)
+        let previousHost = UserDefaults.standard.string(forKey: "serverHost") ?? AppConstants.defaultHost
+        let previousPort = {
+            let stored = UserDefaults.standard.string(forKey: "serverPort") ?? ""
+            return stored.isEmpty ? AppConstants.prodPort : stored
+        }()
 
         do {
             try dependencies.presetTokenStore.setToken(plan.token, forPresetId: plan.activePreset.id)
@@ -313,11 +318,24 @@ struct PairingStep: View {
 
         cachePresets(plan.updatedPresets)
         dependencies.updateServerSettings(host: plan.activeHost, port: plan.activePort)
-        Task { try? await pushPresetList(plan.updatedPresets) }
+
+        do {
+            await dependencies.rpcClient.connect()
+            try await pushPresetList(plan.updatedPresets)
+        } catch {
+            rollbackPairingState(
+                to: existing,
+                newPresetId: plan.activePreset.id,
+                previousHost: previousHost,
+                previousPort: previousPort
+            )
+            state.pairingError = .settingsFailed(error.localizedDescription)
+            state.isConnecting = false
+            return
+        }
 
         state.isConnecting = false
         dependencies.telemetryClient.track(.pairingCompleted)
-        state.complete()
         onPaired()
     }
 
@@ -337,6 +355,19 @@ struct PairingStep: View {
         if let data = try? JSONEncoder().encode(presets) {
             UserDefaults.standard.set(data, forKey: SettingsState.cachedPresetsKey)
         }
+    }
+
+    private func rollbackPairingState(
+        to presets: [ConnectionPreset],
+        newPresetId: String,
+        previousHost: String,
+        previousPort: String
+    ) {
+        cachePresets(presets)
+        if !presets.contains(where: { $0.id == newPresetId }) {
+            try? dependencies.presetTokenStore.remove(presetId: newPresetId)
+        }
+        dependencies.updateServerSettings(host: previousHost, port: previousPort)
     }
 
     private func pushPresetList(_ presets: [ConnectionPreset]) async throws {

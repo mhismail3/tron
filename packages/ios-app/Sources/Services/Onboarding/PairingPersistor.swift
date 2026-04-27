@@ -9,9 +9,10 @@ import Foundation
 ///   1. Write `plan.token` to `PresetTokenStore` keyed on `plan.activePreset.id`.
 ///   2. Write `plan.activeHost` / `plan.activePort` to UserDefaults under
 ///      `serverHost` / `serverPort` (the keys `DependencyContainer` reads).
-///   3. Push `plan.updatedPresets` to the server via `settings.update` so the
-///      array is durable across reinstalls.
-///   4. Trigger a reconnect / RPCClient rebuild so the new bearer is picked up.
+///   3. Reconnect the RPC client so the new bearer is picked up.
+///   4. Push `plan.updatedPresets` to the server via `settings.update` so the
+///      array is durable across reinstalls. The update contains only the
+///      explicit preset list; built-in server defaults stay implicit.
 ///
 /// **Re-pair vs add**: if `existing` already contains a preset matching
 /// `(host, port)` the existing preset is preserved wholesale (id + label)

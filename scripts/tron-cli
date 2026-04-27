@@ -4,8 +4,8 @@
 # Installed to ~/.tron/system/deployment/tron-cli
 # Symlinked from ~/.local/bin/tron
 #
-# Handles runtime commands directly (status, start, stop, logs, etc.)
-# Delegates workspace commands (dev, deploy, ci, etc.) to the workspace script.
+# Handles runtime commands directly (status, start, stop, logs, uninstall, etc.)
+# Delegates workspace-only development commands to the workspace script.
 
 set -e
 
@@ -51,6 +51,7 @@ cmd_help() {
     echo "  start           Start launchd service"
     echo "  stop            Stop service"
     echo "  restart         Restart service"
+    echo "  uninstall       Remove service and reset Mac onboarding (add --reset-settings and/or --reset-credentials)"
     echo "  rollback        Restore previous binary (--yes to skip confirmation)"
     echo "  login           Authenticate with a provider (--provider, --label for options)"
     echo "  logs            Query database logs (use -h for options)"
@@ -64,11 +65,7 @@ cmd_help() {
         echo "  bench           Performance benchmarks (run, bless, compare)"
         echo "  setup           First-time project setup"
         echo "  install         Initial setup (launchd + CLI)"
-        echo "  uninstall       Remove service (preserves data)"
         echo "  auto-deploy     Remote auto-deploy watcher"
-        if [ "$(uname)" = "Darwin" ]; then
-            echo "  ios             Build/run TronMobile on iOS devices (use -h for options)"
-        fi
         echo ""
     else
         echo -e "${DIM}Dev commands available when workspace is installed.${NC}"
@@ -89,12 +86,13 @@ case "$1" in
     start)           cmd_start ;;
     stop)            cmd_stop ;;
     restart)         cmd_restart ;;
+    uninstall)       shift; cmd_uninstall "$@" ;;
     logs)            shift; query_logs "$@" ;;
     errors)          cmd_errors ;;
     rollback)        shift; cmd_rollback "$@" ;;
     login)           shift; cmd_login "$@" ;;
     # Dev (delegate to workspace)
-    dev|deploy|ci|bench|preflight|setup|install|uninstall|auto-deploy|ios)
+    dev|deploy|ci|bench|preflight|setup|install|auto-deploy)
         delegate_to_workspace "$@" ;;
     *)
         print_error "Unknown command: $1"

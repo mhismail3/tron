@@ -1,8 +1,9 @@
 import Foundation
 import Observation
 
-/// Observable model behind `OnboardingFlowView`. Owns the pairing form,
-/// completion flag, and inline error surface for the first-run sheet.
+/// Observable model behind `OnboardingFlowView`. Owns the step selection,
+/// pairing form, completion flag, and inline error surface for the
+/// first-run sheet.
 ///
 /// **Persistence**: explicitly uses an injected `UserDefaults` (defaulted
 /// to `.standard`). We deliberately do NOT route through
@@ -23,6 +24,12 @@ final class OnboardingState {
         case installTailscale
         case installMac
         case connect
+        case workspace
+        case anthropic
+        case openAI
+        case providers
+        case services
+        case model
 
         var toolbarTitle: String {
             switch self {
@@ -34,6 +41,18 @@ final class OnboardingState {
                 return "Install Tron Server"
             case .connect:
                 return "Connect your Mac"
+            case .workspace:
+                return "Default workspace"
+            case .anthropic:
+                return "Anthropic"
+            case .openAI:
+                return "OpenAI"
+            case .providers:
+                return "Other providers"
+            case .services:
+                return "Search services"
+            case .model:
+                return "Default model"
             }
         }
     }
@@ -48,6 +67,13 @@ final class OnboardingState {
     // MARK: - Pairing inputs
 
     var currentStep: Step = .welcome
+
+    /// Unlocks the setup pages that follow the Mac connection page.
+    ///
+    /// The sheet is swipeable, but setup pages depend on a live paired
+    /// server for settings/auth RPCs. Keep this transient: onboarding
+    /// completion is only persisted after the final setup page.
+    var hasPairedMac = false
 
     var pairingHost: String = ""
     var pairingPort: String = AppConstants.prodPort
@@ -97,6 +123,7 @@ final class OnboardingState {
     func reset() {
         defaults.set(false, forKey: Self.completionStorageKey)
         currentStep = .welcome
+        hasPairedMac = false
         pairingHost = ""
         pairingPort = AppConstants.prodPort
         pairingToken = ""

@@ -17,7 +17,7 @@
 #   deploy          Build, test, deploy (--force to skip confirmations)
 #   install         Initial setup (launchd + CLI)
 #   rollback        Restore previous binary (--yes to skip confirmation)
-#   uninstall       Remove service (preserves data)
+#   uninstall       Remove service and reset Mac onboarding (optionally reset settings/auth)
 #   auto-deploy     Contributor auto-deploy watcher (install|uninstall|status|pause|resume|logs)
 #   self-update     User GitHub Releases updater (check|status|pause|resume|logs|reset)
 #
@@ -54,13 +54,6 @@ fi
 #=============================================================================
 
 source "$SCRIPT_DIR/tron-lib.sh"
-
-# iOS development commands (workspace-only, macOS-only).
-# Loaded lazily: only sourced on macOS where xcodebuild is available.
-# Never loaded by tron-cli (production runtime path).
-if [[ "$(uname)" == "Darwin" ]] && [[ -f "$SCRIPT_DIR/tron-ios.sh" ]]; then
-    source "$SCRIPT_DIR/tron-ios.sh"
-fi
 
 #=============================================================================
 # WORKSPACE-ONLY CONFIGURATION
@@ -1028,30 +1021,6 @@ cmd_install() {
     fi
 }
 
-cmd_uninstall() {
-    print_header "Uninstalling Tron Service"
-
-    if service_is_running; then
-        print_status "Stopping service..."
-        launchd_stop "$PLIST_NAME"
-        sleep 1
-    fi
-
-    print_status "Removing launchd service..."
-    rm -f "$PLIST_PATH"
-
-    print_status "Removing CLI..."
-    rm -f "$BIN_DIR/tron"
-
-    print_status "Removing app bundle and binary..."
-    rm -rf "$INSTALLED_BUNDLE" "$DEV_BUNDLE" "$DEPLOY_DIR/tron.bak"
-
-    echo ""
-    print_success "Service uninstalled"
-    print_warning "Data preserved in: $TRON_HOME"
-    echo ""
-}
-
 cmd_setup() {
     echo ""
     echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
@@ -1665,15 +1634,12 @@ cmd_help() {
     echo "  ci              Run CI checks (fmt, check, clippy, test, bench, doc)"
     echo "  bench           Performance benchmarks (run, bless, compare)"
     echo "  setup           First-time project setup"
-    if [[ "$(uname)" == "Darwin" ]]; then
-        echo "  ios             Build/run TronMobile on iOS devices (use -h for options)"
-    fi
     echo ""
     echo -e "${BOLD}Deployment (workspace only):${NC}"
     echo "  preflight       Pre-deploy infrastructure check"
     echo "  deploy          Build, test, deploy (--force, --ci for non-interactive)"
     echo "  install         Initial setup (launchd + CLI)"
-    echo "  uninstall       Remove service (preserves data)"
+    echo "  uninstall       Remove service and reset Mac onboarding (add --reset-settings and/or --reset-credentials)"
     echo "  auto-deploy     Contributor auto-deploy watcher (install|uninstall|status|pause|resume|logs)"
     echo "  self-update     User GitHub Releases updater (check|status|pause|resume|logs|reset)"
     echo ""
@@ -1722,9 +1688,8 @@ case "$1" in
     errors)    cmd_errors ;;
     login)     shift; cmd_login "$@" ;;
     auth)      shift; cmd_auth "$@" ;;
-    uninstall) cmd_uninstall ;;
+    uninstall) shift; cmd_uninstall "$@" ;;
     auto-deploy) shift; cmd_auto_deploy "$@" ;;
     self-update) shift; cmd_self_update "$@" ;;
-    ios)       shift; cmd_ios "$@" ;;
     *) print_error "Unknown command: $1"; cmd_help; exit 1 ;;
 esac

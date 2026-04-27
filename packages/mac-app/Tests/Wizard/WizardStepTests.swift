@@ -113,6 +113,8 @@ struct InstallPipelineStageOrderingTests {
         #expect(source.contains("completedStageSpacing"))
         #expect(source.contains("if shouldUseDetectedInstallLayout"))
         #expect(source.contains("private var detectedInstallSummary"))
+        #expect(source.contains("Run `tron logs` to inspect recent server output."))
+        #expect(!source.contains("Check Console.app"))
     }
 
     @Test("completed install page shows a status banner")

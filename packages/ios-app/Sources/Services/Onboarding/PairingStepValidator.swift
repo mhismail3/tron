@@ -31,6 +31,9 @@ enum PairingStepValidator {
         /// failed. Distinct from `.unauthorized` so the user message
         /// blames device storage rather than the (correct) token.
         case keychainFailed(String)
+        /// The server accepted the pairing token, but onboarding could not
+        /// write the explicit connection settings back to the Mac.
+        case settingsFailed(String)
 
         var userFacingMessage: String {
             switch self {
@@ -46,6 +49,8 @@ enum PairingStepValidator {
                 return "Server version \(serverVersion) is older than this app supports. Update Tron on your Mac."
             case .keychainFailed(let detail):
                 return "Could not save the pairing token to Keychain: \(detail)"
+            case .settingsFailed(let detail):
+                return "Connected, but could not save the server preset on the Mac: \(detail)"
             }
         }
     }
@@ -101,6 +106,7 @@ enum PairingStepValidator {
         }
         return .unreachable(hostHint)
     }
+
 }
 
 /// Classified errors thrown by the pairing reachability probe. The View

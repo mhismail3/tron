@@ -7,11 +7,12 @@
 The iOS app always opens to the normal dashboard after initialization.
 Fresh installs present a medium-detent onboarding sheet above the
 dashboard when `@AppStorage("onboardingComplete")` is false. The sheet
-has four swipeable pages: welcome, install Tailscale on iPhone, install
-Tron Server on Mac, and connect. The sheet follows the app's standard
-Liquid Glass chrome: hidden drag handle, principal toolbar title, and a
-floating progress-dot indicator at the bottom. The connect page is the
-only page that persists anything.
+is swipeable: welcome, install Tailscale on iPhone, install Tron Server
+on Mac, connect, then a short settings setup flow for workspace,
+credentials, services, and default model. Setup pages are locked until
+the Mac connection succeeds. The sheet follows the app's
+standard Liquid Glass chrome: hidden drag handle, principal toolbar
+title, and a floating progress-dot indicator at the bottom.
 
 ---
 
@@ -37,8 +38,16 @@ readyContent()
                  ├─ validate host / port / token / server name
                  ├─ probe ws://host:port/ws with Authorization: Bearer token
                  ├─ send system.ping
-                 ├─ persist preset + Keychain bearer
+                 ├─ persist Keychain bearer + local preset cache
                  ├─ rebuild RPC client for the paired server
+                 ├─ settings.update(connectionPresets)
+                 └─ advance to setup pages
+            ├─ WorkspaceSetupOnboardingPage
+            ├─ ProviderSetupOnboardingPage(Anthropic)
+            ├─ ProviderSetupOnboardingPage(OpenAI)
+            ├─ RemainingProvidersOnboardingPage
+            ├─ ServicesSetupOnboardingPage
+            └─ ModelSetupOnboardingPage
                  └─ state.complete() → dismiss sheet
 ```
 
@@ -61,9 +70,9 @@ filled automatically when scanning a Mac pairing QR code.
 
 ## Pairing
 
-`PairingStep` is the only onboarding step that mutates persistent
-storage and can fail mid-flight. It is split into pure helpers so the
-branches are testable without SwiftUI or live networking:
+`PairingStep` is the first persistent onboarding step and the gate for
+all setup pages that need a live server. It is split into pure helpers
+so the branches are testable without SwiftUI or live networking:
 
 ```
 user taps Connect
@@ -84,9 +93,43 @@ side effects:
   1. presetTokenStore.setToken(...)
   2. cache updated connectionPresets in UserDefaults
   3. dependencies.updateServerSettings(host:port:)
-  4. best-effort settings.update RPC to persist presets on the server
-  5. state.complete()
+  4. reconnect RPC client to the paired server
+  5. settings.update RPC to persist the newly paired preset on the server
+  6. advance to the workspace/settings setup pages
 ```
+
+If step 5 fails, onboarding rolls back the local preset cache/Keychain token
+for that attempt and leaves the user on the pairing page. The RPC update is
+sparse: it writes only `server.connectionPresets`. Compiled server defaults
+stay in Rust and are visible through `settings.get`; they are not serialized
+into `settings.json`.
+
+## Settings Setup Pages
+
+After pairing succeeds, onboarding continues with optional setup pages:
+
+- **Default workspace** reuses `WorkspaceSelector` from the new-session
+  flow and writes `server.defaultWorkspace`. The selected path also
+  updates the local quick-chat workspace so long-press plus uses it
+  immediately.
+- **Anthropic** and **OpenAI** reuse `OAuthLoginSheet` for OAuth and
+  expose a named API-key field for users who prefer keys.
+- **Other providers** exposes compact API-key rows for Google, MiniMax,
+  and Kimi.
+- **Search services** exposes API-key rows for Brave Search and Exa.
+- **Default model** reuses `ModelPickerSheet`, then writes both
+  `server.defaultModel` and `memory.retainModel`.
+
+Provider credentials are written through `auth.*` RPCs, so secrets land
+in `auth.json`, not `settings.json`.
+
+Server settings and app settings are intentionally separate. Settings backed
+by `~/.tron/system/settings.json` live in server settings pages and are
+loaded from the active server via `settings.get`. Device-only preferences
+such as onboarding completion, appearance, dashboard presentation, and the
+cached active connection live in iOS `UserDefaults`/Keychain. When the user
+switches Macs, the app reloads server-backed controls from that Mac and keeps
+device-only preferences local.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system.ping`. The server emits a
@@ -138,6 +181,10 @@ forgotten Mac is the active server. If another preset remains, iOS switches
 to it. If no presets remain, the app resets `onboardingComplete` to `false`
 and shows the onboarding sheet again.
 
+The Mac settings update is awaited before local Keychain/cache cleanup or
+onboarding reset. If the server write fails, the preset stays visible and an
+inline error is shown so the iPhone and Mac do not diverge.
+
 ---
 
 ## Persistence Keys
@@ -183,6 +230,7 @@ Sources/Views/Onboarding/
   ├── OnboardingShell.swift
   ├── QRCodeScannerSheet.swift
   └── Steps/
+      ├── SetupSteps.swift
       └── PairingStep.swift
 
 Sources/Services/Onboarding/

@@ -2695,7 +2695,7 @@ async fn stale_git_push_excluded_after_boundary() {
 /// Shared reload lock used by every test that mutates the global settings
 /// singleton (see `server/rpc/handlers/settings.rs` for the other user).
 fn history_capture_lock() -> &'static std::sync::Mutex<()> {
-    crate::server::rpc::settings_service::settings_reload_lock()
+    crate::settings::test_settings_lock()
 }
 
 async fn wait_for_history_count(

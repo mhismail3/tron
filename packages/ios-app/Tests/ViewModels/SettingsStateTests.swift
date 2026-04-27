@@ -93,4 +93,16 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.updateAction, "notify")
         XCTAssertTrue(state.updateAllowDowngradeOnRollback)
     }
+
+    // MARK: - Server Switching
+
+    func testApplyServerSettingsClearsWorkspaceWhenActiveServerOmitsIt() throws {
+        let state = SettingsState()
+        state.quickSessionWorkspace = "/from/previous/server"
+
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{}"#.utf8))
+        state.applyServerSettings(settings)
+
+        XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
+    }
 }

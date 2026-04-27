@@ -375,7 +375,7 @@ struct InstallStep: View {
         case .copyFailed(let message): return "Could not copy the server binary: \(message)"
         case .plistWriteFailed(let message): return "Could not write the LaunchAgent plist: \(message)"
         case .launchctlFailed(let message): return "launchctl rejected the agent: \(message)"
-        case .awaitPingTimedOut: return "The server did not respond in time. Check Console.app or run `tron logs`."
+        case .awaitPingTimedOut: return "The server did not respond in time. Run `tron logs` to inspect recent server output."
         }
     }
 

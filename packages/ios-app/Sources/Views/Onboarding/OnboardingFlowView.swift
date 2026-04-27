@@ -4,8 +4,8 @@ import UIKit
 /// Root of the iOS onboarding sheet.
 ///
 /// The app opens to the normal dashboard first, then presents this compact
-/// sheet while `onboardingComplete == false`. The first three steps orient
-/// the user; the connect step is the only one that persists anything.
+/// sheet while `onboardingComplete == false`. The first pages orient and
+/// connect the user; the setup pages stay locked until pairing succeeds.
 @available(iOS 26.0, *)
 struct OnboardingFlowView: View {
     @State var state: OnboardingState
@@ -38,9 +38,46 @@ struct OnboardingFlowView: View {
                     PairingStep(
                         state: state,
                         dependencies: dependencies,
-                        onPaired: onComplete
+                        onPaired: {
+                            withAnimation(.snappy(duration: 0.28)) {
+                                state.hasPairedMac = true
+                                state.currentStep = .workspace
+                            }
+                        }
                     )
                     .tag(OnboardingState.Step.connect)
+
+                    WorkspaceSetupOnboardingPage(dependencies: dependencies)
+                        .tag(OnboardingState.Step.workspace)
+
+                    ProviderSetupOnboardingPage(
+                        provider: Self.anthropicProvider,
+                        dependencies: dependencies,
+                        allowsOAuth: true
+                    )
+                    .tag(OnboardingState.Step.anthropic)
+
+                    ProviderSetupOnboardingPage(
+                        provider: Self.openAIProvider,
+                        dependencies: dependencies,
+                        allowsOAuth: true
+                    )
+                    .tag(OnboardingState.Step.openAI)
+
+                    RemainingProvidersOnboardingPage(dependencies: dependencies)
+                        .tag(OnboardingState.Step.providers)
+
+                    ServicesSetupOnboardingPage(dependencies: dependencies)
+                        .tag(OnboardingState.Step.services)
+
+                    ModelSetupOnboardingPage(
+                        dependencies: dependencies,
+                        onComplete: {
+                            state.complete()
+                            onComplete()
+                        }
+                    )
+                    .tag(OnboardingState.Step.model)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
 
@@ -59,10 +96,32 @@ struct OnboardingFlowView: View {
         .tint(.tronEmerald)
     }
 
+    private static let anthropicProvider = ProviderInfo(
+        id: "anthropic",
+        displayName: "Anthropic",
+        assetIcon: "IconAnthropic",
+        color: .tronCoral,
+        supportsOAuth: true
+    )
+
+    private static let openAIProvider = ProviderInfo(
+        id: "openai-codex",
+        displayName: "OpenAI",
+        assetIcon: "IconOpenAI",
+        color: .tronSlate,
+        supportsOAuth: true
+    )
+
     private var stepSelection: Binding<OnboardingState.Step> {
         Binding(
             get: { state.currentStep },
-            set: { state.currentStep = $0 }
+            set: { nextStep in
+                guard nextStep.rawValue <= OnboardingState.Step.connect.rawValue || state.hasPairedMac else {
+                    state.currentStep = .connect
+                    return
+                }
+                state.currentStep = nextStep
+            }
         )
     }
 }

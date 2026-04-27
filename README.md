@@ -232,7 +232,6 @@ The `scripts/tron` CLI manages the full development and deployment lifecycle. Th
 | `tron ci` | CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc` |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron setup` | First-time project setup |
-| `tron ios` | Build/run TronMobile on iOS devices or simulators (`-b` beta, `-d <alias>` device, `-s` simulator, `-g` generic, `-v` verbose). Subcommands: `build`, `run` (default), `stop`, `clean`, `test`, `logs`, `gen`, `devices`. Device UDIDs live under the `ios` key in `~/.tron/system/settings.json`; register them with `tron ios devices add`. macOS-only; loaded from `scripts/tron-ios.sh`. |
 
 ### Deployment (workspace only)
 
@@ -241,7 +240,7 @@ The `scripts/tron` CLI manages the full development and deployment lifecycle. Th
 | `tron preflight` | Pre-deploy infrastructure check |
 | `tron deploy` | Build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive) |
 | `tron install` | Initial install (launchd plist + CLI symlink). Supports `--gui-helper` for machine-readable output when invoked from the Mac wizard; `--skip-service-start` suppresses the `launchctl bootstrap` step. |
-| `tron uninstall` | Remove launchd service (preserves `~/.tron/` data) |
+| `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `settings.json` and/or `auth.json`. |
 | `tron auto-deploy` | Contributor-only auto-deploy watcher (`install`, `uninstall`, `status`, `pause`, `resume`, `logs`). Refuses to run outside a git repo — for DMG users, see `tron self-update` instead. |
 | `tron self-update` | User-mode GitHub Releases updater (`check`, `status`, `pause`, `resume`, `logs`, `reset`). Opt-in via `server.update.enabled`; gated by `~/.tron/auto-update.pause` sentinel. |
 
@@ -458,7 +457,9 @@ Settings are loaded from three layers (highest priority last):
 2. **User file** (`~/.tron/system/settings.json`, deep-merged over defaults)
 3. **Environment variables** (`TRON_*` overrides)
 
-Settings are server-authoritative. The iOS app reads/writes via `settings.get` / `settings.update` / `settings.resetToDefaults` RPC methods. When settings are updated, the server atomically swaps its cached `Arc<TronSettings>`.
+Settings are server-authoritative. The iOS app reads the effective merged values via `settings.get` and writes sparse user overrides via `settings.update` / `settings.resetToDefaults`. When settings are updated, the server atomically swaps its cached `Arc<TronSettings>`.
+
+`settings.json` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed. Built-in defaults stay in `TronSettings::default()` and appear in `settings.get` after the user file is deep-merged over them. iOS device-only preferences live in iOS storage/Keychain, not in the server settings file.
 
 The schema is defined in `packages/agent/src/settings/types/`. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
 
@@ -473,6 +474,7 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
     "heartbeatIntervalMs": 30000,
     "defaultProvider": "anthropic",
     "defaultModel": "claude-sonnet-4-6",
+    "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
     "transcription": { "enabled": true },
     "connectionPresets": [],        // iOS quick-connect host/port presets
     "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
@@ -790,13 +792,13 @@ packages/mac-app/Sources/
 
 | Item | Action |
 |------|--------|
-| Custom status header | Shows `Tron` + current server state on the left, the Tailscale endpoint on the right (click to copy), and a compact `Show pairing info` button |
+| Custom status header | Shows `Tron`, the Tailscale endpoint, color-coded state, PID, and live uptime in a compact left-aligned header |
 | Show pairing info | Opens a pairing-only window with QR + manual copy buttons for host, port, token, and server name; copy actions quickly show a checkmark for two seconds on success |
 | Restart / Pause / Resume server | `launchctl kickstart` / `bootout` / `bootstrap`, shows busy state and posts success/failure notifications |
 | Show logs | Opens the native logs window backed by the bundled runtime CLI contract: `tron logs -n 200 -o <tempfile>` |
 | Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
 | Check for updates | Opens the latest GitHub Release and best-effort triggers `tron self-update check` |
-| Uninstall Tron | Confirm dialog + `tron uninstall` |
+| Uninstall Tron | Confirm dialog + `tron uninstall`; optional checkboxes pass `--reset-settings` and/or `--reset-credentials` to remove `settings.json` and/or `auth.json`. The database and workspace are always preserved. |
 | Quit Tron | Quits wrapper; server keeps running via LaunchAgent |
 
 ### Variants & Workflows
@@ -871,13 +873,12 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 +-- skills/                       Global skills (SKILL.md files); managed entries have a .managed sentinel
 +-- system/
 |   +-- Tron.app/                 macOS app bundle (Contents/MacOS/tron is the server binary)
-|   +-- settings.json             User settings (deep-merged over defaults); may be created by Mac pairing to cache server.tailscaleIp
+|   +-- settings.json             Sparse user settings overrides (optional; deep-merged over compiled defaults)
 |   +-- auth.json                 LLM provider OAuth tokens + API keys (mode 600)
 |   +-- auth-token.json           WebSocket bearer token (mode 600, atomic writes; rotated by `tron auth rotate`)
 |   +-- .onboarded                First-run sentinel; presence drives `system.getInfo.paired` (Phase 2)
 |   +-- updater-state.json        Auto-update scheduler state (lastCheckAt, lastInstalledVersion, consecutiveFailures)
 |   +-- updates/                  Staged DMG downloads for `action: "download"` (Phase 5.5)
-|   +-- defaults/                 Seed copies of settings.json and auth.json (used on first install)
 |   +-- database/                 SQLite event store
 |   |   +-- log.db                Events, sessions, tasks, journals, cron state
 |   |   +-- log.db.lock           OS-level flock sidecar; one Tron process owns it while running

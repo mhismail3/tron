@@ -1092,7 +1092,7 @@ mod skills_cleared_emission_tests {
     //! [`prepare_skill_context_from_session`]. See M6 in the audit plan.
     //!
     //! These tests mutate the global settings singleton and MUST hold the
-    //! shared `settings_reload_lock()` to serialize with other settings-
+    //! shared settings test lock to serialize with other settings-
     //! mutating tests.
 
     use super::*;
@@ -1101,7 +1101,7 @@ mod skills_cleared_emission_tests {
     use crate::settings::types::CompactionPolicy;
 
     fn settings_lock() -> &'static std::sync::Mutex<()> {
-        crate::server::rpc::settings_service::settings_reload_lock()
+        crate::settings::test_settings_lock()
     }
 
     fn settings_with_policy(policy: CompactionPolicy) -> crate::settings::TronSettings {

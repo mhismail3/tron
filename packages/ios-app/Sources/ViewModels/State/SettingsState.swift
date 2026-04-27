@@ -201,7 +201,12 @@ final class SettingsState {
     }
 
     /// Apply a ServerSettings response to local state (shared by load and reset).
-    private func applyServerSettings(_ settings: ServerSettings) {
+    ///
+    /// Every field is overwritten from the active server's effective settings.
+    /// That keeps the iOS UI honest when switching between Macs: a value that
+    /// was present on server A cannot linger after server B reports its own
+    /// default or a missing optional field.
+    func applyServerSettings(_ settings: ServerSettings) {
         preserveRecentCount = settings.compaction.preserveRecentCount
         triggerTokenThreshold = settings.compaction.triggerTokenThreshold
         rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
@@ -212,9 +217,7 @@ final class SettingsState {
         builtinHooks = settings.builtinHooks
         hooksErrorPolicy = settings.hooksErrorPolicy
         hooksMaxAddedContextChars = settings.hooksMaxAddedContextChars
-        if let workspace = settings.defaultWorkspace {
-            quickSessionWorkspace = workspace
-        }
+        quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
         skillsCompactionPolicy = settings.skillsCompactionPolicy
         skillsShowIndex = settings.skillsShowIndex
         autoRetainInterval = settings.autoRetainInterval

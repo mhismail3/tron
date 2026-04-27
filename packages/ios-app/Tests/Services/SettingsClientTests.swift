@@ -29,4 +29,5 @@ struct SettingsClientTests {
             try await client.update(update)
         }
     }
+
 }
