@@ -60,7 +60,7 @@ enum MenuBarItemBuilder {
 
         let controlsEnabled = !snapshot.state.isBusy
 
-        items.append(.action(title: "Show pairing info…", isEnabled: true, handler: { @MainActor in
+        items.append(.action(title: "Show pairing info", isEnabled: true, handler: { @MainActor in
             NotificationCenter.default.post(name: .tronMenuBarShowPairingInfo, object: nil)
         }))
 
@@ -90,13 +90,13 @@ enum MenuBarItemBuilder {
             NotificationCenter.default.post(name: .tronMenuBarSendFeedback, object: nil)
         }))
 
-        items.append(.action(title: "Check for updates…", isEnabled: true, handler: { @MainActor in
+        items.append(.action(title: "Check for updates", isEnabled: true, handler: { @MainActor in
             NotificationCenter.default.post(name: .tronMenuBarCheckForUpdates, object: nil)
         }))
 
         items.append(.separator)
 
-        items.append(.action(title: "Uninstall Tron…", isEnabled: true, handler: { @MainActor in
+        items.append(.action(title: "Uninstall Tron", isEnabled: true, handler: { @MainActor in
             NotificationCenter.default.post(name: .tronMenuBarUninstall, object: nil)
         }))
         items.append(.quit(title: "Quit Tron"))

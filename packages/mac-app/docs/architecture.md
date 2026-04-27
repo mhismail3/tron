@@ -184,7 +184,7 @@ maps to failed.
 
 ### Menu-bar auxiliary windows
 
-Post-onboarding surfaces stay in menu-bar mode. "Show pairing info…" opens a
+Post-onboarding surfaces stay in menu-bar mode. "Show pairing info" opens a
 pairing-only window that reuses the pairing resolver/QR/copy controls without
 wizard navigation or a progress pill. The shared pairing surface resolves live
 when it opens, and copy actions quickly swap to a checkmark for two seconds so the user gets

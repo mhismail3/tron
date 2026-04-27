@@ -7,7 +7,7 @@ import AppKit
 /// by `WizardShell`.
 ///
 /// Pass `initialStep` to override the persisted last-visited step. The
-/// menu-bar's "Show pairing info…" path uses this to remount the wizard
+/// menu-bar's "Show pairing info" path uses this to remount the wizard
 /// directly at `.pairingInfo` after the user has already onboarded.
 struct WizardView: View {
     @Environment(\.environmentSetup) private var setup

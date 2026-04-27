@@ -89,7 +89,7 @@ final class WizardState {
         self.defaults = defaults
         if let initialStep {
             // Caller (e.g. RootView re-mounting WizardView in response
-            // to "Show pairing info…" from the menu bar) wins over the
+            // to "Show pairing info" from the menu bar) wins over the
             // persisted last-visited step. We still WRITE the override
             // back to defaults so kill+relaunch lands the user where
             // they were when the override was applied.

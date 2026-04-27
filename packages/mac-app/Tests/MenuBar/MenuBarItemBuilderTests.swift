@@ -133,13 +133,13 @@ struct MenuBarItemBuilderTests {
 
         let titles = Set(items.map(\.title))
         for required in [
-            "Show pairing info…",
+            "Show pairing info",
             "Restart server",
             "View logs",
             "Open Tron folder",
             "Send feedback",
-            "Check for updates…",
-            "Uninstall Tron…",
+            "Check for updates",
+            "Uninstall Tron",
             "Quit Tron",
         ] {
             #expect(titles.contains(required), "missing \(required) in menu")
