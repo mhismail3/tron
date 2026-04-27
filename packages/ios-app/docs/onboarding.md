@@ -34,7 +34,7 @@ readyContent()
             ├─ InstallMacOnboardingPage
             └─ PairingStep
                  ├─ scan QR / paste URL / enter fields
-                 ├─ validate host / port / token / label
+                 ├─ validate host / port / token / server name
                  ├─ probe ws://host:port/ws with Authorization: Bearer token
                  ├─ send system.ping
                  ├─ persist preset + Keychain bearer
@@ -52,6 +52,9 @@ handled in three places:
   and fills the connect page.
 - `Binding<String>.pasteAware` lets the user paste the full pairing URL
   into any pairing field and auto-distributes the values.
+
+The optional `label` query item is the user-facing "Server Name" and is
+filled automatically when scanning a Mac pairing QR code.
 
 ---
 

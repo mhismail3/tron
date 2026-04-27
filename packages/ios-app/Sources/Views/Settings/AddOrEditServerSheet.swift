@@ -4,7 +4,7 @@ import SwiftUI
 /// an existing one (refreshing its bearer token).
 ///
 /// **Design choice — single sheet, two modes.** Add and re-pair share
-/// 90% of their UI (label + host + port + token + "Connect" button).
+/// 90% of their UI (server name + host + port + token + "Connect" button).
 /// The mode parameter discriminates the small differences:
 /// - **add** — generates a fresh preset id; appends to `connectionPresets`.
 /// - **edit(preset)** — locks the host/port/label fields (preset identity is

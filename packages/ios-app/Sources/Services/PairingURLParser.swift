@@ -13,8 +13,7 @@ import Foundation
 ///
 /// The parser is intentionally strict — every field is required, the
 /// scheme must be `tron`, and `port` must be a positive 16-bit integer.
-/// Extra query parameters are tolerated (forward-compat for future
-/// fields like `label`) but unrecognized ones are dropped.
+/// Extra query parameters are tolerated, but unrecognized ones are dropped.
 ///
 /// **Why not Codable?** URL query strings aren't JSON; we'd reach for
 /// Codable only after building a synthetic dict. The hand-rolled parse
@@ -26,8 +25,9 @@ enum PairingURLParser {
         let host: String
         let port: Int
         let token: String
-        /// Optional human label (e.g. `"My Mac"`); the Mac wizard may
-        /// embed this in the QR for a friendlier preset name.
+        /// Optional server name. It travels as `label` in the URL so
+        /// existing Mac QR codes and settings-preset terminology stay
+        /// compatible while the UI can call it "Server Name."
         let label: String?
     }
 
@@ -100,10 +100,10 @@ enum PairingURLParser {
 
 extension PairingURLParser.PairingPayload {
     /// Apply this payload to a 4-field pairing form, preserving the user's
-    /// label if they've already customized it.
+    /// server name if they've already customized it.
     ///
-    /// The default label (`"My Mac"`) is treated as the placeholder, not a
-    /// user-typed value — so a payload's label can override it. Anything
+    /// The default server name (`"My Mac"`) is treated as the placeholder,
+    /// not a user-typed value — so a payload's label can override it. Anything
     /// else the user typed wins over the URL's label.
     ///
     /// Returns the (host, port, token, label) tuple to commit. Used by both
@@ -131,4 +131,3 @@ extension PairingURLParser.PairingPayload {
         )
     }
 }
-

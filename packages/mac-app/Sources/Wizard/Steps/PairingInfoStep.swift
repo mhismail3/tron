@@ -94,6 +94,7 @@ struct PairingInfoStep: View {
                     pairingRow(field: .tailscaleIP, label: "Tailscale IP", value: payload.host)
                     pairingRow(field: .port, label: "Port", value: String(payload.port))
                     pairingRow(field: .pairingToken, label: "Pairing token", value: payload.token, masked: true)
+                    pairingRow(field: .serverName, label: "Server name", value: payload.label ?? LocalComputerName.fallback)
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.98)))
             } else {
@@ -243,7 +244,7 @@ struct PairingInfoStep: View {
 
         setup.cacheTailscaleIP(host)
 
-        let payload = PairingPayload(host: host, port: info.port, token: token, label: "My Mac")
+        let payload = PairingPayload(host: host, port: info.port, token: token, label: LocalComputerName.current())
         guard let url = PairingURLBuilder.makeURL(payload),
               QRCodeGenerator.makeImage(payload: url.absoluteString, size: PairingInfoStepLayout.qrSize) != nil else {
             fail(.qrGenerationFailed)
@@ -294,6 +295,7 @@ private enum PairingCopyField: Hashable {
     case tailscaleIP
     case port
     case pairingToken
+    case serverName
 }
 
 enum PairingInfoStepLayout {
@@ -302,7 +304,7 @@ enum PairingInfoStepLayout {
     static let qrSize: CGFloat = 170
     static let columnSpacing: CGFloat = 20
     static let valueColumnWidth: CGFloat = 218
-    static let valueCardVerticalPadding: CGFloat = 8
+    static let valueCardVerticalPadding: CGFloat = 6
     static let valueCardHorizontalPadding: CGFloat = 12
     /// Avoids the first fast refresh racing the shell's page-slide
     /// transition, which made the QR appear at its final coordinate

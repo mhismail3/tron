@@ -190,8 +190,8 @@ endpoint, a color-coded status line with PID when launchd reports one, and
 uptime when `ps` can resolve the pid's elapsed time. The endpoint remains
 clickable-to-copy. "Show pairing info" is a normal menu action below the header
 separator. The menu does not repeat the pairing token because the pairing-only
-window owns QR/token/manual copy details. That window reuses the
-pairing resolver/QR/copy controls without wizard navigation or a progress pill.
+window owns QR/manual copy details for host, port, token, and server name.
+That window reuses the pairing resolver/QR/copy controls without wizard navigation or a progress pill.
 The shared pairing surface resolves live when it opens, and copy actions quickly
 swap to a checkmark for two seconds so the user gets deterministic visual
 feedback. "Show logs" opens a native logs window fed by the bundled runtime CLI

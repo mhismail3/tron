@@ -30,11 +30,11 @@ struct PairingURLParserTests {
         }
     }
 
-    @Test("Optional label is round-tripped")
+    @Test("Optional server name label is round-tripped")
     func roundTripsLabel() {
-        let url = PairingURLParser.makeURL(host: "1.2.3.4", port: 9847, token: "tok", label: "My Mac")!
+        let url = PairingURLParser.makeURL(host: "1.2.3.4", port: 9847, token: "tok", label: "Studio Mac")!
         if case .success(let payload) = PairingURLParser.parse(url.absoluteString) {
-            #expect(payload.label == "My Mac")
+            #expect(payload.label == "Studio Mac")
         } else {
             Issue.record("expected success with label")
         }

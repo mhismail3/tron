@@ -163,7 +163,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 
 1. Install [Tailscale](https://tailscale.com) and sign in on the Mac that will host the agent.
 2. Download the latest `Tron-mac-v*.dmg` from [GitHub Releases](https://github.com/mhismail3/tron/releases) and drag `Tron.app` into `/Applications`.
-3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, and displays pairing info (Tailscale IP + port + bearer token + QR code).
+3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, and displays pairing info (Tailscale IP + port + bearer token + server name + QR code).
 4. On iPhone, install the Tron TestFlight build. The app opens to the dashboard and presents a compact onboarding sheet; install/sign in to Tailscale on the phone, then scan the Mac pairing QR or enter the pairing fields manually.
 
 The wizard and menu bar surface everything else (`Check for updates`, `Send feedback`, `Restart server`, etc.) — you never need the CLI unless you want to.
@@ -783,7 +783,7 @@ packages/mac-app/Sources/
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
 3. **Install** — detects whether the server is already installed, waits for the explicit Install CTA when work is needed, then prepares and ad-hoc signs the inner `~/.tron/system/Tron.app` server bundle, writes the LaunchAgent plist, keeps the bundled runtime CLI available to diagnostics, bootstraps or kickstarts `com.tron.server`, and polls `system.ping` while ignoring initial `connection.established` frames.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, polls the agent, starts a short-lived grant watcher after wizard-opened Settings panes, and keeps Re-check as a kickstart+probe fallback.
-5. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), and displays host + port + token with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>`.
+5. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
 6. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
 
 ### Menu-bar Actions
@@ -791,7 +791,7 @@ packages/mac-app/Sources/
 | Item | Action |
 |------|--------|
 | Custom status header | Shows `Tron` + current server state on the left, the Tailscale endpoint on the right (click to copy), and a compact `Show pairing info` button |
-| Show pairing info | Opens a pairing-only window with QR + token/manual copy buttons; copy actions quickly show a checkmark for two seconds on success |
+| Show pairing info | Opens a pairing-only window with QR + manual copy buttons for host, port, token, and server name; copy actions quickly show a checkmark for two seconds on success |
 | Restart / Pause / Resume server | `launchctl kickstart` / `bootout` / `bootstrap`, shows busy state and posts success/failure notifications |
 | Show logs | Opens the native logs window backed by the bundled runtime CLI contract: `tron logs -n 200 -o <tempfile>` |
 | Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |

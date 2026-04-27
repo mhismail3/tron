@@ -9,6 +9,7 @@ enum PairingURLBuilder {
     static let host = "pair"
 
     /// Builds a `tron://pair?host=…&port=…&token=…[&label=…]` URL.
+    /// The optional `label` value is the iOS server name.
     /// Returns nil if any required field is empty after trimming.
     static func makeURL(_ payload: PairingPayload) -> URL? {
         let trimmedHost = payload.host.trimmingCharacters(in: .whitespacesAndNewlines)

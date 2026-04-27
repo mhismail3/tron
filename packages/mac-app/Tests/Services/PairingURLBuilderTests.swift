@@ -19,9 +19,9 @@ struct PairingURLBuilderTests {
         #expect(parsed == payload)
     }
 
-    @Test("label is preserved in round-trip")
+    @Test("server name label is preserved in round-trip")
     func labelRoundTrip() throws {
-        let payload = PairingPayload(host: "100.64.0.1", port: 9847, token: "tok", label: "My Mac")
+        let payload = PairingPayload(host: "100.64.0.1", port: 9847, token: "tok", label: "Studio Mac")
         let url = try #require(PairingURLBuilder.makeURL(payload))
         let parsed = try #require(PairingURLBuilder.parse(url))
         #expect(parsed == payload)

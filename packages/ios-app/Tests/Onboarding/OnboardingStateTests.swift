@@ -65,7 +65,7 @@ struct OnboardingStateTests {
         #expect(state.pairingHost == "100.64.0.7")
         #expect(state.pairingPort == "9847")
         #expect(state.pairingToken == "deadbeef")
-        // Optional label only overrides if user hasn't typed something.
+        // Optional server name only overrides if user hasn't typed something.
         #expect(state.pairingLabel == "Friend's Mac")
     }
 

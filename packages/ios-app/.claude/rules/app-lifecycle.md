@@ -76,7 +76,7 @@ URL scheme: `tron://`
 | Voice Notes | `tron://voice-notes` |
 | Notification inbox | `tron://notifications/{toolCallId}` |
 | Share extension | `tron://share` |
-| Pairing (Mac QR) | `tron://pair?host=…&port=…&token=…[&label=…]` — handled by `TronMobileApp` before `DeepLinkRouter` |
+| Pairing (Mac QR) | `tron://pair?host=…&port=…&token=…[&label=…]` — handled by `TronMobileApp` before `DeepLinkRouter`; `label` is the server name |
 
 Flow:
 1. `onOpenURL` in `TronMobileApp` OR APNs payload via

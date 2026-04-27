@@ -77,7 +77,7 @@ final class OnboardingState {
     }
 
     /// Apply a parsed pairing payload to the form. Preserves the user's
-    /// label if they've typed something other than the default.
+    /// server name if they've typed something other than the default.
     ///
     /// Delegates the field-distribution rule (including the "treat 'My Mac'
     /// as placeholder" semantics) to `PairingPayload.distributing(...)` so

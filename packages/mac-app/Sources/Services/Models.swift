@@ -165,6 +165,7 @@ struct ServerInfo: Equatable, Sendable {
 
 /// Pairing payload shared with the iOS app via the
 /// `tron://pair?host=...&port=...&token=...&label=...` URL.
+/// The `label` query item is the user-facing server name on iOS.
 struct PairingPayload: Equatable, Sendable, Hashable {
     var host: String
     var port: Int

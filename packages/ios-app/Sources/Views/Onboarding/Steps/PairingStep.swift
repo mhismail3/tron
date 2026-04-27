@@ -26,20 +26,28 @@ struct PairingStep: View {
                 if let error = state.pairingError {
                     errorCard(error.userFacingMessage)
                 }
-
-                OnboardingPrimaryButton(
-                    title: state.isConnecting ? "Connecting..." : "Connect",
-                    systemImage: state.isConnecting ? nil : "link",
-                    isLoading: state.isConnecting,
-                    isEnabled: !state.isConnecting,
-                    action: connect
-                )
-                .padding(.top, TronSpacing.sm)
             }
         }
         .sheet(isPresented: $showQRScanner) {
             QRCodeScannerSheet { code in
                 applyScannedCode(code)
+            }
+        }
+        .toolbar {
+            if state.currentStep == .connect {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: connect) {
+                        if state.isConnecting {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text("Connect")
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        }
+                    }
+                    .disabled(state.isConnecting)
+                    .accessibilityLabel(state.isConnecting ? "Connecting" : "Connect to Mac")
+                }
             }
         }
     }
@@ -59,7 +67,7 @@ struct PairingStep: View {
                         Text("Scan the Mac QR code")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                             .foregroundStyle(Color.tronTextPrimary)
-                        Text("This fills in the host, port, and pairing token automatically.")
+                        Text("This fills in the host, port, token, and server name automatically.")
                             .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                             .foregroundStyle(Color.tronTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -129,7 +137,7 @@ struct PairingStep: View {
                 isSecure: true
             )
             field(
-                label: "Label this server",
+                label: "Server Name",
                 placeholder: "My Mac",
                 text: $state.pairingLabel,
                 keyboard: .default,

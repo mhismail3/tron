@@ -92,6 +92,7 @@ Universal-paste detection lives in
 `AddOrEditServerSheet` share the helper, so a full
 `tron://pair?host=…&port=…&token=…[&label=…]` link can be pasted into
 any field.
+The optional `label` query item is the user-facing "Server Name."
 
 Deep-link pairing URLs are intercepted by `TronMobileApp.onOpenURL`
 before `DeepLinkRouter`; the app fills the pairing form and presents the
