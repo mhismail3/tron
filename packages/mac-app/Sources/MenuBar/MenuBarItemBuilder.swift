@@ -117,7 +117,7 @@ enum MenuBarItemBuilder {
         }
         return MenuHeaderContent(
             endpoint: address,
-            endpointCopyValue: snapshot.tailscaleIP.map { "\($0):\(paths.serverPort)" },
+            hasEndpoint: snapshot.tailscaleIP != nil,
             status: statusLabel(snapshot: snapshot),
             health: health,
             pid: snapshot.processID,
@@ -135,7 +135,7 @@ struct MenuHeaderContent: Equatable, Sendable {
     }
 
     var endpoint: String
-    var endpointCopyValue: String?
+    var hasEndpoint: Bool
     var status: String
     var health: Health
     var pid: Int?

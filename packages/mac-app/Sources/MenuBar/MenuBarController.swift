@@ -193,13 +193,11 @@ private final class ActionWrapper: NSObject {
 
 @MainActor
 private final class MenuBarHeaderView: NSView {
-    private let endpointCopyValue: String?
     private var uptimeField: NSTextField?
     private var uptimeSeconds: Int?
     private var uptimeTask: Task<Void, Never>?
 
     init(content: MenuHeaderContent) {
-        self.endpointCopyValue = content.endpointCopyValue
         let diagnosticRows = 2 + (content.pid == nil ? 0 : 1) + (content.uptime == nil ? 0 : 1)
         let height = CGFloat(26 + diagnosticRows * 17)
         super.init(frame: NSRect(x: 0, y: 0, width: 202, height: height))
@@ -223,22 +221,16 @@ private final class MenuBarHeaderView: NSView {
         title.textColor = .labelColor
         title.lineBreakMode = .byTruncatingTail
 
-        let addressButton = NSButton(title: content.endpoint, target: self, action: #selector(copyTailscaleAddress))
-        addressButton.isEnabled = content.endpointCopyValue != nil
-        addressButton.isBordered = false
-        addressButton.bezelStyle = .inline
-        addressButton.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
-        addressButton.contentTintColor = content.endpointCopyValue == nil ? .tertiaryLabelColor : .secondaryLabelColor
-        addressButton.alignment = .left
-        addressButton.lineBreakMode = .byTruncatingMiddle
-        addressButton.setButtonType(.momentaryChange)
-        addressButton.imagePosition = .noImage
-        addressButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let addressField = NSTextField(labelWithString: content.endpoint)
+        addressField.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        addressField.textColor = content.hasEndpoint ? .secondaryLabelColor : .tertiaryLabelColor
+        addressField.lineBreakMode = .byTruncatingMiddle
+        addressField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let status = diagnosticField(prefix: "Status: ", value: content.status, valueColor: color(for: content.health))
         status.lineBreakMode = .byTruncatingTail
 
-        var rows: [NSView] = [title, addressButton, status]
+        var rows: [NSView] = [title, addressField, status]
         if let pid = content.pid {
             let pidField = diagnosticField(prefix: "PID: ", value: "\(pid)", valueColor: .secondaryLabelColor)
             rows.append(pidField)
@@ -315,12 +307,6 @@ private final class MenuBarHeaderView: NSView {
         uptimeField?.stringValue = "Uptime: \(MenuBarUptimeFormatter.format(next))"
     }
 
-    @objc private func copyTailscaleAddress() {
-        guard let endpointCopyValue else { return }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(endpointCopyValue, forType: .string)
-    }
 }
 
 enum MenuBarUptimeFormatter {

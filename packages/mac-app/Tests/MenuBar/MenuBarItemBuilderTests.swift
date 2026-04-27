@@ -45,7 +45,7 @@ struct MenuBarItemBuilderTests {
         if case .header(let content) = items[0] {
             #expect(content.status == "Paused")
             #expect(content.endpoint == "Tailscale unavailable")
-            #expect(content.endpointCopyValue == nil)
+            #expect(content.hasEndpoint == false)
             #expect(content.health == .paused)
         } else {
             Issue.record("first item should be header")
@@ -70,7 +70,7 @@ struct MenuBarItemBuilderTests {
         if case .header(let content) = items[0] {
             #expect(content.status == "Running")
             #expect(content.endpoint == "100.64.0.1:9847")
-            #expect(content.endpointCopyValue == "100.64.0.1:9847")
+            #expect(content.hasEndpoint == true)
             #expect(content.health == .healthy)
             #expect(content.pid == 16027)
             #expect(content.uptime == "01:07:42")
