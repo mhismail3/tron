@@ -12,16 +12,21 @@
 ## Commands
 
 ```bash
-# REQUIRED before completing any task
-cd packages/agent && cargo fmt --all -- --check && cargo check && cargo test -- --quiet
+# Default: run the smallest high-signal verification for the files you touched.
+# Examples:
+# - Rust implementation: cargo fmt --all -- --check && cargo check, plus targeted cargo test filters
+# - iOS implementation: xcodegen generate, plus targeted xcodebuild tests for touched modules
+# - Docs/rules-only edits: no build required; use git diff --check when useful
 
-# Full Rust CI before broad/server-side commits
+# Full Rust CI only for broad Rust/server changes, CI policy changes, or pre-commit checkpoints
 scripts/tron ci fmt check clippy test
 
 # iOS
 cd packages/ios-app && xcodegen generate
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:<targeted-test>
 ```
+
+Prefer fast, focused checks while iterating. Escalate to full suites when the change crosses module boundaries, alters shared contracts, touches release/build/test policy, or when a focused failure suggests wider risk.
 
 ## Settings Parity
 

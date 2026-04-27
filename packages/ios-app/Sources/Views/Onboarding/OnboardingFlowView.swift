@@ -4,8 +4,8 @@ import UIKit
 /// Root of the iOS onboarding sheet.
 ///
 /// The app opens to the normal dashboard first, then presents this compact
-/// paged sheet while `onboardingComplete == false`. Pages one and two orient
-/// the user; page three is the only step that persists anything.
+/// sheet while `onboardingComplete == false`. The first three steps orient
+/// the user; the connect step is the only one that persists anything.
 @available(iOS 26.0, *)
 struct OnboardingFlowView: View {
     @State var state: OnboardingState
@@ -24,12 +24,13 @@ struct OnboardingFlowView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                OnboardingTopBar(step: state.currentStep)
-
+            ZStack(alignment: .bottom) {
                 TabView(selection: stepSelection) {
                     WelcomeOnboardingPage()
                         .tag(OnboardingState.Step.welcome)
+
+                    InstallTailscaleOnboardingPage()
+                        .tag(OnboardingState.Step.installTailscale)
 
                     InstallMacOnboardingPage()
                         .tag(OnboardingState.Step.installMac)
@@ -42,11 +43,20 @@ struct OnboardingFlowView: View {
                     .tag(OnboardingState.Step.connect)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.snappy(duration: 0.28), value: state.currentStep)
+
+                OnboardingPageDots(currentStep: state.currentStep)
+                    .padding(.bottom, TronSpacing.large)
             }
-            .tronScreenBackground()
-            .navigationBarHidden(true)
+            .animation(.snappy(duration: 0.28), value: state.currentStep)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: state.currentStep.toolbarTitle, color: .tronEmerald)
+                }
+            }
         }
+        .tint(.tronEmerald)
     }
 
     private var stepSelection: Binding<OnboardingState.Step> {
@@ -58,26 +68,53 @@ struct OnboardingFlowView: View {
 }
 
 @available(iOS 26.0, *)
+private struct OnboardingPageDots: View {
+    let currentStep: OnboardingState.Step
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ForEach(OnboardingState.Step.allCases, id: \.self) { step in
+                Capsule()
+                    .fill(dotFill(for: step))
+                    .frame(
+                        width: step == currentStep ? 18 : 7,
+                        height: 7
+                    )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.14)), in: Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Onboarding step \(currentStep.rawValue + 1) of \(OnboardingState.Step.allCases.count)")
+    }
+
+    private func dotFill(for step: OnboardingState.Step) -> Color {
+        step.rawValue <= currentStep.rawValue
+            ? Color.tronEmerald
+            : Color.tronTextMuted.opacity(0.45)
+    }
+}
+
+@available(iOS 26.0, *)
 private struct WelcomeOnboardingPage: View {
     var body: some View {
         OnboardingPage(
-            systemImage: "sparkles",
-            title: "Welcome to Tron",
-            subtitle: "Tron lets this iPhone talk to the server running on your Mac."
+            subtitle: "Set up the pieces once, then use this iPhone as the remote for your Mac."
         ) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
                 OnboardingGlassCard {
                     VStack(alignment: .leading, spacing: TronSpacing.md) {
                         OnboardingInfoRow(
-                            systemImage: "desktopcomputer",
-                            title: "Your Mac does the work",
-                            subtitle: "Install Tron Server once, then keep using this app as the remote."
+                            systemImage: "network",
+                            title: "Connect privately",
+                            subtitle: "Tailscale links this iPhone to your Mac over your tailnet."
                         )
                         Divider().overlay(Color.tronBorder.opacity(0.4))
                         OnboardingInfoRow(
-                            systemImage: "network",
-                            title: "Tailscale keeps it private",
-                            subtitle: "Both devices need to be signed into the same tailnet."
+                            systemImage: "desktopcomputer",
+                            title: "Install the Mac server",
+                            subtitle: "Tron Server runs quietly in the background on your Mac."
                         )
                         Divider().overlay(Color.tronBorder.opacity(0.4))
                         OnboardingInfoRow(
@@ -87,9 +124,42 @@ private struct WelcomeOnboardingPage: View {
                         )
                     }
                 }
+            }
+        }
+    }
+}
 
-                OnboardingSwipeHint(title: "Swipe left to install the Mac server")
-                    .padding(.top, TronSpacing.sm)
+@available(iOS 26.0, *)
+private struct InstallTailscaleOnboardingPage: View {
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        OnboardingPage(
+            subtitle: "Install Tailscale on this iPhone, sign in, and come back when it says Connected."
+        ) {
+            VStack(alignment: .leading, spacing: TronSpacing.section) {
+                OnboardingGlassCard {
+                    VStack(alignment: .leading, spacing: TronSpacing.md) {
+                        OnboardingInfoRow(
+                            systemImage: "network",
+                            title: "Tailscale for iPhone",
+                            subtitle: "Use the same Tailscale account you use on the Mac."
+                        )
+                        Divider().overlay(Color.tronBorder.opacity(0.4))
+                        OnboardingInfoRow(
+                            systemImage: "checkmark.shield",
+                            title: "Come back when connected",
+                            subtitle: "Tron verifies reachability when you connect to the Mac server."
+                        )
+                    }
+                }
+
+                OnboardingLinkButton(
+                    title: "Open Tailscale in the App Store",
+                    systemImage: "app.badge"
+                ) {
+                    openURL(AppConstants.tailscaleAppStorePage)
+                }
             }
         }
     }
@@ -102,82 +172,46 @@ private struct InstallMacOnboardingPage: View {
 
     var body: some View {
         OnboardingPage(
-            systemImage: "arrow.down.app",
-            title: "Install the Tron server on your Mac",
-            subtitle: "Download the Mac app, run the installer, then continue here when it shows the pairing screen."
+            subtitle: "Install Tron Server on your Mac, then come back here when the Mac installer shows the pairing screen."
         ) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
                 OnboardingGlassCard {
-                    VStack(alignment: .leading, spacing: TronSpacing.md) {
-                        HStack(alignment: .top, spacing: TronSpacing.md) {
-                            Image(systemName: "macbook.and.iphone")
-                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                                .foregroundStyle(Color.tronEmerald)
-                                .frame(width: 34, height: 34)
+                    HStack(alignment: .top, spacing: TronSpacing.md) {
+                        Image(systemName: "macbook.and.iphone")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                            .foregroundStyle(Color.tronEmerald)
+                            .frame(width: 34, height: 34)
 
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Mac installer")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                                    .foregroundStyle(Color.tronTextPrimary)
-                                Text("Open the releases page on your Mac and download the latest DMG.")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                                    .foregroundStyle(Color.tronTextSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-
-                            Spacer(minLength: 0)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Mac installer")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                                .foregroundStyle(Color.tronTextPrimary)
+                            Text("Open the releases page on your Mac and download the latest DMG.")
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
 
-                        HStack(spacing: TronSpacing.sm) {
-                            Button {
-                                openURL(AppConstants.dmgDownloadPage)
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "safari")
-                                    Text("Open releases")
-                                }
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                .foregroundStyle(Color.tronEmerald)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                            .glassEffect(
-                                .regular.tint(Color.tronEmerald.opacity(0.16)).interactive(),
-                                in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
-                            )
-
-                            Button {
-                                copyDownloadURL()
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                                    Text(didCopy ? "Copied" : "Copy")
-                                }
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                .foregroundStyle(Color.tronEmerald)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 12)
-                                .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                            .glassEffect(
-                                .regular.tint(Color.tronEmerald.opacity(didCopy ? 0.28 : 0.16)).interactive(),
-                                in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
-                            )
-                        }
+                        Spacer(minLength: 0)
                     }
                 }
 
-                Text(AppConstants.dmgDownloadPage.absoluteString)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(Color.tronTextMuted)
-                    .lineLimit(2)
-                    .textSelection(.enabled)
+                HStack(spacing: TronSpacing.sm) {
+                    OnboardingLinkButton(
+                        title: "Open releases",
+                        systemImage: "safari"
+                    ) {
+                        openURL(AppConstants.dmgDownloadPage)
+                    }
 
-                OnboardingSwipeHint(title: "Swipe left after the Mac app is ready")
-                    .padding(.top, TronSpacing.sm)
+                    OnboardingLinkButton(
+                        title: didCopy ? "Copied" : "Copy",
+                        systemImage: didCopy ? "checkmark" : "doc.on.doc",
+                        width: 128,
+                        tintOpacity: didCopy ? 0.28 : 0.16,
+                        action: copyDownloadURL
+                    )
+                }
             }
         }
     }
@@ -195,5 +229,34 @@ private struct InstallMacOnboardingPage: View {
                 }
             }
         }
+    }
+}
+
+@available(iOS 26.0, *)
+private struct OnboardingLinkButton: View {
+    let title: String
+    let systemImage: String
+    var width: CGFloat? = nil
+    var tintOpacity: Double = 0.16
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                Text(title)
+            }
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+            .foregroundStyle(Color.tronEmerald)
+            .frame(maxWidth: width == nil ? .infinity : nil)
+            .frame(width: width)
+            .padding(.vertical, 12)
+            .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .glassEffect(
+            .regular.tint(Color.tronEmerald.opacity(tintOpacity)).interactive(),
+            in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
+        )
     }
 }

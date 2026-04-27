@@ -211,7 +211,9 @@ struct TronMobileApp: App {
                 .environment(\.dependencies, container)
                 .environment(\.interactionPolicy, container.interactionPolicy)
                 .presentationDetents([.medium, .large], selection: $onboardingDetent)
-                .presentationDragIndicator(.visible)
+                .presentationSizing(.largeForm)
+                .presentationBackground(.clear)
+                .presentationDragIndicator(.hidden)
                 .interactiveDismissDisabled(!onboardingComplete)
             }
             .onAppear(perform: syncOnboardingSheetPresentation)

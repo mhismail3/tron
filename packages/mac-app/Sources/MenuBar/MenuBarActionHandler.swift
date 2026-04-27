@@ -10,9 +10,9 @@ import UserNotifications
 /// process control. This handler installs one observer per notification
 /// in `AppDelegate` and disposes them on terminate.
 ///
-/// Each action is fire-and-forget: a Task hops to a background queue
-/// for the subprocess work, then any UI surfacing (dialog, Console.app
-/// open) is hopped back to MainActor.
+/// Each action is fire-and-forget: a Task performs subprocess work,
+/// then any UI surfacing (dialogs, windows, notifications, GitHub
+/// issue links) happens back on MainActor.
 @MainActor
 final class MenuBarActionHandler {
     private let setup: EnvironmentSetup
@@ -167,7 +167,7 @@ final class MenuBarActionHandler {
         // `server.update_*` events that surface in iOS / future Mac
         // banners. There's no in-app banner surface in the Mac wrapper
         // yet, so the canonical user-facing action for "Check for
-        // updates…" is opening the GitHub Releases page — that's what
+        // updates" is opening the GitHub Releases page — that's what
         // they actually want to look at.
         //
         // We ALSO fire-and-forget the CLI's `self-update check` so the

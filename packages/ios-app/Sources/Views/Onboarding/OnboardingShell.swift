@@ -4,49 +4,18 @@ import UIKit
 /// Shared building blocks for the first-run onboarding sheet.
 ///
 /// The dashboard always remains mounted underneath this sheet. Onboarding is
-/// a short paged overlay: two lightweight orientation pages, then the pairing
-/// form that performs the actual connection.
-@available(iOS 26.0, *)
-struct OnboardingTopBar: View {
-    let step: OnboardingState.Step
-
-    var body: some View {
-        HStack {
-            Text(step.counterText)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(Color.tronEmerald)
-                .monospacedDigit()
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .glassEffect(
-                    .regular.tint(Color.tronEmerald.opacity(0.18)),
-                    in: Capsule()
-                )
-                .accessibilityLabel("Step \(step.number) of \(OnboardingState.Step.totalCount)")
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, TronSpacing.xl)
-        .padding(.top, TronSpacing.lg)
-        .padding(.bottom, TronSpacing.sm)
-    }
-}
+/// a short swipeable overlay: three lightweight preparation pages, then
+/// the pairing form that performs the actual connection.
 
 @available(iOS 26.0, *)
 struct OnboardingPage<Content: View>: View {
-    let systemImage: String
-    let title: String
     let subtitle: String
     let content: Content
 
     init(
-        systemImage: String,
-        title: String,
         subtitle: String,
         @ViewBuilder content: () -> Content
     ) {
-        self.systemImage = systemImage
-        self.title = title
         self.subtitle = subtitle
         self.content = content()
     }
@@ -54,38 +23,20 @@ struct OnboardingPage<Content: View>: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
-                header
+                Text(subtitle)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 content
             }
-            .padding(.horizontal, TronSpacing.xl)
-            .padding(.bottom, TronSpacing.xl)
+            .padding(.horizontal, TronSpacing.xlarge)
+            .padding(.top, TronSpacing.lg)
+            .padding(.bottom, 76)
             .frame(maxWidth: 620, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollDismissesKeyboard(.interactively)
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.sm) {
-            HStack(alignment: .center, spacing: TronSpacing.md) {
-                Image(systemName: systemImage)
-                    .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
-                    .foregroundStyle(Color.tronEmerald)
-                    .frame(width: 32, height: 32)
-
-                Text(title)
-                    .font(TronTypography.largeTitle)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-            }
-
-            Text(subtitle)
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(Color.tronTextSecondary)
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-        }
     }
 }
 
@@ -140,28 +91,6 @@ struct OnboardingInfoRow: View {
 }
 
 @available(iOS 26.0, *)
-struct OnboardingSwipeHint: View {
-    let title: String
-
-    var body: some View {
-        HStack(spacing: TronSpacing.sm) {
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-            Image(systemName: "arrow.left")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-        }
-        .foregroundStyle(Color.tronEmerald)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .glassEffect(
-            .regular.tint(Color.tronEmerald.opacity(0.14)),
-            in: Capsule()
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
-}
-
-@available(iOS 26.0, *)
 struct OnboardingPrimaryButton: View {
     let title: String
     var systemImage: String? = nil
@@ -196,25 +125,5 @@ struct OnboardingPrimaryButton: View {
             in: RoundedRectangle(cornerRadius: TronSpacing.cornerLG, style: .continuous)
         )
         .disabled(!isEnabled || isLoading)
-    }
-}
-
-@available(iOS 26.0, *)
-struct OnboardingIconButton: View {
-    let systemImage: String
-    let accessibilityLabel: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(Color.tronEmerald)
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.18)).interactive(), in: Circle())
-        .accessibilityLabel(accessibilityLabel)
     }
 }

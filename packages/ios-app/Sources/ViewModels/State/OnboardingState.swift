@@ -20,12 +20,22 @@ final class OnboardingState {
 
     enum Step: Int, CaseIterable, Hashable {
         case welcome
+        case installTailscale
         case installMac
         case connect
 
-        var number: Int { rawValue + 1 }
-        static var totalCount: Int { allCases.count }
-        var counterText: String { "\(number) / \(Self.totalCount)" }
+        var toolbarTitle: String {
+            switch self {
+            case .welcome:
+                return "Welcome to Tron"
+            case .installTailscale:
+                return "Install Tailscale"
+            case .installMac:
+                return "Install Tron Server"
+            case .connect:
+                return "Connect your Mac"
+            }
+        }
     }
 
     // MARK: - Storage keys
@@ -80,16 +90,6 @@ final class OnboardingState {
         pairingToken = distributed.token
         pairingLabel = distributed.label
         pairingError = nil
-    }
-
-    func goToNextStep() {
-        guard let next = Step(rawValue: currentStep.rawValue + 1) else { return }
-        currentStep = next
-    }
-
-    func goToPreviousStep() {
-        guard let previous = Step(rawValue: currentStep.rawValue - 1) else { return }
-        currentStep = previous
     }
 
     /// Reset the sheet to its initial state. Used by tests and any

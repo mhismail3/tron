@@ -6,8 +6,6 @@ import Foundation
 /// without needing AppKit.
 enum MenuItemDescriptor: Equatable {
     case header(MenuHeaderContent)
-    case text(title: String)
-    case copy(title: String, value: String)
     case action(title: String, isEnabled: Bool, handler: @MainActor () -> Void)
     case openLink(title: String, url: URL)
     case separator
@@ -16,8 +14,6 @@ enum MenuItemDescriptor: Equatable {
     static func == (lhs: MenuItemDescriptor, rhs: MenuItemDescriptor) -> Bool {
         switch (lhs, rhs) {
         case (.header(let l), .header(let r)): return l == r
-        case (.text(let l), .text(let r)): return l == r
-        case (.copy(let l1, let l2), .copy(let r1, let r2)): return l1 == r1 && l2 == r2
         case (.action(let l1, let l2, _), .action(let r1, let r2, _)): return l1 == r1 && l2 == r2
         case (.openLink(let l1, let l2), .openLink(let r1, let r2)): return l1 == r1 && l2 == r2
         case (.separator, .separator): return true
@@ -30,7 +26,7 @@ enum MenuItemDescriptor: Equatable {
         switch self {
         case .header:
             return "Tron"
-        case .text(let title), .copy(let title, _), .action(let title, _, _), .openLink(let title, _), .quit(let title):
+        case .action(let title, _, _), .openLink(let title, _), .quit(let title):
             return title
         case .separator:
             return "—"
@@ -87,23 +83,6 @@ enum MenuBarItemBuilder {
         items.append(.quit(title: "Quit Tron"))
 
         return items
-    }
-
-    static func statusTitle(snapshot: ServerStatusSnapshot) -> String {
-        switch snapshot.state {
-        case .running(let version, let port):
-            return "Tron — running on port \(port) (v\(version ?? "?"))"
-        case .busy(let action):
-            return "Tron — \(action.rawValue.lowercased())…"
-        case .paused:
-            return "Tron — paused"
-        case .failed(let reason):
-            return "Tron — server not responding (\(reason))"
-        case .unauthorized:
-            return "Tron — token missing or rejected"
-        case .checking:
-            return "Tron — checking…"
-        }
     }
 
     static func statusLabel(snapshot: ServerStatusSnapshot) -> String {

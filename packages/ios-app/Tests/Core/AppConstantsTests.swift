@@ -34,4 +34,11 @@ final class AppConstantsTests: XCTestCase {
         XCTAssertEqual(url.host, "github.com")
         XCTAssertTrue(url.path.hasSuffix("/tron/releases"))
     }
+
+    func testTailscaleAppStorePage_isAppleAppStoreURL() {
+        let url = AppConstants.tailscaleAppStorePage
+        XCTAssertEqual(url.scheme, "https")
+        XCTAssertEqual(url.host, "apps.apple.com")
+        XCTAssertTrue(url.path.contains("/app/tailscale/"))
+    }
 }

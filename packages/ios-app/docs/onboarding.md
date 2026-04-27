@@ -7,9 +7,11 @@
 The iOS app always opens to the normal dashboard after initialization.
 Fresh installs present a medium-detent onboarding sheet above the
 dashboard when `@AppStorage("onboardingComplete")` is false. The sheet
-has three swipeable pages: a welcome page, a Mac install link page, and
-the connect page. The connect page is the only page that persists
-anything.
+has four swipeable pages: welcome, install Tailscale on iPhone, install
+Tron Server on Mac, and connect. The sheet follows the app's standard
+Liquid Glass chrome: hidden drag handle, principal toolbar title, and a
+floating progress-dot indicator at the bottom. The connect page is the
+only page that persists anything.
 
 ---
 
@@ -28,6 +30,7 @@ readyContent()
   └─ sheet(isPresented: !onboardingComplete)
        └─ OnboardingFlowView
             ├─ WelcomeOnboardingPage
+            ├─ InstallTailscaleOnboardingPage
             ├─ InstallMacOnboardingPage
             └─ PairingStep
                  ├─ scan QR / paste URL / enter fields
@@ -98,6 +101,12 @@ If the Mac looks healthy but the iPhone reports unreachable, check that
 Tailscale is connected on the iPhone and signed into the same tailnet.
 The Mac server logs should show an inbound WebSocket connection when the
 phone reaches it.
+
+iOS does not expose a reliable public API for this app to inspect the
+state of a third-party Tailscale VPN profile. The onboarding Tailscale
+page therefore links to the App Store and asks the user to return once
+Tailscale says Connected; the real validation happens during the
+pairing probe.
 
 ## QR Scanning
 

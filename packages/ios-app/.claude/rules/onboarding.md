@@ -9,8 +9,10 @@ paths:
 
 # Onboarding
 
-First-run iOS onboarding is a concise swipeable sheet presented above
-the normal dashboard. It is not a full-screen wizard.
+First-run iOS onboarding is a concise Liquid Glass sheet presented above
+the normal dashboard. It is not a full-screen wizard. It uses standard
+sheet chrome: hidden drag handle, principal toolbar title, horizontal
+swipe navigation, and a floating progress-dot indicator at the bottom.
 
 ## High-Level Flow
 
@@ -22,7 +24,8 @@ readyContent()
 
 OnboardingFlowView
   ├─ Welcome page
-  ├─ Mac install link page
+  ├─ Tailscale iPhone page
+  ├─ Mac installer page
   └─ PairingStep
 
 OnboardingState.complete()
@@ -49,10 +52,17 @@ mark an unpaired peer device as onboarded.
 
 ## Step Model
 
-`OnboardingState.Step` owns the three onboarding pages:
-`welcome -> installMac -> connect`. The step exists only to drive the
-sheet's `TabView` selection and the `X / Y` counter. Pairing side effects
-still live exclusively on the connect page.
+`OnboardingState.Step` owns the four onboarding pages:
+`welcome -> installTailscale -> installMac -> connect`. The step exists
+only to drive the sheet selection, toolbar title, floating progress
+dots, and QR deep-link jump target. Pairing side effects still live
+exclusively on the connect page.
+
+iOS cannot reliably introspect whether a third-party Tailscale VPN is
+installed, signed in, and connected without brittle private assumptions.
+The Tailscale page links to the App Store and asks the user to come back
+after Tailscale says Connected; the pairing probe performs the real
+reachability check.
 
 `acceptPairingPayload(_:)` must jump to `.connect` because deep links,
 QR scans, and pasted pairing URLs should all reveal the populated
@@ -116,7 +126,7 @@ switching away.
 | File | Purpose |
 |------|---------|
 | `App/TronMobileApp.swift` | Dashboard root + onboarding sheet presentation |
-| `Views/Onboarding/OnboardingFlowView.swift` | Three-page onboarding sheet root |
+| `Views/Onboarding/OnboardingFlowView.swift` | Four-step onboarding sheet root |
 | `Views/Onboarding/OnboardingShell.swift` | Shared page/card/button chrome |
 | `Views/Onboarding/QRCodeScannerSheet.swift` | Camera QR scanner for Mac pairing URLs |
 | `Views/Onboarding/Steps/PairingStep.swift` | Pairing form + connect action |
@@ -136,7 +146,7 @@ switching away.
 - Pre-pairing pages on iOS stay concise. The Mac app still owns Mac
   installation, Tailscale detection, and macOS permission setup.
 - Do not add a separate route stack. `OnboardingState.Step` is only the
-  three-page sheet selection.
+  four-step sheet selection.
 - Pure helpers (`Validator`, `Persistor`, `URLParser`) take primitives
   only — no DI container, no SwiftUI.
 - Pairing storage keys live exactly once on `OnboardingState` /

@@ -27,8 +27,10 @@ initialization, and the first-run pairing-sheet flag.
    - `.ready` → `readyContent()`
 3. `readyContent()` always mounts `ContentView`; when
    `@AppStorage("onboardingComplete")` is false it presents
-   `OnboardingFlowView` as a medium-detent sheet. Successful pairing
-   calls `state.complete()` to flip the flag and dismiss the sheet.
+   `OnboardingFlowView` as a medium-detent Liquid Glass sheet with a
+   hidden drag handle, swipe navigation, and floating progress dots.
+   Successful pairing calls `state.complete()` to flip the flag and
+   dismiss the sheet.
 
 `AppInitializer.initialize { try await container.initialize() }` runs
 on `WindowGroup.task`. The DI container build (DB, services) is the only
@@ -50,7 +52,7 @@ already-authorized token; they never prompt.
 | `Services/Container/DependencyContainer.swift` | Service initialization |
 | `Services/DeepLinking/DeepLinkRouter.swift` | URL/notification routing |
 | `ViewModels/State/OnboardingState.swift` | `@Observable` onboarding-sheet state, AppStorage keys |
-| `Views/Onboarding/OnboardingFlowView.swift` | Three-page onboarding sheet coordinator |
+| `Views/Onboarding/OnboardingFlowView.swift` | Four-step onboarding sheet coordinator |
 
 ## First-run Gate
 

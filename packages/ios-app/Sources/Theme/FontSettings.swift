@@ -6,7 +6,7 @@ import SwiftUI
 final class FontSettings {
     static let shared = FontSettings()
 
-    /// Selected font family for proportional/sans UI text
+    /// Selected font family for proportional UI text
     var selectedFamily: FontFamily {
         didSet {
             UserDefaults.standard.set(selectedFamily.rawValue, forKey: "fontFamily")
@@ -55,7 +55,7 @@ final class FontSettings {
            let family = FontFamily(rawValue: raw) {
             self.selectedFamily = family
         } else {
-            self.selectedFamily = .recursive
+            self.selectedFamily = .sourceSerif4
         }
 
         // Load selected mono family
@@ -93,7 +93,7 @@ final class FontSettings {
            let family = FontFamily(rawValue: raw) {
             self.selectedFamily = family
         } else {
-            self.selectedFamily = .recursive
+            self.selectedFamily = .sourceSerif4
         }
 
         if let raw = defaults.string(forKey: "monoFontFamily"),

@@ -14,13 +14,11 @@ struct PairingStep: View {
 
     var body: some View {
         OnboardingPage(
-            systemImage: "qrcode",
-            title: "Connect your Mac",
-            subtitle: "Scan the QR code from the Mac pairing screen, or enter the details manually."
+            subtitle: "Use the pairing screen shown by the Mac installer."
         ) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
-                scanCard
-                pairingForm
+                qrPairingCard
+                manualEntrySection
 
                 if let scanError {
                     errorCard(scanError)
@@ -48,32 +46,61 @@ struct PairingStep: View {
 
     // MARK: - Content
 
-    private var scanCard: some View {
+    private var qrPairingCard: some View {
         OnboardingGlassCard {
-            HStack(alignment: .center, spacing: TronSpacing.section) {
-                Image(systemName: "checkmark.shield.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(Color.tronEmerald)
-                    .frame(width: 34, height: 34)
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
+                HStack(alignment: .top, spacing: TronSpacing.md) {
+                    Image(systemName: "qrcode.viewfinder")
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                        .foregroundStyle(Color.tronEmerald)
+                        .frame(width: 34, height: 34)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Use the Mac pairing screen")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                    Text("Make sure Tailscale is on for both devices and Tron Server is running.")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Scan the Mac QR code")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronTextPrimary)
+                        Text("This fills in the host, port, and pairing token automatically.")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
-                Spacer(minLength: 0)
-
-                OnboardingIconButton(
-                    systemImage: "qrcode.viewfinder",
-                    accessibilityLabel: "Scan pairing QR code",
-                    action: { showQRScanner = true }
+                Button {
+                    showQRScanner = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "camera.viewfinder")
+                        Text("Scan QR code")
+                    }
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(Color.tronEmerald)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .glassEffect(
+                    .regular.tint(Color.tronEmerald.opacity(0.16)).interactive(),
+                    in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
                 )
             }
+        }
+    }
+
+    private var manualEntrySection: some View {
+        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+            Text("Manual entry")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronTextPrimary)
+
+            Text("Paste the pairing link or type the values from the Mac app.")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(Color.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            pairingForm
+                .padding(.top, 4)
         }
     }
 

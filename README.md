@@ -164,9 +164,9 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 1. Install [Tailscale](https://tailscale.com) and sign in on the Mac that will host the agent.
 2. Download the latest `Tron-mac-v*.dmg` from [GitHub Releases](https://github.com/mhismail3/tron/releases) and drag `Tron.app` into `/Applications`.
 3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, and displays pairing info (Tailscale IP + port + bearer token + QR code).
-4. On iPhone, install the Tron TestFlight build. The app opens to the dashboard and presents a compact onboarding sheet; swipe to the connect page, then scan the QR or paste the pairing fields from the Mac app.
+4. On iPhone, install the Tron TestFlight build. The app opens to the dashboard and presents a compact onboarding sheet; install/sign in to Tailscale on the phone, then scan the Mac pairing QR or enter the pairing fields manually.
 
-The wizard and menu bar surface everything else (`Check for updates…`, `Send feedback…`, `Restart server`, etc.) — you never need the CLI unless you want to.
+The wizard and menu bar surface everything else (`Check for updates`, `Send feedback`, `Restart server`, etc.) — you never need the CLI unless you want to.
 
 ### Contributors (build from source)
 
@@ -719,10 +719,10 @@ packages/ios-app/Sources/
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView` as a medium-detent three-page sheet (welcome, Mac install link, connect).
+- **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView` as a medium-detent four-step Liquid Glass sheet (welcome, iPhone Tailscale, Mac install link, connect) with swipe navigation and a floating progress-dot indicator.
 - **Multi-server bearer model**: Each entry in `connectionPresets[]` has its own bearer token, stored in Keychain via `PresetTokenStore` keyed by preset ID. `WebSocketService` attaches the active preset's token as `Authorization: Bearer <token>` on upgrade. A new `ConnectionState.unauthorized` surfaces a "Re-pair this server" tap in `ConnectionStatusPill`.
 - **Forgetting a server**: Settings → Server → preset menu → "Forget this Mac" removes the preset from the Mac's `server.connectionPresets`, deletes the iOS Keychain token, unregisters this device's push token for the active Mac, and reopens onboarding when no saved Macs remain.
-- **Telemetry + feedback**: `SentryRedactor` scrubs bearer tokens, file paths, and chat content before crash events leave the device. `FeedbackComposer` builds a redacted log tail and hands it to `MFMailComposeViewController` via `FeedbackMailView`. Opt-in toggle on the Privacy settings page stores to `@AppStorage("telemetryEnabled")` (default OFF).
+- **Telemetry + feedback**: `SentryRedactor` scrubs bearer tokens, file paths, and chat content before crash events leave the device. `FeedbackComposer` builds a redacted log tail and opens a prefilled GitHub issue instead of launching Mail. Opt-in toggle on the Privacy settings page stores to `@AppStorage("telemetryEnabled")` (default OFF).
 
 ### Data Flow
 
@@ -769,7 +769,7 @@ packages/mac-app/Sources/
 |   +-- Server/                Bearer-token reader, `system.ping` client, status poller
 |   +-- Onboarding/            Install planner, permission/Tailscale probes, existing-install detection
 |   +-- Pairing/               Tailscale live probe + auth-token reader; QR + tron:// URL generation
-|   +-- Feedback/              FeedbackComposer + NSSharingService mail compose
+|   +-- Feedback/              GitHub issue composer with redacted log context
 |   +-- Observability/         SentryRedactor (shared pattern with iOS)
 |   +-- LaunchAgentManaging.swift
 |   +-- TronPaths.swift        ~/.tron/ path helpers (mirrors Rust `core::foundation::paths`)
@@ -781,7 +781,7 @@ packages/mac-app/Sources/
 
 1. **Welcome** — introduces Tron.
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
-3. **Install** — detects whether the server is already installed, waits for the explicit Install CTA when work is needed, then prepares and ad-hoc signs the inner `~/.tron/system/Tron.app` server bundle, writes the LaunchAgent plist, bootstraps or kickstarts `com.tron.server`, and polls `system.ping` while ignoring initial `connection.established` frames.
+3. **Install** — detects whether the server is already installed, waits for the explicit Install CTA when work is needed, then prepares and ad-hoc signs the inner `~/.tron/system/Tron.app` server bundle, writes the LaunchAgent plist, keeps the bundled runtime CLI available to diagnostics, bootstraps or kickstarts `com.tron.server`, and polls `system.ping` while ignoring initial `connection.established` frames.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, polls the agent, starts a short-lived grant watcher after wizard-opened Settings panes, and keeps Re-check as a kickstart+probe fallback.
 5. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), and displays host + port + token with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>`.
 6. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
@@ -790,16 +790,13 @@ packages/mac-app/Sources/
 
 | Item | Action |
 |------|--------|
-| Status dot + version | Green/red circle + "Tron — running on port 9847" |
-| Tailscale: `100.x.y.z:9847` | Click to copy |
-| Pairing token (truncated) | Click to copy; "Reveal full" submenu |
-| Show pairing info… | Re-opens wizard step 6 (QR + copy buttons) |
-| Restart / Pause server | `launchctl kickstart` / `launchctl bootout` |
-| View logs… | Opens Console filtered to `com.tron.server` |
-| Send feedback… | `NSSharingService(.composeEmail)` with last 200 log lines |
-| Check for updates… | Triggers `system.checkForUpdates`; submenu shows channel/frequency/action |
-| Open at login | `SMAppService.mainApp` |
-| Uninstall Tron… | Confirm dialog + `tron uninstall` |
+| Custom status header | Shows `Tron` + current server state on the left, the Tailscale endpoint on the right (click to copy), and a compact `Show pairing info` button |
+| Show pairing info | Opens a pairing-only window with QR + token/manual copy buttons; copy actions quickly show a checkmark for two seconds on success |
+| Restart / Pause / Resume server | `launchctl kickstart` / `bootout` / `bootstrap`, shows busy state and posts success/failure notifications |
+| Show logs | Opens the native logs window backed by the bundled runtime CLI contract: `tron logs -n 200 -o <tempfile>` |
+| Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
+| Check for updates | Opens the latest GitHub Release and best-effort triggers `tron self-update check` |
+| Uninstall Tron | Confirm dialog + `tron uninstall` |
 | Quit Tron | Quits wrapper; server keeps running via LaunchAgent |
 
 ### Variants & Workflows

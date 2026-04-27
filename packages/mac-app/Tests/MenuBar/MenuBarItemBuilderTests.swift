@@ -61,7 +61,9 @@ struct MenuBarItemBuilderTests {
         let snap = ServerStatusSnapshot(
             state: .running(version: "0.5.0", port: 9847),
             tailscaleIP: "100.64.0.1",
-            bearerToken: "abcd1234efgh5678"
+            bearerToken: "abcd1234efgh5678",
+            processID: 16027,
+            uptime: "01:07:42"
         )
         let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
 
@@ -70,6 +72,8 @@ struct MenuBarItemBuilderTests {
             #expect(content.endpoint == "100.64.0.1:9847")
             #expect(content.endpointCopyValue == "100.64.0.1:9847")
             #expect(content.health == .healthy)
+            #expect(content.pid == 16027)
+            #expect(content.uptime == "01:07:42")
         } else {
             Issue.record("status should live in custom header")
         }
@@ -238,5 +242,16 @@ struct MenuBarItemBuilderTests {
             return
         }
         #expect(url == tmp)
+    }
+
+    @Test("uptime formatter accepts ps elapsed-time formats and rejects malformed values")
+    func uptimeFormatter() {
+        #expect(MenuBarUptimeFormatter.parse("07:42") == 462)
+        #expect(MenuBarUptimeFormatter.parse("01:07:42") == 4_062)
+        #expect(MenuBarUptimeFormatter.parse("2-01:07:42") == 176_862)
+        #expect(MenuBarUptimeFormatter.parse("1:bad") == nil)
+        #expect(MenuBarUptimeFormatter.parse("1::02") == nil)
+        #expect(MenuBarUptimeFormatter.format(4_062) == "01:07:42")
+        #expect(MenuBarUptimeFormatter.format(176_862) == "2-01:07:42")
     }
 }

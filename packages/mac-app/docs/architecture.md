@@ -26,7 +26,7 @@ packages/mac-app/
 │   ├── Info.plist                  # Bundle metadata (starts regular; switches to accessory after onboarding)
 │   ├── MenuBar/
 │   │   ├── MenuBarActionHandler.swift # routes menu-item descriptors → side effects (subprocess, NSWorkspace, notifications)
-│   │   ├── MenuBarController.swift    # NSStatusItem lifecycle + timer
+│   │   ├── MenuBarController.swift    # NSStatusItem lifecycle + poller task + custom header view
 │   │   └── MenuBarItemBuilder.swift   # Pure builder: snapshot → [MenuItemDescriptor]
 │   ├── Resources/                  # tron-agent + AppIcon.icns + bundled fonts staged into the wrapper bundle
 │   │   └── Fonts/
@@ -169,7 +169,7 @@ TronMacApp.main()
            └─ installMenuBar(setup:)
                 └─ MenuBarController
                     ├─ NSStatusItem with tinted Tron logo
-                    └─ 30s Timer → ServerStatusPoller.snapshot()
+                    └─ 30s poller task → ServerStatusPoller.snapshot()
                          ├─ setup.pingServer(token) → ServerPingResult
                          ├─ launchAgentManager.isLoaded() when ping fails
                          ├─ setup.readBearerToken()

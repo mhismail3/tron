@@ -231,11 +231,11 @@ struct FontCategoryTests {
 @MainActor
 struct FontSettingsTests {
 
-    @Test func defaultFamilyIsRecursive() {
+    @Test func defaultFamilyIsSourceSerif4() {
         let defaults = UserDefaults(suiteName: "FontSettingsTests.default")!
         defaults.removePersistentDomain(forName: "FontSettingsTests.default")
         let settings = FontSettings(defaults: defaults)
-        #expect(settings.selectedFamily == .recursive)
+        #expect(settings.selectedFamily == .sourceSerif4)
     }
 
     @Test func defaultMonoFamilyIsRecursive() {

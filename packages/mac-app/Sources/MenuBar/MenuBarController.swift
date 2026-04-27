@@ -144,17 +144,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             item.isEnabled = false
             item.image = nil
             return item
-        case .text(let title):
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            normalizeMenuItem(item)
-            return item
-        case .copy(let title, let value):
-            let item = NSMenuItem(title: title, action: #selector(handleCopy(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = value
-            normalizeMenuItem(item)
-            return item
         case .action(let title, let isEnabled, let handler):
             let wrapper = ActionWrapper(handler: handler)
             let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "")
@@ -187,13 +176,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         item.mixedStateImage = nil
         item.state = .off
         item.indentationLevel = 0
-    }
-
-    @objc private func handleCopy(_ sender: NSMenuItem) {
-        guard let value = sender.representedObject as? String else { return }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(value, forType: .string)
     }
 
     @objc private func handleOpenLink(_ sender: NSMenuItem) {
@@ -315,7 +297,7 @@ private final class MenuBarHeaderView: NSView {
     }
 
     private func startUptimeTimer(initialUptime: String) {
-        guard let seconds = parseUptime(initialUptime) else { return }
+        guard let seconds = MenuBarUptimeFormatter.parse(initialUptime) else { return }
         uptimeSeconds = seconds
         uptimeTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -330,22 +312,34 @@ private final class MenuBarHeaderView: NSView {
         guard let seconds = uptimeSeconds else { return }
         let next = seconds + 1
         uptimeSeconds = next
-        uptimeField?.stringValue = "Uptime: \(formatUptime(next))"
+        uptimeField?.stringValue = "Uptime: \(MenuBarUptimeFormatter.format(next))"
     }
 
-    private func parseUptime(_ uptime: String) -> Int? {
+    @objc private func copyTailscaleAddress() {
+        guard let endpointCopyValue else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(endpointCopyValue, forType: .string)
+    }
+}
+
+enum MenuBarUptimeFormatter {
+    static func parse(_ uptime: String) -> Int? {
         let dayAndTime = uptime.split(separator: "-", maxSplits: 1).map(String.init)
         let dayOffset: Int
         let timePart: String
         if dayAndTime.count == 2 {
-            dayOffset = (Int(dayAndTime[0]) ?? 0) * 24 * 60 * 60
+            guard let days = Int(dayAndTime[0]) else { return nil }
+            dayOffset = days * 24 * 60 * 60
             timePart = dayAndTime[1]
         } else {
             dayOffset = 0
             timePart = uptime
         }
 
-        let parts = timePart.split(separator: ":").compactMap { Int($0) }
+        let fields = timePart.split(separator: ":", omittingEmptySubsequences: false)
+        let parts = fields.compactMap { Int($0) }
+        guard parts.count == fields.count else { return nil }
         switch parts.count {
         case 2:
             return dayOffset + parts[0] * 60 + parts[1]
@@ -356,7 +350,7 @@ private final class MenuBarHeaderView: NSView {
         }
     }
 
-    private func formatUptime(_ seconds: Int) -> String {
+    static func format(_ seconds: Int) -> String {
         let days = seconds / 86_400
         let remainder = seconds % 86_400
         let hours = remainder / 3_600
@@ -364,13 +358,6 @@ private final class MenuBarHeaderView: NSView {
         let secs = remainder % 60
         let clock = String(format: "%02d:%02d:%02d", hours, minutes, secs)
         return days > 0 ? "\(days)-\(clock)" : clock
-    }
-
-    @objc private func copyTailscaleAddress() {
-        guard let endpointCopyValue else { return }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(endpointCopyValue, forType: .string)
     }
 }
 

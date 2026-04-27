@@ -23,11 +23,22 @@ struct OnboardingStateTests {
         #expect(state.pairingError == nil)
     }
 
-    @Test("Step counter text is one-based")
-    func stepCounterTextIsOneBased() {
-        #expect(OnboardingState.Step.welcome.counterText == "1 / 3")
-        #expect(OnboardingState.Step.installMac.counterText == "2 / 3")
-        #expect(OnboardingState.Step.connect.counterText == "3 / 3")
+    @Test("Step order matches the sheet flow")
+    func stepOrderMatchesSheetFlow() {
+        #expect(OnboardingState.Step.allCases == [
+            .welcome,
+            .installTailscale,
+            .installMac,
+            .connect,
+        ])
+    }
+
+    @Test("Step toolbar metadata matches the sheet flow")
+    func stepToolbarMetadataMatchesFlow() {
+        #expect(OnboardingState.Step.welcome.toolbarTitle == "Welcome to Tron")
+        #expect(OnboardingState.Step.installTailscale.toolbarTitle == "Install Tailscale")
+        #expect(OnboardingState.Step.installMac.toolbarTitle == "Install Tron Server")
+        #expect(OnboardingState.Step.connect.toolbarTitle == "Connect your Mac")
     }
 
     @Test("complete() flips the AppStorage flag")
@@ -76,37 +87,6 @@ struct OnboardingStateTests {
         state.pairingError = .unauthorized
         state.acceptPairingPayload(.init(host: "h", port: 1, token: "t", label: nil))
         #expect(state.pairingError == nil)
-    }
-
-    // MARK: - Step navigation
-
-    @Test("goToNextStep advances until the final step")
-    func goToNextStepAdvancesUntilFinalStep() {
-        let state = OnboardingState(defaults: ephemeralDefaults())
-
-        state.goToNextStep()
-        #expect(state.currentStep == .installMac)
-
-        state.goToNextStep()
-        #expect(state.currentStep == .connect)
-
-        state.goToNextStep()
-        #expect(state.currentStep == .connect)
-    }
-
-    @Test("goToPreviousStep returns until the first step")
-    func goToPreviousStepReturnsUntilFirstStep() {
-        let state = OnboardingState(defaults: ephemeralDefaults())
-        state.currentStep = .connect
-
-        state.goToPreviousStep()
-        #expect(state.currentStep == .installMac)
-
-        state.goToPreviousStep()
-        #expect(state.currentStep == .welcome)
-
-        state.goToPreviousStep()
-        #expect(state.currentStep == .welcome)
     }
 
     // MARK: - reset()

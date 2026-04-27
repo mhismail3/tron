@@ -27,4 +27,8 @@ enum AppConstants {
     /// here. The URL stays stable across releases — the page lists every
     /// asset including dSYM and SHA-256.
     static let dmgDownloadPage: URL = URL(string: "https://github.com/\(githubRepoOwner)/tron/releases")!
+
+    /// Tailscale's iOS App Store listing. The pairing flow sends users here
+    /// before Mac setup so the phone is on the same tailnet when they scan.
+    static let tailscaleAppStorePage: URL = URL(string: "https://apps.apple.com/us/app/tailscale/id1470499037")!
 }
