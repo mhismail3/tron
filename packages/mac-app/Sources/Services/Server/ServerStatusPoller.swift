@@ -37,7 +37,7 @@ actor ServerStatusPoller {
     }
 
     /// Performs a single status probe synchronously. Used by tests +
-    /// the wizard's "wait for server" loop. The tone mapping mirrors
+    /// the wizard's "wait for server" loop. The state mapping mirrors
     /// the INVARIANT documented on `ServerPingResult`.
     static func singleSnapshot(setup: EnvironmentSetup) async -> ServerStatusSnapshot {
         let token = setup.readBearerToken()
@@ -45,36 +45,37 @@ actor ServerStatusPoller {
         switch result {
         case .success(let info):
             return ServerStatusSnapshot(
-                tone: .running,
-                version: info.version,
-                port: info.port,
+                state: .running(version: info.version, port: info.port),
                 tailscaleIP: info.tailscaleIp ?? setup.readTailscaleIPFromSettings(),
                 bearerToken: token
             )
         case .unauthorized:
             return ServerStatusSnapshot(
-                tone: .unauthorized,
-                version: nil,
+                state: .unauthorized,
                 port: setup.serverPort,
                 tailscaleIP: setup.readTailscaleIPFromSettings(),
                 bearerToken: token
             )
-        case .unreachable, .timeout:
-            return ServerStatusSnapshot(
-                tone: .stopped,
-                version: nil,
-                port: setup.serverPort,
-                tailscaleIP: setup.readTailscaleIPFromSettings(),
-                bearerToken: token
-            )
+        case .unreachable:
+            return await launchdStateSnapshot(setup: setup, token: token, reason: "unreachable")
+        case .timeout:
+            return await launchdStateSnapshot(setup: setup, token: token, reason: "timeout")
         case .malformedResponse:
-            return ServerStatusSnapshot(
-                tone: .unknown,
-                version: nil,
-                port: setup.serverPort,
-                tailscaleIP: setup.readTailscaleIPFromSettings(),
-                bearerToken: token
-            )
+            return await launchdStateSnapshot(setup: setup, token: token, reason: "malformed response")
         }
+    }
+
+    private static func launchdStateSnapshot(
+        setup: EnvironmentSetup,
+        token: String?,
+        reason: String
+    ) async -> ServerStatusSnapshot {
+        let isLoaded = await setup.launchAgentManager.isLoaded(label: TronPaths.launchAgentLabel)
+        return ServerStatusSnapshot(
+            state: isLoaded ? .failed(reason: reason) : .paused,
+            port: setup.serverPort,
+            tailscaleIP: setup.readTailscaleIPFromSettings(),
+            bearerToken: token
+        )
     }
 }

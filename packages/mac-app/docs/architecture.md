@@ -40,8 +40,8 @@ packages/mac-app/
 │   │   ├── Models.swift            # TailscaleStatus, PermissionStatus, ExistingInstallStatus…
 │   │   ├── TronPaths.swift         # Single source of truth for all on-disk paths
 │   │   ├── Feedback/
-│   │   │   ├── FeedbackComposer.swift      # pure: Mailto URL + log-tail extraction
-│   │   │   └── MenuBarFeedbackAction.swift # menu-bar handler (NSWorkspace.open the Mailto URL)
+│   │   │   ├── FeedbackComposer.swift      # pure GitHub issue composer with redacted log context
+│   │   │   └── MenuBarFeedbackAction.swift # menu-bar handler (NSWorkspace.open GitHub issue URL)
 │   │   ├── Observability/
 │   │   │   └── SentryRedactor.swift        # beforeSend hook: strip paths, mask tokens, drop chat content (Phase 7)
 │   │   ├── Onboarding/
@@ -58,7 +58,7 @@ packages/mac-app/
 │   │       ├── ServerPing.swift            # one-shot string-id system.ping over WS → ServerPingResult; skips broadcast/event frames
 │   │       ├── ServerStatusPoller.swift    # 30s periodic poll for menu bar
 │   │       ├── SingleInstanceLock.swift    # fcntl(F_SETLK) advisory lock
-│   │       └── TronCLI.swift               # single source of truth for resolving the `tron` binary on PATH
+│   │       └── TronCLI.swift               # single source of truth for resolving the bundled/runtime `tron` CLI
 │   └── Wizard/
 │       ├── WizardState.swift       # @Observable, step persistence, navigation
 │       ├── WizardView.swift        # NavigationStack + per-step dispatcher
@@ -168,16 +168,32 @@ TronMacApp.main()
        └─ setup.onboardedSentinelExists() → true
            └─ installMenuBar(setup:)
                 └─ MenuBarController
-                    ├─ NSStatusItem with template icon
+                    ├─ NSStatusItem with tinted Tron logo
                     └─ 30s Timer → ServerStatusPoller.snapshot()
                          ├─ setup.pingServer(token) → ServerPingResult
+                         ├─ launchAgentManager.isLoaded() when ping fails
                          ├─ setup.readBearerToken()
                          └─ setup.readTailscaleIPFromSettings()
 ```
 
-### Menu-bar → wizard re-entry (post-onboarding)
+The menu bar renders an explicit server state rather than a generic dot:
+`running` is green, `checking`/busy/unauthorized are yellow, `failed` is red,
+and `paused` is gray. If `system.ping` fails, the poller asks launchd whether
+`com.tron.server` is loaded; unloaded maps to paused, loaded-but-unreachable
+maps to failed.
 
-The "Show pairing info…" menu item reopens the wizard at `pairingInfo` without going through `AppDelegate`. Mode + activation policy are owned by `RootView` (SwiftUI `@State`); `AppDelegate` only owns the LaunchAgent and `.onboarded` sentinel side. See [`.claude/rules/wizard-steps.md`](../.claude/rules/wizard-steps.md) for the full sequence.
+### Menu-bar auxiliary windows
+
+Post-onboarding surfaces stay in menu-bar mode. "Show pairing info…" opens a
+pairing-only window that reuses the pairing resolver/QR/copy controls without
+wizard navigation or a progress pill. "View logs" opens a native logs window
+fed by the bundled runtime CLI contract, `tron logs -n 200 -o <tempfile>`,
+with refresh and copy controls. Menu rows use native `NSMenuItem` rendering
+with no item images, so the popup keeps the standard macOS menu spacing used
+by apps like 1Password.
+"Send feedback" builds a prefilled GitHub issue with app/server context and a
+redacted log tail; oversized issue bodies are copied to the pasteboard and the
+GitHub issue opens with a short note.
 
 ### Install pipeline (wizard's `InstallStep`)
 

@@ -12,6 +12,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var pollerTask: Task<Void, Never>?
     private var pairingInfoWindowController: NSWindowController?
+    private var logsWindowController: NSWindowController?
 
     /// Most-recent status snapshot, written by the poller and read by
     /// `rebuildMenu()`.
@@ -20,19 +21,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     init(setup: EnvironmentSetup) {
         self.setup = setup
         self.poller = ServerStatusPoller(setup: setup)
-        self.snapshot = ServerStatusSnapshot.unknown
+        self.snapshot = ServerStatusSnapshot.checking
         super.init()
     }
 
     func install() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = MenuBarIcon.template(for: .unknown)
+        item.button?.image = MenuBarIcon.image(for: snapshot.state)
         item.button?.imagePosition = .imageOnly
-        item.button?.toolTip = "Tron"
+        item.button?.toolTip = snapshot.state.tooltip
         statusItem = item
 
         let menu = NSMenu()
         menu.delegate = self
+        menu.showsStateColumn = false
         item.menu = menu
         rebuildMenu()
 
@@ -42,7 +44,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             for await snapshot in await self.poller.snapshots() {
                 await MainActor.run {
                     self.snapshot = snapshot
-                    self.statusItem?.button?.image = MenuBarIcon.template(for: snapshot.tone)
+                    self.statusItem?.button?.image = MenuBarIcon.image(for: snapshot.state)
+                    self.statusItem?.button?.toolTip = snapshot.state.tooltip
                     self.rebuildMenu()
                 }
             }
@@ -64,8 +67,58 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// the next 30s poll).
     func applySnapshot(_ snapshot: ServerStatusSnapshot) {
         self.snapshot = snapshot
-        statusItem?.button?.image = MenuBarIcon.template(for: snapshot.tone)
+        statusItem?.button?.image = MenuBarIcon.image(for: snapshot.state)
+        statusItem?.button?.toolTip = snapshot.state.tooltip
         rebuildMenu()
+    }
+
+    func showPairingInfoWindow(setup: EnvironmentSetup) {
+        if let pairingInfoWindowController {
+            pairingInfoWindowController.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let view = PairingInfoWindowView()
+            .environment(\.environmentSetup, setup)
+            .tint(Color.tronEmerald)
+            .containerBackground(.regularMaterial, for: .window)
+        let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+        window.title = "Pairing Info"
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: WizardLayout.width, height: 360))
+        let controller = MenuBarWindowController(window: window) { [weak self] in
+            self?.pairingInfoWindowController = nil
+        }
+        pairingInfoWindowController = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func showLogsWindow(setup: EnvironmentSetup) {
+        if let logsWindowController {
+            logsWindowController.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let view = MenuBarLogsView()
+            .environment(\.environmentSetup, setup)
+            .tint(Color.tronEmerald)
+        let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+        window.title = "Tron Logs"
+        window.styleMask = [.titled, .closable, .resizable]
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 760, height: 520))
+        let controller = MenuBarWindowController(window: window) { [weak self] in
+            self?.logsWindowController = nil
+        }
+        logsWindowController = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Menu
@@ -86,26 +139,46 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         case .text(let title):
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             item.isEnabled = false
+            normalizeMenuItem(item)
             return item
         case .copy(let title, let value):
             let item = NSMenuItem(title: title, action: #selector(handleCopy(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = value
+            normalizeMenuItem(item)
             return item
-        case .action(let title, let handler):
+        case .action(let title, let isEnabled, let handler):
             let wrapper = ActionWrapper(handler: handler)
             let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "")
             item.target = wrapper
             item.representedObject = wrapper // keep alive
+            item.isEnabled = isEnabled
+            normalizeMenuItem(item)
             return item
         case .openLink(let title, let url):
             let item = NSMenuItem(title: title, action: #selector(handleOpenLink(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = url
+            normalizeMenuItem(item)
             return item
         case .quit(let title):
-            return NSMenuItem(title: title, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            let wrapper = ActionWrapper { NSApp.terminate(nil) }
+            let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "q")
+            item.target = wrapper
+            item.representedObject = wrapper // keep alive
+            normalizeMenuItem(item)
+            return item
         }
+    }
+
+    private func normalizeMenuItem(_ item: NSMenuItem) {
+        item.view = nil
+        item.image = nil
+        item.onStateImage = nil
+        item.offStateImage = nil
+        item.mixedStateImage = nil
+        item.state = .off
+        item.indentationLevel = 0
     }
 
     @objc private func handleCopy(_ sender: NSMenuItem) {
@@ -128,28 +201,65 @@ private final class ActionWrapper: NSObject {
     @objc func invoke() { handler() }
 }
 
-/// Tone for the menu-bar icon - drives template color.
+@MainActor
+private final class MenuBarWindowController: NSWindowController, NSWindowDelegate {
+    private let onClose: () -> Void
+
+    init(window: NSWindow, onClose: @escaping () -> Void) {
+        self.onClose = onClose
+        super.init(window: window)
+        window.delegate = self
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onClose()
+    }
+}
+
+/// Tone for the menu-bar icon - drives logo tint.
 enum MenuBarTone: Equatable {
     case running
-    case stopped
-    case unauthorized
-    case unknown
+    case attention
+    case paused
+    case failed
 }
 
 enum MenuBarIcon {
-    static func template(for tone: MenuBarTone) -> NSImage {
-        // Use SF Symbols for crisp rendering in both light and dark modes.
-        let name: String
+    static let size = NSSize(width: 18, height: 18)
+
+    static func image(for state: ServerStatusState) -> NSImage {
+        tintedLogo(color: color(for: state.tone))
+    }
+
+    static func color(for tone: MenuBarTone) -> NSColor {
         switch tone {
-        case .running: name = "circle.fill"
-        case .stopped: name = "xmark.circle.fill"
-        case .unauthorized: name = "lock.slash.fill"
-        case .unknown: name = "circle.dashed"
+        case .running:
+            return NSColor(hex: "#10B981")
+        case .attention:
+            return NSColor(hex: "#F59E0B")
+        case .paused:
+            return NSColor(hex: "#9CA3AF")
+        case .failed:
+            return NSColor(hex: "#EF4444")
         }
-        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: "Tron status")?
-            .withSymbolConfiguration(config) ?? NSImage()
-        image.isTemplate = (tone != .running)
+    }
+
+    private static func tintedLogo(color: NSColor) -> NSImage {
+        guard let source = NSImage(named: "TronLogo") else {
+            return NSImage(size: .zero)
+        }
+        let image = NSImage(size: size)
+        image.lockFocus()
+        let rect = NSRect(origin: .zero, size: size)
+        color.setFill()
+        rect.fill()
+        source.draw(in: rect, from: .zero, operation: .destinationIn, fraction: 1)
+        image.unlockFocus()
+        image.isTemplate = false
         return image
     }
 }

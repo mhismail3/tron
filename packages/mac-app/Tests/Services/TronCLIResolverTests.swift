@@ -50,11 +50,6 @@ struct TronCLIResolverTests {
     func noCandidates() {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        // tmp acts as `home`; nothing exists at `~/.local/bin/tron` and
-        // /usr/local/bin/tron + /opt/homebrew/bin/tron are NOT injectable
-        // here — they may exist on the developer machine. To make the
-        // test deterministic we use a FileManager that only sees files
-        // under our tmp dir.
         let fm = SandboxedFileManager(allowedRoot: tmp)
         let result = TronCLI.resolveBinary(home: tmp, fileManager: fm)
         #expect(result == nil)
@@ -73,7 +68,20 @@ struct TronCLIResolverTests {
 
     // MARK: - Single candidate
 
-    @Test("first candidate (~/.local/bin/tron) wins when present")
+    @Test("bundled runtime CLI is preferred when present")
+    func bundledRuntimeCLIWins() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let bundled = tmp.appendingPathComponent("BundleResources/tron-cli")
+        let local = tmp.appendingPathComponent(".local/bin/tron")
+        try makeExecutable(at: bundled)
+        try makeExecutable(at: local)
+        let fm = SandboxedFileManager(allowedRoot: tmp)
+        let result = TronCLI.resolveBinary(home: tmp, bundledRuntimeCLI: bundled, fileManager: fm)
+        #expect(result?.path == bundled.path)
+    }
+
+    @Test("user-local runtime CLI wins when bundled CLI is absent")
     func localBinPreferred() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
@@ -86,39 +94,30 @@ struct TronCLIResolverTests {
 
     // MARK: - Search order
 
-    @Test("homebrew Apple Silicon path is tried last")
-    func searchOrderHonored() throws {
-        // Stage all three candidates; only ~/.local/bin/tron is allowed
-        // through the SandboxedFileManager. The other two exist on disk
-        // but the resolver's first hit is the user-local one. This is
-        // the contract: install-method consistency means a developer
-        // who has both Homebrew and `tron install` only ever sees the
-        // user-local copy run.
+    @Test("installed deployment runtime CLI wins after user-local")
+    func deploymentRuntimeCLIIsSupported() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let userLocal = tmp.appendingPathComponent(".local/bin/tron")
-        try makeExecutable(at: userLocal)
-        // Allow only the user-local candidate; the other two paths are
-        // outside `tmp` so the sandboxed FM rejects them. This proves
-        // the resolver iterates in order AND stops at the first match.
+        let deployment = tmp.appendingPathComponent(".tron/system/deployment/tron-cli")
+        try makeExecutable(at: deployment)
         let fm = SandboxedFileManager(allowedRoot: tmp)
         let result = TronCLI.resolveBinary(home: tmp, fileManager: fm)
-        #expect(result?.path == userLocal.path)
+        #expect(result?.path == deployment.path)
     }
 
     @Test("default arguments are wired (smoke test)")
     func defaultsAreWired() {
         // We can't assert the return value (depends on the dev machine),
         // but we CAN assert the call doesn't crash and returns either
-        // nil or a URL whose path matches one of the three documented
-        // candidates. If a fourth path sneaks in via an accidental edit
+        // nil or a URL whose path matches one of the documented runtime
+        // CLI candidates. If a legacy Homebrew path sneaks back in,
         // this test starts failing.
         let result = TronCLI.resolveBinary()
         if let result {
             let candidates = [
+                "Contents/Resources/tron-cli",
                 ".local/bin/tron",
-                "/usr/local/bin/tron",
-                "/opt/homebrew/bin/tron",
+                ".tron/system/deployment/tron-cli",
             ]
             #expect(candidates.contains { result.path.hasSuffix($0) })
         }
@@ -129,9 +128,8 @@ struct TronCLIResolverTests {
 
 /// A `FileManager` subclass that only reports files as executable when
 /// they live under `allowedRoot`. Lets the resolver test confirm
-/// search-order behavior without depending on whether
-/// `/usr/local/bin/tron` happens to be installed on the developer's
-/// machine.
+/// search-order behavior without depending on real runtime CLI files on
+/// the developer's machine.
 private final class SandboxedFileManager: FileManager, @unchecked Sendable {
     let allowedRoot: URL
 

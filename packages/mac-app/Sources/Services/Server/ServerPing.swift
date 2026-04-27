@@ -6,12 +6,12 @@ import Foundation
 /// network"). Replaces the old `ServerInfo?` return which conflated
 /// "server is down" with "token rejected".
 ///
-/// INVARIANT: the menu-bar tone mapping in
-/// `ServerStatusPoller.singleSnapshot` MUST match this matrix:
+/// INVARIANT: `ServerStatusPoller.singleSnapshot` MUST map ping
+/// results into explicit menu-bar states:
 /// - `.success` → `.running`
 /// - `.unauthorized` → `.unauthorized`
-/// - `.unreachable`, `.timeout` → `.stopped`
-/// - `.malformedResponse` → `.unknown` (server is up but talking junk)
+/// - `.unreachable`, `.timeout`, `.malformedResponse` → ask launchd;
+///   unloaded maps to `.paused`, loaded maps to `.failed(reason:)`.
 enum ServerPingResult: Sendable, Equatable {
     case success(ServerInfo)
     case unauthorized

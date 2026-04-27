@@ -7,9 +7,12 @@ struct ServerStatusPollerTests {
     static func makeSetup(
         token: String? = nil,
         pingResult: ServerPingResult = .unreachable,
-        tailscaleFromSettings: String? = nil
+        tailscaleFromSettings: String? = nil,
+        launchAgentLoaded: Bool = false
     ) -> EnvironmentSetup {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let launchAgentManager = MockLaunchAgentManager()
+        launchAgentManager.loaded = launchAgentLoaded
         return EnvironmentSetup(
             tronHome: tmp,
             installedBundle: tmp,
@@ -29,7 +32,7 @@ struct ServerStatusPollerTests {
             requestAgentPermission: { _ in false },
             detectExistingInstall: { .none },
             pingServer: { _ in pingResult },
-            launchAgentManager: MockLaunchAgentManager(),
+            launchAgentManager: launchAgentManager,
             cleanupInstallArtifacts: { .success(removed: []) },
             touchOnboardedSentinel: { }
         )
@@ -43,49 +46,53 @@ struct ServerStatusPollerTests {
         )
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.tone == .running)
+        #expect(snapshot.state == .running(version: "0.5.0", port: 9847))
         #expect(snapshot.version == "0.5.0")
         #expect(snapshot.port == 9847)
         #expect(snapshot.tailscaleIP == "100.64.0.1")
         #expect(snapshot.bearerToken == "abc123")
     }
 
-    @Test("unreachable + no token: stopped")
-    func stoppedSnapshotNoToken() async throws {
+    @Test("unreachable + launchd unloaded: paused")
+    func pausedSnapshotWhenLaunchdUnloaded() async throws {
         let setup = Self.makeSetup(token: nil, pingResult: .unreachable)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.tone == .stopped)
+        #expect(snapshot.state == .paused)
+        #expect(snapshot.tone == .paused)
         #expect(snapshot.version == nil)
         #expect(snapshot.bearerToken == nil)
     }
 
-    @Test("unreachable + token present: still stopped (server is down)")
-    func stoppedSnapshotWithToken() async throws {
-        let setup = Self.makeSetup(token: "abc123", pingResult: .unreachable)
+    @Test("unreachable + launchd loaded: failed")
+    func failedSnapshotWhenLaunchdLoaded() async throws {
+        let setup = Self.makeSetup(token: "abc123", pingResult: .unreachable, launchAgentLoaded: true)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.tone == .stopped)
+        #expect(snapshot.state == .failed(reason: "unreachable"))
+        #expect(snapshot.tone == .failed)
         #expect(snapshot.bearerToken == "abc123")
     }
 
-    @Test("timeout maps to stopped")
+    @Test("timeout + launchd loaded maps to failed")
     func timeoutSnapshot() async throws {
-        let setup = Self.makeSetup(token: "abc123", pingResult: .timeout)
+        let setup = Self.makeSetup(token: "abc123", pingResult: .timeout, launchAgentLoaded: true)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.tone == .stopped)
+        #expect(snapshot.state == .failed(reason: "timeout"))
     }
 
-    @Test("explicit unauthorized → unauthorized regardless of token presence")
+    @Test("explicit unauthorized maps to attention regardless of token presence")
     func unauthorizedSnapshot() async throws {
         let setup = Self.makeSetup(token: "abc123", pingResult: .unauthorized)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.tone == .unauthorized)
+        #expect(snapshot.state == .unauthorized)
+        #expect(snapshot.tone == .attention)
         #expect(snapshot.bearerToken == "abc123")
     }
 
-    @Test("malformed response: server is up but garbled — unknown")
+    @Test("malformed response + launchd loaded maps to failed")
     func malformedSnapshot() async throws {
-        let setup = Self.makeSetup(token: "abc", pingResult: .malformedResponse)
+        let setup = Self.makeSetup(token: "abc", pingResult: .malformedResponse, launchAgentLoaded: true)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.tone == .unknown)
+        #expect(snapshot.state == .failed(reason: "malformed response"))
     }
 
     @Test("falls back to settings.json tailscale IP when server doesn't report one")

@@ -319,3 +319,21 @@ enum PairingInfoStepLayout {
     /// before the rest of the step finished entering.
     static let initialResolveDelayNanoseconds: UInt64 = 500_000_000
 }
+
+struct PairingInfoWindowView: View {
+    @State private var state = WizardState(initialStep: .pairingInfo)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Pairing Info")
+                .font(TronTypography.wizardTitle)
+                .foregroundStyle(Color.tronEmerald)
+
+            PairingInfoStep(state: state)
+        }
+        .padding(.horizontal, WizardLayout.horizontalPadding)
+        .padding(.top, 24)
+        .padding(.bottom, 20)
+        .frame(width: WizardLayout.width, height: 360)
+    }
+}

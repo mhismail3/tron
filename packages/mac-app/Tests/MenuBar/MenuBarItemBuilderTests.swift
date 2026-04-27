@@ -33,18 +33,18 @@ struct MenuBarItemBuilderTests {
         )
     }
 
-    @Test("stopped snapshot: status row reads stopped, no token + Tailscale rows fall back")
-    func stoppedSnapshot() throws {
+    @Test("paused snapshot: status row reads paused, no token + Tailscale rows fall back")
+    func pausedSnapshot() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
 
-        let snap = ServerStatusSnapshot(tone: .stopped, version: nil, port: nil, tailscaleIP: nil, bearerToken: nil)
+        let snap = ServerStatusSnapshot(state: .paused)
         let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
 
         // Status row is always first.
         if case .text(let title) = items[0] {
-            #expect(title == "Tron — stopped")
+            #expect(title == "Tron — paused")
         } else {
             Issue.record("first item should be .text status row")
         }
@@ -70,9 +70,7 @@ struct MenuBarItemBuilderTests {
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(
-            tone: .running,
-            version: "0.5.0",
-            port: 9847,
+            state: .running(version: "0.5.0", port: 9847),
             tailscaleIP: "100.64.0.1",
             bearerToken: "abcd1234efgh5678"
         )
@@ -104,7 +102,7 @@ struct MenuBarItemBuilderTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot(tone: .running, version: "0.5.0", port: 9847, tailscaleIP: nil, bearerToken: nil)
+        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
         let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
 
         let titles = items.map(\.title)
@@ -112,12 +110,12 @@ struct MenuBarItemBuilderTests {
         #expect(!titles.contains("Resume server"))
     }
 
-    @Test("stopped snapshot includes Resume server (not Pause)")
-    func resumeShownWhileStopped() throws {
+    @Test("paused snapshot includes Resume server (not Pause)")
+    func resumeShownWhilePaused() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot(tone: .stopped, version: nil, port: nil, tailscaleIP: nil, bearerToken: nil)
+        let snap = ServerStatusSnapshot(state: .paused)
         let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
 
         let titles = items.map(\.title)
@@ -130,16 +128,16 @@ struct MenuBarItemBuilderTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot(tone: .unknown, version: nil, port: nil, tailscaleIP: nil, bearerToken: nil)
+        let snap = ServerStatusSnapshot.checking
         let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
 
         let titles = Set(items.map(\.title))
         for required in [
             "Show pairing info…",
             "Restart server",
-            "View logs…",
+            "View logs",
             "Open Tron folder",
-            "Send feedback…",
+            "Send feedback",
             "Check for updates…",
             "Uninstall Tron…",
             "Quit Tron",
@@ -148,12 +146,45 @@ struct MenuBarItemBuilderTests {
         }
     }
 
-    @Test("status title flips for unauthorized tone")
+    @Test("busy snapshot disables server controls and shows transient action title")
+    func busyDisablesServerControls() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp)
+        let snap = ServerStatusSnapshot(state: .busy(.restarting))
+        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+
+        let titles = items.map(\.title)
+        #expect(titles.contains("Restarting…"))
+
+        for item in items {
+            if case .action(let title, let isEnabled, _) = item,
+               title == "Restarting…" {
+                #expect(isEnabled == false)
+            }
+        }
+    }
+
+    @Test("failed status title carries reason")
+    func failedTitle() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp)
+        let snap = ServerStatusSnapshot(state: .failed(reason: "timeout"))
+        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        if case .text(let title) = items[0] {
+            #expect(title == "Tron — server not responding (timeout)")
+        } else {
+            Issue.record("first item should be status row")
+        }
+    }
+
+    @Test("status title flips for unauthorized state")
     func unauthorizedTitle() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot(tone: .unauthorized, version: nil, port: nil, tailscaleIP: nil, bearerToken: nil)
+        let snap = ServerStatusSnapshot(state: .unauthorized)
         let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
         if case .text(let title) = items[0] {
             #expect(title == "Tron — token missing or rejected")
@@ -162,12 +193,12 @@ struct MenuBarItemBuilderTests {
         }
     }
 
-    @Test("status title 'checking' for unknown tone")
-    func unknownTitle() throws {
+    @Test("status title 'checking' for checking state")
+    func checkingTitle() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot.unknown
+        let snap = ServerStatusSnapshot.checking
         let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
         if case .text(let title) = items[0] {
             #expect(title == "Tron — checking…")
@@ -181,7 +212,7 @@ struct MenuBarItemBuilderTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot(tone: .running, version: "0.5.0", port: 9847, tailscaleIP: nil, bearerToken: "abc12345")
+        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847), bearerToken: "abc12345")
         let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
         if case .copy(let title, _) = items[2] {
             #expect(title == "Pairing token: abc12345", "tokens <= 9 chars stay literal")
@@ -195,7 +226,7 @@ struct MenuBarItemBuilderTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot.unknown
+        let snap = ServerStatusSnapshot.checking
         let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
         let openLink = items.first { item in
             if case .openLink(_, _) = item { return true } else { return false }

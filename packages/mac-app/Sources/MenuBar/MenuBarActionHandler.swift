@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UserNotifications
 
 /// Glue between the menu-bar `NotificationCenter` events and the actual
 /// side-effecting code (launchctl, NSWorkspace, AppleScript dialogs).
@@ -47,8 +48,14 @@ final class MenuBarActionHandler {
         observe(.tronMenuBarResumeServer, on: center) { [weak self] in
             await self?.resumeServer()
         }
+        observe(.tronMenuBarShowPairingInfo, on: center) { [weak self] in
+            self?.showPairingInfo()
+        }
         observe(.tronMenuBarViewLogs, on: center) { [weak self] in
-            await self?.viewLogs()
+            self?.viewLogs()
+        }
+        observe(.tronMenuBarSendFeedback, on: center) { [weak self] in
+            await self?.sendFeedback()
         }
         observe(.tronMenuBarCheckForUpdates, on: center) { [weak self] in
             await self?.checkForUpdates()
@@ -56,10 +63,6 @@ final class MenuBarActionHandler {
         observe(.tronMenuBarUninstall, on: center) { [weak self] in
             await self?.confirmAndUninstall()
         }
-        // `.tronWizardShowPairingInfo` is observed directly by
-        // `MenuBarHostView` (it owns the SwiftUI mode flip back to
-        // wizard). Routing it through this handler would force us to
-        // plumb mode mutation through AppDelegate.
     }
 
     func uninstall() {
@@ -91,27 +94,42 @@ final class MenuBarActionHandler {
     // MARK: - Actions
 
     func restartServer() async {
+        applyBusy(.restarting)
         let outcome = await setup.launchAgentManager.restart(label: TronPaths.launchAgentLabel)
         await refreshStatus()
         switch outcome {
         case .ok, .alreadyLoaded:
+            await MenuBarNotifier.post(title: "Tron server restarted", body: "The menu bar status has been refreshed.")
             return
         case .launchdRefused(let message), .unknown(let message):
+            await MenuBarNotifier.post(title: "Restart failed", body: message)
             await presentNonBlockingError(title: "Restart failed", message: message)
         case .binaryMissing(let path):
-            await presentNonBlockingError(title: "Restart failed", message: "Binary missing: \(path)")
+            let message = "Binary missing: \(path)"
+            await MenuBarNotifier.post(title: "Restart failed", body: message)
+            await presentNonBlockingError(title: "Restart failed", message: message)
         }
     }
 
     func pauseServer() async {
+        applyBusy(.pausing)
         let outcome = await setup.launchAgentManager.unload(label: TronPaths.launchAgentLabel)
         await refreshStatus()
-        if case .launchdRefused(let message) = outcome {
+        switch outcome {
+        case .ok, .alreadyLoaded:
+            await MenuBarNotifier.post(title: "Tron server paused", body: "Resume it from the Tron menu bar when needed.")
+        case .launchdRefused(let message), .unknown(let message):
+            await MenuBarNotifier.post(title: "Pause failed", body: message)
+            await presentNonBlockingError(title: "Pause failed", message: message)
+        case .binaryMissing(let path):
+            let message = "Binary missing: \(path)"
+            await MenuBarNotifier.post(title: "Pause failed", body: message)
             await presentNonBlockingError(title: "Pause failed", message: message)
         }
     }
 
     func resumeServer() async {
+        applyBusy(.resuming)
         let outcome = await setup.launchAgentManager.load(
             plistPath: setup.launchAgentPlistPath,
             label: TronPaths.launchAgentLabel
@@ -119,27 +137,29 @@ final class MenuBarActionHandler {
         await refreshStatus()
         switch outcome {
         case .ok, .alreadyLoaded:
+            await MenuBarNotifier.post(title: "Tron server resumed", body: "The menu bar status has been refreshed.")
             return
         case .launchdRefused(let message), .unknown(let message):
+            await MenuBarNotifier.post(title: "Resume failed", body: message)
             await presentNonBlockingError(title: "Resume failed", message: message)
         case .binaryMissing(let path):
-            await presentNonBlockingError(title: "Resume failed", message: "Binary missing: \(path)")
+            let message = "Binary missing: \(path)"
+            await MenuBarNotifier.post(title: "Resume failed", body: message)
+            await presentNonBlockingError(title: "Resume failed", message: message)
         }
     }
 
-    func viewLogs() async {
-        // Console.app filtered by subsystem is the canonical way to surface
-        // launchd-managed log streams. Falls back to a plain log read if
-        // Console.app refuses the URL (rare).
-        if let url = URL(string: "x-apple.console:?subsystem=com.tron.server") {
-            NSWorkspace.shared.open(url)
-            return
-        }
-        // Last-resort: open the system log directory in Finder so the user
-        // can still get to their logs without a hung action.
-        NSWorkspace.shared.activateFileViewerSelecting([
-            setup.tronHome.appendingPathComponent("system/database/log.db", isDirectory: false)
-        ])
+    func showPairingInfo() {
+        menuBarController?.showPairingInfoWindow(setup: setup)
+    }
+
+    func viewLogs() {
+        menuBarController?.showLogsWindow(setup: setup)
+    }
+
+    func sendFeedback() async {
+        let snapshot = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
+        await MenuBarFeedbackAction.present(snapshot: snapshot)
     }
 
     func checkForUpdates() async {
@@ -200,6 +220,16 @@ final class MenuBarActionHandler {
         controller.applySnapshot(snapshot)
     }
 
+    private func applyBusy(_ action: ServerBusyAction) {
+        let current = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
+        menuBarController?.applySnapshot(ServerStatusSnapshot(
+            state: .busy(action),
+            port: current.port ?? setup.serverPort,
+            tailscaleIP: current.tailscaleIP,
+            bearerToken: current.bearerToken
+        ))
+    }
+
     private func presentNonBlockingError(title: String, message: String) async {
         let alert = NSAlert()
         alert.messageText = title
@@ -221,5 +251,21 @@ final class MenuBarActionHandler {
             return ProcessResult(exitCode: -1, stdout: "", stderr: "tron CLI not found in PATH")
         }
         return await Subprocess.run(executable: tron, arguments: arguments)
+    }
+}
+
+enum MenuBarNotifier {
+    static func post(title: String, body: String) async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        if settings.authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        let request = UNNotificationRequest(identifier: "tron-menu-\(UUID().uuidString)", content: content, trigger: nil)
+        try? await center.add(request)
     }
 }

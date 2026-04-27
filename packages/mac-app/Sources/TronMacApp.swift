@@ -73,15 +73,13 @@ struct TronMacApp: App {
 /// - Present → window dismisses; AppDelegate transforms the process to
 ///   `.accessory` and installs the menu bar item.
 ///
-/// The menu-bar's "Show pairing info…" item flips `mode` back to
-/// `.wizard` and pre-seeds `wizardEntryStep = .pairingInfo` so the
-/// wizard remounts directly at the pairing step. The activation
-/// policy follows mode: `.regular` for the wizard window, `.accessory`
-/// for menu-bar-only.
+/// The activation policy follows mode: `.regular` for the wizard
+/// window, `.accessory` for menu-bar-only. Post-onboarding pairing
+/// info is handled by a dedicated menu-bar window controller rather
+/// than remounting the wizard.
 struct RootView: View {
     @Environment(\.environmentSetup) private var setup
     @State private var mode: AppMode = .loading
-    @State private var wizardEntryStep: WizardStep?
 
     var body: some View {
         Group {
@@ -97,12 +95,9 @@ struct RootView: View {
                 // `WizardView` → `WizardShell` applies one fixed
                 // `.frame(width: WizardLayout.width, height: WizardLayout.height)`
                 // so step transitions do not fight window resizing.
-                WizardView(initialStep: wizardEntryStep)
+                WizardView()
             case .menuBarOnly:
-                MenuBarHostView(onShowPairingInfo: {
-                    wizardEntryStep = .pairingInfo
-                    mode = .wizard
-                })
+                MenuBarHostView()
             }
         }
         .task(id: mode) {
@@ -122,7 +117,6 @@ struct RootView: View {
                 NSApp.windows.first?.makeKeyAndOrderFront(nil)
             case .menuBarOnly:
                 NSApp.setActivationPolicy(.accessory)
-                wizardEntryStep = nil
             }
         }
     }
@@ -135,13 +129,9 @@ enum AppMode: Equatable {
 }
 
 /// Visible only in menu-bar mode. Renders a 1×1 hidden placeholder so
-/// SwiftUI's WindowGroup has SOMETHING to draw before the window is
-/// orderOut'd. Listens for `.tronWizardShowPairingInfo` (posted by the
-/// menu-bar item builder) and asks `RootView` to flip back to wizard
-/// mode at the pairing step.
+/// SwiftUI's WindowGroup has something to draw before the window is
+/// orderOut'd.
 struct MenuBarHostView: View {
-    let onShowPairingInfo: () -> Void
-
     var body: some View {
         Color.clear
             .frame(width: 1, height: 1)
@@ -149,9 +139,6 @@ struct MenuBarHostView: View {
                 if let window = NSApp.windows.first {
                     window.orderOut(nil)
                 }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .tronWizardShowPairingInfo)) { _ in
-                onShowPairingInfo()
             }
     }
 }
@@ -161,7 +148,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
     private var actionHandler: MenuBarActionHandler?
     private var wizardCompletionObserver: NSObjectProtocol?
-    private var sendFeedbackObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Skip the single-instance lock when running under XCTest. The
@@ -170,15 +156,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // on the dev machine, breaking tests for any contributor who
         // dogfoods. The env var is set by Xcode for every test run.
         let isUnderXCTest = ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
-        if !isUnderXCTest {
-            // Install single-instance lock first — if another Tron.app
-            // is already running, this returns false and we exit
-            // gracefully.
-            guard SingleInstanceLock.shared.acquire() else {
-                NSLog("[Tron] Another Tron.app instance is already running. Exiting.")
-                NSApp.terminate(nil)
-                return
-            }
+        if isUnderXCTest {
+            return
+        }
+
+        // Install single-instance lock first — if another Tron.app
+        // is already running, this returns false and we exit
+        // gracefully.
+        guard SingleInstanceLock.shared.acquire() else {
+            NSLog("[Tron] Another Tron.app instance is already running. Exiting.")
+            NSApp.terminate(nil)
+            return
         }
 
         let setup = EnvironmentSetup.live
@@ -205,24 +193,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-
-        sendFeedbackObserver = NotificationCenter.default.addObserver(
-            forName: .tronMenuBarSendFeedback,
-            object: nil,
-            queue: .main
-        ) { _ in
-            Task { @MainActor in
-                await MenuBarFeedbackAction.present()
-            }
-        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         if let wizardCompletionObserver {
             NotificationCenter.default.removeObserver(wizardCompletionObserver)
-        }
-        if let sendFeedbackObserver {
-            NotificationCenter.default.removeObserver(sendFeedbackObserver)
         }
         // Tear down menu bar + action observers BEFORE releasing the
         // single-instance lock so a second wrapper that races to launch
@@ -240,9 +215,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = MenuBarController(setup: setup)
         let handler = MenuBarActionHandler(setup: setup)
         handler.menuBarController = controller
-        // The "Show pairing info…" menu item is wired in `MenuBarHostView`
-        // (see RootView), which owns the SwiftUI mode flip back to
-        // wizard. AppDelegate intentionally stays out of that path.
         handler.install()
         controller.install()
         menuBarController = controller
@@ -252,10 +224,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension Notification.Name {
     static let tronWizardDidComplete = Notification.Name("com.tron.mac.wizard.didComplete")
-    /// Posted by `MenuBarItemBuilder` when the user clicks "Show pairing
-    /// info…" in the menu bar. Observed by `MenuBarHostView`, which
-    /// asks `RootView` to flip back to wizard mode pre-seeded at the
-    /// pairing step. Tests pin the descriptor sequence in
-    /// `MenuBarItemBuilderTests.swift`.
-    static let tronWizardShowPairingInfo = Notification.Name("com.tron.mac.wizard.showPairingInfo")
 }

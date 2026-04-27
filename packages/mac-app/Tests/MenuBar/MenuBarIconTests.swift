@@ -6,23 +6,26 @@ import Testing
 @Suite("MenuBarIcon")
 @MainActor
 struct MenuBarIconTests {
-    @Test("each tone resolves to a non-empty NSImage")
-    func everyToneResolves() {
-        for tone in [MenuBarTone.running, .stopped, .unauthorized, .unknown] {
-            let image = MenuBarIcon.template(for: tone)
-            #expect(image.size.width > 0, "tone \(tone) produced empty image")
-            #expect(image.size.height > 0, "tone \(tone) produced empty image")
+    @Test("each server state resolves to a tinted logo image")
+    func everyStateResolves() {
+        for state in [
+            ServerStatusState.checking,
+            .running(version: "0.5.0", port: 9847),
+            .busy(.restarting),
+            .paused,
+            .failed(reason: "timeout"),
+            .unauthorized,
+        ] {
+            let image = MenuBarIcon.image(for: state)
+            #expect(image.size == MenuBarIcon.size, "state \(state) produced wrong image size")
+            #expect(image.isTemplate == false, "state \(state) should use explicit tint rendering")
         }
     }
 
-    @Test("running tone is non-template (colored), other tones are template")
-    func templateFlag() {
-        // Running uses solid color (so the green dot reads as alive); the
-        // other tones rely on macOS's automatic light/dark adaptation
-        // via template rendering.
-        #expect(MenuBarIcon.template(for: .running).isTemplate == false)
-        #expect(MenuBarIcon.template(for: .stopped).isTemplate == true)
-        #expect(MenuBarIcon.template(for: .unauthorized).isTemplate == true)
-        #expect(MenuBarIcon.template(for: .unknown).isTemplate == true)
+    @Test("tone colors are explicit and distinct")
+    func toneColors() {
+        #expect(MenuBarIcon.color(for: .running) != MenuBarIcon.color(for: .attention))
+        #expect(MenuBarIcon.color(for: .attention) != MenuBarIcon.color(for: .failed))
+        #expect(MenuBarIcon.color(for: .paused) != MenuBarIcon.color(for: .failed))
     }
 }

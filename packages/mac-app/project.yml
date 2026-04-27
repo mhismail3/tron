@@ -41,6 +41,10 @@ targets:
         createIntermediateGroups: true
         buildPhase: resources
         optional: true
+      - path: ../../scripts/tron-cli
+        buildPhase: resources
+      - path: ../../scripts/tron-lib.sh
+        buildPhase: resources
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
