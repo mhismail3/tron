@@ -457,10 +457,10 @@ struct ServerSettingsUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
         /// Optional bearer-auth block — present only when the user toggles
-        /// the "Enforce bearer auth" control. Encoded as `{ "auth": { "enforced": true } }`.
+        /// "Require paired-device token". Encoded as `{ "auth": { "enforced": true } }`.
         var auth: AuthUpdate?
-        /// Updated Tailscale IP. Mac wrapper writes this on first launch; the
-        /// iOS UI lets the user override / clear if needed.
+        /// Updated Tailscale IP. The Mac wrapper writes this after live pairing
+        /// resolution; iOS decodes it but does not expose it as a user setting.
         var tailscaleIp: String?
         /// Partial update for local transcription sidecar settings.
         var transcription: TranscriptionUpdate?

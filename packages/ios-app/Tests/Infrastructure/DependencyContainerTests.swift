@@ -135,8 +135,6 @@ final class DependencyContainerTests: XCTestCase {
         Self.clearPairings()
         let container = DependencyContainer()
 
-        XCTAssertEqual(container.serverHost, "")
-        XCTAssertEqual(container.serverPort, "")
         XCTAssertEqual(container.currentServerOrigin, "")
         XCTAssertEqual(container.serverURL.host, "paired-server-required.invalid")
     }
@@ -189,22 +187,22 @@ final class DependencyContainerTests: XCTestCase {
 
     func test_selectPairedServer_incrementsVersion() async throws {
         let (container, first) = pairedContainer(host: "first.example.com", port: 19008)
-        let originalVersion = container.serverSettingsVersion
+        let originalVersion = container.activeServerSelectionVersion
         let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19009)
         container.replacePairedServers([first, second], activeServer: first)
 
         container.selectPairedServer(second, connectAfterSwitch: false)
 
-        XCTAssertEqual(container.serverSettingsVersion, originalVersion + 2, "serverSettingsVersion should increment for replace and select")
+        XCTAssertEqual(container.activeServerSelectionVersion, originalVersion + 2, "activeServerSelectionVersion should increment for replace and select")
     }
 
     func test_selectPairedServer_noChangeDoesNotIncrementVersion() async throws {
         let (container, server) = pairedContainer(host: "same.example.com", port: 19010)
-        let originalVersion = container.serverSettingsVersion
+        let originalVersion = container.activeServerSelectionVersion
 
         container.selectPairedServer(server)
 
-        XCTAssertEqual(container.serverSettingsVersion, originalVersion, "Version should NOT increment when unchanged")
+        XCTAssertEqual(container.activeServerSelectionVersion, originalVersion, "Version should NOT increment when unchanged")
     }
 
     func test_selectPairedServer_updatesServerURL() async throws {

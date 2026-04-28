@@ -120,10 +120,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Agent repository for agent operations
     private(set) var agentRepository: AgentRepository
 
-    // MARK: - Observable Server Settings Version
+    // MARK: - Observable Active Server Selection Version
 
-    /// Incremented when active server selection changes. Views can observe this to react to changes.
-    private(set) var serverSettingsVersion: Int = 0
+    /// Incremented when local paired-server selection changes. Settings observes
+    /// this to clear any server-backed snapshot before loading the new server.
+    private(set) var activeServerSelectionVersion: Int = 0
 
     /// Incremented when auth.json changes on the server. Providers page observes this.
     private(set) var authVersion: Int = 0
@@ -132,12 +133,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     private(set) var isInitialized = false
 
     // MARK: - ServerSettingsProvider
-
-    var serverHost: String { pairedServerStore.activeServer?.host ?? "" }
-    var serverPort: String {
-        guard let port = pairedServerStore.activeServer?.port else { return "" }
-        return String(port)
-    }
 
     var serverURL: URL {
         guard let server = pairedServerStore.activeServer else {
@@ -339,7 +334,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
                 }
             }
         } else {
-            serverSettingsVersion += 1
+            activeServerSelectionVersion += 1
         }
         return plan
     }
@@ -388,8 +383,12 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// the previously selected Mac.
     func reloadServerSettings() async {
         guard let activeServer = pairedServerStore.activeServer else { return }
+        let client = rpcClient
         do {
-            let settings = try await rpcClient.settings.get()
+            let settings = try await client.settings.get()
+            guard pairedServerStore.activeServer?.id == activeServer.id,
+                  rpcClient === client
+            else { return }
             quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
             if !settings.defaultModel.isEmpty {
                 defaultModel = settings.defaultModel
@@ -399,6 +398,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
                 server.lastKnownStatus = "Connected"
             }
         } catch {
+            guard pairedServerStore.activeServer?.id == activeServer.id,
+                  rpcClient === client
+            else { return }
             pairedServerStore.updateMetadata(for: activeServer.id) { server in
                 server.lastKnownStatus = "Offline"
             }
@@ -450,7 +452,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         agentRepository = DefaultAgentRepository(agentClient: newClient.agent)
         eventStoreManager.loadSessions()
 
-        serverSettingsVersion += 1
+        activeServerSelectionVersion += 1
         NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)
 
         TronLogger.shared.info("Active paired server changed to \(currentServerOrigin.nilIfEmpty ?? "none")", category: .general)

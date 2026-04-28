@@ -484,7 +484,7 @@ private struct MCPParamRow: View {
     }
 }
 
-// MARK: - Add Server Sheet
+// MARK: - Add MCP Server Sheet
 
 private struct AddMCPServerSheet: View {
     @Environment(\.dismiss) private var dismiss

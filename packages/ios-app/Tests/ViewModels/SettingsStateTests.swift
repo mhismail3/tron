@@ -73,6 +73,20 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertFalse(state.isLoadingModels)
     }
 
+    func testClearServerSnapshotClearsRollbackAnchor() throws {
+        let state = SettingsState()
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{"server":{"defaultWorkspace":"/old/server"}}"#.utf8))
+        state.applyServerSettings(settings)
+
+        state.clearServerSnapshot()
+        state.quickSessionWorkspace = "/optimistic"
+        state.rollbackToLastLoadedSettings(message: "save failed")
+
+        XCTAssertEqual(state.quickSessionWorkspace, "/optimistic")
+        XCTAssertFalse(state.isLoaded)
+        XCTAssertEqual(state.loadError, "save failed")
+    }
+
     func testFailedUpdateRollsBackToLastLoadedServerSettings() throws {
         let state = SettingsState()
         let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{"server":{"defaultWorkspace":"/loaded"}}"#.utf8))

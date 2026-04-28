@@ -214,7 +214,7 @@ xcodegen generate
 open TronMac.xcodeproj
 ```
 
-Build with the `Tron` scheme (or `Tron Beta` for the beta variant). The app connects to `ws://localhost:9847/ws` by default.
+Build with the `Tron` scheme (or `Tron Beta` for the beta variant). The app starts without a server until the user pairs a Mac through onboarding.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions, TDD expectations, and release workflows.
 
@@ -590,7 +590,7 @@ tron login --label personal
 
 Stored beside provider auth in the same secure file. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request when `server.auth.enforced` is `true`. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
 
-The token is generated during first server startup and written as `bearerToken` inside `~/.tron/system/auth.json`. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS app's connection settings.
+The token is generated during first server startup and written as `bearerToken` inside `~/.tron/system/auth.json`. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS pairing step.
 
 ```bash
 # Rotate the token (forces every paired iOS device to re-pair)
@@ -730,8 +730,8 @@ Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewMo
 
 | Config | Use |
 |--------|-----|
-| Beta | Debug build, beta server endpoint, side-by-side bundle ID |
-| Prod | Release build, production server endpoint |
+| Beta | Debug build, side-by-side bundle ID |
+| Prod | Release build, production bundle ID |
 
 ### Documentation
 

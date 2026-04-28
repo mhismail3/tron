@@ -128,30 +128,46 @@ final class SettingsState {
 
     // MARK: - Load from Server
 
-    func load(using rpcClient: RPCClient) async {
+    func load(
+        using rpcClient: RPCClient,
+        acceptResult: @escaping @MainActor () -> Bool = { true }
+    ) async {
         guard !isLoaded else { return }
         do {
             let settings = try await rpcClient.settings.get()
+            guard acceptResult() else { return }
             applyServerSettings(settings)
             isLoaded = true
         } catch {
+            guard acceptResult() else { return }
             loadError = error.localizedDescription
         }
     }
 
-    func reload(using rpcClient: RPCClient) async {
+    func reload(
+        using rpcClient: RPCClient,
+        acceptResult: @escaping @MainActor () -> Bool = { true }
+    ) async {
         clearServerSnapshot()
-        await load(using: rpcClient)
-        await loadModels(using: rpcClient)
+        await load(using: rpcClient, acceptResult: acceptResult)
+        guard acceptResult() else { return }
+        await loadModels(using: rpcClient, acceptResult: acceptResult)
     }
 
-    func loadModels(using rpcClient: RPCClient) async {
+    func loadModels(
+        using rpcClient: RPCClient,
+        acceptResult: @escaping @MainActor () -> Bool = { true }
+    ) async {
         isLoadingModels = true
         do {
-            availableModels = try await rpcClient.model.list()
+            let models = try await rpcClient.model.list()
+            guard acceptResult() else { return }
+            availableModels = models
         } catch {
+            guard acceptResult() else { return }
             // Silently fail — models are optional
         }
+        guard acceptResult() else { return }
         isLoadingModels = false
     }
 
@@ -159,8 +175,12 @@ final class SettingsState {
 
     /// Reset settings to server defaults via RPC. The server applies its own defaults
     /// and returns the new values — no hardcoded defaults on the client.
-    func resetToDefaults(using rpcClient: RPCClient) async throws {
+    func resetToDefaults(
+        using rpcClient: RPCClient,
+        acceptResult: @escaping @MainActor () -> Bool = { true }
+    ) async throws {
         let settings = try await rpcClient.settings.resetToDefaults()
+        guard acceptResult() else { return }
         applyServerSettings(settings)
     }
 
@@ -169,6 +189,7 @@ final class SettingsState {
         loadError = nil
         availableModels = []
         isLoadingModels = false
+        lastLoadedSettings = nil
     }
 
     func rollbackToLastLoadedSettings(message: String) {

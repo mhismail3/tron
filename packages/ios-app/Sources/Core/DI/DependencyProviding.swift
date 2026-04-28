@@ -42,13 +42,7 @@ protocol DependencyProviding: AnyObject {
 /// Separated from DependencyProviding to allow focused testing.
 @MainActor
 protocol ServerSettingsProvider: AnyObject {
-    /// Current server host
-    var serverHost: String { get }
-
-    /// Current server port
-    var serverPort: String { get }
-
-    /// Computed WebSocket URL from current settings
+    /// Computed WebSocket URL from the active paired server.
     var serverURL: URL { get }
 
     /// Current server origin string (host:port)

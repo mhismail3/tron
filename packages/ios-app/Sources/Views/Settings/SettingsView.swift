@@ -126,7 +126,7 @@ struct SettingsView: View {
             cardsVisible = true
             await loadServerSettingsIfAvailable()
         }
-        .onChange(of: dependencies.serverSettingsVersion) {
+        .onChange(of: dependencies.activeServerSelectionVersion) {
             settingsState.clearServerSnapshot()
             Task { await loadServerSettingsIfAvailable() }
         }
@@ -490,11 +490,15 @@ struct SettingsView: View {
     // MARK: - Actions
 
     private func loadServerSettingsIfAvailable() async {
-        guard dependencies.pairedServerStore.activeServer != nil else {
+        guard let activeServer = dependencies.pairedServerStore.activeServer else {
             settingsState.clearServerSnapshot()
             return
         }
-        await settingsState.reload(using: rpcClient)
+        let client = rpcClient
+        await settingsState.reload(using: client) {
+            dependencies.pairedServerStore.activeServer?.id == activeServer.id
+                && dependencies.rpcClient === client
+        }
     }
 
     private func retry(_ server: PairedServer) {
@@ -520,11 +524,19 @@ struct SettingsView: View {
         confirmArchive = true
         autoMarkRead = true
         guard serverSettingsReady else { return }
+        let activeServerId = dependencies.pairedServerStore.activeServer?.id
+        let client = rpcClient
         Task {
             do {
-                try await settingsState.resetToDefaults(using: rpcClient)
+                try await settingsState.resetToDefaults(using: client) {
+                    dependencies.pairedServerStore.activeServer?.id == activeServerId
+                        && dependencies.rpcClient === client
+                }
             } catch {
-                settingsState.loadError = "Failed to reset: \(error.localizedDescription)"
+                if dependencies.pairedServerStore.activeServer?.id == activeServerId,
+                   dependencies.rpcClient === client {
+                    settingsState.loadError = "Failed to reset: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -540,17 +552,24 @@ struct SettingsView: View {
     private func updateServerSetting(_ build: () -> ServerSettingsUpdate) {
         let update = build()
         let client = rpcClient
+        let activeServerId = dependencies.pairedServerStore.activeServer?.id
         Task {
             do {
                 try await client.settings.update(update)
                 let fresh = try await client.settings.get()
                 await MainActor.run {
+                    guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
+                          dependencies.rpcClient === client
+                    else { return }
                     settingsState.applyServerSettings(fresh)
                     settingsState.isLoaded = true
                     settingsState.loadError = nil
                 }
             } catch {
                 await MainActor.run {
+                    guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
+                          dependencies.rpcClient === client
+                    else { return }
                     settingsState.rollbackToLastLoadedSettings(
                         message: "Could not save server setting: \(error.localizedDescription)"
                     )

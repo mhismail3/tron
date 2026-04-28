@@ -231,7 +231,7 @@ Settings live at `~/.tron/system/settings.json`. All keys are camelCase. Missing
 
 | Section | Purpose |
 |---------|---------|
-| `server` | Network, model, workspace, connection presets |
+| `server` | Network, model, workspace, auth, transcription, updates |
 | `context` | Compaction settings, rules discovery |
 | `agent` | Max turns, subagent depth/model |
 | `tools` | Per-tool settings (bash, read, find, search, web, browser, computerUse) |

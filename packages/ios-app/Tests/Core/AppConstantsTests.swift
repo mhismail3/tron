@@ -12,22 +12,6 @@ final class AppConstantsTests: XCTestCase {
         XCTAssertEqual(AppConstants.prodPort, "9847")
     }
 
-    func testDefaultHost_isLocalhost() {
-        XCTAssertEqual(AppConstants.defaultHost, "localhost")
-    }
-
-    func testFallbackServerURL_isValid() {
-        let url = AppConstants.fallbackServerURL
-        XCTAssertNotNil(url.host)
-        XCTAssertNotNil(url.port)
-        XCTAssertEqual(url.scheme, "ws")
-    }
-
-    func testFallbackServerURL_usesProdPort() {
-        let url = AppConstants.fallbackServerURL
-        XCTAssertEqual(url.port, 9847)
-    }
-
     func testDmgDownloadPage_isGitHubReleasesURL() {
         let url = AppConstants.dmgDownloadPage
         XCTAssertEqual(url.scheme, "https")
