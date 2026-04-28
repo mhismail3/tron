@@ -208,17 +208,21 @@ TronMacApp.main()
 
 The menu bar renders an explicit server state rather than a generic dot:
 `running` is green, `checking`/busy/unauthorized are yellow, `failed` is red,
-and `paused` is gray. If `system.ping` fails, the poller asks launchd whether
-`com.tron.server` is loaded; unloaded maps to paused, loaded-but-unreachable
-maps to failed.
+and `paused` is gray. On a successful ping the poller asks the local port owner
+for PID/uptime, so `tron dev` takeover reports the `Tron-Dev.app` process
+instead of stale LaunchAgent metadata and marks the header `Dev Server active`.
+If `system.ping` fails, the poller asks launchd whether `com.tron.server` is
+loaded; unloaded maps to paused, loaded-but-unreachable maps to failed.
 
 ### Menu-bar auxiliary windows
 
 Post-onboarding surfaces stay in menu-bar mode. The first menu item is a custom
 header view aligned with the normal menu rows: `Tron`, the current Tailscale
-endpoint, a color-coded status line with PID when launchd reports one, and
-uptime when `ps` can resolve the pid's elapsed time. "Show pairing info" is a
-normal menu action below the header separator. The menu does not repeat the
+endpoint, a color-coded status line, PID/uptime for the process actually
+listening on port 9847, and a `Dev Server active` line when that process is the
+`Tron-Dev.app` bundle created by `tron dev`. The menu refreshes this snapshot
+when opened as well as on the background poll interval. "Show pairing info" is
+a normal menu action below the header separator. The menu does not repeat the
 pairing token because the pairing-only window owns QR/manual copy details for
 host, port, token, and server name. That window reuses the
 pairing resolver/QR/copy controls without wizard navigation or a progress pill.

@@ -121,7 +121,8 @@ enum MenuBarItemBuilder {
             status: statusLabel(snapshot: snapshot),
             health: health,
             pid: snapshot.processID,
-            uptime: snapshot.uptime
+            uptime: snapshot.uptime,
+            modeDetail: snapshot.isDevServerActive ? "Dev Server active" : nil
         )
     }
 }
@@ -140,6 +141,7 @@ struct MenuHeaderContent: Equatable, Sendable {
     var health: Health
     var pid: Int?
     var uptime: String?
+    var modeDetail: String?
 }
 
 enum ServerBusyAction: String, Equatable, Sendable {
@@ -222,6 +224,7 @@ struct ServerStatusSnapshot: Equatable {
     var bearerToken: String?
     var processID: Int?
     var uptime: String?
+    var isDevServerActive: Bool
 
     init(
         state: ServerStatusState,
@@ -230,7 +233,8 @@ struct ServerStatusSnapshot: Equatable {
         tailscaleIP: String? = nil,
         bearerToken: String? = nil,
         processID: Int? = nil,
-        uptime: String? = nil
+        uptime: String? = nil,
+        isDevServerActive: Bool = false
     ) {
         self.state = state
         self.tone = state.tone
@@ -246,6 +250,7 @@ struct ServerStatusSnapshot: Equatable {
         self.bearerToken = bearerToken
         self.processID = processID
         self.uptime = uptime
+        self.isDevServerActive = isDevServerActive
     }
 
     static let checking = ServerStatusSnapshot(state: .checking)

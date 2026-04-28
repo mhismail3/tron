@@ -69,6 +69,11 @@ struct EnvironmentSetup: Sendable {
     /// LaunchAgent control surface - load/unload/restart/check.
     var launchAgentManager: LaunchAgentManaging
 
+    /// Best-effort local process metadata for the server currently
+    /// listening on the configured port. This covers `tron dev`, which
+    /// intentionally stops the LaunchAgent before binding port 9847.
+    var probeServerProcess: @Sendable (Int) async -> ServerProcessInfo? = { _ in nil }
+
     /// Syncs first-party `.managed` skills from the app bundle into
     /// `~/.tron/skills`, preserving user-owned skill directories.
     var syncManagedSkills: @Sendable () async -> ManagedSkillSyncResult = {
@@ -133,6 +138,9 @@ struct EnvironmentSetup: Sendable {
             await ServerPing.ping(host: "127.0.0.1", port: TronPaths.defaultServerPort, token: token)
         },
         launchAgentManager: LiveLaunchAgentManager(),
+        probeServerProcess: { port in
+            await ServerProcessProbe.probe(port: port)
+        },
         syncManagedSkills: {
             await Task.detached(priority: .utility) {
                 do {

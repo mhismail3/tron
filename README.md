@@ -785,7 +785,7 @@ packages/mac-app/Sources/
 
 | Item | Action |
 |------|--------|
-| Custom status header | Shows `Tron`, the Tailscale endpoint, color-coded state, PID, and live uptime in a compact left-aligned header |
+| Custom status header | Shows `Tron`, the Tailscale endpoint, color-coded state, PID, live uptime, and a `Dev Server active` marker when `tron dev` owns port 9847 |
 | Show pairing info | Opens a pairing-only window with QR + manual copy buttons for host, port, token, and server name; copy actions quickly show a checkmark for two seconds on success |
 | Restart / Pause / Resume server | `launchctl kickstart` for restart diagnostics, `SMAppService.unregister/register` for stop/start, shows busy state and posts success/failure notifications |
 | Show logs | Opens the native logs window backed by the read-only `logs.recent` RPC |
@@ -812,7 +812,7 @@ Mutual exclusion:
 - Port `9847` — `tron dev` calls `launchctl bootout com.tron.server` before binding, so the installed helper is paused while dev-mode runs.
 - Direct server guard — if no LaunchAgent owns the service but port `9847` is already bound or `system/database/log.db.lock` is held, the app reports another Tron server instead of registering a second helper or choosing a different port.
 
-A contributor can have the DMG installed AND switch to `tron dev` for agent iteration without uninstalling — the wrapper's menu bar shows "Server stopped" while `tron dev` runs; quitting `tron dev` restarts the installed helper by invoking `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which re-enters the same `SMAppService` registration path used by the app. Pre-onboarding/debug cleanup uses the paired internal command `--tron-uninstall-and-quit` so stale Login Item registrations are removed by `SMAppService.unregister` instead of only being booted out of launchd. See [`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants) for the full breakdown including the on-disk artifacts each workflow shares.
+A contributor can have the DMG installed AND switch to `tron dev` for agent iteration without uninstalling — the wrapper's menu bar keeps pinging port 9847, reports the `Tron-Dev.app` PID/uptime, and shows `Dev Server active` while dev owns the port. Quitting `tron dev` restarts the installed helper by invoking `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which re-enters the same `SMAppService` registration path used by the app. Pre-onboarding/debug cleanup uses the paired internal command `--tron-uninstall-and-quit` so stale Login Item registrations are removed by `SMAppService.unregister` instead of only being booted out of launchd. See [`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants) for the full breakdown including the on-disk artifacts each workflow shares.
 
 ### Documentation
 

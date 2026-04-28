@@ -72,6 +72,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         rebuildMenu()
     }
 
+    func menuWillOpen(_ menu: NSMenu) {
+        Task { [weak self] in
+            guard let self else { return }
+            let freshSnapshot = await ServerStatusPoller.singleSnapshot(setup: self.setup)
+            await MainActor.run {
+                self.applySnapshot(freshSnapshot)
+            }
+        }
+    }
+
     func showPairingInfoWindow(setup: EnvironmentSetup) {
         if let pairingInfoWindowController {
             pairingInfoWindowController.window?.makeKeyAndOrderFront(nil)
@@ -198,7 +208,10 @@ private final class MenuBarHeaderView: NSView {
     private var uptimeTask: Task<Void, Never>?
 
     init(content: MenuHeaderContent) {
-        let diagnosticRows = 2 + (content.pid == nil ? 0 : 1) + (content.uptime == nil ? 0 : 1)
+        let diagnosticRows = 2
+            + (content.pid == nil ? 0 : 1)
+            + (content.uptime == nil ? 0 : 1)
+            + (content.modeDetail == nil ? 0 : 1)
         let height = CGFloat(26 + diagnosticRows * 17)
         super.init(frame: NSRect(x: 0, y: 0, width: 202, height: height))
         translatesAutoresizingMaskIntoConstraints = false
@@ -242,6 +255,12 @@ private final class MenuBarHeaderView: NSView {
             rows.append(uptimeField)
             self.uptimeField = uptimeField
             startUptimeTimer(initialUptime: uptime)
+        }
+        if let modeDetail = content.modeDetail {
+            let modeField = NSTextField(labelWithString: modeDetail)
+            modeField.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
+            modeField.textColor = .systemOrange
+            rows.append(modeField)
         }
 
         let body = NSStackView(views: rows)

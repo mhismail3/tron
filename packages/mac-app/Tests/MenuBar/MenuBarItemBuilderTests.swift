@@ -75,10 +75,35 @@ struct MenuBarItemBuilderTests {
             #expect(content.health == .healthy)
             #expect(content.pid == 16027)
             #expect(content.uptime == "01:07:42")
+            #expect(content.modeDetail == nil)
         } else {
             Issue.record("status should live in custom header")
         }
         #expect(!items.map(\.title).contains { $0.contains("Pairing token") })
+    }
+
+    @Test("dev snapshot: header calls out active dev server")
+    func devSnapshotHeader() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp)
+        let snap = ServerStatusSnapshot(
+            state: .running(version: "0.5.0", port: 9847),
+            tailscaleIP: "100.64.0.1",
+            processID: 24680,
+            uptime: "00:00:09",
+            isDevServerActive: true
+        )
+        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+
+        if case .header(let content) = items[0] {
+            #expect(content.status == "Running")
+            #expect(content.pid == 24680)
+            #expect(content.uptime == "00:00:09")
+            #expect(content.modeDetail == "Dev Server active")
+        } else {
+            Issue.record("status should live in custom header")
+        }
     }
 
     @Test("running snapshot includes Pause server (not Resume)")
