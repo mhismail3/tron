@@ -31,6 +31,7 @@ struct OAuthProvider: Identifiable {
 
 struct OAuthLoginSheet: View {
     let provider: OAuthProvider
+    var onComplete: (AuthState) -> Void = { _ in }
 
     @Environment(\.dependencies) private var dependencies
     @Environment(\.dismiss) private var dismiss
@@ -313,11 +314,12 @@ struct OAuthLoginSheet: View {
 
         Task {
             do {
-                _ = try await rpcClient.auth.oauthComplete(
+                let authState = try await rpcClient.auth.oauthComplete(
                     flowId: flowId,
                     code: code,
                     label: label
                 )
+                onComplete(authState)
                 flowState = .success
                 try? await Task.sleep(for: .seconds(1))
                 dismiss()

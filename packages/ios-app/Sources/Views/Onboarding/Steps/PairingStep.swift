@@ -256,7 +256,7 @@ struct PairingStep: View {
     // MARK: - Connect action
 
     private func connect() {
-        state.pairingError = nil
+        state.beginPairingEntry()
         scanError = nil
         state.isConnecting = true
 
@@ -276,7 +276,7 @@ struct PairingStep: View {
     }
 
     private func runValidatedConnect(_ payload: PairingURLParser.PairingPayload) {
-        state.pairingError = nil
+        state.beginPairingEntry()
         scanError = nil
         state.isConnecting = true
         Task { await runProbe(payload: payload) }
@@ -303,6 +303,7 @@ struct PairingStep: View {
         let existing = dependencies.pairedServerStore.servers
         let previousActiveId = dependencies.pairedServerStore.activeServerId
         let plan = PairingPersistor.plan(payload: payload, existing: existing)
+        let previousToken = dependencies.pairedServerTokenStore.token(forServerId: plan.activeServer.id)
 
         do {
             try dependencies.pairedServerTokenStore.setToken(plan.token, forServerId: plan.activeServer.id)
@@ -313,16 +314,37 @@ struct PairingStep: View {
         }
 
         dependencies.replacePairedServers(plan.updatedServers, activeServer: plan.activeServer)
+        let client = dependencies.rpcClient
 
         do {
-            await dependencies.connect()
-            _ = try await dependencies.rpcClient.settings.get()
-            await dependencies.reloadServerSettings()
+            await client.connect()
+            let settings = try await client.settings.get()
+            guard dependencies.pairedServerStore.activeServer?.id == plan.activeServer.id,
+                  dependencies.rpcClient === client
+            else {
+                state.pairingError = .settingsFailed("Active server changed before setup settings loaded.")
+                state.isConnecting = false
+                return
+            }
+            dependencies.applyServerSettingsSnapshot(settings, for: plan.activeServer.id)
+
+            do {
+                let authState = try await client.auth.get()
+                state.hydrateSetup(serverId: plan.activeServer.id, settings: settings, authState: authState)
+            } catch {
+                state.hydrateSetup(
+                    serverId: plan.activeServer.id,
+                    settings: settings,
+                    authState: nil,
+                    authLoadError: error.localizedDescription
+                )
+            }
         } catch {
             rollbackPairingState(
                 to: existing,
                 previousActiveId: previousActiveId,
-                newServerId: plan.activeServer.id
+                pairedServerId: plan.activeServer.id,
+                previousToken: previousToken
             )
             state.pairingError = .settingsFailed(error.localizedDescription)
             state.isConnecting = false
@@ -337,11 +359,14 @@ struct PairingStep: View {
     private func rollbackPairingState(
         to servers: [PairedServer],
         previousActiveId: String?,
-        newServerId: String
+        pairedServerId: String,
+        previousToken: String?
     ) {
         dependencies.replacePairedServers(servers, activeId: previousActiveId)
-        if !servers.contains(where: { $0.id == newServerId }) {
-            try? dependencies.pairedServerTokenStore.remove(serverId: newServerId)
+        if let previousToken {
+            try? dependencies.pairedServerTokenStore.setToken(previousToken, forServerId: pairedServerId)
+        } else {
+            try? dependencies.pairedServerTokenStore.remove(serverId: pairedServerId)
         }
     }
 }

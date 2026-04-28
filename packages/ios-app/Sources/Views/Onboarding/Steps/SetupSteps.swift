@@ -2,6 +2,7 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 struct WorkspaceSetupOnboardingPage: View {
+    let state: OnboardingState
     let dependencies: DependencyContainer
 
     @State private var selectedPath = ""
@@ -58,7 +59,9 @@ struct WorkspaceSetupOnboardingPage: View {
         }
         .onAppear {
             if selectedPath.isEmpty {
-                selectedPath = dependencies.quickSessionWorkspace
+                selectedPath = state.setupSnapshot.defaultWorkspace.isEmpty
+                    ? dependencies.quickSessionWorkspace
+                    : state.setupSnapshot.defaultWorkspace
             }
         }
     }
@@ -90,6 +93,7 @@ struct WorkspaceSetupOnboardingPage: View {
 
 @available(iOS 26.0, *)
 struct ProviderSetupOnboardingPage: View {
+    let state: OnboardingState
     let provider: ProviderInfo
     let dependencies: DependencyContainer
     let allowsOAuth: Bool
@@ -100,11 +104,21 @@ struct ProviderSetupOnboardingPage: View {
     @State private var status: String?
     @State private var isSaving = false
 
+    private var existingSummary: OnboardingCredentialSummary? {
+        state.setupSnapshot.providerSummary(for: provider.id)
+    }
+
     var body: some View {
         OnboardingPage(
             subtitle: "Add \(provider.displayName) credentials now, or skip this and add them later in Settings."
         ) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
+                if let summary = existingSummary {
+                    ExistingCredentialCard(summary: summary)
+                } else if let authError = state.setupSnapshot.authLoadError {
+                    SetupStatusText("Could not inspect existing credentials: \(authError)")
+                }
+
                 if allowsOAuth, let oauth = OAuthProvider.from(provider.id) {
                     SetupActionButton(
                         title: "Sign in with \(provider.displayName)",
@@ -119,7 +133,7 @@ struct ProviderSetupOnboardingPage: View {
                     label: $apiKeyLabel,
                     secret: $apiKey,
                     isSaving: isSaving,
-                    actionTitle: "Save API key",
+                    actionTitle: existingSummary?.kind == .apiKey ? "Replace API key" : "Save API key",
                     onSave: saveProviderKey
                 )
 
@@ -129,8 +143,16 @@ struct ProviderSetupOnboardingPage: View {
             }
         }
         .sheet(item: $oauthProvider) { provider in
-            OAuthLoginSheet(provider: provider)
+            OAuthLoginSheet(provider: provider) { updatedAuthState in
+                state.refreshSetupAuth(updatedAuthState)
+                status = "\(provider.displayName) sign-in saved."
+            }
                 .environment(\.dependencies, dependencies)
+        }
+        .onAppear {
+            if apiKeyLabel == "default" {
+                apiKeyLabel = state.setupSnapshot.preferredApiKeyLabel(for: provider.id)
+            }
         }
     }
 
@@ -146,11 +168,12 @@ struct ProviderSetupOnboardingPage: View {
         status = nil
         Task {
             do {
-                _ = try await dependencies.rpcClient.auth.addNamedApiKey(
+                let authState = try await dependencies.rpcClient.auth.addNamedApiKey(
                     provider: provider.id,
                     label: label,
                     key: key
                 )
+                state.refreshSetupAuth(authState)
                 apiKey = ""
                 status = "\(provider.displayName) API key saved."
             } catch {
@@ -163,6 +186,7 @@ struct ProviderSetupOnboardingPage: View {
 
 @available(iOS 26.0, *)
 struct RemainingProvidersOnboardingPage: View {
+    let state: OnboardingState
     let dependencies: DependencyContainer
 
     private let providers = ProviderInfo.modelProviders.filter {
@@ -178,13 +202,15 @@ struct RemainingProvidersOnboardingPage: View {
                     CompactApiKeyCard(
                         title: provider.displayName,
                         placeholder: "\(provider.displayName) API key",
+                        existingSummary: state.setupSnapshot.providerSummary(for: provider.id),
                         save: { key in
-                            _ = try await dependencies.rpcClient.auth.addNamedApiKey(
+                            try await dependencies.rpcClient.auth.addNamedApiKey(
                                 provider: provider.id,
                                 label: "default",
                                 key: key
                             )
-                        }
+                        },
+                        onSaved: { authState in state.refreshSetupAuth(authState) }
                     )
                 }
             }
@@ -194,6 +220,7 @@ struct RemainingProvidersOnboardingPage: View {
 
 @available(iOS 26.0, *)
 struct ServicesSetupOnboardingPage: View {
+    let state: OnboardingState
     let dependencies: DependencyContainer
 
     var body: some View {
@@ -205,11 +232,13 @@ struct ServicesSetupOnboardingPage: View {
                     CompactApiKeyCard(
                         title: service.displayName,
                         placeholder: "\(service.displayName) API key",
+                        existingSummary: state.setupSnapshot.serviceSummary(for: service.id),
                         save: { key in
-                            _ = try await dependencies.rpcClient.auth.update(
+                            try await dependencies.rpcClient.auth.update(
                                 AuthUpdateParams(service: service.id, apiKey: .value(key))
                             )
-                        }
+                        },
+                        onSaved: { authState in state.refreshSetupAuth(authState) }
                     )
                 }
             }
@@ -219,6 +248,7 @@ struct ServicesSetupOnboardingPage: View {
 
 @available(iOS 26.0, *)
 struct ModelSetupOnboardingPage: View {
+    let state: OnboardingState
     let dependencies: DependencyContainer
     let onComplete: () -> Void
 
@@ -302,14 +332,20 @@ struct ModelSetupOnboardingPage: View {
         do {
             await dependencies.rpcClient.connect()
             models = try await dependencies.rpcClient.model.list()
-            selectedModel = dependencies.defaultModel.isEmpty
-                ? (models.first?.id ?? "claude-sonnet-4-6")
-                : dependencies.defaultModel
+            let hydratedModel = state.setupSnapshot.defaultModel
+            selectedModel = hydratedModel.isEmpty
+                ? (dependencies.defaultModel.isEmpty
+                    ? (models.first?.id ?? "claude-sonnet-4-6")
+                    : dependencies.defaultModel)
+                : hydratedModel
         } catch {
             status = "Could not load models: \(error.localizedDescription)"
-            selectedModel = dependencies.defaultModel.isEmpty
-                ? "claude-sonnet-4-6"
-                : dependencies.defaultModel
+            let hydratedModel = state.setupSnapshot.defaultModel
+            selectedModel = hydratedModel.isEmpty
+                ? (dependencies.defaultModel.isEmpty
+                    ? "claude-sonnet-4-6"
+                    : dependencies.defaultModel)
+                : hydratedModel
         }
         isLoading = false
     }
@@ -375,7 +411,9 @@ private struct CredentialEntryCard: View {
 private struct CompactApiKeyCard: View {
     let title: String
     let placeholder: String
-    let save: (String) async throws -> Void
+    let existingSummary: OnboardingCredentialSummary?
+    let save: (String) async throws -> AuthState
+    let onSaved: (AuthState) -> Void
 
     @State private var key = ""
     @State private var isSaving = false
@@ -385,9 +423,21 @@ private struct CompactApiKeyCard: View {
         OnboardingGlassCard {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
                 HStack(spacing: TronSpacing.md) {
-                    Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronTextPrimary)
+
+                        if let existingSummary {
+                            Text(existingSummary.title)
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                                .foregroundStyle(existingSummary.isExpired ? Color.tronWarning : Color.tronEmerald)
+                            Text(existingSummary.detail)
+                                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .lineLimit(1)
+                        }
+                    }
 
                     Spacer(minLength: 0)
 
@@ -401,7 +451,7 @@ private struct CompactApiKeyCard: View {
                 setupField(placeholder, text: $key, secure: true)
 
                 SetupActionButton(
-                    title: isSaving ? "Saving" : "Save key",
+                    title: isSaving ? "Saving" : (existingSummary?.kind == .apiKey ? "Replace key" : "Save key"),
                     systemImage: "key",
                     action: saveKey
                 )
@@ -421,13 +471,42 @@ private struct CompactApiKeyCard: View {
         status = nil
         Task {
             do {
-                try await save(trimmed)
+                let authState = try await save(trimmed)
+                onSaved(authState)
                 key = ""
                 status = "Saved"
             } catch {
                 status = "Failed"
             }
             isSaving = false
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+private struct ExistingCredentialCard: View {
+    let summary: OnboardingCredentialSummary
+
+    var body: some View {
+        OnboardingGlassCard {
+            HStack(alignment: .top, spacing: TronSpacing.md) {
+                Image(systemName: summary.isExpired ? "exclamationmark.triangle" : "checkmark.seal")
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                    .foregroundStyle(summary.isExpired ? Color.tronWarning : Color.tronEmerald)
+                    .frame(width: 30, height: 30)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(summary.title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                    Text(summary.detail)
+                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+            }
         }
     }
 }

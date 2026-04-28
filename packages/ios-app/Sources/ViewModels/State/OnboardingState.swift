@@ -87,6 +87,11 @@ final class OnboardingState {
     /// the form and shows a progress indicator.
     var isConnecting: Bool = false
 
+    /// Effective server settings and masked auth state loaded immediately
+    /// after pairing. The setup pages read this so re-pairing a previously
+    /// forgotten server shows its existing choices instead of blank defaults.
+    var setupSnapshot = OnboardingSetupSnapshot()
+
     // MARK: - Storage
 
     @ObservationIgnored
@@ -108,6 +113,7 @@ final class OnboardingState {
     /// Delegates the field-distribution rule (including the "treat 'My Mac'
     /// as placeholder" semantics) to `PairingPayload.distributing(...)`.
     func acceptPairingPayload(_ payload: PairingURLParser.PairingPayload) {
+        beginPairingEntry()
         let distributed = payload.distributing(currentLabel: pairingLabel)
         currentStep = .connect
         pairingHost = distributed.host
@@ -115,6 +121,36 @@ final class OnboardingState {
         pairingToken = distributed.token
         pairingLabel = distributed.label
         pairingError = nil
+    }
+
+    func hydrateSetup(
+        serverId: String,
+        settings: ServerSettings,
+        authState: AuthState?,
+        authLoadError: String? = nil
+    ) {
+        setupSnapshot.hydrate(
+            serverId: serverId,
+            settings: settings,
+            authState: authState,
+            authLoadError: authLoadError
+        )
+    }
+
+    func refreshSetupAuth(_ authState: AuthState) {
+        setupSnapshot.refreshAuth(authState)
+    }
+
+    /// Clears setup state before the user pairs or re-pairs a server.
+    ///
+    /// A completed onboarding run can leave `hasPairedMac` true in memory.
+    /// Starting a new pairing must relock server-backed setup pages until the
+    /// new active server connects and fresh `settings.get` values arrive.
+    func beginPairingEntry() {
+        hasPairedMac = false
+        pairingError = nil
+        isConnecting = false
+        setupSnapshot.reset()
     }
 
     /// Reset the sheet to its initial state. Used by tests and any
@@ -129,5 +165,6 @@ final class OnboardingState {
         pairingLabel = "My Mac"
         pairingError = nil
         isConnecting = false
+        setupSnapshot.reset()
     }
 }

@@ -41,7 +41,9 @@ struct ProvidersSettingsPage: View {
             }
         }
         .sheet(item: $oauthProvider) { provider in
-            OAuthLoginSheet(provider: provider)
+            OAuthLoginSheet(provider: provider) { updatedAuthState in
+                authState = updatedAuthState
+            }
         }
         .task(id: dependencies.authVersion) { await loadAuthState() }
         .tronErrorAlert(message: $error)

@@ -102,6 +102,20 @@ struct OnboardingStateTests {
         #expect(state.pairingError == nil)
     }
 
+    @Test("acceptPairingPayload starts a fresh setup hydration scope")
+    func acceptPairingPayloadStartsFreshSetupScope() throws {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{"server":{"defaultWorkspace":"/stale"}}"#.utf8))
+        state.hasPairedMac = true
+        state.hydrateSetup(serverId: "old-server", settings: settings, authState: nil)
+
+        state.acceptPairingPayload(.init(host: "new-host", port: 9847, token: "new-token", label: "New Mac"))
+
+        #expect(state.hasPairedMac == false)
+        #expect(state.setupSnapshot.serverId == nil)
+        #expect(state.setupSnapshot.defaultWorkspace == AppConstants.defaultWorkspace)
+    }
+
     // MARK: - reset()
 
     @Test("reset() clears completion flag and pairing inputs")
@@ -125,6 +139,112 @@ struct OnboardingStateTests {
         #expect(state.pairingToken.isEmpty)
         #expect(state.pairingLabel == "My Mac")
         #expect(defaults.bool(forKey: OnboardingState.completionStorageKey) == false)
+    }
+
+    // MARK: - setup hydration
+
+    @Test("setup snapshot exposes existing server preferences and masked credentials")
+    func setupSnapshotHydratesExistingServerState() throws {
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data("""
+        {
+          "server": {
+            "defaultWorkspace": "/Users/example/project",
+            "defaultModel": "claude-opus-4-6"
+          },
+          "memory": {
+            "retainModel": "claude-haiku-4-5-20251001"
+          }
+        }
+        """.utf8))
+        let auth = try JSONDecoder().decode(AuthState.self, from: Data("""
+        {
+          "providers": {
+            "anthropic": {
+              "hasApiKey": true,
+              "apiKeys": [{"label": "work", "keyHint": "sk-ant-...xyz"}],
+              "activeCredential": {"type": "apiKey", "label": "work"}
+            },
+            "openai-codex": {
+              "hasOAuth": true,
+              "accounts": [{"label": "personal", "expiresAt": 1800000000, "isExpired": false}]
+            }
+          },
+          "services": {
+            "brave": {"hasApiKey": true, "apiKeyHint": "BSA...abc"}
+          }
+        }
+        """.utf8))
+
+        var snapshot = OnboardingSetupSnapshot()
+        snapshot.hydrate(serverId: "server-1", settings: settings, authState: auth)
+
+        #expect(snapshot.serverId == "server-1")
+        #expect(snapshot.defaultWorkspace == "/Users/example/project")
+        #expect(snapshot.defaultModel == "claude-opus-4-6")
+        #expect(snapshot.retainModel == "claude-haiku-4-5-20251001")
+        #expect(snapshot.providerSummary(for: "anthropic")?.title == "API key already saved")
+        #expect(snapshot.providerSummary(for: "anthropic")?.detail == "work - sk-ant-...xyz")
+        #expect(snapshot.providerSummary(for: "openai-codex")?.title == "OAuth already connected")
+        #expect(snapshot.providerSummary(for: "openai-codex")?.detail == "personal")
+        #expect(snapshot.serviceSummary(for: "brave")?.detail == "BSA...abc")
+        #expect(snapshot.preferredApiKeyLabel(for: "anthropic") == "work")
+    }
+
+    @Test("reset clears hydrated setup snapshot")
+    func resetClearsSetupSnapshot() throws {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{"server":{"defaultWorkspace":"/tmp"}}"#.utf8))
+        state.hydrateSetup(serverId: "server-1", settings: settings, authState: nil)
+
+        state.reset()
+
+        #expect(state.setupSnapshot.serverId == nil)
+        #expect(state.setupSnapshot.defaultWorkspace == AppConstants.defaultWorkspace)
+        #expect(state.setupSnapshot.defaultModel == "")
+    }
+
+    @Test("credential refresh updates setup snapshot without losing server preferences")
+    func credentialRefreshUpdatesSetupSnapshot() throws {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data("""
+        {
+          "server": {
+            "defaultWorkspace": "/Users/example/project",
+            "defaultModel": "claude-opus-4-6"
+          }
+        }
+        """.utf8))
+        let emptyAuth = try JSONDecoder().decode(AuthState.self, from: Data(#"{"providers":{},"services":{}}"#.utf8))
+        let refreshedAuth = try JSONDecoder().decode(AuthState.self, from: Data("""
+        {
+          "providers": {
+            "anthropic": {
+              "hasOAuth": true,
+              "accounts": [{"label": "work", "expiresAt": 1800000000, "isExpired": false}],
+              "activeCredential": {"type": "oauth", "label": "work"}
+            }
+          },
+          "services": {
+            "exa": {"hasApiKey": true, "apiKeyHint": "exa...123"}
+          }
+        }
+        """.utf8))
+
+        state.hydrateSetup(
+            serverId: "server-1",
+            settings: settings,
+            authState: emptyAuth,
+            authLoadError: "temporary auth failure"
+        )
+        state.refreshSetupAuth(refreshedAuth)
+
+        #expect(state.setupSnapshot.serverId == "server-1")
+        #expect(state.setupSnapshot.defaultWorkspace == "/Users/example/project")
+        #expect(state.setupSnapshot.defaultModel == "claude-opus-4-6")
+        #expect(state.setupSnapshot.providerSummary(for: "anthropic")?.title == "OAuth already connected")
+        #expect(state.setupSnapshot.providerSummary(for: "anthropic")?.detail == "work")
+        #expect(state.setupSnapshot.serviceSummary(for: "exa")?.detail == "exa...123")
+        #expect(state.setupSnapshot.authLoadError == nil)
     }
 
     // MARK: - Helpers

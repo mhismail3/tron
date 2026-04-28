@@ -389,14 +389,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             guard pairedServerStore.activeServer?.id == activeServer.id,
                   rpcClient === client
             else { return }
-            quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
-            if !settings.defaultModel.isEmpty {
-                defaultModel = settings.defaultModel
-            }
-            pairedServerStore.updateMetadata(for: activeServer.id) { server in
-                server.lastConnectedAt = Date()
-                server.lastKnownStatus = "Connected"
-            }
+            applyServerSettingsSnapshot(settings, for: activeServer.id)
         } catch {
             guard pairedServerStore.activeServer?.id == activeServer.id,
                   rpcClient === client
@@ -405,6 +398,18 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
                 server.lastKnownStatus = "Offline"
             }
             TronLogger.shared.error("Failed to reload settings after server switch: \(error)", category: .general)
+        }
+    }
+
+    func applyServerSettingsSnapshot(_ settings: ServerSettings, for serverId: String) {
+        guard pairedServerStore.activeServer?.id == serverId else { return }
+        quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
+        if !settings.defaultModel.isEmpty {
+            defaultModel = settings.defaultModel
+        }
+        pairedServerStore.updateMetadata(for: serverId) { server in
+            server.lastConnectedAt = Date()
+            server.lastKnownStatus = "Connected"
         }
     }
 

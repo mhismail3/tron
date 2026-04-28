@@ -53,10 +53,14 @@ struct OnboardingFlowView: View {
                     )
                     .tag(OnboardingState.Step.connect)
 
-                    WorkspaceSetupOnboardingPage(dependencies: dependencies)
-                        .tag(OnboardingState.Step.workspace)
+                    WorkspaceSetupOnboardingPage(
+                        state: state,
+                        dependencies: dependencies
+                    )
+                    .tag(OnboardingState.Step.workspace)
 
                     ProviderSetupOnboardingPage(
+                        state: state,
                         provider: Self.anthropicProvider,
                         dependencies: dependencies,
                         allowsOAuth: true
@@ -64,19 +68,27 @@ struct OnboardingFlowView: View {
                     .tag(OnboardingState.Step.anthropic)
 
                     ProviderSetupOnboardingPage(
+                        state: state,
                         provider: Self.openAIProvider,
                         dependencies: dependencies,
                         allowsOAuth: true
                     )
                     .tag(OnboardingState.Step.openAI)
 
-                    RemainingProvidersOnboardingPage(dependencies: dependencies)
-                        .tag(OnboardingState.Step.providers)
+                    RemainingProvidersOnboardingPage(
+                        state: state,
+                        dependencies: dependencies
+                    )
+                    .tag(OnboardingState.Step.providers)
 
-                    ServicesSetupOnboardingPage(dependencies: dependencies)
-                        .tag(OnboardingState.Step.services)
+                    ServicesSetupOnboardingPage(
+                        state: state,
+                        dependencies: dependencies
+                    )
+                    .tag(OnboardingState.Step.services)
 
                     ModelSetupOnboardingPage(
+                        state: state,
                         dependencies: dependencies,
                         onComplete: {
                             state.complete()

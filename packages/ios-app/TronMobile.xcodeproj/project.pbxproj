@@ -45,6 +45,7 @@
 		0AB3142C301892935DE8410B /* SkillDetailSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B3B0877E54541B6F3F6B054 /* SkillDetailSheetTests.swift */; };
 		0B0B9315A33A8820593FDF8D /* ToolSharedComponentsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7530F5B9BC8A9C86E308887 /* ToolSharedComponentsTests.swift */; };
 		0B3043C057DD3EDE08A510AC /* BashToolDetailSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1C3717ED891C0CEA74C73E7 /* BashToolDetailSheetTests.swift */; };
+		0B69E4D9BA9C52CEA26507D8 /* OnboardingSetupSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37E1BE118CB24FF796D61255 /* OnboardingSetupSnapshot.swift */; };
 		0B7704F7E45DC0DDB020675B /* AutomationsDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E71CE034B1663E9055D555 /* AutomationsDashboardView.swift */; };
 		0B7B23992051EFEF043CCD59 /* GitActionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4259DA2296EAA363DF05CA2F /* GitActionSheet.swift */; };
 		0B819F80870C3FB99D8BF4B5 /* SessionUnarchivedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6F792E5D7EDBEAF9026E367 /* SessionUnarchivedPlugin.swift */; };
@@ -1061,6 +1062,7 @@
 		36D732E1A6C2929176A5B88D /* WorktreeStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusView.swift; sourceTree = "<group>"; };
 		3740E0093C7AA75C04BB7E2B /* TurnEndPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnEndPlugin.swift; sourceTree = "<group>"; };
 		37AB1C9655886345E087CCEC /* DashboardEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardEvent.swift; sourceTree = "<group>"; };
+		37E1BE118CB24FF796D61255 /* OnboardingSetupSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSetupSnapshot.swift; sourceTree = "<group>"; };
 		383FE16A63ADA54DF31C7F10 /* MediaClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaClientTests.swift; sourceTree = "<group>"; };
 		3857EF703C066E11ED73DC37 /* NotificationPillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPillTests.swift; sourceTree = "<group>"; };
 		38A55381A199C9A004F1135B /* FilesystemClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesystemClient.swift; sourceTree = "<group>"; };
@@ -3480,6 +3482,7 @@
 				49F8897B954625E3FB843CCE /* InputBarState.swift */,
 				41F3F49288E68CB2894749F3 /* MessageQueueState.swift */,
 				475E03441DAA29FFAE1CC911 /* ModelPickerState.swift */,
+				37E1BE118CB24FF796D61255 /* OnboardingSetupSnapshot.swift */,
 				52DC723DD097673CAFC28F62 /* OnboardingState.swift */,
 				638BD7573C9DDB0C2A218D55 /* ProcessState.swift */,
 				F4B76B12E7C8273D65EB4D58 /* PromptLibraryState.swift */,
@@ -4218,6 +4221,7 @@
 				98689FFDE6179DA2B2470D23 /* OAuthLoopbackServer.swift in Sources */,
 				2BBD1C56E2D8406A4E5E5B9E /* OAuthWebView.swift in Sources */,
 				C08395FE45A8CEF10E465CF6 /* OnboardingFlowView.swift in Sources */,
+				0B69E4D9BA9C52CEA26507D8 /* OnboardingSetupSnapshot.swift in Sources */,
 				5E22F7F5475172AC60DF5F07 /* OnboardingShell.swift in Sources */,
 				D990826C2CDE4BE4CC0146CA /* OnboardingState.swift in Sources */,
 				EB619947CD9E9DDD10C298FB /* OpenConflictResolverButton.swift in Sources */,

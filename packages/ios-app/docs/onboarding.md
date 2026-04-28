@@ -46,6 +46,7 @@ readyContent()
                  ├─ persist Keychain bearer + local paired-server store
                  ├─ rebuild RPC client for the paired server
                  ├─ load settings.get from the paired server
+                 ├─ best-effort load auth.get for masked credential status
                  └─ advance to setup pages
             ├─ WorkspaceSetupOnboardingPage
             ├─ ProviderSetupOnboardingPage(Anthropic)
@@ -99,11 +100,13 @@ side effects:
   2. PairedServerStore.replace(..., activeId:)
   3. rebuild RPC client for the active paired server
   4. connect and load settings.get from the paired server
-  5. advance to the workspace/settings setup pages
+  5. best-effort load auth.get for masked credential status
+  6. advance to the workspace/settings setup pages
 ```
 
 If step 4 fails, onboarding rolls back the local paired-server store and
-Keychain token for that attempt, then leaves the user on the pairing page.
+Keychain token for that attempt, restoring the previous token when a re-pair
+fails, then leaves the user on the pairing page.
 Pairing never writes the iOS server list to `settings.json`; the server only
 owns server runtime settings and secrets.
 
@@ -122,6 +125,24 @@ After pairing succeeds, onboarding continues with optional setup pages:
 - **Search services** exposes API-key rows for Brave Search and Exa.
 - **Default model** reuses `ModelPickerSheet`, then writes both
   `server.defaultModel` and `memory.retainModel`.
+
+Pairing hydrates an in-memory `OnboardingSetupSnapshot` from the newly active
+server before the setup pages unlock. Existing server preferences from
+`settings.get` prefill workspace and model choices, so re-pairing a forgotten
+but still-running Mac can be completed by reviewing each page and swiping
+forward. Existing provider and service credentials from `auth.get` are shown
+only as server-returned labels and masked hints; secrets are never copied into
+iOS storage. If `auth.get` fails after `settings.get` succeeds, onboarding
+still proceeds with the settings snapshot and shows an inline credential-status
+warning instead of blocking setup.
+
+Every credential write in the setup pages consumes the fresh `AuthState`
+returned by the server. OAuth completion, named provider API-key saves, and
+service API-key saves all refresh the same in-memory snapshot immediately, so
+the current page swaps from empty entry state to a saved credential card with
+the masked label/hint before the user moves forward. The OAuth sheet also
+reports its returned `AuthState` to callers; Settings uses the same callback so
+the model providers page refreshes even if the server event arrives later.
 
 Provider credentials are written through `auth.*` RPCs, so secrets land
 in `auth.json`, not `settings.json`.
@@ -248,6 +269,7 @@ Sources/Services/Settings/PairedServerStore.swift
 Sources/Services/Storage/PairedServerTokenStore.swift
 Sources/Services/Storage/KeychainItem.swift
 Sources/Extensions/Binding+PasteAware.swift
+Sources/ViewModels/State/OnboardingSetupSnapshot.swift
 Sources/ViewModels/State/OnboardingState.swift
 
 Tests/Onboarding/
