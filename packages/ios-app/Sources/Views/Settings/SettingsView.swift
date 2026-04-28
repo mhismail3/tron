@@ -1,32 +1,5 @@
 import SwiftUI
 
-public enum SettingsLabels {
-    public static let providers = "Providers"
-    public static let connectToNewServer = "Connect to a new server"
-    public static let transcriptionSidecar = "Transcription Sidecar"
-}
-
-public enum ServerOnboardingLauncher {
-    public static let serverIdUserInfoKey = "serverId"
-
-    public static func userInfo(serverId: String?) -> [String: String] {
-        var userInfo: [String: String] = [:]
-        if let serverId {
-            userInfo[serverIdUserInfoKey] = serverId
-        }
-        return userInfo
-    }
-
-    static func userInfo(prefill server: PairedServer?) -> [String: String] {
-        userInfo(serverId: server?.id)
-    }
-
-    static func post(prefill server: PairedServer?, notificationCenter: NotificationCenter = .default) {
-        let userInfo = userInfo(prefill: server)
-        notificationCenter.post(name: .startServerOnboarding, object: nil, userInfo: userInfo)
-    }
-}
-
 // MARK: - Settings View
 
 struct SettingsView: View {

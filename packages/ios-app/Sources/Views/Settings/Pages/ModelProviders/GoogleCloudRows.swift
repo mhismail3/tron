@@ -2,8 +2,8 @@ import SwiftUI
 
 struct GoogleCloudRows: View {
     let providerInfo: ProviderAuthInfo?
-    let onSave: (AuthUpdateParams) async -> Void
-    let onClear: () async -> Void
+    let onSave: (AuthUpdateParams) async -> ProviderAuthActionResult
+    let onClear: () async -> ProviderAuthActionResult
 
     @State private var isEditing = false
     @State private var clientId = ""
@@ -119,7 +119,7 @@ struct GoogleCloudRows: View {
 
             if isConfigured && isEditing {
                 Button(role: .destructive) {
-                    Task { await onClear() }
+                    clear()
                 } label: {
                     Text("Clear All")
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
@@ -186,25 +186,37 @@ struct GoogleCloudRows: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isEditing = false }
     }
 
+    private func clear() {
+        Task { @MainActor in
+            let result = await onClear()
+            guard result.shouldCommitLocalFormChanges else { return }
+            clientId = ""
+            clientSecret = ""
+            projectId = ""
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isEditing = false }
+        }
+    }
+
     private func save() {
-        Task {
+        Task { @MainActor in
             isSaving = true
             var params = AuthUpdateParams(provider: "google")
             if !clientId.isEmpty { params.clientId = clientId }
             if !clientSecret.isEmpty { params.clientSecret = clientSecret }
             if !projectId.isEmpty { params.projectId = projectId }
-            await onSave(params)
+            let result = await onSave(params)
+            isSaving = false
+            guard result.shouldCommitLocalFormChanges else { return }
             clientId = ""
             clientSecret = ""
             projectId = ""
-            isSaving = false
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isEditing = false }
         }
     }
 }
 
 #Preview("Unconfigured") {
-    GoogleCloudRows(providerInfo: nil, onSave: { _ in }, onClear: {})
+    GoogleCloudRows(providerInfo: nil, onSave: { _ in .succeeded }, onClear: { .succeeded })
         .sectionFill(.tronEmerald)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding()

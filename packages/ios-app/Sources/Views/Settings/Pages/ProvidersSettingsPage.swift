@@ -61,59 +61,55 @@ struct ProvidersSettingsPage: View {
         }
     }
 
-    private func setActive(provider: String, credential: ActiveCredentialParam) async {
-        do {
-            authState = try await rpcClient.auth.setActive(provider: provider, credential: credential)
-        } catch {
-            self.error = error.localizedDescription
+    private func setActive(provider: String, credential: ActiveCredentialParam) async -> ProviderAuthActionResult {
+        await performAuthAction {
+            try await rpcClient.auth.setActive(provider: provider, credential: credential)
         }
     }
 
-    private func removeAccount(provider: String, label: String) async {
-        do {
-            authState = try await rpcClient.auth.removeAccount(provider: provider, label: label)
-        } catch {
-            self.error = error.localizedDescription
+    private func removeAccount(provider: String, label: String) async -> ProviderAuthActionResult {
+        await performAuthAction {
+            try await rpcClient.auth.removeAccount(provider: provider, label: label)
         }
     }
 
-    private func removeApiKey(provider: String, label: String) async {
-        do {
-            authState = try await rpcClient.auth.removeApiKey(provider: provider, label: label)
-        } catch {
-            self.error = error.localizedDescription
+    private func removeApiKey(provider: String, label: String) async -> ProviderAuthActionResult {
+        await performAuthAction {
+            try await rpcClient.auth.removeApiKey(provider: provider, label: label)
         }
     }
 
-    private func addApiKey(provider: String, label: String, key: String) async {
-        do {
-            authState = try await rpcClient.auth.addNamedApiKey(provider: provider, label: label, key: key)
-        } catch {
-            self.error = error.localizedDescription
+    private func addApiKey(provider: String, label: String, key: String) async -> ProviderAuthActionResult {
+        await performAuthAction {
+            try await rpcClient.auth.addNamedApiKey(provider: provider, label: label, key: key)
         }
     }
 
-    private func saveProvider(_ params: AuthUpdateParams) async {
-        do {
-            authState = try await rpcClient.auth.update(params)
-        } catch {
-            self.error = error.localizedDescription
+    private func saveProvider(_ params: AuthUpdateParams) async -> ProviderAuthActionResult {
+        await performAuthAction {
+            try await rpcClient.auth.update(params)
         }
     }
 
-    private func clearProvider(_ providerId: String) async {
-        do {
-            authState = try await rpcClient.auth.clear(AuthClearParams(provider: providerId))
-        } catch {
-            self.error = error.localizedDescription
+    private func clearProvider(_ providerId: String) async -> ProviderAuthActionResult {
+        await performAuthAction {
+            try await rpcClient.auth.clear(AuthClearParams(provider: providerId))
         }
     }
 
-    private func clearService(_ serviceId: String) async {
+    private func clearService(_ serviceId: String) async -> ProviderAuthActionResult {
+        await performAuthAction {
+            try await rpcClient.auth.clear(AuthClearParams(service: serviceId))
+        }
+    }
+
+    private func performAuthAction(_ action: () async throws -> AuthState) async -> ProviderAuthActionResult {
         do {
-            authState = try await rpcClient.auth.clear(AuthClearParams(service: serviceId))
+            authState = try await action()
+            return .succeeded
         } catch {
             self.error = error.localizedDescription
+            return .failed
         }
     }
 }

@@ -3,13 +3,13 @@ import SwiftUI
 struct ModelProviderSection: View {
     let provider: ProviderInfo
     let providerAuth: ProviderAuthInfo?
-    let onSetActive: (ActiveCredentialParam) async -> Void
-    let onRemoveAccount: (String) async -> Void
-    let onRemoveApiKey: (String) async -> Void
-    let onAddApiKey: (String, String) async -> Void
+    let onSetActive: (ActiveCredentialParam) async -> ProviderAuthActionResult
+    let onRemoveAccount: (String) async -> ProviderAuthActionResult
+    let onRemoveApiKey: (String) async -> ProviderAuthActionResult
+    let onAddApiKey: (String, String) async -> ProviderAuthActionResult
     let onOAuthLogin: () -> Void
-    let onSaveProvider: (AuthUpdateParams) async -> Void
-    let onClear: () async -> Void
+    let onSaveProvider: (AuthUpdateParams) async -> ProviderAuthActionResult
+    let onClear: () async -> ProviderAuthActionResult
 
     @State private var showAddApiKey = false
 
@@ -19,7 +19,12 @@ struct ModelProviderSection: View {
 
     private var accounts: [AccountInfo] { providerAuth?.accounts ?? [] }
     private var apiKeys: [ApiKeyInfo] { providerAuth?.apiKeys ?? [] }
-    private var hasAnyCredential: Bool { !accounts.isEmpty || !apiKeys.isEmpty }
+    private var accountRows: [ProviderAccountCredentialRow] {
+        accounts.map { ProviderAccountCredentialRow(account: $0) }
+    }
+    private var apiKeyRows: [ProviderApiKeyCredentialRow] {
+        apiKeys.map { ProviderApiKeyCredentialRow(key: $0) }
+    }
     private var oauthLoginDisabled: Bool {
         provider.supportsOAuth && ProviderStatusHelpers.hasRefreshableOAuth(providerAuth)
     }
@@ -37,33 +42,33 @@ struct ModelProviderSection: View {
     @ViewBuilder
     private var cardContents: some View {
         if provider.supportsOAuth {
-            ForEach(Array(accounts.enumerated()), id: \.offset) { index, account in
+            ForEach(accountRows) { row in
                 ProviderCredentialRow(
-                    isActive: ProviderStatusHelpers.isAccountActive(providerAuth, label: account.label),
+                    isActive: ProviderStatusHelpers.isAccountActive(providerAuth, label: row.account.label),
                     icon: "lock.shield.fill",
-                    label: account.label,
-                    status: ProviderStatusHelpers.accountStatus(account),
-                    statusColor: ProviderStatusHelpers.accountStatusColor(account),
+                    label: row.account.label,
+                    status: ProviderStatusHelpers.accountStatus(row.account),
+                    statusColor: ProviderStatusHelpers.accountStatusColor(row.account),
                     onSelect: {
-                        await onSetActive(ActiveCredentialParam(type: "oauth", label: account.label))
+                        _ = await onSetActive(ActiveCredentialParam(type: "oauth", label: row.account.label))
                     },
-                    onDelete: { await onRemoveAccount(account.label) }
+                    onDelete: { _ = await onRemoveAccount(row.account.label) }
                 )
                 SettingsRowDivider()
             }
         }
 
-        ForEach(Array(apiKeys.enumerated()), id: \.offset) { _, key in
+        ForEach(apiKeyRows) { row in
             ProviderCredentialRow(
-                isActive: ProviderStatusHelpers.isApiKeyActive(providerAuth, label: key.label),
+                isActive: ProviderStatusHelpers.isApiKeyActive(providerAuth, label: row.key.label),
                 icon: "key.horizontal",
-                label: key.label,
-                status: key.keyHint,
+                label: row.key.label,
+                status: row.key.keyHint,
                 statusColor: .tronTextSecondary,
                 onSelect: {
-                    await onSetActive(ActiveCredentialParam(type: "apiKey", label: key.label))
+                    _ = await onSetActive(ActiveCredentialParam(type: "apiKey", label: row.key.label))
                 },
-                onDelete: { await onRemoveApiKey(key.label) }
+                onDelete: { _ = await onRemoveApiKey(row.key.label) }
             )
             SettingsRowDivider()
         }
@@ -95,10 +100,12 @@ struct ModelProviderSection: View {
             SettingsRowDivider()
             AddApiKeyForm(
                 onAdd: { label, key in
-                    await onAddApiKey(label, key)
+                    let result = await onAddApiKey(label, key)
+                    guard result.shouldCommitLocalFormChanges else { return result }
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         showAddApiKey = false
                     }
+                    return result
                 },
                 onCancel: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -174,5 +181,33 @@ struct ProviderSectionHeader: View {
             Spacer()
         }
         .padding(.bottom, 8)
+    }
+}
+
+private struct ProviderAccountCredentialRow: Identifiable {
+    let item: ProviderCredentialRowItem
+    let account: AccountInfo
+
+    init(account: AccountInfo) {
+        self.account = account
+        item = .oauth(account)
+    }
+
+    var id: String {
+        item.id
+    }
+}
+
+private struct ProviderApiKeyCredentialRow: Identifiable {
+    let item: ProviderCredentialRowItem
+    let key: ApiKeyInfo
+
+    init(key: ApiKeyInfo) {
+        self.key = key
+        item = .apiKey(key)
+    }
+
+    var id: String {
+        item.id
     }
 }

@@ -3,8 +3,8 @@ import SwiftUI
 struct ProviderServiceCard: View {
     let service: ProviderInfo
     let serviceAuth: ServiceAuthInfo?
-    let onSave: (AuthUpdateParams) async -> Void
-    let onClear: () async -> Void
+    let onSave: (AuthUpdateParams) async -> ProviderAuthActionResult
+    let onClear: () async -> ProviderAuthActionResult
 
     @State private var apiKey = ""
     @State private var isSaving = false
@@ -71,7 +71,7 @@ struct ProviderServiceCard: View {
 
             if isConfigured {
                 Button(role: .destructive) {
-                    Task { await onClear() }
+                    Task { _ = await onClear() }
                 } label: {
                     Text("Clear")
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
@@ -86,10 +86,11 @@ struct ProviderServiceCard: View {
     private func save() {
         guard !apiKey.isEmpty else { return }
         isSaving = true
-        Task {
-            await onSave(AuthUpdateParams(service: service.id, apiKey: .value(apiKey)))
-            apiKey = ""
+        Task { @MainActor in
+            let result = await onSave(AuthUpdateParams(service: service.id, apiKey: .value(apiKey)))
             isSaving = false
+            guard result.shouldCommitLocalFormChanges else { return }
+            apiKey = ""
         }
     }
 }

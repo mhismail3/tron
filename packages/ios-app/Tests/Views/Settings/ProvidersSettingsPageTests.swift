@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 
 @testable import TronMobile
 
@@ -28,6 +29,48 @@ struct ProvidersSettingsPageTests {
             ServerOnboardingLauncher.serverIdUserInfoKey: "studio",
         ])
         #expect(ServerOnboardingLauncher.userInfo(serverId: nil).isEmpty)
+    }
+
+    @Test("server onboarding posts target active server id")
+    func serverOnboardingPostsTargetActiveServerId() async {
+        let notificationCenter = NotificationCenter()
+        let server = PairedServer(id: "studio", label: "Studio", host: "studio.local", port: 1984)
+
+        let posted: [String: String] = await withCheckedContinuation { continuation in
+            var observer: NSObjectProtocol?
+            observer = notificationCenter.addObserver(
+                forName: .startServerOnboarding,
+                object: nil,
+                queue: nil
+            ) { notification in
+                if let observer {
+                    notificationCenter.removeObserver(observer)
+                }
+                continuation.resume(returning: notification.userInfo as? [String: String] ?? [:])
+            }
+
+            ServerOnboardingLauncher.post(prefill: server, notificationCenter: notificationCenter)
+        }
+
+        #expect(posted == [
+            ServerOnboardingLauncher.serverIdUserInfoKey: "studio",
+        ])
+    }
+
+    @Test("provider auth action result only commits local form changes after success")
+    func providerAuthActionResultCommitsLocalFormChangesOnlyAfterSuccess() {
+        #expect(ProviderAuthActionResult.succeeded.shouldCommitLocalFormChanges)
+        #expect(!ProviderAuthActionResult.failed.shouldCommitLocalFormChanges)
+    }
+
+    @Test("credential row ids are stable and credential-type scoped")
+    func credentialRowIdsAreStableAndCredentialTypeScoped() {
+        let oauth = ProviderCredentialRowItem(kind: .oauth, label: "work")
+        let apiKey = ProviderCredentialRowItem(kind: .apiKey, label: "work")
+
+        #expect(oauth.id == "oauth:work")
+        #expect(apiKey.id == "apiKey:work")
+        #expect(oauth.id != apiKey.id)
     }
 
     @Test("modelProviders array contains the five expected providers")

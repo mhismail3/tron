@@ -1,24 +1,5 @@
 import SwiftUI
 
-public enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
-    case transcriptionSidecar
-    case advancedSecurity
-
-    public static let loadedOrder: [Self] = [
-        .transcriptionSidecar,
-        .advancedSecurity,
-    ]
-
-    public var title: String {
-        switch self {
-        case .transcriptionSidecar:
-            return SettingsLabels.transcriptionSidecar
-        case .advancedSecurity:
-            return "Advanced Security"
-        }
-    }
-}
-
 struct ConnectionSettingsPage: View {
     let settingsState: SettingsState
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
@@ -51,11 +32,6 @@ struct ConnectionSettingsPage: View {
             Button("Cancel", role: .cancel) {}
         } message: { server in
             Text("Removes \(server.label) from this iPhone. Server settings and sessions on the Mac are unchanged.")
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .rePairCurrentServer)) { _ in
-            if let active = dependencies.pairedServerStore.activeServer {
-                startOnboarding(prefill: active)
-            }
         }
     }
 
@@ -340,12 +316,4 @@ struct ConnectionSettingsPage: View {
             set: { if !$0 { serverPendingRemoval = nil } }
         )
     }
-}
-
-extension Notification.Name {
-    /// Posted when the user taps the `.unauthorized` ConnectionStatusPill.
-    static let rePairCurrentServer = Notification.Name("rePairCurrentServer")
-
-    /// Posted by Settings when onboarding should reopen for pairing.
-    static let startServerOnboarding = Notification.Name("tron.startServerOnboarding")
 }

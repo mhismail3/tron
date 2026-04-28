@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AddApiKeyForm: View {
-    let onAdd: (String, String) async -> Void
+    let onAdd: (String, String) async -> ProviderAuthActionResult
     let onCancel: () -> Void
 
     @State private var label = ""
@@ -70,17 +70,18 @@ struct AddApiKeyForm: View {
     private func save() {
         guard isValid else { return }
         isSaving = true
-        Task {
-            await onAdd(ProviderStatusHelpers.trimmedLabel(label), key)
+        Task { @MainActor in
+            let result = await onAdd(ProviderStatusHelpers.trimmedLabel(label), key)
+            isSaving = false
+            guard result.shouldCommitLocalFormChanges else { return }
             label = ""
             key = ""
-            isSaving = false
         }
     }
 }
 
 #Preview("Empty form") {
-    AddApiKeyForm(onAdd: { _, _ in }, onCancel: {})
+    AddApiKeyForm(onAdd: { _, _ in .succeeded }, onCancel: {})
         .sectionFill(.tronEmerald)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding()

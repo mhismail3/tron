@@ -24,7 +24,10 @@ into a fresh pairing attempt, so the user must provide a new token. First-run
 onboarding remains non-dismissable until the user completes setup or explicitly
 leaves from a Settings-launched sheet. Settings hosts dismiss their active
 settings sheet before posting the onboarding launch, so nested settings pages do
-not unwind one at a time before the connect sheet appears.
+not unwind one at a time before the connect sheet appears. The unauthorized
+connection-status repair action uses the same app-level onboarding launch
+notification and targets the active paired server directly instead of depending
+on a nested Settings page listener.
 The setup pages are not rendered until a fresh pairing attempt succeeds, so
 opening onboarding from Settings cannot reveal stale settings from the currently
 active server.
@@ -154,6 +157,9 @@ the current page swaps from empty entry state to a saved credential card with
 the masked label/hint before the user moves forward. The OAuth sheet also
 reports its returned `AuthState` to callers; Settings uses the same callback so
 the model providers page refreshes even if the server event arrives later.
+Settings provider forms keep their local input until the auth RPC returns an
+updated `AuthState`; failed saves leave labels, API keys, and Google Cloud
+fields visible for correction or retry.
 
 Provider credentials are written through `auth.*` RPCs, so secrets land
 in `auth.json`, not `settings.json`.
