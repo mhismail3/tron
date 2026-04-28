@@ -1,18 +1,47 @@
 import SwiftUI
 
+public enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
+    case transcriptionSidecar
+    case advancedSecurity
+
+    public static let loadedOrder: [Self] = [
+        .transcriptionSidecar,
+        .advancedSecurity,
+    ]
+
+    public var title: String {
+        switch self {
+        case .transcriptionSidecar:
+            return SettingsLabels.transcriptionSidecar
+        case .advancedSecurity:
+            return "Advanced Security"
+        }
+    }
+}
+
 struct ConnectionSettingsPage: View {
     let settingsState: SettingsState
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
+    let startServerOnboarding: (PairedServer?) -> Void
 
     @Environment(\.dependencies) private var dependencies
     @State private var serverPendingRemoval: PairedServer?
+
+    init(
+        settingsState: SettingsState,
+        updateServerSetting: @escaping (() -> ServerSettingsUpdate) -> Void,
+        startServerOnboarding: @escaping (PairedServer?) -> Void = { ServerOnboardingLauncher.post(prefill: $0) }
+    ) {
+        self.settingsState = settingsState
+        self.updateServerSetting = updateServerSetting
+        self.startServerOnboarding = startServerOnboarding
+    }
 
     var body: some View {
         SettingsPageContainer(title: "Server") {
             pairedServersSection
             if settingsState.isLoaded {
-                advancedSecuritySection
-                transcriptionSection
+                loadedServerBackedSettingsSections
             } else {
                 serverBackedSettingsUnavailableSection
             }
@@ -47,71 +76,45 @@ struct ConnectionSettingsPage: View {
     private func pairedServerRow(_ server: PairedServer) -> some View {
         let selected = dependencies.pairedServerStore.activeServer?.id == server.id
 
-        return SettingsCard(interactive: true) {
-            Button {
-                guard !selected else { return }
-                dependencies.selectPairedServer(server)
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(TronTypography.sans(size: TronTypography.sizeXL))
-                        .foregroundStyle(selected ? .tronEmerald : .tronTextMuted.opacity(0.6))
-                        .frame(width: 22)
+        return SettingsCard(interactive: false) {
+            HStack(spacing: 10) {
+                Button {
+                    guard !selected else { return }
+                    dependencies.selectPairedServer(server)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                            .font(TronTypography.sans(size: TronTypography.sizeXL))
+                            .foregroundStyle(selected ? .tronEmerald : .tronTextMuted.opacity(0.6))
+                            .frame(width: 22)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(server.label)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                            .foregroundStyle(.tronTextPrimary)
-                        Text(server.origin)
-                            .font(TronTypography.code(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-
-                    Spacer()
-
-                    if let status = server.lastKnownStatus, !status.isEmpty {
-                        Text(status)
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                            .foregroundStyle(status == "Connected" ? .tronSuccess : .tronTextMuted)
-                    }
-
-                    Menu {
-                        Button {
-                            retry(server)
-                        } label: {
-                            Label("Retry", systemImage: "arrow.clockwise")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(server.label)
+                                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                                .foregroundStyle(.tronTextPrimary)
+                            Text(server.origin)
+                                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextSecondary)
                         }
-                        Button {
-                            startOnboarding(prefill: server)
-                        } label: {
-                            Label("Onboard to Server", systemImage: "plus.circle")
+
+                        Spacer()
+
+                        if let status = server.lastKnownStatus, !status.isEmpty {
+                            Text(status)
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                                .foregroundStyle(status == "Connected" ? .tronSuccess : .tronTextMuted)
                         }
-                        Button(role: .destructive) {
-                            serverPendingRemoval = server
-                        } label: {
-                            Label {
-                                Text("Forget")
-                                    .foregroundStyle(.tronError)
-                            } icon: {
-                                Image(systemName: "trash")
-                                    .foregroundStyle(.tronError)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .foregroundStyle(.tronTextSecondary)
-                            .padding(8)
-                            .contentShape(Rectangle())
                     }
-                    .accessibilityLabel("Manage \(server.label)")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .buttonStyle(.plain)
+
+                manageServerMenu(server)
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -125,7 +128,7 @@ struct ConnectionSettingsPage: View {
                         .font(TronTypography.sans(size: TronTypography.sizeXL))
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 22)
-                    Text("Onboard to Server")
+                    Text(SettingsLabels.connectToNewServer)
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(.tronTextPrimary)
                     Spacer()
@@ -142,9 +145,62 @@ struct ConnectionSettingsPage: View {
         }
     }
 
+    private func manageServerMenu(_ server: PairedServer) -> some View {
+        Menu {
+            Button {
+                retry(server)
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+            }
+            Button {
+                startOnboarding(prefill: server)
+            } label: {
+                Label(SettingsLabels.connectToNewServer, systemImage: "plus.circle")
+            }
+            Button(role: .destructive) {
+                serverPendingRemoval = server
+            } label: {
+                Label {
+                    Text("Forget")
+                        .foregroundStyle(.tronError)
+                } icon: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.tronError)
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(.tronTextSecondary)
+                .padding(8)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .transaction { transaction in
+            transaction.animation = .tronFast
+        }
+        .accessibilityLabel("Manage \(server.label)")
+    }
+
+    private var loadedServerBackedSettingsSections: some View {
+        ForEach(ConnectionSettingsServerBackedSection.loadedOrder, id: \.self) { section in
+            serverBackedSection(section)
+        }
+    }
+
+    @ViewBuilder
+    private func serverBackedSection(_ section: ConnectionSettingsServerBackedSection) -> some View {
+        switch section {
+        case .transcriptionSidecar:
+            transcriptionSection
+        case .advancedSecurity:
+            advancedSecuritySection
+        }
+    }
+
     private var advancedSecuritySection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Advanced Security")
+            SettingsSectionHeader(title: ConnectionSettingsServerBackedSection.advancedSecurity.title)
 
             SettingsCard {
                 HStack {
@@ -216,7 +272,7 @@ struct ConnectionSettingsPage: View {
 
     private var transcriptionSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Transcription")
+            SettingsSectionHeader(title: ConnectionSettingsServerBackedSection.transcriptionSidecar.title)
 
             SettingsCard {
                 HStack {
@@ -260,11 +316,7 @@ struct ConnectionSettingsPage: View {
     }
 
     private func startOnboarding(prefill server: PairedServer?) {
-        var userInfo: [String: String] = [:]
-        if let server {
-            userInfo["serverId"] = server.id
-        }
-        NotificationCenter.default.post(name: .startServerOnboarding, object: nil, userInfo: userInfo)
+        startServerOnboarding(server)
     }
 
     private func retry(_ server: PairedServer) {

@@ -275,7 +275,7 @@ cargo clippy -- -D warnings        # Lint with warnings as errors
 
 Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registry`, with subagent and job tools added in the `tool_factory` closure in `main.rs`. To add or rename a tool, update both files.
 
-### Always-on (15)
+### Always-on (18)
 
 | Tool | Description |
 |------|-------------|
@@ -289,19 +289,14 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 | `GetConfirmation` | Ask the user to confirm a high-stakes action before proceeding. |
 | `NotifyApp` | Send a push notification to iOS through the Cloudflare relay, or use the stub delegate when relay config is absent. |
 | `WebFetch` | Fetch and extract content from a URL. Uses an LLM subagent summarizer for large pages. |
+| `WebSearch` | Search the web via the Brave Search API. Registered even before a Brave key exists; calls return a structured credential error until `services.brave` is set in `~/.tron/system/auth.json`. |
 | `Display` | Render rich content (images, streams) for iOS clients via blob storage and `DisplayFrame` events. |
 | `ComputerUse` | Screenshot, click, type, keypress, scroll, window management. |
+| `McpSearch` | Meta-tool that searches across all configured MCP server tool catalogs by keyword. Registered with an empty result set when no MCP servers are configured. |
+| `McpCall` | Meta-tool that invokes a specific tool on an MCP server. Registered even before MCP servers are configured, so later settings changes do not require a daemon restart. |
 | `SpawnSubagent` | Spawn a child agent. Max depth controlled by `agent.subagent_max_depth` (default 3). |
 | `ManageJob` | Inspect, signal, and clean up background jobs (Bash backgrounded processes + subagents). |
 | `Wait` | Block until specified background jobs complete or hit a timeout. |
-
-### Conditional
-
-| Tool | Registered when | Description |
-|------|-----------------|-------------|
-| `WebSearch` | A Brave API key is set in `~/.tron/system/auth.json` under the `services.brave` entry | Web search via the Brave Search API. |
-| `McpSearch` | At least one MCP server is configured | Meta-tool that searches across all MCP server tool catalogs by keyword. |
-| `McpCall` | At least one MCP server is configured | Meta-tool that invokes a specific tool on an MCP server. |
 
 Source-control operations (sync main, push, switch branches, finalize a session into main, resolve merge conflicts) are driven by the user via the iOS Source Control sheet — the agent does not have typed git tools. When a session has a worktree, the agent is told (via a system-prompt block in `runtime/context/system_prompts::GIT_WORKFLOW_PROMPT`) that it can inspect state and make commits via `Bash git …` but must defer destructive / publishing operations to the user.
 
@@ -575,7 +570,7 @@ tron login --label work
 tron login --label personal
 ```
 
-`auth.json` stores accounts under `providers.<name>.accounts[]` (named OAuth entries) and `providers.<name>.apiKeys[]` (named API keys). The active credential per provider is selected by `providers.<name>.activeCredential`, which is `{type: "oauth"|"apiKey", label}`. Manage from the iOS app or via `auth.*` RPC methods.
+`auth.json` stores accounts under `providers.<name>.accounts[]` (named OAuth entries) and `providers.<name>.apiKeys[]` (named API keys). The active credential per provider is selected by `providers.<name>.activeCredential`, which is `{type: "oauth"|"apiKey", label}`. Manage from the iOS app or via `auth.*` RPC methods. When an API key is saved without a custom label, Tron stores it as `Default`.
 
 ### Auth Precedence
 
@@ -596,7 +591,7 @@ The token is generated during first server startup and written as `bearerToken` 
 # Rotate the token (forces every paired iOS device to pair again)
 tron auth rotate
 
-# Then use iOS Settings → Server Settings → Server → Onboard to Server to scan or paste a fresh token.
+# Then use iOS Settings → Server Settings → Server → Connect to a new server to scan or paste a fresh token.
 ```
 
 Rotation is serialized through a process-wide mutex and the on-disk write is atomic (`tempfile + sync_all + rename`), so a concurrent rotate from the menu bar and CLI cannot corrupt the file. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
@@ -637,7 +632,7 @@ System prompt    (stable, per-model)
 Reusable context packages stored as `SKILL.md` files with optional YAML frontmatter.
 
 **Locations** — scanned across every service folder in `SKILL_SERVICE_DIRS` (currently `tron`, `claude`):
-- `~/.tron/skills/`, `~/.claude/skills/` — Global (all projects). First-party skills under `packages/agent/skills/` are synced into `~/.tron/skills/` by `tron dev` / `tron install` and carry a `.managed` sentinel file. `~/.claude/skills/` is read-only to Tron (Claude Code owns that tree) but its contents are detected automatically.
+- `~/.tron/skills/`, `~/.claude/skills/` — Global (all projects). First-party skills under `packages/agent/skills/` are bundled into the Mac app at `Contents/Resources/Skills/` and synced into `~/.tron/skills/` by the Mac installer/menu-bar start path, `tron dev`, and `tron install`. Managed skills carry a `.managed` sentinel file; user-owned same-name directories are preserved. `~/.claude/skills/` is read-only to Tron (Claude Code owns that tree) but its contents are detected automatically.
 - `.tron/skills/` or `.claude/skills/` under the working directory (any depth) — Project-local (higher precedence than globals). `.tron/skills/` wins over `.claude/skills/` on same-name collision within a single scope.
 
 **Usage:** Reference with `@skill-name` in prompts. The injector extracts references, resolves them from the registry, and prepends the skill content as `<skills>` XML context. Session-scoped activation is also exposed via `skill.activate` / `skill.deactivate` RPC methods.
@@ -750,7 +745,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, confirms permissions, optionally enables local transcription, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
 
 ```
 packages/mac-app/Sources/
@@ -947,7 +942,7 @@ A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or th
 
 ### User-mode Update Checks
 
-For users installed via DMG (no git remote), the server can poll GitHub Releases and surface the notarized DMG URL per the `server.update.*` settings. The module lives at `packages/agent/src/server/updater/mod.rs`. Installing an update remains a visible replacement of `/Applications/Tron.app` from the notarized DMG; the server does not mutate the signed app bundle or stage update artifacts under `~/.tron`.
+For users installed via DMG (no git remote), the server can poll GitHub Releases and surface the notarized DMG URL per the `server.update.*` settings. The module lives at `packages/agent/src/server/updater/mod.rs`. Installing an update remains a visible replacement of `/Applications/Tron.app` from the notarized DMG; the server does not mutate the signed app bundle or stage update artifacts under `~/.tron`. After app replacement, the wrapper syncs bundled managed skills into `~/.tron/skills/` the next time the menu-bar app opens or starts the helper.
 
 | Phase | Action | Effect |
 |-------|--------|--------|

@@ -251,6 +251,7 @@ enum InstallOutcome: Equatable, Sendable {
     case success
     case invalidApplicationLocation(String)
     case helperValidationFailed(String)
+    case managedSkillsSyncFailed(String)
     case serviceRequiresApproval
     case serviceRegistrationFailed(String)
     case awaitPingTimedOut

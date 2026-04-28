@@ -11,6 +11,7 @@
 //! tron::events        SQLite event store, migrations, session reconstruction
 //! tron::llm           Provider trait, model registry, SSE streaming, auth
 //! tron::tools         Tool trait, registry, filesystem/bash/web/subagent tools
+//! tron::mcp           MCP router and always-on McpSearch/McpCall meta-tools
 //! tron::skills        SKILL.md parser, registry, context injection
 //! tron::transcription Transcription (parakeet-tdt-0.6b via MLX sidecar)
 //! tron::runtime       Agent loop, context/compaction, hooks, orchestrator, tasks
@@ -373,27 +374,27 @@ fn init_push() -> PushServiceOption {
 
 /// MCP initialization result.
 struct McpState {
-    search: Option<Arc<dyn tron::tools::traits::TronTool>>,
-    call: Option<Arc<dyn tron::tools::traits::TronTool>>,
-    router: Option<Arc<tokio::sync::RwLock<tron::mcp::router::McpRouter>>>,
+    search: Arc<dyn tron::tools::traits::TronTool>,
+    call: Arc<dyn tron::tools::traits::TronTool>,
+    router: Arc<tokio::sync::RwLock<tron::mcp::router::McpRouter>>,
 }
 
-/// Create MCP router, discover tools, and register meta-tools.
+/// Create the MCP router and meta-tools.
+///
+/// The router is present even when the server list is empty. That keeps
+/// `McpSearch`/`McpCall` in every session and lets settings updates add servers
+/// without requiring a daemon restart.
 async fn init_mcp(
     settings: &tron::settings::TronSettings,
     settings_path: &std::path::Path,
 ) -> McpState {
     let mcp_configs = settings.mcp.servers.clone();
     if mcp_configs.is_empty() {
-        tracing::debug!("no MCP servers configured");
-        return McpState {
-            search: None,
-            call: None,
-            router: None,
-        };
+        tracing::debug!("no MCP servers configured; registering empty MCP meta-tools");
+    } else {
+        tracing::info!(count = mcp_configs.len(), "starting MCP servers");
     }
 
-    tracing::info!(count = mcp_configs.len(), "starting MCP servers");
     let router = tron::mcp::router::McpRouter::new(
         mcp_configs,
         settings_path.to_owned(),
@@ -426,9 +427,9 @@ async fn init_mcp(
     // `McpRouter::shutdown_all` and that place observes phase ordering.
 
     McpState {
-        search: Some(search),
-        call: Some(call),
-        router: Some(router),
+        search,
+        call,
+        router,
     }
 }
 
@@ -477,18 +478,6 @@ async fn init_services(
         tron::runtime::memory::MemoryRegistry::new(),
     ));
 
-    // Load Brave API key for web search. A malformed auth.json surfaces as
-    // a hard startup error rather than silently dropping the key and disabling
-    // the tool — the user needs to know the file is broken.
-    let brave_api_key: Option<String> =
-        tron::llm::auth::storage::get_service_api_keys(&auth_path(), "brave")
-            .map_err(|e| anyhow::anyhow!("failed to load Brave auth: {e}"))?
-            .into_iter()
-            .next();
-    if brave_api_key.is_some() {
-        tracing::info!("Brave API key loaded — WebSearch tool enabled");
-    }
-
     let (provider_factory, shared_http_client) = init_provider_factory(settings).await;
 
     // Process manager for background tool execution
@@ -503,7 +492,7 @@ async fn init_services(
 
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
-        brave_api_key,
+        auth_path: auth_path(),
         push_service,
         http_client: shared_http_client,
         sandbox_settings: settings.tools.bash.sandbox.clone(),
@@ -783,7 +772,7 @@ fn build_rpc_context(
     origin: String,
     cron: &CronState,
     worktree_coordinator: Option<Arc<tron::worktree::WorktreeCoordinator>>,
-    mcp_router: Option<Arc<tokio::sync::RwLock<tron::mcp::router::McpRouter>>>,
+    mcp_router: Arc<tokio::sync::RwLock<tron::mcp::router::McpRouter>>,
 ) -> RpcContext {
     RpcContext {
         orchestrator: services.orchestrator.clone(),
@@ -808,7 +797,7 @@ fn build_rpc_context(
         auth_path: auth_path(),
         broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        mcp_router,
+        mcp_router: Some(mcp_router),
         display_stream_registry: None,
         process_manager: Some(services.process_manager.clone()),
         job_manager: Some(services.job_manager.clone()),
@@ -963,15 +952,13 @@ async fn main() -> Result<()> {
     // Register MCP shutdown as an ordered phase hook. Replaces the earlier
     // standalone `ctrl_c` watcher in `init_mcp`, which raced with main's
     // shutdown path (both could call `router.shutdown_all()` concurrently).
-    if let Some(router) = mcp_router_for_shutdown {
-        server.shutdown().register_phase_hook(
-            tron::server::shutdown::ShutdownPhase::Mcp,
-            "mcp",
-            move || async move {
-                router.write().await.shutdown_all().await;
-            },
-        );
-    }
+    server.shutdown().register_phase_hook(
+        tron::server::shutdown::ShutdownPhase::Mcp,
+        "mcp",
+        move || async move {
+            mcp_router_for_shutdown.write().await.shutdown_all().await;
+        },
+    );
 
     // Event bridge: orchestrator events -> WebSocket clients
     let bridge = EventBridge::new(

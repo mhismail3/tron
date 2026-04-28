@@ -166,6 +166,8 @@ enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
     case validateApplication
     /// Confirms the embedded helper app, plist, and signature are intact.
     case validateHelper
+    /// Syncs bundled first-party skills into `~/.tron/skills`.
+    case syncSkills
     /// Registers the bundled LaunchAgent through `SMAppService`.
     case registerAgent
     case awaitPing

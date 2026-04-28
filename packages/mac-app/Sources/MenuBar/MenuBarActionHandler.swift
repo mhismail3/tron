@@ -95,6 +95,10 @@ final class MenuBarActionHandler {
 
     func restartServer() async {
         applyBusy(.restarting)
+        guard await syncManagedSkillsForServerStart(action: "restart") else {
+            await refreshStatus()
+            return
+        }
         let outcome = await setup.launchAgentManager.restart(label: TronPaths.launchAgentLabel)
         await refreshStatus()
         switch outcome {
@@ -138,6 +142,10 @@ final class MenuBarActionHandler {
 
     func resumeServer() async {
         applyBusy(.resuming)
+        guard await syncManagedSkillsForServerStart(action: "resume") else {
+            await refreshStatus()
+            return
+        }
         let outcome = await setup.launchAgentManager.load(
             plistPath: setup.launchAgentPlistPath,
             label: TronPaths.launchAgentLabel
@@ -158,6 +166,18 @@ final class MenuBarActionHandler {
             let message = "Binary missing: \(path)"
             await MenuBarNotifier.post(title: "Resume failed", body: message)
             await presentNonBlockingError(title: "Resume failed", message: message)
+        }
+    }
+
+    private func syncManagedSkillsForServerStart(action: String) async -> Bool {
+        switch await setup.syncManagedSkills() {
+        case .synced:
+            return true
+        case .failed(let message):
+            let title = action == "resume" ? "Resume blocked" : "Restart blocked"
+            await MenuBarNotifier.post(title: title, body: message)
+            await presentNonBlockingError(title: title, message: "Could not sync bundled skills: \(message)")
+            return false
         }
     }
 

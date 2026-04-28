@@ -11,7 +11,7 @@
 
 The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side.
 
-`Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. The release binary is produced by `cargo build --release --bin tron` and staged into the bundled helper app at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron`; the helper is signed before the outer app. The app bundle also carries only the transcription sidecar source files (`worker.py`, `requirements.txt`) under `Contents/Resources/Transcription/`; the venv and model cache are mutable user data under `~/.tron/system/transcription/` after the user enables transcription. See [development.md](./development.md) for the build pipeline.
+`Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. The release binary is produced by `cargo build --release --bin tron` and staged into the bundled helper app at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron`; the helper is signed before the outer app. The app bundle also carries managed skills under `Contents/Resources/Skills/` and the transcription sidecar source files (`worker.py`, `requirements.txt`) under `Contents/Resources/Transcription/`; the venv and model cache are mutable user data under `~/.tron/system/transcription/` after the user enables transcription. See [development.md](./development.md) for the build pipeline.
 
 ## Directory Structure
 
@@ -69,6 +69,8 @@ packages/mac-app/
 │       └── Steps/                  # One view per WizardStep case
 └── Tests/                          # Mirrors Sources layout
 ```
+
+`Contents/Resources/Skills/` is generated at build time from `packages/agent/skills/`; it is not checked into `packages/mac-app/Sources/Resources/`.
 
 ## Key Architectural Patterns
 
@@ -309,7 +311,7 @@ Four workflows operate against the same `~/.tron/system/` data tree and share `p
 - **LaunchAgent label `com.tron.server`** — the launchd job that owns the installed server. Workflows 1, 2, and 3 register their bundled LaunchAgent through `SMAppService`. Workflow 4 stops it before binding the port itself.
 - **`~/.tron/system/`** data tree — settings, auth, sessions, log database, and `run/` state. Wrappers in workflows 1, 2, and 3 mutate the wrapper-side files (`run/.onboarded`, `run/.mac-wrapper.lock`); the agent owns the rest.
 - **`auth.json.bearerToken`** — bearer issued by the agent on first start. Same token regardless of which workflow started the agent.
-- **`~/.tron/skills/`** — managed skills synced from `packages/agent/skills/` by `tron install` / `tron dev` (NOT by the wrapper).
+- **`~/.tron/skills/`** — managed skills synced from the wrapper's bundled `Contents/Resources/Skills/` by production install/menu-bar start paths, and from `packages/agent/skills/` by `tron install` / `tron dev`. Same-name user-owned directories without `.managed` are preserved; stale `.managed` directories disappear when the bundled set no longer contains them.
 
 ### Mutual exclusion (how they coexist without conflict)
 
@@ -324,7 +326,7 @@ Wrapper precedence is explicit: Debug (`com.tron.mac.dev`) outranks installed-re
 
 If no LaunchAgent owns `com.tron.server` but port `9847` is already bound or `~/.tron/system/database/log.db.lock` is held, registration stops with an "another Tron server is running" error. The app never chooses an alternate port and never treats a direct dev server as a successful install.
 
-**Result**: a contributor can have the production DMG installed AND switch to `tron dev` to iterate on the agent without uninstalling anything. The DMG wrapper's menu bar shows "Server stopped" while `tron dev` runs; quitting `tron dev` calls `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which registers/starts through `SMAppService` and exits without showing the wizard.
+**Result**: a contributor can have the production DMG installed AND switch to `tron dev` to iterate on the agent without uninstalling anything. The DMG wrapper's menu bar shows "Server stopped" while `tron dev` runs; quitting `tron dev` calls `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which syncs bundled managed skills, registers/starts through `SMAppService`, and exits without showing the wizard. The same menu-bar startup sync is what makes a replaced `/Applications/Tron.app` refresh managed skills after a DMG update.
 
 ### Switching between workflows
 
@@ -344,6 +346,6 @@ The wrapper (workflow 1 or 2) does not need to be relaunched — its `ServerStat
 
 ### One production install path
 
-The wizard is the production install path. It validates `/Applications/Tron.app`, registers the bundled LaunchAgent through `SMAppService`, and lets the helper generate `bearerToken` inside `~/.tron/system/auth.json` on first start. `scripts/tron` remains contributor tooling and is not used by the distributed Mac app.
+The wizard is the production install path. It validates `/Applications/Tron.app`, syncs bundled managed skills into `~/.tron/skills/`, registers the bundled LaunchAgent through `SMAppService`, and lets the helper generate `bearerToken` inside `~/.tron/system/auth.json` on first start. `scripts/tron` remains contributor tooling and is not used by the distributed Mac app.
 
 See [development.md](./development.md) for local dev + CI commands and the [README "Mac App" section](../../../README.md#mac-app-tronapp) for end-user-facing documentation.

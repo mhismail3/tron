@@ -324,6 +324,7 @@ struct OnboardingStateTests {
         #expect(snapshot.serviceSummary(for: "brave")?.title == "API key saved")
         #expect(snapshot.serviceSummary(for: "brave")?.detail == "BSA...abc")
         #expect(snapshot.preferredApiKeyLabel(for: "anthropic") == "work")
+        #expect(snapshot.preferredApiKeyLabel(for: "minimax") == "Default")
     }
 
     @Test("reset clears hydrated setup snapshot")

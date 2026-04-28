@@ -2,8 +2,33 @@ import Testing
 
 @testable import TronMobile
 
-@Suite("Model Providers Page Tests")
+@Suite("Providers Page Tests")
 struct ProvidersSettingsPageTests {
+
+    @Test("settings copy matches current labels")
+    func settingsCopyMatchesCurrentLabels() {
+        #expect(SettingsLabels.providers == "Providers")
+        #expect(SettingsLabels.connectToNewServer == "Connect to a new server")
+        #expect(SettingsLabels.transcriptionSidecar == "Transcription Sidecar")
+    }
+
+    @Test("server-backed settings show transcription before security")
+    func serverBackedSettingsOrder() {
+        #expect(ConnectionSettingsServerBackedSection.loadedOrder == [
+            .transcriptionSidecar,
+            .advancedSecurity,
+        ])
+        #expect(ConnectionSettingsServerBackedSection.transcriptionSidecar.title == "Transcription Sidecar")
+        #expect(ConnectionSettingsServerBackedSection.advancedSecurity.title == "Advanced Security")
+    }
+
+    @Test("server onboarding userInfo carries paired server id")
+    func serverOnboardingUserInfoCarriesServerId() {
+        #expect(ServerOnboardingLauncher.userInfo(serverId: "studio") == [
+            ServerOnboardingLauncher.serverIdUserInfoKey: "studio",
+        ])
+        #expect(ServerOnboardingLauncher.userInfo(serverId: nil).isEmpty)
+    }
 
     @Test("modelProviders array contains the five expected providers")
     func providerArrayShape() {

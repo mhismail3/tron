@@ -224,7 +224,19 @@ struct InstallStep: View {
             plan = value
         }
 
-        // 3. Register the bundled Login Item through SMAppService.
+        // 3. Sync bundled managed skills into the user's mutable skill tree.
+        stages[.syncSkills] = .running
+        await paceStage()
+        switch await setup.syncManagedSkills() {
+        case .synced:
+            stages[.syncSkills] = .succeeded
+        case .failed(let message):
+            stages[.syncSkills] = .failed(message)
+            state.installOutcome = .managedSkillsSyncFailed(message)
+            return
+        }
+
+        // 4. Register the bundled Login Item through SMAppService.
         stages[.registerAgent] = .running
         await paceStage()
         let outcome = await InstallLaunchAgentRunner.ensureLoaded(
@@ -250,7 +262,7 @@ struct InstallStep: View {
             return
         }
 
-        // 4. Await ping.
+        // 5. Await ping.
         stages[.awaitPing] = .running
         await paceStage()
         let pingOK = await waitForPing()
@@ -327,6 +339,7 @@ struct InstallStep: View {
         case .success: return ""
         case .invalidApplicationLocation(let message): return message
         case .helperValidationFailed(let message): return message
+        case .managedSkillsSyncFailed(let message): return "Could not sync bundled skills: \(message)"
         case .serviceRequiresApproval: return "Approve Tron Server in System Settings > Login Items, then return here."
         case .serviceRegistrationFailed(let message): return "Could not register Tron Server: \(message)"
         case .awaitPingTimedOut: return "The server did not respond in time. Open the logs window from the Tron menu bar after approving the Login Item."
@@ -454,6 +467,7 @@ enum InstallStepContent {
         switch stage {
         case .validateApplication: return "Confirm app location"
         case .validateHelper: return "Verify server helper"
+        case .syncSkills: return "Sync managed skills"
         case .registerAgent: return "Register Login Item"
         case .awaitPing: return "Confirm it's running"
         }

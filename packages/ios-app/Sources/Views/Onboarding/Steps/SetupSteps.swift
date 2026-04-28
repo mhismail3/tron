@@ -99,7 +99,7 @@ struct ProviderSetupOnboardingPage: View {
     let allowsOAuth: Bool
 
     @State private var apiKey = ""
-    @State private var apiKeyLabel = "default"
+    @State private var apiKeyLabel = OnboardingSetupSnapshot.defaultApiKeyLabel
     @State private var oauthProvider: OAuthProvider?
     @State private var status: String?
     @State private var isSaving = false
@@ -150,7 +150,7 @@ struct ProviderSetupOnboardingPage: View {
                 .environment(\.dependencies, dependencies)
         }
         .onAppear {
-            if apiKeyLabel == "default" {
+            if apiKeyLabel == OnboardingSetupSnapshot.defaultApiKeyLabel {
                 apiKeyLabel = state.setupSnapshot.preferredApiKeyLabel(for: provider.id)
             }
         }
@@ -206,7 +206,7 @@ struct RemainingProvidersOnboardingPage: View {
                         save: { key in
                             try await dependencies.rpcClient.auth.addNamedApiKey(
                                 provider: provider.id,
-                                label: "default",
+                                label: OnboardingSetupSnapshot.defaultApiKeyLabel,
                                 key: key
                             )
                         },

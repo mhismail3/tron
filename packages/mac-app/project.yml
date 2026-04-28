@@ -76,6 +76,16 @@ targets:
           rm -rf "$TRANSCRIPTION_DST"
           mkdir -p "$TRANSCRIPTION_DST"
           ditto "$TRANSCRIPTION_SRC" "$TRANSCRIPTION_DST"
+          SKILLS_SRC="$SRCROOT/../agent/skills"
+          SKILLS_DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/Skills"
+          test -d "$SKILLS_SRC" || { echo "Missing managed skills at $SKILLS_SRC" >&2; exit 1; }
+          find "$SKILLS_SRC" -mindepth 2 -maxdepth 2 -name .managed -print -quit | grep -q . \
+            || { echo "No managed skills found under $SKILLS_SRC" >&2; exit 1; }
+          rm -rf "$SKILLS_DST"
+          mkdir -p "$SKILLS_DST"
+          ditto "$SKILLS_SRC" "$SKILLS_DST"
+          find "$SKILLS_DST" -name node_modules -type d -prune -exec rm -rf {} +
+          find "$SKILLS_DST" -name .DS_Store -type f -delete
           HELPER="$DST/LoginItems/Tron Server.app"
           if [ -d "$HELPER" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
             SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"

@@ -4,6 +4,9 @@
 //! MCP servers. Instead of registering each MCP tool individually (which
 //! would consume ~500 tokens per tool in the LLM context), tools are exposed
 //! via two meta-tools: `McpSearch` and `McpCall`.
+//! The meta-tools are always registered, even before any MCP servers are
+//! configured, so adding a server through settings takes effect without a
+//! daemon restart.
 //!
 //! ## Architecture
 //!

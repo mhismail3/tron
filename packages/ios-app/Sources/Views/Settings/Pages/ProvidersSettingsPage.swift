@@ -7,6 +7,8 @@ import SwiftUI
 struct ProvidersSettingsPage: View {
     @Environment(\.dependencies) private var dependencies
 
+    static let title = SettingsLabels.providers
+
     @State private var authState: AuthState?
     @State private var error: String?
     @State private var oauthProvider: OAuthProvider?
@@ -14,7 +16,7 @@ struct ProvidersSettingsPage: View {
     private var rpcClient: RPCClient { dependencies.rpcClient }
 
     var body: some View {
-        SettingsPageContainer(title: "Model Providers") {
+        SettingsPageContainer(title: Self.title) {
             ForEach(ProviderInfo.modelProviders) { provider in
                 ModelProviderSection(
                     provider: provider,

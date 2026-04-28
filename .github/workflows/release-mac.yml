@@ -340,6 +340,10 @@ jobs:
             || { echo "::error::bundled transcription worker missing"; exit 1; }
           test -f "$APP_PATH/Contents/Resources/Transcription/requirements.txt" \
             || { echo "::error::bundled transcription requirements missing"; exit 1; }
+          test -f "$APP_PATH/Contents/Resources/Skills/self-inspect/.managed" \
+            || { echo "::error::bundled managed skills missing"; exit 1; }
+          test -f "$APP_PATH/Contents/Resources/Skills/self-inspect/SKILL.md" \
+            || { echo "::error::bundled managed skill content missing"; exit 1; }
 
       # Inside-out signing — required for hardened runtime + notarization.
       #

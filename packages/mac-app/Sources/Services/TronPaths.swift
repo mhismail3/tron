@@ -72,6 +72,15 @@ enum TronPaths {
             .appendingPathComponent("Transcription", isDirectory: true)
     }
 
+    static var skillsDir: URL {
+        tronHome.appendingPathComponent("skills", isDirectory: true)
+    }
+
+    static var managedSkillsResourceDir: URL {
+        (Bundle.main.resourceURL ?? applicationBundle.appendingPathComponent("Contents/Resources", isDirectory: true))
+            .appendingPathComponent("Skills", isDirectory: true)
+    }
+
     static var launchAgentPlistPath: URL {
         applicationBundle
             .appendingPathComponent("Contents/Library/LaunchAgents", isDirectory: true)

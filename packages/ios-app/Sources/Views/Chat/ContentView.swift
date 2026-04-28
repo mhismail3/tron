@@ -59,7 +59,10 @@ struct ContentView: View {
                 newSessionFlowSheet
             }
             .sheet(isPresented: $showSettings) {
-                SettingsView()
+                SettingsView { server in
+                    showSettings = false
+                    ServerOnboardingLauncher.post(prefill: server)
+                }
                     .environment(\.dependencies, dependencies)
             }
             .sheet(isPresented: $showVoiceNotesRecording) {

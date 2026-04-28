@@ -1,5 +1,32 @@
 import SwiftUI
 
+public enum SettingsLabels {
+    public static let providers = "Providers"
+    public static let connectToNewServer = "Connect to a new server"
+    public static let transcriptionSidecar = "Transcription Sidecar"
+}
+
+public enum ServerOnboardingLauncher {
+    public static let serverIdUserInfoKey = "serverId"
+
+    public static func userInfo(serverId: String?) -> [String: String] {
+        var userInfo: [String: String] = [:]
+        if let serverId {
+            userInfo[serverIdUserInfoKey] = serverId
+        }
+        return userInfo
+    }
+
+    static func userInfo(prefill server: PairedServer?) -> [String: String] {
+        userInfo(serverId: server?.id)
+    }
+
+    static func post(prefill server: PairedServer?, notificationCenter: NotificationCenter = .default) {
+        let userInfo = userInfo(prefill: server)
+        notificationCenter.post(name: .startServerOnboarding, object: nil, userInfo: userInfo)
+    }
+}
+
 // MARK: - Settings View
 
 struct SettingsView: View {
@@ -27,6 +54,11 @@ struct SettingsView: View {
     }
 
     @State private var settingsState = SettingsState()
+    private let launchServerOnboarding: (PairedServer?) -> Void
+
+    init(launchServerOnboarding: @escaping (PairedServer?) -> Void = { ServerOnboardingLauncher.post(prefill: $0) }) {
+        self.launchServerOnboarding = launchServerOnboarding
+    }
 
     private var hasPairedServers: Bool {
         !dependencies.pairedServerStore.servers.isEmpty
@@ -77,7 +109,8 @@ struct SettingsView: View {
                 case .server:
                     ConnectionSettingsPage(
                         settingsState: settingsState,
-                        updateServerSetting: updateServerSetting
+                        updateServerSetting: updateServerSetting,
+                        startServerOnboarding: { startOnboarding(prefill: $0) }
                     )
                 case .agent:
                     ContextSettingsPage(
@@ -131,7 +164,6 @@ struct SettingsView: View {
             Task { await loadServerSettingsIfAvailable() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { _ in
-            activePage = nil
             dismiss()
         }
         .alert("Reset Settings?", isPresented: $showingResetAlert) {
@@ -202,7 +234,7 @@ struct SettingsView: View {
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 22)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Onboard to Server")
+                        Text(SettingsLabels.connectToNewServer)
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
                         Text("Pair this iPhone with a Mac before editing server settings.")
@@ -252,7 +284,7 @@ struct SettingsView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.tronEmerald)
 
-                    Button("Onboard to Server") {
+                    Button(SettingsLabels.connectToNewServer) {
                         startOnboarding(prefill: dependencies.pairedServerStore.activeServer)
                     }
                     .buttonStyle(.bordered)
@@ -280,7 +312,7 @@ struct SettingsView: View {
             serverManagementCard
 
             SettingsCard(interactive: true) {
-                categoryRow(icon: "key.horizontal", label: "Model Providers", subtitle: "Login with OAuth and configure API keys") {
+                categoryRow(icon: "key.horizontal", label: SettingsLabels.providers, subtitle: "Login with OAuth and configure API keys") {
                     activePage = .providers
                 }
             }
@@ -433,11 +465,7 @@ struct SettingsView: View {
     }
 
     private func startOnboarding(prefill server: PairedServer? = nil) {
-        var userInfo: [String: String] = [:]
-        if let server {
-            userInfo["serverId"] = server.id
-        }
-        NotificationCenter.default.post(name: .startServerOnboarding, object: nil, userInfo: userInfo)
+        launchServerOnboarding(server)
     }
 
     private func resetToDefaults() {

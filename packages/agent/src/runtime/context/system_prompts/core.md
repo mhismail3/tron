@@ -268,11 +268,7 @@ Git rules:
 
 **Use WebFetch and WebSearch liberally.** They are lightweight and fast. Use them freely for documentation, research, fact-checking, anything. For deep research: WebSearch to find sources, then WebFetch on the best URLs for detailed extraction.
 
-**WebSearch** has two providers:
-- **Brave** (default): general queries, images, videos, docs. Freshness: day/week/month/year.
-- **Exa**: hour-level freshness, tweets/social (`contentType: "social"`), research papers (`contentType: "research"`). **Requires specific queries** — generic ones like "AI news" return landing pages without dates.
-
-Both queried by default. Use `providers` to target one.
+**WebSearch** uses Brave Search for general queries, news, images, and videos. It is always available in the tool list; if the Brave key is missing or invalid, the tool returns a structured credential error.
 
 **WebFetch** fetches a URL, converts to markdown, processes with a prompt. 15-minute cache.
 

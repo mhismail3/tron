@@ -193,26 +193,63 @@ sync_managed_skills() {
 
     local synced=0
     local skipped=0
+    local removed=0
+    local found=0
+
+    mkdir -p "$dst_dir"
+
+    for skill_dst in "$dst_dir"/*/; do
+        [ -d "$skill_dst" ] || continue
+        local name
+        name=$(basename "$skill_dst")
+        if [ -f "$skill_dst/.managed" ] && [ ! -d "$src_dir/$name" ]; then
+            rm -rf "$skill_dst"
+            removed=$((removed + 1))
+        fi
+    done
 
     for skill_src in "$src_dir"/*/; do
         [ -d "$skill_src" ] || continue
+        found=$((found + 1))
         local name
         name=$(basename "$skill_src")
         local skill_dst="$dst_dir/$name"
 
+        if [ ! -f "$skill_src/.managed" ]; then
+            print_error "Managed skill source is missing .managed: $skill_src"
+            return 1
+        fi
+
         # Skip if target exists and is NOT managed (user-owned)
-        if [ -d "$skill_dst" ] && [ ! -f "$skill_dst/.managed" ]; then
+        if [ -e "$skill_dst" ] && [ ! -f "$skill_dst/.managed" ]; then
             skipped=$((skipped + 1))
             continue
         fi
 
-        mkdir -p "$skill_dst"
-        rsync -a --delete --exclude='node_modules' --exclude='.DS_Store' "$skill_src" "$skill_dst/"
+        local staging
+        staging=$(mktemp -d "$dst_dir/.${name}.syncing.XXXXXX")
+        if ! rsync -a --delete --exclude='node_modules' --exclude='.DS_Store' "$skill_src/" "$staging/"; then
+            rm -rf "$staging"
+            return 1
+        fi
+        if ! rm -rf "$skill_dst"; then
+            rm -rf "$staging"
+            return 1
+        fi
+        if ! mv "$staging" "$skill_dst"; then
+            rm -rf "$staging"
+            return 1
+        fi
         synced=$((synced + 1))
     done
 
-    if [ "$synced" -gt 0 ] || [ "$skipped" -gt 0 ]; then
-        print_success "Skills: $synced synced, $skipped user-owned (skipped)"
+    if [ "$found" -eq 0 ]; then
+        print_error "No managed skill sources found in $src_dir"
+        return 1
+    fi
+
+    if [ "$synced" -gt 0 ] || [ "$skipped" -gt 0 ] || [ "$removed" -gt 0 ]; then
+        print_success "Skills: $synced synced, $skipped user-owned (skipped), $removed stale managed removed"
     fi
 }
 

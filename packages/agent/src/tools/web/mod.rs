@@ -8,7 +8,7 @@
 //! | Module          | Content |
 //! |-----------------|---------|
 //! | [`web_fetch`]   | `WebFetch` tool — GET a URL, render as markdown, with redirect bounding |
-//! | [`web_search`]  | `WebSearch` tool — Brave Search API query with result decoration |
+//! | [`web_search`]  | `WebSearch` tool — Brave Search API query with per-call auth lookup |
 //! | [`url_validator`] | Parse + scheme/host validation; rejects `file://`, private IPs |
 //! | [`html_parser`] | HTML → markdown conversion; script/style/nav stripping |
 //! | [`cache`]       | Short-lived in-memory fetch cache keyed on canonical URL |
@@ -18,6 +18,9 @@
 //! - Every outbound request routes through the injected `HttpClient`
 //!   trait ([`crate::tools::traits`]) so tests never hit the real
 //!   internet.
+//! - `WebSearch` is always registered and reads Brave credentials from
+//!   `auth.json` when called, so adding a key does not require a daemon
+//!   restart.
 //! - [`url_validator::validate_url`] rejects private and link-local
 //!   addresses; a `WebFetch` to `http://127.0.0.1:8080/…` returns an
 //!   error, not an accidental SSRF.

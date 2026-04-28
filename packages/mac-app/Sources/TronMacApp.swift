@@ -245,6 +245,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("[Tron] Cannot start server from command mode: %@", problem)
                 return
             }
+            switch await setup.syncManagedSkills() {
+            case .synced:
+                break
+            case .failed(let message):
+                NSLog("[Tron] Cannot start server from command mode: failed to sync managed skills: %@", message)
+                return
+            }
 
             let outcome = await setup.launchAgentManager.load(
                 plistPath: setup.launchAgentPlistPath,
@@ -300,6 +307,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func installMenuBar(setup: EnvironmentSetup) {
         guard menuBarController == nil else { return }
+        Task {
+            if case .failed(let message) = await setup.syncManagedSkills() {
+                NSLog("[Tron] Menu-bar startup failed to sync managed skills: %@", message)
+            }
+        }
         let controller = MenuBarController(setup: setup)
         let handler = MenuBarActionHandler(setup: setup)
         handler.menuBarController = controller

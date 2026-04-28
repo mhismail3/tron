@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-04-28 (settings revamp: local paired servers + server-owned settings)
+> Last verified: 2026-04-28 (settings revamp: local paired servers, server-owned settings, and onboarding handoff)
 
 ## Overview
 

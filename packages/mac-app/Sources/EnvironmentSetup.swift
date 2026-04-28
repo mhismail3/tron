@@ -69,6 +69,12 @@ struct EnvironmentSetup: Sendable {
     /// LaunchAgent control surface - load/unload/restart/check.
     var launchAgentManager: LaunchAgentManaging
 
+    /// Syncs first-party `.managed` skills from the app bundle into
+    /// `~/.tron/skills`, preserving user-owned skill directories.
+    var syncManagedSkills: @Sendable () async -> ManagedSkillSyncResult = {
+        .synced(ManagedSkillSyncSummary(synced: 0, skippedUserOwned: 0, removedStale: 0))
+    }
+
     /// Applies the first-run transcription preference. The wizard seeds
     /// bundled sidecar support files into `~/.tron/system/transcription/`
     /// either way so iOS can enable it later; enabling also writes
@@ -127,6 +133,26 @@ struct EnvironmentSetup: Sendable {
             await ServerPing.ping(host: "127.0.0.1", port: TronPaths.defaultServerPort, token: token)
         },
         launchAgentManager: LiveLaunchAgentManager(),
+        syncManagedSkills: {
+            await Task.detached(priority: .utility) {
+                do {
+                    let summary = try ManagedSkillInstaller.sync(
+                        from: TronPaths.managedSkillsResourceDir,
+                        to: TronPaths.skillsDir
+                    )
+                    NSLog(
+                        "[EnvironmentSetup] synced managed skills: %d synced, %d user-owned skipped, %d stale removed",
+                        summary.synced,
+                        summary.skippedUserOwned,
+                        summary.removedStale
+                    )
+                    return .synced(summary)
+                } catch {
+                    NSLog("[EnvironmentSetup] failed to sync managed skills: %@", error.localizedDescription)
+                    return .failed(error.localizedDescription)
+                }
+            }.value
+        },
         applyTranscriptionPreference: { enabled in
             await TranscriptionSetupCoordinator.apply(
                 enabled: enabled,

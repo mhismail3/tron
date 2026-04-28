@@ -3,6 +3,7 @@
 //! Separated from `main.rs` to keep the binary entry point focused on
 //! initialization orchestration and server lifecycle.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tron::events::EventStore;
@@ -12,11 +13,12 @@ use crate::PushServiceOption;
 
 /// Configuration for tool registry creation.
 ///
-/// Captures shared resources (event store, API keys) so the
+/// Captures shared resources (event store, auth paths) so the
 /// tool factory closure can create real provider implementations.
 pub(crate) struct ToolRegistryConfig {
     pub event_store: Arc<EventStore>,
-    pub brave_api_key: Option<String>,
+    /// Auth storage path read by tools whose credentials can change at runtime.
+    pub auth_path: PathBuf,
     #[cfg_attr(not(feature = "apns"), allow(dead_code))]
     pub push_service: PushServiceOption,
     /// Shared HTTP client (connection pool reused across tools).
@@ -28,9 +30,9 @@ pub(crate) struct ToolRegistryConfig {
     /// Broadcast sender for Display tool streaming (DisplayFrame events).
     pub display_event_tx: Option<tokio::sync::broadcast::Sender<tron::core::events::TronEvent>>,
     /// `McpSearch` meta-tool (searches all MCP server tools by keyword).
-    pub mcp_search: Option<Arc<dyn tron::tools::traits::TronTool>>,
+    pub mcp_search: Arc<dyn tron::tools::traits::TronTool>,
     /// `McpCall` meta-tool (calls a tool on an MCP server).
-    pub mcp_call: Option<Arc<dyn tron::tools::traits::TronTool>>,
+    pub mcp_call: Arc<dyn tron::tools::traits::TronTool>,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -38,7 +40,7 @@ pub(crate) struct ToolRegistryConfig {
 /// Called once per agent run to create a fresh registry. Registration matches
 /// the TypeScript server:
 /// - Tools with real backends use real providers
-/// - `NotifyApp`: conditionally registered (only with APNS backend)
+/// - `NotifyApp`: real APNS relay when configured, otherwise a stub delegate
 /// - Subagent tools: NOT registered (stubs return "not available", confusing LLM)
 pub(crate) fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     use tron::tools::backends::{
@@ -112,13 +114,13 @@ pub(crate) fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry 
         http.clone(),
     )));
 
-    // 11: WebSearch — conditional on Brave API key
-    if let Some(ref api_key) = config.brave_api_key {
-        registry.register(Arc::new(tron::tools::web::web_search::WebSearchTool::new(
-            http,
-            api_key.clone(),
-        )));
-    }
+    // 11: WebSearch — always registered; reads Brave auth at execution time.
+    registry.register(Arc::new(
+        tron::tools::web::web_search::WebSearchTool::new_with_auth_path(
+            http.clone(),
+            config.auth_path.clone(),
+        ),
+    ));
 
     // 12: Display (rich content presentation — images, streams)
     //     Uses blob storage for images to avoid exceeding WebSocket message limits.
@@ -145,13 +147,11 @@ pub(crate) fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry 
     // both ProcessManager and SubagentManager are available for JobManager creation.
     // See the `tool_factory` closure in main().
 
-    // MCP meta-tools (McpSearch + McpCall replace individual tool registration)
-    if let Some(ref tool) = config.mcp_search {
-        registry.register(tool.clone());
-    }
-    if let Some(ref tool) = config.mcp_call {
-        registry.register(tool.clone());
-    }
+    // MCP meta-tools (McpSearch + McpCall replace individual tool registration).
+    // They remain present with zero configured servers so settings changes can
+    // take effect without recreating sessions or restarting the daemon.
+    registry.register(config.mcp_search.clone());
+    registry.register(config.mcp_call.clone());
 
     tracing::debug!(tool_count = registry.len(), tools = ?registry.names(), "tool registry created");
     registry

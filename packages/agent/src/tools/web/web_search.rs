@@ -3,6 +3,7 @@
 //! Searches the web using the Brave Search API with support for multiple
 //! endpoints (web, news, images, videos), domain filtering, and freshness.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
@@ -114,13 +115,45 @@ fn endpoint_path(endpoint: &str) -> &'static str {
 /// The `WebSearch` tool searches the web using the Brave Search API.
 pub struct WebSearchTool {
     http: Arc<dyn HttpClient>,
-    api_key: String,
+    api_key_source: ApiKeySource,
+}
+
+enum ApiKeySource {
+    Static(String),
+    AuthFile(PathBuf),
+}
+
+impl ApiKeySource {
+    fn load(&self) -> Result<Option<String>, String> {
+        match self {
+            Self::Static(api_key) => Ok(non_empty_key(api_key)),
+            Self::AuthFile(path) => crate::llm::auth::storage::get_service_api_keys(path, "brave")
+                .map_err(|e| e.to_string())
+                .map(|keys| keys.into_iter().find_map(|key| non_empty_key(&key))),
+        }
+    }
+}
+
+fn non_empty_key(api_key: &str) -> Option<String> {
+    let trimmed = api_key.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
 impl WebSearchTool {
     /// Create a new `WebSearch` tool with the given HTTP client and API key.
     pub fn new(http: Arc<dyn HttpClient>, api_key: String) -> Self {
-        Self { http, api_key }
+        Self {
+            http,
+            api_key_source: ApiKeySource::Static(api_key),
+        }
+    }
+
+    /// Create a new `WebSearch` tool that reads Brave auth from disk per call.
+    pub fn new_with_auth_path(http: Arc<dyn HttpClient>, auth_path: PathBuf) -> Self {
+        Self {
+            http,
+            api_key_source: ApiKeySource::AuthFile(auth_path),
+        }
     }
 }
 
@@ -180,6 +213,22 @@ impl TronTool for WebSearchTool {
             ));
         }
 
+        let api_key = match self.api_key_source.load() {
+            Ok(Some(api_key)) => api_key,
+            Ok(None) => {
+                return Ok(web_search_error(
+                    "Brave Search API key is not configured. Add a Brave Search API key in Settings.",
+                    None,
+                ));
+            }
+            Err(e) => {
+                return Ok(web_search_error(
+                    format!("Could not load Brave Search API key: {e}"),
+                    None,
+                ));
+            }
+        };
+
         let endpoint = get_optional_string(&params, "endpoint").unwrap_or_else(|| "web".into());
         let limits = endpoint_limits(&endpoint);
         let count = get_optional_u64(&params, "count")
@@ -218,10 +267,10 @@ impl TronTool for WebSearchTool {
             .join("&");
         let url = format!("{BRAVE_BASE_URL}{path}?{qs}");
 
-        let mut headers: Vec<(&str, &str)> = vec![("Accept", "application/json")];
-        if !self.api_key.is_empty() {
-            headers.push(("X-Subscription-Token", &self.api_key));
-        }
+        let headers: Vec<(&str, &str)> = vec![
+            ("Accept", "application/json"),
+            ("X-Subscription-Token", &api_key),
+        ];
 
         let response = match self.http.get_with_headers(&url, &headers).await {
             Ok(r) => r,
@@ -412,9 +461,12 @@ fn format_video_results(body: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::auth::storage::save_auth_storage;
+    use crate::llm::auth::types::{AuthStorage, ServiceAuth};
     use crate::tools::testutil::{extract_text, make_ctx};
     use crate::tools::traits::{HttpRequest, HttpResponse};
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct MockHttp {
         handler: Box<dyn Fn(&str) -> Result<HttpResponse, String> + Send + Sync>,
@@ -442,6 +494,102 @@ mod tests {
             })
             }),
         }
+    }
+
+    struct HeaderAssertingHttp {
+        expected_key: String,
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl HttpClient for HeaderAssertingHttp {
+        async fn get(&self, _url: &str) -> Result<HttpResponse, ToolError> {
+            Err(ToolError::Internal {
+                message: "expected get_with_headers".into(),
+            })
+        }
+
+        async fn get_with_headers(
+            &self,
+            _url: &str,
+            headers: &[(&str, &str)],
+        ) -> Result<HttpResponse, ToolError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            assert!(
+                headers.iter().any(|(name, value)| {
+                    *name == "X-Subscription-Token" && *value == self.expected_key
+                }),
+                "expected Brave key header, got {headers:?}"
+            );
+            Ok(HttpResponse {
+                status: 200,
+                body: r#"{"web":{"results":[{"title":"Example","url":"https://example.com","description":"A test result"}]}}"#.into(),
+                content_type: Some("application/json".into()),
+                headers: HashMap::new(),
+            })
+        }
+
+        async fn request(&self, _req: &HttpRequest<'_>) -> Result<HttpResponse, ToolError> {
+            Err(ToolError::Internal {
+                message: "expected get_with_headers".into(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn dynamic_auth_missing_key_returns_config_error_without_http_call() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let http = Arc::new(MockHttp {
+            handler: Box::new(move |_| {
+                calls_clone.fetch_add(1, Ordering::SeqCst);
+                Ok(HttpResponse {
+                    status: 200,
+                    body: "{}".into(),
+                    content_type: Some("application/json".into()),
+                    headers: HashMap::new(),
+                })
+            }),
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let tool = WebSearchTool::new_with_auth_path(http, dir.path().join("auth.json"));
+
+        let r = tool
+            .execute(json!({"query": "test"}), &make_ctx())
+            .await
+            .unwrap();
+
+        assert_eq!(r.is_error, Some(true));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(extract_text(&r).contains("Brave Search API key is not configured"));
+        assert_eq!(r.details.as_ref().unwrap()["errorClass"], "api_key");
+    }
+
+    #[tokio::test]
+    async fn dynamic_auth_loads_key_at_execution_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth_path = dir.path().join("auth.json");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let http = Arc::new(HeaderAssertingHttp {
+            expected_key: "runtime-key".into(),
+            calls: calls.clone(),
+        });
+        let tool = WebSearchTool::new_with_auth_path(http, auth_path.clone());
+
+        let mut storage = AuthStorage::default();
+        let mut services = HashMap::new();
+        let _ = services.insert("brave".into(), ServiceAuth::from_single("runtime-key"));
+        storage.services = Some(services);
+        save_auth_storage(&auth_path, &mut storage).unwrap();
+
+        let r = tool
+            .execute(json!({"query": "test"}), &make_ctx())
+            .await
+            .unwrap();
+
+        assert!(r.is_error.is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(extract_text(&r).contains("Example"));
     }
 
     #[tokio::test]

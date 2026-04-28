@@ -266,7 +266,7 @@ struct TronMobileApp: App {
     }
 
     private func launchServerOnboarding(notification: Notification) {
-        let serverId = notification.userInfo?["serverId"] as? String
+        let serverId = notification.userInfo?[ServerOnboardingLauncher.serverIdUserInfoKey] as? String
         let server = serverId.flatMap { id in
             container.pairedServerStore.servers.first { $0.id == id }
         }

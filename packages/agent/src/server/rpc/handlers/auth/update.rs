@@ -1,6 +1,8 @@
 use super::oauth::parse_oauth_tokens;
 use super::*;
 
+const DEFAULT_API_KEY_LABEL: &str = "Default";
+
 /// Update auth for a provider or service.
 pub struct UpdateAuthHandler;
 
@@ -79,11 +81,7 @@ fn update_standard_provider(
                 save_auth_storage(auth_path, &mut storage).map_err(map_auth_error)?;
             }
         } else if let Some(key) = api_key_val.as_str() {
-            // Use provided label, or generate a default
-            let label = params
-                .get("apiKeyLabel")
-                .and_then(|v| v.as_str())
-                .unwrap_or("(default)");
+            let label = api_key_label(params);
             save_named_api_key(auth_path, provider, label, key).map_err(map_auth_error)?;
         }
     }
@@ -132,7 +130,7 @@ fn update_google_provider(auth_path: &Path, params: Option<&Value>) -> Result<()
             google.base.api_keys = None;
         } else if let Some(key) = api_key_val.as_str() {
             google.base.api_keys = Some(vec![ApiKeyEntry {
-                label: "(default)".to_string(),
+                label: api_key_label(params).to_string(),
                 key: key.to_string(),
             }]);
         }
@@ -182,6 +180,15 @@ fn update_google_provider(auth_path: &Path, params: Option<&Value>) -> Result<()
     save_auth_storage(auth_path, &mut storage).map_err(map_auth_error)?;
 
     Ok(())
+}
+
+fn api_key_label(params: &Value) -> &str {
+    params
+        .get("apiKeyLabel")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .unwrap_or(DEFAULT_API_KEY_LABEL)
 }
 
 fn update_service(auth_path: &Path, service: &str, params: Option<&Value>) -> Result<(), RpcError> {

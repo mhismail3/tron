@@ -29,7 +29,11 @@ struct ChatSheetContent: View {
     private var sheetContent: some View {
         switch sheet {
         case .settings:
-            SettingsView()
+            SettingsView { server in
+                viewModel.showSettings = false
+                sheetCoordinator?.activeSheet = nil
+                ServerOnboardingLauncher.post(prefill: server)
+            }
                 .environment(\.dependencies, dependencies)
 
         case .agentControl:

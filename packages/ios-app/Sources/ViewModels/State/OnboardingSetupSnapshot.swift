@@ -8,6 +8,8 @@ import Foundation
 /// onboarding pages reflect the server's existing `settings.json` and masked
 /// `auth.json` state without copying those files into iOS storage.
 struct OnboardingSetupSnapshot {
+    static let defaultApiKeyLabel = "Default"
+
     private(set) var serverId: String?
     private(set) var settings: ServerSettings?
     private(set) var authState: AuthState?
@@ -127,14 +129,14 @@ struct OnboardingSetupSnapshot {
     }
 
     func preferredApiKeyLabel(for providerId: String) -> String {
-        guard let info = authState?.providers[providerId] else { return "default" }
+        guard let info = authState?.providers[providerId] else { return Self.defaultApiKeyLabel }
         if let active = info.activeCredential, active.isApiKey {
             return active.label
         }
         if let key = info.apiKeys?.first {
             return key.label
         }
-        return "default"
+        return Self.defaultApiKeyLabel
     }
 
     private func joinedDetail(_ label: String, _ hint: String?) -> String {

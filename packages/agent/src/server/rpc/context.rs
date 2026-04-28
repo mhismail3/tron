@@ -83,7 +83,8 @@ pub struct RpcContext {
             std::collections::HashMap<String, crate::server::rpc::handlers::auth::PendingOAuthFlow>,
         >,
     >,
-    /// MCP router for managing MCP servers (None = no MCP servers configured).
+    /// MCP router for managing MCP servers. Production contexts always provide
+    /// one; isolated handler tests may leave it absent.
     pub mcp_router: Option<Arc<tokio::sync::RwLock<crate::mcp::router::McpRouter>>>,
     /// Active display stream registry (shared with DisplayTool for on-demand cancellation).
     pub display_stream_registry: Option<crate::tools::ui::display_stream::ActiveStreamRegistry>,

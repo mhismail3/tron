@@ -49,11 +49,12 @@ struct WizardStepOrderingTests {
 
 @Suite("InstallPipelineStage ordering")
 struct InstallPipelineStageOrderingTests {
-    @Test("stages run validate app, validate helper, register, ping")
+    @Test("stages run validate app, validate helper, sync skills, register, ping")
     func canonicalOrder() {
         #expect(InstallPipelineStage.allCases == [
             .validateApplication,
             .validateHelper,
+            .syncSkills,
             .registerAgent,
             .awaitPing,
         ])
@@ -71,6 +72,7 @@ struct InstallPipelineStageOrderingTests {
         #expect(InstallStepLayout.stageRowMinHeight >= 22)
         #expect(InstallStepLayout.stageIconGlyphSize <= 13)
         #expect(InstallStepContent.label(for: .validateApplication) == "Confirm app location")
+        #expect(InstallStepContent.label(for: .syncSkills) == "Sync managed skills")
         #expect(InstallStepContent.label(for: .registerAgent) == "Register Login Item")
         for stage in InstallPipelineStage.allCases {
             #expect(!InstallStepContent.label(for: stage).isEmpty)

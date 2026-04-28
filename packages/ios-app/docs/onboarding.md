@@ -22,7 +22,9 @@ is prefilled from the local paired-server record and may use that server's
 Keychain token for the probe. Editing the prefilled host or port turns it back
 into a fresh pairing attempt, so the user must provide a new token. First-run
 onboarding remains non-dismissable until the user completes setup or explicitly
-leaves from a Settings-launched sheet.
+leaves from a Settings-launched sheet. Settings hosts dismiss their active
+settings sheet before posting the onboarding launch, so nested settings pages do
+not unwind one at a time before the connect sheet appears.
 The setup pages are not rendered until a fresh pairing attempt succeeds, so
 opening onboarding from Settings cannot reveal stale settings from the currently
 active server.
@@ -129,7 +131,8 @@ After pairing succeeds, onboarding continues with optional setup pages:
 - **Anthropic** and **OpenAI** reuse `OAuthLoginSheet` for OAuth and
   expose a named API-key field for users who prefer keys.
 - **Other providers** exposes compact API-key rows for Google, MiniMax,
-  and Kimi.
+  and Kimi. These quick rows save the key under the `Default` label unless
+  the user later renames it from Settings.
 - **Search services** exposes API-key rows for Brave Search and Exa.
 - **Default model** reuses `ModelPickerSheet`, then writes both
   `server.defaultModel` and `memory.retainModel`.
@@ -221,7 +224,7 @@ paired server. It deletes the matching iOS Keychain bearer token and removes
 the server from `PairedServerStore`; server settings and sessions on the Mac
 are unchanged. If another paired server remains, iOS switches locally to it.
 If no paired servers remain, Settings hides server settings and shows the
-"Onboard to Server" CTA.
+"Connect to a new server" CTA.
 
 Forgetting an offline server is safe because it is local-only. Optional status
 snapshots such as last connected time and last known status can remain local

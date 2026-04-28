@@ -249,6 +249,7 @@ async fn auth_update_sets_api_key() {
         .expect("provider auth written by test setup");
     let api_keys = pa.api_keys.unwrap();
     assert_eq!(api_keys[0].key, "sk-ant-api03-newkey123456789");
+    assert_eq!(api_keys[0].label, "Default");
 }
 
 #[tokio::test]
@@ -295,6 +296,8 @@ async fn auth_update_sets_google_with_all_fields() {
     assert_eq!(google["hasClientId"], true);
     assert_eq!(google["hasClientSecret"], true);
     assert_eq!(google["projectId"], "my-gcp-project");
+    assert_eq!(google["apiKeys"][0]["label"], "Default");
+    assert_eq!(google["activeCredential"]["label"], "Default");
 }
 
 #[tokio::test]
@@ -1438,4 +1441,28 @@ async fn auth_update_with_api_key_label_creates_named_key() {
         .unwrap();
     assert_eq!(api_keys.len(), 1);
     assert_eq!(api_keys[0]["label"], "work");
+}
+
+#[tokio::test]
+async fn auth_update_google_with_api_key_label_creates_named_key() {
+    let (ctx, _dir) = make_ctx_with_temp_auth();
+    let result = UpdateAuthHandler
+        .handle(
+            Some(json!({
+                "provider": "google",
+                "apiKey": "AIza-named-key",
+                "apiKeyLabel": "work"
+            })),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let api_keys = result["providers"]["google"]["apiKeys"].as_array().unwrap();
+    assert_eq!(api_keys.len(), 1);
+    assert_eq!(api_keys[0]["label"], "work");
+    assert_eq!(
+        result["providers"]["google"]["activeCredential"]["label"],
+        "work"
+    );
 }

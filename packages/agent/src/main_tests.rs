@@ -471,9 +471,47 @@ fn server_runs_migrations() {
     assert_eq!(count, 1);
 }
 
+struct RegistryTestTool {
+    name: &'static str,
+}
+
+#[async_trait::async_trait]
+impl tron::tools::traits::TronTool for RegistryTestTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn category(&self) -> tron::core::tools::ToolCategory {
+        tron::core::tools::ToolCategory::Custom
+    }
+
+    fn definition(&self) -> tron::core::tools::Tool {
+        tron::core::tools::Tool {
+            name: self.name.to_string(),
+            description: "test tool".into(),
+            parameters: tron::core::tools::ToolParameterSchema {
+                schema_type: "object".into(),
+                properties: Some(serde_json::Map::new()),
+                required: None,
+                description: None,
+                extra: serde_json::Map::new(),
+            },
+        }
+    }
+
+    async fn execute(
+        &self,
+        _params: serde_json::Value,
+        _ctx: &tron::tools::traits::ToolContext,
+    ) -> Result<tron::core::tools::TronToolResult, tron::tools::errors::ToolError> {
+        Ok(tron::core::tools::text_result("ok", false))
+    }
+}
+
 fn make_tool_config() -> ToolRegistryConfig {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("tools-test.db");
+    let auth_path = dir.path().join("auth.json");
     let db_str = db_path.to_string_lossy();
     let pool = tron::events::new_file(&db_str, &test_db_config()).unwrap();
     {
@@ -483,14 +521,14 @@ fn make_tool_config() -> ToolRegistryConfig {
     let event_store = Arc::new(EventStore::new(pool));
     ToolRegistryConfig {
         event_store,
-        brave_api_key: None,
+        auth_path,
         push_service: None,
         http_client: reqwest::Client::new(),
         sandbox_settings: tron::settings::BashSandboxSettings::default(),
         computer_use_settings: tron::settings::ComputerUseSettings::default(),
         display_event_tx: None,
-        mcp_search: None,
-        mcp_call: None,
+        mcp_search: Arc::new(RegistryTestTool { name: "McpSearch" }),
+        mcp_call: Arc::new(RegistryTestTool { name: "McpCall" }),
     }
 }
 
@@ -509,8 +547,11 @@ fn tool_registry_order() {
     assert_eq!(names[7], "GetConfirmation");
     assert_eq!(names[8], "NotifyApp");
     assert_eq!(names[9], "WebFetch");
-    assert_eq!(names[10], "Display");
-    assert_eq!(names[11], "ComputerUse");
+    assert_eq!(names[10], "WebSearch");
+    assert_eq!(names[11], "Display");
+    assert_eq!(names[12], "ComputerUse");
+    assert_eq!(names[13], "McpSearch");
+    assert_eq!(names[14], "McpCall");
 }
 
 #[test]
@@ -524,28 +565,33 @@ fn tool_registry_has_notify_app() {
 fn tool_registry_count() {
     let config = make_tool_config();
     let registry = create_tool_registry(&config);
-    // 12 tools without Brave API key (no WebSearch), without subagent tools
     assert_eq!(
         registry.len(),
-        12,
-        "expected 12 tools (no WebSearch without Brave key), got: {:?}",
+        15,
+        "expected 15 base tools before subagent/job tools, got: {:?}",
         registry.names()
     );
 }
 
 #[test]
-fn tool_registry_count_with_web_search() {
-    let config = ToolRegistryConfig {
-        brave_api_key: Some("test-key".into()),
-        ..make_tool_config()
-    };
+fn tool_registry_always_includes_web_search_and_mcp_meta_tools() {
+    let config = make_tool_config();
     let registry = create_tool_registry(&config);
-    assert_eq!(
-        registry.len(),
-        13,
-        "expected 13 tools with WebSearch, got: {:?}",
-        registry.names()
-    );
+    let names = registry.names();
+    assert!(names.contains(&"WebSearch".to_string()));
+    assert!(names.contains(&"McpSearch".to_string()));
+    assert!(names.contains(&"McpCall".to_string()));
+}
+
+#[tokio::test]
+async fn init_mcp_registers_meta_tools_without_servers() {
+    let settings = TronSettings::default();
+    let dir = tempfile::tempdir().unwrap();
+    let state = init_mcp(&settings, &dir.path().join("settings.json")).await;
+
+    assert_eq!(state.search.name(), "McpSearch");
+    assert_eq!(state.call.name(), "McpCall");
+    assert!(state.router.read().await.status().is_empty());
 }
 
 #[test]
