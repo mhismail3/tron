@@ -66,7 +66,7 @@ final class SettingsParityTests: XCTestCase {
         "transcriptionEnabled",
         // Server auth (ConnectionSettingsPage.swift)
         "authEnforced",
-        // Update checks (UpdatesSettingsPage.swift)
+        // Update checks (ConnectionSettingsPage.swift)
         "updateEnabled",
         "updateChannel",
         "updateFrequency",

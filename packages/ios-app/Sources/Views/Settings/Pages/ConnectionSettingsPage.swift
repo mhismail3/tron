@@ -7,6 +7,8 @@ struct ConnectionSettingsPage: View {
 
     @Environment(\.dependencies) private var dependencies
     @State private var serverPendingRemoval: PairedServer?
+    @State private var isCheckingForUpdates = false
+    @State private var checkResultMessage: String?
 
     init(
         settingsState: SettingsState,
@@ -20,6 +22,7 @@ struct ConnectionSettingsPage: View {
 
     var body: some View {
         SettingsPageContainer(title: "Server") {
+            serverInfoCard
             pairedServersSection
             if settingsState.isLoaded {
                 loadedServerBackedSettingsSections
@@ -33,6 +36,37 @@ struct ConnectionSettingsPage: View {
         } message: { server in
             Text("Removes \(server.label) from this iPhone. Server settings and sessions on the Mac are unchanged.")
         }
+        .alert(
+            checkResultMessage ?? "",
+            isPresented: Binding(
+                get: { checkResultMessage != nil },
+                set: { if !$0 { checkResultMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { checkResultMessage = nil }
+        }
+    }
+
+    private var serverInfoCard: some View {
+        SettingsInfoCard(
+            icon: "server.rack",
+            title: ServerSettingsSummary.title(for: summaryContext),
+            description: ServerSettingsSummary.description(for: summaryContext)
+        )
+    }
+
+    private var summaryContext: ServerSettingsSummary.Context {
+        ServerSettingsSummary.Context(
+            activeServerLabel: dependencies.pairedServerStore.activeServer?.label,
+            pairedServerCount: dependencies.pairedServerStore.servers.count,
+            isLoaded: settingsState.isLoaded,
+            loadError: settingsState.loadError,
+            transcriptionEnabled: settingsState.transcriptionEnabled,
+            authEnforced: settingsState.authEnforced,
+            updateEnabled: settingsState.updateEnabled,
+            updateChannel: settingsState.updateChannel,
+            updateFrequency: settingsState.updateFrequency
+        )
     }
 
     private var pairedServersSection: some View {
@@ -186,6 +220,8 @@ struct ConnectionSettingsPage: View {
             transcriptionSection
         case .advancedSecurity:
             advancedSecuritySection
+        case .updates:
+            updatesSection
         }
     }
 
@@ -194,19 +230,7 @@ struct ConnectionSettingsPage: View {
             SettingsSectionHeader(title: ConnectionSettingsServerBackedSection.advancedSecurity.title)
 
             SettingsCard {
-                HStack {
-                    Image(systemName: "lock.shield")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 18)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Require paired-device token")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                        Text("Reject WebSocket connections that do not present the paired token.")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-                    Spacer()
+                SettingsRow(icon: "lock.shield", label: "Require paired-device token") {
                     Toggle(
                         "",
                         isOn: Binding(
@@ -226,11 +250,9 @@ struct ConnectionSettingsPage: View {
                     .labelsHidden()
                     .tint(.tronEmerald)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 14)
             }
 
-            SettingsCaption(text: "Tokens are stored in the iOS Keychain and verified against the active server.")
+            SettingsCaption(text: "Rejects WebSocket connections that do not present the paired token. Tokens are stored in the iOS Keychain and verified against the active server.")
         }
     }
 
@@ -249,7 +271,7 @@ struct ConnectionSettingsPage: View {
                         Text("Server settings unavailable")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
-                        Text(settingsState.loadError ?? "Connect to the active server before editing security or transcription.")
+                        Text(settingsState.loadError ?? "Connect to the active server before editing security, transcription, or update settings.")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -266,19 +288,7 @@ struct ConnectionSettingsPage: View {
             SettingsSectionHeader(title: ConnectionSettingsServerBackedSection.transcriptionSidecar.title)
 
             SettingsCard {
-                HStack {
-                    Image(systemName: "waveform")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 18)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Local transcription")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                        Text("Uses the Mac's local transcription sidecar when enabled.")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-                    Spacer()
+                SettingsRow(icon: "waveform", label: "Local transcription") {
                     Toggle(
                         "",
                         isOn: Binding(
@@ -298,11 +308,149 @@ struct ConnectionSettingsPage: View {
                     .labelsHidden()
                     .tint(.tronEmerald)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 14)
             }
 
-            SettingsCaption(text: "Changing this setting takes effect after Tron Server restarts from the Mac menu bar.")
+            SettingsCaption(text: "Uses the Mac's local transcription sidecar when enabled. Changing this setting takes effect after Tron Server restarts from the Mac menu bar.")
+        }
+    }
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: ServerUpdateSettingsItem.sectionTitle)
+
+            VStack(alignment: .leading, spacing: 16) {
+                updateChecksCard
+                channelCard
+                frequencyCard
+                manualCheckCard
+            }
+        }
+    }
+
+    private var updateChecksCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard {
+                SettingsRow(
+                    icon: ServerUpdateSettingsItem.automaticChecks.icon,
+                    label: ServerUpdateSettingsItem.automaticChecks.title
+                ) {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { settingsState.updateEnabled },
+                            set: { newValue in
+                                settingsState.updateEnabled = newValue
+                                updateServerSetting {
+                                    ServerSettingsUpdate(server: .init(update: .init(enabled: newValue)))
+                                }
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .tint(.tronEmerald)
+                }
+            }
+
+            SettingsCaption(text: ServerUpdateSettingsItem.automaticChecks.description)
+        }
+    }
+
+    private var channelCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard {
+                SettingsRow(
+                    icon: ServerUpdateSettingsItem.releaseChannel.icon,
+                    label: ServerUpdateSettingsItem.releaseChannel.title
+                ) {
+                    SettingsCycleToggle(
+                        options: UpdateChannel.allCases.map { ($0.rawValue, $0.displayName) },
+                        current: settingsState.updateChannel
+                    ) { newValue in
+                        settingsState.updateChannel = newValue
+                        if let channel = UpdateChannel.from(newValue) {
+                            updateServerSetting {
+                                ServerSettingsUpdate(server: .init(update: .init(channel: channel)))
+                            }
+                        }
+                    }
+                }
+            }
+
+            SettingsCaption(text: ServerUpdateSettingsItem.releaseChannel.description)
+        }
+    }
+
+    private var frequencyCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard {
+                SettingsRow(
+                    icon: ServerUpdateSettingsItem.checkFrequency.icon,
+                    label: ServerUpdateSettingsItem.checkFrequency.title
+                ) {
+                    SettingsCycleToggle(
+                        options: UpdateFrequency.allCases.map { ($0.rawValue, $0.displayName) },
+                        current: settingsState.updateFrequency
+                    ) { newValue in
+                        settingsState.updateFrequency = newValue
+                        if let frequency = UpdateFrequency.from(newValue) {
+                            updateServerSetting {
+                                ServerSettingsUpdate(server: .init(update: .init(frequency: frequency)))
+                            }
+                        }
+                    }
+                }
+            }
+
+            SettingsCaption(text: ServerUpdateSettingsItem.checkFrequency.description)
+        }
+    }
+
+    private var manualCheckCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCard(interactive: true) {
+                Button {
+                    Task { await checkForUpdatesNow() }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: ServerUpdateSettingsItem.manualCheck.icon)
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.tronEmerald)
+                            .frame(width: 18)
+                        Text(ServerUpdateSettingsItem.manualCheck.title)
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            .foregroundStyle(.tronTextPrimary)
+                        Spacer()
+                        if isCheckingForUpdates {
+                            ProgressView()
+                                .tint(.tronEmerald)
+                                .scaleEffect(0.7)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isCheckingForUpdates)
+            }
+
+            SettingsCaption(text: ServerUpdateSettingsItem.manualCheck.description)
+        }
+    }
+
+    private func checkForUpdatesNow() async {
+        isCheckingForUpdates = true
+        defer { isCheckingForUpdates = false }
+
+        do {
+            let result = try await dependencies.rpcClient.misc.checkForUpdates()
+            if result.available, let latest = result.latestVersion {
+                checkResultMessage = "Update available: \(latest)"
+            } else {
+                checkResultMessage = "You're up to date."
+            }
+        } catch {
+            checkResultMessage = "Check failed: \(error.localizedDescription)"
         }
     }
 

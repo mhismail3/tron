@@ -22,7 +22,7 @@ struct SettingsView: View {
     @State private var cardsVisible = false
 
     enum SettingsPage: String, Identifiable {
-        case server, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary, updates, privacy
+        case server, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary, privacy
         var id: String { rawValue }
     }
 
@@ -111,12 +111,6 @@ struct SettingsView: View {
                     GitWorkflowSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
                 case .promptLibrary:
                     PromptLibrarySettingsPage(
-                        settingsState: settingsState,
-                        updateServerSetting: updateServerSetting,
-                        rpcClient: rpcClient
-                    )
-                case .updates:
-                    UpdatesSettingsPage(
                         settingsState: settingsState,
                         updateServerSetting: updateServerSetting,
                         rpcClient: rpcClient
@@ -319,18 +313,12 @@ struct SettingsView: View {
                     activePage = .promptLibrary
                 }
             }
-
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "arrow.down.app", label: "Updates", subtitle: "Configure server release checks") {
-                    activePage = .updates
-                }
-            }
         }
     }
 
     private var serverManagementCard: some View {
         SettingsCard(interactive: true) {
-            categoryRow(icon: "network", label: "Server", subtitle: "Paired servers, security, and transcription") {
+            categoryRow(icon: "network", label: "Server", subtitle: "Paired servers, security, transcription, and updates") {
                 activePage = .server
             }
         }

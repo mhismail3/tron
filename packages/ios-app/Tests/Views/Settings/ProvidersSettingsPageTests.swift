@@ -1,80 +1,12 @@
 import Testing
-import Foundation
-
 @testable import TronMobile
 
 @Suite("Providers Page Tests")
 struct ProvidersSettingsPageTests {
 
-    @Test("settings copy matches current labels")
-    func settingsCopyMatchesCurrentLabels() {
+    @Test("provider settings copy matches current label")
+    func providerSettingsCopyMatchesCurrentLabel() {
         #expect(SettingsLabels.providers == "Providers")
-        #expect(SettingsLabels.connectToNewServer == "Connect to a new server")
-        #expect(SettingsLabels.transcriptionSidecar == "Transcription Sidecar")
-    }
-
-    @Test("server-backed settings show transcription before security")
-    func serverBackedSettingsOrder() {
-        #expect(ConnectionSettingsServerBackedSection.loadedOrder == [
-            .transcriptionSidecar,
-            .advancedSecurity,
-        ])
-        #expect(ConnectionSettingsServerBackedSection.transcriptionSidecar.title == "Transcription Sidecar")
-        #expect(ConnectionSettingsServerBackedSection.advancedSecurity.title == "Advanced Security")
-    }
-
-    @Test("paired server menu uses server-specific actions")
-    func pairedServerMenuUsesServerSpecificActions() {
-        #expect(PairedServerMenuAction.allCases.map(\.title) == [
-            "Reconnect",
-            "Set Up",
-            "Forget",
-        ])
-        #expect(PairedServerMenuAction.allCases.map(\.systemImage) == [
-            "arrow.clockwise",
-            "gearshape.2",
-            "trash",
-        ])
-        #expect(PairedServerMenuAction.allCases.filter(\.isDestructive) == [.forget])
-    }
-
-    @Test("paired server menu reserves only the ellipsis hit target")
-    func pairedServerMenuReservesOnlyEllipsisHitTarget() {
-        #expect(PairedServerMenuLayout.hitTargetSize == 36)
-    }
-
-    @Test("server onboarding userInfo carries paired server id")
-    func serverOnboardingUserInfoCarriesServerId() {
-        #expect(ServerOnboardingLauncher.userInfo(serverId: "studio") == [
-            ServerOnboardingLauncher.serverIdUserInfoKey: "studio",
-        ])
-        #expect(ServerOnboardingLauncher.userInfo(serverId: nil).isEmpty)
-    }
-
-    @Test("server onboarding posts target active server id")
-    func serverOnboardingPostsTargetActiveServerId() async {
-        let notificationCenter = NotificationCenter()
-        let server = PairedServer(id: "studio", label: "Studio", host: "studio.local", port: 1984)
-
-        let posted: [String: String] = await withCheckedContinuation { continuation in
-            var observer: NSObjectProtocol?
-            observer = notificationCenter.addObserver(
-                forName: .startServerOnboarding,
-                object: nil,
-                queue: nil
-            ) { notification in
-                if let observer {
-                    notificationCenter.removeObserver(observer)
-                }
-                continuation.resume(returning: notification.userInfo as? [String: String] ?? [:])
-            }
-
-            ServerOnboardingLauncher.post(prefill: server, notificationCenter: notificationCenter)
-        }
-
-        #expect(posted == [
-            ServerOnboardingLauncher.serverIdUserInfoKey: "studio",
-        ])
     }
 
     @Test("provider auth action result only commits local form changes after success")

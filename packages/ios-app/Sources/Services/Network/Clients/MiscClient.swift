@@ -41,8 +41,8 @@ final class MiscClient: RPCDomainClient {
         )
     }
 
-    /// Snapshot of the updater state + configured settings. Used to render
-    /// the iOS `UpdatesSettingsPage` status row and the Mac menu bar.
+    /// Snapshot of the updater state + configured settings. Used by update
+    /// status surfaces such as the Mac menu bar.
     func getUpdateStatus() async throws -> SystemUpdateStatusResult {
         let ws = try requireTransport().requireConnection()
 

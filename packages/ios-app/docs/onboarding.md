@@ -172,6 +172,12 @@ active server id, appearance, dashboard presentation, telemetry consent, and
 bearer tokens live in iOS `UserDefaults`/Keychain. When the user switches
 Macs, the app clears server-backed controls immediately and reloads them from
 the newly active Mac.
+The Server sheet starts with a dynamic summary card, then groups settings as:
+header, one or more glass containers with control titles, and optional
+description text below each container. Transcription, paired-device token
+enforcement, and update checks all live in this sheet because they are active
+Mac server settings; update controls sit at the bottom after security under one
+Updates header.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system.ping`. The server emits a
