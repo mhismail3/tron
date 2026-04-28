@@ -55,9 +55,9 @@ struct SettingsView: View {
             }
             #endif
         } content: {
-            appSettingsSection
+            serverSettingsSection
                 .cardEntrance(visible: cardsVisible, index: 0)
-            currentServerSection
+            appSettingsSection
                 .cardEntrance(visible: cardsVisible, index: 1)
             dangerZoneCard
                 .cardEntrance(visible: cardsVisible, index: 2)
@@ -158,7 +158,7 @@ struct SettingsView: View {
 
     private var appSettingsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SettingsSectionHeader(title: "iOS App")
+            SettingsSectionHeader(title: "App Settings")
 
             if #available(iOS 26.0, *) {
                 SettingsCard(interactive: true) {
@@ -176,17 +176,17 @@ struct SettingsView: View {
         }
     }
 
-    private var currentServerSection: some View {
+    private var serverSettingsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SettingsSectionHeader(title: "Current Server")
+            SettingsSectionHeader(title: "Server Settings")
 
             if !hasPairedServers {
                 noServerCard
             } else {
-                serverSwitcherCard
                 if serverSettingsReady {
                     serverSettingsCategories
                 } else {
+                    serverManagementCard
                     serverUnavailableCard
                 }
             }
@@ -216,79 +216,11 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 12)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var serverSwitcherCard: some View {
-        SettingsCard {
-            VStack(spacing: 0) {
-                ForEach(dependencies.pairedServerStore.servers) { server in
-                    serverSwitcherRow(server)
-                    if server.id != dependencies.pairedServerStore.servers.last?.id {
-                        SettingsRowDivider()
-                    }
-                }
-            }
-        }
-    }
-
-    private func serverSwitcherRow(_ server: PairedServer) -> some View {
-        let selected = dependencies.pairedServerStore.activeServer?.id == server.id
-
-        return HStack(spacing: 10) {
-            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(selected ? .tronEmerald : .tronTextMuted.opacity(0.5))
-                .frame(width: 18)
-
-            Button {
-                guard !selected else { return }
-                dependencies.selectPairedServer(server)
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(server.label)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(server.origin)
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-
-            Menu {
-                Button {
-                    retry(server)
-                } label: {
-                    Label("Retry", systemImage: "arrow.clockwise")
-                }
-                Button {
-                    startOnboarding(repairing: server)
-                } label: {
-                    Label("Re-pair", systemImage: "key.fill")
-                }
-                Button(role: .destructive) {
-                    _ = dependencies.forgetPairedServer(server)
-                } label: {
-                    Label("Forget", systemImage: "trash")
-                }
-                Button {
-                    startOnboarding()
-                } label: {
-                    Label("Onboard to Server", systemImage: "plus.circle")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronTextSecondary)
-                    .padding(8)
-            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
     }
 
     private var serverUnavailableCard: some View {
@@ -320,13 +252,8 @@ struct SettingsView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.tronEmerald)
 
-                    Button("Re-pair") {
-                        startOnboarding(repairing: dependencies.pairedServerStore.activeServer)
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("Onboard") {
-                        startOnboarding()
+                    Button("Onboard to Server") {
+                        startOnboarding(prefill: dependencies.pairedServerStore.activeServer)
                     }
                     .buttonStyle(.bordered)
                 }
@@ -350,11 +277,7 @@ struct SettingsView: View {
                 }
             }
 
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "network", label: "Server", subtitle: "Paired servers, security, and transcription") {
-                    activePage = .server
-                }
-            }
+            serverManagementCard
 
             SettingsCard(interactive: true) {
                 categoryRow(icon: "key.horizontal", label: "Model Providers", subtitle: "Login with OAuth and configure API keys") {
@@ -396,6 +319,14 @@ struct SettingsView: View {
                 categoryRow(icon: "arrow.down.app", label: "Updates", subtitle: "Configure server release checks") {
                     activePage = .updates
                 }
+            }
+        }
+    }
+
+    private var serverManagementCard: some View {
+        SettingsCard(interactive: true) {
+            categoryRow(icon: "network", label: "Server", subtitle: "Paired servers, security, and transcription") {
+                activePage = .server
             }
         }
     }
@@ -501,18 +432,7 @@ struct SettingsView: View {
         }
     }
 
-    private func retry(_ server: PairedServer) {
-        if dependencies.pairedServerStore.activeServer?.id != server.id {
-            dependencies.selectPairedServer(server)
-        } else {
-            Task {
-                await dependencies.manualRetry()
-                await loadServerSettingsIfAvailable()
-            }
-        }
-    }
-
-    private func startOnboarding(repairing server: PairedServer? = nil) {
+    private func startOnboarding(prefill server: PairedServer? = nil) {
         var userInfo: [String: String] = [:]
         if let server {
             userInfo["serverId"] = server.id

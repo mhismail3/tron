@@ -80,6 +80,14 @@ final class OnboardingState {
     var pairingToken: String = ""
     var pairingLabel: String = "My Mac"
 
+    /// Non-nil only when Settings opens onboarding for a server already in
+    /// the local paired-server store. A blank token field can then reuse that
+    /// server's Keychain token, but only while host/port still match.
+    var pairingPrefilledServerId: String?
+
+    private var pairingPrefilledServerHost: String?
+    private var pairingPrefilledServerPort: String?
+
     /// Inline failure for the Connect button. `nil` clears the label.
     var pairingError: PairingStepValidator.Failure?
 
@@ -87,8 +95,42 @@ final class OnboardingState {
     /// the form and shows a progress indicator.
     var isConnecting: Bool = false
 
+    var validatedPairingPayload: PairingURLParser.PairingPayload? {
+        validatedPairingPayload(storedToken: nil)
+    }
+
+    func validatedPairingPayload(storedToken: String?) -> PairingURLParser.PairingPayload? {
+        guard case .success(let payload) = PairingStepValidator.validate(
+            host: pairingHost,
+            port: pairingPort,
+            token: effectivePairingToken(storedToken: storedToken),
+            label: pairingLabel
+        ) else {
+            return nil
+        }
+        return payload
+    }
+
+    func pairingValidationFailure(storedToken: String? = nil) -> PairingStepValidator.Failure? {
+        guard case .failure(let failure) = PairingStepValidator.validate(
+            host: pairingHost,
+            port: pairingPort,
+            token: effectivePairingToken(storedToken: storedToken),
+            label: pairingLabel
+        ) else {
+            return nil
+        }
+        return failure
+    }
+
+    var canAttemptPairing: Bool {
+        guard !isConnecting else { return false }
+        let storedToken = canUseStoredPairingToken ? "stored-token" : nil
+        return pairingValidationFailure(storedToken: storedToken) == nil
+    }
+
     /// Effective server settings and masked auth state loaded immediately
-    /// after pairing. The setup pages read this so re-pairing a previously
+    /// after pairing. The setup pages read this so pairing a previously
     /// forgotten server shows its existing choices instead of blank defaults.
     var setupSnapshot = OnboardingSetupSnapshot()
 
@@ -120,6 +162,7 @@ final class OnboardingState {
         pairingPort = distributed.port
         pairingToken = distributed.token
         pairingLabel = distributed.label
+        clearPairingPrefill()
         pairingError = nil
     }
 
@@ -141,16 +184,44 @@ final class OnboardingState {
         setupSnapshot.refreshAuth(authState)
     }
 
-    /// Clears setup state before the user pairs or re-pairs a server.
+    func canSelectStep(_ step: Step) -> Bool {
+        step.rawValue <= Step.connect.rawValue || hasPairedMac
+    }
+
+    func selectStep(_ step: Step) {
+        currentStep = canSelectStep(step) ? step : .connect
+    }
+
+    /// Prepares the dismissible Settings-launched onboarding sheet.
+    ///
+    /// Settings can reopen onboarding after first-run completion. That path
+    /// must skip the welcome/install pages, clear any prior server-backed setup
+    /// snapshot, and optionally prefill the host/port/label so an existing
+    /// paired server can reuse its saved Keychain token.
+    func prepareServerOnboarding(prefill server: PairedServer? = nil) {
+        beginPairingEntry()
+        currentStep = .connect
+        pairingHost = server?.host ?? ""
+        pairingPort = server.map { String($0.port) } ?? AppConstants.prodPort
+        pairingToken = ""
+        pairingLabel = server?.label ?? "My Mac"
+        pairingPrefilledServerId = server?.id
+        pairingPrefilledServerHost = server?.host
+        pairingPrefilledServerPort = server.map { String($0.port) }
+    }
+
+    /// Clears setup state before the user pairs a server.
     ///
     /// A completed onboarding run can leave `hasPairedMac` true in memory.
     /// Starting a new pairing must relock server-backed setup pages until the
     /// new active server connects and fresh `settings.get` values arrive.
     func beginPairingEntry() {
+        currentStep = .connect
         hasPairedMac = false
         pairingError = nil
         isConnecting = false
         setupSnapshot.reset()
+        clearPairingPrefill()
     }
 
     /// Reset the sheet to its initial state. Used by tests and any
@@ -163,8 +234,39 @@ final class OnboardingState {
         pairingPort = AppConstants.prodPort
         pairingToken = ""
         pairingLabel = "My Mac"
+        clearPairingPrefill()
         pairingError = nil
         isConnecting = false
         setupSnapshot.reset()
+    }
+
+    private var canUseStoredPairingToken: Bool {
+        guard pairingPrefilledServerId != nil,
+              pairingToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let prefilledHost = pairingPrefilledServerHost,
+              let prefilledPort = pairingPrefilledServerPort
+        else {
+            return false
+        }
+
+        return PairingPersistor.normalizeHost(pairingHost) == PairingPersistor.normalizeHost(prefilledHost)
+            && pairingPort.trimmingCharacters(in: .whitespacesAndNewlines) == prefilledPort
+    }
+
+    private func effectivePairingToken(storedToken: String?) -> String {
+        let typedToken = pairingToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typedToken.isEmpty {
+            return typedToken
+        }
+        guard canUseStoredPairingToken else {
+            return pairingToken
+        }
+        return storedToken ?? ""
+    }
+
+    private func clearPairingPrefill() {
+        pairingPrefilledServerId = nil
+        pairingPrefilledServerHost = nil
+        pairingPrefilledServerPort = nil
     }
 }

@@ -8,7 +8,7 @@ import Foundation
 ///   - the universal-paste path on every text field of the pairing form
 ///     (so a user can paste the full link into any field and have it
 ///     auto-distribute), and
-///   - Settings-launched re-pairing to refresh a stored token when the Mac app
+///   - Settings-launched pairing to refresh a stored token when the Mac app
 ///     rotates one.
 ///
 /// The parser is intentionally strict — every field is required, the

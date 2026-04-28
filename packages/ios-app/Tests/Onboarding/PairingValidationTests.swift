@@ -135,6 +135,10 @@ struct PairingValidationTests {
         let settings = PairingStepValidator.Failure.settingsFailed("disk full").userFacingMessage
         #expect(settings.lowercased().contains("server settings"))
         #expect(settings.contains("disk full"))
+
+        let missingStoredToken = PairingStepValidator.Failure.storedTokenMissing.userFacingMessage
+        #expect(missingStoredToken.lowercased().contains("saved token"))
+        #expect(missingStoredToken.lowercased().contains("scan"))
     }
 
     // MARK: - keychainFailed regression coverage
@@ -183,6 +187,7 @@ struct PairingValidationTests {
         #expect(a != .unauthorized)
         #expect(a != .unreachable("h"))
         #expect(a != .missingFields)
+        #expect(a != .storedTokenMissing)
     }
 
     @Test("classify never produces keychainFailed (it's caller-emitted, not network-derived)")

@@ -14,10 +14,18 @@ the Mac connection succeeds. The sheet follows the app's
 standard Liquid Glass chrome: hidden drag handle, principal toolbar
 title, and a floating progress-dot indicator at the bottom.
 
-When Settings launches onboarding to add or re-pair a server, the same sheet
-opens directly on the connect step with a top-left dismiss button. First-run
+When Settings launches onboarding for a new server, the same sheet opens
+directly on the connect step with a top-left dismiss button and still requires
+a QR scan, pasted pairing link, or manual token before Connect is enabled. When
+Settings launches onboarding from an already paired server row, the connect page
+is prefilled from the local paired-server record and may use that server's
+Keychain token for the probe. Editing the prefilled host or port turns it back
+into a fresh pairing attempt, so the user must provide a new token. First-run
 onboarding remains non-dismissable until the user completes setup or explicitly
 leaves from a Settings-launched sheet.
+The setup pages are not rendered until a fresh pairing attempt succeeds, so
+opening onboarding from Settings cannot reveal stale settings from the currently
+active server.
 
 ---
 
@@ -105,8 +113,8 @@ side effects:
 ```
 
 If step 4 fails, onboarding rolls back the local paired-server store and
-Keychain token for that attempt, restoring the previous token when a re-pair
-fails, then leaves the user on the pairing page.
+Keychain token for that attempt, restoring the previous token when a token
+refresh fails, then leaves the user on the pairing page.
 Pairing never writes the iOS server list to `settings.json`; the server only
 owns server runtime settings and secrets.
 
@@ -128,9 +136,9 @@ After pairing succeeds, onboarding continues with optional setup pages:
 
 Pairing hydrates an in-memory `OnboardingSetupSnapshot` from the newly active
 server before the setup pages unlock. Existing server preferences from
-`settings.get` prefill workspace and model choices, so re-pairing a forgotten
-but still-running Mac can be completed by reviewing each page and swiping
-forward. Existing provider and service credentials from `auth.get` are shown
+`settings.get` prefill workspace and model choices, so pairing a forgotten but
+still-running Mac can be completed by reviewing each page and swiping forward.
+Existing provider and service credentials from `auth.get` are shown
 only as server-returned labels and masked hints; secrets are never copied into
 iOS storage. If `auth.get` fails after `settings.get` succeeds, onboarding
 still proceeds with the settings snapshot and shows an inline credential-status
@@ -148,7 +156,7 @@ Provider credentials are written through `auth.*` RPCs, so secrets land
 in `auth.json`, not `settings.json`.
 
 Server settings and app settings are intentionally separate. Settings backed
-by `~/.tron/system/settings.json` live in the Current Server section and are
+by `~/.tron/system/settings.json` live in the Server Settings section and are
 shown only after the active server connects and `settings.get` returns real
 values. Device-only preferences such as onboarding completion, paired servers,
 active server id, appearance, dashboard presentation, telemetry consent, and
@@ -196,9 +204,19 @@ chat camera sheet's compact medium-detent camera presentation. Camera
 permission copy in `Info.plist` covers both pairing QR scans and chat
 photo capture.
 
+For new-server onboarding, the toolbar Connect button is disabled until the
+pairing form contains a valid host, port, token, and server name from QR
+scanning, paste, or manual entry. For an already paired server launched from
+Settings, the blank token field means "use this server's saved Keychain token";
+if that token is missing, the inline error asks the user to scan the Mac QR code
+or enter the token manually. Pairing a host/port that already exists in the local
+paired-server store updates that server's token and makes it active instead of
+adding a duplicate; hostname matching is case-insensitive and ignores one
+trailing dot.
+
 ## Forgetting a Mac
 
-Settings → Current Server → menu → "Forget" is the local reset path for a
+Settings → Server Settings → Server → menu → "Forget" is the local reset path for a
 paired server. It deletes the matching iOS Keychain bearer token and removes
 the server from `PairedServerStore`; server settings and sessions on the Mac
 are unchanged. If another paired server remains, iOS switches locally to it.

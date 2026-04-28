@@ -53,7 +53,8 @@ struct PairingStep: View {
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         }
                     }
-                    .disabled(state.isConnecting)
+                    .disabled(!state.canAttemptPairing)
+                    .opacity(state.canAttemptPairing ? 1 : 0.45)
                     .accessibilityLabel(state.isConnecting ? "Connecting" : "Connect to Mac")
                 }
             }
@@ -256,23 +257,15 @@ struct PairingStep: View {
     // MARK: - Connect action
 
     private func connect() {
-        state.beginPairingEntry()
         scanError = nil
-        state.isConnecting = true
+        state.pairingError = nil
 
-        switch PairingStepValidator.validate(
-            host: state.pairingHost,
-            port: state.pairingPort,
-            token: state.pairingToken,
-            label: state.pairingLabel
-        ) {
-        case .failure(let failure):
-            state.pairingError = failure
-            state.isConnecting = false
+        guard let payload = state.validatedPairingPayload(storedToken: storedPrefilledToken) else {
+            state.pairingError = pairingValidationFailure
             return
-        case .success(let payload):
-            runValidatedConnect(payload)
         }
+
+        runValidatedConnect(payload)
     }
 
     private func runValidatedConnect(_ payload: PairingURLParser.PairingPayload) {
@@ -280,6 +273,25 @@ struct PairingStep: View {
         scanError = nil
         state.isConnecting = true
         Task { await runProbe(payload: payload) }
+    }
+
+    private var storedPrefilledToken: String? {
+        guard let serverId = state.pairingPrefilledServerId,
+              state.pairingToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return nil
+        }
+        return dependencies.pairedServerTokenStore.token(forServerId: serverId)
+    }
+
+    private var pairingValidationFailure: PairingStepValidator.Failure {
+        if state.pairingPrefilledServerId != nil,
+           state.pairingToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           storedPrefilledToken == nil,
+           state.pairingValidationFailure(storedToken: "stored-token") == nil {
+            return .storedTokenMissing
+        }
+        return state.pairingValidationFailure() ?? .missingFields
     }
 
     private func runProbe(payload: PairingURLParser.PairingPayload) async {

@@ -53,49 +53,51 @@ struct OnboardingFlowView: View {
                     )
                     .tag(OnboardingState.Step.connect)
 
-                    WorkspaceSetupOnboardingPage(
-                        state: state,
-                        dependencies: dependencies
-                    )
-                    .tag(OnboardingState.Step.workspace)
+                    if state.hasPairedMac {
+                        WorkspaceSetupOnboardingPage(
+                            state: state,
+                            dependencies: dependencies
+                        )
+                        .tag(OnboardingState.Step.workspace)
 
-                    ProviderSetupOnboardingPage(
-                        state: state,
-                        provider: Self.anthropicProvider,
-                        dependencies: dependencies,
-                        allowsOAuth: true
-                    )
-                    .tag(OnboardingState.Step.anthropic)
+                        ProviderSetupOnboardingPage(
+                            state: state,
+                            provider: Self.anthropicProvider,
+                            dependencies: dependencies,
+                            allowsOAuth: true
+                        )
+                        .tag(OnboardingState.Step.anthropic)
 
-                    ProviderSetupOnboardingPage(
-                        state: state,
-                        provider: Self.openAIProvider,
-                        dependencies: dependencies,
-                        allowsOAuth: true
-                    )
-                    .tag(OnboardingState.Step.openAI)
+                        ProviderSetupOnboardingPage(
+                            state: state,
+                            provider: Self.openAIProvider,
+                            dependencies: dependencies,
+                            allowsOAuth: true
+                        )
+                        .tag(OnboardingState.Step.openAI)
 
-                    RemainingProvidersOnboardingPage(
-                        state: state,
-                        dependencies: dependencies
-                    )
-                    .tag(OnboardingState.Step.providers)
+                        RemainingProvidersOnboardingPage(
+                            state: state,
+                            dependencies: dependencies
+                        )
+                        .tag(OnboardingState.Step.providers)
 
-                    ServicesSetupOnboardingPage(
-                        state: state,
-                        dependencies: dependencies
-                    )
-                    .tag(OnboardingState.Step.services)
+                        ServicesSetupOnboardingPage(
+                            state: state,
+                            dependencies: dependencies
+                        )
+                        .tag(OnboardingState.Step.services)
 
-                    ModelSetupOnboardingPage(
-                        state: state,
-                        dependencies: dependencies,
-                        onComplete: {
-                            state.complete()
-                            onComplete()
-                        }
-                    )
-                    .tag(OnboardingState.Step.model)
+                        ModelSetupOnboardingPage(
+                            state: state,
+                            dependencies: dependencies,
+                            onComplete: {
+                                state.complete()
+                                onComplete()
+                            }
+                        )
+                        .tag(OnboardingState.Step.model)
+                    }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
 
@@ -122,6 +124,12 @@ struct OnboardingFlowView: View {
             }
         }
         .tint(.tronEmerald)
+        .onAppear {
+            state.selectStep(state.currentStep)
+        }
+        .onChange(of: state.hasPairedMac) { _, _ in
+            state.selectStep(state.currentStep)
+        }
     }
 
     private static let anthropicProvider = ProviderInfo(
@@ -144,11 +152,7 @@ struct OnboardingFlowView: View {
         Binding(
             get: { state.currentStep },
             set: { nextStep in
-                guard nextStep.rawValue <= OnboardingState.Step.connect.rawValue || state.hasPairedMac else {
-                    state.currentStep = .connect
-                    return
-                }
-                state.currentStep = nextStep
+                state.selectStep(nextStep)
             }
         )
     }

@@ -56,7 +56,7 @@ struct OnboardingSetupSnapshot {
             if active.isOAuth {
                 let account = info.accounts?.first { $0.label == active.label }
                 return OnboardingCredentialSummary(
-                    title: account?.isExpired == true ? "OAuth needs reconnect" : "OAuth already connected",
+                    title: oauthTitle(for: providerId, isExpired: account?.isExpired == true),
                     detail: active.label,
                     isExpired: account?.isExpired == true,
                     kind: .oauth
@@ -66,7 +66,7 @@ struct OnboardingSetupSnapshot {
             if active.isApiKey {
                 let key = info.apiKeys?.first { $0.label == active.label }
                 return OnboardingCredentialSummary(
-                    title: "API key already saved",
+                    title: "API key saved",
                     detail: joinedDetail(active.label, key?.keyHint ?? info.apiKeyHint),
                     isExpired: false,
                     kind: .apiKey
@@ -76,7 +76,7 @@ struct OnboardingSetupSnapshot {
 
         if let account = info.accounts?.first {
             return OnboardingCredentialSummary(
-                title: account.isExpired ? "OAuth needs reconnect" : "OAuth already connected",
+                title: oauthTitle(for: providerId, isExpired: account.isExpired),
                 detail: account.label,
                 isExpired: account.isExpired,
                 kind: .oauth
@@ -85,7 +85,7 @@ struct OnboardingSetupSnapshot {
 
         if let key = info.apiKeys?.first {
             return OnboardingCredentialSummary(
-                title: "API key already saved",
+                title: "API key saved",
                 detail: joinedDetail(key.label, key.keyHint),
                 isExpired: false,
                 kind: .apiKey
@@ -94,7 +94,7 @@ struct OnboardingSetupSnapshot {
 
         if info.hasApiKey {
             return OnboardingCredentialSummary(
-                title: "API key already saved",
+                title: "API key saved",
                 detail: info.apiKeyHint ?? "Saved on this server",
                 isExpired: false,
                 kind: .apiKey
@@ -105,7 +105,7 @@ struct OnboardingSetupSnapshot {
             let hasGoogleConfig = info.hasClientId == true || info.hasClientSecret == true || info.projectId != nil
             if hasGoogleConfig {
                 return OnboardingCredentialSummary(
-                    title: "Google Cloud already configured",
+                    title: "Google Cloud configured",
                     detail: info.projectId ?? "OAuth client saved on this server",
                     isExpired: false,
                     kind: .configuration
@@ -119,7 +119,7 @@ struct OnboardingSetupSnapshot {
     func serviceSummary(for serviceId: String) -> OnboardingCredentialSummary? {
         guard let info = authState?.services[serviceId], info.hasApiKey else { return nil }
         return OnboardingCredentialSummary(
-            title: "API key already saved",
+            title: "API key saved",
             detail: info.apiKeyHint ?? "Saved on this server",
             isExpired: false,
             kind: .apiKey
@@ -140,6 +140,24 @@ struct OnboardingSetupSnapshot {
     private func joinedDetail(_ label: String, _ hint: String?) -> String {
         guard let hint, !hint.isEmpty else { return label }
         return "\(label) - \(hint)"
+    }
+
+    private func oauthTitle(for providerId: String, isExpired: Bool) -> String {
+        let providerName = providerDisplayName(for: providerId)
+        return isExpired ? "\(providerName) needs reconnect" : "\(providerName) signed in"
+    }
+
+    private func providerDisplayName(for providerId: String) -> String {
+        switch providerId {
+        case "anthropic":
+            return "Anthropic"
+        case "openai-codex":
+            return "OpenAI"
+        case "google":
+            return "Google"
+        default:
+            return "Provider"
+        }
     }
 }
 

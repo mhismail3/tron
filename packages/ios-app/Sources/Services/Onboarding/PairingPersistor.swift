@@ -11,7 +11,7 @@ import Foundation
 ///      `plan.activeServer` selected.
 ///   3. Rebuild/reconnect the RPC client so the new bearer is picked up.
 ///
-/// **Re-pair vs add**: if `existing` already contains a server matching
+/// **Existing vs add**: if `existing` already contains a server matching
 /// `(host, port)` the existing server is preserved wholesale (id + label).
 /// The server id is the Keychain key, so reusing it lets the rotated token
 /// land on the same record without orphaning the previous one.
@@ -38,10 +38,11 @@ enum PairingPersistor {
     ) -> Plan {
         let host = payload.host
         let port = payload.port
+        let normalizedHost = normalizeHost(host)
 
-        // Re-pair: same (host, port) → preserve server identity so the
+        // Existing server: same normalized (host, port) preserves identity so the
         // Keychain key stays stable across token rotations.
-        if let match = existing.first(where: { $0.host == host && $0.port == port }) {
+        if let match = existing.first(where: { normalizeHost($0.host) == normalizedHost && $0.port == port }) {
             return Plan(
                 activeServer: match,
                 updatedServers: existing,
@@ -68,5 +69,14 @@ enum PairingPersistor {
             updatedServers: existing + [server],
             token: payload.token
         )
+    }
+
+    /// Shared host comparison for "same paired server" checks.
+    static func normalizeHost(_ host: String) -> String {
+        var normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.hasSuffix(".") {
+            normalized.removeLast()
+        }
+        return normalized
     }
 }

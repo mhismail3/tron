@@ -271,12 +271,7 @@ struct TronMobileApp: App {
             container.pairedServerStore.servers.first { $0.id == id }
         }
 
-        onboardingState.beginPairingEntry()
-        onboardingState.currentStep = .connect
-        onboardingState.pairingHost = server?.host ?? ""
-        onboardingState.pairingPort = server.map { String($0.port) } ?? AppConstants.prodPort
-        onboardingState.pairingToken = ""
-        onboardingState.pairingLabel = server?.label ?? "My Mac"
+        onboardingState.prepareServerOnboarding(prefill: server)
 
         onboardingSuppressed = false
         onboardingAllowsDismiss = true

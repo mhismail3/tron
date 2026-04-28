@@ -99,10 +99,10 @@ struct PairingPersistorTests {
         #expect(plan.updatedServers[1].id == "id-new")
     }
 
-    // MARK: - Re-pair / existing match path
+    // MARK: - Existing match path
 
     @Test("plan(): existing (host,port) re-uses server id and label, only updates token")
-    func rePairExistingServer() {
+    func existingServerRefreshesToken() {
         let existing = PairedServer(id: "p-keep", label: "Studio", host: "100.64.0.1", port: 9847)
         let payload = PairingURLParser.PairingPayload(
             host: "100.64.0.1",
@@ -119,9 +119,36 @@ struct PairingPersistorTests {
         #expect(plan.activeServer.id == "p-keep",
                 "existing server id must be preserved so Keychain key stays stable")
         #expect(plan.activeServer.label == "Studio",
-                "existing label must be preserved on re-pair (user already named it)")
+                "existing label must be preserved when refreshing the token")
         #expect(plan.updatedServers.count == 1)
         #expect(plan.updatedServers[0].id == "p-keep")
+        #expect(plan.token == "tok-rotated")
+    }
+
+    @Test("plan(): existing hostname match ignores case and one trailing dot")
+    func existingServerHostnameMatchIsNormalized() {
+        let existing = PairedServer(
+            id: "p-keep",
+            label: "Studio",
+            host: "studio.tailnet.ts.net",
+            port: 9847
+        )
+        let payload = PairingURLParser.PairingPayload(
+            host: "Studio.Tailnet.Ts.Net.",
+            port: 9847,
+            token: "tok-rotated",
+            label: "Duplicate"
+        )
+
+        let plan = PairingPersistor.plan(
+            payload: payload,
+            existing: [existing],
+            idGenerator: { "DO-NOT-USE-NEW-ID" }
+        )
+
+        #expect(plan.activeServer.id == "p-keep")
+        #expect(plan.activeServer.host == "studio.tailnet.ts.net")
+        #expect(plan.updatedServers.count == 1)
         #expect(plan.token == "tok-rotated")
     }
 

@@ -8,10 +8,14 @@ struct ConnectionSettingsPage: View {
     @State private var serverPendingRemoval: PairedServer?
 
     var body: some View {
-        SettingsPageContainer(title: "Current Server") {
+        SettingsPageContainer(title: "Server") {
             pairedServersSection
-            advancedSecuritySection
-            transcriptionSection
+            if settingsState.isLoaded {
+                advancedSecuritySection
+                transcriptionSection
+            } else {
+                serverBackedSettingsUnavailableSection
+            }
         }
         .alert("Forget this server?", isPresented: removalAlertBinding, presenting: serverPendingRemoval) { server in
             Button("Forget", role: .destructive) { forget(server) }
@@ -21,7 +25,7 @@ struct ConnectionSettingsPage: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .rePairCurrentServer)) { _ in
             if let active = dependencies.pairedServerStore.activeServer {
-                startOnboarding(repairing: active)
+                startOnboarding(prefill: active)
             }
         }
     }
@@ -73,14 +77,25 @@ struct ConnectionSettingsPage: View {
 
                     Menu {
                         Button {
-                            startOnboarding(repairing: server)
+                            retry(server)
                         } label: {
-                            Label("Re-pair", systemImage: "key.fill")
+                            Label("Retry", systemImage: "arrow.clockwise")
+                        }
+                        Button {
+                            startOnboarding(prefill: server)
+                        } label: {
+                            Label("Onboard to Server", systemImage: "plus.circle")
                         }
                         Button(role: .destructive) {
                             serverPendingRemoval = server
                         } label: {
-                            Label("Forget", systemImage: "trash")
+                            Label {
+                                Text("Forget")
+                                    .foregroundStyle(.tronError)
+                            } icon: {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.tronError)
+                            }
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -93,6 +108,8 @@ struct ConnectionSettingsPage: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -101,7 +118,7 @@ struct ConnectionSettingsPage: View {
     private var onboardRow: some View {
         SettingsCard(interactive: true) {
             Button {
-                startOnboarding(repairing: nil)
+                startOnboarding(prefill: nil)
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "plus.circle")
@@ -118,6 +135,8 @@ struct ConnectionSettingsPage: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -168,6 +187,33 @@ struct ConnectionSettingsPage: View {
         }
     }
 
+    private var serverBackedSettingsUnavailableSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Server Controls")
+
+            SettingsCard(accent: .tronWarning) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronWarning)
+                        .frame(width: 18)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Server settings unavailable")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            .foregroundStyle(.tronTextPrimary)
+                        Text(settingsState.loadError ?? "Connect to the active server before editing security or transcription.")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 14)
+            }
+        }
+    }
+
     private var transcriptionSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "Transcription")
@@ -213,12 +259,22 @@ struct ConnectionSettingsPage: View {
         }
     }
 
-    private func startOnboarding(repairing server: PairedServer?) {
+    private func startOnboarding(prefill server: PairedServer?) {
         var userInfo: [String: String] = [:]
         if let server {
             userInfo["serverId"] = server.id
         }
         NotificationCenter.default.post(name: .startServerOnboarding, object: nil, userInfo: userInfo)
+    }
+
+    private func retry(_ server: PairedServer) {
+        if dependencies.pairedServerStore.activeServer?.id != server.id {
+            dependencies.selectPairedServer(server)
+        } else {
+            Task {
+                await dependencies.manualRetry()
+            }
+        }
     }
 
     private func forget(_ server: PairedServer) {
@@ -238,6 +294,6 @@ extension Notification.Name {
     /// Posted when the user taps the `.unauthorized` ConnectionStatusPill.
     static let rePairCurrentServer = Notification.Name("rePairCurrentServer")
 
-    /// Posted by Settings when onboarding should reopen for add/re-pair.
+    /// Posted by Settings when onboarding should reopen for pairing.
     static let startServerOnboarding = Notification.Name("tron.startServerOnboarding")
 }

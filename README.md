@@ -254,7 +254,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron status` | Show service status, PID, port |
 | `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm) |
 | `tron login` | Authenticate with a provider (`--label <name>` for multi-account) |
-| `tron auth rotate` | Rotate the WebSocket bearer token (forces every paired iOS device to re-pair) |
+| `tron auth rotate` | Rotate the WebSocket bearer token (forces every paired iOS device to pair again) |
 | `tron logs` | Query database logs (`-h` for filter options) |
 | `tron errors` | Show recent errors |
 
@@ -593,10 +593,10 @@ Stored beside provider auth in the same secure file. This single 32-byte URL-saf
 The token is generated during first server startup and written as `bearerToken` inside `~/.tron/system/auth.json`. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS pairing step.
 
 ```bash
-# Rotate the token (forces every paired iOS device to re-pair)
+# Rotate the token (forces every paired iOS device to pair again)
 tron auth rotate
 
-# The new token prints to stdout; copy it into iOS Settings → Server → Re-pair.
+# Then use iOS Settings → Server Settings → Server → Onboard to Server to scan or paste a fresh token.
 ```
 
 Rotation is serialized through a process-wide mutex and the on-disk write is atomic (`tempfile + sync_all + rename`), so a concurrent rotate from the menu bar and CLI cannot corrupt the file. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
@@ -714,10 +714,10 @@ packages/ios-app/Sources/
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow for add/re-pair with a dismiss button.
+- **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages are not available until a pairing probe, `settings.get`, and setup hydration succeed.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `settings.json`.
-- **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings.get` response and best-effort `auth.get` masked credential state before unlocking setup pages. Re-pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
-- **Forgetting a server**: Settings → Current Server → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
+- **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings.get` response and best-effort `auth.get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
+- **Forgetting a server**: Settings → Server Settings → Server → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
 - **Telemetry + feedback**: `SentryRedactor` scrubs bearer tokens, file paths, and chat content before crash events leave the device. `FeedbackComposer` builds a redacted log tail and opens a prefilled GitHub issue instead of launching Mail. Opt-in toggle on the Privacy settings page stores to `@AppStorage("telemetryEnabled")` (default OFF).
 
 ### Data Flow

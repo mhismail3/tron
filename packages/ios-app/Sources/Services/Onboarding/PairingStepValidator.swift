@@ -29,6 +29,10 @@ enum PairingStepValidator {
         /// failed. Distinct from `.unauthorized` so the user message
         /// blames device storage rather than the (correct) token.
         case keychainFailed(String)
+        /// A locally paired server exists, but its Keychain token is gone.
+        /// The user can recover by scanning the Mac QR code again or entering
+        /// the pairing token manually.
+        case storedTokenMissing
         /// The server accepted the pairing token, but onboarding could not
         /// read the active server settings after storing the local pairing.
         case settingsFailed(String)
@@ -47,6 +51,8 @@ enum PairingStepValidator {
                 return "Server version \(serverVersion) is older than this app supports. Update Tron on your Mac."
             case .keychainFailed(let detail):
                 return "Could not save the pairing token to Keychain: \(detail)"
+            case .storedTokenMissing:
+                return "This paired server is missing its saved token. Scan the Mac QR code or enter the pairing token to continue."
             case .settingsFailed(let detail):
                 return "Connected, but could not save server settings: \(detail)"
             }

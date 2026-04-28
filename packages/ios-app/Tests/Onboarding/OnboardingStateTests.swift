@@ -19,6 +19,7 @@ struct OnboardingStateTests {
         #expect(state.pairingPort == AppConstants.prodPort)
         #expect(state.pairingToken.isEmpty)
         #expect(state.pairingLabel == "My Mac")
+        #expect(state.pairingPrefilledServerId == nil)
         #expect(state.hasPairedMac == false)
         #expect(state.isConnecting == false)
         #expect(state.pairingError == nil)
@@ -116,6 +117,131 @@ struct OnboardingStateTests {
         #expect(state.setupSnapshot.defaultWorkspace == AppConstants.defaultWorkspace)
     }
 
+    @Test("prepareServerOnboarding starts Settings-launched onboarding at connect")
+    func prepareServerOnboardingStartsAtConnect() throws {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{"server":{"defaultWorkspace":"/stale"}}"#.utf8))
+        state.currentStep = .model
+        state.hasPairedMac = true
+        state.pairingHost = "stale.example.com"
+        state.pairingPort = "1111"
+        state.pairingToken = "stale-token"
+        state.pairingLabel = "Stale"
+        state.hydrateSetup(serverId: "old-server", settings: settings, authState: nil)
+
+        state.prepareServerOnboarding(prefill: nil)
+
+        #expect(state.currentStep == .connect)
+        #expect(state.hasPairedMac == false)
+        #expect(state.pairingHost == "")
+        #expect(state.pairingPort == AppConstants.prodPort)
+        #expect(state.pairingToken == "")
+        #expect(state.pairingLabel == "My Mac")
+        #expect(state.pairingPrefilledServerId == nil)
+        #expect(state.canAttemptPairing == false)
+        #expect(state.setupSnapshot.serverId == nil)
+        #expect(state.setupSnapshot.defaultWorkspace == AppConstants.defaultWorkspace)
+    }
+
+    @Test("prepareServerOnboarding can prefill a paired server and reuse its stored token")
+    func prepareServerOnboardingPrefillsExistingServer() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        let server = PairedServer(
+            id: "studio",
+            label: "Studio",
+            host: "100.64.0.7",
+            port: 9847
+        )
+
+        state.prepareServerOnboarding(prefill: server)
+
+        #expect(state.currentStep == .connect)
+        #expect(state.pairingHost == "100.64.0.7")
+        #expect(state.pairingPort == "9847")
+        #expect(state.pairingToken == "")
+        #expect(state.pairingLabel == "Studio")
+        #expect(state.pairingPrefilledServerId == "studio")
+        #expect(state.canAttemptPairing == true)
+        #expect(state.validatedPairingPayload == nil)
+        #expect(state.validatedPairingPayload(storedToken: "stored-token")?.token == "stored-token")
+    }
+
+    @Test("fresh server onboarding stays blocked until a token is scanned or entered")
+    func freshServerOnboardingRequiresToken() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+
+        state.prepareServerOnboarding(prefill: nil)
+        state.pairingHost = "100.64.0.7"
+        state.pairingPort = "9847"
+        state.pairingLabel = "Studio"
+
+        #expect(state.pairingPrefilledServerId == nil)
+        #expect(state.validatedPairingPayload(storedToken: "ignored-token") == nil)
+        #expect(state.canAttemptPairing == false)
+
+        state.pairingToken = "fresh-token"
+
+        #expect(state.validatedPairingPayload?.token == "fresh-token")
+        #expect(state.canAttemptPairing == true)
+    }
+
+    @Test("editing a prefilled server origin requires a fresh token")
+    func editingPrefilledOriginRequiresFreshToken() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        let server = PairedServer(
+            id: "studio",
+            label: "Studio",
+            host: "studio.tailnet.ts.net",
+            port: 9847
+        )
+
+        state.prepareServerOnboarding(prefill: server)
+        state.pairingHost = "other.tailnet.ts.net"
+
+        #expect(state.canAttemptPairing == false)
+        #expect(state.validatedPairingPayload(storedToken: "stored-token") == nil)
+
+        state.pairingToken = "fresh-token"
+
+        #expect(state.validatedPairingPayload?.host == "other.tailnet.ts.net")
+        #expect(state.validatedPairingPayload?.token == "fresh-token")
+        #expect(state.canAttemptPairing == true)
+    }
+
+    @Test("setup steps cannot be selected before a fresh pairing succeeds")
+    func setupStepsStayLockedUntilPairingSucceeds() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        state.currentStep = .connect
+
+        state.selectStep(.workspace)
+
+        #expect(state.currentStep == .connect)
+
+        state.hasPairedMac = true
+        state.selectStep(.workspace)
+
+        #expect(state.currentStep == .workspace)
+    }
+
+    @Test("pairing connect eligibility follows the current form values")
+    func pairingConnectEligibilityFollowsFormValues() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+
+        #expect(state.validatedPairingPayload == nil)
+        #expect(state.canAttemptPairing == false)
+
+        state.pairingHost = "100.64.0.7"
+        state.pairingPort = "9847"
+        state.pairingToken = "pair-token"
+        state.pairingLabel = "Studio"
+
+        #expect(state.validatedPairingPayload?.host == "100.64.0.7")
+        #expect(state.canAttemptPairing == true)
+
+        state.isConnecting = true
+        #expect(state.canAttemptPairing == false)
+    }
+
     // MARK: - reset()
 
     @Test("reset() clears completion flag and pairing inputs")
@@ -127,6 +253,7 @@ struct OnboardingStateTests {
         state.pairingPort = "1"
         state.pairingToken = "t"
         state.pairingLabel = "L"
+        state.prepareServerOnboarding(prefill: .init(id: "server-1", label: "Studio", host: "h", port: 1))
         state.hasPairedMac = true
         defaults.set(true, forKey: OnboardingState.completionStorageKey)
 
@@ -138,6 +265,7 @@ struct OnboardingStateTests {
         #expect(state.pairingPort == AppConstants.prodPort)
         #expect(state.pairingToken.isEmpty)
         #expect(state.pairingLabel == "My Mac")
+        #expect(state.pairingPrefilledServerId == nil)
         #expect(defaults.bool(forKey: OnboardingState.completionStorageKey) == false)
     }
 
@@ -167,6 +295,11 @@ struct OnboardingStateTests {
             "openai-codex": {
               "hasOAuth": true,
               "accounts": [{"label": "personal", "expiresAt": 1800000000, "isExpired": false}]
+            },
+            "google": {
+              "hasClientId": true,
+              "hasClientSecret": true,
+              "projectId": "tron-project"
             }
           },
           "services": {
@@ -182,10 +315,13 @@ struct OnboardingStateTests {
         #expect(snapshot.defaultWorkspace == "/Users/example/project")
         #expect(snapshot.defaultModel == "claude-opus-4-6")
         #expect(snapshot.retainModel == "claude-haiku-4-5-20251001")
-        #expect(snapshot.providerSummary(for: "anthropic")?.title == "API key already saved")
+        #expect(snapshot.providerSummary(for: "anthropic")?.title == "API key saved")
         #expect(snapshot.providerSummary(for: "anthropic")?.detail == "work - sk-ant-...xyz")
-        #expect(snapshot.providerSummary(for: "openai-codex")?.title == "OAuth already connected")
+        #expect(snapshot.providerSummary(for: "openai-codex")?.title == "OpenAI signed in")
         #expect(snapshot.providerSummary(for: "openai-codex")?.detail == "personal")
+        #expect(snapshot.providerSummary(for: "google")?.title == "Google Cloud configured")
+        #expect(snapshot.providerSummary(for: "google")?.detail == "tron-project")
+        #expect(snapshot.serviceSummary(for: "brave")?.title == "API key saved")
         #expect(snapshot.serviceSummary(for: "brave")?.detail == "BSA...abc")
         #expect(snapshot.preferredApiKeyLabel(for: "anthropic") == "work")
     }
@@ -241,8 +377,9 @@ struct OnboardingStateTests {
         #expect(state.setupSnapshot.serverId == "server-1")
         #expect(state.setupSnapshot.defaultWorkspace == "/Users/example/project")
         #expect(state.setupSnapshot.defaultModel == "claude-opus-4-6")
-        #expect(state.setupSnapshot.providerSummary(for: "anthropic")?.title == "OAuth already connected")
+        #expect(state.setupSnapshot.providerSummary(for: "anthropic")?.title == "Anthropic signed in")
         #expect(state.setupSnapshot.providerSummary(for: "anthropic")?.detail == "work")
+        #expect(state.setupSnapshot.serviceSummary(for: "exa")?.title == "API key saved")
         #expect(state.setupSnapshot.serviceSummary(for: "exa")?.detail == "exa...123")
         #expect(state.setupSnapshot.authLoadError == nil)
     }
