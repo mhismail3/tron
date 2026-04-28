@@ -10,15 +10,21 @@ import UIKit
 struct OnboardingFlowView: View {
     @State var state: OnboardingState
     let dependencies: DependencyContainer
+    let allowsDismiss: Bool
+    let onDismiss: () -> Void
     let onComplete: () -> Void
 
     init(
         state: OnboardingState,
         dependencies: DependencyContainer,
+        allowsDismiss: Bool = false,
+        onDismiss: @escaping () -> Void = {},
         onComplete: @escaping () -> Void
     ) {
         _state = State(initialValue: state)
         self.dependencies = dependencies
+        self.allowsDismiss = allowsDismiss
+        self.onDismiss = onDismiss
         self.onComplete = onComplete
     }
 
@@ -88,6 +94,16 @@ struct OnboardingFlowView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                if allowsDismiss {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(.tronEmerald)
+                        }
+                        .accessibilityLabel("Dismiss onboarding")
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: state.currentStep.toolbarTitle, color: .tronEmerald)
                 }

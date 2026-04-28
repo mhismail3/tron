@@ -81,21 +81,12 @@ final class SettingsState {
     /// Whether the Mac server loads the local MLX transcription sidecar.
     var transcriptionEnabled: Bool = false
 
-    // MARK: - Connection Presets
-
-    var connectionPresets: [ConnectionPreset] = []
-
-    // MARK: - Server Auth + Tailscale
+    // MARK: - Server Auth
 
     /// Whether the server requires a bearer token on `/ws` upgrades. Default
     /// `false` matches the Phase 2 "ship-but-not-enforced" rollout. iOS sends
     /// the header unconditionally so flipping this is instantly safe.
     var authEnforced: Bool = false
-    /// Cached Tailscale IP reported by the server. `nil` if the server hasn't
-    /// been configured yet (older installs or fresh deployment without the
-    /// Mac wrapper).
-    var tailscaleIp: String? = nil
-
     // MARK: - Update Checks
 
     /// Master switch for user-mode update checks. Default `false` (opt-in).
@@ -110,39 +101,13 @@ final class SettingsState {
     /// `"notify"`.
     var updateAction: String = "notify"
 
-    // MARK: - Preset Cache
-
     /// UserDefaults key for the iOS-only telemetry opt-in. Kept with
     /// settings/privacy ownership because telemetry is configured from
     /// Settings, not onboarding.
     nonisolated static let telemetryEnabledStorageKey = "telemetryEnabled"
 
-    /// UserDefaults key for the cached `[ConnectionPreset]`. Internal so the
-    /// `DependencyContainer` bearer-token resolver can read it directly on
-    /// the WS-upgrade synchronous path (avoids a round-trip through the
-    /// async `SettingsState.load`).
-    ///
-    /// `nonisolated` so synchronous helpers can read it without crossing
-    /// actor boundaries. The string is a value type; no isolation is needed.
-    nonisolated static let cachedPresetsKey = "cachedConnectionPresets"
-
-    private func loadCachedPresets() {
-        guard let data = UserDefaults.standard.data(forKey: Self.cachedPresetsKey),
-              let cached = try? JSONDecoder().decode([ConnectionPreset].self, from: data) else { return }
-        connectionPresets = cached
-    }
-
-    private func cachePresets(_ presets: [ConnectionPreset]) {
-        guard let data = try? JSONEncoder().encode(presets) else { return }
-        UserDefaults.standard.set(data, forKey: Self.cachedPresetsKey)
-    }
-
-    /// Replace the paired-server list and keep the WebSocket bearer-token
-    /// resolver's synchronous UserDefaults cache in lock-step.
-    func replaceConnectionPresets(_ presets: [ConnectionPreset]) {
-        connectionPresets = presets
-        cachePresets(presets)
-    }
+    @ObservationIgnored
+    private var lastLoadedSettings: ServerSettings?
 
     // MARK: - Load State
 
@@ -153,9 +118,7 @@ final class SettingsState {
 
     // MARK: - Init
 
-    init() {
-        loadCachedPresets()
-    }
+    init() {}
 
     // MARK: - Display Helpers
 
@@ -177,8 +140,7 @@ final class SettingsState {
     }
 
     func reload(using rpcClient: RPCClient) async {
-        isLoaded = false
-        loadError = nil
+        clearServerSnapshot()
         await load(using: rpcClient)
         await loadModels(using: rpcClient)
     }
@@ -202,6 +164,21 @@ final class SettingsState {
         applyServerSettings(settings)
     }
 
+    func clearServerSnapshot() {
+        isLoaded = false
+        loadError = nil
+        availableModels = []
+        isLoadingModels = false
+    }
+
+    func rollbackToLastLoadedSettings(message: String) {
+        if let lastLoadedSettings {
+            applyServerSettings(lastLoadedSettings)
+            isLoaded = true
+        }
+        loadError = message
+    }
+
     /// Apply a ServerSettings response to local state (shared by load and reset).
     ///
     /// Every field is overwritten from the active server's effective settings.
@@ -209,12 +186,12 @@ final class SettingsState {
     /// was present on server A cannot linger after server B reports its own
     /// default or a missing optional field.
     func applyServerSettings(_ settings: ServerSettings) {
+        lastLoadedSettings = settings
         preserveRecentCount = settings.compaction.preserveRecentCount
         triggerTokenThreshold = settings.compaction.triggerTokenThreshold
         rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
         isolationMode = settings.isolationMode
         queueDrainMode = settings.queueDrainMode
-        replaceConnectionPresets(settings.connectionPresets)
         hooksLlmModel = settings.hooksLlmModel
         builtinHooks = settings.builtinHooks
         hooksErrorPolicy = settings.hooksErrorPolicy
@@ -244,7 +221,6 @@ final class SettingsState {
         transcriptionEnabled = settings.transcriptionEnabled
 
         authEnforced = settings.authEnforced
-        tailscaleIp = settings.tailscaleIp
 
         updateEnabled = settings.updateEnabled
         updateChannel = settings.updateChannel

@@ -11,7 +11,6 @@ import Foundation
 struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
-    let connectionPresets: [ConnectionPreset]
     /// Whether the local Mac server loads the MLX transcription sidecar.
     /// Fresh installs default this off; Mac onboarding can enable it after
     /// seeding the sidecar files and restarting the helper.
@@ -129,7 +128,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum ServerKeys: String, CodingKey {
-        case defaultModel, defaultWorkspace, connectionPresets, transcription, auth, tailscaleIp, update
+        case defaultModel, defaultWorkspace, transcription, auth, tailscaleIp, update
     }
 
     private enum TranscriptionKeys: String, CodingKey {
@@ -157,7 +156,6 @@ struct ServerSettings: Decodable {
         if let serverContainer = try? container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server) {
             decodedDefaultModel = (try? serverContainer.decodeIfPresent(String.self, forKey: .defaultModel)) ?? decodedDefaultModel
             defaultWorkspace = try? serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
-            connectionPresets = (try? serverContainer.decodeIfPresent([ConnectionPreset].self, forKey: .connectionPresets)) ?? []
             tailscaleIp = try? serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
             if let transcriptionContainer = try? serverContainer.nestedContainer(keyedBy: TranscriptionKeys.self, forKey: .transcription) {
                 transcriptionEnabled = (try? transcriptionContainer.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
@@ -187,7 +185,6 @@ struct ServerSettings: Decodable {
             }
         } else {
             defaultWorkspace = nil
-            connectionPresets = []
             transcriptionEnabled = false
             authEnforced = false
             tailscaleIp = nil
@@ -465,11 +462,6 @@ struct ServerSettingsUpdate: Encodable {
         /// Updated Tailscale IP. Mac wrapper writes this on first launch; the
         /// iOS UI lets the user override / clear if needed.
         var tailscaleIp: String?
-        /// Replace the entire `connectionPresets` array on the server. The
-        /// settings deep-merge replaces arrays wholesale (see
-        /// `settings/storage/loader.rs::deep_merge`) so iOS sends the full
-        /// post-edit list whenever it adds, removes, or renames a preset.
-        var connectionPresets: [ConnectionPreset]?
         /// Partial update for local transcription sidecar settings.
         var transcription: TranscriptionUpdate?
         /// Partial update for user-mode update checks/downloads.
@@ -570,17 +562,4 @@ struct ServerSettingsUpdate: Encodable {
 struct BuiltinHookSetting: Codable, Identifiable, Equatable {
     var id: String
     var enabled: Bool
-}
-
-/// A connection preset for quick-connect from the Connections settings page.
-///
-/// `Equatable` + `Hashable` so the iOS layer can pass it through SwiftUI's
-/// `.sheet(item:)` / `.alert(presenting:)` modifiers and compare list deltas
-/// without manual reduction. The Codable shape stays identical to what the
-/// server emits.
-struct ConnectionPreset: Codable, Identifiable, Equatable, Hashable {
-    let id: String
-    let label: String
-    let host: String
-    let port: Int
 }

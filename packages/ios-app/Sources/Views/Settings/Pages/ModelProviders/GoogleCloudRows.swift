@@ -102,7 +102,8 @@ struct GoogleCloudRows: View {
             }
             .disabled(isSaving || !canSave)
             .buttonStyle(.borderedProminent)
-            .tint(.tronEmerald)
+            .tint((!isSaving && canSave) ? .tronEmerald : .tronTextMuted.opacity(0.25))
+            .opacity((!isSaving && canSave) ? 1 : 0.55)
 
             if isEditing {
                 Button {

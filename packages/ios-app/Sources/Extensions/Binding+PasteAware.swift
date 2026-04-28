@@ -2,8 +2,7 @@ import SwiftUI
 
 /// Universal-paste detection helper for the pairing flow.
 ///
-/// Both the onboarding `PairingStep` form and the Settings →
-/// Server `AddOrEditServerSheet` need the same UX: pasting a
+/// The onboarding `PairingStep` form needs this UX: pasting a
 /// `tron://pair?host=…&port=…&token=…[&label=…]` URL into ANY of the
 /// host / port / token / label fields should auto-distribute the
 /// parsed values across all the fields, instead of dropping the URL
@@ -18,9 +17,7 @@ import SwiftUI
 ///   - Composes cleanly with `TextField` and `SecureField` —
 ///     `TextField(placeholder, text: binding.pasteAware { … })`.
 ///   - Doesn't depend on a specific destination state shape — the
-///     consumer supplies a closure that knows how to apply the
-///     payload. Onboarding routes through `OnboardingState`; Settings
-///     mutates local @State directly.
+///     consumer supplies a closure that knows how to apply the payload.
 ///
 /// Non-pairing pastes (anything that doesn't contain `tron://pair`)
 /// fall through to the underlying binding unchanged so the helper is

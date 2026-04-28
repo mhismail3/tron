@@ -13,8 +13,7 @@ struct ServerSettingsTests {
         {
             "server": {
                 "defaultModel": "claude-opus-4-6",
-                "defaultWorkspace": "/projects",
-                "connectionPresets": [{"id":"p1","label":"Local","host":"127.0.0.1","port":8080}]
+                "defaultWorkspace": "/projects"
             },
             "context": {
                 "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 },
@@ -32,8 +31,6 @@ struct ServerSettingsTests {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.defaultWorkspace == "/projects")
-        #expect(settings.connectionPresets.count == 1)
-        #expect(settings.connectionPresets[0].label == "Local")
         #expect(settings.compaction.preserveRecentCount == 3)
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
         #expect(settings.rules.discoverStandaloneFiles == false)
@@ -55,7 +52,6 @@ struct ServerSettingsTests {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
         #expect(settings.defaultModel == "claude-sonnet-4-6")
         #expect(settings.defaultWorkspace == nil)
-        #expect(settings.connectionPresets.isEmpty)
         #expect(settings.compaction.preserveRecentCount == 5)
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
         #expect(settings.rules.discoverStandaloneFiles == true)
@@ -123,30 +119,6 @@ struct ServerSettingsTests {
         let hook = try JSONDecoder().decode(BuiltinHookSetting.self, from: json.data(using: .utf8)!)
         #expect(hook.id == "commit-msg")
         #expect(hook.enabled == false)
-    }
-
-    // MARK: - ConnectionPreset
-
-    @Test("ConnectionPreset decode")
-    func connectionPresetDecode() throws {
-        let json = #"{"id":"local","label":"Local Dev","host":"192.168.1.100","port":9090}"#
-        let preset = try JSONDecoder().decode(ConnectionPreset.self, from: json.data(using: .utf8)!)
-        #expect(preset.id == "local")
-        #expect(preset.label == "Local Dev")
-        #expect(preset.host == "192.168.1.100")
-        #expect(preset.port == 9090)
-    }
-
-    @Test("ConnectionPreset encode round-trip")
-    func connectionPresetRoundTrip() throws {
-        let json = #"{"id":"rt","label":"Round Trip","host":"10.0.0.1","port":9847}"#
-        let decoded = try JSONDecoder().decode(ConnectionPreset.self, from: json.data(using: .utf8)!)
-        let encoded = try JSONEncoder().encode(decoded)
-        let redecoded = try JSONDecoder().decode(ConnectionPreset.self, from: encoded)
-        #expect(redecoded.id == "rt")
-        #expect(redecoded.label == "Round Trip")
-        #expect(redecoded.host == "10.0.0.1")
-        #expect(redecoded.port == 9847)
     }
 
     // MARK: - Memory Settings

@@ -3,11 +3,10 @@ import Testing
 @testable import TronMobile
 
 /// `PairingPersistor` is the pure-value planner that maps a parsed
-/// `PairingURLParser.PairingPayload` and the existing `[ConnectionPreset]`
+/// `PairingURLParser.PairingPayload` and the existing local `[PairedServer]`
 /// list to a `Plan` describing exactly what side effects the caller must
-/// perform to switch the active server: Keychain write, UserDefaults write
-/// for active host/port, and the new `connectionPresets[]` to push to the
-/// server.
+/// perform to switch the active server: Keychain write, local store update,
+/// and RPC-client rebuild.
 ///
 /// **Why pure**: keeps the commit decision testable end-to-end without
 /// SwiftUI, dependency-container, RPC, or Keychain plumbing. The view
@@ -15,10 +14,10 @@ import Testing
 @Suite("PairingPersistor")
 struct PairingPersistorTests {
 
-    // MARK: - New preset path
+    // MARK: - New server path
 
-    @Test("plan(): new (host,port) appends a new preset with the supplied label")
-    func newPresetAppended() {
+    @Test("plan(): new (host,port) appends a new server with the supplied label")
+    func newServerAppended() {
         let payload = PairingURLParser.PairingPayload(
             host: "100.64.0.1",
             port: 9847,
@@ -31,15 +30,13 @@ struct PairingPersistorTests {
             idGenerator: { "id-1" }
         )
 
-        #expect(plan.activePreset.id == "id-1")
-        #expect(plan.activePreset.label == "Studio Mac")
-        #expect(plan.activePreset.host == "100.64.0.1")
-        #expect(plan.activePreset.port == 9847)
-        #expect(plan.updatedPresets.count == 1)
-        #expect(plan.updatedPresets[0].id == "id-1")
+        #expect(plan.activeServer.id == "id-1")
+        #expect(plan.activeServer.label == "Studio Mac")
+        #expect(plan.activeServer.host == "100.64.0.1")
+        #expect(plan.activeServer.port == 9847)
+        #expect(plan.updatedServers.count == 1)
+        #expect(plan.updatedServers[0].id == "id-1")
         #expect(plan.token == "tok-fresh")
-        #expect(plan.activeHost == "100.64.0.1")
-        #expect(plan.activePort == "9847")
     }
 
     @Test("plan(): missing/empty label defaults to 'My Mac'")
@@ -55,8 +52,8 @@ struct PairingPersistorTests {
             existing: [],
             idGenerator: { "id-x" }
         )
-        #expect(plan.activePreset.label == "My Mac",
-                "no label means default 'My Mac' so the preset row isn't unlabeled")
+        #expect(plan.activeServer.label == "My Mac",
+                "no label means default 'My Mac' so the server row isn't unlabeled")
     }
 
     @Test("plan(): empty-string label also defaults to 'My Mac'")
@@ -69,7 +66,7 @@ struct PairingPersistorTests {
             existing: [],
             idGenerator: { "id" }
         )
-        #expect(plan.activePreset.label == "My Mac")
+        #expect(plan.activeServer.label == "My Mac")
     }
 
     @Test("plan(): label override is preferred over default if non-empty")
@@ -82,12 +79,12 @@ struct PairingPersistorTests {
             existing: [],
             idGenerator: { "id" }
         )
-        #expect(plan.activePreset.label == "Friend's Mac")
+        #expect(plan.activeServer.label == "Friend's Mac")
     }
 
-    @Test("plan(): preserves existing presets when adding a new one")
-    func preservesExistingPresets() {
-        let other = ConnectionPreset(id: "p-other", label: "Old", host: "10.0.0.1", port: 9847)
+    @Test("plan(): preserves existing servers when adding a new one")
+    func preservesExistingServers() {
+        let other = PairedServer(id: "p-other", label: "Old", host: "10.0.0.1", port: 9847)
         let payload = PairingURLParser.PairingPayload(
             host: "100.64.0.1", port: 9847, token: "t", label: "New"
         )
@@ -96,17 +93,17 @@ struct PairingPersistorTests {
             existing: [other],
             idGenerator: { "id-new" }
         )
-        #expect(plan.updatedPresets.count == 2)
-        #expect(plan.updatedPresets[0].id == "p-other",
-                "existing presets must come first (stable order)")
-        #expect(plan.updatedPresets[1].id == "id-new")
+        #expect(plan.updatedServers.count == 2)
+        #expect(plan.updatedServers[0].id == "p-other",
+                "existing servers must come first (stable order)")
+        #expect(plan.updatedServers[1].id == "id-new")
     }
 
     // MARK: - Re-pair / existing match path
 
-    @Test("plan(): existing (host,port) re-uses preset id and label, only updates token")
-    func rePairExistingPreset() {
-        let existing = ConnectionPreset(id: "p-keep", label: "Studio", host: "100.64.0.1", port: 9847)
+    @Test("plan(): existing (host,port) re-uses server id and label, only updates token")
+    func rePairExistingServer() {
+        let existing = PairedServer(id: "p-keep", label: "Studio", host: "100.64.0.1", port: 9847)
         let payload = PairingURLParser.PairingPayload(
             host: "100.64.0.1",
             port: 9847,
@@ -119,18 +116,18 @@ struct PairingPersistorTests {
             idGenerator: { "DO-NOT-USE-NEW-ID" }
         )
 
-        #expect(plan.activePreset.id == "p-keep",
-                "existing preset id must be preserved so Keychain key stays stable")
-        #expect(plan.activePreset.label == "Studio",
+        #expect(plan.activeServer.id == "p-keep",
+                "existing server id must be preserved so Keychain key stays stable")
+        #expect(plan.activeServer.label == "Studio",
                 "existing label must be preserved on re-pair (user already named it)")
-        #expect(plan.updatedPresets.count == 1)
-        #expect(plan.updatedPresets[0].id == "p-keep")
+        #expect(plan.updatedServers.count == 1)
+        #expect(plan.updatedServers[0].id == "p-keep")
         #expect(plan.token == "tok-rotated")
     }
 
-    @Test("plan(): new (host,port) when same host but different port creates new preset")
-    func samePathDifferentPortIsNewPreset() {
-        let existing = ConnectionPreset(id: "p1", label: "L", host: "100.64.0.1", port: 9847)
+    @Test("plan(): new (host,port) when same host but different port creates new server")
+    func samePathDifferentPortIsNewServer() {
+        let existing = PairedServer(id: "p1", label: "L", host: "100.64.0.1", port: 9847)
         let payload = PairingURLParser.PairingPayload(
             host: "100.64.0.1", port: 9848, token: "t", label: "Other"
         )
@@ -139,22 +136,7 @@ struct PairingPersistorTests {
             existing: [existing],
             idGenerator: { "p2" }
         )
-        #expect(plan.activePreset.id == "p2")
-        #expect(plan.updatedPresets.count == 2)
-    }
-
-    @Test("plan(): activeHost/activePort always reflect the payload, not the existing preset")
-    func activeAlwaysFollowsPayload() {
-        let existing = ConnectionPreset(id: "p1", label: "L", host: "10.0.0.1", port: 9847)
-        let payload = PairingURLParser.PairingPayload(
-            host: "100.64.0.7", port: 9000, token: "t", label: "L"
-        )
-        let plan = PairingPersistor.plan(
-            payload: payload,
-            existing: [existing],
-            idGenerator: { "p2" }
-        )
-        #expect(plan.activeHost == "100.64.0.7")
-        #expect(plan.activePort == "9000")
+        #expect(plan.activeServer.id == "p2")
+        #expect(plan.updatedServers.count == 2)
     }
 }

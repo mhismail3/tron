@@ -233,7 +233,6 @@ mod tests {
         let server = json.get("server").unwrap();
         assert!(server.get("heartbeatIntervalMs").is_some());
         assert!(server.get("defaultModel").is_some());
-        assert!(server.get("connectionPresets").is_some());
 
         // Removed fields no longer present
         assert!(server.get("wsPort").is_none());

@@ -43,11 +43,7 @@ impl MethodHandler for ListContainersHandler {
         let statuses = sandbox_service::query_container_statuses().await;
         enrich_with_status(&mut containers, &statuses);
 
-        let host_ip = crate::settings::get_settings()
-            .server
-            .connection_presets
-            .first()
-            .map(|p| p.host.clone());
+        let host_ip = crate::settings::get_settings().server.tailscale_ip.clone();
 
         Ok(serde_json::json!({
             "containers": containers,

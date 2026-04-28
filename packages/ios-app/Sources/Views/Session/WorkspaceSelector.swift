@@ -129,7 +129,7 @@ struct WorkspaceSelector: View {
                     .clipShape(Capsule())
             }
 
-            Text("Check that the Tron server is running\nand the host/port in Settings is correct.")
+            Text("Check that the current Tron server is running\nor re-pair it from Settings.")
                 .font(TronTypography.caption)
                 .foregroundStyle(.tronTextMuted)
                 .multilineTextAlignment(.center)

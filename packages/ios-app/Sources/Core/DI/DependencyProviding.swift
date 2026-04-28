@@ -38,7 +38,7 @@ protocol DependencyProviding: AnyObject {
 
 // MARK: - Server Settings Provider Protocol
 
-/// Protocol for managing server connection settings.
+/// Protocol for managing local paired-server selection.
 /// Separated from DependencyProviding to allow focused testing.
 @MainActor
 protocol ServerSettingsProvider: AnyObject {
@@ -54,9 +54,9 @@ protocol ServerSettingsProvider: AnyObject {
     /// Current server origin string (host:port)
     var currentServerOrigin: String { get }
 
-    /// Update server connection settings.
-    /// This will disconnect from the current server and recreate the RPC client.
-    func updateServerSettings(host: String, port: String)
+    /// Select a locally paired server.
+    /// This disconnects from the current server and recreates the RPC client.
+    func selectPairedServer(_ server: PairedServer, connectAfterSwitch: Bool)
 }
 
 // MARK: - App Settings Provider Protocol

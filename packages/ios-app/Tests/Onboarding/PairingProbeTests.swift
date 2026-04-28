@@ -3,7 +3,7 @@ import Testing
 @testable import TronMobile
 
 /// `PairingProbe` is the one-shot reachability check the onboarding
-/// PairingStep runs before committing the new bearer token + preset.
+/// PairingStep runs before committing the new bearer token + paired server.
 ///
 /// The production probe is `URLSessionPairingProbe`, which opens a single
 /// WebSocket upgrade to `ws://<host>:<port>/ws` carrying

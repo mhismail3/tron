@@ -10,6 +10,7 @@ struct ProviderServiceCard: View {
     @State private var isSaving = false
 
     private var isConfigured: Bool { serviceAuth?.hasApiKey == true }
+    private var canSave: Bool { !apiKey.isEmpty && !isSaving }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -63,9 +64,10 @@ struct ProviderServiceCard: View {
                 Text("Save")
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
             }
-            .disabled(apiKey.isEmpty || isSaving)
+            .disabled(!canSave)
             .buttonStyle(.borderedProminent)
-            .tint(.tronEmerald)
+            .tint(canSave ? .tronEmerald : .tronTextMuted.opacity(0.25))
+            .opacity(canSave ? 1 : 0.55)
 
             if isConfigured {
                 Button(role: .destructive) {

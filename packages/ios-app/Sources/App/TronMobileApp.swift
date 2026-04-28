@@ -21,6 +21,8 @@ struct TronMobileApp: App {
     @State private var onboardingState = OnboardingState()
     @State private var isOnboardingSheetPresented = false
     @State private var onboardingDetent: PresentationDetent = .medium
+    @State private var onboardingAllowsDismiss = false
+    @State private var onboardingSuppressed = false
 
     /// First-run pairing flag. Driven by `OnboardingState.completionStorageKey`
     /// (the literal key `"onboardingComplete"`). When false, the app still
@@ -203,8 +205,12 @@ struct TronMobileApp: App {
                 OnboardingFlowView(
                     state: onboardingState,
                     dependencies: container,
+                    allowsDismiss: onboardingAllowsDismiss,
+                    onDismiss: dismissOnboardingFromSettings,
                     onComplete: {
                         onboardingComplete = true
+                        onboardingAllowsDismiss = false
+                        onboardingSuppressed = false
                         isOnboardingSheetPresented = false
                     }
                 )
@@ -214,13 +220,16 @@ struct TronMobileApp: App {
                 .presentationSizing(.largeForm)
                 .presentationBackground(.clear)
                 .presentationDragIndicator(.hidden)
-                .interactiveDismissDisabled(!onboardingComplete)
+                .interactiveDismissDisabled(!onboardingComplete && !onboardingAllowsDismiss)
             }
             .onAppear(perform: syncOnboardingSheetPresentation)
             .onChange(of: onboardingComplete) { _, isComplete in
                 syncOnboardingSheetPresentation()
                 guard isComplete else { return }
                 Task { await registerPushIfAuthorized() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { notification in
+                launchServerOnboarding(notification: notification)
             }
     }
 
@@ -242,11 +251,39 @@ struct TronMobileApp: App {
     }
 
     private func syncOnboardingSheetPresentation() {
-        let shouldPresent = !onboardingComplete
+        let shouldPresent = !onboardingComplete && !onboardingSuppressed
         if shouldPresent && !isOnboardingSheetPresented {
             onboardingDetent = .medium
+            onboardingAllowsDismiss = false
         }
         isOnboardingSheetPresented = shouldPresent
+    }
+
+    private func dismissOnboardingFromSettings() {
+        onboardingSuppressed = !onboardingComplete
+        onboardingAllowsDismiss = false
+        isOnboardingSheetPresented = false
+    }
+
+    private func launchServerOnboarding(notification: Notification) {
+        let serverId = notification.userInfo?["serverId"] as? String
+        let server = serverId.flatMap { id in
+            container.pairedServerStore.servers.first { $0.id == id }
+        }
+
+        onboardingState.currentStep = .connect
+        onboardingState.hasPairedMac = false
+        onboardingState.pairingError = nil
+        onboardingState.isConnecting = false
+        onboardingState.pairingHost = server?.host ?? ""
+        onboardingState.pairingPort = server.map { String($0.port) } ?? AppConstants.prodPort
+        onboardingState.pairingToken = ""
+        onboardingState.pairingLabel = server?.label ?? "My Mac"
+
+        onboardingSuppressed = false
+        onboardingAllowsDismiss = true
+        onboardingDetent = .large
+        isOnboardingSheetPresented = true
     }
 
     @discardableResult
@@ -257,6 +294,8 @@ struct TronMobileApp: App {
         onboardingState.acceptPairingPayload(payload)
         onboardingDetent = .large
         isOnboardingSheetPresented = true
+        onboardingAllowsDismiss = false
+        onboardingSuppressed = false
         onboardingComplete = false
         return true
     }

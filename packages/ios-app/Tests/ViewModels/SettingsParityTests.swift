@@ -60,15 +60,12 @@ final class SettingsParityTests: XCTestCase {
         "promptHistoryMaxEntries",
         "promptHistoryMaxAgeDays",
         "promptHistoryAutoPrune",
-        // Connection presets
-        "connectionPresets",
         // MCP
         "mcpSchemaRefreshTtlMs",
         // Transcription (ConnectionSettingsPage.swift)
         "transcriptionEnabled",
-        // Server auth + Tailscale identity (ConnectionSettingsPage:88-156)
+        // Server auth (ConnectionSettingsPage.swift)
         "authEnforced",
-        "tailscaleIp",
         // Update checks (UpdatesSettingsPage.swift)
         "updateEnabled",
         "updateChannel",
@@ -83,6 +80,7 @@ final class SettingsParityTests: XCTestCase {
         "isLoaded": "UI loading flag — not persisted",
         "isLoadingModels": "UI loading flag — not persisted",
         "loadError": "transient error state — surfaced inline in the UI, not a setting",
+        "lastLoadedSettings": "rollback snapshot for failed sparse updates — not a setting",
     ]
 
     /// Normalize a Mirror child label into the user-level field name.

@@ -4,7 +4,7 @@ import SwiftUI
 // MARK: - Server Settings Notification
 
 extension Notification.Name {
-    /// Posted when server settings (host, port, TLS) change
+    /// Posted when the active paired server changes.
     static let serverSettingsDidChange = Notification.Name("tron.serverSettingsDidChange")
     /// Posted when auth.json changes on the server (via RPC or WebSocket event)
     static let authDidUpdate = Notification.Name("tron.authDidUpdate")
@@ -23,14 +23,6 @@ extension Notification.Name {
 @Observable
 @MainActor
 final class DependencyContainer: DependencyProviding, ServerSettingsProvider, AppSettingsProvider {
-
-    // MARK: - Server Settings (Persisted)
-
-    @ObservationIgnored
-    @AppStorage("serverHost") private var _serverHost = AppConstants.defaultHost
-
-    @ObservationIgnored
-    @AppStorage("serverPort") private var _serverPort = AppConstants.prodPort
 
     // MARK: - App Settings (Persisted)
 
@@ -60,11 +52,15 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Shared audio recorder — starts on-demand when user taps mic
     let audioRecorder = AudioRecorder()
 
-    /// Per-preset bearer-token storage backed by Keychain. Owned here because
-    /// the bearer-token resolver closure captures a reference; same instance
-    /// is shared with `ConnectionSettingsPage` for re-pair / preset-add flows.
+    /// iOS-local paired server list and active selection.
     @ObservationIgnored
-    let presetTokenStore = PresetTokenStore()
+    let pairedServerStore = PairedServerStore()
+
+    /// Per-server bearer-token storage backed by Keychain. Owned here because
+    /// the bearer-token resolver closure captures a reference; same instance
+    /// is shared with onboarding and Settings for re-pair flows.
+    @ObservationIgnored
+    let pairedServerTokenStore = PairedServerTokenStore()
 
     /// Default pairing probe used by the onboarding PairingStep. Held here
     /// so tests + previews can swap a `StubPairingProbe` without rebuilding
@@ -93,11 +89,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     // MARK: - Recreatable Services (When Server Changes)
 
-    /// RPC client for server communication - recreated when server settings change
+    /// RPC client for server communication - recreated when active server changes
     private(set) var rpcClient: RPCClient
 
     /// Centralized connection policy layer (replaces scattered `rpcClient.connectionState`
-    /// observers). Recreated when server settings change because `rpcClient` is.
+    /// observers). Recreated when the active server changes because `rpcClient` is.
     private(set) var connectionManager: ConnectionManager
 
     /// Single read-only / interaction-allowed policy for all UI surfaces. Recreated with
@@ -126,7 +122,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     // MARK: - Observable Server Settings Version
 
-    /// Incremented when server settings change. Views can observe this to react to changes.
+    /// Incremented when active server selection changes. Views can observe this to react to changes.
     private(set) var serverSettingsVersion: Int = 0
 
     /// Incremented when auth.json changes on the server. Providers page observes this.
@@ -137,15 +133,21 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     // MARK: - ServerSettingsProvider
 
-    var serverHost: String { _serverHost }
-    var serverPort: String { _serverPort }
+    var serverHost: String { pairedServerStore.activeServer?.host ?? "" }
+    var serverPort: String {
+        guard let port = pairedServerStore.activeServer?.port else { return "" }
+        return String(port)
+    }
 
     var serverURL: URL {
-        Self.buildServerURL(host: _serverHost, port: _serverPort)
+        guard let server = pairedServerStore.activeServer else {
+            return Self.placeholderServerURL
+        }
+        return Self.buildServerURL(host: server.host, port: String(server.port))
     }
 
     var currentServerOrigin: String {
-        "\(_serverHost):\(_serverPort)"
+        pairedServerStore.activeServer?.origin ?? ""
     }
 
     // MARK: - AppSettingsProvider
@@ -163,10 +165,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     // MARK: - Initialization
 
     init() {
-        // Read persisted values before initialization (workaround for @AppStorage in init)
-        let host = UserDefaults.standard.string(forKey: "serverHost") ?? AppConstants.defaultHost
-        let port = UserDefaults.standard.string(forKey: "serverPort") ?? AppConstants.prodPort
-
         // Initialize core services that persist across server changes.
         // Falls back to temp directory if Documents is unavailable (e.g., device migration).
         let documentsURL: URL
@@ -197,18 +195,22 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         lastTelemetryEnabledState = telemetryEnabled
         telemetryClient = TelemetryClientFactory.make(enabled: telemetryEnabled)
 
-        // Build initial server URL
-        let url = Self.buildServerURL(host: host, port: port)
+        // Build initial server URL from the iOS-local active pairing. With no
+        // pair, use a non-routable placeholder so app launch never silently
+        // falls back to localhost.
+        let url = pairedServerStore.activeServer.map {
+            Self.buildServerURL(host: $0.host, port: String($0.port))
+        } ?? Self.placeholderServerURL
 
         // Initialize RPC client. Bearer resolver closes over a copy of the
-        // (struct-valued) PresetTokenStore so there's no retain cycle on
-        // the container, and reads the active host/port from UserDefaults
-        // at upgrade time so the resolver tracks server-switching without
-        // re-instantiation.
-        let tokenStore = presetTokenStore
+        // (struct-valued) PairedServerTokenStore so there's no retain cycle on
+        // the container, and reads the active paired server id from
+        // UserDefaults at upgrade time so the resolver tracks server-switching
+        // without re-instantiation.
+        let tokenStore = pairedServerTokenStore
         let client = RPCClient(
             serverURL: url,
-            bearerTokenProvider: { Self.resolveBearerToken(presetTokenStore: tokenStore) }
+            bearerTokenProvider: { Self.resolveBearerToken(tokenStore: tokenStore) }
         )
         rpcClient = client
 
@@ -304,82 +306,49 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     // MARK: - Server Settings Management
 
-    func updateServerSettings(host: String, port: String) {
-        // Compare against the current RPCClient's actual URL, not @AppStorage.
-        // SettingsView shares the same @AppStorage keys and updates them before
-        // calling this method, so _serverPort already has the new value by the
-        // time we check. Using the running client's origin avoids this race.
-        let newOrigin = "\(host):\(port)"
-        guard newOrigin != rpcClient.serverOrigin else {
-            TronLogger.shared.debug("Server settings unchanged, skipping update", category: .general)
-            return
-        }
+    func replacePairedServers(_ servers: [PairedServer], activeServer: PairedServer) {
+        replacePairedServers(servers, activeId: activeServer.id)
+    }
 
-        TronLogger.shared.info("Server settings changing: \(_serverHost):\(_serverPort) -> \(host):\(port)", category: .general)
+    func replacePairedServers(_ servers: [PairedServer], activeId: String?) {
+        pairedServerStore.replace(servers, activeId: activeId)
+        rebuildServerBoundServices()
+    }
 
-        // Disconnect old client
-        let oldClient = rpcClient
+    func selectPairedServer(_ server: PairedServer, connectAfterSwitch: Bool = true) {
+        guard pairedServerStore.activeServer?.id != server.id else { return }
+        pairedServerStore.select(server)
+        rebuildServerBoundServices()
+        guard connectAfterSwitch else { return }
         Task {
-            await oldClient.disconnect()
-        }
-
-        // Update stored settings
-        _serverHost = host
-        _serverPort = port
-
-        // Recreate RPC client with new URL — same bearer-resolver wiring as
-        // initial init so the per-preset token lookup keeps working after
-        // a server switch.
-        let url = Self.buildServerURL(host: host, port: port)
-        let tokenStore = presetTokenStore
-        let newClient = RPCClient(
-            serverURL: url,
-            bearerTokenProvider: { Self.resolveBearerToken(presetTokenStore: tokenStore) }
-        )
-        rpcClient = newClient
-
-        // Rebuild connection policy layer against the new client
-        let newManager = ConnectionManager(provider: newClient)
-        connectionManager = newManager
-        interactionPolicy = InteractionPolicy(connection: newManager)
-
-        // Update skill store with new client
-        skillStore.configure(rpcClient: newClient)
-
-        // Update event store manager with new client + connection policy
-        eventStoreManager.updateRPCClient(newClient)
-        eventStoreManager.attachConnectionManager(newManager)
-
-        // Recreate notification store with new client
-        notificationStore = NotificationStore(rpcClient: newClient)
-
-        // Recreate repositories with new client
-        modelRepository = DefaultModelRepository(modelClient: newClient.model)
-        sessionRepository = DefaultSessionRepository(sessionClient: newClient.session)
-        agentRepository = DefaultAgentRepository(agentClient: newClient.agent)
-
-        // Reload sessions with new origin filter
-        eventStoreManager.loadSessions()
-
-        // Signal change for observers
-        serverSettingsVersion += 1
-
-        // Post notification for views that can't directly observe
-        NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)
-
-        // Connect to new server and reload settings
-        Task {
-            await newClient.connect()
+            await connect()
             await reloadServerSettings()
         }
+    }
 
-        TronLogger.shared.info("Server settings updated, new origin: \(newClient.serverOrigin)", category: .general)
+    @discardableResult
+    func forgetPairedServer(_ server: PairedServer) -> PairedServerStore.RemovalPlan {
+        let plan = pairedServerStore.remove(server)
+        try? pairedServerTokenStore.remove(serverId: server.id)
+        if plan.removedWasActive {
+            rebuildServerBoundServices()
+            if plan.nextActiveServer != nil {
+                Task {
+                    await connect()
+                    await reloadServerSettings()
+                }
+            }
+        } else {
+            serverSettingsVersion += 1
+        }
+        return plan
     }
 
     // MARK: - Connection Management
 
     /// Connect to the server
     func connect() async {
+        guard pairedServerStore.activeServer != nil else { return }
         await rpcClient.connect()
     }
 
@@ -395,16 +364,19 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     /// Verify connection is alive
     func verifyConnection() async -> Bool {
-        await rpcClient.verifyConnection()
+        guard pairedServerStore.activeServer != nil else { return false }
+        return await rpcClient.verifyConnection()
     }
 
     /// Force reconnect to the server
     func forceReconnect() async {
+        guard pairedServerStore.activeServer != nil else { return }
         await rpcClient.forceReconnect()
     }
 
     /// Manual retry triggered from UI
     func manualRetry() async {
+        guard pairedServerStore.activeServer != nil else { return }
         await rpcClient.manualRetry()
     }
 
@@ -415,53 +387,93 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// the active server's effective settings rather than carrying values from
     /// the previously selected Mac.
     func reloadServerSettings() async {
+        guard let activeServer = pairedServerStore.activeServer else { return }
         do {
             let settings = try await rpcClient.settings.get()
             quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
             if !settings.defaultModel.isEmpty {
                 defaultModel = settings.defaultModel
             }
+            pairedServerStore.updateMetadata(for: activeServer.id) { server in
+                server.lastConnectedAt = Date()
+                server.lastKnownStatus = "Connected"
+            }
         } catch {
+            pairedServerStore.updateMetadata(for: activeServer.id) { server in
+                server.lastKnownStatus = "Offline"
+            }
             TronLogger.shared.error("Failed to reload settings after server switch: \(error)", category: .general)
         }
     }
 
     // MARK: - Private Helpers
 
+    private static var placeholderServerURL: URL {
+        URL(string: "ws://paired-server-required.invalid:1/ws")!
+    }
+
     private static func buildServerURL(host: String, port: String) -> URL {
         let urlString = "ws://\(host):\(port)/ws"
         guard let url = URL(string: urlString) else {
-            TronLogger.shared.error("Invalid server URL '\(urlString)', falling back to localhost", category: .general)
-            return AppConstants.fallbackServerURL
+            TronLogger.shared.error("Invalid server URL '\(urlString)', using inert placeholder", category: .general)
+            return Self.placeholderServerURL
         }
         return url
     }
 
+    private func rebuildServerBoundServices() {
+        let oldClient = rpcClient
+        Task {
+            await oldClient.disconnect()
+        }
+
+        let url = pairedServerStore.activeServer.map {
+            Self.buildServerURL(host: $0.host, port: String($0.port))
+        } ?? Self.placeholderServerURL
+        let tokenStore = pairedServerTokenStore
+        let newClient = RPCClient(
+            serverURL: url,
+            bearerTokenProvider: { Self.resolveBearerToken(tokenStore: tokenStore) }
+        )
+        rpcClient = newClient
+
+        let newManager = ConnectionManager(provider: newClient)
+        connectionManager = newManager
+        interactionPolicy = InteractionPolicy(connection: newManager)
+
+        skillStore.configure(rpcClient: newClient)
+        eventStoreManager.updateRPCClient(newClient)
+        eventStoreManager.attachConnectionManager(newManager)
+        notificationStore = NotificationStore(rpcClient: newClient)
+        modelRepository = DefaultModelRepository(modelClient: newClient.model)
+        sessionRepository = DefaultSessionRepository(sessionClient: newClient.session)
+        agentRepository = DefaultAgentRepository(agentClient: newClient.agent)
+        eventStoreManager.loadSessions()
+
+        serverSettingsVersion += 1
+        NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)
+
+        TronLogger.shared.info("Active paired server changed to \(currentServerOrigin.nilIfEmpty ?? "none")", category: .general)
+    }
+
     /// Static helper invoked by the bearer-token provider closure on every WS
-    /// upgrade. Reads the active host:port from `@AppStorage` (UserDefaults),
-    /// matches against the cached connection-presets list, and looks up the
-    /// per-preset token in Keychain.
+    /// upgrade. Reads the iOS-local active server id and server list, then
+    /// looks up the per-server token in Keychain.
     ///
-    /// Returns `nil` when no paired preset matches. The server in
+    /// Returns `nil` when no active paired server has a token. The server in
     /// `auth.enforced=false` mode still accepts; in `enforced=true` mode
     /// the server returns 401 → `WebSocketService` parks in `.unauthorized`
     /// → user re-pairs via `ConnectionStatusPill` CTA.
     @MainActor
-    private static func resolveBearerToken(presetTokenStore: PresetTokenStore) -> String? {
-        let host = UserDefaults.standard.string(forKey: "serverHost") ?? AppConstants.defaultHost
-        let port = UserDefaults.standard.string(forKey: "serverPort") ?? AppConstants.prodPort
-
-        // Cached presets are written by `SettingsState.cachePresets` on every
-        // successful `settings.get` and are durable across launches — safe to
-        // read synchronously on the WS-upgrade path even before the first
-        // server settings round-trip in this process.
-        guard let data = UserDefaults.standard.data(forKey: SettingsState.cachedPresetsKey),
-              let presets = try? JSONDecoder().decode([ConnectionPreset].self, from: data),
-              let match = presets.first(where: { $0.host == host && String($0.port) == port })
+    private static func resolveBearerToken(tokenStore: PairedServerTokenStore) -> String? {
+        guard let activeId = UserDefaults.standard.string(forKey: PairedServerStore.activeIdKey),
+              let data = UserDefaults.standard.data(forKey: PairedServerStore.serversKey),
+              let servers = try? JSONDecoder().decode([PairedServer].self, from: data),
+              servers.contains(where: { $0.id == activeId })
         else {
             return nil
         }
 
-        return presetTokenStore.token(forPresetId: match.id)
+        return tokenStore.token(forServerId: activeId)
     }
 }

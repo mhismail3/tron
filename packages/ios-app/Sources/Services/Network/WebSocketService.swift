@@ -147,7 +147,7 @@ final class WebSocketService {
     private var deployRestartExpectedMs: Int = 0
 
     /// Bearer token resolver invoked on every WS upgrade. `nil` means "send
-    /// no Authorization header" — used by presets that have not completed
+    /// no Authorization header" — used by paired servers that have not completed
     /// bearer pairing on this device.
     private let bearerTokenProvider: BearerTokenProvider?
 

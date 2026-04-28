@@ -4,7 +4,7 @@ import Testing
 @testable import TronMobile
 
 /// Behavioral tests for `WebSocketService`'s bearer-token integration —
-/// Phase 3 of the onboarding plan (per-preset bearer auth on the WS upgrade
+/// Pairing bearer auth on the WS upgrade
 /// request, plus the new `.unauthorized` state machine path).
 ///
 /// These tests exercise the upgrade-request shape and the state-machine
@@ -34,7 +34,7 @@ struct WebSocketAuthTests {
 
     @Test("upgrade request omits Authorization when provider returns nil")
     func upgradeRequestOmitsHeaderWhenNil() {
-        // Mirrors an unpaired preset: a server entry exists but no bearer is
+        // Mirrors an unpaired server: a server entry exists but no bearer is
         // in Keychain. The header must not be sent so the server's 401
         // response triggers `.unauthorized` rather than the request being
         // silently rejected with the wrong token.
@@ -141,7 +141,7 @@ struct WebSocketAuthTests {
         }
     }
 
-    // MARK: - Unpaired preset path
+    // MARK: - Unpaired server path
 
     @Test("nil-token provider produces no header and accepts a 401-driven .unauthorized transition")
     func nilTokenProviderToUnauthorized() {

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Final onboarding page: scan, paste, or manually enter the Mac pairing
 /// details, verify the server with `system.ping`, then persist the active
-/// connection preset.
+/// paired server locally on this device.
 @available(iOS 26.0, *)
 struct PairingStep: View {
     @Bindable var state: OnboardingState
@@ -300,34 +300,29 @@ struct PairingStep: View {
     }
 
     private func commit(payload: PairingURLParser.PairingPayload) async {
-        let existing = readCachedPresets()
+        let existing = dependencies.pairedServerStore.servers
+        let previousActiveId = dependencies.pairedServerStore.activeServerId
         let plan = PairingPersistor.plan(payload: payload, existing: existing)
-        let previousHost = UserDefaults.standard.string(forKey: "serverHost") ?? AppConstants.defaultHost
-        let previousPort = {
-            let stored = UserDefaults.standard.string(forKey: "serverPort") ?? ""
-            return stored.isEmpty ? AppConstants.prodPort : stored
-        }()
 
         do {
-            try dependencies.presetTokenStore.setToken(plan.token, forPresetId: plan.activePreset.id)
+            try dependencies.pairedServerTokenStore.setToken(plan.token, forServerId: plan.activeServer.id)
         } catch {
             state.pairingError = .keychainFailed(error.localizedDescription)
             state.isConnecting = false
             return
         }
 
-        cachePresets(plan.updatedPresets)
-        dependencies.updateServerSettings(host: plan.activeHost, port: plan.activePort)
+        dependencies.replacePairedServers(plan.updatedServers, activeServer: plan.activeServer)
 
         do {
-            await dependencies.rpcClient.connect()
-            try await pushPresetList(plan.updatedPresets)
+            await dependencies.connect()
+            _ = try await dependencies.rpcClient.settings.get()
+            await dependencies.reloadServerSettings()
         } catch {
             rollbackPairingState(
                 to: existing,
-                newPresetId: plan.activePreset.id,
-                previousHost: previousHost,
-                previousPort: previousPort
+                previousActiveId: previousActiveId,
+                newServerId: plan.activeServer.id
             )
             state.pairingError = .settingsFailed(error.localizedDescription)
             state.isConnecting = false
@@ -339,45 +334,17 @@ struct PairingStep: View {
         onPaired()
     }
 
-    // MARK: - Cached preset helpers
-
-    private func readCachedPresets() -> [ConnectionPreset] {
-        guard
-            let data = UserDefaults.standard.data(forKey: SettingsState.cachedPresetsKey),
-            let presets = try? JSONDecoder().decode([ConnectionPreset].self, from: data)
-        else {
-            return []
-        }
-        return presets
-    }
-
-    private func cachePresets(_ presets: [ConnectionPreset]) {
-        if let data = try? JSONEncoder().encode(presets) {
-            UserDefaults.standard.set(data, forKey: SettingsState.cachedPresetsKey)
-        }
-    }
-
     private func rollbackPairingState(
-        to presets: [ConnectionPreset],
-        newPresetId: String,
-        previousHost: String,
-        previousPort: String
+        to servers: [PairedServer],
+        previousActiveId: String?,
+        newServerId: String
     ) {
-        cachePresets(presets)
-        if !presets.contains(where: { $0.id == newPresetId }) {
-            try? dependencies.presetTokenStore.remove(presetId: newPresetId)
+        dependencies.replacePairedServers(servers, activeId: previousActiveId)
+        if !servers.contains(where: { $0.id == newServerId }) {
+            try? dependencies.pairedServerTokenStore.remove(serverId: newServerId)
         }
-        dependencies.updateServerSettings(host: previousHost, port: previousPort)
-    }
-
-    private func pushPresetList(_ presets: [ConnectionPreset]) async throws {
-        let update = ServerSettingsUpdate(
-            server: ServerSettingsUpdate.ServerUpdate(connectionPresets: presets)
-        )
-        try await dependencies.rpcClient.settings.update(update)
     }
 }
 
 // Universal-paste detection lives in `Extensions/Binding+PasteAware.swift`
-// so the same code paths the Settings re-pair sheet uses are exercised by
-// the onboarding form.
+// so pairing URLs pasted into any onboarding field are distributed cleanly.

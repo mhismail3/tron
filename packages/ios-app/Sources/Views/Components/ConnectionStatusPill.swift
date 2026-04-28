@@ -11,14 +11,14 @@ import SwiftUI
 /// **`.unauthorized` handling:** when the WS upgrade returns 401 the pill enters a
 /// distinct red state with the "Re-pair this server (Tap to fix)" copy. Tapping
 /// invokes `onRePair` when supplied so the host view can present the
-/// re-pair sheet; otherwise falls through to `onRetry`.
+/// re-pair flow; otherwise falls through to `onRetry`.
 @available(iOS 26.0, *)
 struct ConnectionStatusPill: View {
     let connectionState: ConnectionState
     let isReady: Bool
     let onRetry: () async -> Void
     /// Optional CTA invoked when the user taps the pill in `.unauthorized`
-    /// state. Host view presents the per-preset re-pair sheet from here.
+    /// state. Host view presents the re-pair flow from here.
     /// Falls back to `onRetry` when nil.
     let onRePair: (() -> Void)?
 
@@ -71,7 +71,7 @@ struct ConnectionStatusPill: View {
     private func pillContent(for state: ConnectionState) -> some View {
         let color = statusColor(for: state)
         Button {
-            // .unauthorized routes to the host view's re-pair sheet when
+            // .unauthorized routes to the host view's re-pair flow when
             // available, otherwise retry is the only available action.
             if case .unauthorized = state, let onRePair {
                 onRePair()

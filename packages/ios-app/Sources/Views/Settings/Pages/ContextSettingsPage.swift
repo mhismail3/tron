@@ -131,7 +131,7 @@ struct ContextSettingsPage: View {
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronEmerald)
                         .frame(width: 18)
-                    Text("Drain Mode")
+                    Text("Queued Message Delivery")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     Spacer()
                     queueDrainModeToggle

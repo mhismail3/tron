@@ -8,8 +8,8 @@ import Foundation
 ///   - the universal-paste path on every text field of the pairing form
 ///     (so a user can paste the full link into any field and have it
 ///     auto-distribute), and
-///   - the "Re-pair" sheet (Phase 3.6) to refresh a stored token when
-///     the Mac app rotates one.
+///   - Settings-launched re-pairing to refresh a stored token when the Mac app
+///     rotates one.
 ///
 /// The parser is intentionally strict — every field is required, the
 /// scheme must be `tron`, and `port` must be a positive 16-bit integer.
@@ -26,8 +26,8 @@ enum PairingURLParser {
         let port: Int
         let token: String
         /// Optional server name. It travels as `label` in the URL so
-        /// existing Mac QR codes and settings-preset terminology stay
-        /// compatible while the UI can call it "Server Name."
+    /// existing Mac QR codes stay compatible while the UI can call it
+    /// "Server Name."
         let label: String?
     }
 
@@ -108,10 +108,7 @@ extension PairingURLParser.PairingPayload {
     ///
     /// Returns the (host, port, token, label) tuple to commit. Used by both
     /// the onboarding pairing step (via `OnboardingState.acceptPairingPayload`)
-    /// and the settings re-pair sheet (`AddOrEditServerSheet` in add mode)
     /// so the "what counts as user-edited" rule has one source of truth.
-    /// Re-pair (`.edit`) mode bypasses this helper entirely — identity
-    /// fields are locked there and only the token is refreshed.
     func distributing(
         currentLabel: String,
         defaultLabel: String = "My Mac"

@@ -11,6 +11,7 @@ final class DependencyContainerTests: XCTestCase {
 
     override class func setUp() {
         super.setUp()
+        clearPairings()
         // Create ONE container for all read-only tests
         sharedContainer = DependencyContainer()
     }
@@ -18,6 +19,29 @@ final class DependencyContainerTests: XCTestCase {
     override class func tearDown() {
         sharedContainer = nil
         super.tearDown()
+    }
+
+    override func tearDown() {
+        Self.clearPairings()
+        super.tearDown()
+    }
+
+    private static func clearPairings() {
+        UserDefaults.standard.removeObject(forKey: PairedServerStore.serversKey)
+        UserDefaults.standard.removeObject(forKey: PairedServerStore.activeIdKey)
+    }
+
+    private func pairedContainer(
+        id: String = "server",
+        host: String = "localhost",
+        port: Int = 8082
+    ) -> (DependencyContainer, PairedServer) {
+        Self.clearPairings()
+        let server = PairedServer(id: id, label: "Test Server", host: host, port: port)
+        let data = try! JSONEncoder().encode([server])
+        UserDefaults.standard.set(data, forKey: PairedServerStore.serversKey)
+        UserDefaults.standard.set(server.id, forKey: PairedServerStore.activeIdKey)
+        return (DependencyContainer(), server)
     }
 
     // MARK: - Container Lifecycle Tests (use shared container)
@@ -92,10 +116,7 @@ final class DependencyContainerTests: XCTestCase {
     // (UserDefaults may have values from previous test runs)
 
     func test_serverURL_constructsCorrectlyWithoutTLS() async throws {
-        // Test URL construction logic by setting known values
-        let container = DependencyContainer()
-        // Reset to known defaults
-        container.updateServerSettings(host: "localhost", port: "8082")
+        let (container, _) = pairedContainer(host: "localhost", port: 8082)
         let url = container.serverURL
 
         XCTAssertEqual(url.scheme, "ws")
@@ -104,86 +125,94 @@ final class DependencyContainerTests: XCTestCase {
     }
 
     func test_currentServerOrigin_formatsCorrectly() async throws {
-        // Test origin formatting with known values
-        let container = DependencyContainer()
-        container.updateServerSettings(host: "testhost", port: "9999")
-        defer { container.updateServerSettings(host: "localhost", port: "8082") }
+        let (container, _) = pairedContainer(host: "testhost", port: 9999)
         let origin = container.currentServerOrigin
 
         XCTAssertEqual(origin, "testhost:9999")
     }
 
-    // MARK: - Server Settings Update Tests (need fresh container - modifies state)
-    // Each test restores defaults after mutating, so UserDefaults don't leak
-    // garbage values (like "newhost-36060.com") into the real app on the simulator.
-
-    func test_updateServerSettings_recreatesRPCClient() async throws {
+    func test_noPairedServerDoesNotUseLocalhostFallback() async throws {
+        Self.clearPairings()
         let container = DependencyContainer()
-        let originalClient = container.rpcClient
 
-        container.updateServerSettings(host: "test-server.example.com", port: "19001")
-        defer { container.updateServerSettings(host: "localhost", port: "8082") }
+        XCTAssertEqual(container.serverHost, "")
+        XCTAssertEqual(container.serverPort, "")
+        XCTAssertEqual(container.currentServerOrigin, "")
+        XCTAssertEqual(container.serverURL.host, "paired-server-required.invalid")
+    }
+
+    // MARK: - Active Server Update Tests
+
+    func test_selectPairedServer_recreatesRPCClient() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19000)
+        let originalClient = container.rpcClient
+        let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19001)
+        container.replacePairedServers([first, second], activeServer: first)
+
+        container.selectPairedServer(second, connectAfterSwitch: false)
 
         XCTAssert(originalClient !== container.rpcClient, "RPC client should be recreated after settings change")
     }
 
-    func test_updateServerSettings_preservesEventDatabase() async throws {
-        let container = DependencyContainer()
+    func test_selectPairedServer_preservesEventDatabase() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19002)
         let originalDB = container.eventDatabase
+        let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19003)
+        container.replacePairedServers([first, second], activeServer: first)
 
-        container.updateServerSettings(host: "test.example.com", port: "19002")
-        defer { container.updateServerSettings(host: "localhost", port: "8082") }
+        container.selectPairedServer(second, connectAfterSwitch: false)
 
         XCTAssert(originalDB === container.eventDatabase, "EventDatabase should NOT be recreated after settings change")
     }
 
-    func test_updateServerSettings_preservesPushNotificationService() async throws {
-        let container = DependencyContainer()
+    func test_selectPairedServer_preservesPushNotificationService() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19004)
         let originalService = container.pushNotificationService
+        let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19005)
+        container.replacePairedServers([first, second], activeServer: first)
 
-        container.updateServerSettings(host: "test.example.com", port: "19003")
-        defer { container.updateServerSettings(host: "localhost", port: "8082") }
+        container.selectPairedServer(second, connectAfterSwitch: false)
 
         XCTAssert(originalService === container.pushNotificationService, "PushNotificationService should NOT be recreated")
     }
 
-    func test_updateServerSettings_preservesDeepLinkRouter() async throws {
-        let container = DependencyContainer()
+    func test_selectPairedServer_preservesDeepLinkRouter() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19006)
         let originalRouter = container.deepLinkRouter
+        let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19007)
+        container.replacePairedServers([first, second], activeServer: first)
 
-        container.updateServerSettings(host: "test.example.com", port: "19004")
-        defer { container.updateServerSettings(host: "localhost", port: "8082") }
+        container.selectPairedServer(second, connectAfterSwitch: false)
 
         XCTAssert(originalRouter === container.deepLinkRouter, "DeepLinkRouter should NOT be recreated")
     }
 
-    func test_updateServerSettings_incrementsVersion() async throws {
-        let container = DependencyContainer()
+    func test_selectPairedServer_incrementsVersion() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19008)
+        let originalVersion = container.serverSettingsVersion
+        let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19009)
+        container.replacePairedServers([first, second], activeServer: first)
+
+        container.selectPairedServer(second, connectAfterSwitch: false)
+
+        XCTAssertEqual(container.serverSettingsVersion, originalVersion + 2, "serverSettingsVersion should increment for replace and select")
+    }
+
+    func test_selectPairedServer_noChangeDoesNotIncrementVersion() async throws {
+        let (container, server) = pairedContainer(host: "same.example.com", port: 19010)
         let originalVersion = container.serverSettingsVersion
 
-        container.updateServerSettings(host: "test.example.com", port: "19005")
-        defer { container.updateServerSettings(host: "localhost", port: "8082") }
+        container.selectPairedServer(server)
 
-        XCTAssertEqual(container.serverSettingsVersion, originalVersion + 1, "serverSettingsVersion should increment")
+        XCTAssertEqual(container.serverSettingsVersion, originalVersion, "Version should NOT increment when unchanged")
     }
 
-    func test_updateServerSettings_noChangeDoesNotIncrementVersion() async throws {
-        let originalVersion = Self.sharedContainer.serverSettingsVersion
+    func test_selectPairedServer_updatesServerURL() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19011)
+        let second = PairedServer(id: "second", label: "Second", host: "newhost.example.com", port: 19012)
+        container.replacePairedServers([first, second], activeServer: first)
 
-        // Update with same settings - should be a no-op
-        Self.sharedContainer.updateServerSettings(
-            host: Self.sharedContainer.serverHost,
-            port: Self.sharedContainer.serverPort
-        )
-
-        XCTAssertEqual(Self.sharedContainer.serverSettingsVersion, originalVersion, "Version should NOT increment when unchanged")
-    }
-
-    func test_updateServerSettings_updatesServerURL() async throws {
-        let container = DependencyContainer()
-
-        container.updateServerSettings(host: "newhost.example.com", port: "19006")
-        defer { container.updateServerSettings(host: "localhost", port: "8082") }
+        container.selectPairedServer(second, connectAfterSwitch: false)
 
         let url = container.serverURL
         XCTAssertEqual(url.scheme, "ws")

@@ -157,10 +157,9 @@ struct PairingURLParserTests {
 
     // MARK: - PairingPayload.distributing(currentLabel:defaultLabel:)
 
-    /// `distributing(...)` is the shared field-distribution rule used by both
-    /// `OnboardingState.acceptPairingPayload` and `AddOrEditServerSheet`'s
-    /// add-mode paste closure. These tests pin the "what counts as
-    /// user-edited" semantics so the two surfaces don't drift.
+    /// `distributing(...)` is the shared field-distribution rule used by
+    /// `OnboardingState.acceptPairingPayload`. These tests pin the "what
+    /// counts as user-edited" semantics.
     @Suite("distributing(currentLabel:defaultLabel:)")
     struct DistributingTests {
 

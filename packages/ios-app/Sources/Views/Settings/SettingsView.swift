@@ -3,26 +3,14 @@ import SwiftUI
 // MARK: - Settings View
 
 struct SettingsView: View {
-    private static let defaultPort = AppConstants.prodPort
-
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
-    @AppStorage("serverHost") private var serverHost = AppConstants.defaultHost
-    @AppStorage("serverPort") private var serverPort = ""
     @AppStorage("confirmArchive") private var confirmArchive = true
     @AppStorage("autoMarkNotificationsRead") private var autoMarkRead = true
-    @AppStorage(OnboardingState.completionStorageKey) private var onboardingComplete = false
 
-    // Convenience accessors
     private var rpcClient: RPCClient { dependencies.rpcClient }
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     private var defaultModelValue: String { dependencies.defaultModel }
-    private var defaultModelBinding: Binding<String> {
-        Binding(
-            get: { dependencies.defaultModel },
-            set: { dependencies.defaultModel = $0 }
-        )
-    }
 
     @State private var showingResetAlert = false
     #if DEBUG || BETA
@@ -33,30 +21,23 @@ struct SettingsView: View {
     @State private var activePage: SettingsPage?
     @State private var cardsVisible = false
 
-    /// Settings sub-pages, driven by a single `.sheet(item:)`.
-    ///
-    /// `diagnostics` is only reachable in DEBUG / BETA builds — the
-    /// categories card hides its entry behind `#if DEBUG || BETA`, and
-    /// the sheet dispatch does too, so a mis-set `activePage` in a
-    /// production build falls through cleanly.
     enum SettingsPage: String, Identifiable {
         case server, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary, updates, privacy
-        #if DEBUG || BETA
-        case diagnostics
-        #endif
         var id: String { rawValue }
     }
 
-    // Server-authoritative settings (loaded via RPC, mutated via bindings)
     @State private var settingsState = SettingsState()
 
-    /// Effective port to use for connections
-    private var effectivePort: String {
-        if !serverPort.isEmpty { return serverPort }
-        return Self.defaultPort
+    private var hasPairedServers: Bool {
+        !dependencies.pairedServerStore.servers.isEmpty
     }
 
-    /// Selected model display name
+    private var serverSettingsReady: Bool {
+        dependencies.pairedServerStore.activeServer != nil
+            && rpcClient.connectionState.isConnected
+            && settingsState.isLoaded
+    }
+
     private var selectedModelDisplayName: String {
         if let model = settingsState.availableModels.first(where: { $0.id == defaultModelValue }) {
             return model.formattedModelName
@@ -74,11 +55,14 @@ struct SettingsView: View {
             }
             #endif
         } content: {
-            categoriesCard
+            appSettingsSection
+                .cardEntrance(visible: cardsVisible, index: 0)
+            currentServerSection
+                .cardEntrance(visible: cardsVisible, index: 1)
             dangerZoneCard
-                .cardEntrance(visible: cardsVisible, index: 9)
+                .cardEntrance(visible: cardsVisible, index: 2)
             footerView
-                .cardEntrance(visible: cardsVisible, index: 10)
+                .cardEntrance(visible: cardsVisible, index: 3)
         }
         #if DEBUG || BETA
         .sheet(isPresented: $showLogViewer) {
@@ -92,17 +76,8 @@ struct SettingsView: View {
                 switch page {
                 case .server:
                     ConnectionSettingsPage(
-                        serverHost: $serverHost,
-                        serverPort: $serverPort,
                         settingsState: settingsState,
-                        onHostSubmit: {
-                            dependencies.updateServerSettings(host: serverHost, port: effectivePort)
-                        },
-                        onPortChange: { newPort in
-                            dependencies.updateServerSettings(host: serverHost, port: newPort)
-                        },
-                        updateServerSetting: updateServerSetting,
-                        onAllPresetsRemoved: resetToOnboardingAfterLastPresetRemoved
+                        updateServerSetting: updateServerSetting
                     )
                 case .agent:
                     ContextSettingsPage(
@@ -142,10 +117,6 @@ struct SettingsView: View {
                     )
                 case .privacy:
                     PrivacySettingsPage()
-                #if DEBUG || BETA
-                case .diagnostics:
-                    DiagnosticsPage(rpcClient: rpcClient)
-                #endif
                 }
             }
             .adaptivePresentationDetents([.medium, .large])
@@ -153,19 +124,21 @@ struct SettingsView: View {
         }
         .task {
             cardsVisible = true
-            await settingsState.load(using: rpcClient)
-            await settingsState.loadModels(using: rpcClient)
+            await loadServerSettingsIfAvailable()
         }
         .onChange(of: dependencies.serverSettingsVersion) {
-            Task {
-                await settingsState.reload(using: rpcClient)
-            }
+            settingsState.clearServerSnapshot()
+            Task { await loadServerSettingsIfAvailable() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { _ in
+            activePage = nil
+            dismiss()
         }
         .alert("Reset Settings?", isPresented: $showingResetAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) { resetToDefaults() }
         } message: {
-            Text("This will reset all settings to their default values.")
+            Text("This will reset app settings on this iPhone and reset server settings when the current server is connected.")
         }
         .alert("Archive All Sessions?", isPresented: $showArchiveAllConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -181,90 +154,249 @@ struct SettingsView: View {
         .tint(.tronEmerald)
     }
 
-    // MARK: - Categories Card
+    // MARK: - Main Sections
 
-    private var categoriesCard: some View {
-        VStack(spacing: 8) {
+    private var appSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsSectionHeader(title: "iOS App")
+
+            if #available(iOS 26.0, *) {
+                SettingsCard(interactive: true) {
+                    categoryRow(icon: "paintbrush", label: "App", subtitle: "Appearance, notifications, and local behavior") {
+                        activePage = .app
+                    }
+                }
+            }
+
             SettingsCard(interactive: true) {
-                categoryRow(icon: "network", label: "Server", subtitle: "Configure the Tron server host/port") {
+                categoryRow(icon: "hand.raised", label: "Privacy", subtitle: "Telemetry opt-in and feedback composer") {
+                    activePage = .privacy
+                }
+            }
+        }
+    }
+
+    private var currentServerSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsSectionHeader(title: "Current Server")
+
+            if !hasPairedServers {
+                noServerCard
+            } else {
+                serverSwitcherCard
+                if serverSettingsReady {
+                    serverSettingsCategories
+                } else {
+                    serverUnavailableCard
+                }
+            }
+        }
+    }
+
+    private var noServerCard: some View {
+        SettingsCard(interactive: true) {
+            Button(action: { startOnboarding() }) {
+                HStack(spacing: 10) {
+                    Image(systemName: "plus.circle")
+                        .font(TronTypography.sans(size: TronTypography.sizeXL))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 22)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Onboard to Server")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            .foregroundStyle(.tronTextPrimary)
+                        Text("Pair this iPhone with a Mac before editing server settings.")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextMuted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var serverSwitcherCard: some View {
+        SettingsCard {
+            VStack(spacing: 0) {
+                ForEach(dependencies.pairedServerStore.servers) { server in
+                    serverSwitcherRow(server)
+                    if server.id != dependencies.pairedServerStore.servers.last?.id {
+                        SettingsRowDivider()
+                    }
+                }
+            }
+        }
+    }
+
+    private func serverSwitcherRow(_ server: PairedServer) -> some View {
+        let selected = dependencies.pairedServerStore.activeServer?.id == server.id
+
+        return HStack(spacing: 10) {
+            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(selected ? .tronEmerald : .tronTextMuted.opacity(0.5))
+                .frame(width: 18)
+
+            Button {
+                guard !selected else { return }
+                dependencies.selectPairedServer(server)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(server.label)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(server.origin)
+                        .font(TronTypography.code(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            Menu {
+                Button {
+                    retry(server)
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
+                Button {
+                    startOnboarding(repairing: server)
+                } label: {
+                    Label("Re-pair", systemImage: "key.fill")
+                }
+                Button(role: .destructive) {
+                    _ = dependencies.forgetPairedServer(server)
+                } label: {
+                    Label("Forget", systemImage: "trash")
+                }
+                Button {
+                    startOnboarding()
+                } label: {
+                    Label("Onboard to Server", systemImage: "plus.circle")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.tronTextSecondary)
+                    .padding(8)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+    }
+
+    private var serverUnavailableCard: some View {
+        SettingsCard(accent: .tronWarning) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: settingsState.isLoadingModels ? "hourglass" : "wifi.exclamationmark")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody))
+                        .foregroundStyle(.tronWarning)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Server settings unavailable")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            .foregroundStyle(.tronTextPrimary)
+                        Text(settingsState.loadError ?? "Connect to the active server before editing its settings.")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.tronTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Button("Retry") {
+                        Task {
+                            await dependencies.manualRetry()
+                            await loadServerSettingsIfAvailable()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.tronEmerald)
+
+                    Button("Re-pair") {
+                        startOnboarding(repairing: dependencies.pairedServerStore.activeServer)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Onboard") {
+                        startOnboarding()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+        }
+    }
+
+    private var serverSettingsCategories: some View {
+        VStack(spacing: 8) {
+            if let error = settingsState.loadError {
+                SettingsCard(accent: .tronError) {
+                    Text(error)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronError)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                }
+            }
+
+            SettingsCard(interactive: true) {
+                categoryRow(icon: "network", label: "Server", subtitle: "Paired servers, security, and transcription") {
                     activePage = .server
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 0)
 
             SettingsCard(interactive: true) {
                 categoryRow(icon: "key.horizontal", label: "Model Providers", subtitle: "Login with OAuth and configure API keys") {
                     activePage = .providers
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 1)
 
             SettingsCard(interactive: true) {
                 categoryRow(icon: "brain", label: "Agent", subtitle: "Session defaults, compaction, memory, and queueing") {
                     activePage = .agent
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 2)
 
             SettingsCard(interactive: true) {
                 categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "Configure external tool servers") {
                     activePage = .mcpServers
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 3)
 
             SettingsCard(interactive: true) {
                 categoryRow(icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill", label: "Hooks", subtitle: "Manage agent lifecycle events") {
                     activePage = .hooks
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 4)
 
             SettingsCard(interactive: true) {
                 categoryRow(icon: "point.3.connected.trianglepath.dotted", label: "Git Workflow", subtitle: "Configure sync, merge, push, and conflict policies") {
                     activePage = .gitWorkflow
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 5)
 
             SettingsCard(interactive: true) {
                 categoryRow(icon: "text.book.closed", label: "Prompt Library", subtitle: "Configure prompt history and quick-prompt snippets") {
                     activePage = .promptLibrary
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 6)
 
             SettingsCard(interactive: true) {
-                categoryRow(icon: "arrow.down.app", label: "Updates", subtitle: "Configure how the Tron server checks for and installs new releases") {
+                categoryRow(icon: "arrow.down.app", label: "Updates", subtitle: "Configure server release checks") {
                     activePage = .updates
                 }
             }
-            .cardEntrance(visible: cardsVisible, index: 7)
-
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "hand.raised", label: "Privacy", subtitle: "Telemetry opt-in, event list, and feedback composer") {
-                    activePage = .privacy
-                }
-            }
-            .cardEntrance(visible: cardsVisible, index: 8)
-
-            if #available(iOS 26.0, *) {
-                SettingsCard(interactive: true) {
-                    categoryRow(icon: "paintbrush", label: "App", subtitle: "Change how the iOS app looks and behaves") {
-                        activePage = .app
-                    }
-                }
-                .cardEntrance(visible: cardsVisible, index: 9)
-            }
-
-            #if DEBUG || BETA
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "stethoscope", label: "Diagnostics", subtitle: "Inspect server identity, session counts, and RPC surface") {
-                    activePage = .diagnostics
-                }
-            }
-            .cardEntrance(visible: cardsVisible, index: 10)
-            #endif
         }
     }
 
@@ -347,8 +479,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Footer
-
     private var footerView: some View {
         Text("Built by Moose \u{1FACE} \u{00B7} v0.1.0")
             .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -357,24 +487,39 @@ struct SettingsView: View {
             .padding(.top, 16)
     }
 
-    // MARK: - Computed Properties
-
-    var serverURL: URL? {
-        URL(string: "ws://\(serverHost):\(effectivePort)/ws")
-    }
-
     // MARK: - Actions
 
+    private func loadServerSettingsIfAvailable() async {
+        guard dependencies.pairedServerStore.activeServer != nil else {
+            settingsState.clearServerSnapshot()
+            return
+        }
+        await settingsState.reload(using: rpcClient)
+    }
+
+    private func retry(_ server: PairedServer) {
+        if dependencies.pairedServerStore.activeServer?.id != server.id {
+            dependencies.selectPairedServer(server)
+        } else {
+            Task {
+                await dependencies.manualRetry()
+                await loadServerSettingsIfAvailable()
+            }
+        }
+    }
+
+    private func startOnboarding(repairing server: PairedServer? = nil) {
+        var userInfo: [String: String] = [:]
+        if let server {
+            userInfo["serverId"] = server.id
+        }
+        NotificationCenter.default.post(name: .startServerOnboarding, object: nil, userInfo: userInfo)
+    }
+
     private func resetToDefaults() {
-        // Reset every @AppStorage value the page binds, not just the
-        // server connection ones — partial reset would leave a state
-        // mismatch (e.g. autoMarkRead surviving while everything else
-        // clears) that confuses the user.
-        serverHost = AppConstants.defaultHost
-        serverPort = ""
         confirmArchive = true
         autoMarkRead = true
-        dependencies.updateServerSettings(host: AppConstants.defaultHost, port: Self.defaultPort)
+        guard serverSettingsReady else { return }
         Task {
             do {
                 try await settingsState.resetToDefaults(using: rpcClient)
@@ -382,15 +527,6 @@ struct SettingsView: View {
                 settingsState.loadError = "Failed to reset: \(error.localizedDescription)"
             }
         }
-    }
-
-    private func resetToOnboardingAfterLastPresetRemoved() {
-        serverHost = AppConstants.defaultHost
-        serverPort = ""
-        dependencies.updateServerSettings(host: AppConstants.defaultHost, port: Self.defaultPort)
-        onboardingComplete = false
-        activePage = nil
-        dismiss()
     }
 
     private func archiveAllSessions() {
@@ -405,24 +541,24 @@ struct SettingsView: View {
         let update = build()
         let client = rpcClient
         Task {
-            try? await client.settings.update(update)
+            do {
+                try await client.settings.update(update)
+                let fresh = try await client.settings.get()
+                await MainActor.run {
+                    settingsState.applyServerSettings(fresh)
+                    settingsState.isLoaded = true
+                    settingsState.loadError = nil
+                }
+            } catch {
+                await MainActor.run {
+                    settingsState.rollbackToLastLoadedSettings(
+                        message: "Could not save server setting: \(error.localizedDescription)"
+                    )
+                }
+            }
         }
     }
 }
-
-// MARK: - Server URL Builder
-
-struct ServerURLBuilder {
-    static func buildURL(
-        host: String,
-        port: String
-    ) -> URL? {
-        let urlString = "ws://\(host):\(port)/ws"
-        return URL(string: urlString)
-    }
-}
-
-// MARK: - Preview
 
 #if DEBUG
 #Preview {

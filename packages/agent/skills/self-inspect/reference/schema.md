@@ -256,7 +256,6 @@ Settings live at `~/.tron/system/settings.json`. All keys are camelCase. Missing
 | `sessionsDir` | `"sessions"` | Session data directory |
 | `memoryDbPath` | `"memory.db"` | Memory database path |
 | `transcription.enabled` | false | Audio transcription |
-| `connectionPresets` | [] | Array of {id, label, host, port} |
 
 ### agent
 

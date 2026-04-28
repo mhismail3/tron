@@ -3,9 +3,8 @@ import Testing
 @testable import TronMobile
 
 /// `PairingStepValidator` is the pure-value classifier for the onboarding
-/// PairingStep. It mirrors the validation in `AddOrEditServerSheetCommit`
-/// but is purpose-built for onboarding (no preset-list dedupe — onboarding
-/// happens before the user has any presets to collide against).
+/// PairingStep. It is purpose-built for onboarding and validates only the
+/// payload fields; paired-server dedupe happens in `PairingPersistor`.
 ///
 /// The classification feeds directly into the inline error label below
 /// the form. Each case has an accompanying `userFacingMessage` so the
@@ -134,7 +133,7 @@ struct PairingValidationTests {
         #expect(incompatible.contains("0.5.0"))
 
         let settings = PairingStepValidator.Failure.settingsFailed("disk full").userFacingMessage
-        #expect(settings.lowercased().contains("server preset"))
+        #expect(settings.lowercased().contains("server settings"))
         #expect(settings.contains("disk full"))
     }
 

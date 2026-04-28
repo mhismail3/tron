@@ -3,8 +3,8 @@ import Security
 
 /// Generic Keychain wrapper for storing per-key string secrets.
 ///
-/// Used by `PresetTokenStore` to store WebSocket bearer tokens keyed by
-/// `ConnectionPreset.id`. Items are stored as
+/// Used by `PairedServerTokenStore` to store WebSocket bearer tokens keyed by
+/// `PairedServer.id`. Items are stored as
 /// `kSecClassGenericPassword` with `kSecAttrAccessibleAfterFirstUnlock` so
 /// background reconnect works post-reboot before the user unlocks the device.
 ///

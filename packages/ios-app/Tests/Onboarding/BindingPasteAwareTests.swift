@@ -4,8 +4,7 @@ import Testing
 @testable import TronMobile
 
 /// `Binding<String>.pasteAware(onPairingPayload:)` is the universal-paste
-/// helper shared by the onboarding `PairingStep` and the Settings re-pair
-/// `AddOrEditServerSheet`.
+/// helper used by the onboarding `PairingStep`.
 ///
 /// **Why these tests**: the helper is intercepting EVERY keystroke into
 /// the field — a regression that caused legitimate text input to be

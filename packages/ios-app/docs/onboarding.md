@@ -14,6 +14,11 @@ the Mac connection succeeds. The sheet follows the app's
 standard Liquid Glass chrome: hidden drag handle, principal toolbar
 title, and a floating progress-dot indicator at the bottom.
 
+When Settings launches onboarding to add or re-pair a server, the same sheet
+opens directly on the connect step with a top-left dismiss button. First-run
+onboarding remains non-dismissable until the user completes setup or explicitly
+leaves from a Settings-launched sheet.
+
 ---
 
 ## Flow Diagram
@@ -38,9 +43,9 @@ readyContent()
                  ├─ validate host / port / token / server name
                  ├─ probe ws://host:port/ws with Authorization: Bearer token
                  ├─ send system.ping
-                 ├─ persist Keychain bearer + local preset cache
+                 ├─ persist Keychain bearer + local paired-server store
                  ├─ rebuild RPC client for the paired server
-                 ├─ settings.update(connectionPresets)
+                 ├─ load settings.get from the paired server
                  └─ advance to setup pages
             ├─ WorkspaceSetupOnboardingPage
             ├─ ProviderSetupOnboardingPage(Anthropic)
@@ -90,19 +95,17 @@ PairingPersistor.plan(payload, existing)
   │
   ▼
 side effects:
-  1. presetTokenStore.setToken(...)
-  2. cache updated connectionPresets in UserDefaults
-  3. dependencies.updateServerSettings(host:port:)
-  4. reconnect RPC client to the paired server
-  5. settings.update RPC to persist the newly paired preset on the server
-  6. advance to the workspace/settings setup pages
+  1. pairedServerTokenStore.setToken(...)
+  2. PairedServerStore.replace(..., activeId:)
+  3. rebuild RPC client for the active paired server
+  4. connect and load settings.get from the paired server
+  5. advance to the workspace/settings setup pages
 ```
 
-If step 5 fails, onboarding rolls back the local preset cache/Keychain token
-for that attempt and leaves the user on the pairing page. The RPC update is
-sparse: it writes only `server.connectionPresets`. Compiled server defaults
-stay in Rust and are visible through `settings.get`; they are not serialized
-into `settings.json`.
+If step 4 fails, onboarding rolls back the local paired-server store and
+Keychain token for that attempt, then leaves the user on the pairing page.
+Pairing never writes the iOS server list to `settings.json`; the server only
+owns server runtime settings and secrets.
 
 ## Settings Setup Pages
 
@@ -124,12 +127,13 @@ Provider credentials are written through `auth.*` RPCs, so secrets land
 in `auth.json`, not `settings.json`.
 
 Server settings and app settings are intentionally separate. Settings backed
-by `~/.tron/system/settings.json` live in server settings pages and are
-loaded from the active server via `settings.get`. Device-only preferences
-such as onboarding completion, appearance, dashboard presentation, and the
-cached active connection live in iOS `UserDefaults`/Keychain. When the user
-switches Macs, the app reloads server-backed controls from that Mac and keeps
-device-only preferences local.
+by `~/.tron/system/settings.json` live in the Current Server section and are
+shown only after the active server connects and `settings.get` returns real
+values. Device-only preferences such as onboarding completion, paired servers,
+active server id, appearance, dashboard presentation, telemetry consent, and
+bearer tokens live in iOS `UserDefaults`/Keychain. When the user switches
+Macs, the app clears server-backed controls immediately and reloads them from
+the newly active Mac.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system.ping`. The server emits a
@@ -173,29 +177,30 @@ photo capture.
 
 ## Forgetting a Mac
 
-Settings → Server → preset menu → "Forget this Mac" is the clean reset path
-for a paired server. It removes that preset from the Mac's
-`settings.json` (`server.connectionPresets`), deletes the matching iOS
-Keychain bearer token, and unregisters this device's push token when the
-forgotten Mac is the active server. If another preset remains, iOS switches
-to it. If no presets remain, the app resets `onboardingComplete` to `false`
-and shows the onboarding sheet again.
+Settings → Current Server → menu → "Forget" is the local reset path for a
+paired server. It deletes the matching iOS Keychain bearer token and removes
+the server from `PairedServerStore`; server settings and sessions on the Mac
+are unchanged. If another paired server remains, iOS switches locally to it.
+If no paired servers remain, Settings hides server settings and shows the
+"Onboard to Server" CTA.
 
-The Mac settings update is awaited before local Keychain/cache cleanup or
-onboarding reset. If the server write fails, the preset stays visible and an
-inline error is shown so the iPhone and Mac do not diverge.
+Forgetting an offline server is safe because it is local-only. Optional status
+snapshots such as last connected time and last known status can remain local
+metadata, but offline snapshots are never editable server settings.
 
 ---
 
 ## Persistence Keys
 
-All keys live exactly once on `OnboardingState` or `SettingsState`.
+All keys live exactly once on `OnboardingState`, `SettingsState`, or
+`PairedServerStore`.
 Never duplicate these literals inline.
 
 | Key | Purpose | Type |
 |-----|---------|------|
 | `onboardingComplete` | Presents/dismisses the first-run onboarding sheet | Bool |
-| `cachedConnectionPresets` | Local copy of server-side preset list | Data (JSON) |
+| `pairedServers` | Local paired Mac list | Data (JSON) |
+| `activePairedServerId` | Active paired server id | String |
 
 `telemetryEnabled` belongs to `SettingsState.telemetryEnabledStorageKey`
 because privacy/telemetry is configured from Settings, not onboarding.
@@ -206,12 +211,12 @@ pairing an iPad must not silently mark an iPhone as paired.
 
 ---
 
-## Per-Preset Bearer Tokens
+## Per-Server Bearer Tokens
 
-Every `ConnectionPreset.id` has a Keychain slot at
-`com.tron.mobile.bearer.<presetId>`. The onboarding sheet and settings
-re-pair sheet write the token; `WebSocketService` reads it when building
-the `Authorization: Bearer …` upgrade header.
+Every `PairedServer.id` has a Keychain slot at
+`com.tron.mobile.bearer.<serverId>`. The onboarding sheet writes or refreshes
+the token; `WebSocketService` reads it when building the
+`Authorization: Bearer …` upgrade header.
 
 Keychain accessibility is `accessibleAfterFirstUnlock` so background
 reconnects after reboot can read the token once the device has been
@@ -239,7 +244,8 @@ Sources/Services/Onboarding/
   └── PairingPersistor.swift
 
 Sources/Services/PairingURLParser.swift
-Sources/Services/Storage/PresetTokenStore.swift
+Sources/Services/Settings/PairedServerStore.swift
+Sources/Services/Storage/PairedServerTokenStore.swift
 Sources/Services/Storage/KeychainItem.swift
 Sources/Extensions/Binding+PasteAware.swift
 Sources/ViewModels/State/OnboardingState.swift
@@ -251,4 +257,8 @@ Tests/Onboarding/
   ├── PairingValidationTests.swift
   ├── PairingURLParserTests.swift
   └── BindingPasteAwareTests.swift
+
+Tests/Services/
+  ├── PairedServerStoreTests.swift
+  └── PairedServerTokenStoreTests.swift
 ```

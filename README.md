@@ -471,10 +471,9 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
     "defaultModel": "claude-sonnet-4-6",
     "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
     "transcription": { "enabled": false },
-    "connectionPresets": [],        // iOS quick-connect host/port presets
     "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
     "auth": {
-      "enforced": false             // Phase 2 flag: when true, every WS upgrade requires `Authorization: Bearer <token>`
+      "enforced": false             // When true, every WS upgrade requires a paired-device bearer token
     },
     "update": {                     // User-mode update checks. All fields off / safest by default.
       "enabled": false,             // Master switch — false means the scheduler never runs + no GitHub API traffic
@@ -694,8 +693,8 @@ packages/ios-app/Sources/
 +-- Database/             SQLite event database, queries
 +-- Models/               Data models, RPC codables, event types
 +-- Protocols/            Coordinator and view model protocols
-+-- Services/             Network (RPC client, WebSocket, deep links), audio, push notifications,
-+                         feedback composer, telemetry redactor, PresetTokenStore (Keychain)
++-- Services/             Network (RPC client, WebSocket, deep links), paired servers, audio,
++                         push notifications, feedback composer, telemetry redactor, Keychain tokens
 +-- ViewModels/           Chat view models, handlers, managers, @Observable state, OnboardingState
 +-- Views/                SwiftUI views (chat, tools, voice notes, settings, Onboarding/, ...)
 +-- Theme/                Colors, typography, design tokens
@@ -715,9 +714,9 @@ packages/ios-app/Sources/
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView` as a medium-detent four-step Liquid Glass sheet (welcome, iPhone Tailscale, Mac install link, connect) with swipe navigation and a floating progress-dot indicator.
-- **Multi-server bearer model**: Each entry in `connectionPresets[]` has its own bearer token, stored in Keychain via `PresetTokenStore` keyed by preset ID. `WebSocketService` attaches the active preset's token as `Authorization: Bearer <token>` on upgrade. A new `ConnectionState.unauthorized` surfaces a "Re-pair this server" tap in `ConnectionStatusPill`.
-- **Forgetting a server**: Settings → Server → preset menu → "Forget this Mac" removes the preset from the Mac's `server.connectionPresets`, deletes the iOS Keychain token, unregisters this device's push token for the active Mac, and reopens onboarding when no saved Macs remain.
+- **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow for add/re-pair with a dismiss button.
+- **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `settings.json`.
+- **Forgetting a server**: Settings → Current Server → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
 - **Telemetry + feedback**: `SentryRedactor` scrubs bearer tokens, file paths, and chat content before crash events leave the device. `FeedbackComposer` builds a redacted log tail and opens a prefilled GitHub issue instead of launching Mail. Opt-in toggle on the Privacy settings page stores to `@AppStorage("telemetryEnabled")` (default OFF).
 
 ### Data Flow
@@ -742,7 +741,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 - `development.md` — Xcode setup, builds, testing
 - `events.md` — Event plugin system
 - `apns.md` — Push notification setup
-- `onboarding.md` — First-run onboarding sheet, QR/deep-link handling, and per-preset bearer persistence
+- `onboarding.md` — First-run onboarding sheet, QR/deep-link handling, local paired servers, and bearer persistence
 
 ---
 

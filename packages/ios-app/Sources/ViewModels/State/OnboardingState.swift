@@ -106,8 +106,7 @@ final class OnboardingState {
     /// server name if they've typed something other than the default.
     ///
     /// Delegates the field-distribution rule (including the "treat 'My Mac'
-    /// as placeholder" semantics) to `PairingPayload.distributing(...)` so
-    /// the same logic powers `AddOrEditServerSheet` (add mode).
+    /// as placeholder" semantics) to `PairingPayload.distributing(...)`.
     func acceptPairingPayload(_ payload: PairingURLParser.PairingPayload) {
         let distributed = payload.distributing(currentLabel: pairingLabel)
         currentStep = .connect

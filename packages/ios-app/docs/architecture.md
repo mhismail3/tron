@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-04-23 (post-Phases 3, 4, 7)
+> Last verified: 2026-04-28 (settings revamp: local paired servers + server-owned settings)
 
 ## Overview
 
@@ -36,10 +36,11 @@ Sources/
 │   ├── Feedback/           # Mailto composer + log-tail attachment (Phase 7)
 │   ├── Notifications/      # Push notifications
 │   ├── Observability/      # Sentry redactor + TelemetryClient (Phase 7)
-│   ├── Onboarding/         # Migration decider + pairing validator/probe/persistor
+│   ├── Onboarding/         # Pairing validator/probe/persistor
 │   ├── PairingURLParser.swift  # tron://pair?host&port&token&label parser + builder
 │   ├── Parsing/            # Tool result parsers (delegated by ToolResultParser)
-│   └── Storage/            # KeychainItem + PresetTokenStore (per-preset bearer tokens)
+│   ├── Settings/           # PairedServerStore (local server list + active id)
+│   └── Storage/            # KeychainItem + PairedServerTokenStore
 ├── ViewModels/             # View state management
 │   ├── Chat/               # ChatViewModel and extensions
 │   ├── Handlers/           # Event handling coordinators

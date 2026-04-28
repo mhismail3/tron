@@ -24,9 +24,6 @@ pub struct ServerSettings {
     pub default_workspace: Option<String>,
     /// Audio transcription settings.
     pub transcription: TranscriptionSettings,
-    /// Quick-connect connection presets for iOS clients.
-    #[serde(default)]
-    pub connection_presets: Vec<ConnectionPreset>,
     /// Bearer-token authentication settings.
     #[serde(default)]
     pub auth: AuthSettings,
@@ -49,7 +46,6 @@ impl Default for ServerSettings {
             default_provider: "anthropic".to_string(),
             default_workspace: None,
             transcription: TranscriptionSettings::default(),
-            connection_presets: Vec::new(),
             auth: AuthSettings::default(),
             update: UpdateSettings::default(),
             tailscale_ip: None,
@@ -116,20 +112,6 @@ impl Default for UpdateSettings {
             action: crate::server::updater::UpdateAction::default(),
         }
     }
-}
-
-/// A connection preset for quick-connect from iOS clients.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectionPreset {
-    /// Unique identifier.
-    pub id: String,
-    /// Display label.
-    pub label: String,
-    /// Hostname or IP address.
-    pub host: String,
-    /// Port number.
-    pub port: u16,
 }
 
 /// Audio transcription settings.
@@ -433,7 +415,6 @@ mod tests {
         assert_eq!(s.default_provider, "anthropic");
         assert_eq!(s.default_model, "claude-sonnet-4-6");
         assert!(s.default_workspace.is_none());
-        assert!(s.connection_presets.is_empty());
         // Phase 2: bearer auth defaults OFF so existing clients keep working.
         assert!(!s.auth.enforced);
         // Phase 2: tailscaleIp defaults absent (populated by installer scripts).
@@ -578,7 +559,6 @@ mod tests {
         let json = serde_json::to_value(&s).unwrap();
         assert!(json.get("heartbeatIntervalMs").is_some());
         assert!(json.get("defaultModel").is_some());
-        assert!(json.get("connectionPresets").is_some());
     }
 
     #[test]
@@ -586,29 +566,6 @@ mod tests {
         let s = ServerSettings::default();
         let json = serde_json::to_value(&s).unwrap();
         assert!(json.get("defaultWorkspace").is_none());
-    }
-
-    #[test]
-    fn connection_presets_serde_roundtrip() {
-        let json = serde_json::json!({
-            "connectionPresets": [
-                {"id": "main", "label": "Main", "host": "100.64.213.113", "port": 9847},
-                {"id": "secondary", "label": "Secondary", "host": "100.95.255.62", "port": 9847}
-            ]
-        });
-        let s: ServerSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(s.connection_presets.len(), 2);
-        assert_eq!(s.connection_presets[0].id, "main");
-        assert_eq!(s.connection_presets[0].label, "Main");
-        assert_eq!(s.connection_presets[0].host, "100.64.213.113");
-        assert_eq!(s.connection_presets[0].port, 9847);
-        assert_eq!(s.connection_presets[1].id, "secondary");
-    }
-
-    #[test]
-    fn connection_presets_empty_by_default() {
-        let s: ServerSettings = serde_json::from_str("{}").unwrap();
-        assert!(s.connection_presets.is_empty());
     }
 
     #[test]

@@ -12,6 +12,10 @@ struct AddApiKeyForm: View {
         ProviderStatusHelpers.isApiKeyFormValid(label: label, key: key)
     }
 
+    private var canSave: Bool {
+        isValid && !isSaving
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
@@ -43,9 +47,10 @@ struct AddApiKeyForm: View {
                     Text("Save")
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 }
-                .disabled(!isValid || isSaving)
+                .disabled(!canSave)
                 .buttonStyle(.borderedProminent)
-                .tint(.tronEmerald)
+                .tint(canSave ? .tronEmerald : .tronTextMuted.opacity(0.25))
+                .opacity(canSave ? 1 : 0.55)
 
                 Button {
                     onCancel()

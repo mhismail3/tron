@@ -5,14 +5,12 @@ import Foundation
 /// Three responsibilities:
 ///   1. Validate + trim the four form inputs (host / port / token / label).
 ///   2. Produce a `PairingURLParser.PairingPayload` on success that the View
-///      hands back to `DependencyContainer` to install as a preset + token.
+///      hands back to `DependencyContainer` to install as a paired server + token.
 ///   3. Classify thrown errors from the post-validation `system.ping`
 ///      reachability probe into user-facing categories.
 ///
-/// **Why a dedicated type** (vs reusing `AddOrEditServerSheetCommit`):
-/// onboarding doesn't need duplicate-(host,port) detection — it happens
-/// before the user has any presets. Keeping the surfaces narrow makes the
-/// intent of each call site obvious.
+/// **Why a dedicated type**: onboarding validation should stay about field
+/// shape and reachability; local server dedupe happens in `PairingPersistor`.
 enum PairingStepValidator {
 
     enum Failure: Error, Equatable {
@@ -32,7 +30,7 @@ enum PairingStepValidator {
         /// blames device storage rather than the (correct) token.
         case keychainFailed(String)
         /// The server accepted the pairing token, but onboarding could not
-        /// write the explicit connection settings back to the Mac.
+        /// read the active server settings after storing the local pairing.
         case settingsFailed(String)
 
         var userFacingMessage: String {
@@ -50,7 +48,7 @@ enum PairingStepValidator {
             case .keychainFailed(let detail):
                 return "Could not save the pairing token to Keychain: \(detail)"
             case .settingsFailed(let detail):
-                return "Connected, but could not save the server preset on the Mac: \(detail)"
+                return "Connected, but could not save server settings: \(detail)"
             }
         }
     }
