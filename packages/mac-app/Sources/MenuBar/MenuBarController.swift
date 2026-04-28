@@ -13,6 +13,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var pollerTask: Task<Void, Never>?
     private var pairingInfoWindowController: NSWindowController?
     private var logsWindowController: NSWindowController?
+    private var developerOptionsVisible = false
 
     /// Most-recent status snapshot, written by the poller and read by
     /// `rebuildMenu()`.
@@ -131,11 +132,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func toggleDeveloperOptions() {
+        developerOptionsVisible.toggle()
+        rebuildMenu()
+    }
+
     // MARK: - Menu
 
     private func rebuildMenu() {
         guard let menu = statusItem?.menu else { return }
-        let items = MenuBarItemBuilder.build(snapshot: snapshot, paths: setup)
+        let items = MenuBarItemBuilder.build(
+            snapshot: snapshot,
+            paths: setup,
+            developerOptionsVisible: developerOptionsVisible
+        )
         menu.removeAllItems()
         for descriptor in items {
             menu.addItem(make(descriptor: descriptor))

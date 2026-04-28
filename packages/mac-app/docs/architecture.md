@@ -230,6 +230,20 @@ The shared pairing surface resolves live when it opens, and copy actions quickly
 swap to a checkmark for two seconds so the user gets deterministic visual
 feedback. "Show logs" opens a native logs window fed by the read-only
 `logs.recent` RPC, with refresh and copy controls.
+While `Tron-Dev.app` owns port 9847, the bottom developer section shows a
+`Stop dev server` action even when developer options are collapsed. Pause,
+restart, and uninstall remain disabled during dev takeover. The stop action
+re-probes the port owner before signaling anything, sends TERM then KILL only to
+the verified dev PID if needed, and then resumes the installed Login Item through
+the same `SMAppService` load path as the normal Resume action.
+The bottom developer section is collapsed by default. Expanding it shows
+background-safe `scripts/tron dev` commands for starting dev takeover from the
+menu bar; the command runner resolves `scripts/tron` from `TRON_PROJECT_ROOT` or
+by walking up from the app/current directory, writes output to
+`~/.tron/system/run/dev-menu-command.log`, and disables start commands while a
+dev server already owns the port. The Debug Xcode scheme sets
+`TRON_PROJECT_ROOT` to the checkout root so local menu actions work without
+extra shell setup.
 Menu rows use native `NSMenuItem` rendering with no item images, so the popup
 keeps the standard macOS menu spacing used by apps like 1Password.
 "Send feedback" builds a prefilled GitHub issue with app/server context and a

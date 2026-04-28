@@ -788,6 +788,8 @@ packages/mac-app/Sources/
 | Custom status header | Shows `Tron`, the Tailscale endpoint, color-coded state, PID, live uptime, and a `Dev Server active` marker when `tron dev` owns port 9847 |
 | Show pairing info | Opens a pairing-only window with QR + manual copy buttons for host, port, token, and server name; copy actions quickly show a checkmark for two seconds on success |
 | Restart / Pause / Resume server | `launchctl kickstart` for restart diagnostics, `SMAppService.unregister/register` for stop/start, shows busy state and posts success/failure notifications |
+| Stop dev server | Appears in the bottom developer section whenever `Tron-Dev.app` owns port 9847, even while developer options are collapsed; stops the dev process and resumes the installed Login Item. Pause, restart, and uninstall are disabled while dev takeover is active. |
+| Developer options | A collapsed bottom section exposes `Show Developer Options`; when expanded it runs background-safe `scripts/tron dev -d`, `scripts/tron dev -td`, and `scripts/tron dev -btd` commands from the checkout resolved by `TRON_PROJECT_ROOT` or a nearby source tree |
 | Show logs | Opens the native logs window backed by the read-only `logs.recent` RPC |
 | Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
 | Check for updates | Opens the latest GitHub Release |

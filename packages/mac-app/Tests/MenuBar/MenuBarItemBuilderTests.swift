@@ -106,6 +106,66 @@ struct MenuBarItemBuilderTests {
         }
     }
 
+    @Test("dev snapshot: stop dev action appears and service controls are disabled")
+    func devSnapshotControls() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp)
+        let snap = ServerStatusSnapshot(
+            state: .running(version: "0.5.0", port: 9847),
+            isDevServerActive: true
+        )
+        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let titles = items.map(\.title)
+
+        #expect(titles == [
+            "Tron",
+            "—",
+            "Show pairing info",
+            "Open Tron folder",
+            "Show logs",
+            "Check for updates",
+            "Send feedback",
+            "—",
+            "Pause server",
+            "Restart server",
+            "Uninstall Tron",
+            "Quit Tron",
+            "—",
+            "Stop dev server",
+            "Show Developer Options",
+        ])
+
+        for item in items {
+            if case .action(let title, let isEnabled, _) = item {
+                if title == "Stop dev server" {
+                    #expect(isEnabled == true)
+                }
+                if ["Pause server", "Restart server", "Uninstall Tron"].contains(title) {
+                    #expect(isEnabled == false, "\(title) should be disabled while dev owns port 9847")
+                }
+            }
+        }
+    }
+
+    @Test("dev snapshot: collapsed developer section still shows stop dev")
+    func collapsedDeveloperSectionShowsStopDevDuringTakeover() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp)
+        let snap = ServerStatusSnapshot(
+            state: .running(version: "0.5.0", port: 9847),
+            isDevServerActive: true
+        )
+        let titles = MenuBarItemBuilder.build(snapshot: snap, paths: setup).map(\.title)
+
+        #expect(Array(titles.suffix(3)) == [
+            "—",
+            "Stop dev server",
+            "Show Developer Options",
+        ])
+    }
+
     @Test("running snapshot includes Pause server (not Resume)")
     func pauseShownWhileRunning() throws {
         let tmp = TestTempDir.make()
@@ -150,6 +210,7 @@ struct MenuBarItemBuilderTests {
             "Check for updates",
             "Uninstall Tron",
             "Quit Tron",
+            "Show Developer Options",
         ] {
             #expect(titles.contains(required), "missing \(required) in menu")
         }
@@ -176,7 +237,85 @@ struct MenuBarItemBuilderTests {
             "Restart server",
             "Uninstall Tron",
             "Quit Tron",
+            "—",
+            "Show Developer Options",
         ])
+    }
+
+    @Test("developer options are collapsed by default at the bottom")
+    func developerOptionsCollapsedByDefault() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp)
+        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
+        let titles = MenuBarItemBuilder.build(snapshot: snap, paths: setup).map(\.title)
+
+        #expect(Array(titles.suffix(2)) == ["—", "Show Developer Options"])
+        #expect(!titles.contains("Start dev server"))
+        #expect(!titles.contains("Hide Developer Options"))
+    }
+
+    @Test("expanded developer options show dev commands above hide toggle")
+    func developerOptionsExpanded() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp)
+        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
+        let items = MenuBarItemBuilder.build(
+            snapshot: snap,
+            paths: setup,
+            developerOptionsVisible: true
+        )
+        let titles = items.map(\.title)
+
+        #expect(Array(titles.suffix(5)) == [
+            "—",
+            "Start dev server",
+            "Start dev server after tests",
+            "Build, test, and start dev server",
+            "Hide Developer Options",
+        ])
+
+        for item in items {
+            if case .action(let title, let isEnabled, _) = item,
+               TronDevCommand.menuCommands.map(\.title).contains(title) {
+                #expect(isEnabled)
+            }
+        }
+    }
+
+    @Test("expanded developer options disable start commands while dev is active")
+    func developerOptionsDisableStartCommandsDuringTakeover() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp)
+        let snap = ServerStatusSnapshot(
+            state: .running(version: "0.5.0", port: 9847),
+            isDevServerActive: true
+        )
+        let items = MenuBarItemBuilder.build(
+            snapshot: snap,
+            paths: setup,
+            developerOptionsVisible: true
+        )
+        let titles = items.map(\.title)
+
+        #expect(Array(titles.suffix(6)) == [
+            "—",
+            "Stop dev server",
+            "Start dev server",
+            "Start dev server after tests",
+            "Build, test, and start dev server",
+            "Hide Developer Options",
+        ])
+
+        for item in items {
+            if case .action(let title, let isEnabled, _) = item,
+               TronDevCommand.menuCommands.map(\.title).contains(title) {
+                #expect(!isEnabled, "\(title) should be disabled while dev owns port 9847")
+            }
+        }
+        #expect(titles.last == "Hide Developer Options")
     }
 
     @Test("busy snapshot disables server controls and shows transient action title")

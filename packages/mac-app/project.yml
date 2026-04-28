@@ -118,6 +118,8 @@ schemes:
         TronMacTests: [test]
     run:
       config: Debug
+      environmentVariables:
+        TRON_PROJECT_ROOT: "$(SRCROOT)/../.."
     test:
       config: Debug
       targets:

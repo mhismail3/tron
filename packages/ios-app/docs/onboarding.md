@@ -233,7 +233,9 @@ If no paired servers remain, Settings hides server settings and shows the
 "Connect to a new server" CTA.
 The paired-server ellipsis menu is scoped to the selected server row and offers
 "Reconnect", "Set Up", and "Forget"; the separate "Connect to a new server" CTA
-is only used for adding a fresh server.
+is only used for adding a fresh server. The menu hit target is overlaid outside
+the row's glass card so the native menu presentation does not disturb the
+card's Liquid Glass rendering when it closes.
 
 Forgetting an offline server is safe because it is local-only. Optional status
 snapshots such as last connected time and last known status can remain local

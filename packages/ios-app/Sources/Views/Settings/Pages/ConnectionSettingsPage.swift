@@ -52,8 +52,8 @@ struct ConnectionSettingsPage: View {
     private func pairedServerRow(_ server: PairedServer) -> some View {
         let selected = dependencies.pairedServerStore.activeServer?.id == server.id
 
-        return SettingsCard(interactive: false) {
-            HStack(spacing: 10) {
+        return ZStack(alignment: .trailing) {
+            SettingsCard(interactive: false) {
                 Button {
                     guard !selected else { return }
                     dependencies.selectPairedServer(server)
@@ -80,17 +80,24 @@ struct ConnectionSettingsPage: View {
                                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                                 .foregroundStyle(status == "Connected" ? .tronSuccess : .tronTextMuted)
                         }
+
+                        Color.clear
+                            .frame(width: PairedServerMenuLayout.hitTargetSize)
+                            .accessibilityHidden(true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-
-                manageServerMenu(server)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Keep Menu outside SettingsCard's glassEffect tree. iOS 26 can
+            // temporarily flatten ancestor glass to white when a Menu closes.
+            manageServerMenu(server)
+                .padding(.trailing, 12)
         }
     }
 
@@ -126,13 +133,13 @@ struct ConnectionSettingsPage: View {
             Image(systemName: "ellipsis.circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextSecondary)
-                .frame(width: 36, height: 36)
+                .frame(width: PairedServerMenuLayout.hitTargetSize, height: PairedServerMenuLayout.hitTargetSize)
                 .contentShape(Circle())
                 .accessibilityHidden(true)
 
             Menu {
                 Button {
-                    retry(server)
+                    reconnect(server)
                 } label: {
                     Label(PairedServerMenuAction.reconnect.title, systemImage: PairedServerMenuAction.reconnect.systemImage)
                 }
@@ -157,13 +164,13 @@ struct ConnectionSettingsPage: View {
                 .tint(.tronError)
             } label: {
                 Color.clear
-                    .frame(width: 36, height: 36)
+                    .frame(width: PairedServerMenuLayout.hitTargetSize, height: PairedServerMenuLayout.hitTargetSize)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Manage \(server.label)")
         }
-        .frame(width: 36, height: 36)
+        .frame(width: PairedServerMenuLayout.hitTargetSize, height: PairedServerMenuLayout.hitTargetSize)
     }
 
     private var loadedServerBackedSettingsSections: some View {
@@ -303,7 +310,7 @@ struct ConnectionSettingsPage: View {
         startServerOnboarding(server)
     }
 
-    private func retry(_ server: PairedServer) {
+    private func reconnect(_ server: PairedServer) {
         if dependencies.pairedServerStore.activeServer?.id != server.id {
             dependencies.selectPairedServer(server)
         } else {

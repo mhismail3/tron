@@ -38,6 +38,11 @@ struct ProvidersSettingsPageTests {
         #expect(PairedServerMenuAction.allCases.filter(\.isDestructive) == [.forget])
     }
 
+    @Test("paired server menu reserves only the ellipsis hit target")
+    func pairedServerMenuReservesOnlyEllipsisHitTarget() {
+        #expect(PairedServerMenuLayout.hitTargetSize == 36)
+    }
+
     @Test("server onboarding userInfo carries paired server id")
     func serverOnboardingUserInfoCarriesServerId() {
         #expect(ServerOnboardingLauncher.userInfo(serverId: "studio") == [

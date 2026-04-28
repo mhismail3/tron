@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 // ARCHITECTURE: Shared settings copy and sheet-launch contracts live here so
 // page views stay focused on layout and state binding.
@@ -82,6 +83,10 @@ enum PairedServerMenuAction: CaseIterable, Hashable, Sendable {
     var isDestructive: Bool {
         self == .forget
     }
+}
+
+enum PairedServerMenuLayout {
+    static let hitTargetSize: CGFloat = 36
 }
 
 extension Notification.Name {

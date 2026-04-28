@@ -74,6 +74,20 @@ struct EnvironmentSetup: Sendable {
     /// intentionally stops the LaunchAgent before binding port 9847.
     var probeServerProcess: @Sendable (Int) async -> ServerProcessInfo? = { _ in nil }
 
+    /// Stops the `Tron-Dev.app` process currently taking over the server
+    /// port. The live implementation revalidates the port owner before
+    /// sending any signal.
+    var stopDevServer: @Sendable (Int) async -> DevServerStopResult = { port in
+        await DevServerStopper.stop(port: port)
+    }
+
+    /// Runs background-safe `scripts/tron dev ...` commands from the
+    /// developer menu. The live implementation resolves the checkout
+    /// before launching the script and logs command output to disk.
+    var runDevCommand: @Sendable (TronDevCommand) async -> TronDevCommandResult = { command in
+        await TronDevCommandRunner.run(command: command)
+    }
+
     /// Syncs first-party `.managed` skills from the app bundle into
     /// `~/.tron/skills`, preserving user-owned skill directories.
     var syncManagedSkills: @Sendable () async -> ManagedSkillSyncResult = {
@@ -140,6 +154,12 @@ struct EnvironmentSetup: Sendable {
         launchAgentManager: LiveLaunchAgentManager(),
         probeServerProcess: { port in
             await ServerProcessProbe.probe(port: port)
+        },
+        stopDevServer: { port in
+            await DevServerStopper.stop(port: port)
+        },
+        runDevCommand: { command in
+            await TronDevCommandRunner.run(command: command)
         },
         syncManagedSkills: {
             await Task.detached(priority: .utility) {
