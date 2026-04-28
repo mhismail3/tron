@@ -122,40 +122,48 @@ struct ConnectionSettingsPage: View {
     }
 
     private func manageServerMenu(_ server: PairedServer) -> some View {
-        Menu {
-            Button {
-                retry(server)
-            } label: {
-                Label("Retry", systemImage: "arrow.clockwise")
-            }
-            Button {
-                startOnboarding(prefill: server)
-            } label: {
-                Label(SettingsLabels.connectToNewServer, systemImage: "plus.circle")
-            }
-            Button(role: .destructive) {
-                serverPendingRemoval = server
-            } label: {
-                Label {
-                    Text("Forget")
-                        .foregroundStyle(.tronError)
-                } icon: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.tronError)
-                }
-            }
-        } label: {
+        ZStack {
             Image(systemName: "ellipsis.circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronTextSecondary)
-                .padding(8)
+                .frame(width: 36, height: 36)
                 .contentShape(Circle())
+                .accessibilityHidden(true)
+
+            Menu {
+                Button {
+                    retry(server)
+                } label: {
+                    Label(PairedServerMenuAction.reconnect.title, systemImage: PairedServerMenuAction.reconnect.systemImage)
+                }
+                Button {
+                    startOnboarding(prefill: server)
+                } label: {
+                    Label(PairedServerMenuAction.setUp.title, systemImage: PairedServerMenuAction.setUp.systemImage)
+                }
+                Button(role: .destructive) {
+                    serverPendingRemoval = server
+                } label: {
+                    Label {
+                        Text(PairedServerMenuAction.forget.title)
+                            .foregroundStyle(.tronError)
+                    } icon: {
+                        Image(systemName: PairedServerMenuAction.forget.systemImage)
+                            .symbolRenderingMode(.monochrome)
+                            .foregroundStyle(.tronError)
+                            .tint(.tronError)
+                    }
+                }
+                .tint(.tronError)
+            } label: {
+                Color.clear
+                    .frame(width: 36, height: 36)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Manage \(server.label)")
         }
-        .buttonStyle(.plain)
-        .transaction { transaction in
-            transaction.animation = .tronFast
-        }
-        .accessibilityLabel("Manage \(server.label)")
+        .frame(width: 36, height: 36)
     }
 
     private var loadedServerBackedSettingsSections: some View {

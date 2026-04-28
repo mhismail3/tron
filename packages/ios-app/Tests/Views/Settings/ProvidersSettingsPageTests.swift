@@ -23,6 +23,21 @@ struct ProvidersSettingsPageTests {
         #expect(ConnectionSettingsServerBackedSection.advancedSecurity.title == "Advanced Security")
     }
 
+    @Test("paired server menu uses server-specific actions")
+    func pairedServerMenuUsesServerSpecificActions() {
+        #expect(PairedServerMenuAction.allCases.map(\.title) == [
+            "Reconnect",
+            "Set Up",
+            "Forget",
+        ])
+        #expect(PairedServerMenuAction.allCases.map(\.systemImage) == [
+            "arrow.clockwise",
+            "gearshape.2",
+            "trash",
+        ])
+        #expect(PairedServerMenuAction.allCases.filter(\.isDestructive) == [.forget])
+    }
+
     @Test("server onboarding userInfo carries paired server id")
     func serverOnboardingUserInfoCarriesServerId() {
         #expect(ServerOnboardingLauncher.userInfo(serverId: "studio") == [

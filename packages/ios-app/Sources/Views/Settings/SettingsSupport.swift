@@ -52,6 +52,38 @@ enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
     }
 }
 
+enum PairedServerMenuAction: CaseIterable, Hashable, Sendable {
+    case reconnect
+    case setUp
+    case forget
+
+    var title: String {
+        switch self {
+        case .reconnect:
+            return "Reconnect"
+        case .setUp:
+            return "Set Up"
+        case .forget:
+            return "Forget"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .reconnect:
+            return "arrow.clockwise"
+        case .setUp:
+            return "gearshape.2"
+        case .forget:
+            return "trash"
+        }
+    }
+
+    var isDestructive: Bool {
+        self == .forget
+    }
+}
+
 extension Notification.Name {
     /// Posted by settings and connection repair affordances to open pairing.
     static let startServerOnboarding = Notification.Name("tron.startServerOnboarding")
