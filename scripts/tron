@@ -1,5 +1,5 @@
 #!/bin/bash
-# tron - CLI for Tron development and deployment
+# tron - CLI for workspace development and contributor service tooling
 #
 # Usage: tron <command> [options]
 #
@@ -13,9 +13,9 @@
 #   start/stop/restart  Manage launchd service
 #   status              Show service status
 #
-# Deployment:
+# Contributor service:
 #   deploy          Build, test, deploy (--force to skip confirmations)
-#   install         Initial setup (launchd + CLI)
+#   install         Contributor launchd setup (not used by the Mac app)
 #   rollback        Restore previous binary (--yes to skip confirmation)
 #   uninstall       Remove service and reset Mac onboarding (optionally reset settings/auth)
 #   auto-deploy     Contributor auto-deploy watcher (install|uninstall|status|pause|resume|logs)
@@ -83,17 +83,17 @@ require_project_dir() {
     fi
 }
 
-# Override ensure_prod_binary to also try release build as fallback
+# Contributor service binary restore helper.
 ensure_prod_binary() {
     if validate_prod_binary; then
         return 0
     fi
 
-    print_warning "Production binary is missing or corrupt"
+    print_warning "Contributor service binary is missing or corrupt"
 
-    if [ -f "$DEPLOY_DIR/tron.bak" ] && file "$DEPLOY_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
+    if [ -f "$CONTRIBUTOR_DIR/tron.bak" ] && file "$CONTRIBUTOR_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
         print_status "Restoring from backup..."
-        create_app_bundle "$INSTALLED_BUNDLE" "$DEPLOY_DIR/tron.bak"
+        create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"
         codesign_bundle "$INSTALLED_BUNDLE"
         print_success "Restored from backup"
         return 0
@@ -107,7 +107,7 @@ ensure_prod_binary() {
         return 0
     fi
 
-    print_error "No valid binary found. Run: tron deploy"
+    print_error "No valid contributor service binary found. Run: tron deploy"
     return 1
 }
 
@@ -148,7 +148,14 @@ build_rust_dev() {
 
 run_tests() {
     print_status "Running tests..."
-    if (cd "$RUST_WORKSPACE" && cargo test --workspace -- --quiet 2>&1); then
+    # The WebSocket integration target shares process-global test server
+    # plumbing and must run serially. Keep unit/binary tests parallel for
+    # speed, then run each integration target with the harness shape it needs.
+    if (cd "$RUST_WORKSPACE" \
+        && cargo test --workspace --lib --bins -- --quiet 2>&1 \
+        && cargo test --test db_path_guard -- --quiet 2>&1 \
+        && cargo test --test threat_model_invariants -- --quiet 2>&1 \
+        && cargo test --test integration -- --test-threads=1 --quiet 2>&1); then
         print_success "Tests passed"
         return 0
     else
@@ -378,11 +385,11 @@ cmd_dev() {
             --log|--logs) cmd_logs; return ;;
             -h|--help)
                 echo ""
-                echo -e "${CYAN}tron dev${NC} - Start dev server (takes over port $PROD_PORT from production)"
+                echo -e "${CYAN}tron dev${NC} - Start dev server (takes over port $PROD_PORT from the installed helper)"
                 echo ""
-                echo "Stops the production service, runs local binary on port $PROD_PORT."
+                echo "Stops the installed service, runs local binary on port $PROD_PORT."
                 echo "Uses the dev-server profile (thin LTO, fast builds, debug backtraces)."
-                echo "Production restarts automatically when dev exits (Ctrl+C)."
+                echo "The installed service restarts automatically when dev exits (Ctrl+C)."
                 echo ""
                 echo "Usage: tron dev [options]"
                 echo ""
@@ -391,7 +398,7 @@ cmd_dev() {
                 echo "  -t, --test        Run tests before starting"
                 echo "  -d, --background  Run in background (logs to database only)"
                 echo "  -l, --log-level   Override database log level (trace/debug/info/warn/error)"
-                echo "  --stop            Stop dev server and restart production"
+                echo "  --stop            Stop dev server and restart the installed service"
                 echo "  --log             Tail the server log"
                 echo ""
                 echo "Examples:"
@@ -400,10 +407,10 @@ cmd_dev() {
                 echo "  tron dev -bt      # Build, test, then start"
                 echo "  tron dev -bd      # Build then start in background"
                 echo "  tron dev -btd     # Build, test, then start in background"
-                echo "  tron dev --stop   # Stop dev, restart production"
+                echo "  tron dev --stop   # Stop dev, restart the installed service"
                 echo ""
                 echo "Note: kill -9 bypasses the cleanup trap. Use 'tron start' to"
-                echo "restart production manually if that happens."
+                echo "restart the installed service manually if that happens."
                 echo ""
                 return 0
                 ;;
@@ -438,9 +445,9 @@ cmd_dev() {
 }
 
 dev_start_foreground() {
-    # Stop prod service for takeover
+    # Stop the installed helper for dev takeover.
     if service_is_running; then
-        print_status "Stopping production service for dev takeover..."
+        print_status "Stopping installed service for dev takeover..."
         launchd_stop "$PLIST_NAME"
     fi
 
@@ -454,15 +461,15 @@ dev_start_foreground() {
         sleep 1
         if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
-            print_status "Restarting production service..."
+            print_status "Restarting installed service..."
             launchd_start "$PLIST_NAME"
             return 1
         fi
     fi
 
-    # Restart prod on ANY exit (Ctrl+C, error, normal exit)
+    # Restart the installed helper on ANY exit (Ctrl+C, error, normal exit).
     # IMPORTANT: no `exec` — must run as child so EXIT trap fires
-    trap 'echo ""; print_status "Restarting production service..."; if ensure_prod_binary; then launchd_start "$PLIST_NAME"; print_success "Production service restarted"; else print_error "Cannot restart: no valid binary. Run: tron deploy"; fi' EXIT INT TERM
+    trap 'echo ""; print_status "Restarting installed service..."; if ensure_restartable_prod_server; then launchd_start "$PLIST_NAME"; print_success "Installed service restarted"; else print_error "Cannot restart: install Tron.app at /Applications/Tron.app"; fi' EXIT INT TERM
 
     echo ""
     echo -e "${CYAN}Starting Tron Dev Server (takeover)${NC}"
@@ -470,7 +477,7 @@ dev_start_foreground() {
     echo "  Server: http://localhost:$PROD_PORT"
     echo "  Health: http://localhost:$PROD_PORT/health"
     echo ""
-    echo -e "${YELLOW}Prod stopped. Ctrl+C to stop dev and restart prod.${NC}"
+    echo -e "${YELLOW}Installed service stopped. Ctrl+C to stop dev and restart it.${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
     # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
@@ -484,9 +491,9 @@ dev_start_foreground() {
 }
 
 dev_start_background() {
-    # Stop prod service for takeover
+    # Stop the installed helper for dev takeover.
     if service_is_running; then
-        print_status "Stopping production service for dev takeover..."
+        print_status "Stopping installed service for dev takeover..."
         launchd_stop "$PLIST_NAME"
     fi
 
@@ -500,7 +507,7 @@ dev_start_background() {
         sleep 1
         if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
-            print_status "Restarting production service..."
+            print_status "Restarting installed service..."
             launchd_start "$PLIST_NAME"
             return 1
         fi
@@ -527,24 +534,24 @@ dev_start_background() {
         echo "  PID:     $pid"
         echo "  Logs:    tron logs"
         echo ""
-        echo -e "${YELLOW}Use 'tron dev --stop' to stop and restart prod.${NC}"
+        echo -e "${YELLOW}Use 'tron dev --stop' to stop dev and restart the installed service.${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     else
         print_error "Dev server failed to start. Check: tron logs -l error"
-        print_status "Restarting production service..."
-        if ensure_prod_binary; then
+        print_status "Restarting installed service..."
+        if ensure_restartable_prod_server; then
             launchd_start "$PLIST_NAME"
-            print_success "Production service restarted"
+            print_success "Installed service restarted"
         fi
         return 1
     fi
 }
 
 dev_stop() {
-    # If launchd service is running, there's no dev to stop
+    # If launchd service is running, there's no dev to stop.
     if service_is_running; then
-        print_warning "Production service is running (no dev takeover active)"
-        echo "  Use 'tron stop' to stop production"
+        print_warning "Installed service is running (no dev takeover active)"
+        echo "  Use 'tron stop' to stop the installed service"
         return 0
     fi
 
@@ -559,16 +566,16 @@ dev_stop() {
             kill -9 "$pid" 2>/dev/null || true
         fi
         print_success "Dev server stopped"
-        # The EXIT trap in the dev process should restart prod.
+        # The EXIT trap in the dev process should restart the installed helper.
         # If it was kill -9, restart manually:
         sleep 1
         if ! service_is_running; then
-            print_status "Restarting production service..."
-            if ensure_prod_binary; then
+            print_status "Restarting installed service..."
+            if ensure_restartable_prod_server; then
                 launchd_start "$PLIST_NAME"
-                print_success "Production service restarted"
+                print_success "Installed service restarted"
             else
-                print_error "Cannot restart: no valid binary. Run: tron deploy"
+                print_error "Cannot restart: install Tron.app at /Applications/Tron.app"
             fi
         fi
     else
@@ -643,7 +650,7 @@ cmd_preflight() {
     fi
 
     # 8. No stuck sentinel
-    local sentinel_file="$DEPLOY_DIR/restart-sentinel.json"
+    local sentinel_file="$CONTRIBUTOR_DIR/restart-sentinel.json"
     if [ -f "$sentinel_file" ]; then
         local sentinel_status
         sentinel_status=$(python3 -c "import json; print(json.load(open('$sentinel_file')).get('status',''))" 2>/dev/null || true)
@@ -753,8 +760,8 @@ cmd_deploy() {
     # Backup current binary
     if [ -f "$INSTALLED_BINARY" ]; then
         print_status "Backing up current binary..."
-        mkdir -p "$DEPLOY_DIR"
-        cp "$INSTALLED_BINARY" "$DEPLOY_DIR/tron.bak"
+        mkdir -p "$CONTRIBUTOR_DIR"
+        cp "$INSTALLED_BINARY" "$CONTRIBUTOR_DIR/tron.bak"
     fi
 
     # Stop service
@@ -779,15 +786,15 @@ cmd_deploy() {
 
     # Install runtime CLI, shared library, and entitlements (only if changed)
     for f in tron-cli tron-lib.sh tron-agent.entitlements AppIcon.icns; do
-        if [ -f "$SCRIPT_DIR/$f" ] && ! cmp -s "$SCRIPT_DIR/$f" "$DEPLOY_DIR/$f"; then
-            cp "$SCRIPT_DIR/$f" "$DEPLOY_DIR/$f"
-            [ "$f" = "tron-cli" ] && chmod +x "$DEPLOY_DIR/$f"
+        if [ -f "$SCRIPT_DIR/$f" ] && ! cmp -s "$SCRIPT_DIR/$f" "$CONTRIBUTOR_DIR/$f"; then
+            cp "$SCRIPT_DIR/$f" "$CONTRIBUTOR_DIR/$f"
+            [ "$f" = "tron-cli" ] && chmod +x "$CONTRIBUTOR_DIR/$f"
             print_success "Updated $f"
         fi
     done
 
     # Record workspace path
-    echo "$PROJECT_DIR" > "$DEPLOY_DIR/workspace-path"
+    echo "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path"
 
     # Regenerate plists so paths (e.g. log file) stay current
     print_status "Updating launchd plist..."
@@ -798,10 +805,10 @@ cmd_deploy() {
     new_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
     echo "$new_commit" > "$DEPLOYED_COMMIT_FILE"
 
-    # Write restart sentinel so the new binary runs self-test + sends APNS notification
+    # Write restart sentinel so the contributor service records deploy restart state.
     local now
     now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-    cat > "$DEPLOY_DIR/restart-sentinel.json" <<SENTINEL
+    cat > "$CONTRIBUTOR_DIR/restart-sentinel.json" <<SENTINEL
 {
   "action": "deploy",
   "timestamp": "$now",
@@ -829,7 +836,7 @@ SENTINEL
             print_success "Health check passed"
 
             # Remove backup (deploy succeeded)
-            rm -f "$DEPLOY_DIR/tron.bak"
+            rm -f "$CONTRIBUTOR_DIR/tron.bak"
 
             write_deployment_result "success"
         else
@@ -840,11 +847,11 @@ SENTINEL
         print_error "Service failed to start!"
 
         # Auto-rollback
-        if [ -f "$DEPLOY_DIR/tron.bak" ]; then
+        if [ -f "$CONTRIBUTOR_DIR/tron.bak" ]; then
             print_status "Rolling back..."
-            create_app_bundle "$INSTALLED_BUNDLE" "$DEPLOY_DIR/tron.bak"
+            create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"
             codesign_bundle "$INSTALLED_BUNDLE"
-            rm -f "$DEPLOY_DIR/tron.bak"
+            rm -f "$CONTRIBUTOR_DIR/tron.bak"
             launchd_start "$PLIST_NAME"
             sleep 2
             if service_is_running; then
@@ -866,17 +873,15 @@ SENTINEL
 }
 
 cmd_install() {
-    # --gui-helper: machine-readable mode invoked from the Mac wizard's
-    # fallback path. Emits one JSON event per line on stdout, keeping
-    # stderr for anything else. Suppresses decorative banners and
-    # interactive prompts so the wizard can render its own UI.
+    # --gui-helper: machine-readable contributor mode. Emits one JSON
+    # event per line on stdout, keeping stderr for anything else.
+    # Suppresses decorative banners and interactive prompts.
     #
     # Event shape: {"phase":"<name>","status":"start|ok|fail","detail":"..."}
     # Phases (ordered): dirs, configs, build, bundle, sidecar, skills,
     #                   plist, cli, symlink, launchd
-    # The wizard typically short-circuits after bundle+plist+launchd
-    # because it performs copy/load natively via BinaryInstaller; this
-    # mode exists as a CLI-equivalent for contributors / headless CI.
+    # The distributed Mac app does not call this path. Production
+    # installs are `/Applications/Tron.app` + SMAppService only.
     local gui_helper=0
     local skip_service_start=0
     while [ $# -gt 0 ]; do
@@ -909,9 +914,9 @@ cmd_install() {
 
     _emit_event dirs start ""
     mkdir -p "$BIN_DIR"
-    mkdir -p "$TRON_HOME/system/deployment"
+    mkdir -p "$CONTRIBUTOR_DIR"
     mkdir -p "$HOME/Library/LaunchAgents"
-    _emit_event dirs ok "$BIN_DIR,$TRON_HOME/system/deployment,$HOME/Library/LaunchAgents"
+    _emit_event dirs ok "$BIN_DIR,$CONTRIBUTOR_DIR,$HOME/Library/LaunchAgents"
 
     _emit_event configs start ""
     ensure_default_configs
@@ -953,19 +958,19 @@ cmd_install() {
     _emit_event plist ok "$PLIST_PATH"
 
     _emit_event cli start ""
-    cp "$SCRIPT_DIR/tron-lib.sh" "$DEPLOY_DIR/tron-lib.sh"
-    cp "$SCRIPT_DIR/tron-cli" "$DEPLOY_DIR/tron-cli"
-    cp "$SCRIPT_DIR/tron-agent.entitlements" "$DEPLOY_DIR/tron-agent.entitlements"
-    cp "$SCRIPT_DIR/AppIcon.icns" "$DEPLOY_DIR/AppIcon.icns" 2>/dev/null || true
-    chmod +x "$DEPLOY_DIR/tron-cli"
+    cp "$SCRIPT_DIR/tron-lib.sh" "$CONTRIBUTOR_DIR/tron-lib.sh"
+    cp "$SCRIPT_DIR/tron-cli" "$CONTRIBUTOR_DIR/tron-cli"
+    cp "$SCRIPT_DIR/tron-agent.entitlements" "$CONTRIBUTOR_DIR/tron-agent.entitlements"
+    cp "$SCRIPT_DIR/AppIcon.icns" "$CONTRIBUTOR_DIR/AppIcon.icns" 2>/dev/null || true
+    chmod +x "$CONTRIBUTOR_DIR/tron-cli"
     [ "$gui_helper" -eq 0 ] && print_success "Installed runtime CLI"
-    echo "$PROJECT_DIR" > "$DEPLOY_DIR/workspace-path"
-    _emit_event cli ok "$DEPLOY_DIR/tron-cli"
+    echo "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path"
+    _emit_event cli ok "$CONTRIBUTOR_DIR/tron-cli"
 
     _emit_event symlink start "$BIN_DIR/tron"
     [ "$gui_helper" -eq 0 ] && print_status "Installing tron CLI..."
-    ln -sf "$DEPLOY_DIR/tron-cli" "$BIN_DIR/tron"
-    [ "$gui_helper" -eq 0 ] && print_success "Installed: $BIN_DIR/tron -> $DEPLOY_DIR/tron-cli"
+    ln -sf "$CONTRIBUTOR_DIR/tron-cli" "$BIN_DIR/tron"
+    [ "$gui_helper" -eq 0 ] && print_success "Installed: $BIN_DIR/tron -> $CONTRIBUTOR_DIR/tron-cli"
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         [ "$gui_helper" -eq 0 ] && print_warning "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
         _emit_event symlink ok "path-missing:$BIN_DIR"
@@ -976,9 +981,8 @@ cmd_install() {
     local current_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
     echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
 
-    # The Mac wizard performs launchd load itself via LaunchAgentManaging,
-    # so --gui-helper defaults to skipping the launchctl step. Contributors
-    # using the CLI-install path keep the full behavior.
+    # Machine-readable contributor runs skip launchctl; interactive
+    # CLI-install runs keep the full behavior.
     if [ "$skip_service_start" -eq 0 ] && [ "$gui_helper" -eq 0 ]; then
         _emit_event launchd start ""
         print_status "Starting service..."
@@ -1079,17 +1083,17 @@ cmd_setup() {
     # Install runtime CLI, shared library, and create symlink
     print_status "Setting up tron command..."
     mkdir -p "$HOME/.local/bin"
-    mkdir -p "$DEPLOY_DIR"
+    mkdir -p "$CONTRIBUTOR_DIR"
 
-    cp "$SCRIPT_DIR/tron-lib.sh" "$DEPLOY_DIR/tron-lib.sh"
-    cp "$SCRIPT_DIR/tron-cli" "$DEPLOY_DIR/tron-cli"
-    chmod +x "$DEPLOY_DIR/tron-cli"
+    cp "$SCRIPT_DIR/tron-lib.sh" "$CONTRIBUTOR_DIR/tron-lib.sh"
+    cp "$SCRIPT_DIR/tron-cli" "$CONTRIBUTOR_DIR/tron-cli"
+    chmod +x "$CONTRIBUTOR_DIR/tron-cli"
 
     # Record workspace path
-    echo "$PROJECT_DIR" > "$DEPLOY_DIR/workspace-path"
+    echo "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path"
 
-    ln -sf "$DEPLOY_DIR/tron-cli" "$HOME/.local/bin/tron"
-    print_success "Created symlink: ~/.local/bin/tron -> $DEPLOY_DIR/tron-cli"
+    ln -sf "$CONTRIBUTOR_DIR/tron-cli" "$HOME/.local/bin/tron"
+    print_success "Created symlink: ~/.local/bin/tron -> $CONTRIBUTOR_DIR/tron-cli"
 
     if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
         print_warning "~/.local/bin is not in your PATH"
@@ -1331,8 +1335,8 @@ cmd_bench() {
 AUTO_DEPLOY_PLIST_NAME="com.tron.auto-deploy"
 AUTO_DEPLOY_PLIST_PATH="$HOME/Library/LaunchAgents/$AUTO_DEPLOY_PLIST_NAME.plist"
 AUTO_DEPLOY_PAUSE_FILE="$TRON_HOME/auto-deploy.pause"
-AUTO_DEPLOY_LOG="$DEPLOY_DIR/auto-deploy.log"
-AUTO_DEPLOY_LAUNCHD_LOG="$DEPLOY_DIR/auto-deploy-launchd.log"
+AUTO_DEPLOY_LOG="$CONTRIBUTOR_DIR/auto-deploy.log"
+AUTO_DEPLOY_LAUNCHD_LOG="$CONTRIBUTOR_DIR/auto-deploy-launchd.log"
 AUTO_DEPLOY_SCRIPT="$SCRIPT_DIR/auto-deploy"
 
 cmd_auto_deploy() {
@@ -1351,7 +1355,7 @@ cmd_auto_deploy() {
 }
 
 create_auto_deploy_plist() {
-    mkdir -p "$DEPLOY_DIR"
+    mkdir -p "$CONTRIBUTOR_DIR"
 
     cat > "$AUTO_DEPLOY_PLIST_PATH" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1502,7 +1506,7 @@ auto_deploy_logs() {
 #=============================================================================
 
 SELF_UPDATE_PAUSE_FILE="$TRON_HOME/auto-update.pause"
-SELF_UPDATE_STATE_FILE="$TRON_HOME/system/updater-state.json"
+SELF_UPDATE_STATE_FILE="$TRON_HOME/system/run/updater-state.json"
 
 cmd_self_update() {
     local subcmd="${1:-status}"

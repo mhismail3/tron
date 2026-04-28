@@ -17,7 +17,7 @@ use std::path::PathBuf;
 pub mod dirs {
     // ── Top-level under ~/.tron/ ──
 
-    /// System configuration and binaries directory.
+    /// System configuration and runtime state directory.
     pub const SYSTEM: &str = "system";
     /// User workspace for sessions, knowledge, reports, scratch, etc.
     pub const WORKSPACE: &str = "workspace";
@@ -28,15 +28,12 @@ pub mod dirs {
 
     // ── Under system/ ──
 
-    /// App bundle name (macOS TCC identifies apps by CFBundleIdentifier inside the bundle).
-    pub const APP_BUNDLE: &str = "Tron.app";
     /// SQLite databases.
     pub const DB: &str = "database";
+    /// Ephemeral runtime lock files. Ordinary startup may create this directory.
+    pub const RUN: &str = "run";
     /// Streaming journals for crash recovery of partial LLM output.
     pub const JOURNALS: &str = "journals";
-    /// Dev/deploy/update artifacts and rollback state. Ordinary user
-    /// installs do not create this directory on startup.
-    pub const DEPLOYMENT: &str = "deployment";
     /// Transcription sidecar: Python venv, worker script, HuggingFace model cache.
     pub const TRANSCRIPTION: &str = "transcription";
 
@@ -78,21 +75,17 @@ pub mod files {
     pub const SETTINGS_JSON: &str = "settings.json";
     /// Authentication credentials (API keys, tokens).
     pub const AUTH_JSON: &str = "auth.json";
-    /// WebSocket bearer token used by iOS clients to authenticate the
-    /// `Authorization: Bearer <token>` header on the WS upgrade request.
-    /// Stored in `~/.tron/system/auth-token.json` with mode `0o600`,
-    /// generated during first server startup when the file is absent.
-    pub const BEARER_TOKEN_JSON: &str = "auth-token.json";
-    /// First-run sentinel: empty marker file at `~/.tron/system/.onboarded`.
+    /// First-run sentinel: empty marker file at `~/.tron/system/run/.onboarded`.
     /// Touched by the Mac wizard at the end of its install flow OR on
     /// the first successful WS authentication from any iOS device. The
     /// `system.getInfo` RPC reports `paired: true` once it exists.
     pub const ONBOARDED_MARKER: &str = ".onboarded";
     /// Persistent state for the user-mode auto-updater
     /// (`server::updater`) — lastCheckAt, lastInstalledVersion,
-    /// consecutiveFailures. Stored in `~/.tron/system/updater-state.json`
+    /// latestAvailableVersion/latestDownloadUrl. Stored in
+    /// `~/.tron/system/run/updater-state.json`
     /// with mode `0o644` (non-secret, widely readable is fine). Atomic
-    /// writes mirror the `auth-token.json` pattern.
+    /// writes mirror the `auth.json` pattern.
     pub const UPDATER_STATE_JSON: &str = "updater-state.json";
     /// Pause sentinel honoured by both the contributor `scripts/auto-deploy`
     /// loop and the user-mode auto-updater. Presence of the file blocks
@@ -167,28 +160,19 @@ pub fn skills_dir() -> PathBuf {
 
 // ── System subdirectory helpers ────────────────────────────────────────
 
-/// `~/.tron/system/Tron.app/Contents/MacOS/`
-pub fn bin_dir() -> PathBuf {
-    system_dir()
-        .join(dirs::APP_BUNDLE)
-        .join("Contents")
-        .join("MacOS")
-}
-
 /// `~/.tron/system/database/`
 pub fn db_dir() -> PathBuf {
     system_dir().join(dirs::DB)
 }
 
+/// `~/.tron/system/run/`
+pub fn run_dir() -> PathBuf {
+    system_dir().join(dirs::RUN)
+}
+
 /// `~/.tron/system/database/journals/`
 pub fn journals_dir() -> PathBuf {
     db_dir().join(dirs::JOURNALS)
-}
-
-/// `~/.tron/system/deployment/` (dev/deploy/update state; not created
-/// during ordinary server startup)
-pub fn deploy_dir() -> PathBuf {
-    system_dir().join(dirs::DEPLOYMENT)
 }
 
 // ── Transcription sidecar ──────────────────────────────────────────────
@@ -316,9 +300,14 @@ pub fn memory_rules_dir() -> PathBuf {
 
 // ── Composite file path helpers ────────────────────────────────────────
 
-/// `~/.tron/system/Tron.app/Contents/MacOS/tron`
+/// Path to the currently running Tron executable.
+///
+/// Production macOS installs launch the server helper from inside
+/// `/Applications/Tron.app`; dev workflows may run a Cargo-built binary.
+/// Use the actual executable path instead of a fixed install path so health
+/// and diagnostics stay correct for both.
 pub fn tron_binary_path() -> PathBuf {
-    bin_dir().join("tron")
+    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("tron"))
 }
 
 /// `~/.tron/system/settings.json`
@@ -331,31 +320,41 @@ pub fn auth_path() -> PathBuf {
     system_dir().join(files::AUTH_JSON)
 }
 
-/// `~/.tron/system/auth-token.json` — WebSocket bearer-token storage.
+/// `~/.tron/system/auth.json` — WebSocket bearer-token storage and provider auth.
 ///
-/// See [`files::BEARER_TOKEN_JSON`] for purpose. Read by the WS upgrade
-/// handler when `server.auth.enforced` is true; written by
+/// The bearer token is stored as top-level `bearerToken`. Read by the WS
+/// upgrade handler when `server.auth.enforced` is true; written by
 /// `server::onboarding::load_or_create_bearer_token` and
 /// `server::onboarding::rotate_bearer_token`.
 pub fn bearer_token_path() -> PathBuf {
-    system_dir().join(files::BEARER_TOKEN_JSON)
+    auth_path()
 }
 
-/// `~/.tron/system/.onboarded` — first-run sentinel marker.
+/// `~/.tron/system/run/auth.lock` — auth file serialization lock.
+pub fn auth_lock_path() -> PathBuf {
+    run_dir().join("auth.lock")
+}
+
+/// `~/.tron/system/run/.mac-wrapper.lock` — Mac wrapper single-instance lock.
+pub fn mac_wrapper_lock_path() -> PathBuf {
+    run_dir().join(".mac-wrapper.lock")
+}
+
+/// `~/.tron/system/run/.onboarded` — first-run sentinel marker.
 ///
 /// See [`files::ONBOARDED_MARKER`] for purpose. Existence-checked by
 /// `system.getInfo` to populate the `paired` field; created by the Mac
 /// wizard or `server::onboarding::mark_onboarded`.
 pub fn onboarded_marker_path() -> PathBuf {
-    system_dir().join(files::ONBOARDED_MARKER)
+    run_dir().join(files::ONBOARDED_MARKER)
 }
 
-/// `~/.tron/system/updater-state.json` — auto-updater persistent state.
+/// `~/.tron/system/run/updater-state.json` — auto-updater persistent state.
 ///
 /// See [`files::UPDATER_STATE_JSON`] for purpose. Read/written by
 /// `server::updater`. Mode `0o644` (no secrets); atomic writes.
 pub fn updater_state_path() -> PathBuf {
-    system_dir().join(files::UPDATER_STATE_JSON)
+    run_dir().join(files::UPDATER_STATE_JSON)
 }
 
 /// `~/.tron/auto-update.pause` — pause sentinel for the auto-updater.
@@ -370,6 +369,11 @@ pub fn auto_update_pause_path() -> PathBuf {
 /// `~/.tron/<workspace>/automations/automations.json`
 pub fn automations_path() -> PathBuf {
     cron_dir().join(files::AUTOMATIONS_JSON)
+}
+
+/// `~/.tron/<workspace>/automations/automations.json.bak`
+pub fn automations_backup_path() -> PathBuf {
+    cron_dir().join("automations.json.bak")
 }
 
 /// `~/.tron/<workspace>/memory/rules/SYSTEM.md`
@@ -691,6 +695,16 @@ mod tests {
     }
 
     #[test]
+    fn automations_backup_path_correct() {
+        let p = automations_backup_path();
+        assert!(p.ends_with(format!(
+            "{}/{}/automations.json.bak",
+            dirs::WORKSPACE,
+            dirs::CRON
+        )));
+    }
+
+    #[test]
     fn settings_path_correct() {
         let p = settings_path();
         assert!(p.ends_with(format!("{}/{}", dirs::SYSTEM, files::SETTINGS_JSON)));
@@ -699,10 +713,25 @@ mod tests {
     #[test]
     fn tron_binary_path_correct() {
         let p = tron_binary_path();
-        assert!(p.ends_with(format!(
-            "{}/{}/Contents/MacOS/tron",
+        assert!(
+            p.file_name().is_some(),
+            "current executable path should resolve to a concrete file name"
+        );
+    }
+
+    #[test]
+    fn run_dir_under_system() {
+        let p = run_dir();
+        assert!(p.ends_with(format!("{}/{}", dirs::SYSTEM, dirs::RUN)));
+    }
+
+    #[test]
+    fn runtime_locks_under_run_dir() {
+        assert!(auth_lock_path().ends_with(format!("{}/{}/auth.lock", dirs::SYSTEM, dirs::RUN)));
+        assert!(mac_wrapper_lock_path().ends_with(format!(
+            "{}/{}/.mac-wrapper.lock",
             dirs::SYSTEM,
-            dirs::APP_BUNDLE
+            dirs::RUN
         )));
     }
 
@@ -722,10 +751,10 @@ mod tests {
     fn updater_state_path_lives_under_system_dir() {
         let p = updater_state_path();
         let s = p.to_string_lossy();
-        assert!(s.ends_with("/updater-state.json"), "got: {s}");
+        assert!(s.ends_with("/run/updater-state.json"), "got: {s}");
         assert!(
-            s.contains("/.tron/system/"),
-            "must live under ~/.tron/system/, got: {s}"
+            s.contains("/.tron/system/run/"),
+            "must live under ~/.tron/system/run/, got: {s}"
         );
     }
 

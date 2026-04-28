@@ -60,29 +60,29 @@ enum TailscaleProbe {
         let appPresent = tailscaleAppExists(appURL)
 
         // The CLI may be present even without the .app (Homebrew install).
-        // Run through the candidate CLI paths in priority order; the
-        // first executable one wins.
+        // Try every executable candidate and accept the first one that
+        // proves the Mac is actively connected. This avoids a stale or
+        // GUI-flavoured binary masking a healthy Homebrew CLI.
+        var sawExecutableCLI = false
         for candidate in cliPaths where FileManager.default.isExecutableFile(atPath: candidate.path) {
+            sawExecutableCLI = true
             let result = await runProcess(candidate)
 
             // Non-zero exit covers: daemon not running, transient
             // startup errors, permission errors. All of these are
-            // "not ready right now" — conservatively report not-
-            // signed-in and let the next poll re-classify once the
-            // daemon stabilises.
-            guard result.exitCode == 0 else { return .installedNotSignedIn }
+            // "not ready from this executable right now" — try any
+            // other known CLI before reporting not-ready.
+            guard result.exitCode == 0 else { continue }
 
             guard let data = result.stdout.data(using: .utf8),
                   let status = try? JSONDecoder().decode(TailscaleStatusJSON.self, from: data) else {
-                // Malformed / unparseable JSON — treat as not-ready
-                // rather than silently falling through to any legacy
-                // field. A schema change in a future Tailscale would
-                // otherwise keep reporting stale .signedIn state.
-                return .installedNotSignedIn
+                // Malformed / unparseable JSON — do not trust this
+                // executable, but keep looking for a healthier CLI.
+                continue
             }
 
             guard status.BackendState == "Running" else {
-                return .installedNotSignedIn
+                continue
             }
 
             // Prefer `Self.TailscaleIPs` (the node's own IP) over the
@@ -95,12 +95,11 @@ enum TailscaleProbe {
             }
 
             // BackendState==Running but no IPv4 in the response — this
-            // shouldn't happen in a healthy tailnet but is a clear
-            // "not usable yet" signal. Conservative fallback.
-            return .installedNotSignedIn
+            // shouldn't happen in a healthy tailnet. Try another CLI
+            // before giving up.
         }
 
-        return appPresent ? .installedNotSignedIn : .notInstalled
+        return appPresent || sawExecutableCLI ? .installedNotSignedIn : .notInstalled
     }
 
     static let defaultCLIPaths: [URL] = [

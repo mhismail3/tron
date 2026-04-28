@@ -10,9 +10,8 @@
 #
 #   1. Resolve the target version from the tag or the manual input.
 #   2. Build the Rust agent binary in release mode (cached).
-#   3. Stage the agent into `packages/mac-app/Sources/Resources/tron-agent`
-#      via the existing `scripts/bundle-agent.sh` helper (same script the
-#      local `tron dev` + archive commands use — zero drift).
+#   3. Stage the agent into the embedded `Tron Server.app` Login Item via
+#      `packages/mac-app/scripts/bundle-agent.sh`.
 #   4. Generate the Xcode project with XcodeGen and archive the
 #      `TronMac` scheme with automatic signing.
 #   5. Export the `.app` from the archive (Developer ID Application).
@@ -175,7 +174,7 @@ jobs:
         run: |
           brew install xcodegen create-dmg
 
-      - name: Stage agent binary into mac-app resources
+      - name: Stage agent binary into embedded Login Item
         working-directory: packages/mac-app
         run: |
           # --skip-build because we already built the release binary above;
@@ -325,29 +324,32 @@ jobs:
           test -d "$APP_PATH" || { echo "::error::archive missing $APP_BUNDLE"; exit 1; }
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
           ls -la "$APP_PATH/Contents/MacOS"
-          test -f "$APP_PATH/Contents/Resources/tron-agent" \
-            || { echo "::error::tron-agent missing from Resources/"; exit 1; }
+          test -f "$APP_PATH/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron" \
+            || { echo "::error::Tron Server.app helper missing"; exit 1; }
+          test -f "$APP_PATH/Contents/Library/LaunchAgents/com.tron.server.plist" \
+            || { echo "::error::bundled LaunchAgent plist missing"; exit 1; }
 
       # Inside-out signing — required for hardened runtime + notarization.
       #
-      # Step 1: sign the embedded helper.  Step 2: sign the OUTER bundle
+      # Step 1: sign the embedded helper app. Step 2: sign the OUTER bundle
       # WITHOUT `--deep` so the helper's signature is preserved. The
       # earlier `--deep` flag was a footgun: it recursively re-signs every
       # already-signed binary, blowing away the hardened-runtime + entitlements
-      # we just applied to `tron-agent`. Apple has deprecated `--deep` for
+      # we just applied to `Tron Server.app`. Apple has deprecated `--deep` for
       # exactly this reason (`man codesign`, "DEEP DEPRECATION").
       #
       # Verification uses `--deep` because it's a read-only walk and we
       # want to confirm the entire bundle tree validates.
-      - name: Sign embedded tron-agent helper
+      - name: Sign embedded Tron Server helper
         if: steps.drymode.outputs.dry_run != 'true'
         run: |
           set -euo pipefail
+          HELPER="$APP_PATH/Contents/Library/LoginItems/Tron Server.app"
           codesign --force --timestamp --options runtime \
             --keychain "$KEYCHAIN" \
             --sign "$SIGN_IDENT" \
-            "$APP_PATH/Contents/Resources/tron-agent"
-          codesign --verify --strict --verbose=2 "$APP_PATH/Contents/Resources/tron-agent"
+            "$HELPER"
+          codesign --verify --strict --deep --verbose=2 "$HELPER"
 
       - name: Re-sign Tron.app with hardened runtime
         if: steps.drymode.outputs.dry_run != 'true'
@@ -367,7 +369,7 @@ jobs:
           # Defence in depth: confirm the helper's signature is still
           # the one we applied above (not silently re-signed by Xcode
           # or replaced by `--deep`).
-          codesign --display --verbose=2 "$APP_PATH/Contents/Resources/tron-agent"
+          codesign --display --verbose=2 "$APP_PATH/Contents/Library/LoginItems/Tron Server.app"
 
       # ── Notarize + staple ─────────────────────────────────────────
       #

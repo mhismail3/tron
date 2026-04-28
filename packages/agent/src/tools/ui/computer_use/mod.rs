@@ -11,7 +11,6 @@
 //! |---------------|---------|
 //! | `actions`     | Input actions: type, keypress, scroll, click, list, focus, get_windows |
 //! | `screenshot`  | Screen/window/region capture with resize and compression |
-//! | `permissions` | macOS TCC permission probing (accessibility, automation, screen recording, FDA) |
 //! | `codegen`     | AppleScript/Swift code generation for UI automation |
 
 use std::sync::Arc;
@@ -172,16 +171,7 @@ impl TronTool for ComputerUseTool {
 
 mod actions;
 mod codegen;
-mod permissions;
 mod screenshot;
-
-pub use permissions::{
-    PermissionStatus, WizardPermissions, probe_wizard_permissions, request_screen_recording_access,
-};
-
-// Re-export parse functions for tests
-#[cfg(test)]
-pub(crate) use permissions::{parse_automation_result, parse_fda_result};
 
 #[cfg(test)]
 #[path = "../computer_use_tests.rs"]

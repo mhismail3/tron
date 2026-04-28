@@ -85,7 +85,7 @@ tron/
 +-- scripts/
 |   +-- tron                CLI for build, deploy, service management
 |   +-- tron-lib.sh         Shared bash helpers used by scripts/tron
-|   +-- tron-cli            Runtime CLI deployed alongside the server
+|   +-- tron-cli            Contributor CLI helper for local service management
 |   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
 +-- .github/
 |   +-- workflows/          CI + Mac DMG release pipeline
@@ -222,13 +222,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions, TDD expectations,
 
 ## CLI Reference
 
-The `scripts/tron` CLI manages the full development and deployment lifecycle. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); when adding or renaming a subcommand, update this table.
+The `scripts/tron` CLI manages workspace development and contributor service workflows. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); when adding or renaming a subcommand, update this table.
 
 ### Development (workspace only)
 
 | Command | Description |
 |---------|-------------|
-| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` background) |
+| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` background). Stops the installed `com.tron.server` job before binding port `9847` and restores it through `/Applications/Tron.app` on exit. |
 | `tron ci` | CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc` |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron setup` | First-time project setup |
@@ -239,7 +239,7 @@ The `scripts/tron` CLI manages the full development and deployment lifecycle. Th
 |---------|-------------|
 | `tron preflight` | Pre-deploy infrastructure check |
 | `tron deploy` | Build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive) |
-| `tron install` | Initial install (launchd plist + CLI symlink). Supports `--gui-helper` for machine-readable output when invoked from the Mac wizard; `--skip-service-start` suppresses the `launchctl bootstrap` step. |
+| `tron install` | Contributor-only shell install for workspace testing. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
 | `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `settings.json` and/or `auth.json`. |
 | `tron auto-deploy` | Contributor-only auto-deploy watcher (`install`, `uninstall`, `status`, `pause`, `resume`, `logs`). Refuses to run outside a git repo — for DMG users, see `tron self-update` instead. |
 | `tron self-update` | User-mode GitHub Releases updater (`check`, `status`, `pause`, `resume`, `logs`, `reset`). Opt-in via `server.update.enabled`; gated by `~/.tron/auto-update.pause` sentinel. |
@@ -287,7 +287,7 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 | `Bash` | Execute shell commands with configurable timeout. Supports backgrounding, blob storage for large output, and an optional sandbox image. |
 | `AskUserQuestion` | Prompt the user for input with structured options. |
 | `GetConfirmation` | Ask the user to confirm a high-stakes action before proceeding. |
-| `NotifyApp` | Send a push notification to iOS. Uses APNS direct, the relay, or a stub fallback depending on `push_service`. |
+| `NotifyApp` | Send a push notification to iOS through the Cloudflare relay, or use the stub delegate when relay config is absent. |
 | `WebFetch` | Fetch and extract content from a URL. Uses an LLM subagent summarizer for large pages. |
 | `Display` | Render rich content (images, streams) for iOS clients via blob storage and `DisplayFrame` events. |
 | `ComputerUse` | Screenshot, click, type, keypress, scroll, window management. |
@@ -309,7 +309,7 @@ Source-control operations (sync main, push, switch branches, finalize a session 
 
 ## RPC API
 
-Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **167 methods** across three groups.
+Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **165 methods** across three groups.
 
 ### Connection
 
@@ -326,31 +326,26 @@ Messages use the server's WebSocket RPC framing. Request IDs are strings and are
 {"id":"ping-1","success":true,"result":{"pong":true,"timestamp":"…","serverVersion":"0.1.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true}}
 ```
 
-`system.ping` accepts optional `{"protocolVersion": <u32>, "clientVersion": <str>}` params. Clients that advertise a `protocolVersion` below `minClientProtocolVersion` receive a `CLIENT_VERSION_UNSUPPORTED` error with details naming both versions; clients that omit the field are accepted as pre-handshake (legacy).
+`system.ping` requires `{"protocolVersion": <u32>, "clientVersion": <str>}` params. Clients that omit `protocolVersion` or send a non-numeric value receive `INVALID_PARAMS`; clients below `minClientProtocolVersion` receive `CLIENT_VERSION_UNSUPPORTED` with details naming both versions.
 
 `system.getInfo` returns the running daemon's `version`, `uptime` (seconds), `activeSessions` count, `platform` / `arch`, plus three additive fields used by the iOS pairing flow:
 
 - `port` — WebSocket listening port (mirrors the `--port` CLI flag).
 - `tailscaleIp` — cached `server.tailscaleIp` from `settings.json`, or `null` if unset. The Mac pairing wizard resolves Tailscale live on fresh installs, then writes this cache for later wrapper/menu-bar reads and future server settings reloads.
-- `paired` — `true` once `~/.tron/system/.onboarded` exists. The sentinel is touched by the Mac wizard at the end of its install flow OR on the first successful WS auth.
+- `paired` — `true` once `~/.tron/system/run/.onboarded` exists. The sentinel is touched by the Mac wizard at the end of its install flow OR on the first successful WS auth.
 
 These fields are additive; older clients that ignore them continue to work unchanged.
 
-`system.probePermissions` returns a non-prompting snapshot of the agent's macOS TCC grants for the three wizard-surfaced permissions — Full Disk Access, Screen Recording, Accessibility. Each value is one of `"granted"`, `"denied"`, or `"unknown"`. The Mac wizard polls this RPC every ~2 s, rechecks when the app regains focus, and starts a short-lived kickstart+probe watcher only after the user opens one of the wizard's permission Settings panes. The manual Re-check action uses the same stronger refresh path as a fallback, while ordinary focus changes remain plain probes so System Settings navigation does not repeatedly restart the agent. Implementation uses native `AXIsProcessTrusted()` / `CGPreflightScreenCaptureAccess()` FFI — no subprocess, no prompt.
-
-`system.requestPermission` is the user-initiated prompt companion for the Mac wizard. It currently supports `{ "permission": "screenRecording" }`, which calls `CGRequestScreenCaptureAccess()` inside the launchd agent so macOS adds the installed Tron Server app to the Screen Recording list. It is never used for polling or startup.
-
-`system.checkForUpdates` / `system.getUpdateStatus` / `system.applyUpdate` drive the user-mode auto-updater (see Section "Deployment → User-mode auto-update"). Each has a deliberately tame default response so iOS + Mac menu-bar UIs render a meaningful empty state instead of a spurious error:
+`system.checkForUpdates` / `system.getUpdateStatus` drive user-mode GitHub Releases checks (see "Deployment → User-mode update checks"). Each has a deliberately tame default response so iOS + Mac menu-bar UIs render a meaningful empty state instead of a spurious error:
 
 - `system.checkForUpdates` returns `{ available: false, disabled: true, channel, currentVersion }` when `server.update.enabled` is `false` (the safe default) — no GitHub fetch is performed.
-- `system.getUpdateStatus` is a pure read of `settings.server.update` + `~/.tron/system/updater-state.json`; it always succeeds and exposes `enabled: false` plus null `latestAvailableVersion` for un-opted-in users.
-- `system.applyUpdate` is wired today as a stub that returns `{ status: "noop", message, currentVersion }` regardless of the flag. The install pipeline (lock `deploy.lock` → backup `.bak` → atomic swap → `launchctl kickstart` → post-install ping → rollback on failure) lands with the DMG release work in Phase 6; until then the supported upgrade path is a manual DMG drag-install. The wire shape will not change when the pipeline lands — only `status` flips from `"noop"` to `"installing"`.
+- `system.getUpdateStatus` is a pure read of `settings.server.update` + `~/.tron/system/run/updater-state.json`; it always succeeds and exposes `enabled: false` plus null `latestAvailableVersion` for un-opted-in users.
 
-### Core (64)
+### Core (63)
 
 | Group | Count | Methods |
 |-------|------:|---------|
-| `system` | 9 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown`, `system.probePermissions`, `system.requestPermission`, `system.checkForUpdates`, `system.getUpdateStatus`, `system.applyUpdate` |
+| `system` | 6 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown`, `system.checkForUpdates`, `system.getUpdateStatus` |
 | `blob` | 1 | `blob.get` |
 | `session` | 13 | `session.create`, `session.resume`, `session.list`, `session.delete`, `session.fork`, `session.getHead`, `session.getState`, `session.getHistory`, `session.reconstruct`, `session.archive`, `session.unarchive`, `session.archiveOlderThan`, `session.export` |
 | `agent` | 10 | `agent.prompt`, `agent.abort`, `agent.abortTool`, `agent.status`, `agent.queuePrompt`, `agent.dequeuePrompt`, `agent.clearQueue`, `agent.deliverSubagentResults`, `agent.submitConfirmation`, `agent.submitAnswers` |
@@ -361,7 +356,7 @@ These fields are additive; older clients that ignore them continue to work uncha
 | `auth` | 9 | `auth.get`, `auth.update`, `auth.clear`, `auth.oauthBegin`, `auth.oauthComplete`, `auth.renameAccount`, `auth.setActive`, `auth.removeAccount`, `auth.removeApiKey` |
 | `tool` | 1 | `tool.result` |
 | `message` | 1 | `message.delete` |
-| `logs` | 1 | `logs.ingest` |
+| `logs` | 2 | `logs.ingest`, `logs.recent` |
 | `memory` | 1 | `memory.retain` |
 
 ### Capabilities (27)
@@ -399,7 +394,7 @@ These fields are additive; older clients that ignore them continue to work uncha
 
 ## Event System
 
-The event store uses an immutable, append-only log with **84 typed event variants**. Sessions are tree-structured, supporting fork and rewind. State is always reconstructed from events; no mutable session state is stored outside the log.
+The event store uses an immutable, append-only log with **80 typed event variants**. Sessions are tree-structured, supporting fork and rewind. State is always reconstructed from events; no mutable session state is stored outside the log.
 
 The canonical event list is generated by the `define_events!` macro in `packages/agent/src/events/types/macros.rs`, invoked from `events/types/generated.rs`. Adding a new event means editing `generated.rs` and adding a payload type — the macro generates the `EventType` enum, wire-format helpers, and `ALL_EVENT_TYPES` automatically.
 
@@ -428,7 +423,7 @@ The canonical event list is generated by the `define_events!` macro in `packages
 | `hook` | `hook.triggered`, `hook.completed`, `hook.background_started`, `hook.background_completed`, `hook.llm_result` |
 | `memory` | `memory.retained`, `memory.auto_retain_triggered`, `memory.auto_retain_failed` |
 | `device` | `device.token_invalidated` |
-| `server.update` | `server.update_available`, `server.update_downloaded`, `server.update_installed`, `server.update_failed`, `server.update_disabled_after_failures` |
+| `server.update` | `server.update_available` |
 
 ### Event Broadcasting
 
@@ -481,12 +476,11 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
     "auth": {
       "enforced": false             // Phase 2 flag: when true, every WS upgrade requires `Authorization: Bearer <token>`
     },
-    "update": {                     // User-mode auto-updater (Phase 5.5). All fields off / safest by default.
+    "update": {                     // User-mode update checks. All fields off / safest by default.
       "enabled": false,             // Master switch — false means the scheduler never runs + no GitHub API traffic
       "channel": "stable",          // "stable" ignores pre-release tags; "beta" includes them
       "frequency": "daily",         // "manual" | "startup" | "hourly" | "daily" | "weekly"
-      "action": "notify",           // "notify" | "download" | "install" — monotonically escalating
-      "allowDowngradeOnRollback": true  // Mirror scripts/tron rollback semantics on failed auto-install
+      "action": "notify"            // notify-only; installing remains DMG replacement
     }
     // NB: telemetry is an iOS-only opt-in stored under `@AppStorage("telemetryEnabled")`;
     // no corresponding server setting exists because the server never emits telemetry.
@@ -593,11 +587,11 @@ tron login --label personal
 
 ### WebSocket Bearer Token
 
-**Storage:** `~/.tron/system/auth-token.json` (mode 600, atomic writes)
+**Storage:** `~/.tron/system/auth.json` top-level `bearerToken` (mode 600, atomic writes)
 
-Distinct from provider auth above. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request when `server.auth.enforced` is `true`. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
+Stored beside provider auth in the same secure file. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request when `server.auth.enforced` is `true`. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
 
-The token is generated during first server startup and stored alongside `auth.json` under `~/.tron/system/`. The Mac onboarding wizard (Phase 5) and iOS pairing flow (Phase 4) both display it for the user to copy into the iOS app's connection settings.
+The token is generated during first server startup and written as `bearerToken` inside `~/.tron/system/auth.json`. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS app's connection settings.
 
 ```bash
 # Rotate the token (forces every paired iOS device to re-pair)
@@ -608,7 +602,7 @@ tron auth rotate
 
 Rotation is serialized through a process-wide mutex and the on-disk write is atomic (`tempfile + sync_all + rename`), so a concurrent rotate from the menu bar and CLI cannot corrupt the file. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
 
-The first-run sentinel `~/.tron/system/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported to iOS via the `paired` field of `system.getInfo` (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
+The first-run sentinel `~/.tron/system/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported to iOS via the `paired` field of `system.getInfo` (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
 
 See [`packages/agent/src/server/onboarding/mod.rs`](packages/agent/src/server/onboarding/mod.rs) for the full token + sentinel lifecycle.
 
@@ -754,13 +748,13 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 ## Mac App
 
-**Minimum macOS:** 14 Sonoma | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
+**Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`, and on first launch runs a wizard that asks before copying the bundled `tron-agent` binary into `~/.tron/system/Tron.app/Contents/MacOS/tron`, drops a launchd plist, confirms permissions, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app` plus a bundled LaunchAgent plist, registers it through `SMAppService`, confirms permissions, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
 
 ```
 packages/mac-app/Sources/
-+-- TronMacApp.swift           App entry: branches on ~/.tron/system/.onboarded sentinel
++-- TronMacApp.swift           App entry: branches on ~/.tron/system/run/.onboarded sentinel
 +-- EnvironmentSetup.swift     Dev vs release bundle-ID wiring, log paths, shared state root
 +-- Wizard/                    First-run flow
 |   +-- WizardState.swift      @Observable state machine + `WizardStep` enum
@@ -769,22 +763,24 @@ packages/mac-app/Sources/
 +-- MenuBar/                   NSStatusItem controller, status polling, copy actions, update submenu
 +-- Services/
 |   +-- Server/                Bearer-token reader, `system.ping` client, status poller
-|   +-- Onboarding/            Install planner, permission/Tailscale probes, existing-install detection
-|   +-- Pairing/               Tailscale live probe + auth-token reader; QR + tron:// URL generation
+|   +-- Onboarding/            SMAppService install planner, permission/Tailscale probes, existing-install detection
+|   +-- Pairing/               Tailscale live probe + auth.json bearer-token reader; QR + tron:// URL generation
 |   +-- Feedback/              GitHub issue composer with redacted log context
 |   +-- Observability/         SentryRedactor (shared pattern with iOS)
 |   +-- LaunchAgentManaging.swift
 |   +-- TronPaths.swift        ~/.tron/ path helpers (mirrors Rust `core::foundation::paths`)
 +-- Resources/
-    +-- tron-agent             Bundled server binary (embedded by packages/mac-app/scripts/bundle-agent.sh during CI)
+    +-- Library/
+        +-- LoginItems/Tron Server.app/Contents/MacOS/tron
+        +-- LaunchAgents/com.tron.server.plist
 ```
 
 ### Wizard Steps
 
 1. **Welcome** — introduces Tron.
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
-3. **Install** — detects whether the server is already installed, waits for the explicit Install CTA when work is needed, then prepares and ad-hoc signs the inner `~/.tron/system/Tron.app` server bundle, writes the LaunchAgent plist, keeps the bundled runtime CLI available to diagnostics, bootstraps or kickstarts `com.tron.server`, and polls `system.ping` while ignoring initial `connection.established` frames.
-4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, polls the agent, starts a short-lived grant watcher after wizard-opened Settings panes, and keeps Re-check as a kickstart+probe fallback.
+3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system.ping` answers. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles `requiresApproval` by opening Login Items settings, and polls `system.ping` while ignoring initial `connection.established` frames.
+4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, labels the exact app entry to enable for each permission, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after wizard-opened Settings panes, and keeps Re-check as a non-restarting probe.
 5. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
 6. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
 
@@ -794,48 +790,51 @@ packages/mac-app/Sources/
 |------|--------|
 | Custom status header | Shows `Tron`, the Tailscale endpoint, color-coded state, PID, and live uptime in a compact left-aligned header |
 | Show pairing info | Opens a pairing-only window with QR + manual copy buttons for host, port, token, and server name; copy actions quickly show a checkmark for two seconds on success |
-| Restart / Pause / Resume server | `launchctl kickstart` / `bootout` / `bootstrap`, shows busy state and posts success/failure notifications |
-| Show logs | Opens the native logs window backed by the bundled runtime CLI contract: `tron logs -n 200 -o <tempfile>` |
+| Restart / Pause / Resume server | `launchctl kickstart` for restart diagnostics, `SMAppService.unregister/register` for stop/start, shows busy state and posts success/failure notifications |
+| Show logs | Opens the native logs window backed by the read-only `logs.recent` RPC |
 | Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
-| Check for updates | Opens the latest GitHub Release and best-effort triggers `tron self-update check` |
-| Uninstall Tron | Confirm dialog + `tron uninstall`; optional checkboxes pass `--reset-settings` and/or `--reset-credentials` to remove `settings.json` and/or `auth.json`. The database and workspace are always preserved. |
+| Check for updates | Opens the latest GitHub Release |
+| Uninstall Tron | Confirm dialog + `SMAppService.unregister`; clears `system/run/` runtime state; optional checkboxes remove `settings.json` and/or `auth.json`. The database and workspace are always preserved. |
 | Quit Tron | Quits wrapper; server keeps running via LaunchAgent |
 
 ### Variants & Workflows
 
-The wrapper coexists with the production install and with the `tron dev` agent-only workflow. Three distinct artifacts share `port 9847` and the `~/.tron/system/` data tree:
+The wrapper coexists with local Release testing, Xcode Debug dogfood, and the `tron dev` agent-only workflow. Four workflows share `port 9847` and the `~/.tron/system/` data tree:
 
 | Workflow | Build product | Bundle ID | Lives at | What it is |
 |---|---|---|---|---|
 | **Production (DMG)** | `Tron.app` | `com.tron.mac` | `/Applications/Tron.app` | Notarized SwiftUI wrapper + bundled headless agent — what end users install |
+| **Local Release test** (Xcode Release copied into place) | `Tron.app` | `com.tron.mac` | `/Applications/Tron.app` | Same installed-release path as the DMG; useful for validating local changes before packaging |
 | **Wizard dogfood** (Xcode Run / `xcodebuild -configuration Debug`) | `TronMac.app` | `com.tron.mac.dev` | `~/Library/Developer/Xcode/DerivedData/.../Build/Products/Debug/TronMac.app` | Same SwiftUI wrapper, debug-profile bundled agent — used by contributors testing the UI |
-| **Agent dev** (`tron dev`) | `Tron-Dev.app` (no SwiftUI — just a `.app` wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/system/deployment/Tron-Dev.app` | Headless agent only — used by contributors iterating on the Rust server without rebuilding the wrapper |
+| **Agent dev** (`tron dev`) | `Tron-Dev.app` (no SwiftUI — just a `.app` wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/system/run/Tron-Dev.app` | Headless agent only — used by contributors iterating on the Rust server without rebuilding the wrapper |
 
 Mutual exclusion:
-- Two wrappers (workflows 1 + 2) — guarded by `~/.tron/system/.mac-wrapper.lock` (`fcntl(F_SETLK, F_WRLCK)`); second instance terminates.
+- Multiple wrappers (workflows 1/2/3) — guarded by `~/.tron/system/run/.mac-wrapper.lock` (`fcntl(F_SETLK, F_WRLCK)`); any second instance terminates.
 - Two agents — guarded by `~/.tron/system/database/log.db.lock` (cross-process exclusive `flock`).
-- Port `9847` — `tron dev` calls `launchctl bootout com.tron.server` before binding, so the production agent is paused while dev-mode runs.
+- LaunchAgent ownership — Debug wrapper builds (`com.tron.mac.dev`) outrank installed-release wrappers for contributor dogfood and may stop a lower-priority loaded job before registering their bundled helper. Installed-release wrappers do not take over from a running Debug wrapper.
+- Port `9847` — `tron dev` calls `launchctl bootout com.tron.server` before binding, so the installed helper is paused while dev-mode runs.
+- Direct server guard — if no LaunchAgent owns the service but port `9847` is already bound or `system/database/log.db.lock` is held, the app reports another Tron server instead of registering a second helper or choosing a different port.
 
-A contributor can have the DMG installed AND switch to `tron dev` for agent iteration without uninstalling — the wrapper's menu bar shows "Server stopped" while `tron dev` runs; quitting `tron dev` and re-bootstrapping `com.tron.server` restores production behavior. See [`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants) for the full breakdown including the on-disk artifacts each workflow shares.
+A contributor can have the DMG installed AND switch to `tron dev` for agent iteration without uninstalling — the wrapper's menu bar shows "Server stopped" while `tron dev` runs; quitting `tron dev` restarts the installed helper by invoking `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which re-enters the same `SMAppService` registration path used by the app. Pre-onboarding/debug cleanup uses the paired internal command `--tron-uninstall-and-quit` so stale Login Item registrations are removed by `SMAppService.unregister` instead of only being booted out of launchd. See [`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants) for the full breakdown including the on-disk artifacts each workflow shares.
 
 ### Documentation
 
 - `packages/mac-app/docs/architecture.md` — wizard + menu bar + helper-binary lifecycle
-- `packages/mac-app/docs/development.md` — XcodeGen setup, debug/release schemes, signing identities
+- `packages/mac-app/docs/development.md` — workflow quick reference for Xcode Debug, local Release install testing, `tron dev`, and DMG release, plus XcodeGen/signing setup
 
 ---
 
 ## Permissions
 
-The Mac wizard surfaces three system permissions after the server is installed, because macOS TCC grants need to bind to the launchd-managed agent bundle (`com.tron.server`). Each permission has an "Open System Settings" deep link when revoked.
+The Mac wizard surfaces three system permissions after the server is installed. Each permission has an "Open System Settings" deep link when revoked, and each row names the exact app entry macOS expects in that pane.
 
 | Permission | Why | Required | Probe |
 |------------|-----|----------|-------|
-| Full Disk Access | Agent reads/writes user-selected files and app data outside the sandbox | Yes | Agent RPC snapshot (`system.probePermissions`) |
-| Screen Recording | ComputerUse screenshots and visual inspection | Yes | `CGPreflightScreenCaptureAccess()` in the agent |
-| Accessibility | ComputerUse mouse/keyboard control | Yes | `AXIsProcessTrusted()` in the agent |
+| Full Disk Access | Agent reads/writes user-selected files and app data outside the sandbox | Yes | Wrapper process opens FDA-gated user data |
+| Screen Recording | ComputerUse screenshots and visual inspection | Yes | Wrapper `CGPreflightScreenCaptureAccess()` plus a fresh wrapper probe process |
+| Accessibility | ComputerUse mouse/keyboard control | Yes | `AXIsProcessTrusted()` in the wrapper |
 
-The install step only prepares the signed server bundle, writes/loads the LaunchAgent, and waits for the first heartbeat. The inner app bundle is ad-hoc signed after its `Info.plist` and resources are written so TCC binds grants to `com.tron.server` instead of Cargo's raw executable signature. Ordinary agent startup does not probe TCC or open System Settings, so macOS permission prompts cannot appear while the user is still on the install step. The wizard begins polling `system.probePermissions` only on the Permissions step, about every 2 seconds. When the user clicks the Screen Recording settings button, the wrapper first sends `system.requestPermission` so the agent itself asks macOS for capture access and can appear in the Screen Recording list; then the wrapper opens the Settings pane. Because System Settings can still require manual app insertion, the Screen Recording row also exposes a clickable/draggable `~/.tron/system/Tron.app` shortcut next to the settings button: click reveals it in Finder, drag starts an AppKit file drag with both `public.file-url` and `NSFilenamesPboardType` payloads for the manual-add list. Any wizard-opened Settings pane starts a short-lived watcher that silently kickstarts, waits for the agent, and re-probes until that specific grant turns green; the user-facing Re-check button runs the same refresh and labels it "Checking permissions…" while active.
+The install step validates the signed `Tron Server.app`, registers the bundled LaunchAgent through `SMAppService`, and waits for the first heartbeat. Ordinary agent startup does not probe TCC or open System Settings, so macOS permission prompts cannot appear while the user is still on the install step. The LaunchAgent's `AssociatedBundleIdentifiers` lists the wrapper bundle IDs, so macOS presents the helper's privacy grants under the responsible wrapper app: `Tron.app` in Release and `TronMac.app` in Debug. All three wizard rows therefore name the wrapper app, not `Tron Server.app`. The settings buttons only open System Settings; they never call prompt APIs that would create a second modal over the already-open pane. Screen Recording additionally shows a small draggable wrapper-app icon for the macOS case where the row is not inserted automatically; the row copy tells the user to drag that icon into the list. Re-check/app activation use native non-prompting probes. Screen Recording probes the current wrapper first; if macOS still reports the current process as stale after a Settings change, the wizard starts the same wrapper executable once as a quiet child probe and reads that fresh process result from `~/.tron/system/run/`. Once all three rows are green, Continue restarts the helper one time so launch-time-applied grants are visible to the server before pairing.
 
 ---
 
@@ -849,20 +848,18 @@ tron deploy --force  # Skip uncommitted-changes / test-failure prompts
 tron deploy --ci     # Non-interactive: any failure aborts
 ```
 
-The deploy process (`scripts/tron::cmd_deploy`):
+`tron deploy` is a contributor-only script path and is not the production Mac distribution mechanism. Production releases are the notarized DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG.
+
+The deploy process (`scripts/tron::cmd_deploy`) is retained for local contributor workflows:
 
 1. Aborts if a dev server is bound to the prod port.
 2. Warns on uncommitted changes (errors out under `--ci`).
 3. Builds the release binary (`cargo build --release`).
 4. Runs `cargo test`. Failures prompt for continuation unless `--ci`.
 5. Under `--ci`, also runs the benchmark gate.
-6. Acquires a deploy lock at `~/.tron/system/deployment/deploy.lock`.
-7. Backs up the current binary to `~/.tron/system/deployment/tron.bak`.
-8. Stops the launchd service.
-9. Re-creates the macOS app bundle at `~/.tron/system/Tron.app` with the new binary, codesigns it with the best-available identity (Developer ID Application > Apple Development > ad-hoc), and — when signed with Developer ID and `tron-notarize` credentials exist in Keychain — submits it to Apple's notary service and staples the ticket. Notarization is non-fatal; deploy succeeds even if Apple rejects, the network fails, or credentials are missing. One-time setup: `xcrun notarytool store-credentials "tron-notarize" --apple-id <email> --team-id <TEAM_ID>`.
-10. Deploys the transcription sidecar via `deploy_transcription_sidecar` and syncs managed skills.
-11. Reloads the launchd plist and runs health checks.
-12. Auto-rollback restores `tron.bak` on failure.
+6. Uses contributor-only artifacts directly under `~/.tron/system/run/`.
+7. Syncs managed skills and transcription support.
+8. Runs local health checks for the contributor server.
 
 ### Install Directory
 
@@ -872,18 +869,22 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 ~/.tron/
 +-- skills/                       Global skills (SKILL.md files); managed entries have a .managed sentinel
 +-- system/
-|   +-- Tron.app/                 macOS app bundle (Contents/MacOS/tron is the server binary)
 |   +-- settings.json             Sparse user settings overrides (optional; deep-merged over compiled defaults)
-|   +-- auth.json                 LLM provider OAuth tokens + API keys (mode 600)
-|   +-- auth-token.json           WebSocket bearer token (mode 600, atomic writes; rotated by `tron auth rotate`)
-|   +-- .onboarded                First-run sentinel; presence drives `system.getInfo.paired` (Phase 2)
-|   +-- updater-state.json        Auto-update scheduler state (lastCheckAt, lastInstalledVersion, consecutiveFailures)
-|   +-- updates/                  Staged DMG downloads for `action: "download"` (Phase 5.5)
+|   +-- auth.json                 LLM provider OAuth tokens + API keys + bearerToken (mode 600)
 |   +-- database/                 SQLite event store
 |   |   +-- log.db                Events, sessions, tasks, journals, cron state
 |   |   +-- log.db.lock           OS-level flock sidecar; one Tron process owns it while running
 |   |   +-- journals/             Streaming journals for crash recovery of partial LLM output
-|   +-- deployment/               Dev/deploy/update state only; absent or empty after a normal Mac installer flow
+|   +-- run/                      Mutable runtime state and local contributor artifacts
+|   |   +-- auth.lock             Auth-file refresh lock
+|   |   +-- .mac-wrapper.lock     Mac wrapper single-instance lock
+|   |   +-- .onboarded            First-run sentinel; presence drives `system.getInfo.paired`
+|   |   +-- updater-state.json    Update-check scheduler state (lastCheckAt, latestAvailableVersion, latestDownloadUrl)
+|   |   +-- Tron-Dev.app          Optional `tron dev` headless agent bundle
+|   |   +-- Tron-Deploy.app       Optional contributor shell-service bundle
+|   |   +-- tron-cli              Optional contributor CLI shim symlinked from `~/.local/bin/tron`
+|   |   +-- tron-lib.sh           Optional contributor CLI helper library
+|   |   +-- *.log, *.json, *.bak  Optional contributor run logs, sentinels, and rollback backup
 |   +-- transcription/            Speech-to-text sidecar
 |       +-- worker.py             parakeet-mlx Python worker (stdin/stdout JSON-line protocol)
 |       +-- requirements.txt      Pip deps for the venv
@@ -912,50 +913,47 @@ Notes:
 - Credentials for external CLIs (Google Workspace, etc.) live in `workspace/vault/`. See the relevant skills for the materialization pattern.
 - Additional sentinels at the root of `~/.tron/` toggle worker behavior: `auto-deploy.pause` (contributor-only watcher) and `auto-update.pause` (DMG-user self-updater). Both are managed by the respective `pause`/`resume` CLI subcommands.
 
-### Service (launchd)
+### Service (SMAppService)
 
-Managed by the `com.tron.server` launchd plist. The entry point is the Rust binary inside the macOS app bundle: `~/.tron/system/Tron.app/Contents/MacOS/tron --port 9847 --quiet`. The plist is generated by `scripts/tron install` and lives at `~/Library/LaunchAgents/com.tron.server.plist`.
+The production Mac app registers `com.tron.server` with `SMAppService.agent(plistName: "com.tron.server.plist")`. The notarized app must live at `/Applications/Tron.app`; the bundled LaunchAgent lives inside the app at `Contents/Library/LaunchAgents/com.tron.server.plist`, and its `BundleProgram` points at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` with `ProgramArguments` of `tron --port 9847 --quiet`. `AssociatedBundleIdentifiers` lists the wrapper bundle IDs (`com.tron.mac`, `com.tron.mac.dev`) so Login Items/TCC attribution follows the responsible wrapper app. No production code writes `~/Library/LaunchAgents` or copies an app bundle into `~/.tron/system/`. An enabled Login Item registration without a loaded launchd job is not treated as installed/running; the current app replaces that registration through SMAppService and still waits for the server heartbeat.
+
+Local Release builds use the same path rule: copy the built `Tron.app` to `/Applications/Tron.app` before testing install/registration. If a DMG build is already installed, the local Release build replaces that same slot; stop the wrapper/server before copying, then reopen `/Applications/Tron.app` and restart/resume the helper. Debug Xcode builds use bundle ID `com.tron.mac.dev`, may run from DerivedData for wrapper dogfood, and must be Apple Development signed with a hardened-runtime helper because `SMAppService` can register an ad-hoc bundle but launchd will refuse to spawn it. For agent-only iteration, `tron dev` stops the LaunchAgent, binds port `9847`, and later restores the installed helper through the wrapper's internal `--tron-start-server-and-quit` command so ServiceManagement remains the only registration path.
 
 ### DMG Release Pipeline
 
 End-users install `Tron.app` via a notarized DMG published to GitHub Releases. The pipeline lives at `.github/workflows/release-mac.yml` and triggers on `mac-v*` tag push:
 
-1. Checkout + Rust toolchain cache (`Swatinem/rust-cache`).
-2. Decode `MACOS_CERT_P12_BASE64` secret; import to ad-hoc keychain.
-3. `cargo build --release --bin tron --locked`.
-4. `xcodegen generate` inside `packages/mac-app/`.
-5. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
-6. `packages/mac-app/scripts/bundle-agent.sh` embeds the release binary at `Tron.app/Contents/Resources/tron-agent` and signs it as a helper tool.
-7. Re-sign `Tron.app` with hardened runtime + `TronMac.entitlements`.
-8. `xcrun notarytool submit` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple on success.
-9. Build the DMG with `create-dmg`.
-10. Upload dSYMs to Sentry via `sentry-cli`.
-11. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg` with auto-generated notes.
+1. Checkout + Rust toolchain/cache (`actions-rust-lang/setup-rust-toolchain`).
+2. `cargo build --release --bin tron --locked` in `packages/agent/`.
+3. Install XcodeGen + `create-dmg`.
+4. `packages/mac-app/scripts/bundle-agent.sh --skip-build` stages `packages/agent/target/release/tron` into `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` and writes the bundled LaunchAgent plist.
+5. `xcodegen generate` inside `packages/mac-app/`.
+6. Create an isolated release keychain from the signing/notarization secrets, or fall back to dry-run ad-hoc signing when secrets are absent.
+7. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
+8. Sign the helper app first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
+9. `xcrun notarytool submit` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple on success.
+10. Build the DMG with `create-dmg`.
+11. Upload dSYMs to Sentry via `sentry-cli`.
+12. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg` with auto-generated notes.
 
 A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or the workflow itself. The dry-run stops before notarization (no cert needed) so PR contributors can verify the assembly pipeline without secrets.
 
 **iOS distribution is separate** — use the `/publish` skill (`/publish bump && /publish build`) which handles archive → IPA → asc upload to App ID `6761511764`. TestFlight indefinitely; no App Store submission planned.
 
-### User-mode Auto-update
+### User-mode Update Checks
 
-For users installed via DMG (no git remote), the server polls GitHub Releases and offers updates per the `server.update.*` settings. The module lives at `packages/agent/src/server/updater/mod.rs`; its behavior is test-driven end-to-end under `server/updater/mod_tests.rs`.
+For users installed via DMG (no git remote), the server can poll GitHub Releases and surface the notarized DMG URL per the `server.update.*` settings. The module lives at `packages/agent/src/server/updater/mod.rs`. Installing an update remains a visible replacement of `/Applications/Tron.app` from the notarized DMG; the server does not mutate the signed app bundle or stage update artifacts under `~/.tron`.
 
 | Phase | Action | Effect |
 |-------|--------|--------|
 | Check | `system.checkForUpdates` | Queries `api.github.com/repos/mhismail3/tron/releases`; returns the highest semver allowed by `channel` (`stable` excludes pre-release tags, `beta` includes them). Cached 60s to avoid rate-limit thrash. |
-| Notify | `action: "notify"` | Emits `server.update_available`; iOS banner + menu-bar submenu surface it. No download. |
-| Download | `action: "download"` | Fetches DMG to `~/.tron/system/updates/`, runs `codesign --verify --strict --deep`, emits `server.update_downloaded`. |
-| Install | `action: "install"` | Acquires `~/.tron/system/deployment/deploy.lock`, backs up to `tron.bak`, atomically replaces the binary (`.tmp → fsync → rename`), writes `restart-sentinel.json`, `launchctl kickstart`, post-restart ping; rollback on failure. |
+| Notify | `action: "notify"` | Emits `server.update_available`; iOS banner + menu-bar submenu surface the release and DMG URL. No server-side download. |
 
 Safety invariants (all test-covered):
 
-- Signature verification before any binary swap.
-- Atomic replace via `.tmp + rename` (mirrors `auth/storage.rs` pattern).
-- `consecutiveFailures >= 3` auto-degrades `action` to `notify` and emits `server.update_disabled_after_failures` — the system cannot enter a download-restart-fail loop.
-- Locked behind `deploy.lock` so manual `tron deploy` and auto-update never race.
+- No app-bundle mutation: runtime files stay outside `Tron.app`, and replacing the app is a user-visible DMG install.
 - Skipped if a dev server has taken over port 9847 (same guard as `auto-deploy`).
 - Pause-able via `~/.tron/auto-update.pause` sentinel; `tron self-update pause|resume` manages it.
-- Existing active sessions defer an `install` action for up to 1 hour unless `force-install` is set; deferred installs emit `server.update_deferred` so iOS surfaces "update waiting for idle".
 
 **Contrast with `tron auto-deploy`**: the latter is contributor-only, pulls from `origin/main`, and refuses to run outside a git repo. Users on DMG-installed builds use `tron self-update` exclusively. See [CLI Reference → Deployment](#cli-reference) for the full command surface.
 

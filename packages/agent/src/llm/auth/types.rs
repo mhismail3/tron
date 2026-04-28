@@ -203,6 +203,9 @@ where
 pub struct AuthStorage {
     /// Schema version (always 1).
     pub version: u32,
+    /// WebSocket bearer token used by paired iOS/Mac clients.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bearer_token: Option<String>,
     /// Per-provider auth configuration.
     pub providers: HashMap<String, serde_json::Value>,
     /// Per-service API key configuration.
@@ -220,6 +223,7 @@ impl AuthStorage {
     pub fn new() -> Self {
         Self {
             version: 1,
+            bearer_token: None,
             providers: HashMap::new(),
             services: None,
             last_updated: chrono::Utc::now().to_rfc3339(),

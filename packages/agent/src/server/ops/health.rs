@@ -4,7 +4,6 @@ use std::path::Path;
 use std::time::Instant;
 
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use serde_json::json;
 
 /// Health check response body.
@@ -68,7 +67,6 @@ pub fn deep_health_check(
     sessions: usize,
     pool: &crate::events::ConnectionPool,
     tron_home: &Path,
-    deploy_dir: &Path,
 ) -> DeepHealthResponse {
     let checks = vec![
         // 1. Database
@@ -84,17 +82,8 @@ pub fn deep_health_check(
         // 4. Skills
         check_skills(&tron_home.join(crate::core::paths::dirs::SKILLS)),
         // 5. Binary
-        check_binary(
-            &tron_home
-                .join(crate::core::paths::dirs::SYSTEM)
-                .join(crate::core::paths::dirs::APP_BUNDLE)
-                .join("Contents")
-                .join("MacOS")
-                .join("tron"),
-        ),
-        // 6. Deploy
-        check_deploy(deploy_dir),
-        // 7. Disk
+        check_binary(&crate::core::paths::tron_binary_path()),
+        // 6. Disk
         check_disk(tron_home),
     ];
 
@@ -258,93 +247,6 @@ fn check_binary(path: &Path) -> DeepHealthCheck {
     }
 }
 
-fn check_deploy(deploy_dir: &Path) -> DeepHealthCheck {
-    let sentinel = read_optional_json::<crate::server::deploy::RestartSentinel>(
-        &deploy_dir.join("restart-sentinel.json"),
-    );
-    let last_deploy =
-        read_optional_json::<serde_json::Value>(&deploy_dir.join("last-deployment.json"));
-
-    let mut status = CheckLevel::Ok;
-    let mut detail = serde_json::Map::new();
-
-    match sentinel {
-        OptionalJsonArtifact::Missing => {
-            let _ = detail.insert("sentinelStatus".into(), json!("none"));
-        }
-        OptionalJsonArtifact::Present(sentinel) => {
-            let _ = detail.insert("sentinelStatus".into(), json!(sentinel.status));
-            status = match sentinel.status.as_str() {
-                "completed" => CheckLevel::Ok,
-                "failed" | "rolled_back" => CheckLevel::Fail,
-                _ => CheckLevel::Warn,
-            };
-        }
-        OptionalJsonArtifact::Invalid(error) => {
-            let _ = detail.insert("sentinelStatus".into(), json!("invalid"));
-            let _ = detail.insert("sentinelError".into(), json!(error));
-            status = CheckLevel::Fail;
-        }
-    }
-
-    match last_deploy {
-        OptionalJsonArtifact::Missing => {
-            let _ = detail.insert("lastDeployment".into(), serde_json::Value::Null);
-        }
-        OptionalJsonArtifact::Present(last_deployment) => {
-            let _ = detail.insert("lastDeployment".into(), last_deployment);
-        }
-        OptionalJsonArtifact::Invalid(error) => {
-            let _ = detail.insert("lastDeployment".into(), serde_json::Value::Null);
-            let _ = detail.insert("lastDeploymentError".into(), json!(error));
-            status = status.max(CheckLevel::Warn);
-        }
-    }
-
-    DeepHealthCheck {
-        name: "deploy".into(),
-        status: status.as_str().into(),
-        detail: Some(serde_json::Value::Object(detail)),
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum CheckLevel {
-    Ok,
-    Warn,
-    Fail,
-}
-
-impl CheckLevel {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Ok => "ok",
-            Self::Warn => "warn",
-            Self::Fail => "fail",
-        }
-    }
-}
-
-enum OptionalJsonArtifact<T> {
-    Missing,
-    Present(T),
-    Invalid(String),
-}
-
-fn read_optional_json<T>(path: &Path) -> OptionalJsonArtifact<T>
-where
-    T: DeserializeOwned,
-{
-    match std::fs::read_to_string(path) {
-        Ok(contents) => match serde_json::from_str(&contents) {
-            Ok(value) => OptionalJsonArtifact::Present(value),
-            Err(error) => OptionalJsonArtifact::Invalid(error.to_string()),
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => OptionalJsonArtifact::Missing,
-        Err(error) => OptionalJsonArtifact::Invalid(error.to_string()),
-    }
-}
-
 fn check_disk(tron_home: &Path) -> DeepHealthCheck {
     disk_check_from_result(crate::server::disk::available_megabytes(tron_home))
 }
@@ -377,21 +279,6 @@ fn disk_check_from_result(result: std::io::Result<u64>) -> DeepHealthCheck {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::deploy::{RestartSentinel, write_sentinel};
-
-    fn sample_restart_sentinel(status: &str) -> RestartSentinel {
-        RestartSentinel {
-            action: "deploy".into(),
-            timestamp: "2026-03-12T10:00:00.000Z".into(),
-            commit: "abc123".into(),
-            previous_commit: "def456".into(),
-            status: status.into(),
-            completed_at: None,
-            initiated_by: "api".into(),
-            self_test: None,
-            binary_sha256: None,
-        }
-    }
 
     #[test]
     fn status_is_ok() {
@@ -528,58 +415,6 @@ mod tests {
                 .detail
                 .as_ref()
                 .and_then(|detail| detail.get("error"))
-                .is_some()
-        );
-    }
-
-    #[test]
-    fn deploy_check_fails_when_sentinel_reports_failed() {
-        let dir = tempfile::tempdir().unwrap();
-        write_sentinel(dir.path(), &sample_restart_sentinel("failed")).unwrap();
-
-        let check = check_deploy(dir.path());
-        assert_eq!(check.name, "deploy");
-        assert_eq!(check.status, "fail");
-        assert_eq!(
-            check.detail.as_ref().unwrap()["sentinelStatus"],
-            serde_json::Value::String("failed".into())
-        );
-    }
-
-    #[test]
-    fn deploy_check_warns_on_invalid_last_deployment_json() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("last-deployment.json"), "{ not valid json").unwrap();
-
-        let check = check_deploy(dir.path());
-        assert_eq!(check.name, "deploy");
-        assert_eq!(check.status, "warn");
-        assert!(
-            check
-                .detail
-                .as_ref()
-                .and_then(|detail| detail.get("lastDeploymentError"))
-                .is_some()
-        );
-    }
-
-    #[test]
-    fn deploy_check_fails_on_invalid_sentinel_json() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("restart-sentinel.json"), "{ not valid json").unwrap();
-
-        let check = check_deploy(dir.path());
-        assert_eq!(check.name, "deploy");
-        assert_eq!(check.status, "fail");
-        assert_eq!(
-            check.detail.as_ref().unwrap()["sentinelStatus"],
-            serde_json::Value::String("invalid".into())
-        );
-        assert!(
-            check
-                .detail
-                .as_ref()
-                .and_then(|detail| detail.get("sentinelError"))
                 .is_some()
         );
     }

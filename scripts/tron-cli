@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tron-cli - Universal CLI entrypoint for Tron server management
 #
-# Installed to ~/.tron/system/deployment/tron-cli
+# Installed to ~/.tron/system/run/tron-cli
 # Symlinked from ~/.local/bin/tron
 #
 # Handles runtime commands directly (status, start, stop, logs, uninstall, etc.)
@@ -23,8 +23,8 @@ source "$LIB_DIR/tron-lib.sh"
 
 # Workspace path (recorded by tron install/deploy)
 _WORKSPACE_PATH=""
-if [ -f "$DEPLOY_DIR/workspace-path" ]; then
-    _WORKSPACE_PATH=$(cat "$DEPLOY_DIR/workspace-path")
+if [ -f "$CONTRIBUTOR_DIR/workspace-path" ]; then
+    _WORKSPACE_PATH=$(cat "$CONTRIBUTOR_DIR/workspace-path")
 fi
 
 delegate_to_workspace() {

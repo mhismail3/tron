@@ -4,15 +4,15 @@
 //!
 //! ## What this module owns
 //!
-//! - **`auth-token.json`** at [`crate::core::paths::bearer_token_path()`].
+//! - **`auth.json.bearerToken`** at [`crate::core::paths::auth_path()`].
 //!   A single 32-byte URL-safe-base64 token that gates WebSocket upgrade
 //!   requests when `server.auth.enforced` is true. Generated during
 //!   first server startup; rotated via `tron auth rotate` (CLI) or the
 //!   menu-bar action in the Mac wrapper. File mode is `0o600` and writes
-//!   are atomic via the same `tempfile + sync_all + rename` pattern used
-//!   by `llm::auth::storage` (commit b616eee3 C4).
+//!   are owned by `llm::auth::storage` so provider credentials and the
+//!   pairing bearer share one secure auth document.
 //!
-//! - **`.onboarded`** sentinel at [`crate::core::paths::onboarded_marker_path()`].
+//! - **`run/.onboarded`** sentinel at [`crate::core::paths::onboarded_marker_path()`].
 //!   Empty marker file. Touched by the Mac wizard at the end of its
 //!   install flow OR on the first successful WS auth. The
 //!   `system.getInfo` RPC returns `paired: true` once it exists so iOS
@@ -24,9 +24,9 @@
 //!   without padding (43 chars). The encoding choice means the token is
 //!   safe to embed verbatim in a `tron://pair?token=…` deep link without
 //!   percent-encoding.
-//! - `auth-token.json` is never world-readable. The 0o600 perms are set
-//!   by `tempfile::Builder::tempfile_in` at `open(2)` time, before any
-//!   bytes are written; the atomic `rename` preserves them.
+//! - `auth.json` is never world-readable. The 0o600 perms are set by
+//!   `llm::auth::storage` at `open(2)` time, before any bytes are
+//!   written; the atomic `rename` preserves them.
 //! - Rotation is serialized through a per-process mutex so two
 //!   concurrent `rotate_bearer_token` calls cannot corrupt the file.
 //!   Concurrent reads see a consistent snapshot via the atomic rename
@@ -41,12 +41,15 @@
 
 #![deny(unsafe_code)]
 
-use std::io::{self, Write as _};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use base64::{Engine as _, engine::general_purpose};
 use parking_lot::Mutex;
 use rand::RngCore;
+
+use crate::llm::auth::errors::AuthError;
+use crate::llm::auth::storage::{load_auth_storage, load_or_init_for_write, save_auth_storage};
 
 /// Length of the raw random token in bytes. Encoded as URL-safe base64
 /// without padding, this produces a 43-character string.
@@ -58,12 +61,12 @@ const TOKEN_BYTE_LEN: usize = 32;
 /// a multiple of 4.
 const ENCODED_TOKEN_LEN: usize = 43;
 
-/// Default file path for the bearer token: `~/.tron/system/auth-token.json`.
+/// Default file path for the bearer token: `~/.tron/system/auth.json`.
 pub fn bearer_token_path() -> PathBuf {
-    crate::core::paths::bearer_token_path()
+    crate::core::paths::auth_path()
 }
 
-/// Default file path for the first-run sentinel: `~/.tron/system/.onboarded`.
+/// Default file path for the first-run sentinel: `~/.tron/system/run/.onboarded`.
 pub fn onboarded_marker_path() -> PathBuf {
     crate::core::paths::onboarded_marker_path()
 }
@@ -95,8 +98,14 @@ pub fn load_or_create_bearer_token(path: &Path) -> io::Result<String> {
     if let Some(existing) = read_token(path)? {
         return Ok(existing);
     }
+    let _guard = rotate_lock().lock();
+    if let Some(existing) = read_token(path)? {
+        return Ok(existing);
+    }
+    let mut storage = load_or_init_for_write(path).map_err(auth_error_to_io)?;
     let token = generate_bearer_token();
-    write_token(path, &token)?;
+    storage.bearer_token = Some(token.clone());
+    save_auth_storage(path, &mut storage).map_err(auth_error_to_io)?;
     Ok(token)
 }
 
@@ -110,8 +119,10 @@ pub fn load_or_create_bearer_token(path: &Path) -> io::Result<String> {
 /// the old or the new token, never a partial.
 pub fn rotate_bearer_token(path: &Path) -> io::Result<String> {
     let _guard = rotate_lock().lock();
+    let mut storage = load_or_init_for_write(path).map_err(auth_error_to_io)?;
     let token = generate_bearer_token();
-    write_token(path, &token)?;
+    storage.bearer_token = Some(token.clone());
+    save_auth_storage(path, &mut storage).map_err(auth_error_to_io)?;
     Ok(token)
 }
 
@@ -146,60 +157,32 @@ pub fn mark_onboarded(path: &Path) -> io::Result<()> {
 // Internals
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Read the stored token from disk, returning `None` if the file is
-/// absent. Returns `Err` for any other I/O failure or malformed JSON.
+/// Read the stored token from `auth.json`, returning `None` if the file
+/// or `bearerToken` field is absent. Returns `Err` for any other I/O
+/// failure or malformed JSON.
 fn read_token(path: &Path) -> io::Result<Option<String>> {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e),
+    let Some(storage) = load_auth_storage(path).map_err(auth_error_to_io)? else {
+        return Ok(None);
     };
-    let parsed: serde_json::Value =
-        serde_json::from_str(&raw).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let token = parsed
-        .get("token")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "auth-token.json is missing the required `token` field",
-            )
-        })?
-        .to_string();
-    Ok(Some(token))
+    Ok(storage
+        .bearer_token
+        .and_then(|token| non_empty_token(&token).map(str::to_owned)))
 }
 
-/// Persist the token to `path` atomically with mode `0o600`.
-fn write_token(path: &Path, token: &str) -> io::Result<()> {
-    let json = serde_json::json!({ "token": token }).to_string();
-    let parent = path.parent().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "auth-token path has no parent directory",
-        )
-    })?;
-    std::fs::create_dir_all(parent)?;
-    atomic_write_0600(parent, path, json.as_bytes())
+fn non_empty_token(token: &str) -> Option<&str> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
-/// Atomic 0o600 write. Mirrors the pattern in `llm/auth/storage.rs` —
-/// kept inline (rather than refactored to a shared helper) because each
-/// caller has a different error type and the function is 8 lines.
-///
-/// `tempfile::Builder::tempfile_in` opens with mode `0o600` at `open(2)`
-/// time on Unix, so the file never exists on disk with wider perms even
-/// transiently. `sync_all` is a durability barrier so a power loss
-/// between rename and write doesn't leave an empty token. `persist`
-/// performs the atomic rename within the same parent directory.
-fn atomic_write_0600(parent: &Path, final_path: &Path, contents: &[u8]) -> io::Result<()> {
-    let mut tmp = tempfile::Builder::new()
-        .prefix(".auth-token.tmp.")
-        .tempfile_in(parent)?;
-    tmp.write_all(contents)?;
-    tmp.as_file().sync_all()?;
-    // `persist` returns the now-renamed File; we don't need it.
-    let _persisted = tmp.persist(final_path).map_err(|e| e.error)?;
-    Ok(())
+fn auth_error_to_io(err: AuthError) -> io::Error {
+    match err {
+        AuthError::Io(e) => e,
+        other => io::Error::new(io::ErrorKind::InvalidData, other),
+    }
 }
 
 /// Process-wide rotation mutex. Two concurrent `rotate_bearer_token`
@@ -225,7 +208,7 @@ mod tests {
 
     fn temp_token_path() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("auth-token.json");
+        let path = dir.path().join("auth.json");
         (dir, path)
     }
 
@@ -311,11 +294,22 @@ mod tests {
     }
 
     #[test]
-    fn load_or_create_returns_error_for_missing_token_field() {
+    fn load_or_create_initializes_missing_token_field() {
         let (_dir, path) = temp_token_path();
-        std::fs::write(&path, r#"{"other": "value"}"#).expect("seed");
-        let err = load_or_create_bearer_token(&path).expect_err("missing token field must fail");
-        assert!(err.to_string().contains("token"));
+        std::fs::write(
+            &path,
+            r#"{"version":1,"providers":{},"lastUpdated":"2026-04-27T00:00:00Z"}"#,
+        )
+        .expect("seed");
+        let token = load_or_create_bearer_token(&path).expect("missing bearerToken initializes");
+        assert_eq!(token.len(), ENCODED_TOKEN_LEN);
+        let raw = std::fs::read_to_string(&path).expect("read auth.json");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("auth json");
+        assert_eq!(parsed["bearerToken"], token);
+        assert!(
+            parsed.get("providers").is_some(),
+            "existing auth.json keys must be preserved"
+        );
     }
 
     // ── Permissions ──
@@ -327,7 +321,7 @@ mod tests {
         let (_dir, path) = temp_token_path();
         load_or_create_bearer_token(&path).expect("create");
         let mode = std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "auth-token.json must be 0o600, got {mode:o}");
+        assert_eq!(mode, 0o600, "auth.json must be 0o600, got {mode:o}");
     }
 
     // ── Rotation ──
@@ -472,7 +466,7 @@ mod tests {
     #[test]
     fn mark_onboarded_creates_parent_directory() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let nested = dir.path().join("nested/system/.onboarded");
+        let nested = dir.path().join("nested/system/run/.onboarded");
         assert!(!nested.parent().unwrap().exists());
         mark_onboarded(&nested).expect("mark with missing parent");
         assert!(nested.exists());
@@ -484,7 +478,7 @@ mod tests {
     fn bearer_token_path_lives_under_system_dir() {
         let p = bearer_token_path();
         let s = p.to_string_lossy();
-        assert!(s.ends_with("/auth-token.json"), "got: {s}");
+        assert!(s.ends_with("/auth.json"), "got: {s}");
         assert!(
             s.contains("/.tron/system/"),
             "must live under ~/.tron/system/, got: {s}"
@@ -495,10 +489,10 @@ mod tests {
     fn onboarded_marker_path_lives_under_system_dir() {
         let p = onboarded_marker_path();
         let s = p.to_string_lossy();
-        assert!(s.ends_with("/.onboarded"), "got: {s}");
+        assert!(s.ends_with("/run/.onboarded"), "got: {s}");
         assert!(
-            s.contains("/.tron/system/"),
-            "must live under ~/.tron/system/, got: {s}"
+            s.contains("/.tron/system/run/"),
+            "must live under ~/.tron/system/run/, got: {s}"
         );
     }
 }

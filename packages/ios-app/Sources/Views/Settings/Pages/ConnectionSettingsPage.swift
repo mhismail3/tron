@@ -142,7 +142,7 @@ struct ConnectionSettingsPage: View {
                     .padding(.vertical, 14)
                 }
 
-                SettingsCaption(text: "Tokens live in `~/.tron/system/auth-token.json` on your Mac. Rotate from the menu bar or with `tron auth rotate`.")
+                SettingsCaption(text: "Tokens live in `~/.tron/system/auth.json` on your Mac. Rotate from the menu bar or with `tron auth rotate`.")
             }
 
             // Tailscale identity (read-only display when populated)

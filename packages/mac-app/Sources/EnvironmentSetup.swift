@@ -8,8 +8,9 @@ import SwiftUI
 /// without touching the host system.
 struct EnvironmentSetup: Sendable {
     var tronHome: URL
-    var installedBundle: URL
-    var installedBinary: URL
+    var applicationBundle: URL
+    var serverHelperBundle: URL
+    var serverHelperBinary: URL
     var bearerTokenPath: URL
     var onboardedMarkerPath: URL
     var settingsPath: URL
@@ -20,7 +21,7 @@ struct EnvironmentSetup: Sendable {
     /// Returns true if the on-disk first-run sentinel exists.
     var onboardedSentinelExists: @Sendable () -> Bool
 
-    /// Reads the bearer token from `~/.tron/system/auth-token.json`.
+    /// Reads the bearer token from `~/.tron/system/auth.json`.
     /// Returns nil if missing/unreadable.
     var readBearerToken: @Sendable () -> String?
 
@@ -39,27 +40,23 @@ struct EnvironmentSetup: Sendable {
     /// returns at least one address.
     var probeTailscale: @Sendable () async -> TailscaleStatus
 
-    /// Probes the three onboarding-relevant TCC permissions. None of the
-    /// probes block; "notDetermined" means the user has not yet been
-    /// prompted by Settings.
-    var probePermission: @Sendable (Permission) async -> PermissionStatus
+    /// Probes all three wizard permissions from the wrapper process.
+    /// The LaunchAgent associates the helper with the wrapper bundle IDs,
+    /// so macOS presents and evaluates these TCC rows under `Tron.app`
+    /// / `TronMac.app`. Keeping probes here avoids stale helper rows in
+    /// System Settings and makes Re-check instantaneous.
+    var probePermissions: @Sendable () async -> [Permission: PermissionStatus]
 
-    /// Probes all three wizard permissions against the AGENT process
-    /// via `system.probePermissions`. The agent is the binary that
-    /// actually runs the Computer-Use tool and the filesystem tools, so
-    /// this is the authoritative read for the Permissions wizard step.
-    /// Returns `.probeUnavailable` per-permission when the server is
-    /// unreachable (e.g. mid-`launchctl kickstart`).
-    var probeAgentPermissions: @Sendable () async -> [Permission: PermissionStatus]
-
-    /// Asks the AGENT process to create a macOS TCC prompt/list row for
-    /// a permission that requires the target binary to request access.
-    /// This is user-initiated only; probes remain non-prompting.
-    var requestAgentPermission: @Sendable (Permission) async -> Bool
-
-    /// Detects whether a CLI-installed Tron is already present at the
-    /// canonical paths.
+    /// Detects whether the bundled Login Item is registered and usable.
     var detectExistingInstall: @Sendable () -> ExistingInstallStatus
+
+    /// Returns a user-facing problem when the release app is not running
+    /// from `/Applications/Tron.app`.
+    var validateApplicationLocation: @Sendable () -> String?
+
+    /// Returns a user-facing problem when the embedded helper, LaunchAgent
+    /// plist, or helper signature is missing/corrupt.
+    var validateBundledHelper: @Sendable () -> String?
 
     /// Performs a single `system.ping` against the running server.
     /// Returns a classified `ServerPingResult` so the caller can
@@ -72,17 +69,14 @@ struct EnvironmentSetup: Sendable {
     /// LaunchAgent control surface - load/unload/restart/check.
     var launchAgentManager: LaunchAgentManaging
 
-    /// Removes installer-owned launch artifacts after a failed or stale
-    /// partial install. Preserves auth, settings, and database state.
-    var cleanupInstallArtifacts: @Sendable () async -> InstallCleanupOutcome
-
-    /// Touches the `.onboarded` sentinel atomically.
+    /// Touches the `~/.tron/system/run/.onboarded` sentinel atomically.
     var touchOnboardedSentinel: @Sendable () throws -> Void
 
     static let live = EnvironmentSetup(
         tronHome: TronPaths.tronHome,
-        installedBundle: TronPaths.installedBundle,
-        installedBinary: TronPaths.installedBinary,
+        applicationBundle: TronPaths.applicationBundle,
+        serverHelperBundle: TronPaths.serverHelperBundle,
+        serverHelperBinary: TronPaths.serverHelperBinary,
         bearerTokenPath: TronPaths.bearerTokenPath,
         onboardedMarkerPath: TronPaths.onboardedMarkerPath,
         settingsPath: TronPaths.settingsPath,
@@ -111,40 +105,22 @@ struct EnvironmentSetup: Sendable {
         probeTailscale: {
             await TailscaleProbe.probe()
         },
-        probePermission: { permission in
-            await PermissionProbe.probe(permission)
-        },
-        probeAgentPermissions: {
-            await PermissionProbeRPC.probeAll(
-                host: "127.0.0.1",
-                port: TronPaths.defaultServerPort,
-                token: BearerTokenReader.read(at: TronPaths.bearerTokenPath)
-            )
-        },
-        requestAgentPermission: { permission in
-            await PermissionRequestRPC.request(
-                permission,
-                host: "127.0.0.1",
-                port: TronPaths.defaultServerPort,
-                token: BearerTokenReader.read(at: TronPaths.bearerTokenPath)
-            )
+        probePermissions: {
+            await MacPermissionProbe.probeAll()
         },
         detectExistingInstall: {
             ExistingInstallDetector.detect()
+        },
+        validateApplicationLocation: {
+            ExistingInstallDetector.validateApplicationLocation()
+        },
+        validateBundledHelper: {
+            ExistingInstallDetector.validateBundledHelper()
         },
         pingServer: { token in
             await ServerPing.ping(host: "127.0.0.1", port: TronPaths.defaultServerPort, token: token)
         },
         launchAgentManager: LiveLaunchAgentManager(),
-        cleanupInstallArtifacts: {
-            await InstallArtifactCleaner.clean(
-                installedBundle: TronPaths.installedBundle,
-                launchAgentPlistPath: TronPaths.launchAgentPlistPath,
-                launchAgentManager: LiveLaunchAgentManager(),
-                label: TronPaths.launchAgentLabel,
-                emptyDirectoriesToRemove: [TronPaths.deploymentDir]
-            )
-        },
         touchOnboardedSentinel: {
             try OnboardedSentinelWriter.touch(at: TronPaths.onboardedMarkerPath)
         }

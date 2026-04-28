@@ -86,16 +86,10 @@ pub(crate) fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry 
         tron::tools::ui::get_confirmation::GetConfirmationTool::new(),
     ));
 
-    // 9: NotifyApp — direct APNS, relay, or stub fallback
+    // 9: NotifyApp — relay or stub fallback
     let notify_delegate: Arc<dyn tron::tools::traits::NotifyDelegate> = {
         #[cfg(feature = "apns")]
         match config.push_service {
-            Some(crate::PushService::Direct(ref apns)) => Arc::new(
-                tron::server::platform::apns::delegate::ApnsNotifyDelegate::new(
-                    apns.clone(),
-                    config.event_store.clone(),
-                ),
-            ),
             Some(crate::PushService::Relay(ref relay)) => Arc::new(
                 tron::server::platform::apns::relay_delegate::RelayNotifyDelegate::new(
                     relay.clone(),

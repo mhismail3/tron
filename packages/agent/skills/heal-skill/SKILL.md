@@ -106,9 +106,9 @@ Check all `~/.tron/` paths in the skill content against the **PATH REFERENCE** t
 | `~/.tron/database/tron.db` | `~/.tron/system/database/log.db` (DATABASE) |
 | `~/.tron/settings.json` | `~/.tron/system/settings.json` (SETTINGS) |
 | `~/.tron/auth.json` | `~/.tron/system/auth.json` (AUTH) |
-| `~/.tron/tron` (binary) | `~/.tron/system/Tron.app/Contents/MacOS/tron` (BINARY) |
-| `~/.tron/artifacts/` | `~/.tron/system/deployment/` (DEPLOYMENT) |
-| `~/.tron/artifacts/deployment/` | `~/.tron/system/deployment/` (DEPLOYMENT) |
+| `~/.tron/tron` (binary) | `/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` (production helper binary) |
+| `~/.tron/artifacts/` | *(remove; no production artifacts directory)* |
+| `~/.tron/artifacts/deployment/` | *(remove; no production artifacts directory)* |
 | `~/.tron/knowledge/` | `~/.tron/workspace/knowledge/` (KNOWLEDGE) |
 | `~/.tron/database/` | `~/.tron/system/database/` (DATABASE) |
 

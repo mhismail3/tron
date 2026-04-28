@@ -11,7 +11,13 @@ struct TronMacApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            Group {
+                if MacCommandLineMode.current.isCommand {
+                    CommandModeHostView()
+                } else {
+                    RootView()
+                }
+            }
                 .environment(\.environmentSetup, EnvironmentSetup.live)
                 // App-wide tint — every system control (focus rings,
                 // default buttons, toggles) inherits emerald instead
@@ -44,7 +50,6 @@ struct TronMacApp: App {
                     window.backgroundColor = .clear
                     window.titlebarAppearsTransparent = true
                     window.titleVisibility = .hidden
-                    window.isMovableByWindowBackground = true
                     window.styleMask.insert(.fullSizeContentView)
                     // Strip the resize affordance entirely — paired with
                     // the fixed `.frame(...)` and `.contentSize`
@@ -68,7 +73,7 @@ struct TronMacApp: App {
 
 /// Top-level switcher between Wizard and Menu Bar modes.
 ///
-/// Decision rule: presence of the `~/.tron/system/.onboarded` sentinel.
+/// Decision rule: presence of the `~/.tron/system/run/.onboarded` sentinel.
 /// - Missing → wizard window.
 /// - Present → window dismisses; AppDelegate transforms the process to
 ///   `.accessory` and installs the menu bar item.
@@ -143,6 +148,24 @@ struct MenuBarHostView: View {
     }
 }
 
+struct CommandModeHostView: View {
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .onAppear {
+                switch MacCommandLineMode.current {
+                case .probeScreenRecordingAndQuit:
+                    NSApp.setActivationPolicy(.prohibited)
+                case .startServerAndQuit, .uninstallAndQuit, .normal:
+                    NSApp.setActivationPolicy(.accessory)
+                }
+                for window in NSApp.windows {
+                    window.orderOut(nil)
+                }
+            }
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
@@ -150,6 +173,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var wizardCompletionObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        switch MacCommandLineMode.current {
+        case .startServerAndQuit:
+            startServerAndQuit()
+            return
+        case .uninstallAndQuit:
+            uninstallAndQuit()
+            return
+        case .probeScreenRecordingAndQuit(let resultPath):
+            probeScreenRecordingAndQuit(resultPath: resultPath)
+            return
+        case .normal:
+            break
+        }
+
         // Skip the single-instance lock when running under XCTest. The
         // test host app launches inside `xcodebuild test` and would
         // otherwise refuse to start whenever a real Tron.app is running
@@ -193,6 +230,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    private func startServerAndQuit() {
+        NSApp.setActivationPolicy(.accessory)
+        Task { @MainActor in
+            defer { NSApp.terminate(nil) }
+            let setup = EnvironmentSetup.live
+            if let problem = setup.validateApplicationLocation() {
+                NSLog("[Tron] Cannot start server from command mode: %@", problem)
+                return
+            }
+            if let problem = setup.validateBundledHelper() {
+                NSLog("[Tron] Cannot start server from command mode: %@", problem)
+                return
+            }
+
+            let outcome = await setup.launchAgentManager.load(
+                plistPath: setup.launchAgentPlistPath,
+                label: TronPaths.launchAgentLabel
+            )
+            if outcome == .alreadyLoaded {
+                _ = await setup.launchAgentManager.restart(label: TronPaths.launchAgentLabel)
+            } else if outcome != .ok {
+                NSLog("[Tron] Command-mode server start returned %@", String(describing: outcome))
+            }
+        }
+    }
+
+    private func uninstallAndQuit() {
+        NSApp.setActivationPolicy(.accessory)
+        Task { @MainActor in
+            defer { NSApp.terminate(nil) }
+            let outcome = await TronUninstaller.unregisterAndClean(setup: EnvironmentSetup.live)
+            switch outcome {
+            case .ok, .alreadyLoaded:
+                NSLog("[Tron] Unregistered Tron Server")
+            case .requiresApproval(let message), .launchdRefused(let message), .unknown(let message):
+                NSLog("[Tron] Command-mode uninstall failed: %@", message)
+            case .binaryMissing(let path):
+                NSLog("[Tron] Command-mode uninstall missing helper: %@", path)
+            }
+        }
+    }
+
+    private func probeScreenRecordingAndQuit(resultPath: String?) {
+        NSApp.setActivationPolicy(.prohibited)
+        for window in NSApp.windows {
+            window.orderOut(nil)
+        }
+        MacPermissionProbe.writeCurrentScreenRecordingProbeResult(to: resultPath)
+        NSApp.terminate(nil)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

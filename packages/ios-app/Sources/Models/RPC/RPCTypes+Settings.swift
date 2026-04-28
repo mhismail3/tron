@@ -15,34 +15,30 @@ struct ServerSettings: Decodable {
     /// Whether the server enforces bearer-token WebSocket auth.
     /// `false` (default) means iOS may connect without an `Authorization`
     /// header. `true` means a header must be present and match
-    /// `~/.tron/system/auth-token.json`. iOS reads this purely so the
+    /// `~/.tron/system/auth.json` (`bearerToken`). iOS reads this purely so the
     /// Settings UI can display the current state and let the user toggle it.
     let authEnforced: Bool
     /// Cached Tailscale IP (e.g. `100.x.y.z`) the server reported. Populated by
     /// the Mac wrapper / install scripts. Optional — older servers don't set it.
     let tailscaleIp: String?
 
-    // MARK: - Auto-Update (Phase 5.5)
+    // MARK: - Update Checks
     //
-    // Five-field block under `server.update`. Defaults mirror
+    // Four-field block under `server.update`. Defaults mirror
     // `packages/agent/src/settings/types/server.rs::UpdateSettings::default()`:
-    // opt-in, stable channel, daily check, notify-only, allow auto-rollback.
+    // opt-in, stable channel, daily check, notify-only.
     // Strings are kept as raw wire values so the `Picker` bindings can stay
     // in lockstep with the iOS `UpdateChannel` / `UpdateFrequency` /
     // `UpdateAction` enums declared further down.
 
-    /// Master switch for the user-mode auto-updater. Default `false` (opt-in).
+    /// Master switch for user-mode update checks. Default `false` (opt-in).
     let updateEnabled: Bool
     /// `"stable"` | `"beta"`.
     let updateChannel: String
     /// `"manual"` | `"startup"` | `"hourly"` | `"daily"` | `"weekly"`.
     let updateFrequency: String
-    /// `"notify"` | `"download"` | `"install"`.
+    /// `"notify"`.
     let updateAction: String
-    /// When a freshly-installed version fails its post-install self-test,
-    /// automatically rollback to the previous binary. Mirrors the existing
-    /// `tron rollback` path used by `cmd_deploy`.
-    let updateAllowDowngradeOnRollback: Bool
 
     let compaction: CompactionSettings
     let rules: RulesSettings
@@ -137,7 +133,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum UpdateKeys: String, CodingKey {
-        case enabled, channel, frequency, action, allowDowngradeOnRollback
+        case enabled, channel, frequency, action
     }
 
     private enum ContextKeys: String, CodingKey {
@@ -162,7 +158,7 @@ struct ServerSettings: Decodable {
             } else {
                 authEnforced = false
             }
-            // server.update.* — Phase 5.5 user-mode auto-updater. The whole
+            // server.update.* — user-mode update checks/downloads. The whole
             // block is optional; missing entries fall through to the same
             // defaults as the Rust `UpdateSettings::default()`.
             if let updateContainer = try? serverContainer.nestedContainer(keyedBy: UpdateKeys.self, forKey: .update) {
@@ -170,13 +166,11 @@ struct ServerSettings: Decodable {
                 updateChannel = (try? updateContainer.decodeIfPresent(String.self, forKey: .channel)) ?? "stable"
                 updateFrequency = (try? updateContainer.decodeIfPresent(String.self, forKey: .frequency)) ?? "daily"
                 updateAction = (try? updateContainer.decodeIfPresent(String.self, forKey: .action)) ?? "notify"
-                updateAllowDowngradeOnRollback = (try? updateContainer.decodeIfPresent(Bool.self, forKey: .allowDowngradeOnRollback)) ?? true
             } else {
                 updateEnabled = false
                 updateChannel = "stable"
                 updateFrequency = "daily"
                 updateAction = "notify"
-                updateAllowDowngradeOnRollback = true
             }
         } else {
             defaultWorkspace = nil
@@ -187,7 +181,6 @@ struct ServerSettings: Decodable {
             updateChannel = "stable"
             updateFrequency = "daily"
             updateAction = "notify"
-            updateAllowDowngradeOnRollback = true
         }
         defaultModel = decodedDefaultModel
 
@@ -390,7 +383,7 @@ enum GitMergeStrategy: String, Encodable {
     }
 }
 
-// MARK: - Auto-Update Enums (Phase 5.5)
+// MARK: - Update Enums
 //
 // Must match the Rust `UpdateChannel`, `UpdateFrequency`, `UpdateAction`
 // enums in `packages/agent/src/server/updater/mod.rs` character-for-character
@@ -430,7 +423,7 @@ enum UpdateFrequency: String, Encodable, CaseIterable {
 }
 
 enum UpdateAction: String, Encodable, CaseIterable {
-    case notify, download, install
+    case notify
 
     static func from(_ raw: String?) -> Self? {
         raw.flatMap { Self(rawValue: $0) }
@@ -439,8 +432,6 @@ enum UpdateAction: String, Encodable, CaseIterable {
     var displayName: String {
         switch self {
         case .notify: return "Notify when available"
-        case .download: return "Download in background"
-        case .install: return "Auto-install"
         }
     }
 }
@@ -465,7 +456,7 @@ struct ServerSettingsUpdate: Encodable {
         /// `settings/storage/loader.rs::deep_merge`) so iOS sends the full
         /// post-edit list whenever it adds, removes, or renames a preset.
         var connectionPresets: [ConnectionPreset]?
-        /// Partial update for the user-mode auto-updater (Phase 5.5).
+        /// Partial update for user-mode update checks/downloads.
         /// Only the fields the user actually changed are set; the encoder
         /// drops `nil` so the server's deep-merge preserves everything else.
         var update: UpdateUpdate?
@@ -479,7 +470,6 @@ struct ServerSettingsUpdate: Encodable {
             var channel: UpdateChannel?
             var frequency: UpdateFrequency?
             var action: UpdateAction?
-            var allowDowngradeOnRollback: Bool?
         }
     }
 

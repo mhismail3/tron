@@ -1,8 +1,7 @@
 //! Shared helpers for push notification delegates.
 //!
-//! Extracted from [`ApnsNotifyDelegate`](super::delegate::ApnsNotifyDelegate) so both
-//! the direct and relay delegates share identical token-query, notification-conversion,
-//! and result-processing logic.
+//! Shared by the relay delegate and cron push notifier so they use identical
+//! token-query, notification-conversion, and result-processing logic.
 //!
 //! Key functions:
 //! - [`group_tokens`] — split the active-tokens list by `(environment, bundle_id)`.
@@ -266,7 +265,7 @@ pub(crate) fn process_send_results(
         message: Some(message),
         success_count: u32::try_from(success_count).unwrap_or(u32::MAX),
         total_count: u32::try_from(total).unwrap_or(u32::MAX),
-        // Real delegates (direct APNs + relay) don't stub — no warning.
+        // Real relay delivery doesn't stub — no warning.
         warning: None,
     }
 }

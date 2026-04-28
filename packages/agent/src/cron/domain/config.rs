@@ -76,7 +76,7 @@ pub fn save_config(path: &Path, backup_path: &Path, config: &CronConfig) -> Resu
     file.write_all(content.as_bytes())?;
     file.sync_all()?;
 
-    // Backup existing file to deployment directory
+    // Backup existing file beside the automations config.
     if path.exists() {
         if let Some(parent) = backup_path.parent() {
             std::fs::create_dir_all(parent)?;

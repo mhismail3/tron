@@ -44,6 +44,117 @@ struct MockLaunchAgentManagerTests {
         _ = await mock.isLoaded(label: "x")
         #expect(mock.calls.map(\.kind) == [.load, .unload, .restart, .isLoaded])
     }
+
+    @Test("live manager attempts registration when preflight status is notFound")
+    func liveManagerAttemptsRegisterOnNotFoundAfterDiskValidation() {
+        let outcome = LiveLaunchAgentManager.preRegistrationOutcome(for: .notFound)
+        #expect(outcome == nil)
+    }
+
+    @Test("live manager short-circuits already enabled or approval-required services")
+    func liveManagerShortCircuitsTerminalPreflightStates() {
+        #expect(
+            LiveLaunchAgentManager.preRegistrationOutcome(
+                for: .enabled,
+                currentVariant: .installedRelease,
+                runningParentBundleIdentifier: "com.tron.mac"
+            ) == .alreadyLoaded
+        )
+        #expect(
+            LiveLaunchAgentManager.preRegistrationOutcome(for: .requiresApproval)
+                == .requiresApproval(message: "Approve Tron Server in Login Items to finish installation.")
+        )
+    }
+
+    @Test("enabled service without loaded launchd job is re-registered")
+    func enabledServiceWithoutLoadedJobIsNotReady() {
+        #expect(
+            LiveLaunchAgentManager.preRegistrationOutcome(
+                for: .enabled,
+                currentVariant: .xcodeDebug(bundlePath: "/tmp/Debug/TronMac.app"),
+                runningParentBundleIdentifier: nil
+            ) == nil
+        )
+    }
+
+    @Test("debug wrapper may take over installed release service")
+    func debugWrapperMayTakeOverReleaseService() {
+        let variant = MacRuntimeVariant.xcodeDebug(bundlePath: "/tmp/Debug/Tron.app")
+        #expect(
+            LiveLaunchAgentManager.preRegistrationOutcome(
+                for: .notRegistered,
+                currentVariant: variant,
+                runningParentBundleIdentifier: "com.tron.mac"
+            ) == nil
+        )
+        #expect(
+            LiveLaunchAgentManager.shouldBootoutForTakeover(
+                status: .notRegistered,
+                currentVariant: variant,
+                runningParentBundleIdentifier: "com.tron.mac"
+            )
+        )
+    }
+
+    @Test("installed release does not take over debug wrapper")
+    func installedReleaseDoesNotTakeOverDebugWrapper() {
+        #expect(
+            LiveLaunchAgentManager.preRegistrationOutcome(
+                for: .notRegistered,
+                currentVariant: .installedRelease,
+                runningParentBundleIdentifier: "com.tron.mac.dev"
+            ) == .launchdRefused(message: "Tron Server is currently managed by com.tron.mac.dev. Stop that build before installing this one.")
+        )
+        #expect(
+            !LiveLaunchAgentManager.shouldBootoutForTakeover(
+                status: .enabled,
+                currentVariant: .installedRelease,
+                runningParentBundleIdentifier: "com.tron.mac.dev"
+            )
+        )
+    }
+
+    @Test("external direct server blocks registration")
+    func externalDirectServerBlocksRegistration() {
+        #expect(
+            LiveLaunchAgentManager.shouldRefuseExternalServer(
+                status: .notRegistered,
+                runningParentBundleIdentifier: nil,
+                portBound: true,
+                databaseLockHeld: false
+            )
+        )
+        #expect(
+            LiveLaunchAgentManager.shouldRefuseExternalServer(
+                status: .notFound,
+                runningParentBundleIdentifier: nil,
+                portBound: false,
+                databaseLockHeld: true
+            )
+        )
+        #expect(
+            !LiveLaunchAgentManager.shouldRefuseExternalServer(
+                status: .notRegistered,
+                runningParentBundleIdentifier: "com.tron.mac",
+                portBound: true,
+                databaseLockHeld: true
+            )
+        )
+    }
+
+    @Test("unregistration is idempotent when ServiceManagement is already clear")
+    func unregistrationPreflightHandlesAlreadyClearState() {
+        #expect(
+            LiveLaunchAgentManager.preUnregistrationOutcome(for: .notRegistered) == .ok
+        )
+        if case .binaryMissing(let path) = LiveLaunchAgentManager.preUnregistrationOutcome(for: .notFound) {
+            #expect(path.hasSuffix("/Contents/Library/LaunchAgents/com.tron.server.plist"))
+        } else {
+            Issue.record("Expected missing LaunchAgent plist to block unregister")
+        }
+        #expect(LiveLaunchAgentManager.preUnregistrationOutcome(for: .enabled) == nil)
+        #expect(LiveLaunchAgentManager.preUnregistrationOutcome(for: .requiresApproval) == nil)
+    }
 }
 
 @Suite("InstallLaunchAgentRunner")

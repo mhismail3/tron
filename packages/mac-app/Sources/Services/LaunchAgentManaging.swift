@@ -6,6 +6,7 @@ import Foundation
 enum LaunchAgentOutcome: Equatable, Sendable {
     case ok
     case alreadyLoaded
+    case requiresApproval(message: String)
     case launchdRefused(message: String)
     case binaryMissing(path: String)
     case unknown(message: String)
@@ -14,20 +15,33 @@ enum LaunchAgentOutcome: Equatable, Sendable {
 struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     var pid: Int?
     var uptime: String?
+    var parentBundleIdentifier: String?
+    var programIdentifier: String?
+
+    init(
+        pid: Int? = nil,
+        uptime: String? = nil,
+        parentBundleIdentifier: String? = nil,
+        programIdentifier: String? = nil
+    ) {
+        self.pid = pid
+        self.uptime = uptime
+        self.parentBundleIdentifier = parentBundleIdentifier
+        self.programIdentifier = programIdentifier
+    }
 }
 
-/// Indirection over `launchctl` so the wizard's install step is
-/// testable without actually invoking the system launchd. Mocks live in
-/// `Tests/Mocks/MockLaunchAgentManager.swift`.
+/// Indirection over `SMAppService` and launchd diagnostics so the
+/// wizard's install step is testable without mutating Login Items.
+/// Mocks live in `Tests/Mocks/MockLaunchAgentManager.swift`.
 protocol LaunchAgentManaging: Sendable {
-    /// `launchctl bootstrap gui/$UID/<plistPath>` — installs the agent.
-    /// Returns `.alreadyLoaded` if launchd already has the label. The
-    /// install wizard treats that as a stale-job signal and follows with
-    /// `restart(label:)` so launchd consumes the plist/binary just written.
+    /// `SMAppService.agent(plistName:).register()` — registers the
+    /// bundled LaunchAgent. Returns `.requiresApproval` when macOS is
+    /// waiting for the user to approve the Login Item.
     func load(plistPath: URL, label: String) async -> LaunchAgentOutcome
 
-    /// `launchctl bootout gui/$UID/<label>` — removes the agent. Safe to
-    /// call when not loaded.
+    /// `SMAppService.agent(plistName:).unregister()` — removes the
+    /// bundled Login Item registration. Safe to call when not registered.
     func unload(label: String) async -> LaunchAgentOutcome
 
     /// `launchctl kickstart -k gui/$UID/<label>` — restarts the agent.

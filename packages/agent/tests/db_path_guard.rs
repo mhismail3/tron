@@ -8,6 +8,14 @@ use tron::settings::db_path_policy::{
     validate_production_db_path_for_home,
 };
 
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("packages/agent has a repo root")
+        .to_path_buf()
+}
+
 fn setup_home() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");
@@ -110,4 +118,30 @@ fn startup_migrations_only_touch_log_db() {
         "log.db should contain schema after migration"
     );
     assert_eq!(untouched_before, file_signature(&untouched));
+}
+
+#[test]
+fn contributor_scripts_keep_runtime_artifacts_under_system_run() {
+    let root = repo_root();
+    let scripts = [
+        root.join("scripts/tron-lib.sh"),
+        root.join("scripts/tron"),
+        root.join("scripts/tron-cli"),
+        root.join("scripts/auto-deploy"),
+    ];
+
+    for script in scripts {
+        let body = std::fs::read_to_string(&script)
+            .unwrap_or_else(|e| panic!("read {}: {e}", script.display()));
+        assert!(
+            !body.contains("system/deployment"),
+            "{} must not recreate the old deployment directory",
+            script.display()
+        );
+    }
+
+    let tron_lib = std::fs::read_to_string(root.join("scripts/tron-lib.sh")).unwrap();
+    assert!(tron_lib.contains("RUN_DIR=\"$TRON_HOME/system/run\""));
+    assert!(tron_lib.contains("CONTRIBUTOR_DIR=\"$RUN_DIR\""));
+    assert!(tron_lib.contains("DEV_BUNDLE=\"$RUN_DIR/Tron-Dev.app\""));
 }

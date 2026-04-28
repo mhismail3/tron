@@ -12,7 +12,12 @@ struct SystemPingResult: Decodable {
     let pong: Bool
 }
 
-// MARK: - Auto-Update (Phase 5.5)
+struct SystemPingParams: Encodable {
+    let protocolVersion: Int
+    let clientVersion: String
+}
+
+// MARK: - Update Checks
 
 /// Result of `system.checkForUpdates` — a forced GitHub Releases probe.
 ///
@@ -51,32 +56,15 @@ struct SystemUpdateStatusResult: Decodable {
     let action: String
     /// Master enabled flag.
     let enabled: Bool
-    /// Allow auto-rollback flag.
-    let allowDowngradeOnRollback: Bool
     /// RFC3339 timestamp of the last check attempt. `nil` if never checked.
     let lastCheckAt: String?
     /// Last version the updater installed (if any). `nil` if never installed.
     let lastInstalledVersion: String?
-    /// Running count of post-install failures. When this hits 3, `action`
-    /// auto-degrades to `notify`.
-    let consecutiveFailures: Int
     /// Latest known version from the most recent successful check. `nil`
     /// if no check has landed yet.
     let latestAvailableVersion: String?
     /// Latest known download URL.
     let latestDownloadUrl: String?
-}
-
-/// Result of `system.applyUpdate` — kicks off the action pipeline
-/// (download or install, depending on the configured action).
-struct SystemApplyUpdateResult: Decodable {
-    /// `"started"` means the server is now working. Progress is streamed
-    /// through the normal event pipeline (`server.update_downloaded`,
-    /// `server.update_installed`, `server.update_failed`).
-    /// `"noop"` means there was nothing to apply (no staged update).
-    let status: String
-    /// Short human-readable note surfaced inline in the iOS toast.
-    let message: String?
 }
 
 // MARK: - Diagnostics (debug / beta only)

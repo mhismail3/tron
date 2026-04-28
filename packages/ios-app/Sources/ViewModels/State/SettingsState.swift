@@ -91,9 +91,9 @@ final class SettingsState {
     /// Mac wrapper).
     var tailscaleIp: String? = nil
 
-    // MARK: - Auto-Update (Phase 5.5)
+    // MARK: - Update Checks
 
-    /// Master switch for the user-mode auto-updater. Default `false` (opt-in).
+    /// Master switch for user-mode update checks. Default `false` (opt-in).
     var updateEnabled: Bool = false
     /// Release channel: `"stable"` (latest GitHub release) or `"beta"`
     /// (highest semver including pre-release tags).
@@ -102,11 +102,8 @@ final class SettingsState {
     /// `"manual" | "startup" | "hourly" | "daily" | "weekly"`.
     var updateFrequency: String = "daily"
     /// What the server does when a newer release is found. One of
-    /// `"notify" | "download" | "install"`.
+    /// `"notify"`.
     var updateAction: String = "notify"
-    /// Auto-rollback a freshly-installed version if its post-install self-test
-    /// fails (ping timeout or version mismatch).
-    var updateAllowDowngradeOnRollback: Bool = true
 
     // MARK: - Preset Cache
 
@@ -247,6 +244,5 @@ final class SettingsState {
         updateChannel = settings.updateChannel
         updateFrequency = settings.updateFrequency
         updateAction = settings.updateAction
-        updateAllowDowngradeOnRollback = settings.updateAllowDowngradeOnRollback
     }
 }

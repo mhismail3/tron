@@ -6,28 +6,22 @@ import Darwin
 /// and the bottom action bar (Back / Continue, with Continue gated by
 /// all three grants in `WizardShell.permissionsCanContinue`). This
 /// view contributes the description, the three permission cards each
-/// with their own "Open Settings" deep-link, a Screen Recording app
-/// shortcut for macOS's manual-add path, and an inline Re-check link.
+/// with their own "Open Settings" deep-link and an inline Re-check link.
 ///
 /// This step runs AFTER Install (see `WizardStep.allCases` ordering
 /// test) on purpose. macOS ties sandbox/TCC extensions to the process
 /// that was launched when the grant was made, so granting FDA to the
 /// agent before it exists would prompt the user for a permission they
 /// can't satisfy. By the time the wizard gets here the agent bundle
-/// is already on disk at `~/.tron/system/Tron.app` and the LaunchAgent
-/// is running — the user grants permissions to "Tron Server" in
-/// System Settings. When they return from a Settings pane opened via
-/// this step, we consume that single round-trip, `launchctl kickstart
-/// -k` the agent when the permission was previously missing, and then
-/// re-probe so the new grant takes effect without a visible restart
-/// prompt.
-///
-/// The three categories map 1:1 to the macOS TCC probes exposed by the
-/// agent's `system.probePermissions` RPC. The wizard polls that RPC
-/// (rather than probing the wrapper's own TCC state) because the agent
-/// is the binary that actually runs the Computer-Use tool and the file
-/// tools — the wrapper itself never touches FDA / Screen Recording /
-/// Accessibility at runtime.
+/// is already embedded at `Tron.app/Contents/Library/LoginItems/Tron Server.app`
+/// and the LaunchAgent is running. The LaunchAgent associates the helper
+/// with the wrapper bundle IDs, so macOS surfaces all three privacy rows
+/// under the responsible wrapper app (`Tron.app` in Release,
+/// `TronMac.app` in Debug). Returning from Settings, pressing Re-check,
+/// and the background watcher are all fast native wrapper probes. Hidden
+/// server restarts make the UI feel stuck and produce transient
+/// "unknown" states while launchd is cycling the helper; explicit
+/// restart remains a menu-bar action outside this wizard page.
 struct PermissionsStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
@@ -36,7 +30,7 @@ struct PermissionsStep: View {
     @State private var pollTask: Task<Void, Never>?
     @State private var settingsGrantWatchTask: Task<Void, Never>?
     @State private var checkingPermissions = false
-    @State private var pendingSettingsReturn: PermissionSettingsReturn?
+    @State private var settingsReturnPending = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -48,21 +42,18 @@ struct PermissionsStep: View {
             VStack(spacing: 10) {
                 permissionRow(.fullDiskAccess,
                               title: "Full Disk Access",
-                              detail: "Lets Tron read and edit files.",
-                              instruction: PermissionsStepContent.defaultInstruction)
+                              detail: "Lets Tron Server read and edit files.")
                 permissionRow(.screenRecording,
                               title: "Screen Recording",
-                              detail: "Lets Tron see your screen.",
-                              instruction: PermissionsStepContent.screenRecordingInstruction)
+                              detail: "Lets Tron Server see your screen.")
                 permissionRow(.accessibility,
                               title: "Accessibility",
-                              detail: "Lets Tron click and type for you.",
-                              instruction: PermissionsStepContent.defaultInstruction)
+                              detail: "Lets Tron Server click and type for you.")
             }
             .padding(.vertical, 1)
 
             Button {
-                Task { await refreshAll(kickstart: true, showActivity: true) }
+                Task { await refreshAll(showActivity: true) }
             } label: {
                 Label(checkingPermissions ? "Checking permissions…" : "Re-check permissions",
                       systemImage: checkingPermissions ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
@@ -82,10 +73,10 @@ struct PermissionsStep: View {
     private func permissionRow(
         _ permission: Permission,
         title: String,
-        detail: String,
-        instruction: String
+        detail: String
     ) -> some View {
         let status = state.permissionStatuses[permission] ?? .notDetermined
+        let appName = permissionAppDisplayName
         WizardInfoCard(
             verticalPadding: PermissionsStepLayout.cardVerticalPadding,
             horizontalPadding: PermissionsStepLayout.cardHorizontalPadding
@@ -104,7 +95,7 @@ struct PermissionsStep: View {
                         .lineLimit(1)
                         .allowsTightening(true)
                         .minimumScaleFactor(0.92)
-                    Text(instruction)
+                    Text(instruction(for: permission, appName: appName))
                         .font(TronTypography.wizardCaption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -116,21 +107,24 @@ struct PermissionsStep: View {
             } trailing: {
                 HStack(spacing: PermissionsStepLayout.trailingControlSpacing) {
                     if permission == .screenRecording {
-                        ScreenRecordingAppShortcut(appURL: setup.installedBundle)
-                            .frame(
-                                width: PermissionsStepLayout.appShortcutHitSize,
-                                height: PermissionsStepLayout.appShortcutHitSize
-                            )
+                        ScreenRecordingAppShortcut(
+                            appURL: setup.applicationBundle,
+                            displayName: appName
+                        )
+                        .frame(
+                            width: PermissionsStepLayout.appShortcutHitSize,
+                            height: PermissionsStepLayout.appShortcutHitSize
+                        )
                     }
 
                     Button {
-                        openPermissionSettings(permission, statusBeforeOpen: status)
+                        openPermissionSettings(permission)
                     } label: {
                         Image(systemName: "gearshape.fill")
                     }
                     .buttonStyle(.wizardTertiary)
-                    .help("Open Settings")
-                    .accessibilityLabel("Open Settings for \(title)")
+                    .help("Open Settings and enable \(appName)")
+                    .accessibilityLabel("Open Settings for \(title) and enable \(appName)")
                 }
             }
         }
@@ -158,42 +152,38 @@ struct PermissionsStep: View {
         }
     }
 
-    /// Opens the relevant Settings pane. Screen Recording gets one
-    /// extra step first: macOS does not add an app to that list just
-    /// because Settings opened. The process that needs capture access
-    /// must request it once, so we ask the already-installed agent to
-    /// call `CGRequestScreenCaptureAccess()` before showing the pane.
-    private func openPermissionSettings(_ permission: Permission, statusBeforeOpen: PermissionStatus) {
-        guard permission == .screenRecording, statusBeforeOpen != .granted else {
-            openSettingsPane(permission, statusBeforeOpen: statusBeforeOpen)
-            return
-        }
+    private var permissionAppDisplayName: String {
+        PermissionsStepContent.appDisplayName(for: setup.applicationBundle)
+    }
 
-        Task {
-            async let requestSucceeded = setup.requestAgentPermission(permission)
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            await MainActor.run {
-                openSettingsPane(permission, statusBeforeOpen: statusBeforeOpen)
-            }
-            _ = await requestSucceeded
+    private func instruction(for permission: Permission, appName: String) -> String {
+        switch permission {
+        case .fullDiskAccess:
+            return "Enable \"\(appName)\" in Full Disk Access."
+        case .screenRecording:
+            return "Drag the icon into the list if \"\(appName)\" is missing."
+        case .accessibility:
+            return "Enable \"\(appName)\" in Accessibility."
         }
     }
 
-    private func openSettingsPane(_ permission: Permission, statusBeforeOpen: PermissionStatus) {
-        pendingSettingsReturn = PermissionSettingsReturn(
-            permission: permission,
-            statusBeforeOpen: statusBeforeOpen
-        )
+    /// Opens the relevant Settings pane without calling prompt APIs.
+    /// macOS lists the wrapper automatically for the signed app builds
+    /// we support; extra prompt dialogs add confusion because the pane
+    /// is already visible.
+    private func openPermissionSettings(_ permission: Permission) {
+        settingsReturnPending = true
         startSettingsGrantWatch(for: permission)
         NSWorkspace.shared.open(PermissionDeepLink.url(for: permission))
     }
 
-    // MARK: - Polling + kickstart lifecycle
+    // MARK: - Polling lifecycle
 
     /// Starts the 2 s agent-probe poll loop. Runs until the view
     /// disappears or all three grants are observed, whichever comes
     /// first. The loop is re-entrant — calling this twice is a no-op
     /// thanks to the `pollTask` guard.
+    @MainActor
     private func startPolling() async {
         // Seed the state before the recurring 2 s loop. On revisits,
         // refresh immediately so stale grants correct as soon as the
@@ -209,19 +199,17 @@ struct PermissionsStep: View {
             if Task.isCancelled { return }
         }
 
-        await refreshAll(kickstart: false, showActivity: false)
+        await refreshAll(showActivity: false)
 
         guard pollTask == nil else { return }
         pollTask = Task { [weak state = self.state] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
                 if Task.isCancelled { break }
-                let snapshot = await setup.probeAgentPermissions()
+                let snapshot = await setup.probePermissions()
                 await MainActor.run {
                     guard let state else { return }
-                    for (permission, status) in snapshot {
-                        state.permissionStatuses[permission] = status
-                    }
+                    Self.applyPermissionSnapshot(snapshot, to: state)
                 }
                 // Stop polling once everything is granted — no point
                 // hammering the RPC when the user is still on this
@@ -239,8 +227,8 @@ struct PermissionsStep: View {
     /// Installs an observer on `NSApp.didBecomeActiveNotification`.
     /// When the user comes back to the wrapper, we first check whether
     /// that activation corresponds to a Settings pane opened by this
-    /// view. Plain app activation is only a recheck; otherwise clicking
-    /// around System Settings can repeatedly restart the server.
+    /// view. Both paths are fast probes; the only difference is whether
+    /// the visible Re-check control briefly shows activity.
     ///
     /// The observer is stored as a `@State` token so `onDisappear` can
     /// remove it — SwiftUI will recreate the view each time the user
@@ -271,11 +259,10 @@ struct PermissionsStep: View {
     }
 
     /// Starts a short-lived background watcher after the user opens a
-    /// Settings pane from this page. Plain polling can read stale grant
-    /// state from the already-running launchd agent; this watcher
-    /// periodically restarts and reprobes until the specific permission
-    /// turns green. The Re-check button uses the same stronger refresh
-    /// path as a manual fallback.
+    /// Settings pane from this page. It does not restart the helper; it
+    /// just performs quick non-prompting wrapper probes so the row flips
+    /// green as soon as macOS reports the grant.
+    @MainActor
     private func startSettingsGrantWatch(for permission: Permission) {
         settingsGrantWatchTask?.cancel()
         guard (state.permissionStatuses[permission] ?? .notDetermined) != .granted else {
@@ -287,101 +274,84 @@ struct PermissionsStep: View {
                 try? await Task.sleep(nanoseconds: PermissionsStepContent.settingsGrantWatchIntervalNanoseconds)
                 if Task.isCancelled { return }
                 guard state.step == .permissions else { return }
-                guard pendingSettingsReturn?.permission == permission else { return }
 
-                await refreshAll(kickstart: true, showActivity: false)
+                await refreshAll(showActivity: false)
 
                 if state.permissionStatuses[permission] == .granted {
-                    pendingSettingsReturn = nil
                     return
                 }
             }
         }
     }
 
-    /// One-shot agent probe. When `kickstart` is true, we first
-    /// `launchctl kickstart -k` the agent — this is the seamless
-    /// restart that lets a freshly-granted FDA extension take effect
-    /// without the user ever seeing the "Tron Server must quit"
-    /// dialog. Best-effort: if kickstart fails (launchd refuses for
-    /// any reason), we fall through to a plain probe so the UI still
-    /// reflects real state.
-    private func refreshAll(kickstart: Bool, showActivity: Bool) async {
-        if kickstart {
+    /// One-shot wrapper probe. This is intentionally a probe only: no
+    /// `launchctl kickstart`, no launchd polling loop, and no prompt.
+    @MainActor
+    private func refreshAll(showActivity: Bool) async {
+        if showActivity {
+            checkingPermissions = true
+        }
+        defer {
             if showActivity {
-                checkingPermissions = true
-            }
-            defer {
-                if showActivity {
-                    checkingPermissions = false
-                }
-            }
-            _ = await setup.launchAgentManager.restart(label: TronPaths.launchAgentLabel)
-            // Wait for the first successful ping after restart. The
-            // agent comes up in ~500 ms on warm starts but we budget
-            // generously so a slow first launch doesn't show a false
-            // "denied" flash while the RPC socket is still reopening.
-            let token = setup.readBearerToken()
-            for _ in 0..<20 {
-                switch await setup.pingServer(token) {
-                case .success, .unauthorized:
-                    // Agent is up (even on auth error, the process is
-                    // running and answering RPCs).
-                    let snapshot = await setup.probeAgentPermissions()
-                    for (permission, status) in snapshot {
-                        state.permissionStatuses[permission] = status
-                    }
-                    return
-                case .unreachable, .timeout, .malformedResponse:
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                }
+                checkingPermissions = false
             }
         }
+        let snapshot = await setup.probePermissions()
+        Self.applyPermissionSnapshot(snapshot, to: state)
+    }
 
-        let snapshot = await setup.probeAgentPermissions()
-        for (permission, status) in snapshot {
+    /// Applies a probe snapshot while preserving the last concrete
+    /// answer across transient RPC failures. If launchd is briefly
+    /// cycling for some unrelated reason, an all-unknown fallback should
+    /// not wipe green/red badges into confusing gray icons.
+    @MainActor
+    private static func applyPermissionSnapshot(
+        _ snapshot: [Permission: PermissionStatus],
+        to state: WizardState
+    ) {
+        for permission in Permission.allCases {
+            guard let status = snapshot[permission] else { continue }
+            if status == .probeUnavailable,
+               state.permissionStatuses[permission] != nil {
+                continue
+            }
             state.permissionStatuses[permission] = status
         }
     }
 
     /// Wrapper for the app-activation path. The pending Settings
     /// round-trip is consumed before awaiting so repeated activation
-    /// notifications from the same System Settings visit cannot enqueue
-    /// repeated `launchctl kickstart -k` calls.
+    /// notifications from the same System Settings visit cannot keep
+    /// flipping the visible Re-check control into a busy state.
+    @MainActor
     private func handleAppActivation() async {
         guard state.step == .permissions else { return }
-        let pendingReturn = pendingSettingsReturn
-        pendingSettingsReturn = nil
-
-        switch PermissionSettingsReturnPolicy.action(for: pendingReturn) {
-        case .recheckOnly:
-            await refreshAll(kickstart: false, showActivity: false)
-        case .restartAndRecheck:
-            await refreshAll(kickstart: true, showActivity: true)
-        }
+        let showActivity = settingsReturnPending
+        settingsReturnPending = false
+        await refreshAll(showActivity: showActivity)
     }
 }
 
 private struct ScreenRecordingAppShortcut: NSViewRepresentable {
     let appURL: URL
+    let displayName: String
 
-    func makeNSView(context: Context) -> DraggableAppShortcutView {
-        let view = DraggableAppShortcutView()
-        view.configure(appURL: appURL)
+    func makeNSView(context: Context) -> ScreenRecordingAppShortcutView {
+        let view = ScreenRecordingAppShortcutView()
+        view.configure(appURL: appURL, displayName: displayName)
         return view
     }
 
-    func updateNSView(_ nsView: DraggableAppShortcutView, context: Context) {
-        nsView.configure(appURL: appURL)
+    func updateNSView(_ nsView: ScreenRecordingAppShortcutView, context: Context) {
+        nsView.configure(appURL: appURL, displayName: displayName)
     }
 }
 
-private final class DraggableAppShortcutView: NSView, NSDraggingSource {
+private final class ScreenRecordingAppShortcutView: NSView, NSDraggingSource {
     private var appURL: URL?
-    private var appIcon = NSImage.tronFallbackAppIcon
+    private var appIcon = NSImage.tronShortcutFallbackAppIcon
     private var mouseDownPoint: NSPoint?
     private var didStartDrag = false
-    private var dragStartedInMouseSequence = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -394,31 +364,33 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
     }
 
     override var intrinsicContentSize: NSSize {
-        let size = PermissionsStepLayout.appShortcutHitSize
-        return NSSize(width: size, height: size)
+        NSSize(
+            width: PermissionsStepLayout.appShortcutHitSize,
+            height: PermissionsStepLayout.appShortcutHitSize
+        )
     }
 
     override var mouseDownCanMoveWindow: Bool {
         false
     }
 
-    override var acceptsFirstResponder: Bool {
-        false
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 
     override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool {
         true
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
-    }
-
-    func configure(appURL: URL) {
+    func configure(appURL: URL, displayName: String) {
         self.appURL = appURL
-        toolTip = "Drag Tron.app into the Screen Recording list, or click to reveal it in Finder"
+        toolTip = "Drag \(displayName) into the Screen Recording list if it is missing."
         setAccessibilityRole(.button)
-        setAccessibilityLabel("Tron app shortcut for Screen Recording")
+        setAccessibilityLabel("\(displayName) Screen Recording shortcut")
         appIcon = Self.icon(for: appURL)
         needsDisplay = true
     }
@@ -427,23 +399,20 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
         super.draw(dirtyRect)
 
         NSGraphicsContext.saveGraphicsState()
-        NSShadow.appIconLiftShadow.set()
+        NSShadow.screenRecordingShortcutShadow.set()
         appIcon.draw(in: iconDrawingRect)
         NSGraphicsContext.restoreGraphicsState()
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
     }
 
     override func mouseDown(with event: NSEvent) {
         mouseDownPoint = convert(event.locationInWindow, from: nil)
         didStartDrag = false
-        dragStartedInMouseSequence = false
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard !didStartDrag, let appURL, FileManager.default.fileExists(atPath: appURL.path) else {
+        guard !didStartDrag,
+              let appURL,
+              FileManager.default.fileExists(atPath: appURL.path) else {
             return
         }
 
@@ -453,30 +422,16 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
         }
 
         didStartDrag = true
-        dragStartedInMouseSequence = true
-
         let item = NSDraggingItem(pasteboardWriter: Self.dragPasteboardItem(for: appURL))
-        let dragRect = iconDrawingRect
-        item.setDraggingFrame(dragRect, contents: appIcon)
+        item.setDraggingFrame(iconDrawingRect, contents: appIcon)
 
         let session = beginDraggingSession(with: [item], event: event, source: self)
         session.animatesToStartingPositionsOnCancelOrFail = true
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer {
-            mouseDownPoint = nil
-            dragStartedInMouseSequence = false
-        }
-
-        guard !didStartDrag,
-              !dragStartedInMouseSequence,
-              let appURL,
-              FileManager.default.fileExists(atPath: appURL.path)
-        else {
-            return
-        }
-        NSWorkspace.shared.activateFileViewerSelecting([appURL])
+        mouseDownPoint = nil
+        didStartDrag = false
     }
 
     func draggingSession(
@@ -491,14 +446,13 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
         endedAt screenPoint: NSPoint,
         operation: NSDragOperation
     ) {
-        didStartDrag = false
         mouseDownPoint = nil
+        didStartDrag = false
     }
 
     private static func dragPasteboardItem(for appURL: URL) -> NSPasteboardItem {
         let item = NSPasteboardItem()
         item.setString(appURL.absoluteString, forType: .fileURL)
-        item.setString(appURL.absoluteString, forType: .URL)
         item.setString(appURL.path, forType: .string)
         item.setPropertyList(
             [appURL.path],
@@ -516,8 +470,7 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
             )
             return image
         }
-        return NSImage(named: "AppIcon")
-            ?? NSImage.tronFallbackAppIcon
+        return .tronShortcutFallbackAppIcon
     }
 
     private var iconDrawingRect: NSRect {
@@ -532,7 +485,7 @@ private final class DraggableAppShortcutView: NSView, NSDraggingSource {
 }
 
 private extension NSImage {
-    static var tronFallbackAppIcon: NSImage {
+    static var tronShortcutFallbackAppIcon: NSImage {
         NSImage(named: "AppIcon")
             ?? NSImage(size: NSSize(
                 width: PermissionsStepLayout.appShortcutIconSize,
@@ -542,7 +495,7 @@ private extension NSImage {
 }
 
 private extension NSShadow {
-    static var appIconLiftShadow: NSShadow {
+    static var screenRecordingShortcutShadow: NSShadow {
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.24)
         shadow.shadowOffset = NSSize(width: 0, height: -4)
@@ -552,13 +505,15 @@ private extension NSShadow {
 }
 
 enum PermissionsStepContent {
-    static let intro = "Tron needs these permissions to use your computer for you."
-    static let defaultInstruction = "Click gear and enable Tron."
-    static let screenRecordingInstruction =
-        "Click gear, then drag this icon into the first app list."
+    static let intro = "Enable the Tron app named on each row in System Settings."
     static let initialProbeDelayNanoseconds: UInt64 = 520_000_000
-    static let settingsGrantWatchAttempts = 45
-    static let settingsGrantWatchIntervalNanoseconds: UInt64 = 1_000_000_000
+    static let settingsGrantWatchAttempts = 24
+    static let settingsGrantWatchIntervalNanoseconds: UInt64 = 750_000_000
+
+    static func appDisplayName(for applicationBundle: URL) -> String {
+        let name = applicationBundle.lastPathComponent
+        return name.isEmpty ? "Tron.app" : name
+    }
 }
 
 enum PermissionsStepLayout {

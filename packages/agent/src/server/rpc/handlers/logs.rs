@@ -1,6 +1,7 @@
 //! Logs handler: ingest client logs into the database.
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::instrument;
 
@@ -11,6 +12,43 @@ use crate::server::rpc::registry::MethodHandler;
 
 /// Ingest structured client logs into the database.
 pub struct IngestLogsHandler;
+
+/// Fetch recent server/client logs from the event database.
+pub struct RecentLogsHandler;
+
+const DEFAULT_RECENT_LIMIT: u32 = 200;
+const MAX_RECENT_LIMIT: u32 = 1_000;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecentLogsParams {
+    #[serde(default = "default_recent_limit")]
+    limit: u32,
+}
+
+fn default_recent_limit() -> u32 {
+    DEFAULT_RECENT_LIMIT
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecentLogsResult {
+    entries: Vec<RecentLogEntry>,
+    count: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecentLogEntry {
+    id: i64,
+    timestamp: String,
+    level: String,
+    component: String,
+    message: String,
+    origin: Option<String>,
+    session_id: Option<String>,
+    error_message: Option<String>,
+}
 
 #[async_trait]
 impl MethodHandler for IngestLogsHandler {
@@ -35,6 +73,74 @@ impl MethodHandler for IngestLogsHandler {
                     message: format!("Failed to get DB connection: {e}"),
                 })?;
                 ClientLogsService::ingest(&mut conn, &entries)
+            })
+            .await?;
+
+        to_json_value(&result)
+    }
+}
+
+#[async_trait]
+impl MethodHandler for RecentLogsHandler {
+    #[instrument(skip(self, ctx), fields(method = "logs.recent"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let params: RecentLogsParams = match params {
+            Some(value) => serde_json::from_value(value).map_err(|e| RpcError::InvalidParams {
+                message: format!("Invalid params: {e}"),
+            })?,
+            None => RecentLogsParams {
+                limit: DEFAULT_RECENT_LIMIT,
+            },
+        };
+
+        if params.limit > MAX_RECENT_LIMIT {
+            return Err(RpcError::InvalidParams {
+                message: format!("limit must be <= {MAX_RECENT_LIMIT}"),
+            });
+        }
+
+        let limit = i64::from(params.limit);
+        let pool = ctx.event_store.pool().clone();
+        let result = ctx
+            .run_blocking("logs.recent", move || {
+                let conn = pool.get().map_err(|e| RpcError::Internal {
+                    message: format!("Failed to get DB connection: {e}"),
+                })?;
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT id, timestamp, level, component, message, origin, session_id, error_message \
+                         FROM logs ORDER BY id DESC LIMIT ?1",
+                    )
+                    .map_err(|e| RpcError::Internal {
+                        message: format!("Failed to prepare logs query: {e}"),
+                    })?;
+                let rows = stmt
+                    .query_map([limit], |row| {
+                        Ok(RecentLogEntry {
+                            id: row.get(0)?,
+                            timestamp: row.get(1)?,
+                            level: row.get(2)?,
+                            component: row.get(3)?,
+                            message: row.get(4)?,
+                            origin: row.get(5)?,
+                            session_id: row.get(6)?,
+                            error_message: row.get(7)?,
+                        })
+                    })
+                    .map_err(|e| RpcError::Internal {
+                        message: format!("Failed to read logs: {e}"),
+                    })?;
+
+                let mut entries: Vec<RecentLogEntry> = rows
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| RpcError::Internal {
+                        message: format!("Failed to decode logs: {e}"),
+                    })?;
+                entries.reverse();
+                Ok(RecentLogsResult {
+                    count: entries.len(),
+                    entries,
+                })
             })
             .await?;
 
@@ -313,5 +419,49 @@ mod tests {
         });
         let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
         assert_eq!(result["inserted"], 1);
+    }
+
+    #[tokio::test]
+    async fn recent_logs_returns_bounded_chronological_entries() {
+        let ctx = make_test_context();
+        {
+            let conn = ctx.event_store.pool().get().unwrap();
+            conn.execute(
+                "INSERT INTO logs (timestamp, level, level_num, component, message, origin) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                ("2026-04-27T10:00:00.000Z", "info", 30, "server", "first", "server"),
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO logs (timestamp, level, level_num, component, message, origin) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                ("2026-04-27T10:01:00.000Z", "warn", 40, "server", "second", "server"),
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO logs (timestamp, level, level_num, component, message, origin) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                ("2026-04-27T10:02:00.000Z", "error", 50, "server", "third", "server"),
+            )
+            .unwrap();
+        }
+
+        let result = RecentLogsHandler
+            .handle(Some(json!({ "limit": 2 })), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["count"], 2);
+        assert_eq!(result["entries"][0]["message"], "second");
+        assert_eq!(result["entries"][1]["message"], "third");
+        assert_eq!(result["entries"][1]["level"], "error");
+    }
+
+    #[tokio::test]
+    async fn recent_logs_rejects_excessive_limit() {
+        let ctx = make_test_context();
+        let err = RecentLogsHandler
+            .handle(Some(json!({ "limit": 1_001 })), &ctx)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "INVALID_PARAMS");
     }
 }

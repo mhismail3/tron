@@ -1,7 +1,7 @@
 //! Transport-agnostic push notification sender trait.
 //!
-//! Implemented by [`ApnsService`](super::ApnsService) (direct .p8 signing + HTTP/2 to APNs)
-//! and [`RelayClient`](super::relay::RelayClient) (HMAC-signed HTTPS to Cloudflare Worker relay).
+//! Implemented by [`RelayClient`](super::relay::RelayClient), which sends
+//! HMAC-signed HTTPS requests to the Cloudflare Worker relay.
 
 use async_trait::async_trait;
 

@@ -140,16 +140,11 @@ FROM sessions GROUP BY origin;
 ## Workflow 8: Verify Installation Files
 
 1. `curl -s http://localhost:9847/health/deep | jq .` — deep health endpoint
-2. Check deployment state:
+2. Verify key files exist:
    ```bash
-   cat ~/.tron/system/deployment/last-deployment.json | jq .
-   cat ~/.tron/system/deployment/deployed-commit
-   cat ~/.tron/system/deployment/restart-sentinel.json | jq .
-   ```
-3. Verify key files exist:
-   ```bash
-   ls -la ~/.tron/system/Tron.app/Contents/MacOS/tron
+   ls -la /Applications/Tron.app/Contents/Library/LoginItems/Tron\ Server.app/Contents/MacOS/tron
    ls -la ~/.tron/system/database/log.db
+   ls -la ~/.tron/system/run
    ls -la ~/.tron/system/settings.json
    ls -la ~/.tron/system/auth.json
    ```

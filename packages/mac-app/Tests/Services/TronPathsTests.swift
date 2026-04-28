@@ -17,11 +17,11 @@ struct TronPathsTests {
     @Test("bundle ID matches the LaunchAgent label")
     func bundleIDMatches() {
         // The agent's CFBundleIdentifier MUST equal the LaunchAgent
-        // label so `launchctl kickstart gui/$UID/<bundleID>` after a
-        // TCC grant hits the right service. Historical mismatch
+        // label so SMAppService registration and launchctl diagnostics
+        // always refer to the same service. Historical mismatch
         // (bundleID="com.tron.agent", label="com.tron.server") caused
-        // the permissions wizard to kickstart a service that didn't
-        // exist; the two unified as `com.tron.server`.
+        // status checks to report the wrong service; the two unified
+        // as `com.tron.server`.
         #expect(TronPaths.bundleID == "com.tron.server")
         #expect(TronPaths.bundleID == TronPaths.launchAgentLabel)
     }
@@ -29,41 +29,59 @@ struct TronPathsTests {
     @Test("agent display name is 'Tron Server'")
     func agentDisplayNameMatches() {
         // System Settings lists CFBundleDisplayName (fallback
-        // CFBundleName). Calling the agent "Tron Server" — distinct
-        // from the menu-bar wrapper's "Tron" — is what prevents the
-        // FDA / Screen Recording / Accessibility panes from showing
-        // two indistinguishable "Tron" entries.
+        // CFBundleName). Calling the agent "Tron Server" keeps the
+        // Accessibility entry distinct from the responsible wrapper
+        // entry used by FDA / Screen Recording.
         #expect(TronPaths.agentDisplayName == "Tron Server")
     }
 
-    @Test("installed binary lives inside Tron.app/Contents/MacOS")
-    func installedBinaryShape() {
-        let bin = TronPaths.installedBinary.path
-        #expect(bin.hasSuffix("/Tron.app/Contents/MacOS/tron"))
+    @Test("LaunchAgent associates with wrapper variants")
+    func associatedWrapperBundleIDsMatchVariants() {
+        #expect(TronPaths.associatedWrapperBundleIDs == [
+            MacRuntimeVariant.releaseBundleIdentifier,
+            MacRuntimeVariant.debugBundleIdentifier,
+        ])
     }
 
-    @Test("dev binary lives under deployment/")
-    func devBinaryShape() {
-        let bin = TronPaths.devBinary.path
-        #expect(bin.contains("/deployment/Tron-Dev.app/Contents/MacOS/tron"))
+    @Test("server helper binary lives inside the bundled Login Item")
+    func serverHelperBinaryShape() {
+        let bin = TronPaths.serverHelperBinary.path
+        #expect(bin.hasSuffix("/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"))
     }
 
-    @Test("LaunchAgent plist sits in ~/Library/LaunchAgents/")
+    @Test("runtime locks live in system/run")
+    func runDirShape() {
+        #expect(TronPaths.runDir.path.hasSuffix("/system/run"))
+    }
+
+    @Test("database lock stays beside log.db")
+    func databaseLockShape() {
+        #expect(TronPaths.databaseLockPath.path.hasSuffix("/system/database/log.db.lock"))
+    }
+
+    @Test("LaunchAgent plist is bundled in Contents/Library/LaunchAgents")
     func launchAgentPlistShape() {
         let plist = TronPaths.launchAgentPlistPath.path
-        #expect(plist.contains("/Library/LaunchAgents/com.tron.server.plist"))
+        #expect(plist.contains("/Contents/Library/LaunchAgents/com.tron.server.plist"))
     }
 
-    @Test("auth-token.json lives in system/")
+    @Test("auth.json lives in system/")
     func bearerTokenShape() {
         let tok = TronPaths.bearerTokenPath.path
-        #expect(tok.hasSuffix("/system/auth-token.json"))
+        #expect(tok.hasSuffix("/system/auth.json"))
     }
 
-    @Test("onboarded sentinel lives in system/")
+    @Test("onboarded sentinel lives in system/run/")
     func onboardedShape() {
         let s = TronPaths.onboardedMarkerPath.path
-        #expect(s.hasSuffix("/system/.onboarded"))
+        #expect(s.hasSuffix("/system/run/.onboarded"))
+    }
+
+    @Test("runtime uninstall files live in system/run/")
+    func runtimeUninstallFilesShape() {
+        #expect(TronPaths.updaterStatePath.path.hasSuffix("/system/run/updater-state.json"))
+        #expect(TronPaths.authLockPath.path.hasSuffix("/system/run/auth.lock"))
+        #expect(TronPaths.macWrapperLockPath.path.hasSuffix("/system/run/.mac-wrapper.lock"))
     }
 
     @Test("settings.json lives in system/")

@@ -1,129 +1,17 @@
-//! APNS configuration loading from `~/.tron/system/deployment/`.
+//! APNS relay configuration.
+//!
+//! Production push delivery is relay-only: the server signs requests to the
+//! Cloudflare Worker, and the Worker owns the Apple `.p8` key material.
 
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
-
-/// APNS configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ApnsConfig {
-    /// Apple Developer Key ID (10-char alphanumeric).
-    pub key_id: String,
-    /// Apple Developer Team ID (10-char alphanumeric).
-    pub team_id: String,
-    /// App bundle identifier (e.g., "com.example.TronMobile").
-    pub bundle_id: String,
-    /// APNS environment: "sandbox" or "production".
-    #[serde(default = "default_environment")]
-    pub environment: String,
-    /// Optional explicit path to the .p8 key file.
-    pub key_path: Option<String>,
-}
-
-fn default_environment() -> String {
-    "sandbox".to_string()
-}
-
-impl ApnsConfig {
-    /// Resolve the path to the private key file.
-    pub fn resolved_key_path(&self) -> PathBuf {
-        if let Some(ref path) = self.key_path {
-            let expanded = if path.starts_with('~') {
-                let home = crate::core::paths::home_dir();
-                PathBuf::from(home).join(path.trim_start_matches("~/"))
-            } else {
-                PathBuf::from(path)
-            };
-            return expanded;
-        }
-        // Default: ~/.tron/system/deployment/AuthKey_{keyId}.p8
-        crate::core::paths::deploy_dir().join(format!("AuthKey_{}.p8", self.key_id))
-    }
-
-    /// APNS server hostname based on environment.
-    pub fn apns_host(&self) -> &str {
-        if self.environment == "production" {
-            "api.push.apple.com"
-        } else {
-            "api.sandbox.push.apple.com"
-        }
-    }
-}
-
-/// Load APNS config from `~/.tron/system/deployment/apns.json`.
-///
-/// Returns `None` if config doesn't exist or is invalid (not an error —
-/// APNS is optional).
-pub fn load_apns_config() -> Option<ApnsConfig> {
-    load_from_path(None)
-}
-
-/// Load APNS config from a specific base directory (for testing).
-pub(crate) fn load_from_path(base: Option<&Path>) -> Option<ApnsConfig> {
-    let config_path = if let Some(base) = base {
-        base.join("apns.json")
-    } else {
-        crate::core::paths::deploy_dir().join("apns.json")
-    };
-
-    if !config_path.exists() {
-        debug!(
-            ?config_path,
-            "APNS config not found, push notifications disabled"
-        );
-        return None;
-    }
-
-    let content = match std::fs::read_to_string(&config_path) {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(?config_path, error = %e, "failed to read APNS config");
-            return None;
-        }
-    };
-
-    let config: ApnsConfig = match serde_json::from_str(&content) {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(?config_path, error = %e, "failed to parse APNS config");
-            return None;
-        }
-    };
-
-    // Validate required fields
-    if config.key_id.is_empty() || config.team_id.is_empty() || config.bundle_id.is_empty() {
-        warn!("APNS config missing required fields (keyId, teamId, bundleId)");
-        return None;
-    }
-
-    // Check key file exists
-    let key_path = config.resolved_key_path();
-    if !key_path.exists() {
-        warn!(?key_path, "APNS private key file not found");
-        return None;
-    }
-
-    debug!(
-        key_id = %config.key_id,
-        team_id = %config.team_id,
-        bundle_id = %config.bundle_id,
-        environment = %config.environment,
-        "APNS config loaded"
-    );
-
-    Some(config)
-}
-
-// ── Relay configuration ─────────────────────────────────────────────
 
 /// Build-time relay URL (compiled via `TRON_RELAY_URL` env var at build time).
 const RELAY_URL: Option<&str> = option_env!("TRON_RELAY_URL");
 /// Build-time relay HMAC secret (compiled via `TRON_RELAY_SECRET` env var at build time).
 const RELAY_SECRET: Option<&str> = option_env!("TRON_RELAY_SECRET");
 
-/// Relay service configuration (no .p8 key needed).
-#[derive(Debug, Clone)]
+/// Relay service configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelayConfig {
     /// Relay worker URL (e.g., "https://relay.tron.dev").
     pub relay_url: String,
@@ -134,41 +22,38 @@ pub struct RelayConfig {
 }
 
 /// Resolved push notification configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PushConfig {
-    /// Direct APNs delivery via .p8 key on disk.
-    Direct(ApnsConfig),
     /// Relay delivery via Cloudflare Worker.
     Relay(RelayConfig),
     /// Push notifications disabled.
     Disabled,
 }
 
-/// Load push configuration with priority: direct (.p8) > relay > disabled.
+/// Load push configuration with one paved production path: relay or disabled.
 pub fn load_push_config() -> PushConfig {
-    // Priority 1: Direct APNs (local .p8 key)
-    if let Some(config) = load_apns_config() {
-        return PushConfig::Direct(config);
-    }
-
-    // Priority 2: Relay (build-time or runtime env vars)
-    if let Some(relay) = load_relay_config() {
-        return PushConfig::Relay(relay);
-    }
-
-    PushConfig::Disabled
+    load_relay_config()
+        .map(PushConfig::Relay)
+        .unwrap_or(PushConfig::Disabled)
 }
 
-/// Try to load relay config from build-time constants or runtime env vars.
+/// Try to load relay config from runtime env vars or build-time constants.
 pub fn load_relay_config() -> Option<RelayConfig> {
-    // Runtime env vars override build-time constants
     let url = std::env::var("TRON_RELAY_URL")
         .ok()
         .or_else(|| RELAY_URL.map(String::from));
     let secret = std::env::var("TRON_RELAY_SECRET")
         .ok()
         .or_else(|| RELAY_SECRET.map(String::from));
+    let environment = std::env::var("TRON_RELAY_ENVIRONMENT").ok();
+    relay_config_from_values(url, secret, environment)
+}
 
+fn relay_config_from_values(
+    url: Option<String>,
+    secret: Option<String>,
+    environment: Option<String>,
+) -> Option<RelayConfig> {
     let (Some(url), Some(secret)) = (url, secret) else {
         return None;
     };
@@ -182,8 +67,7 @@ pub fn load_relay_config() -> Option<RelayConfig> {
         return None;
     }
 
-    let environment =
-        std::env::var("TRON_RELAY_ENVIRONMENT").unwrap_or_else(|_| "production".to_string());
+    let environment = environment.unwrap_or_else(|| "production".to_string());
 
     debug!(
         relay_url = %url,
@@ -203,142 +87,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_environment_is_sandbox() {
-        let json = r#"{"keyId": "ABC", "teamId": "XYZ", "bundleId": "com.test.App"}"#;
-        let config: ApnsConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(config.environment, "sandbox");
+    fn relay_config_requires_url_and_secret() {
+        assert!(relay_config_from_values(None, Some("secret".into()), None).is_none());
+        assert!(relay_config_from_values(Some("https://relay.test".into()), None, None).is_none());
     }
 
     #[test]
-    fn resolved_key_path_default() {
-        let config = ApnsConfig {
-            key_id: "ABC123".to_string(),
-            team_id: "XYZ".to_string(),
-            bundle_id: "com.test".to_string(),
-            environment: "sandbox".to_string(),
-            key_path: None,
-        };
-        let path = config.resolved_key_path();
-        assert!(path.to_string_lossy().contains("AuthKey_ABC123.p8"));
-        assert!(path.to_string_lossy().contains(".tron/system/deployment"));
-    }
-
-    #[test]
-    fn resolved_key_path_explicit() {
-        let config = ApnsConfig {
-            key_id: "ABC".to_string(),
-            team_id: "XYZ".to_string(),
-            bundle_id: "com.test".to_string(),
-            environment: "sandbox".to_string(),
-            key_path: Some("/custom/path/key.p8".to_string()),
-        };
-        assert_eq!(
-            config.resolved_key_path(),
-            PathBuf::from("/custom/path/key.p8")
+    fn relay_config_rejects_empty_values() {
+        assert!(
+            relay_config_from_values(Some(String::new()), Some("secret".into()), None).is_none()
+        );
+        assert!(
+            relay_config_from_values(Some("https://relay.test".into()), Some(String::new()), None)
+                .is_none()
         );
     }
 
     #[test]
-    fn apns_host_sandbox() {
-        let config = ApnsConfig {
-            key_id: "A".to_string(),
-            team_id: "B".to_string(),
-            bundle_id: "C".to_string(),
-            environment: "sandbox".to_string(),
-            key_path: None,
-        };
-        assert_eq!(config.apns_host(), "api.sandbox.push.apple.com");
-    }
-
-    #[test]
-    fn apns_host_production() {
-        let config = ApnsConfig {
-            key_id: "A".to_string(),
-            team_id: "B".to_string(),
-            bundle_id: "C".to_string(),
-            environment: "production".to_string(),
-            key_path: None,
-        };
-        assert_eq!(config.apns_host(), "api.push.apple.com");
-    }
-
-    #[test]
-    fn load_from_nonexistent_returns_none() {
-        let result = load_from_path(Some(Path::new("/nonexistent/path")));
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn load_from_invalid_json_returns_none() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("apns.json"), "not json").unwrap();
-        let result = load_from_path(Some(dir.path()));
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn load_missing_required_fields_returns_none() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("apns.json"),
-            r#"{"keyId": "", "teamId": "X", "bundleId": "Y"}"#,
+    fn relay_config_defaults_to_production_environment() {
+        let config = relay_config_from_values(
+            Some("https://relay.test".into()),
+            Some("secret".into()),
+            None,
         )
         .unwrap();
-        let result = load_from_path(Some(dir.path()));
-        assert!(result.is_none());
-    }
 
-    #[test]
-    fn load_valid_config_without_key_file_returns_none() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("apns.json"),
-            r#"{"keyId": "ABC", "teamId": "XYZ", "bundleId": "com.test"}"#,
-        )
-        .unwrap();
-        // No .p8 file exists
-        let result = load_from_path(Some(dir.path()));
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn load_valid_config_with_key_file() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("apns.json"),
-            serde_json::json!({
-                "keyId": "ABC",
-                "teamId": "XYZ",
-                "bundleId": "com.test",
-                "keyPath": dir.path().join("key.p8").to_string_lossy().to_string(),
-            })
-            .to_string(),
-        )
-        .unwrap();
-        std::fs::write(dir.path().join("key.p8"), "fake key").unwrap();
-
-        let result = load_from_path(Some(dir.path()));
-        assert!(result.is_some());
-        let config = result.unwrap();
-        assert_eq!(config.key_id, "ABC");
-        assert_eq!(config.team_id, "XYZ");
-        assert_eq!(config.bundle_id, "com.test");
-    }
-
-    #[test]
-    fn camel_case_deserialization() {
-        let json = r#"{
-            "keyId": "K1",
-            "teamId": "T1",
-            "bundleId": "com.test.app",
-            "environment": "production",
-            "keyPath": "/some/path.p8"
-        }"#;
-        let config: ApnsConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(config.key_id, "K1");
-        assert_eq!(config.team_id, "T1");
-        assert_eq!(config.bundle_id, "com.test.app");
+        assert_eq!(config.relay_url, "https://relay.test");
+        assert_eq!(config.relay_secret, "secret");
         assert_eq!(config.environment, "production");
-        assert_eq!(config.key_path.as_deref(), Some("/some/path.p8"));
+    }
+
+    #[test]
+    fn relay_config_accepts_explicit_environment() {
+        let config = relay_config_from_values(
+            Some("https://relay.test".into()),
+            Some("secret".into()),
+            Some("sandbox".into()),
+        )
+        .unwrap();
+
+        assert_eq!(config.environment, "sandbox");
     }
 }

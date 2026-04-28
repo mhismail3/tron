@@ -101,6 +101,10 @@ final class MenuBarActionHandler {
         case .ok, .alreadyLoaded:
             await MenuBarNotifier.post(title: "Tron server restarted", body: "The menu bar status has been refreshed.")
             return
+        case .requiresApproval(let message):
+            LoginItemsSettingsOpener.open()
+            await MenuBarNotifier.post(title: "Restart blocked", body: message)
+            await presentNonBlockingError(title: "Restart blocked", message: message)
         case .launchdRefused(let message), .unknown(let message):
             await MenuBarNotifier.post(title: "Restart failed", body: message)
             await presentNonBlockingError(title: "Restart failed", message: message)
@@ -118,6 +122,10 @@ final class MenuBarActionHandler {
         switch outcome {
         case .ok, .alreadyLoaded:
             await MenuBarNotifier.post(title: "Tron server paused", body: "Resume it from the Tron menu bar when needed.")
+        case .requiresApproval(let message):
+            LoginItemsSettingsOpener.open()
+            await MenuBarNotifier.post(title: "Pause blocked", body: message)
+            await presentNonBlockingError(title: "Pause blocked", message: message)
         case .launchdRefused(let message), .unknown(let message):
             await MenuBarNotifier.post(title: "Pause failed", body: message)
             await presentNonBlockingError(title: "Pause failed", message: message)
@@ -139,6 +147,10 @@ final class MenuBarActionHandler {
         case .ok, .alreadyLoaded:
             await MenuBarNotifier.post(title: "Tron server resumed", body: "The menu bar status has been refreshed.")
             return
+        case .requiresApproval(let message):
+            LoginItemsSettingsOpener.open()
+            await MenuBarNotifier.post(title: "Resume blocked", body: message)
+            await presentNonBlockingError(title: "Resume blocked", message: message)
         case .launchdRefused(let message), .unknown(let message):
             await MenuBarNotifier.post(title: "Resume failed", body: message)
             await presentNonBlockingError(title: "Resume failed", message: message)
@@ -163,23 +175,8 @@ final class MenuBarActionHandler {
     }
 
     func checkForUpdates() async {
-        // The user-mode auto-updater (when enabled in settings) emits
-        // `server.update_*` events that surface in iOS / future Mac
-        // banners. There's no in-app banner surface in the Mac wrapper
-        // yet, so the canonical user-facing action for "Check for
-        // updates" is opening the GitHub Releases page — that's what
-        // they actually want to look at.
-        //
-        // We ALSO fire-and-forget the CLI's `self-update check` so the
-        // in-server scheduler advances state if the user happens to have
-        // the auto-updater enabled. CLI failure is logged but doesn't
-        // affect the UX (GitHub Releases is the source of truth).
         if let url = URL(string: "https://github.com/mhismail3/tron/releases/latest") {
             NSWorkspace.shared.open(url)
-        }
-        let trigger = await runTronCommand(arguments: ["self-update", "check"])
-        if trigger.exitCode != 0 {
-            NSLog("[menu-bar] self-update check exited \(trigger.exitCode): \(trigger.stderr)")
         }
     }
 
@@ -187,7 +184,7 @@ final class MenuBarActionHandler {
         let alert = NSAlert()
         alert.messageText = "Uninstall Tron?"
         alert.informativeText = """
-        This removes the Tron menu bar app, the headless server, and the LaunchAgent.
+        This unregisters the Tron Server Login Item.
 
         Your workspace files in ~/.tron/workspace/ and your conversation history in ~/.tron/system/database/ are preserved.
         """
@@ -243,22 +240,28 @@ final class MenuBarActionHandler {
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }
 
-        var arguments = ["uninstall"]
-        if resetSettingsCheckbox.state == .on {
-            arguments.append("--reset-settings")
-        }
-        if resetCredentialsCheckbox.state == .on {
-            arguments.append("--reset-credentials")
-        }
-        let result = await runTronCommand(arguments: arguments)
-        if result.exitCode == 0 {
-            // Quit the wrapper after a successful uninstall — there's
-            // nothing left to manage. The user reopens the DMG to reinstall.
+        let outcome = await TronUninstaller.unregisterAndClean(
+            setup: setup,
+            options: TronUninstaller.Options(
+                resetSettings: resetSettingsCheckbox.state == .on,
+                resetCredentials: resetCredentialsCheckbox.state == .on
+            )
+        )
+        switch outcome {
+        case .ok, .alreadyLoaded:
             NSApp.terminate(nil)
-        } else {
+        case .requiresApproval(let message), .launchdRefused(let message), .unknown(let message):
+            if case .requiresApproval = outcome {
+                LoginItemsSettingsOpener.open()
+            }
             await presentNonBlockingError(
                 title: "Uninstall failed",
-                message: result.stderr.isEmpty ? "tron uninstall returned exit \(result.exitCode)" : result.stderr
+                message: message
+            )
+        case .binaryMissing(let path):
+            await presentNonBlockingError(
+                title: "Uninstall failed",
+                message: "Missing helper: \(path)"
             )
         }
     }
@@ -295,16 +298,6 @@ final class MenuBarActionHandler {
         _ = alert.runModal()
     }
 
-    /// Runs `tron <args>` asynchronously via `Subprocess.run`. Resolves
-    /// the binary through the shared `TronCLI` helper so both this
-    /// handler and `MenuBarFeedbackAction` walk the same install-location
-    /// search order.
-    private func runTronCommand(arguments: [String]) async -> ProcessResult {
-        guard let tron = TronCLI.resolveBinary() else {
-            return ProcessResult(exitCode: -1, stdout: "", stderr: "tron CLI not found in PATH")
-        }
-        return await Subprocess.run(executable: tron, arguments: arguments)
-    }
 }
 
 enum MenuBarNotifier {

@@ -48,9 +48,19 @@ final class WizardState {
     /// every time the view becomes active.
     var permissionStatuses: [Permission: PermissionStatus] = [:]
 
-    /// Existing-install detection result. Set on entry so the combined
-    /// Install step can either install, repair a partial install, or show
-    /// the already-installed/reset state without a placeholder page.
+    /// The helper is restarted once after all three TCC rows are
+    /// enabled so grants that macOS applies on next launch are visible
+    /// to the running server before pairing.
+    var permissionsServerRestarted = false
+
+    /// True while the Permissions Continue button is performing that
+    /// one helper restart.
+    var permissionsRestartInProgress = false
+
+    /// Existing Login Item detection result. Set on entry so the
+    /// Install step can surface clean, approval, partial, or registered
+    /// states. A registered service still has to be started and pinged
+    /// before the wizard advances.
     var existingInstallStatus: ExistingInstallStatus = .none
 
     /// Outcome of the install pipeline. Set when the install step
@@ -146,7 +156,7 @@ final class WizardState {
     }
 
     /// Power-user shortcut: from Welcome, skip directly to the Pairing
-    /// step on the assumption the server is already installed.
+    /// step on the assumption the server is already running.
     func skipToPairing() {
         navigate(to: .pairingInfo, direction: .forward)
     }
@@ -168,6 +178,8 @@ final class WizardState {
         slideDirection = .forward
         tailscaleStatus = nil
         permissionStatuses.removeAll()
+        permissionsServerRestarted = false
+        permissionsRestartInProgress = false
         existingInstallStatus = .none
         installOutcome = nil
         installRequestID = 0
@@ -218,10 +230,9 @@ enum WizardSlideDirection: Sendable, Equatable {
 /// the Pairing step can render a precise failure message.
 enum InstallOutcome: Equatable, Sendable {
     case success
-    case alreadyInstalled
-    case sourceBinaryMissing
-    case copyFailed(String)
-    case plistWriteFailed(String)
-    case launchctlFailed(String)
+    case invalidApplicationLocation(String)
+    case helperValidationFailed(String)
+    case serviceRequiresApproval
+    case serviceRegistrationFailed(String)
     case awaitPingTimedOut
 }

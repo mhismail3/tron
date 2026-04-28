@@ -312,7 +312,11 @@ async fn e2e_rapid_fire_requests() {
 
     // Send 50 rapid pings
     for i in 1..=50u64 {
-        let req = json!({"id": format!("rapid_{i}"), "method": "system.ping"});
+        let req = json!({
+            "id": format!("rapid_{i}"),
+            "method": "system.ping",
+            "params": ping_params(),
+        });
         ws.send(Message::text(req.to_string())).await.unwrap();
     }
 
@@ -661,6 +665,13 @@ async fn read_until_event_type(ws: &mut WsStream, event_type: &str) -> Option<Va
         }
     }
     None
+}
+
+fn take_event_type(events: &mut Vec<Value>, event_type: &str) -> Option<Value> {
+    let pos = events
+        .iter()
+        .position(|msg| msg.get("type").and_then(|v| v.as_str()) == Some(event_type))?;
+    Some(events.remove(pos))
 }
 
 async fn wait_for_detailed_snapshot_rules(
@@ -1637,7 +1648,7 @@ async fn e2e_prompt_text_response() {
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
-    let resp = rpc_call(
+    let (resp, mut interleaved) = rpc_call_with_interleaved_events(
         &mut ws,
         2,
         "agent.prompt",
@@ -1648,7 +1659,11 @@ async fn e2e_prompt_text_response() {
     assert_eq!(resp["result"]["acknowledged"], true);
 
     // Wait for agent.ready (the final event in the lifecycle)
-    let ready = read_until_event_type(&mut ws, "agent.ready").await;
+    let ready = take_event_type(&mut interleaved, "agent.ready").or(read_until_event_type(
+        &mut ws,
+        "agent.ready",
+    )
+    .await);
     assert!(ready.is_some(), "should receive agent.ready event");
 
     server.shutdown().shutdown();
@@ -1721,7 +1736,7 @@ async fn e2e_prompt_event_ordering() {
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
-    let _ = rpc_call(
+    let (_, mut events) = rpc_call_with_interleaved_events(
         &mut ws,
         2,
         "agent.prompt",
@@ -1730,7 +1745,7 @@ async fn e2e_prompt_event_ordering() {
     .await;
 
     // Collect events for up to 3 seconds
-    let events = collect_events(&mut ws, Duration::from_secs(3)).await;
+    events.extend(collect_events(&mut ws, Duration::from_secs(3)).await);
     let types: Vec<&str> = events
         .iter()
         .filter_map(|e| e.get("type").and_then(|v| v.as_str()))
@@ -1766,7 +1781,7 @@ async fn e2e_prompt_error_from_provider() {
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
-    let _ = rpc_call(
+    let (_, mut interleaved) = rpc_call_with_interleaved_events(
         &mut ws,
         2,
         "agent.prompt",
@@ -1775,7 +1790,11 @@ async fn e2e_prompt_error_from_provider() {
     .await;
 
     // Even on provider error, agent.ready must arrive
-    let ready = read_until_event_type(&mut ws, "agent.ready").await;
+    let ready = take_event_type(&mut interleaved, "agent.ready").or(read_until_event_type(
+        &mut ws,
+        "agent.ready",
+    )
+    .await);
     assert!(
         ready.is_some(),
         "agent.ready must arrive even after provider error"
@@ -2054,7 +2073,7 @@ async fn e2e_prompt_text_content_arrives() {
 
     let sid = create_and_bind_session(&mut ws, 1).await;
 
-    let _ = rpc_call(
+    let (_, mut events) = rpc_call_with_interleaved_events(
         &mut ws,
         2,
         "agent.prompt",
@@ -2063,7 +2082,7 @@ async fn e2e_prompt_text_content_arrives() {
     .await;
 
     // Collect events and find text_delta
-    let events = collect_events(&mut ws, Duration::from_secs(3)).await;
+    events.extend(collect_events(&mut ws, Duration::from_secs(3)).await);
     let text_deltas: Vec<&Value> = events
         .iter()
         .filter(|e| e.get("type").and_then(|v| v.as_str()) == Some("agent.text_delta"))

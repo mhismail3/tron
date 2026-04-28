@@ -100,19 +100,19 @@ pub struct RpcContext {
     /// can render the connection display ("Tailscale 100.x:9847") without
     /// re-parsing user input. Set by `TronServer::new` from `ServerConfig::port`.
     pub ws_port: u16,
-    /// Path to the first-run sentinel (`~/.tron/system/.onboarded`). Stored on
+    /// Path to the first-run sentinel (`~/.tron/system/run/.onboarded`). Stored on
     /// the context so tests can inject a temp path; production sets it to
     /// [`crate::server::onboarding::onboarded_marker_path`]. Drives the `paired`
     /// field returned by `system.getInfo`.
     pub onboarded_marker_path: PathBuf,
-    /// Release fetcher used by the user-mode auto-updater (Plan §H.2).
+    /// Release fetcher used by user-mode update checks.
     /// `None` disables all updater RPCs — they return a structured
     /// "updater disabled" error. Production wires
     /// [`crate::server::updater::HttpReleaseFetcher::new`]; tests inject a
     /// [`crate::server::updater::MockReleaseFetcher`] so RPC tests can
     /// exercise the happy + sad paths offline.
     pub release_fetcher: Option<Arc<dyn crate::server::updater::ReleaseFetcher>>,
-    /// Path to the updater state file (`~/.tron/system/updater-state.json`).
+    /// Path to the updater state file (`~/.tron/system/run/updater-state.json`).
     /// Atomic reads/writes go through [`crate::server::updater::read_update_state`]
     /// / [`crate::server::updater::write_update_state`]. Tests inject a
     /// tempdir path; production sets it to

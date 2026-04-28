@@ -120,7 +120,7 @@ struct WizardStateTests {
         state.pairingPayload = PairingPayload(host: "1.2.3.4", port: 9847, token: "x", label: nil)
         state.tailscaleStatus = .signedIn(ipv4: "100.1.2.3")
         state.permissionStatuses[.fullDiskAccess] = .granted
-        state.existingInstallStatus = .installed(version: "0.5.0")
+        state.existingInstallStatus = .registered(version: "0.5.0")
         state.complete()
 
         state.reset()

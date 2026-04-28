@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 
 /// Result of a single `system.ping` probe. The four non-success cases
 /// drive distinct UI affordances in the menu bar / wizard so the user
@@ -180,272 +181,6 @@ enum ServerPing {
     }
 }
 
-/// One-shot `system.probePermissions` RPC client. Returns the agent's
-/// TCC grant state — which is the state the Permissions wizard cares
-/// about, because the AGENT is the binary that actually uses FDA /
-/// Screen Recording / Accessibility at runtime.
-///
-/// The RPC is defined in
-/// `packages/agent/src/server/rpc/handlers/system.rs`
-/// (`ProbePermissionsHandler`). It uses native FFI and never prompts,
-/// so this client can poll every couple of seconds without racing the
-/// System Settings deep-link UX.
-///
-/// Failure modes are folded into `.probeUnavailable` on the per-
-/// permission result so the wizard renders a retry affordance rather
-/// than looping forever — e.g. the agent is mid-restart after a kickstart.
-enum PermissionProbeRPC {
-    static let requestID = "mac-probe-permissions"
-
-    /// Probes the three wizard permissions against the agent. If the
-    /// server is unreachable or the response is malformed, all three
-    /// come back as `.probeUnavailable` so the UI can surface a single
-    /// "server restarting…" banner instead of three confused spinners.
-    static func probeAll(
-        host: String,
-        port: Int,
-        token: String?,
-        timeout: TimeInterval = 3
-    ) async -> [Permission: PermissionStatus] {
-        guard let url = URLComponents(string: "ws://\(host):\(port)/ws")?.url else {
-            return fallback()
-        }
-
-        var request = URLRequest(url: url, timeoutInterval: timeout)
-        if let token, !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-
-        let session = URLSession(configuration: .ephemeral)
-        defer { session.invalidateAndCancel() }
-
-        let task = session.webSocketTask(with: request)
-        task.resume()
-        defer { task.cancel(with: .goingAway, reason: nil) }
-
-        let payload: [String: Any] = [
-            "id": requestID,
-            "method": "system.probePermissions",
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
-              let str = String(data: data, encoding: .utf8) else {
-            return fallback()
-        }
-
-        do {
-            try await task.send(.string(str))
-
-            for _ in 0..<8 {
-                let message = try await task.receive()
-                guard let raw = messageData(from: message) else {
-                    return fallback()
-                }
-
-                switch decodeFrame(raw) {
-                case .result(let statuses):
-                    return statuses
-                case .ignore:
-                    continue
-                case .error, .malformed:
-                    return fallback()
-                }
-            }
-
-            return fallback()
-        } catch {
-            return fallback()
-        }
-    }
-
-    enum ResponseFrame: Equatable {
-        case result([Permission: PermissionStatus])
-        case ignore
-        case error
-        case malformed
-    }
-
-    static func decodeFrame(_ data: Data, expectedID: String = requestID) -> ResponseFrame {
-        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
-            return .malformed
-        }
-        guard responseID(json["id"], matches: expectedID) else {
-            return .ignore
-        }
-        if json["error"] != nil || json["success"] as? Bool == false {
-            return .error
-        }
-        guard let statuses = decode(data) else {
-            return .malformed
-        }
-        return .result(statuses)
-    }
-
-    static func decode(_ data: Data) -> [Permission: PermissionStatus]? {
-        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-              let result = json["result"] as? [String: Any] else {
-            return nil
-        }
-        func status(for key: String) -> PermissionStatus {
-            // Server emits lowercase tokens ("granted" / "denied" /
-            // "unknown"). Anything else degrades to probeUnavailable so
-            // a future server bump that introduces new tokens still
-            // renders a retry affordance, not a crash.
-            switch result[key] as? String {
-            case "granted": return .granted
-            case "denied":  return .denied
-            default:        return .probeUnavailable
-            }
-        }
-        return [
-            .fullDiskAccess:  status(for: "fullDiskAccess"),
-            .screenRecording: status(for: "screenRecording"),
-            .accessibility:   status(for: "accessibility"),
-        ]
-    }
-
-    /// Uniform fallback: every permission reports `.probeUnavailable`.
-    /// The wizard treats this as "server probably mid-restart, try again
-    /// in a moment" and keeps polling.
-    private static func fallback() -> [Permission: PermissionStatus] {
-        [
-            .fullDiskAccess:  .probeUnavailable,
-            .screenRecording: .probeUnavailable,
-            .accessibility:   .probeUnavailable,
-        ]
-    }
-
-    private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {
-        switch message {
-        case .data(let data):
-            return data
-        case .string(let string):
-            return Data(string.utf8)
-        @unknown default:
-            return nil
-        }
-    }
-
-    private static func responseID(_ value: Any?, matches expectedID: String) -> Bool {
-        if let string = value as? String {
-            return string == expectedID
-        }
-        return false
-    }
-}
-
-/// One-shot `system.requestPermission` RPC client. This is deliberately
-/// separate from `PermissionProbeRPC`: probing must stay silent, while
-/// this request is called only after a user clicks a Permissions-step
-/// gear button.
-enum PermissionRequestRPC {
-    static func request(
-        _ permission: Permission,
-        host: String,
-        port: Int,
-        token: String?,
-        timeout: TimeInterval = 4
-    ) async -> Bool {
-        guard let url = URLComponents(string: "ws://\(host):\(port)/ws")?.url else {
-            return false
-        }
-
-        var request = URLRequest(url: url, timeoutInterval: timeout)
-        if let token, !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-
-        let session = URLSession(configuration: .ephemeral)
-        defer { session.invalidateAndCancel() }
-
-        let task = session.webSocketTask(with: request)
-        task.resume()
-        defer { task.cancel(with: .goingAway, reason: nil) }
-
-        let requestID = "mac-request-permission-\(permission.rawValue)"
-        let payload: [String: Any] = [
-            "id": requestID,
-            "method": "system.requestPermission",
-            "params": ["permission": permission.rawValue],
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
-              let str = String(data: data, encoding: .utf8) else {
-            return false
-        }
-
-        do {
-            try await task.send(.string(str))
-            for _ in 0..<8 {
-                let message = try await task.receive()
-                guard let raw = messageData(from: message) else { return false }
-                switch decodeFrame(raw, expectedID: requestID) {
-                case .result(let responsePermission, _):
-                    return responsePermission == permission
-                case .ignore:
-                    continue
-                case .error, .malformed:
-                    return false
-                }
-            }
-            return false
-        } catch {
-            return false
-        }
-    }
-
-    enum ResponseFrame: Equatable {
-        case result(Permission, PermissionStatus)
-        case ignore
-        case error
-        case malformed
-    }
-
-    static func decodeFrame(_ data: Data, expectedID: String) -> ResponseFrame {
-        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
-            return .malformed
-        }
-        guard responseID(json["id"], matches: expectedID) else {
-            return .ignore
-        }
-        if json["error"] != nil || json["success"] as? Bool == false {
-            return .error
-        }
-        guard let result = json["result"] as? [String: Any],
-              let rawPermission = result["permission"] as? String,
-              let permission = Permission(rawValue: rawPermission) else {
-            return .malformed
-        }
-
-        let status: PermissionStatus
-        switch result["status"] as? String {
-        case "granted":
-            status = .granted
-        case "denied":
-            status = .denied
-        default:
-            status = .probeUnavailable
-        }
-        return .result(permission, status)
-    }
-
-    private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {
-        switch message {
-        case .data(let data):
-            return data
-        case .string(let string):
-            return Data(string.utf8)
-        @unknown default:
-            return nil
-        }
-    }
-
-    private static func responseID(_ value: Any?, matches expectedID: String) -> Bool {
-        if let string = value as? String {
-            return string == expectedID
-        }
-        return false
-    }
-}
-
 /// Captures the HTTP upgrade response status code via the URLSession
 /// delegate callbacks. Thread-safe via NSLock so it can be touched from
 /// the URLSession's delegate queue and the awaiter.
@@ -468,34 +203,161 @@ private final class WSStatusCapture: NSObject, URLSessionTaskDelegate, URLSessio
     }
 }
 
-/// Live `LaunchAgentManaging` implementation that shells out to
-/// `launchctl`. Tests use `MockLaunchAgentManager` instead.
+/// Live `LaunchAgentManaging` implementation. Registration goes
+/// through `SMAppService`; `launchctl` is used only for diagnostics and
+/// explicit restart/kickstart.
 struct LiveLaunchAgentManager: LaunchAgentManaging {
     func load(plistPath: URL, label: String) async -> LaunchAgentOutcome {
-        if await isLoaded(label: label) {
-            return .alreadyLoaded
-        }
         guard FileManager.default.fileExists(atPath: plistPath.path) else {
             return .binaryMissing(path: plistPath.path)
         }
-        let result = await Subprocess.run(
-            executable: URL(fileURLWithPath: "/bin/launchctl"),
-            arguments: ["bootstrap", "gui/\(currentUID())", plistPath.path]
-        )
-        return result.exitCode == 0
-            ? .ok
-            : .launchdRefused(message: result.stderr.isEmpty ? result.stdout : result.stderr)
+        guard FileManager.default.fileExists(atPath: TronPaths.serverHelperBinary.path) else {
+            return .binaryMissing(path: TronPaths.serverHelperBinary.path)
+        }
+
+        let service = SMAppService.agent(plistName: "\(label).plist")
+        let status = ExistingInstallDetector.serviceStatus(label: label)
+        let currentVariant = MacRuntimeVariant.detect()
+        let runningParent = await runtimeInfo(label: label)?.parentBundleIdentifier
+
+        if let outcome = Self.preRegistrationOutcome(
+            for: status,
+            currentVariant: currentVariant,
+            runningParentBundleIdentifier: runningParent
+        ) {
+            return outcome
+        }
+        if Self.shouldBootoutForTakeover(
+            status: status,
+            currentVariant: currentVariant,
+            runningParentBundleIdentifier: runningParent
+        ) {
+            _ = await Subprocess.run(
+                executable: URL(fileURLWithPath: "/bin/launchctl"),
+                arguments: ["bootout", "gui/\(currentUID())/\(label)"]
+            )
+        }
+        let externalPortBound = await isPortBound(TronPaths.defaultServerPort)
+        let databaseLockHeld = await isDatabaseLockHeld()
+        if Self.shouldRefuseExternalServer(
+            status: status,
+            runningParentBundleIdentifier: runningParent,
+            portBound: externalPortBound,
+            databaseLockHeld: databaseLockHeld
+        ) {
+            return .launchdRefused(message: "Another Tron server is already running on port \(TronPaths.defaultServerPort). Stop it before installing Tron Server.")
+        }
+
+        if status == .enabled, runningParent == nil {
+            do {
+                try await service.unregister()
+            } catch {
+                return .launchdRefused(
+                    message: "Tron Server is registered but launchd has no loaded job, and macOS refused to replace the registration: \(error.localizedDescription)"
+                )
+            }
+        }
+
+        do {
+            try service.register()
+        } catch {
+            return .launchdRefused(message: error.localizedDescription)
+        }
+
+        switch service.status {
+        case .enabled:
+            return .ok
+        case .requiresApproval:
+            return .requiresApproval(message: "Approve Tron Server in Login Items to finish installation.")
+        case .notFound:
+            return .unknown(message: "ServiceManagement could not find the bundled Tron Server LaunchAgent after registration.")
+        case .notRegistered:
+            return .unknown(message: "Tron Server was not registered.")
+        @unknown default:
+            return .unknown(message: "Tron Server registration returned an unknown status.")
+        }
+    }
+
+    static func preRegistrationOutcome(
+        for status: ExistingInstallDetector.ServiceRegistrationStatus,
+        currentVariant: MacRuntimeVariant = MacRuntimeVariant.detect(),
+        runningParentBundleIdentifier: String? = nil
+    ) -> LaunchAgentOutcome? {
+        switch status {
+        case .requiresApproval:
+            return .requiresApproval(message: "Approve Tron Server in Login Items to finish installation.")
+        case .enabled, .notRegistered, .notFound, .unknown:
+            guard let runningParentBundleIdentifier else {
+                // SMAppService can report an enabled Login Item even
+                // when launchd has no loaded job for the label, e.g. a
+                // stale DerivedData Debug registration. Do not treat
+                // that as ready; route through the registration path so
+                // the current app bundle is the source of truth.
+                return nil
+            }
+            if runningParentBundleIdentifier == currentVariant.expectedParentBundleIdentifier {
+                return .alreadyLoaded
+            }
+            if currentVariant.precedence > MacRuntimeVariant.precedence(forParentBundleIdentifier: runningParentBundleIdentifier) {
+                return nil
+            }
+            return .launchdRefused(
+                message: "Tron Server is currently managed by \(runningParentBundleIdentifier). Stop that build before installing this one."
+            )
+        }
+    }
+
+    static func shouldBootoutForTakeover(
+        status: ExistingInstallDetector.ServiceRegistrationStatus,
+        currentVariant: MacRuntimeVariant,
+        runningParentBundleIdentifier: String?
+    ) -> Bool {
+        guard status != .requiresApproval,
+              let runningParentBundleIdentifier,
+              runningParentBundleIdentifier != currentVariant.expectedParentBundleIdentifier else {
+            return false
+        }
+        return currentVariant.precedence > MacRuntimeVariant.precedence(forParentBundleIdentifier: runningParentBundleIdentifier)
+    }
+
+    static func shouldRefuseExternalServer(
+        status: ExistingInstallDetector.ServiceRegistrationStatus,
+        runningParentBundleIdentifier: String?,
+        portBound: Bool,
+        databaseLockHeld: Bool
+    ) -> Bool {
+        guard status != .enabled,
+              status != .requiresApproval,
+              runningParentBundleIdentifier == nil else {
+            return false
+        }
+        return portBound || databaseLockHeld
     }
 
     func unload(label: String) async -> LaunchAgentOutcome {
-        let result = await Subprocess.run(
-            executable: URL(fileURLWithPath: "/bin/launchctl"),
-            arguments: ["bootout", "gui/\(currentUID())/\(label)"]
-        )
-        // bootout returns 0 when removed; non-zero often "not loaded".
-        return result.exitCode == 0
-            ? .ok
-            : .unknown(message: result.stderr.isEmpty ? result.stdout : result.stderr)
+        let service = SMAppService.agent(plistName: "\(label).plist")
+        if let outcome = Self.preUnregistrationOutcome(for: ExistingInstallDetector.serviceStatus(label: label)) {
+            return outcome
+        }
+        do {
+            try await service.unregister()
+            return .ok
+        } catch {
+            return .unknown(message: error.localizedDescription)
+        }
+    }
+
+    static func preUnregistrationOutcome(
+        for status: ExistingInstallDetector.ServiceRegistrationStatus
+    ) -> LaunchAgentOutcome? {
+        switch status {
+        case .notRegistered:
+            return .ok
+        case .notFound:
+            return .binaryMissing(path: TronPaths.launchAgentPlistPath.path)
+        case .enabled, .requiresApproval, .unknown:
+            return nil
+        }
     }
 
     func restart(label: String) async -> LaunchAgentOutcome {
@@ -529,7 +391,15 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         } else {
             uptime = nil
         }
-        return LaunchAgentRuntimeInfo(pid: pid, uptime: uptime)
+        return LaunchAgentRuntimeInfo(
+            pid: pid,
+            uptime: uptime,
+            parentBundleIdentifier: parseLaunchctlValue(
+                named: "parent bundle identifier",
+                from: result.stdout
+            ),
+            programIdentifier: parseLaunchctlValue(named: "program identifier", from: result.stdout)
+        )
     }
 
     private func parsePID(from launchctlOutput: String) -> Int? {
@@ -542,6 +412,17 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         return nil
     }
 
+    private func parseLaunchctlValue(named key: String, from launchctlOutput: String) -> String? {
+        let prefix = "\(key) ="
+        for line in launchctlOutput.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix(prefix) else { continue }
+            let value = trimmed.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+            return value.isEmpty ? nil : value
+        }
+        return nil
+    }
+
     private func processElapsedTime(pid: Int) async -> String? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/ps"),
@@ -550,6 +431,25 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         guard result.exitCode == 0 else { return nil }
         let uptime = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return uptime.isEmpty ? nil : uptime
+    }
+
+    private func isPortBound(_ port: Int) async -> Bool {
+        let result = await Subprocess.run(
+            executable: URL(fileURLWithPath: "/usr/sbin/lsof"),
+            arguments: ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"]
+        )
+        return result.exitCode == 0 && !result.stdout.isEmpty
+    }
+
+    private func isDatabaseLockHeld() async -> Bool {
+        guard FileManager.default.fileExists(atPath: TronPaths.databaseLockPath.path) else {
+            return false
+        }
+        let result = await Subprocess.run(
+            executable: URL(fileURLWithPath: "/usr/sbin/lsof"),
+            arguments: [TronPaths.databaseLockPath.path]
+        )
+        return result.exitCode == 0 && !result.stdout.isEmpty
     }
 
     private func currentUID() -> Int {

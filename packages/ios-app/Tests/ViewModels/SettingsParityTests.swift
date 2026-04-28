@@ -67,12 +67,11 @@ final class SettingsParityTests: XCTestCase {
         // Server auth + Tailscale identity (ConnectionSettingsPage:88-156)
         "authEnforced",
         "tailscaleIp",
-        // Auto-update (Phase 5.5 — UpdatesSettingsPage.swift)
+        // Update checks (UpdatesSettingsPage.swift)
         "updateEnabled",
         "updateChannel",
         "updateFrequency",
         "updateAction",
-        "updateAllowDowngradeOnRollback",
     ]
 
     /// Explicit waivers — fields that exist on SettingsState but are

@@ -1,7 +1,7 @@
 //! WebSocket bearer-token authentication middleware.
 //!
 //! Phase 2 of the onboarding plan: gates `/ws` upgrades behind a bearer
-//! token stored in `~/.tron/system/auth-token.json`. The token is created
+//! token stored as `bearerToken` in `~/.tron/system/auth.json`. The token is created
 //! lazily by [`crate::server::onboarding::load_or_create_bearer_token`]
 //! at server startup; the WS upgrade handler asks this module to verify
 //! the `Authorization: Bearer <token>` header before passing control to
@@ -205,7 +205,7 @@ mod tests {
 
     fn temp_store() -> (tempfile::TempDir, BearerTokenStore) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("auth-token.json");
+        let path = dir.path().join("auth.json");
         let store = BearerTokenStore::new(path);
         (dir, store)
     }
@@ -293,10 +293,10 @@ mod tests {
     #[test]
     fn store_returns_none_when_path_unwritable() {
         // A path inside a non-existent, non-creatable directory yields
-        // None rather than a panic. We use `/dev/null/auth-token.json`
+        // None rather than a panic. We use `/dev/null/auth.json`
         // because creating subdirectories of `/dev/null` always fails
         // with NotADirectory on Unix.
-        let store = BearerTokenStore::new(PathBuf::from("/dev/null/auth-token.json"));
+        let store = BearerTokenStore::new(PathBuf::from("/dev/null/auth.json"));
         assert!(store.current_token().is_none());
     }
 
@@ -400,7 +400,7 @@ mod tests {
         // header present, 401 is the right answer because there's no
         // canonical token to compare against. This is the
         // "server-not-initialized" path the Mac wizard polls past.
-        let store = BearerTokenStore::new(PathBuf::from("/dev/null/auth-token.json"));
+        let store = BearerTokenStore::new(PathBuf::from("/dev/null/auth.json"));
         let headers = header_with_bearer("Bearer some-value");
         let err = verify_bearer_header(&headers, &store, true).unwrap_err();
         assert_eq!(err, StatusCode::UNAUTHORIZED);

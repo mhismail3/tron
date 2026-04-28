@@ -16,8 +16,9 @@ struct ServerStatusPollerTests {
         launchAgentManager.runtimeInfo = LaunchAgentRuntimeInfo(pid: 16027, uptime: "01:07:42")
         return EnvironmentSetup(
             tronHome: tmp,
-            installedBundle: tmp,
-            installedBinary: tmp,
+            applicationBundle: tmp,
+            serverHelperBundle: tmp.appendingPathComponent("Tron Server.app"),
+            serverHelperBinary: tmp.appendingPathComponent("Tron Server.app/Contents/MacOS/tron"),
             bearerTokenPath: tmp,
             onboardedMarkerPath: tmp,
             settingsPath: tmp,
@@ -28,13 +29,12 @@ struct ServerStatusPollerTests {
             readTailscaleIPFromSettings: { tailscaleFromSettings },
             cacheTailscaleIP: { _ in },
             probeTailscale: { .notInstalled },
-            probePermission: { _ in .notDetermined },
-            probeAgentPermissions: { [:] },
-            requestAgentPermission: { _ in false },
+            probePermissions: { [:] },
             detectExistingInstall: { .none },
+            validateApplicationLocation: { nil },
+            validateBundledHelper: { nil },
             pingServer: { _ in pingResult },
             launchAgentManager: launchAgentManager,
-            cleanupInstallArtifacts: { .success(removed: []) },
             touchOnboardedSentinel: { }
         )
     }

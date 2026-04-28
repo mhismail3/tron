@@ -287,19 +287,15 @@ Settings live at `~/.tron/system/settings.json`. All keys are camelCase. Missing
 
 ---
 
-## Deployment Files
+## Runtime Files
 
-All under `~/.tron/system/deployment/`:
-
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
-| `deployed-commit` | Current git commit hash |
-| `last-deployment.json` | `{ status, timestamp, commit, previousCommit, error }` |
-| `restart-sentinel.json` | `{ action, timestamp, commit, status, completedAt, initiatedBy, selfTest: { passed, checks[], timestamp } }` |
-| `tron-cli` | CLI wrapper executable |
-| `tron-lib.sh` | Shared deployment library |
-| `workspace-path` | Path to tron workspace |
-| `auth.lock` | Auth serialization lock |
+| `~/.tron/system/run/auth.lock` | Auth serialization lock |
+| `~/.tron/system/run/.mac-wrapper.lock` | Mac wrapper single-instance lock |
+| `~/.tron/system/run/.onboarded` | First-run sentinel |
+| `~/.tron/system/run/updater-state.json` | Update-check scheduler state |
+| `~/.tron/system/database/log.db.lock` | SQLite process lock beside `log.db` |
 
 ## Health Endpoints
 
@@ -312,7 +308,4 @@ curl -s http://localhost:9847/health | jq .
 curl -s http://localhost:9847/health/deep | jq .
 # Response: { status, uptimeSecs, connections, activeSessions, checks: [{name, status, detail}] }
 
-# Deploy status
-curl -s http://localhost:9847/deploy/status | jq .
-# Response: { version, deployedCommit, binaryPath, binaryExists, binaryModified, ... }
 ```

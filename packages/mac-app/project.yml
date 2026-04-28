@@ -41,10 +41,8 @@ targets:
         createIntermediateGroups: true
         buildPhase: resources
         optional: true
-      - path: ../../scripts/tron-cli
-        buildPhase: resources
-      - path: ../../scripts/tron-lib.sh
-        buildPhase: resources
+        excludes:
+          - "Library/**"
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
@@ -59,9 +57,23 @@ targets:
       configs:
         Debug:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.dev
-          CODE_SIGN_IDENTITY: "-"
         Release:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac
+    postBuildScripts:
+      - name: Copy Bundled Login Item
+        script: |
+          set -euo pipefail
+          SRC="$SRCROOT/Sources/Resources/Library"
+          DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Library"
+          test -d "$SRC" || { echo "Missing bundled Library resources at $SRC" >&2; exit 1; }
+          rm -rf "$DST"
+          mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
+          ditto "$SRC" "$DST"
+          HELPER="$DST/LoginItems/Tron Server.app"
+          if [ -d "$HELPER" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
+            SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
+            codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$HELPER"
+          fi
 
   TronMacTests:
     type: bundle.unit-test

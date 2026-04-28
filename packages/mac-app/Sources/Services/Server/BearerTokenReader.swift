@@ -1,28 +1,32 @@
 import Foundation
 
-/// Reads the bearer token from `~/.tron/system/auth-token.json`. This is
-/// the same file written by the Rust agent's `server::onboarding`
-/// module via the atomic `tempfile + sync_all + rename` pattern.
+/// Reads the bearer token from `bearerToken` in `~/.tron/system/auth.json`.
+/// This is the same file written by the Rust agent's `server::onboarding`
+/// module through the shared auth-storage atomic writer.
 ///
 /// File format (matches `packages/agent/src/server/onboarding/mod.rs`):
 /// ```json
-/// { "token": "<url-safe base64, 32 bytes>" }
+/// {
+///   "version": 1,
+///   "bearerToken": "<url-safe base64, 32 bytes>",
+///   "providers": {},
+///   "lastUpdated": "..."
+/// }
 /// ```
 ///
-/// Security INVARIANT: the token file MUST be mode `0o600` (owner-only
+/// Security INVARIANT: `auth.json` MUST be mode `0o600` (owner-only
 /// read+write). Any wider permission bit indicates either a tampered
 /// file or a buggy writer; in either case the token is treated as
 /// untrusted and `read` returns nil with an `NSLog` audit line. The
-/// Rust writer's `set_secure_permissions` enforces `0o600` at write
-/// time (see `packages/agent/src/server/onboarding/mod.rs::write_token`).
+/// Rust writer enforces `0o600` at write time (see
+/// `packages/agent/src/llm/auth/storage.rs::save_auth_storage`).
 ///
 /// Tests in `Tests/Services/BearerTokenReaderTests.swift` cover happy
-/// path, missing file, malformed JSON, the legacy plain-string fallback
-/// (some early dogfood writes were not wrapped in the object), and the
-/// new permission guard.
+/// path, missing file, malformed JSON, missing `bearerToken`, and the
+/// permission guard.
 enum BearerTokenReader {
-    private struct TokenFile: Decodable {
-        let token: String
+    private struct AuthFile: Decodable {
+        let bearerToken: String?
     }
 
     /// Reads the token file. Returns nil if missing, empty, malformed,
@@ -36,20 +40,10 @@ enum BearerTokenReader {
             return nil
         }
 
-        // Preferred path: {"token": "..."} JSON object.
-        if let decoded = try? JSONDecoder().decode(TokenFile.self, from: data) {
-            return nonEmpty(decoded.token)
+        guard let decoded = try? JSONDecoder().decode(AuthFile.self, from: data) else {
+            return nil
         }
-
-        // Legacy fallback: file is a bare string (pre-Phase-2 dogfood
-        // builds). Trim whitespace and surrounding quotes.
-        if let raw = String(data: data, encoding: .utf8) {
-            let trimmed = raw
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            return nonEmpty(trimmed)
-        }
-        return nil
+        return nonEmpty(decoded.bearerToken ?? "")
     }
 
     /// Returns true when the file is owned by the current user AND has

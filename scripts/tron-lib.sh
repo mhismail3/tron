@@ -13,12 +13,15 @@
 TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
 BIN_DIR="$HOME/.local/bin"
 
-# App bundle paths — macOS TCC identifies apps by CFBundleIdentifier, so wrapping
-# the binary in a .app bundle ensures permissions persist across binary replacements.
+# Contributor app bundle paths. Production Mac distribution lives at
+# `/Applications/Tron.app` and is registered by the Swift wrapper via SMAppService;
+# these bundles are only for shell-script development flows.
 TRON_BUNDLE_ID="com.tron.agent"
-INSTALLED_BUNDLE="$TRON_HOME/system/Tron.app"
+RUN_DIR="$TRON_HOME/system/run"
+CONTRIBUTOR_DIR="$RUN_DIR"
+INSTALLED_BUNDLE="$CONTRIBUTOR_DIR/Tron-Deploy.app"
 INSTALLED_BINARY="$INSTALLED_BUNDLE/Contents/MacOS/tron"
-DEV_BUNDLE="$TRON_HOME/system/deployment/Tron-Dev.app"
+DEV_BUNDLE="$RUN_DIR/Tron-Dev.app"
 DEV_BINARY="$DEV_BUNDLE/Contents/MacOS/tron"
 
 # Keychain profile name for xcrun notarytool (see notarize_bundle).
@@ -30,12 +33,14 @@ NOTARIZE_PROFILE="tron-notarize"
 # Service configuration
 PLIST_NAME="com.tron.server"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+RELEASE_APP="/Applications/Tron.app"
+RELEASE_APP_BINARY="$RELEASE_APP/Contents/MacOS/Tron"
+RELEASE_LAUNCH_AGENT_PLIST="$RELEASE_APP/Contents/Library/LaunchAgents/$PLIST_NAME.plist"
 PROD_PORT=9847
 
 # File paths
-DEPLOY_DIR="$TRON_HOME/system/deployment"
-DEPLOYED_COMMIT_FILE="$DEPLOY_DIR/deployed-commit"
-ONBOARDED_MARKER_PATH="$TRON_HOME/system/.onboarded"
+DEPLOYED_COMMIT_FILE="$CONTRIBUTOR_DIR/deployed-commit"
+ONBOARDED_MARKER_PATH="$TRON_HOME/system/run/.onboarded"
 
 # Database
 DB_PATH="$TRON_HOME/system/database/log.db"
@@ -94,7 +99,7 @@ print_header()  { echo -e "\n${CYAN}$1${NC}\n━━━━━━━━━━━�
 
 require_installed() {
     if [ ! -f "$PLIST_PATH" ]; then
-        print_error "Tron not installed. Run: tron install"
+        print_error "Contributor service is not installed. Run: tron install"
         exit 1
     fi
 }
@@ -106,7 +111,7 @@ confirm_action() {
 }
 
 ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/system/{database,deployment}
+    mkdir -p "$TRON_HOME"/system/{database,run}
     mkdir -p "$TRON_HOME"/workspace/{knowledge,automations,scratch}
     mkdir -p "$TRON_HOME"/workspace/memory/{rules,sessions}
     mkdir -p "$TRON_HOME"/skills
@@ -146,22 +151,31 @@ wait_for_port_free() {
 }
 
 #=============================================================================
-# LAUNCHD HELPERS — modern API (bootout/bootstrap/kickstart) with fallback
+# CONTRIBUTOR LAUNCHD HELPERS
 #=============================================================================
 
 _launchd_target() { echo "gui/$(id -u)/$1"; }
 
 launchd_stop() {
-    launchctl bootout "$(_launchd_target "$1")" 2>/dev/null \
-        || launchctl unload "$HOME/Library/LaunchAgents/$1.plist" 2>/dev/null \
-        || true
+    launchctl bootout "$(_launchd_target "$1")" 2>/dev/null || true
 }
 
 launchd_start() {
     local plist="$HOME/Library/LaunchAgents/$1.plist"
-    launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null \
-        || launchctl load "$plist" 2>/dev/null \
-        || true
+    local target="$(_launchd_target "$1")"
+    if launchctl print "$target" &>/dev/null; then
+        launchctl kickstart -k "$target" 2>/dev/null || true
+        return 0
+    fi
+
+    if [ "$1" = "$PLIST_NAME" ] && [ -x "$RELEASE_APP_BINARY" ] && [ -f "$RELEASE_LAUNCH_AGENT_PLIST" ]; then
+        "$RELEASE_APP_BINARY" --tron-start-server-and-quit >/dev/null 2>&1 || true
+        sleep 1
+        launchctl kickstart -k "$target" 2>/dev/null || true
+        return 0
+    fi
+
+    launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || true
 }
 
 launchd_restart() {
@@ -189,25 +203,36 @@ validate_prod_binary() {
     [ -f "$INSTALLED_BINARY" ] && file "$INSTALLED_BINARY" 2>/dev/null | grep -q "Mach-O"
 }
 
-# Base version: restores from backup only.
+release_wrapper_available() {
+    [ -x "$RELEASE_APP_BINARY" ] && [ -f "$RELEASE_LAUNCH_AGENT_PLIST" ]
+}
+
+# Base contributor-service version: restores from backup only.
 # Workspace script overrides this to also try $RELEASE_BINARY.
 ensure_prod_binary() {
     if validate_prod_binary; then
         return 0
     fi
 
-    print_warning "Production binary is missing or corrupt"
+    print_warning "Contributor service binary is missing or corrupt"
 
-    if [ -f "$DEPLOY_DIR/tron.bak" ] && file "$DEPLOY_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
+    if [ -f "$CONTRIBUTOR_DIR/tron.bak" ] && file "$CONTRIBUTOR_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
         print_status "Restoring from backup..."
-        create_app_bundle "$INSTALLED_BUNDLE" "$DEPLOY_DIR/tron.bak"
+        create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"
         codesign_bundle "$INSTALLED_BUNDLE"
         print_success "Restored from backup"
         return 0
     fi
 
-    print_error "No valid binary found. Run: tron deploy"
+    print_error "No valid contributor service binary found. Run: tron deploy"
     return 1
+}
+
+ensure_restartable_prod_server() {
+    if release_wrapper_available; then
+        return 0
+    fi
+    ensure_prod_binary
 }
 
 service_start() {
@@ -312,7 +337,7 @@ PLIST
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     for candidate in \
         "$script_dir/AppIcon.icns" \
-        "$DEPLOY_DIR/AppIcon.icns"; do
+        "$CONTRIBUTOR_DIR/AppIcon.icns"; do
         if [ -f "$candidate" ]; then
             cp "$candidate" "$bundle_path/Contents/Resources/AppIcon.icns"
             break
@@ -357,7 +382,7 @@ codesign_bundle() {
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     for candidate in \
         "$script_dir/tron-agent.entitlements" \
-        "$DEPLOY_DIR/tron-agent.entitlements"; do
+        "$CONTRIBUTOR_DIR/tron-agent.entitlements"; do
         if [ -f "$candidate" ]; then
             entitlements="$candidate"
             break
@@ -528,8 +553,8 @@ notarize_bundle() {
 }
 
 # Convenience wrapper: codesign + notarize in one call.
-# Used by production flows (cmd_deploy, cmd_install). Dev flows and the
-# emergency rollback path call codesign_bundle directly to stay fast.
+# Used by contributor release-bundle flows (cmd_deploy, cmd_install). Dev
+# flows and the rollback path call codesign_bundle directly to stay fast.
 sign_and_notarize() {
     local bundle="$1"
     codesign_bundle "$bundle"
@@ -697,7 +722,7 @@ write_deployment_result() {
         error_msg="\"$error_msg\""
     fi
 
-    cat > "$DEPLOY_DIR/last-deployment.json" << RESULT
+    cat > "$CONTRIBUTOR_DIR/last-deployment.json" << RESULT
 {
   "status": "$status",
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
@@ -715,8 +740,8 @@ RESULT
 cmd_status() {
     # $PROJECT_DIR is set by workspace script; otherwise try workspace-path file
     local git_dir="${PROJECT_DIR:-}"
-    if [ -z "$git_dir" ] && [ -f "$DEPLOY_DIR/workspace-path" ]; then
-        git_dir=$(cat "$DEPLOY_DIR/workspace-path")
+    if [ -z "$git_dir" ] && [ -f "$CONTRIBUTOR_DIR/workspace-path" ]; then
+        git_dir=$(cat "$CONTRIBUTOR_DIR/workspace-path")
     fi
 
     echo ""
@@ -842,8 +867,20 @@ cmd_uninstall() {
     print_status "Removing CLI entrypoint..."
     rm -f "$BIN_DIR/tron"
 
-    print_status "Removing installed server bundles..."
-    rm -rf "$INSTALLED_BUNDLE" "$DEV_BUNDLE" "$DEPLOY_DIR/tron.bak"
+    print_status "Removing contributor runtime artifacts..."
+    rm -rf "$INSTALLED_BUNDLE" "$DEV_BUNDLE"
+    rm -f \
+        "$CONTRIBUTOR_DIR/tron.bak" \
+        "$CONTRIBUTOR_DIR/tron-cli" \
+        "$CONTRIBUTOR_DIR/tron-lib.sh" \
+        "$CONTRIBUTOR_DIR/tron-agent.entitlements" \
+        "$CONTRIBUTOR_DIR/AppIcon.icns" \
+        "$CONTRIBUTOR_DIR/workspace-path" \
+        "$CONTRIBUTOR_DIR/deployed-commit" \
+        "$CONTRIBUTOR_DIR/last-deployment.json" \
+        "$CONTRIBUTOR_DIR/restart-sentinel.json" \
+        "$CONTRIBUTOR_DIR/auto-deploy.log" \
+        "$CONTRIBUTOR_DIR/auto-deploy-launchd.log"
 
     print_status "Resetting Mac onboarding state..."
     rm -f "$ONBOARDED_MARKER_PATH"
@@ -889,7 +926,7 @@ cmd_rollback() {
 
     print_header "Rolling Back to Previous Binary"
 
-    if [ ! -f "$DEPLOY_DIR/tron.bak" ]; then
+    if [ ! -f "$CONTRIBUTOR_DIR/tron.bak" ]; then
         print_error "No backup found. Cannot rollback."
         echo "  A backup is only available immediately after a deploy."
         exit 1
@@ -909,7 +946,7 @@ cmd_rollback() {
 
     # Restore backup
     print_status "Restoring backup..."
-    create_app_bundle "$INSTALLED_BUNDLE" "$DEPLOY_DIR/tron.bak"
+    create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"
     codesign_bundle "$INSTALLED_BUNDLE"
 
     # Start service
@@ -1420,10 +1457,8 @@ _show_provider_login_status() {
 # `tron auth rotate` shells out to the installed binary (or the
 # dev-server build, falling back to a workspace `cargo run`) so that
 # rotation always uses the same on-disk path resolver as the daemon
-# itself. We don't reach into `$AUTH_FILE` here — that JSON holds OAuth
-# provider credentials, not the WebSocket bearer token, which lives at
-# `$TRON_HOME/system/auth-token.json` and is owned by
-# `crate::server::onboarding`.
+# itself. The token is stored as top-level `bearerToken` in `$AUTH_FILE`
+# and is owned by `crate::server::onboarding`.
 # ─────────────────────────────────────────────────────────────────────
 cmd_auth() {
     local action="${1:-}"
@@ -1440,8 +1475,8 @@ cmd_auth() {
             echo "  rotate    Generate a fresh WebSocket bearer token (forces iOS re-pair)"
             echo ""
             echo "After rotation every paired iOS device shows the .unauthorized state"
-            echo "and must re-pair using the new token. The token file lives at"
-            echo "  $TRON_HOME/system/auth-token.json"
+            echo "and must re-pair using the new token. The token lives in"
+            echo "  $AUTH_FILE (bearerToken)"
             echo "with mode 0o600."
             echo ""
             return 0
@@ -1455,8 +1490,8 @@ cmd_auth() {
 }
 
 cmd_auth_rotate() {
-    # Pick the freshest binary in priority order: installed deployment >
-    # dev-server build > workspace `cargo run`. This mirrors how
+    # Pick the freshest contributor binary in priority order: installed
+    # service bundle > dev-server build > workspace `cargo run`. This mirrors how
     # cmd_status / cmd_rollback select binaries — keeping a single
     # source of truth means the rotated token always lands at the path
     # the running daemon will actually consult.
@@ -1474,7 +1509,7 @@ cmd_auth_rotate() {
     if [[ -n "$binary" ]]; then
         "$binary" auth rotate "$@"
     else
-        # Workspace fallback — dev tree, no built binary on disk yet.
+        # Workspace source path — dev tree, no built binary on disk yet.
         if ! command -v cargo >/dev/null 2>&1; then
             print_error "No tron binary found and cargo is unavailable. Build with 'cargo build' first."
             return 1

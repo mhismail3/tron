@@ -16,7 +16,7 @@ struct BearerTokenReaderTests {
     func missingFile() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
 
@@ -24,65 +24,55 @@ struct BearerTokenReaderTests {
     func emptyFile() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
         FileManager.default.createFile(atPath: path.path, contents: Data())
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
 
-    @Test("valid JSON object: token returned")
+    @Test("valid auth.json: bearerToken returned")
     func validJSONObject() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
-        try writeSecureToken(Data(#"{"token":"abcdef1234567890"}"#.utf8), to: path)
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try writeSecureToken(Data(#"{"version":1,"bearerToken":"abcdef1234567890","providers":{},"lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8), to: path)
         #expect(BearerTokenReader.read(at: path) == "abcdef1234567890")
     }
 
-    @Test("legacy bare-string fallback still works")
-    func legacyBareString() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
-        try writeSecureToken(Data("abcdef1234567890\n".utf8), to: path)
-        #expect(BearerTokenReader.read(at: path) == "abcdef1234567890")
-    }
-
-    @Test("legacy bare-string with surrounding quotes")
-    func legacyBareStringQuoted() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
-        try writeSecureToken(Data("\"abcdef1234567890\"".utf8), to: path)
-        #expect(BearerTokenReader.read(at: path) == "abcdef1234567890")
-    }
-
-    @Test("JSON with empty token returns nil")
+    @Test("JSON with empty bearerToken returns nil")
     func emptyJSONToken() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
-        try writeSecureToken(Data(#"{"token":""}"#.utf8), to: path)
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try writeSecureToken(Data(#"{"bearerToken":""}"#.utf8), to: path)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
 
-    @Test("JSON with whitespace-only token returns nil")
+    @Test("JSON with whitespace-only bearerToken returns nil")
     func whitespaceJSONToken() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
-        try writeSecureToken(Data(#"{"token":"   \n"}"#.utf8), to: path)
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try writeSecureToken(Data(#"{"bearerToken":"   \n"}"#.utf8), to: path)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
 
-    @Test("malformed JSON falls back to bare-string interpretation")
-    func malformedJSONFallback() throws {
+    @Test("missing bearerToken returns nil")
+    func missingBearerToken() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
-        // Not valid JSON - reader treats as legacy bare string.
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try writeSecureToken(Data(#"{"version":1,"providers":{},"lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8), to: path)
+        #expect(BearerTokenReader.read(at: path) == nil)
+    }
+
+    @Test("malformed JSON returns nil")
+    func malformedJSONReturnsNil() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
         try writeSecureToken(Data("not-json-but-a-token".utf8), to: path)
-        #expect(BearerTokenReader.read(at: path) == "not-json-but-a-token")
+        #expect(BearerTokenReader.read(at: path) == nil)
     }
 
     // MARK: - Permission guard
@@ -91,8 +81,8 @@ struct BearerTokenReaderTests {
     func wideOpenPermissionsRejected() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
-        try Data(#"{"token":"abcdef1234567890"}"#.utf8).write(to: path)
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try Data(#"{"bearerToken":"abcdef1234567890"}"#.utf8).write(to: path)
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path.path)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
@@ -101,8 +91,8 @@ struct BearerTokenReaderTests {
     func groupReadableRejected() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
-        try Data(#"{"token":"abcdef1234567890"}"#.utf8).write(to: path)
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try Data(#"{"bearerToken":"abcdef1234567890"}"#.utf8).write(to: path)
         try FileManager.default.setAttributes([.posixPermissions: 0o640], ofItemAtPath: path.path)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
@@ -111,8 +101,8 @@ struct BearerTokenReaderTests {
     func tightPermissionsAccepted() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
-        try writeSecureToken(Data(#"{"token":"abcdef1234567890"}"#.utf8), to: path)
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try writeSecureToken(Data(#"{"bearerToken":"abcdef1234567890"}"#.utf8), to: path)
         #expect(BearerTokenReader.read(at: path) == "abcdef1234567890")
     }
 
@@ -120,8 +110,8 @@ struct BearerTokenReaderTests {
     func bypassFlagWorks() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
-        try Data(#"{"token":"abcdef1234567890"}"#.utf8).write(to: path)
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try Data(#"{"bearerToken":"abcdef1234567890"}"#.utf8).write(to: path)
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path.path)
         #expect(BearerTokenReader.read(at: path, enforcePermissions: false) == "abcdef1234567890")
     }
@@ -130,7 +120,7 @@ struct BearerTokenReaderTests {
     func missingFilePermissionGuardNeutral() {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth-token.json", isDirectory: false)
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
         #expect(BearerTokenReader.permissionsAreSafe(at: path) == true)
     }
 }

@@ -139,6 +139,7 @@ private struct WizardProgressTrack: View, @MainActor Animatable {
 ///   actions (Refresh, Re-check) live inline within the body
 ///   so they slide with it.
 struct WizardShell<Content: View>: View {
+    @Environment(\.environmentSetup) private var setup
     @Bindable var state: WizardState
     @ViewBuilder var content: (WizardStep) -> Content
 
@@ -152,7 +153,6 @@ struct WizardShell<Content: View>: View {
     /// chrome re-renders with the fresh direction attached before
     /// `displayStep` changes identity (Phase 2).
     @State private var displayDirection: WizardSlideDirection
-    @State private var hostingWindow: NSWindow?
 
     init(state: WizardState, @ViewBuilder content: @escaping (WizardStep) -> Content) {
         self.state = state
@@ -204,8 +204,7 @@ struct WizardShell<Content: View>: View {
         // clipping geometry.
         .frame(width: WizardLayout.width, height: WizardLayout.height)
         .configureHostingWindow { window in
-            hostingWindow = window
-            applyWindowBackgroundDragPolicy(for: displayStep, window: window)
+            window.isMovableByWindowBackground = true
         }
         // Two-phase direction+step update (see struct doc). Phase 1
         // runs synchronously: write the new direction, which re-renders
@@ -224,25 +223,8 @@ struct WizardShell<Content: View>: View {
             displayDirection = state.slideDirection
             DispatchQueue.main.async {
                 displayStep = newStep
-                applyWindowBackgroundDragPolicy(for: newStep)
             }
         }
-        .onChange(of: displayStep) { _, newStep in
-            applyWindowBackgroundDragPolicy(for: newStep)
-        }
-        .onDisappear {
-            hostingWindow?.isMovableByWindowBackground = true
-        }
-    }
-
-    /// The glass window normally allows background dragging so the
-    /// titlebar-less canvas still feels movable. Permissions is the
-    /// exception: its Screen Recording row contains a real app-bundle
-    /// drag source, and AppKit can otherwise interpret click-hold as a
-    /// window move before the shortcut starts its file drag.
-    private func applyWindowBackgroundDragPolicy(for step: WizardStep, window: NSWindow? = nil) {
-        guard let window = window ?? hostingWindow else { return }
-        window.isMovableByWindowBackground = step != .permissions
     }
 
     // MARK: - Header (icon + title + progress)
@@ -345,7 +327,17 @@ struct WizardShell<Content: View>: View {
             .keyboardShortcut(.defaultAction)
         case .tailscale:
             Button {
-                state.advance()
+                if state.tailscaleStatus?.isReady == true {
+                    state.advance()
+                } else {
+                    Task { @MainActor in
+                        let status = await setup.probeTailscale()
+                        state.tailscaleStatus = status
+                        if status.isReady {
+                            state.advance()
+                        }
+                    }
+                }
             } label: {
                 Text(state.tailscaleStatus?.isReady == true ? "Continue" : "I have Tailscale")
             }
@@ -353,13 +345,22 @@ struct WizardShell<Content: View>: View {
             .keyboardShortcut(.defaultAction)
         case .permissions:
             Button {
-                state.advance()
+                Task { @MainActor in
+                    guard permissionsCanContinue else { return }
+                    if !state.permissionsServerRestarted {
+                        state.permissionsRestartInProgress = true
+                        _ = await setup.launchAgentManager.restart(label: TronPaths.launchAgentLabel)
+                        state.permissionsServerRestarted = true
+                        state.permissionsRestartInProgress = false
+                    }
+                    state.advance()
+                }
             } label: {
-                Text("Continue")
+                Text(state.permissionsRestartInProgress ? "Finalizing…" : "Continue")
             }
             .buttonStyle(.wizardPrimary)
             .keyboardShortcut(.defaultAction)
-            .disabled(!permissionsCanContinue)
+            .disabled(!permissionsCanContinue || state.permissionsRestartInProgress)
         case .install:
             Button {
                 if installCanContinue {
@@ -395,11 +396,8 @@ struct WizardShell<Content: View>: View {
 
     /// Gate for the Permissions step's Continue button. All three
     /// categories (FDA, Screen Recording, Accessibility) must be
-    /// granted — the Rust agent's Computer-Use tool refuses to run
-    /// without every one of them (see
-    /// `packages/agent/src/tools/ui/computer_use/permissions.rs`),
-    /// so we'd rather hold the wizard here than let the user land
-    /// on a half-working install.
+    /// granted, so we'd rather hold the wizard here than let the user
+    /// land on a half-working install.
     private var permissionsCanContinue: Bool {
         Permission.allCases.allSatisfy { permission in
             state.permissionStatuses[permission] == .granted
@@ -408,18 +406,22 @@ struct WizardShell<Content: View>: View {
 
     /// Mirrors the gate previously implemented privately by
     /// `InstallStep`: the primary CTA advances only after the install
-    /// pipeline has finished cleanly. Before then, the same CTA starts
-    /// or retries the pipeline via `state.requestInstall()`.
+    /// pipeline has started the helper and `system.ping` has answered.
+    /// Before then, the same CTA starts or retries the pipeline via
+    /// `state.requestInstall()`.
     private var installCanContinue: Bool {
         guard let outcome = state.installOutcome else { return false }
-        return outcome == .success || outcome == .alreadyInstalled
+        return outcome == .success
     }
 
     private var installPrimaryLabel: String {
         if installCanContinue { return "Continue" }
         if state.installIsRunning { return "Installing..." }
-        if let outcome = state.installOutcome, outcome != .success, outcome != .alreadyInstalled {
+        if let outcome = state.installOutcome, outcome != .success {
             return "Retry install"
+        }
+        if case .registered = state.existingInstallStatus {
+            return "Start server"
         }
         return "Install"
     }

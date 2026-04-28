@@ -1,29 +1,20 @@
-//! System handlers: ping, getInfo, shutdown, getDiagnostics, auto-updater.
+//! System handlers: ping, getInfo, shutdown, getDiagnostics, update checks.
 //!
-//! The three updater handlers below (`system.checkForUpdates`,
-//! `system.getUpdateStatus`, `system.applyUpdate`) are the RPC surface for
-//! the user-mode auto-updater (Plan §H.2, Phase 5.5). They never mutate the
-//! binary themselves — the install pipeline (codesign-verify → atomic swap
-//! → ping → rollback) lands in Phase 6 alongside the DMG release workflow.
-//! `ApplyUpdateHandler` is wired today as a `{ status: "noop" }` stub so
-//! the iOS "Install now" button can be laid out and tested against a real
-//! response shape; flipping it to `status: "installing"` is a pure
-//! server-side change once the pipeline exists.
+//! The updater handlers below (`system.checkForUpdates`,
+//! `system.getUpdateStatus`) support GitHub Releases checks and verified DMG
+//! downloads. They do not mutate the running app bundle; production updates are
+//! DMG replacement until a full app-bundle updater exists.
 
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use serde::Deserialize;
 use serde_json::Value;
 use tracing::{instrument, warn};
 
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{CLIENT_VERSION_UNSUPPORTED, RpcError};
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
-use crate::server::updater::{
-    AUTO_DEGRADE_FAILURE_THRESHOLD, UpdateDecision, UpdaterState, check_for_update,
-    read_update_state,
-};
+use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, read_update_state};
 
 /// Current RPC wire-protocol version.
 ///
@@ -33,10 +24,9 @@ use crate::server::updater::{
 /// is accepted.
 pub const CURRENT_PROTOCOL_VERSION: u32 = 1;
 
-/// Minimum `protocolVersion` the server will accept from a client that
-/// explicitly advertises one. Clients that omit `protocolVersion` are
-/// treated as pre-handshake and accepted — this is the backward-compat
-/// path for the legacy iOS builds that existed before L6 landed.
+/// Minimum `protocolVersion` the server will accept. Every supported client
+/// must send this field in `system.ping`; missing or malformed values are
+/// rejected as invalid params instead of being treated as an older client.
 pub const MIN_CLIENT_PROTOCOL_VERSION: u32 = 1;
 
 /// Returns a pong with the current server timestamp.
@@ -49,39 +39,42 @@ pub const MIN_CLIENT_PROTOCOL_VERSION: u32 = 1;
 /// - `protocolVersion >= MIN_CLIENT_PROTOCOL_VERSION` → success reply
 ///   that echoes the server's protocol version so a future client can
 ///   feature-gate on it.
-/// - No params / no `protocolVersion` → backward-compatible reply (no
-///   version fields required, no error).
+/// - No params / no numeric `protocolVersion` → [`RpcError::InvalidParams`].
 pub struct PingHandler;
 
 #[async_trait]
 impl MethodHandler for PingHandler {
     #[instrument(skip(self, _ctx), fields(method = "system.ping"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let client_protocol = params
+        let client_protocol_raw = params
             .as_ref()
             .and_then(|p| p.get("protocolVersion"))
             .and_then(Value::as_u64)
-            .map(|v| v as u32);
+            .ok_or_else(|| RpcError::InvalidParams {
+                message: "system.ping requires numeric protocolVersion".into(),
+            })?;
+        let client_protocol =
+            u32::try_from(client_protocol_raw).map_err(|_| RpcError::InvalidParams {
+                message: "system.ping protocolVersion is too large".into(),
+            })?;
         let client_version = params
             .as_ref()
             .and_then(|p| p.get("clientVersion"))
             .and_then(Value::as_str)
             .map(String::from);
 
-        if let Some(v) = client_protocol
-            && v < MIN_CLIENT_PROTOCOL_VERSION
-        {
+        if client_protocol < MIN_CLIENT_PROTOCOL_VERSION {
             // Explicit rejection with an actionable message. Details
             // carry the numeric versions so the iOS UI can render an
             // "upgrade required" dialog with the exact numbers.
             return Err(RpcError::Custom {
                 code: CLIENT_VERSION_UNSUPPORTED.to_string(),
                 message: format!(
-                    "Client protocol version {v} is below the minimum supported version \
+                    "Client protocol version {client_protocol} is below the minimum supported version \
                      {MIN_CLIENT_PROTOCOL_VERSION}. Please upgrade the Tron client."
                 ),
                 details: Some(serde_json::json!({
-                    "clientProtocolVersion": v,
+                    "clientProtocolVersion": client_protocol,
                     "minClientProtocolVersion": MIN_CLIENT_PROTOCOL_VERSION,
                     "serverProtocolVersion": CURRENT_PROTOCOL_VERSION,
                     "serverVersion": env!("CARGO_PKG_VERSION"),
@@ -112,7 +105,7 @@ impl MethodHandler for PingHandler {
 ///   `~/.tron/system/settings.json:server.tailscaleIp`. Surfaced as a
 ///   recommended host on the iOS pairing screen. Optional — `null` when the
 ///   server hasn't been wrapped by `Tron.app` yet.
-/// - `paired` — `true` once the `~/.tron/system/.onboarded` sentinel
+/// - `paired` — `true` once the `~/.tron/system/run/.onboarded` sentinel
 ///   exists. Lets iOS distinguish "fresh server, run wizard" from
 ///   "established server, just verify the bearer token."
 ///
@@ -223,95 +216,8 @@ impl MethodHandler for ShutdownHandler {
     }
 }
 
-/// `system.probePermissions` — returns the current TCC grant state of
-/// the agent process for the three wizard-surfaced permissions: Full
-/// Disk Access, Screen Recording, Accessibility.
-///
-/// The Mac wrapper's Permissions wizard polls this handler every ~2s
-/// (and on `NSApp.didBecomeActive`) to decide when to advance. The
-/// whole point of doing the probe RPC-side is that the AGENT is the
-/// binary the user is granting permissions to — not the wrapper —
-/// because the agent runs the Computer-Use tool and the filesystem
-/// tools. Probing in the wrapper would answer the wrong question.
-///
-/// Non-prompting: uses `AXIsProcessTrusted()` and
-/// `CGPreflightScreenCaptureAccess()` FFI calls, so polling is safe
-/// (it does not race the System Settings deep-link UX).
-///
-/// Shape:
-/// ```json
-/// {
-///   "fullDiskAccess": "granted" | "denied" | "unknown",
-///   "screenRecording": "granted" | "denied" | "unknown",
-///   "accessibility":   "granted" | "denied" | "unknown"
-/// }
-/// ```
-pub struct ProbePermissionsHandler;
-
-#[async_trait]
-impl MethodHandler for ProbePermissionsHandler {
-    #[instrument(skip(self, _ctx), fields(method = "system.probePermissions"))]
-    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let snapshot = crate::tools::ui::computer_use::probe_wizard_permissions().await;
-        Ok(serde_json::json!({
-            "fullDiskAccess":  snapshot.full_disk_access.wire_token(),
-            "screenRecording": snapshot.screen_recording.wire_token(),
-            "accessibility":   snapshot.accessibility.wire_token(),
-        }))
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RequestPermissionParams {
-    permission: String,
-}
-
-/// `system.requestPermission` — user-initiated TCC prompt for the agent.
-///
-/// The Mac wrapper uses this only after the user clicks a permission
-/// gear button. Probing remains non-prompting (`system.probePermissions`);
-/// this handler is the opt-in path for macOS categories that require
-/// the target process to ask once before System Settings shows a row.
-///
-/// Currently supported:
-/// - `"screenRecording"`: calls `CGRequestScreenCaptureAccess()` inside
-///   the launchd agent so the Screen Recording list contains Tron Server,
-///   not the SwiftUI wrapper.
-pub struct RequestPermissionHandler;
-
-#[async_trait]
-impl MethodHandler for RequestPermissionHandler {
-    #[instrument(skip(self, _ctx), fields(method = "system.requestPermission"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let Some(params) = params else {
-            return Err(RpcError::InvalidParams {
-                message: "params required".into(),
-            });
-        };
-        let params: RequestPermissionParams =
-            serde_json::from_value(params).map_err(|e| RpcError::InvalidParams {
-                message: format!("invalid params: {e}"),
-            })?;
-
-        match params.permission.as_str() {
-            "screenRecording" => {
-                let status =
-                    crate::tools::ui::computer_use::request_screen_recording_access().await;
-                Ok(serde_json::json!({
-                    "permission": "screenRecording",
-                    "status": status.wire_token(),
-                }))
-            }
-            other => Err(RpcError::InvalidParams {
-                message: format!("unsupported permission request: {other}"),
-            }),
-        }
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────
-// User-mode auto-updater — Plan §H.2, Phase 5.5
+// User-mode update checks/downloads
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Builds the "status + live outcome" JSON the two read-side updater
@@ -344,11 +250,8 @@ fn build_status_value(
         "frequency": settings_update.frequency.as_str(),
         "action": settings_update.action.as_str(),
         "enabled": settings_update.enabled,
-        "allowDowngradeOnRollback": settings_update.allow_downgrade_on_rollback,
         "lastCheckAt": state.last_check_at,
         "lastInstalledVersion": state.last_installed_version,
-        "consecutiveFailures": state.consecutive_failures,
-        "autoDegradeThreshold": AUTO_DEGRADE_FAILURE_THRESHOLD,
         "latestAvailableVersion": latest_version,
         "latestDownloadUrl": latest_download_url,
     })
@@ -365,7 +268,7 @@ fn build_status_value(
 ///
 /// Non-goals:
 /// - This handler does NOT write to `updater-state.json`. State
-///   mutation is the scheduler's job (Phase 5.5 cont.); keeping the
+///   mutation is the scheduler's job; keeping the
 ///   handler read-only means iOS clients can poke "Check now" as often
 ///   as they want without racing the scheduler.
 /// - No in-memory TTL cache in v1. Rate-limit concerns (Plan §N.22)
@@ -471,42 +374,25 @@ impl MethodHandler for GetUpdateStatusHandler {
     }
 }
 
-/// `system.applyUpdate` — stub in Phase 5.5.
-///
-/// The full install pipeline (lock `deploy.lock`, backup `.bak`,
-/// atomic swap, `launchctl kickstart`, post-install ping, rollback
-/// on failure) is explicitly deferred to Phase 6 per the updater
-/// module docs. Returning `{ status: "noop", … }` today lets iOS
-/// develop the "Install now" button against the real response shape
-/// (`SystemApplyUpdateResult`) without waiting on the pipeline.
-///
-/// When Phase 6 lands, the noop branch gets replaced with a call to
-/// the install pipeline and returns `status: "installing"` while the
-/// WS streams progress events. No RPC wire-shape change required.
-pub struct ApplyUpdateHandler;
-
-#[async_trait]
-impl MethodHandler for ApplyUpdateHandler {
-    #[instrument(skip(self, _ctx), fields(method = "system.applyUpdate"))]
-    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        Ok(serde_json::json!({
-            "status": "noop",
-            "message": "Install pipeline wiring lands with Phase 6 (DMG release + codesign-verify + atomic swap + rollback). \
-        Until then, manual DMG drag-install remains the supported upgrade path.",
-            "currentVersion": env!("CARGO_PKG_VERSION"),
-        }))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::rpc::handlers::test_helpers::make_test_context;
 
+    fn ping_params(version: u32) -> Value {
+        serde_json::json!({
+            "protocolVersion": version,
+            "clientVersion": "test-client",
+        })
+    }
+
     #[tokio::test]
     async fn ping_returns_pong() {
         let ctx = make_test_context();
-        let result = PingHandler.handle(None, &ctx).await.unwrap();
+        let result = PingHandler
+            .handle(Some(ping_params(CURRENT_PROTOCOL_VERSION)), &ctx)
+            .await
+            .unwrap();
         assert_eq!(result["pong"], true);
         assert!(result["timestamp"].is_string());
     }
@@ -653,44 +539,6 @@ mod tests {
         assert_eq!(result["acknowledged"], true);
     }
 
-    /// `system.probePermissions` must return exactly the three top-level
-    /// keys the Mac wrapper's `PermissionProbeRPC` decoder expects, and
-    /// each value must be one of the three wire tokens — never a
-    /// typo'd alias, number, or structured object. A breaking change
-    /// here silently freezes the Permissions wizard at "waiting…".
-    #[tokio::test]
-    async fn probe_permissions_returns_three_wire_tokens() {
-        let ctx = make_test_context();
-        let result = ProbePermissionsHandler.handle(None, &ctx).await.unwrap();
-
-        for key in ["fullDiskAccess", "screenRecording", "accessibility"] {
-            let token = result[key]
-                .as_str()
-                .unwrap_or_else(|| panic!("{key} must be a string, got {:?}", result[key]));
-            assert!(
-                matches!(token, "granted" | "denied" | "unknown"),
-                "{key} must be one of granted/denied/unknown, got {token:?}",
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn request_permission_rejects_unsupported_permission() {
-        let ctx = make_test_context();
-        let err = RequestPermissionHandler
-            .handle(
-                Some(serde_json::json!({ "permission": "fullDiskAccess" })),
-                &ctx,
-            )
-            .await
-            .unwrap_err();
-
-        assert!(
-            matches!(err, RpcError::InvalidParams { .. }),
-            "unsupported permission requests must fail as invalid params, got {err:?}",
-        );
-    }
-
     #[tokio::test]
     async fn shutdown_ends_active_sessions() {
         let ctx = make_test_context();
@@ -707,7 +555,10 @@ mod tests {
     #[tokio::test]
     async fn ping_timestamp_is_iso8601() {
         let ctx = make_test_context();
-        let result = PingHandler.handle(None, &ctx).await.unwrap();
+        let result = PingHandler
+            .handle(Some(ping_params(CURRENT_PROTOCOL_VERSION)), &ctx)
+            .await
+            .unwrap();
         let ts = result["timestamp"].as_str().unwrap();
         assert!(ts.contains('T'));
         assert!(ts.ends_with('Z'));
@@ -715,18 +566,13 @@ mod tests {
 
     // ── L6: version handshake ──────────────────────────────────────
 
-    /// Legacy clients (pre-L6) that don't advertise a protocol version
-    /// must still succeed — otherwise we brick the field devices.
+    /// Every supported client must advertise a protocol version. This keeps
+    /// the shipped path explicit: no incomplete client shape is accepted.
     #[tokio::test]
-    async fn ping_without_protocol_version_is_accepted() {
+    async fn ping_without_protocol_version_is_rejected() {
         let ctx = make_test_context();
-        let result = PingHandler.handle(None, &ctx).await.unwrap();
-        assert_eq!(result["pong"], true);
-        assert_eq!(result["compatible"], true);
-        assert_eq!(
-            result["serverProtocolVersion"].as_u64().unwrap(),
-            u64::from(CURRENT_PROTOCOL_VERSION),
-        );
+        let err = PingHandler.handle(None, &ctx).await.unwrap_err();
+        assert!(matches!(err, RpcError::InvalidParams { .. }));
     }
 
     /// Stale client that explicitly advertises a too-old protocol
@@ -738,7 +584,7 @@ mod tests {
         let ctx = make_test_context();
         let params = serde_json::json!({
             "protocolVersion": 0u32,
-            "clientVersion": "0.0.1-legacy",
+            "clientVersion": "0.0.1",
         });
         let err = PingHandler.handle(Some(params), &ctx).await.unwrap_err();
         assert_eq!(err.code(), CLIENT_VERSION_UNSUPPORTED);
@@ -755,7 +601,7 @@ mod tests {
             details["serverProtocolVersion"].as_u64().unwrap(),
             u64::from(CURRENT_PROTOCOL_VERSION),
         );
-        assert_eq!(details["clientVersion"], "0.0.1-legacy");
+        assert_eq!(details["clientVersion"], "0.0.1");
 
         // Human-readable message names both numbers.
         assert!(body.message.contains("0"));
@@ -807,19 +653,15 @@ mod tests {
     }
 
     /// A client that sends garbage in `protocolVersion` (wrong type) is
-    /// treated as if the field were absent — backward-compatible fail-
-    /// open, not an outright rejection. The client's subsequent RPCs
-    /// will fail the first time they hit a breaking change; the ping
-    /// itself should not be the gate for every typo.
+    /// rejected immediately. The handshake is the gate.
     #[tokio::test]
-    async fn malformed_protocol_version_does_not_panic_and_accepts() {
+    async fn malformed_protocol_version_is_rejected() {
         let ctx = make_test_context();
         let params = serde_json::json!({
             "protocolVersion": "not a number",
         });
-        let result = PingHandler.handle(Some(params), &ctx).await.unwrap();
-        assert_eq!(result["pong"], true);
-        assert_eq!(result["compatible"], true);
+        let err = PingHandler.handle(Some(params), &ctx).await.unwrap_err();
+        assert!(matches!(err, RpcError::InvalidParams { .. }));
     }
 
     // ── L11: diagnostics ────────────────────────────────────────────
@@ -932,7 +774,7 @@ mod tests {
         );
     }
 
-    // ── Phase 5.5: user-mode auto-updater RPCs ──────────────────────
+    // ── User-mode update check/download RPCs ───────────────────────
 
     use crate::server::updater::{
         MockReleaseFetcher, ReleaseInfo, UpdateAction, UpdateChannel, UpdateFrequency,
@@ -1091,7 +933,7 @@ mod tests {
             true,
             UpdateChannel::Beta,
             UpdateFrequency::Hourly,
-            UpdateAction::Download,
+            UpdateAction::Notify,
         ));
 
         let mut ctx = make_test_context();
@@ -1108,9 +950,7 @@ mod tests {
     }
 
     /// Fetcher returning a transport error is mapped to `RpcError::Internal`
-    /// so the client sees a structured error rather than a hang. The
-    /// post-install failure counter is NOT incremented here (only the
-    /// install pipeline increments it).
+    /// so the client sees a structured error rather than a hang.
     #[tokio::test]
     async fn check_for_updates_fetch_error_surfaces_as_internal_error() {
         let _lock = test_settings_lock()
@@ -1136,7 +976,7 @@ mod tests {
     /// Status reflects the current settings AND the state file
     /// verbatim. A missing state file is the common first-run case;
     /// it must NOT error and must surface as "no check yet"
-    /// (all nullable fields null, `consecutiveFailures = 0`).
+    /// (all nullable fields null).
     #[tokio::test]
     async fn get_update_status_merges_settings_and_state() {
         let _lock = test_settings_lock()
@@ -1146,7 +986,7 @@ mod tests {
             true,
             UpdateChannel::Beta,
             UpdateFrequency::Weekly,
-            UpdateAction::Install,
+            UpdateAction::Notify,
         ));
 
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1156,7 +996,6 @@ mod tests {
         let mut state = UpdaterState::default();
         state.last_check_at = Some("2026-04-23T12:00:00Z".to_string());
         state.last_installed_version = Some("0.5.0".to_string());
-        state.consecutive_failures = 1;
         state.latest_available_version = Some("0.5.1".to_string());
         state.latest_download_url = Some("https://example.test/Tron-0.5.1.dmg".to_string());
         write_update_state(&state_path, &state).expect("write state");
@@ -1170,13 +1009,11 @@ mod tests {
         assert_eq!(result["enabled"], true);
         assert_eq!(result["channel"], "beta");
         assert_eq!(result["frequency"], "weekly");
-        assert_eq!(result["action"], "install");
-        assert_eq!(result["allowDowngradeOnRollback"], true);
+        assert_eq!(result["action"], "notify");
 
         // State fields flow through verbatim.
         assert_eq!(result["lastCheckAt"], "2026-04-23T12:00:00Z");
         assert_eq!(result["lastInstalledVersion"], "0.5.0");
-        assert_eq!(result["consecutiveFailures"], 1);
         assert_eq!(result["latestAvailableVersion"], "0.5.1");
         assert_eq!(
             result["latestDownloadUrl"],
@@ -1185,13 +1022,11 @@ mod tests {
 
         // Contract fields iOS needs regardless of state.
         assert!(result["currentVersion"].is_string());
-        assert!(result["autoDegradeThreshold"].is_u64());
-
         init_settings(TronSettings::default());
     }
 
     /// Missing state file must NOT error — first-run case. All nullable
-    /// fields serialize as JSON null and `consecutiveFailures = 0`.
+    /// fields serialize as JSON null.
     #[tokio::test]
     async fn get_update_status_missing_state_file_is_fresh_defaults() {
         let _lock = test_settings_lock()
@@ -1207,7 +1042,6 @@ mod tests {
 
         let result = GetUpdateStatusHandler.handle(None, &ctx).await.unwrap();
 
-        assert_eq!(result["consecutiveFailures"], 0);
         assert!(result["lastCheckAt"].is_null());
         assert!(result["lastInstalledVersion"].is_null());
         assert!(result["latestAvailableVersion"].is_null());
@@ -1215,31 +1049,9 @@ mod tests {
         assert_eq!(result["enabled"], false); // default-off
     }
 
-    /// `system.applyUpdate` is a stub in Phase 5.5 — it must return
-    /// `status=noop` with a message explaining that the install
-    /// pipeline lands in Phase 6. The iOS decoder treats `status=noop`
-    /// as a non-error "not installed" outcome so users aren't misled
-    /// into thinking the update succeeded.
-    #[tokio::test]
-    async fn apply_update_is_noop_in_phase_5_5() {
-        let ctx = make_test_context();
-        let result = ApplyUpdateHandler.handle(None, &ctx).await.unwrap();
-
-        assert_eq!(result["status"], "noop");
-        assert!(
-            result["message"]
-                .as_str()
-                .unwrap()
-                .to_lowercase()
-                .contains("phase 6")
-        );
-        assert!(result["currentVersion"].is_string());
-    }
-
     /// `build_status_value` must prefer a live outcome's latest release
-    /// over stale state — Phase 6's `applyUpdate` will use the same
-    /// merge rule when streaming progress. Locking the precedence now
-    /// means the Phase 6 refactor can't silently regress it.
+    /// over stale state so menu-bar and iOS update UI never report an
+    /// older cached release when a fresh check completed in the same call.
     #[test]
     fn build_status_value_prefers_live_outcome_over_state() {
         use crate::server::updater::{CheckOutcome, UpdateDecision};

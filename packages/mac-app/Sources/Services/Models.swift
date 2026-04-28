@@ -94,34 +94,6 @@ enum PermissionStatus: String, Equatable, Sendable {
     case probeUnavailable
 }
 
-/// One Settings round-trip initiated by a Permissions-step gear button.
-/// App activation alone is too broad: System Settings focus changes can
-/// activate the wrapper even when the user only navigated inside Settings.
-struct PermissionSettingsReturn: Equatable, Sendable {
-    var permission: Permission
-    var statusBeforeOpen: PermissionStatus
-}
-
-enum PermissionSettingsReturnAction: Equatable, Sendable {
-    case recheckOnly
-    case restartAndRecheck
-}
-
-enum PermissionSettingsReturnPolicy {
-    static func action(for pendingReturn: PermissionSettingsReturn?) -> PermissionSettingsReturnAction {
-        guard let pendingReturn else {
-            return .recheckOnly
-        }
-
-        switch pendingReturn.statusBeforeOpen {
-        case .granted:
-            return .recheckOnly
-        case .denied, .notDetermined, .probeUnavailable:
-            return .restartAndRecheck
-        }
-    }
-}
-
 /// Tailscale state on the host. Used by the Tailscale prerequisite step.
 enum TailscaleStatus: Equatable, Sendable {
     case notInstalled
@@ -139,19 +111,15 @@ enum TailscaleStatus: Equatable, Sendable {
     }
 }
 
-/// Existing-install detection result. Drives whether the wizard skips
-/// the Install step.
+/// Existing server registration detection result. This deliberately
+/// models the Login Item registration, not whether the server is
+/// currently reachable. The Install step must still start/kickstart
+/// and ping the helper before it can advance.
 enum ExistingInstallStatus: Equatable, Sendable {
     case none
+    case requiresApproval
     case partial(reason: String)
-    case installed(version: String?)
-
-    var hasInstall: Bool {
-        switch self {
-        case .none: return false
-        case .partial, .installed: return true
-        }
-    }
+    case registered(version: String?)
 }
 
 /// Subset of `system.getInfo` the wrapper needs. Decoded from the WS RPC
@@ -173,25 +141,22 @@ struct PairingPayload: Equatable, Sendable, Hashable {
     var label: String?
 }
 
-/// Discrete steps in the install pipeline (wizard step 5). Each is
+/// Discrete steps in the install pipeline. Each is
 /// tested separately in `InstallPlannerTests`.
 enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
-    /// Copies the server binary, writes bundle metadata/resources, strips
-    /// quarantine, and signs the app bundle before launchd ever starts it.
-    case copyBinary
-    case writePlist
-    case loadAgent
+    /// Confirms this is the release app in `/Applications`.
+    case validateApplication
+    /// Confirms the embedded helper app, plist, and signature are intact.
+    case validateHelper
+    /// Registers the bundled LaunchAgent through `SMAppService`.
+    case registerAgent
     case awaitPing
 }
 
 /// Pure-value description of what the install step plans to do. The
-/// View applies the plan via `LaunchAgentManaging`.
+/// View applies the plan via `SMAppService` through `LaunchAgentManaging`.
 struct InstallPlan: Equatable, Sendable {
-    var sourceBinary: URL
-    var iconSource: URL? = nil
-    var targetBundle: URL
-    var targetBinary: URL
     var plistPath: URL
-    var plistContents: String
-    var requiresLoad: Bool
+    var helperBundle: URL
+    var helperBinary: URL
 }

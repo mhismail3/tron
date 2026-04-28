@@ -111,7 +111,7 @@ Never drop loose files in `~/.tron/` or `~/`. If you're not sure where something
 **Off-limits for writing** (enforced by guardrails):
 - System paths: /System, /Library, /usr, /bin, /sbin, /etc, /var, /opt, /Applications, /Volumes
 - Dotfiles: ~/.ssh, ~/.aws, ~/.config, ~/.gitconfig, etc. (you can read these, not write)
-- Synology Drive, ~/.tron/system/ (database, auth, settings, deployment)
+- Synology Drive, ~/.tron/system/ (database, auth, settings, runtime state)
 
 ## PATH REFERENCE
 
@@ -134,11 +134,10 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 |------|------|----------|
 | DATABASE | `~/.tron/system/database/` | `log.db` — SQLite event store, sessions, cron state |
 | SETTINGS | `~/.tron/system/settings.json` | Server configuration |
-| AUTH | `~/.tron/system/auth.json` | API keys and OAuth tokens |
+| AUTH | `~/.tron/system/auth.json` | API keys, OAuth tokens, and bearerToken |
 | VAULT | `~/.tron/workspace/vault/` | Encrypted credential store |
-| DEPLOYMENT | `~/.tron/system/deployment/` | Dev/deploy/update artifacts and rollback state; absent or empty after a normal Mac installer flow |
+| RUN | `~/.tron/system/run/` | Runtime state and local contributor artifacts: `auth.lock`, `.mac-wrapper.lock`, `.onboarded`, `updater-state.json`, optional `Tron-Dev.app` |
 | TRANSCRIPTION | `~/.tron/system/transcription/` | Speech-to-text sidecar: `worker.py`, `venv/`, `models/hf/` |
-| BINARY | `~/.tron/system/Tron.app/Contents/MacOS/tron` | Server binary |
 
 **Workspace (your working area):**
 

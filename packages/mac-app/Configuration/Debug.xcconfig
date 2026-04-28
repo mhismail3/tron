@@ -10,5 +10,5 @@ ENABLE_TESTABILITY = YES
 ONLY_ACTIVE_ARCH = YES
 MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE
 
-// Dev variant — bundle ID matches scripts/tron-lib.sh DEV_BUNDLE pattern
+// Dev wrapper variant — distinct from the headless Tron-Dev.app used by `tron dev`.
 PRODUCT_BUNDLE_IDENTIFIER = com.tron.mac.dev

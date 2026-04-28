@@ -148,7 +148,7 @@ pub const IMPORT_NO_CLAUDE_DIRECTORY: &str = "IMPORT_NO_CLAUDE_DIRECTORY";
 
 // ── Version handshake (L6) ──────────────────────────────────────────
 //
-// `system.ping` accepts an optional `protocolVersion` from the client
+// `system.ping` requires a numeric `protocolVersion` from the client
 // and returns the server's current version plus a compatibility
 // verdict. Version numbers are monotonic integers bumped only on
 // breaking wire-format changes — field adds that old clients can

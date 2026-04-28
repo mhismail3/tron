@@ -30,7 +30,7 @@ pub struct ServerSettings {
     /// Bearer-token authentication settings.
     #[serde(default)]
     pub auth: AuthSettings,
-    /// User-mode auto-update configuration (Phase 5.5).
+    /// User-mode update-check configuration.
     #[serde(default)]
     pub update: UpdateSettings,
     /// Cached Tailscale IP address. Populated by the Mac wrapper / install
@@ -66,7 +66,7 @@ impl Default for ServerSettings {
 ///
 /// When `enforced` is `true`, every WS upgrade must present a matching
 /// `Authorization: Bearer <token>` header or get a `401`. The token lives
-/// in `~/.tron/system/auth-token.json` and is rotatable via
+/// in `~/.tron/system/auth.json` as `bearerToken` and is rotatable via
 /// `tron auth rotate`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -75,19 +75,17 @@ pub struct AuthSettings {
     pub enforced: bool,
 }
 
-/// User-mode auto-update configuration.
+/// User-mode update-check configuration.
 ///
 /// Drives the `server::updater` module's behavior. Default is the
 /// safest possible combination — `enabled = false` means the
 /// updater is entirely dormant. Flipping `enabled = true` with the
 /// other fields at their defaults gives the gentlest behavior:
 /// daily checks on the `stable` channel, `notify`-only when a
-/// newer release is found (no automatic downloads, no automatic
-/// installs).
+/// newer release is found (no automatic downloads).
 ///
-/// See Plan §H.2 for the full semantics of each field. All fields
-/// have 1:1 iOS UI counterparts per the project's Settings-parity
-/// rule (root CLAUDE.md).
+/// All fields have 1:1 iOS UI counterparts per the project's
+/// Settings-parity rule.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UpdateSettings {
@@ -102,16 +100,11 @@ pub struct UpdateSettings {
     /// `manual` disables the scheduler entirely; checks only fire
     /// on explicit RPC.
     pub frequency: crate::server::updater::UpdateFrequency,
-    /// What to do when a newer release is found. The escalation
-    /// order is `notify < download < install`; each step implies
-    /// everything the weaker levels do.
+    /// What to do when a newer release is found. `notify` reports
+    /// availability; `download` also stages and verifies the DMG.
+    /// Installing still means replacing `/Applications/Tron.app`
+    /// from the notarized DMG.
     pub action: crate::server::updater::UpdateAction,
-    /// Whether the updater is allowed to auto-rollback on a failed
-    /// install. `true` mirrors the existing `scripts/tron rollback`
-    /// semantics used by `cmd_deploy`; `false` leaves the broken
-    /// binary in place and surfaces an `update_failed` event for
-    /// operator intervention.
-    pub allow_downgrade_on_rollback: bool,
 }
 
 impl Default for UpdateSettings {
@@ -121,7 +114,6 @@ impl Default for UpdateSettings {
             channel: crate::server::updater::UpdateChannel::default(),
             frequency: crate::server::updater::UpdateFrequency::default(),
             action: crate::server::updater::UpdateAction::default(),
-            allow_downgrade_on_rollback: true,
         }
     }
 }
@@ -479,11 +471,10 @@ mod tests {
 
     #[test]
     fn update_settings_defaults_are_safe() {
-        // The safe default is the full "dormant" state — no HTTP
-        // requests to GitHub, no downloads, no installs. Flipping
-        // just `enabled = true` gives the gentlest behavior
-        // (daily stable notify-only), matching Plan §H.2's promise
-        // that opt-in users get a predictable experience.
+        // The safe default is the full "dormant" state: no HTTP
+        // requests to GitHub and no downloads. Flipping just
+        // `enabled = true` gives the gentlest behavior: daily stable
+        // notify-only checks.
         let s = UpdateSettings::default();
         assert!(!s.enabled);
         assert_eq!(
@@ -501,14 +492,11 @@ mod tests {
             crate::server::updater::UpdateAction::Notify,
             "default action must be notify"
         );
-        assert!(s.allow_downgrade_on_rollback);
     }
 
     #[test]
     fn update_settings_default_when_section_missing() {
-        // Existing settings.json files predating Phase 5.5 don't have
-        // an `update` block; they must deserialize without error and
-        // end up with the dormant default.
+        // Missing `update` blocks deserialize to the dormant default.
         let s: ServerSettings = serde_json::from_str("{}").unwrap();
         assert!(!s.update.enabled);
     }
@@ -520,8 +508,7 @@ mod tests {
                 "enabled": true,
                 "channel": "beta",
                 "frequency": "hourly",
-                "action": "download",
-                "allowDowngradeOnRollback": false
+                "action": "notify"
             }
         });
         let s: ServerSettings = serde_json::from_value(json).unwrap();
@@ -536,17 +523,15 @@ mod tests {
         );
         assert_eq!(
             s.update.action,
-            crate::server::updater::UpdateAction::Download
+            crate::server::updater::UpdateAction::Notify
         );
-        assert!(!s.update.allow_downgrade_on_rollback);
 
         // Roundtrip.
         let back = serde_json::to_value(&s).unwrap();
         assert_eq!(back["update"]["enabled"], true);
         assert_eq!(back["update"]["channel"], "beta");
         assert_eq!(back["update"]["frequency"], "hourly");
-        assert_eq!(back["update"]["action"], "download");
-        assert_eq!(back["update"]["allowDowngradeOnRollback"], false);
+        assert_eq!(back["update"]["action"], "notify");
     }
 
     #[test]

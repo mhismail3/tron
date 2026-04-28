@@ -1,6 +1,6 @@
 ---
 name: "Self Inspect"
-description: "Inspect Tron database, settings, auth, skills, deployment, health, and all ~/.tron/ state via direct sqlite3 queries and file reads. Trigger on 'debug this session', 'what went wrong', 'why did that fail', 'inspect my last turns', 'what just happened', 'debug this chat' — diagnose the current live session's errors, failed tools, and anomalies, then write a diagnostic report to ~/.tron/workspace/reports/"
+description: "Inspect Tron database, settings, auth, skills, runtime locks, health, and all ~/.tron/ state via direct sqlite3 queries and file reads. Trigger on 'debug this session', 'what went wrong', 'why did that fail', 'inspect my last turns', 'what just happened', 'debug this chat' — diagnose the current live session's errors, failed tools, and anomalies, then write a diagnostic report to ~/.tron/workspace/reports/"
 version: "3.2.0"
 allowedTools:
   - Bash
@@ -30,28 +30,17 @@ Whenever you debug or investigate a session — for ANY reason — you MUST writ
 | Deep health check | `curl -s http://localhost:9847/health/deep \| jq .` |
 | Settings | `cat ~/.tron/system/settings.json \| jq .` |
 | Auth providers | `cat ~/.tron/system/auth.json \| jq 'del(.. \| .accessToken?, .refreshToken?, .apiKey?, .clientSecret?)'` |
-| Deploy status | `curl -s http://localhost:9847/deploy/status \| jq .` |
 
 ## ~/.tron/ Directory Layout
 
 ```
 ~/.tron/
 ├── system/                        # Operational state
-│   ├── Tron.app/                  # App bundle (macOS TCC identity)
-│   │   └── Contents/MacOS/tron    # Server binary (Rust, launchd-managed)
-│   ├── auth.json                  # OAuth tokens and API keys
+│   ├── auth.json                  # OAuth tokens, API keys, bearerToken
 │   ├── settings.json              # All configuration
+│   ├── run/                       # Runtime state (.onboarded, updater-state.json, locks)
 │   ├── database/
 │   │   └── log.db                 # Main SQLite database
-│   ├── deployment/                # Deploy scripts and state
-│   │   ├── tron-cli               # CLI wrapper
-│   │   ├── tron-lib.sh            # Shared deployment library
-│   │   ├── tron-agent.entitlements # Hardened runtime entitlements
-│   │   ├── deployed-commit        # Current git commit hash
-│   │   ├── last-deployment.json   # Last deploy metadata
-│   │   ├── restart-sentinel.json  # Restart state tracking
-│   │   ├── workspace-path         # Path to tron workspace
-│   │   └── auth.lock              # Auth serialization lock
 │   └── transcription/             # Speech-to-text sidecar (worker.py, venv/, models/hf/)
 ├── skills/                        # Installed skills (SKILL.md per skill)
 ├── memory/                        # Agent memory and working state

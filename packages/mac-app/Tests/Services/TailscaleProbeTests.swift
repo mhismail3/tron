@@ -194,8 +194,8 @@ struct TailscaleProbeTests {
         }
     }
 
-    @Test("multiple CLI paths: first executable wins")
-    func firstExecutableWins() async throws {
+    @Test("multiple CLI paths: skips non-executable paths")
+    func skipsNonExecutablePaths() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         // First path: not executable.
@@ -232,6 +232,50 @@ struct TailscaleProbeTests {
             #expect(ip == "100.1.2.3")
         } else {
             Issue.record("expected .signedIn")
+        }
+    }
+
+    @Test("multiple CLI paths: falls through from stale executable to connected CLI")
+    func fallsThroughFromStaleExecutableToConnectedCLI() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+
+        let stale = tmp.appendingPathComponent("stale/tailscale", isDirectory: false)
+        try FileManager.default.createDirectory(at: stale.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: stale)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stale.path)
+
+        let connected = tmp.appendingPathComponent("connected/tailscale", isDirectory: false)
+        try FileManager.default.createDirectory(at: connected.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: connected)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: connected.path)
+
+        var seen: [URL] = []
+        let status = await TailscaleProbe.probe(
+            tailscaleAppExists: { _ in true },
+            cliPaths: [stale, connected],
+            runProcess: { url in
+                seen.append(url)
+                if url == stale {
+                    return ProcessResult(
+                        exitCode: 0,
+                        stdout: #"{"BackendState":"NeedsLogin"}"#,
+                        stderr: ""
+                    )
+                }
+                return ProcessResult(
+                    exitCode: 0,
+                    stdout: #"{"BackendState":"Running","Self":{"TailscaleIPs":["100.95.255.62"]}}"#,
+                    stderr: ""
+                )
+            }
+        )
+
+        #expect(seen == [stale, connected])
+        if case .signedIn(let ip) = status {
+            #expect(ip == "100.95.255.62")
+        } else {
+            Issue.record("expected .signedIn after fallback CLI, got \(status)")
         }
     }
 

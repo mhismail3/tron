@@ -676,14 +676,14 @@ fn cli_auth_unknown_action_fails() {
 
 #[test]
 fn run_subcommand_auth_rotate_writes_token_to_default_path() {
-    // The default path for `auth-token.json` is under `~/.tron/system/`,
+    // The default path for `auth.json` is under `~/.tron/system/`,
     // which would clobber the user's real token on a dev machine. The
     // test writes through the lower-level `rotate_bearer_token` helper
     // with a temp path instead — same code path the dispatch hits, just
     // with the path injected. The clap dispatch test above guarantees
     // the wiring matches.
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("auth-token.json");
+    let path = dir.path().join("auth.json");
     let token = tron::server::onboarding::rotate_bearer_token(&path).expect("rotate writes token");
     assert_eq!(
         token.len(),
@@ -700,24 +700,30 @@ fn run_subcommand_auth_rotate_writes_token_to_default_path() {
 #[test]
 fn startup_ensures_bearer_token_exists() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("auth-token.json");
+    let path = dir.path().join("auth.json");
 
     let token = ensure_bearer_token_at(&path).expect("startup should create bearer token");
 
     assert_eq!(token.len(), 43);
-    assert!(
-        path.exists(),
-        "startup must persist auth-token.json for pairing"
-    );
+    assert!(path.exists(), "startup must persist auth.json for pairing");
     let read_back = tron::server::onboarding::load_or_create_bearer_token(&path).expect("read");
     assert_eq!(read_back, token);
 }
 
 #[test]
-fn ordinary_startup_does_not_create_deployment_dir() {
+fn ordinary_startup_creates_only_required_system_dirs() {
+    assert_eq!(
+        startup_system_subdirs(),
+        &[tron::core::paths::dirs::DB, tron::core::paths::dirs::RUN],
+        "ordinary startup should create only database/ and run/"
+    );
+}
+
+#[test]
+fn ordinary_startup_creates_run_dir_for_ephemeral_locks() {
     assert!(
-        !startup_system_subdirs().contains(&tron::core::paths::dirs::DEPLOYMENT),
-        "deployment/ is dev/deploy/update state and should be created only by those flows"
+        startup_system_subdirs().contains(&tron::core::paths::dirs::RUN),
+        "run/ holds runtime locks that normal server startup may create"
     );
 }
 
@@ -730,13 +736,7 @@ fn ordinary_startup_does_not_probe_tcc_permissions() {
         .and_then(|tail| tail.split("#[tokio::main]").next())
         .expect("spawn_background_tasks body should be discoverable");
 
-    for forbidden in [
-        "probe_wizard_permissions",
-        "CGPreflightScreenCaptureAccess",
-        "AXIsProcessTrusted",
-        "Privacy_AllFiles",
-        "x-apple.systempreferences",
-    ] {
+    for forbidden in ["Privacy_AllFiles", "x-apple.systempreferences"] {
         assert!(
             !spawn_body.contains(forbidden),
             "ordinary startup must not touch macOS TCC or open permission UI; found {forbidden}"
@@ -747,7 +747,7 @@ fn ordinary_startup_does_not_probe_tcc_permissions() {
 #[test]
 fn run_subcommand_auth_rotate_invalidates_prior_token() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("auth-token.json");
+    let path = dir.path().join("auth.json");
     let first = tron::server::onboarding::load_or_create_bearer_token(&path).expect("first");
     let second = tron::server::onboarding::rotate_bearer_token(&path).expect("rotate");
     let third = tron::server::onboarding::load_or_create_bearer_token(&path).expect("third");

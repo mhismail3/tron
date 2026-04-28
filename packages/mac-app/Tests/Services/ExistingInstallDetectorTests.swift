@@ -2,207 +2,188 @@ import Foundation
 import Testing
 @testable import TronMac
 
-/// Tests for `ExistingInstallDetector` — branches the wizard uses to
-/// decide whether to skip the Install step.
-///
-/// The detector takes injected paths so we don't touch the host's real
-/// `~/.tron/`. The bundle-version resolver is a closure too so we can
-/// confirm the resolver is invoked with the correct bundle root.
 @Suite("ExistingInstallDetector")
 struct ExistingInstallDetectorTests {
-    @Test("clean host: nothing detected")
-    func cleanHost() throws {
+    @Test("clean app bundle with unregistered service is not installed")
+    func cleanUnregisteredService() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
+        let paths = try makeHelperFixture(in: tmp)
+
         let result = ExistingInstallDetector.detect(
-            binaryPath: tmp.appendingPathComponent("Tron.app/Contents/MacOS/tron", isDirectory: false),
-            authJSONPath: tmp.appendingPathComponent("auth.json", isDirectory: false),
-            plistPath: tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false),
-            bundleVersionResolver: { _ in nil }
+            helperBundle: paths.helperBundle,
+            helperBinary: paths.helperBinary,
+            plistPath: paths.plistPath,
+            bundleVersionResolver: { _ in nil },
+            bundleSignatureProblemResolver: { _ in nil },
+            serviceStatusResolver: { .notRegistered }
         )
+
         #expect(result == .none)
     }
 
-    @Test("binary present: detected as installed (no version)")
-    func binaryOnlyIsInstalled() throws {
+    @Test("enabled service reports registered version")
+    func enabledServiceIsRegistered() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let bundle = tmp.appendingPathComponent("Tron.app", isDirectory: true)
-        let macOS = bundle.appendingPathComponent("Contents/MacOS", isDirectory: true)
-        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
-        let binary = macOS.appendingPathComponent("tron", isDirectory: false)
-        FileManager.default.createFile(atPath: binary.path, contents: Data([0x7f, 0x45]))
+        let paths = try makeHelperFixture(in: tmp)
 
         let result = ExistingInstallDetector.detect(
-            binaryPath: binary,
-            authJSONPath: tmp.appendingPathComponent("missing-auth.json", isDirectory: false),
-            plistPath: tmp.appendingPathComponent("missing.plist", isDirectory: false),
+            helperBundle: paths.helperBundle,
+            helperBinary: paths.helperBinary,
+            plistPath: paths.plistPath,
+            bundleVersionResolver: { _ in "0.5.0" },
+            bundleSignatureProblemResolver: { _ in nil },
+            serviceStatusResolver: { .enabled }
+        )
+
+        #expect(result == .registered(version: "0.5.0"))
+    }
+
+    @Test("requiresApproval maps to install blocking state")
+    func requiresApproval() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let paths = try makeHelperFixture(in: tmp)
+
+        let result = ExistingInstallDetector.detect(
+            helperBundle: paths.helperBundle,
+            helperBinary: paths.helperBinary,
+            plistPath: paths.plistPath,
             bundleVersionResolver: { _ in nil },
-            bundleSignatureProblemResolver: { _ in nil }
+            bundleSignatureProblemResolver: { _ in nil },
+            serviceStatusResolver: { .requiresApproval }
         )
 
-        if case .installed(let version) = result {
-            #expect(version == nil)
-        } else {
-            Issue.record("expected .installed, got \(result)")
-        }
+        #expect(result == .requiresApproval)
     }
 
-    @Test("binary + version resolver: version surfaced")
-    func binaryWithVersion() throws {
+    @Test("missing bundled plist is partial")
+    func missingPlistIsPartial() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let bundle = tmp.appendingPathComponent("Tron.app", isDirectory: true)
-        let macOS = bundle.appendingPathComponent("Contents/MacOS", isDirectory: true)
-        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
-        let binary = macOS.appendingPathComponent("tron", isDirectory: false)
-        FileManager.default.createFile(atPath: binary.path, contents: Data())
+        let paths = try makeHelperFixture(in: tmp, includePlist: false)
 
-        var observedRoot: URL?
         let result = ExistingInstallDetector.detect(
-            binaryPath: binary,
-            authJSONPath: tmp.appendingPathComponent("missing", isDirectory: false),
-            plistPath: tmp.appendingPathComponent("missing.plist", isDirectory: false),
-            bundleVersionResolver: { url in
-                observedRoot = url
-                return "0.5.0"
-            },
-            bundleSignatureProblemResolver: { _ in nil }
+            helperBundle: paths.helperBundle,
+            helperBinary: paths.helperBinary,
+            plistPath: paths.plistPath,
+            bundleVersionResolver: { _ in nil },
+            bundleSignatureProblemResolver: { _ in nil },
+            serviceStatusResolver: { .notRegistered }
         )
 
-        if case .installed(let version) = result {
-            #expect(version == "0.5.0")
+        if case .partial(let reason) = result {
+            #expect(reason.contains("LaunchAgent"))
         } else {
-            Issue.record("expected .installed")
+            Issue.record("expected partial")
         }
-        #expect(observedRoot == bundle, "resolver must receive the bundle root, not the binary path")
     }
 
-    @Test("binary with invalid bundle signature is treated as partial so install can repair it")
+    @Test("invalid helper signature is partial")
     func invalidSignatureIsPartial() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let bundle = tmp.appendingPathComponent("Tron.app", isDirectory: true)
-        let macOS = bundle.appendingPathComponent("Contents/MacOS", isDirectory: true)
-        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
-        let binary = macOS.appendingPathComponent("tron", isDirectory: false)
+        let paths = try makeHelperFixture(in: tmp)
+
+        let result = ExistingInstallDetector.detect(
+            helperBundle: paths.helperBundle,
+            helperBinary: paths.helperBinary,
+            plistPath: paths.plistPath,
+            bundleVersionResolver: { _ in nil },
+            bundleSignatureProblemResolver: { _ in "Tron Server.app signature is invalid" },
+            serviceStatusResolver: { .enabled }
+        )
+
+        if case .partial(let reason) = result {
+            #expect(reason.contains("signature"))
+        } else {
+            Issue.record("expected partial")
+        }
+    }
+
+    @Test("release bundle must live at /Applications/Tron.app")
+    func releaseLocationGuard() {
+        let problem = ExistingInstallDetector.validateApplicationLocation(
+            bundleURL: URL(fileURLWithPath: "/Users/example/Downloads/Tron.app", isDirectory: true),
+            bundleIdentifier: "com.tron.mac"
+        )
+        #expect(problem?.contains("/Applications") == true)
+
+        let devProblem = ExistingInstallDetector.validateApplicationLocation(
+            bundleURL: URL(fileURLWithPath: "/tmp/TronMac.app", isDirectory: true),
+            bundleIdentifier: "com.tron.mac.dev"
+        )
+        #expect(devProblem == nil)
+    }
+
+    @Test("unsupported wrapper bundle ids are rejected")
+    func unsupportedWrapperBundleID() {
+        let problem = ExistingInstallDetector.validateApplicationLocation(
+            bundleURL: URL(fileURLWithPath: "/tmp/Tron.app", isDirectory: true),
+            bundleIdentifier: "example.tron"
+        )
+
+        #expect(problem?.contains("Unsupported") == true)
+    }
+
+    @Test("LaunchAgent plist requires current BundleProgram and associated wrapper IDs")
+    func launchAgentPlistIsCurrent() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let plist = tmp.appendingPathComponent("com.tron.server.plist")
+        try InstallPlanner.renderPlist(paths: makeTargetPaths(in: tmp)).write(to: plist, atomically: true, encoding: .utf8)
+
+        #expect(ExistingInstallDetector.launchAgentPlistIsCurrent(plistPath: plist))
+    }
+
+    @Test("ad-hoc helper signature is rejected before SMAppService registration")
+    func adhocHelperSignatureRejected() {
+        let problem = ExistingInstallDetector.codeSignatureIdentityProblem("""
+        Executable=/tmp/Tron Server.app/Contents/MacOS/tron
+        Identifier=com.tron.server
+        Signature=adhoc
+        TeamIdentifier=not set
+        """)
+
+        #expect(problem?.contains("ad-hoc signed") == true)
+    }
+
+    @Test("team-signed helper identity is accepted")
+    func teamSignedHelperIdentityAccepted() {
+        let problem = ExistingInstallDetector.codeSignatureIdentityProblem("""
+        Executable=/tmp/Tron Server.app/Contents/MacOS/tron
+        Identifier=com.tron.server
+        TeamIdentifier=MYGKXH6TY4
+        """)
+
+        #expect(problem == nil)
+    }
+
+    private typealias HelperFixture = (helperBundle: URL, helperBinary: URL, plistPath: URL)
+
+    private func makeHelperFixture(in tmp: URL, includePlist: Bool = true) throws -> HelperFixture {
+        let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app", isDirectory: true)
+        let binary = helper.appendingPathComponent("Contents/MacOS/tron", isDirectory: false)
+        try FileManager.default.createDirectory(at: binary.deletingLastPathComponent(), withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: binary.path, contents: Data())
-
-        let result = ExistingInstallDetector.detect(
-            binaryPath: binary,
-            authJSONPath: tmp.appendingPathComponent("missing", isDirectory: false),
-            plistPath: tmp.appendingPathComponent("missing.plist", isDirectory: false),
-            bundleVersionResolver: { _ in "0.5.0" },
-            bundleSignatureProblemResolver: { _ in "Tron.app is present but its code signature is not bound to com.tron.server" }
-        )
-
-        if case .partial(let reason) = result {
-            #expect(reason.contains("code signature"))
-        } else {
-            Issue.record("expected .partial, got \(result)")
+        let plist = tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist", isDirectory: false)
+        if includePlist {
+            try FileManager.default.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("<plist/>".utf8).write(to: plist)
         }
+        return (helper, binary, plist)
     }
 
-    @Test("auth.json present + binary missing is not a partial install")
-    func authJSONOnlyIsIgnored() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let auth = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try Data("{\"k\":\"v\"}".utf8).write(to: auth)
-
-        let result = ExistingInstallDetector.detect(
-            binaryPath: tmp.appendingPathComponent("missing-bin", isDirectory: false),
-            authJSONPath: auth,
-            plistPath: tmp.appendingPathComponent("missing.plist", isDirectory: false),
-            bundleVersionResolver: { _ in nil }
+    private func makeTargetPaths(in tmp: URL) -> InstallPlanner.TargetPaths {
+        let app = tmp.appendingPathComponent("Tron.app", isDirectory: true)
+        let helper = app.appendingPathComponent("Contents/Library/LoginItems/Tron Server.app", isDirectory: true)
+        return InstallPlanner.TargetPaths(
+            helperBundle: helper,
+            helperBinary: helper.appendingPathComponent("Contents/MacOS/tron", isDirectory: false),
+            plistPath: app.appendingPathComponent("Contents/Library/LaunchAgents/com.tron.server.plist", isDirectory: false),
+            label: "com.tron.server",
+            port: 9847
         )
-
-        #expect(result == .none, "auth.json is user data and must not force partial-install recovery")
-    }
-
-    @Test("plist present + binary missing: partial")
-    func plistOnlyIsPartial() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let plist = tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false)
-        try Data("<plist/>".utf8).write(to: plist)
-
-        let result = ExistingInstallDetector.detect(
-            binaryPath: tmp.appendingPathComponent("missing-bin", isDirectory: false),
-            authJSONPath: tmp.appendingPathComponent("missing-auth", isDirectory: false),
-            plistPath: plist,
-            bundleVersionResolver: { _ in nil }
-        )
-
-        if case .partial(let reason) = result {
-            #expect(reason.contains("LaunchAgent") || reason.contains("plist"))
-        } else {
-            Issue.record("expected .partial, got \(result)")
-        }
-    }
-
-    @Test("auth.json + plist with missing binary reports only launch artifact")
-    func authAndPlistReportsLaunchArtifactOnly() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let auth = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try Data("{\"k\":\"v\"}".utf8).write(to: auth)
-        let plist = tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false)
-        try Data("<plist/>".utf8).write(to: plist)
-
-        let result = ExistingInstallDetector.detect(
-            binaryPath: tmp.appendingPathComponent("missing-bin", isDirectory: false),
-            authJSONPath: auth,
-            plistPath: plist,
-            bundleVersionResolver: { _ in nil }
-        )
-
-        if case .partial(let reason) = result {
-            #expect(reason.contains("LaunchAgent plist"), "expected reason to mention LaunchAgent plist, got: \(reason)")
-            #expect(!reason.contains("auth.json"), "auth.json is preserved user data, not an install artifact")
-        } else {
-            Issue.record("expected .partial, got \(result)")
-        }
-    }
-
-    @Test("empty auth.json doesn't count as present")
-    func emptyAuthDoesntCount() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let auth = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        FileManager.default.createFile(atPath: auth.path, contents: Data())
-
-        let result = ExistingInstallDetector.detect(
-            binaryPath: tmp.appendingPathComponent("missing-bin", isDirectory: false),
-            authJSONPath: auth,
-            plistPath: tmp.appendingPathComponent("missing.plist", isDirectory: false),
-            bundleVersionResolver: { _ in nil }
-        )
-
-        #expect(result == .none, "empty auth.json must not be treated as present")
-    }
-
-    @Test("readMarketingVersion returns CFBundleShortVersionString")
-    func marketingVersionReader() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let contents = tmp.appendingPathComponent("Contents", isDirectory: true)
-        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
-        let infoPlist: [String: Any] = [
-            "CFBundleShortVersionString": "0.5.0",
-            "CFBundleIdentifier": "com.tron.server",
-        ]
-        let data = try PropertyListSerialization.data(fromPropertyList: infoPlist, format: .xml, options: 0)
-        try data.write(to: contents.appendingPathComponent("Info.plist", isDirectory: false))
-
-        let version = ExistingInstallDetector.readMarketingVersion(of: tmp)
-        #expect(version == "0.5.0")
-    }
-
-    @Test("readMarketingVersion returns nil when Info.plist missing")
-    func marketingVersionMissingPlist() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        #expect(ExistingInstallDetector.readMarketingVersion(of: tmp) == nil)
     }
 }

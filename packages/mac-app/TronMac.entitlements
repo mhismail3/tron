@@ -5,8 +5,8 @@
     <!--
         com.apple.security.app-sandbox is INTENTIONALLY OMITTED.
 
-        Tron's Mac wrapper installs the headless server, manages a
-        LaunchAgent in ~/Library/LaunchAgents/, runs `launchctl` and
+        Tron's Mac wrapper registers a bundled Login Item with
+        SMAppService, runs `launchctl` diagnostics/restarts and
         `tailscale` subprocesses, reads/writes ~/.tron/ outside the
         app's container, and probes Full Disk Access by stat'ing
         protected paths. None of those are possible inside the App
@@ -22,11 +22,9 @@
     <true/>
     <!--
         disable-library-validation is REQUIRED so the bundled
-        Resources/tron-agent helper binary can be launched by our
-        signed process without separately signing every Rust dylib
-        it links to. The bundled binary is itself codesigned with
-        the same hardened runtime by the release pipeline before
-        notarization.
+        LoginItems/Tron Server.app helper can load the runtime pieces
+        it needs. The helper app is itself codesigned before the outer
+        app is signed and notarized.
     -->
 </dict>
 </plist>

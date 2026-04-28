@@ -78,7 +78,7 @@ pub struct CronScheduler {
     deps: Arc<ExecutorDeps>,
     /// Path to `automations.json`.
     config_path: PathBuf,
-    /// Path to `automations.json.bak` (in deployment directory).
+    /// Path to `automations.json.bak` beside the automations config.
     backup_path: PathBuf,
 }
 

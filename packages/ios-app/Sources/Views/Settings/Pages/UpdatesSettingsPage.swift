@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings page for the user-mode auto-updater (Phase 5.5).
+/// Settings page for user-mode update checks.
 ///
 /// Server-authoritative fields live under `settings.json > server.update`
 /// (see `packages/agent/src/settings/types/server.rs::UpdateSettings` and
@@ -13,11 +13,7 @@ import SwiftUI
 ///   configure before opting in).
 /// - Channel cycle (`stable` / `beta`).
 /// - Frequency cycle (`manual` / `startup` / `hourly` / `daily` / `weekly`).
-/// - Action cycle (`notify` / `download` / `install`).
-/// - Rollback-on-failure toggle.
-/// - Manual check button (fires `system.checkForUpdates` — wired in the
-///   Phase 5.5 RPC layer; this view invokes the RPC client and surfaces
-///   the result inline).
+/// - Manual check button (fires `system.checkForUpdates`).
 struct UpdatesSettingsPage: View {
     @Bindable var settingsState: SettingsState
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
@@ -25,15 +21,12 @@ struct UpdatesSettingsPage: View {
 
     @State private var isCheckingForUpdates = false
     @State private var checkResultMessage: String?
-    @State private var isInstallingUpdate = false
 
     var body: some View {
         SettingsPageContainer(title: "Updates") {
             masterToggleCard
             channelCard
             frequencyCard
-            actionCard
-            safetyCard
             manualCheckCard
         }
         .alert(
@@ -51,7 +44,7 @@ struct UpdatesSettingsPage: View {
 
     private var masterToggleCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Auto-Update")
+            SettingsSectionHeader(title: "Update Checks")
 
             SettingsCard {
                 SettingsRow(icon: "arrow.down.app", label: "Automatically check for updates") {
@@ -122,58 +115,6 @@ struct UpdatesSettingsPage: View {
             }
 
             SettingsCaption(text: "Manual means only the button below (and the Mac menu bar) fire checks. Startup checks once per server launch.")
-        }
-    }
-
-    // MARK: - Action
-
-    private var actionCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "When an update is available")
-
-            SettingsCard {
-                SettingsRow(icon: "tray.and.arrow.down", label: "Action") {
-                    SettingsCycleToggle(
-                        options: UpdateAction.allCases.map { ($0.rawValue, $0.displayName) },
-                        current: settingsState.updateAction
-                    ) { newValue in
-                        settingsState.updateAction = newValue
-                        if let action = UpdateAction.from(newValue) {
-                            updateServerSetting {
-                                ServerSettingsUpdate(server: .init(update: .init(action: action)))
-                            }
-                        }
-                    }
-                }
-            }
-
-            SettingsCaption(text: "Notify surfaces a banner. Download stages the DMG and verifies its codesign. Install atomically swaps the binary with rollback on failure.")
-        }
-    }
-
-    // MARK: - Safety
-
-    private var safetyCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Safety")
-
-            SettingsCard {
-                SettingsRow(icon: "arrow.uturn.backward.circle", label: "Auto-rollback on failed install") {
-                    Toggle("", isOn: Binding(
-                        get: { settingsState.updateAllowDowngradeOnRollback },
-                        set: { newValue in
-                            settingsState.updateAllowDowngradeOnRollback = newValue
-                            updateServerSetting {
-                                ServerSettingsUpdate(server: .init(update: .init(allowDowngradeOnRollback: newValue)))
-                            }
-                        }
-                    ))
-                    .labelsHidden()
-                    .tint(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(text: "If a freshly-installed version fails its post-install self-test, revert to the previous binary. After 3 consecutive failures the action auto-downgrades to Notify.")
         }
     }
 

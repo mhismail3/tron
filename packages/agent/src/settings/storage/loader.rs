@@ -33,11 +33,6 @@ pub fn auth_path() -> PathBuf {
     crate::core::paths::auth_path()
 }
 
-/// Resolve the deployment directory (`~/.tron/system/deployment/`).
-pub fn deploy_dir() -> PathBuf {
-    crate::core::paths::deploy_dir()
-}
-
 /// Load settings from the default path with env var overrides.
 pub fn load_settings() -> Result<TronSettings> {
     load_settings_from_path(&settings_path())

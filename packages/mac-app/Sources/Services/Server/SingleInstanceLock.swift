@@ -5,7 +5,7 @@ import AppKit
 /// see that one is already running and exit cleanly with a banner.
 ///
 /// Implementation: exclusive `fcntl(F_SETLK, F_WRLCK)` advisory lock on
-/// `~/.tron/system/.mac-wrapper.lock`. The kernel cleans up the lock on
+/// `~/.tron/system/run/.mac-wrapper.lock`. The kernel cleans up the lock on
 /// process exit (including crash), so we don't have to worry about
 /// stale lockfiles. The PID is written to the file body so `tron
 /// status` can report "held by PID 12345".
@@ -27,7 +27,7 @@ final class SingleInstanceLock: @unchecked Sendable {
     private var fileDescriptor: Int32 = -1
     private let mutex = NSLock()
 
-    init(lockFileURL: URL = TronPaths.systemDir.appendingPathComponent(".mac-wrapper.lock", isDirectory: false)) {
+    init(lockFileURL: URL = TronPaths.macWrapperLockPath) {
         self.lockFileURL = lockFileURL
     }
 

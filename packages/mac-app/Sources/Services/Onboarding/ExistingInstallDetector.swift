@@ -1,42 +1,114 @@
 import Foundation
+import ServiceManagement
 
-/// Decides whether a CLI-installed Tron is already present on the host.
-/// The wizard uses this to skip the Install step on second runs and to
-/// avoid clobbering a contributor's local setup.
-///
-/// Detection rule (mirrors plan §A step 3):
-/// - `~/.tron/system/Tron.app/Contents/MacOS/tron` exists (binary), OR
-/// - `~/Library/LaunchAgents/com.tron.server.plist` exists without that
-///   binary, which is a stale/partial launch artifact.
-///
-/// Auth/settings/database files are user data, not install artifacts.
-/// They are deliberately ignored here so the cleanup action can preserve
-/// them while still returning the installer to a clean retry state.
+/// Decides whether the bundled `SMAppService` agent is registered and
+/// the embedded helper is intact. Auth/settings/database files are user
+/// data and are deliberately ignored.
 enum ExistingInstallDetector {
     static func detect(
-        binaryPath: URL = TronPaths.installedBinary,
-        authJSONPath _: URL = TronPaths.systemDir.appendingPathComponent("auth.json", isDirectory: false),
+        helperBundle: URL = TronPaths.serverHelperBundle,
+        helperBinary: URL = TronPaths.serverHelperBinary,
         plistPath: URL = TronPaths.launchAgentPlistPath,
         bundleVersionResolver: (URL) -> String? = ExistingInstallDetector.readMarketingVersion,
-        bundleSignatureProblemResolver: (URL) -> String? = ExistingInstallDetector.bundleSignatureProblem
+        bundleSignatureProblemResolver: (URL) -> String? = ExistingInstallDetector.bundleSignatureProblem,
+        serviceStatusResolver: () -> ServiceRegistrationStatus = { ExistingInstallDetector.serviceStatus() }
     ) -> ExistingInstallStatus {
         let fm = FileManager.default
-        let hasBinary = fm.fileExists(atPath: binaryPath.path)
+        let hasHelper = fm.fileExists(atPath: helperBundle.path)
+        let hasBinary = fm.fileExists(atPath: helperBinary.path)
         let hasPlist = fm.fileExists(atPath: plistPath.path)
 
-        switch (hasBinary, hasPlist) {
-        case (true, _):
-            let bundle = binaryPath.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            if let problem = bundleSignatureProblemResolver(bundle) {
-                return .partial(reason: problem)
-            }
-            let version = bundleVersionResolver(bundle)
-            return .installed(version: version)
-        case (false, true):
-            return .partial(reason: "LaunchAgent plist present but Tron.app missing")
-        case (false, false):
-            return .none
+        guard hasHelper else {
+            return hasPlist ? .partial(reason: "Tron Server.app is missing from the application bundle") : .none
         }
+        guard hasBinary else {
+            return .partial(reason: "Tron Server.app is missing its tron executable")
+        }
+        guard hasPlist else {
+            return .partial(reason: "Bundled LaunchAgent plist is missing")
+        }
+        if let problem = bundleSignatureProblemResolver(helperBundle) {
+            return .partial(reason: problem)
+        }
+
+        switch serviceStatusResolver() {
+        case .enabled:
+            return .registered(version: bundleVersionResolver(helperBundle))
+        case .requiresApproval:
+            return .requiresApproval
+        case .notRegistered:
+            return .none
+        case .notFound:
+            return .partial(reason: "macOS cannot find the bundled Tron Server Login Item")
+        case .unknown(let message):
+            return .partial(reason: message)
+        }
+    }
+
+    enum ServiceRegistrationStatus: Equatable, Sendable {
+        case enabled
+        case requiresApproval
+        case notRegistered
+        case notFound
+        case unknown(String)
+    }
+
+    static func serviceStatus(label: String = TronPaths.launchAgentLabel) -> ServiceRegistrationStatus {
+        let service = SMAppService.agent(plistName: "\(label).plist")
+        switch service.status {
+        case .enabled:
+            return .enabled
+        case .requiresApproval:
+            return .requiresApproval
+        case .notRegistered:
+            return .notRegistered
+        case .notFound:
+            return .notFound
+        @unknown default:
+            return .unknown("Tron Server registration is in an unknown state")
+        }
+    }
+
+    static func validateBundledHelper(
+        helperBundle: URL = TronPaths.serverHelperBundle,
+        helperBinary: URL = TronPaths.serverHelperBinary,
+        plistPath: URL = TronPaths.launchAgentPlistPath,
+        signatureProblemResolver: (URL) -> String? = ExistingInstallDetector.bundleSignatureProblem
+    ) -> String? {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: helperBundle.path) else {
+            return "Tron Server.app is missing from the application bundle."
+        }
+        guard fm.fileExists(atPath: helperBinary.path) else {
+            return "Tron Server.app is missing its tron executable."
+        }
+        guard fm.fileExists(atPath: plistPath.path) else {
+            return "The bundled LaunchAgent plist is missing."
+        }
+        return signatureProblemResolver(helperBundle)
+    }
+
+    static func validateApplicationLocation(
+        bundleURL: URL = Bundle.main.bundleURL,
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier
+    ) -> String? {
+        MacRuntimeVariant.detect(
+            bundleURL: bundleURL,
+            bundleIdentifier: bundleIdentifier
+        ).locationProblem
+    }
+
+    static func launchAgentPlistIsCurrent(plistPath: URL = TronPaths.launchAgentPlistPath) -> Bool {
+        guard let data = try? Data(contentsOf: plistPath),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let bundleProgram = plist["BundleProgram"] as? String,
+              let args = plist["ProgramArguments"] as? [String],
+              let associatedBundleIDs = plist["AssociatedBundleIdentifiers"] as? [String] else {
+            return false
+        }
+        return bundleProgram == "Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+            && args == ["tron", "--port", "9847", "--quiet"]
+            && associatedBundleIDs == TronPaths.associatedWrapperBundleIDs
     }
 
     /// Reads `CFBundleShortVersionString` from `<Bundle>/Contents/Info.plist`.
@@ -50,15 +122,11 @@ enum ExistingInstallDetector {
         return plist["CFBundleShortVersionString"] as? String
     }
 
-    /// Returns nil when the bundle's code signature is suitable for TCC.
-    /// Accessibility grants are code-identity sensitive; an unsigned app
-    /// bundle whose executable keeps Cargo's linker-generated ad-hoc
-    /// identity can show up in System Settings, accept a toggle, then have
-    /// macOS immediately flip the toggle back off after restart.
+    /// Returns nil when the helper app's code signature is suitable for TCC.
     static func bundleSignatureProblem(of bundle: URL) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        process.arguments = ["-dv", "--verbose=4", bundle.path]
+        process.arguments = ["--verify", "--deep", "--strict", "--verbose=2", bundle.path]
 
         let output = Pipe()
         process.standardOutput = output
@@ -68,22 +136,45 @@ enum ExistingInstallDetector {
             try process.run()
             process.waitUntilExit()
         } catch {
-            return "Tron.app is present but its code signature could not be checked"
+            return "Tron Server.app is present but its code signature could not be checked"
         }
 
         let data = output.fileHandleForReading.readDataToEndOfFile()
         let text = String(data: data, encoding: .utf8) ?? ""
         guard process.terminationStatus == 0 else {
-            return "Tron.app is present but its code signature is invalid"
+            return "Tron Server.app is present but its code signature is invalid"
         }
-        guard text.contains("Identifier=\(TronPaths.bundleID)") else {
-            return "Tron.app is present but its code signature is not bound to \(TronPaths.bundleID)"
+
+        let identity = Process()
+        identity.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        identity.arguments = ["-dv", "--verbose=4", bundle.path]
+        let identityOutput = Pipe()
+        identity.standardOutput = identityOutput
+        identity.standardError = identityOutput
+        do {
+            try identity.run()
+            identity.waitUntilExit()
+        } catch {
+            return "Tron Server.app is present but its code signature identity could not be checked"
         }
-        guard !text.contains("Info.plist=not bound") else {
-            return "Tron.app is present but its Info.plist is not sealed into the code signature"
+        let identityText = String(data: identityOutput.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard identity.terminationStatus == 0 else {
+            return "Tron Server.app is present but its code signature identity is invalid"
         }
-        guard !text.contains("Sealed Resources=none") else {
-            return "Tron.app is present but its bundle resources are not sealed into the code signature"
+        if let problem = codeSignatureIdentityProblem(identityText) {
+            return problem
+        }
+        _ = text
+        return nil
+    }
+
+    static func codeSignatureIdentityProblem(_ identityText: String) -> String? {
+        guard identityText.contains("Identifier=\(TronPaths.bundleID)") else {
+            return "Tron Server.app is present but its code signature is not bound to \(TronPaths.bundleID)"
+        }
+        if identityText.contains("Signature=adhoc")
+            || identityText.contains("TeamIdentifier=not set") {
+            return "Tron Server.app is ad-hoc signed. Build Debug with Apple Development signing so macOS can launch the Login Item."
         }
         return nil
     }

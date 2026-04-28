@@ -1,9 +1,7 @@
 //! `TronServer` — Axum HTTP + WebSocket server.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use crate::server::rpc::context::RpcContext;
@@ -13,7 +11,7 @@ use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
-use axum::routing::{get, post};
+use axum::routing::get;
 use tokio::net::TcpListener;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
@@ -63,12 +61,6 @@ pub struct AppState {
     pub config: ServerConfig,
     /// Prometheus metrics handle for rendering.
     pub metrics_handle: Arc<PrometheusHandle>,
-    /// Guard preventing double-restart during deploy.
-    pub deploy_restart_initiated: Arc<AtomicBool>,
-    /// Path to the installed server binary (e.g. `~/.tron/system/Tron.app/Contents/MacOS/tron`).
-    pub deploy_binary_path: PathBuf,
-    /// Deployment directory (e.g. `~/.tron/system/deployment/`).
-    pub deploy_dir: PathBuf,
 }
 
 /// The main Tron server.
@@ -79,9 +71,6 @@ pub struct TronServer {
     shutdown: Arc<ShutdownCoordinator>,
     rpc_context: Arc<RpcContext>,
     metrics_handle: Arc<PrometheusHandle>,
-    deploy_restart_initiated: Arc<AtomicBool>,
-    deploy_binary_path: PathBuf,
-    deploy_dir: PathBuf,
     start_time: Instant,
 }
 
@@ -110,9 +99,6 @@ impl TronServer {
             shutdown,
             rpc_context: Arc::new(rpc_context),
             metrics_handle: Arc::new(metrics_handle),
-            deploy_restart_initiated: Arc::new(AtomicBool::new(false)),
-            deploy_binary_path: crate::core::paths::tron_binary_path(),
-            deploy_dir: crate::settings::deploy_dir(),
             start_time: Instant::now(),
         }
     }
@@ -127,9 +113,6 @@ impl TronServer {
             rpc_context: self.rpc_context.clone(),
             config: self.config.clone(),
             metrics_handle: self.metrics_handle.clone(),
-            deploy_restart_initiated: self.deploy_restart_initiated.clone(),
-            deploy_binary_path: self.deploy_binary_path.clone(),
-            deploy_dir: self.deploy_dir.clone(),
         };
 
         Router::new()
@@ -137,11 +120,6 @@ impl TronServer {
             .route("/metrics", get(metrics_handler))
             .route("/ws", get(ws_upgrade_handler))
             .route("/health/deep", get(deep_health_handler))
-            .route("/deploy/status", get(crate::server::deploy::status_handler))
-            .route(
-                "/deploy/restart",
-                post(crate::server::deploy::restart_handler),
-            )
             .with_state(state)
             // Outermost layers execute first on request, last on response.
             .layer(CatchPanicLayer::new())
@@ -208,19 +186,6 @@ impl TronServer {
     pub fn rpc_context(&self) -> &Arc<RpcContext> {
         &self.rpc_context
     }
-
-    /// Get the deploy restart initiated flag.
-    pub fn deploy_restart_initiated(&self) -> &Arc<AtomicBool> {
-        &self.deploy_restart_initiated
-    }
-
-    /// Override deploy paths (for test isolation).
-    #[must_use]
-    pub fn with_deploy_paths(mut self, binary_path: PathBuf, deploy_dir: PathBuf) -> Self {
-        self.deploy_binary_path = binary_path;
-        self.deploy_dir = deploy_dir;
-        self
-    }
 }
 
 /// GET /health
@@ -237,7 +202,6 @@ async fn deep_health_handler(State(state): State<AppState>) -> Json<health::Deep
     let sessions = state.rpc_context.orchestrator.active_session_count();
     let pool = state.rpc_context.event_store.pool().clone();
     let tron_home = crate::settings::tron_home_dir();
-    let deploy_dir = state.deploy_dir.clone();
     let response = state
         .rpc_context
         .run_blocking("http.health.deep", move || {
@@ -247,7 +211,6 @@ async fn deep_health_handler(State(state): State<AppState>) -> Json<health::Deep
                 sessions,
                 &pool,
                 &tron_home,
-                &deploy_dir,
             ))
         })
         .await;
@@ -418,6 +381,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deploy_routes_are_not_registered_in_production_router() {
+        let server = make_server();
+        let app = server.router();
+
+        let req = Request::builder()
+            .uri("/deploy/status")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn server_with_custom_config() {
         let config = ServerConfig {
             host: "0.0.0.0".into(),
@@ -565,53 +542,5 @@ mod tests {
         assert!(["healthy", "degraded", "unhealthy"].contains(&parsed["status"].as_str().unwrap()));
         assert!(parsed["checks"].is_array());
         assert!(parsed["uptimeSecs"].is_number());
-    }
-
-    #[tokio::test]
-    async fn deep_health_endpoint_surfaces_failed_deploy_state() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("deploy")).unwrap();
-        crate::server::deploy::write_sentinel(
-            &dir.path().join("deploy"),
-            &crate::server::deploy::RestartSentinel {
-                action: "deploy".into(),
-                timestamp: "2026-03-12T10:00:00.000Z".into(),
-                commit: "abc123".into(),
-                previous_commit: "def456".into(),
-                status: "failed".into(),
-                completed_at: None,
-                initiated_by: "api".into(),
-                self_test: None,
-                binary_sha256: None,
-            },
-        )
-        .unwrap();
-
-        let server =
-            make_server().with_deploy_paths(dir.path().join("tron"), dir.path().join("deploy"));
-        let app = server.router();
-
-        let req = Request::builder()
-            .uri("/health/deep")
-            .body(Body::empty())
-            .unwrap();
-
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(resp.into_body(), 10_000)
-            .await
-            .unwrap();
-        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(parsed["status"], "unhealthy");
-
-        let deploy_check = parsed["checks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|check| check["name"] == "deploy")
-            .unwrap();
-        assert_eq!(deploy_check["status"], "fail");
-        assert_eq!(deploy_check["detail"]["sentinelStatus"], "failed");
     }
 }

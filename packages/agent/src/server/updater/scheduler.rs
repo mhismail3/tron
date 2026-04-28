@@ -19,14 +19,11 @@
 //!   same resolved version are suppressed via the `latest_available_version`
 //!   column of [`UpdaterState`] — the event fires once per transition
 //!   into "update available at vX".
-//! - **No install yet.** Phase 5.5 surfaces the wire shape (`notify`
-//!   only); `download` and `install` actions degrade gracefully to
-//!   "emit update_available and log an explanatory message" until the
-//!   Phase 6 DMG release pipeline gives us real artifacts to swap.
-//! - **Network errors do not tick `consecutiveFailures`.** Only a full
-//!   install-pipeline failure should increment that counter (Plan §H.2),
-//!   and we don't run the install pipeline yet. Transport errors log
-//!   and are skipped.
+//! - **No app-bundle mutation.** `notify` reports availability and
+//!   `download` may stage a verified DMG; replacing
+//!   `/Applications/Tron.app` remains a user-visible DMG install.
+//! - **Network errors are non-sticky.** Transport errors log and are
+//!   skipped; the next scheduled tick can recover normally.
 //! - **Settings are re-read on every tick.** The scheduler does not
 //!   cache the channel / frequency / action across ticks; the
 //!   `ArcSwap`-backed `crate::settings::get_settings()` is already
@@ -51,8 +48,8 @@ use tracing::{debug, info, warn};
 use crate::server::websocket::broadcast::BroadcastManager;
 
 use super::{
-    AUTO_DEGRADE_FAILURE_THRESHOLD, CheckOutcome, ReleaseFetcher, UpdateDecision, UpdaterState,
-    check_for_update, is_paused, read_update_state, write_update_state,
+    CheckOutcome, ReleaseFetcher, UpdateDecision, UpdaterState, check_for_update, is_paused,
+    read_update_state, write_update_state,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -74,7 +71,7 @@ pub struct SchedulerDeps {
     /// session log.
     pub broadcast: Arc<BroadcastManager>,
     /// Path to `updater-state.json`. Typically
-    /// `~/.tron/system/updater-state.json`.
+    /// `~/.tron/system/run/updater-state.json`.
     pub state_path: PathBuf,
     /// Path to the pause sentinel. Typically
     /// `~/.tron/auto-update.pause`.
@@ -106,9 +103,7 @@ pub struct TickReport {
     /// available release (e.g., a dev build). No event is emitted in
     /// this case.
     pub skipped_ahead_of_latest: bool,
-    /// Populated with a short error message when the fetcher itself
-    /// errored. Does NOT increment `consecutiveFailures` — network
-    /// errors are not post-install failures.
+    /// Populated with a short error message when the fetcher itself errored.
     pub fetcher_error: Option<String>,
     /// Decision reached by the version comparator. `None` when the
     /// tick bailed before calling the fetcher.
@@ -265,19 +260,6 @@ pub async fn perform_tick(deps: &SchedulerDeps) -> TickReport {
     // every successful poll so the UI can surface a fresh timestamp.
     if let Err(e) = write_update_state(&deps.state_path, &state) {
         warn!(error = %e, path = ?deps.state_path, "updater state write failed");
-    }
-
-    // Safety-valve: at or above the auto-degrade threshold the server
-    // should already have flipped `action` back to `notify` (the
-    // install pipeline will do that when Phase 6 lands). For now we
-    // just log on each tick so operators can see the counter without
-    // `tron self-update status`.
-    if state.consecutive_failures >= AUTO_DEGRADE_FAILURE_THRESHOLD {
-        warn!(
-            consecutive_failures = state.consecutive_failures,
-            "auto-update is at or past the auto-degrade threshold — \
-             action has been flipped to notify"
-        );
     }
 
     TickReport {
@@ -586,26 +568,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetcher_transport_error_does_not_tick_consecutive_failures() {
+    async fn fetcher_transport_error_records_fresh_check_time() {
         let tmp = tempfile::tempdir().unwrap();
         let fetcher = Arc::new(MockReleaseFetcher::failing("dns failure"));
         let deps = deps_with(fetcher, &tmp, "0.5.0");
 
-        // Pre-seed a state with consecutive_failures = 2 to prove the
-        // transport error doesn't bump the counter.
         let mut seed = UpdaterState::default();
-        seed.consecutive_failures = 2;
+        seed.latest_available_version = Some("0.5.9".to_string());
         write_update_state(&deps.state_path, &seed).unwrap();
 
         let _guard = install_update_settings(default_enabled(UpdateChannel::Stable));
         let report = perform_tick(&deps).await;
 
         assert!(report.fetcher_error.is_some());
-        assert_eq!(
-            report.state_after.consecutive_failures, 2,
-            "network errors must NOT increment the install-failure counter"
-        );
         assert!(report.state_after.last_check_at.is_some());
+        assert_eq!(
+            report.state_after.latest_available_version.as_deref(),
+            Some("0.5.9"),
+            "failed checks should not clear the last successful update banner"
+        );
     }
 
     #[tokio::test]

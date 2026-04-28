@@ -1,23 +1,20 @@
-//! Push notification delivery — direct APNs and relay transports.
+//! Push notification delivery via the Cloudflare Worker relay.
 //!
 //! ## Submodules
 //!
 //! | Module            | Purpose                                                             |
 //! |-------------------|---------------------------------------------------------------------|
-//! | [`sender`]        | `PushSender` trait — transport-agnostic send interface               |
-//! | [`service`]       | `ApnsService` — direct .p8 JWT signing + HTTP/2 to APNs             |
+//! | [`sender`]        | `PushSender` trait — transport-agnostic send interface              |
 //! | [`relay`]         | `RelayClient` — HMAC-signed HTTPS to Cloudflare Worker relay        |
-//! | [`delegate`]      | `ApnsNotifyDelegate` — `NotifyDelegate` impl using direct APNs      |
 //! | [`relay_delegate`]| `RelayNotifyDelegate` — `NotifyDelegate` impl using relay           |
-//! | `config`          | Config loading: direct (.p8 on disk) vs relay (build-time env)      |
+//! | `config`          | Relay config loading from build-time or runtime env vars            |
 //! | `push_helpers`    | Token queries, `(env, bundle_id)` grouping, terminal-error cleanup  |
 //! | `types`           | `ApnsNotification`, `ApnsSendResult`                                |
 //!
 //! ## Transport selection (in `main.rs`)
 //!
-//! 1. Direct: `~/.tron/system/deployment/apns.json` + `.p8` key on disk
-//! 2. Relay: `TRON_RELAY_URL` + `TRON_RELAY_SECRET` (build-time or runtime env)
-//! 3. Disabled: neither configured → `StubNotifyDelegate`
+//! 1. Relay: `TRON_RELAY_URL` + `TRON_RELAY_SECRET` (build-time or runtime env)
+//! 2. Disabled: relay not configured → `StubNotifyDelegate`
 //!
 //! ## Per-token routing
 //!
@@ -39,17 +36,12 @@
 //! session-scoping.
 
 mod config;
-pub mod delegate;
 mod push_helpers;
 pub mod relay;
 pub mod relay_delegate;
 pub mod sender;
-mod service;
 mod types;
 
-pub use config::{
-    ApnsConfig, PushConfig, RelayConfig, load_apns_config, load_push_config, load_relay_config,
-};
+pub use config::{PushConfig, RelayConfig, load_push_config, load_relay_config};
 pub use sender::{ApnsBatch, PushSender};
-pub use service::ApnsService;
 pub use types::{ApnsNotification, ApnsSendResult};

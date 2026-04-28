@@ -8,7 +8,7 @@ DerivedData/
 *.dmg
 
 # The Rust agent binary is bundled at release-time by CI, never committed
-Sources/Resources/tron-agent
+Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron
 
 # macOS / Xcode
 .DS_Store

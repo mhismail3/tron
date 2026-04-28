@@ -1,8 +1,5 @@
 //! Relay-backed [`NotifyDelegate`] — sends push notifications via the Cloudflare
-//! Worker relay instead of direct APNs.
-//!
-//! Structurally identical to [`ApnsNotifyDelegate`](super::delegate::ApnsNotifyDelegate),
-//! but uses [`RelayClient`](super::relay::RelayClient) as the transport.
+//! Worker relay.
 
 use std::sync::Arc;
 
@@ -22,9 +19,8 @@ pub struct RelayNotifyDelegate {
     pool: ConnectionPool,
     /// Event store used to emit `device.token_invalidated` when the
     /// relay returns a response mapping to a terminal APNs token error.
-    /// Same store the rest of the server uses — see
-    /// [`ApnsNotifyDelegate::new`] for the reasoning on sharing the
-    /// canonical instance.
+    /// Same store the rest of the server uses so token invalidation events
+    /// are emitted through the canonical event pipeline.
     event_store: Arc<EventStore>,
 }
 

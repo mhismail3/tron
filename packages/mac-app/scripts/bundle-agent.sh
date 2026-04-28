@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# bundle-agent.sh — stage the Rust agent binary so Xcode can copy it into
-# `Tron.app/Contents/Resources/tron-agent`.
+# bundle-agent.sh — stage the Rust agent binary as the embedded
+# `Tron Server.app` Login Item used by `SMAppService`.
 #
-# The file is staged at `packages/mac-app/Sources/Resources/tron-agent`,
-# which is declared as a `type: folder` resources build phase in
-# `project.yml`. XcodeGen copies every entry of that folder into the
-# built `.app` bundle's `Resources/` directory; the staged file is
-# gitignored (`.gitignore` line: `Sources/Resources/tron-agent`).
+# The executable is staged at:
+# `packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron`.
+# `project.yml` copies `Sources/Resources/Library` into
+# `Tron.app/Contents/Library` after compile, yielding the production path
+# required by `SMAppService.agent(plistName:)`.
 #
 # Usage:
 #   bundle-agent.sh                 # default: build release + stage
@@ -34,8 +34,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 AGENT_DIR="$REPO_ROOT/packages/agent"
-STAGING_DIR="$SCRIPT_DIR/../Sources/Resources"
-STAGING_PATH="$STAGING_DIR/tron-agent"
+RESOURCES_DIR="$SCRIPT_DIR/../Sources/Resources"
+LIBRARY_DIR="$RESOURCES_DIR/Library"
+HELPER_BUNDLE="$LIBRARY_DIR/LoginItems/Tron Server.app"
+HELPER_CONTENTS="$HELPER_BUNDLE/Contents"
+HELPER_MACOS="$HELPER_CONTENTS/MacOS"
+HELPER_RESOURCES="$HELPER_CONTENTS/Resources"
+LAUNCH_AGENT_DIR="$LIBRARY_DIR/LaunchAgents"
+STAGING_PATH="$HELPER_MACOS/tron"
+HELPER_INFO_PLIST="$HELPER_CONTENTS/Info.plist"
+LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.tron.server.plist"
 
 # --- argv parser ---------------------------------------------------------
 
@@ -61,8 +69,8 @@ done
 # --- clean mode ----------------------------------------------------------
 
 if [ "$do_clean" -eq 1 ]; then
-    rm -f "$STAGING_PATH"
-    echo "cleaned $STAGING_PATH"
+    rm -rf "$HELPER_BUNDLE" "$LAUNCH_AGENT_PLIST"
+    echo "cleaned $HELPER_BUNDLE and $LAUNCH_AGENT_PLIST"
     exit 0
 fi
 
@@ -112,12 +120,97 @@ fi
 
 # --- staging -------------------------------------------------------------
 
-mkdir -p "$STAGING_DIR" || { echo "error: cannot create $STAGING_DIR" >&2; exit 3; }
+mkdir -p "$HELPER_MACOS" "$HELPER_RESOURCES" "$LAUNCH_AGENT_DIR" || {
+    echo "error: cannot create helper staging directories" >&2
+    exit 3
+}
+
+cat > "$HELPER_INFO_PLIST" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>tron</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.tron.server</string>
+    <key>CFBundleName</key>
+    <string>Tron Server</string>
+    <key>CFBundleDisplayName</key>
+    <string>Tron Server</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon.icns</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+
+cp "$RESOURCES_DIR/AppIcon.icns" "$HELPER_RESOURCES/AppIcon.icns"
+
+cat > "$LAUNCH_AGENT_PLIST" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tron.server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>tron</string>
+        <string>--port</string>
+        <string>9847</string>
+        <string>--quiet</string>
+    </array>
+
+    <key>BundleProgram</key>
+    <string>Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RUST_LOG</key>
+        <string>info</string>
+    </dict>
+
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>com.tron.mac</string>
+        <string>com.tron.mac.dev</string>
+    </array>
+</dict>
+</plist>
+PLIST
 
 # Atomic stage: copy to tempfile then rename, matching the pattern used
-# by the Rust agent's own atomic-write helper and the wizard's
-# BinaryInstaller.install in Sources/Wizard/Steps/InstallStep.swift.
-tmp="$STAGING_DIR/.tron-agent.tmp.$$"
+# by the Rust agent's own atomic-write helper.
+tmp="$HELPER_MACOS/.tron.tmp.$$"
 trap 'rm -f "$tmp"' EXIT
 cp "$source_bin" "$tmp"
 chmod 0755 "$tmp"

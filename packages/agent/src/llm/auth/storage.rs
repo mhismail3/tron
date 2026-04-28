@@ -430,11 +430,12 @@ pub struct AuthFileLock {
 pub fn acquire_auth_file_lock(auth_path: &Path) -> std::io::Result<AuthFileLock> {
     use std::os::unix::io::AsRawFd;
 
-    // Place lock file in system/deployment/ to keep ~/.tron/ clean.
+    // Place the lock in system/run/ with the rest of Tron's mutable runtime
+    // state.
     let lock_path = auth_path
         .parent()
         .unwrap_or(auth_path)
-        .join("deployment/auth.lock");
+        .join("run/auth.lock");
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -632,7 +633,7 @@ mod tests {
             .filter(|e| {
                 let name = e.file_name();
                 let name = name.to_string_lossy();
-                name != "auth.json" && name != "deployment"
+                name != "auth.json" && name != "run"
             })
             .map(|e| e.file_name())
             .collect();
@@ -862,7 +863,7 @@ mod tests {
         auth_path
             .parent()
             .unwrap_or(auth_path)
-            .join("deployment/auth.lock")
+            .join("run/auth.lock")
     }
 
     #[allow(unsafe_code)]

@@ -38,8 +38,6 @@
     <string>NSApplication</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Tron. All rights reserved.</string>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Tron uses AppleEvents to verify Full Disk Access during onboarding.</string>
     <key>NSSystemAdministrationUsageDescription</key>
     <string>Tron installs a LaunchAgent so the headless server starts at login.</string>
 </dict>

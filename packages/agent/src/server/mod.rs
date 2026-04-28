@@ -2,7 +2,7 @@
 //!
 //! Axum HTTP + `WebSocket` server and event broadcasting.
 //!
-//! - HTTP endpoints: health check
+//! - HTTP endpoints: health check, metrics, WebSocket upgrade
 //! - `WebSocket` gateway: connection management, heartbeat, message dispatch
 //! - Event fan-out to connected clients via `BroadcastManager`
 //! - Graceful shutdown via `CancellationToken` coordination
@@ -16,9 +16,8 @@
 //! | Module        | Purpose                                                                            |
 //! |---------------|------------------------------------------------------------------------------------|
 //! | `config`      | `ServerConfig` (host/port + heartbeat/buffer tuning)                               |
-//! | `deploy`      | Deploy sentinel, atomic-swap binary lifecycle, rollback                            |
 //! | `device`      | iOS push-device registry; APNs token storage                                       |
-//! | `disk`        | Disk-space + write probes for deploy / log rotation                                |
+//! | `disk`        | Disk-space probes for health diagnostics                                           |
 //! | `health`      | `/health` JSON producer (DB ok, RPC count, version)                                |
 //! | `metrics`     | Prometheus recorder install + `/metrics` exporter                                  |
 //! | `onboarding`  | Per-server bearer-token lifecycle + first-run sentinel ([Phase 2])                 |
@@ -26,15 +25,13 @@
 //! | `rpc`         | JSON-RPC method registry, handler tree, request/response types                     |
 //! | `server`      | `TronServer::new` wiring (registry + context + bind)                               |
 //! | `shutdown`    | Phased graceful shutdown coordinator (MCP → tasks → IO)                            |
-//! | `updater`     | User-mode GitHub Releases auto-updater (Phase 5.5) — channel + action + state     |
+//! | `updater`     | User-mode GitHub Releases checks/downloads — channel + action + state           |
 //! | `websocket`   | WS upgrade, framing, heartbeat, bearer-auth middleware (when `auth.enforced=true`) |
 
 #![deny(unsafe_code)]
 
 #[path = "app/config.rs"]
 pub mod config;
-#[path = "ops/deploy.rs"]
-pub mod deploy;
 pub mod device;
 #[path = "ops/disk.rs"]
 pub mod disk;

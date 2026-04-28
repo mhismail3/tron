@@ -11,7 +11,10 @@ final class MiscClient: RPCDomainClient {
 
         let _: SystemPingResult = try await ws.send(
             method: "system.ping",
-            params: EmptyParams()
+            params: SystemPingParams(
+                protocolVersion: 1,
+                clientVersion: AppConstants.appVersion
+            )
         )
     }
 
@@ -24,7 +27,7 @@ final class MiscClient: RPCDomainClient {
         )
     }
 
-    // MARK: - Auto-Update (Phase 5.5)
+    // MARK: - Update Checks
 
     /// Force an immediate GitHub Releases probe. Returns the latest release
     /// info (if any); the server caches upstream responses 60s to avoid API
@@ -45,18 +48,6 @@ final class MiscClient: RPCDomainClient {
 
         return try await ws.send(
             method: "system.getUpdateStatus",
-            params: EmptyParams()
-        )
-    }
-
-    /// Kick off the configured action pipeline for any staged update.
-    /// Progress is streamed through the normal event pipeline, not the
-    /// RPC response.
-    func applyUpdate() async throws -> SystemApplyUpdateResult {
-        let ws = try requireTransport().requireConnection()
-
-        return try await ws.send(
-            method: "system.applyUpdate",
             params: EmptyParams()
         )
     }

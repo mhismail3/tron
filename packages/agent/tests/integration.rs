@@ -430,20 +430,41 @@ async fn read_json(ws: &mut WsStream) -> Value {
 
 /// Send a JSON-RPC request and read the response.
 async fn rpc_call(ws: &mut WsStream, id: u64, method: &str, params: Option<Value>) -> Value {
+    let (response, _) = rpc_call_with_interleaved_events(ws, id, method, params).await;
+    response
+}
+
+async fn rpc_call_with_interleaved_events(
+    ws: &mut WsStream,
+    id: u64,
+    method: &str,
+    params: Option<Value>,
+) -> (Value, Vec<Value>) {
     let id_str = format!("r{id}");
     let mut req = json!({"id": id_str, "method": method});
-    if let Some(p) = params {
+    if method == "system.ping" {
+        req["params"] = params.unwrap_or_else(ping_params);
+    } else if let Some(p) = params {
         req["params"] = p;
     }
     ws.send(Message::text(req.to_string())).await.unwrap();
 
     // Read until we get a response with matching id
+    let mut interleaved = Vec::new();
     loop {
         let parsed = read_json(ws).await;
         if parsed.get("id").and_then(|v| v.as_str()) == Some(&id_str) {
-            return parsed;
+            return (parsed, interleaved);
         }
+        interleaved.push(parsed);
     }
+}
+
+fn ping_params() -> Value {
+    json!({
+        "protocolVersion": 1,
+        "clientVersion": "integration-test",
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

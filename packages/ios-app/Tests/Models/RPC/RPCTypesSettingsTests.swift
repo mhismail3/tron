@@ -254,7 +254,7 @@ struct ServerSettingsTests {
         #expect(GitMergeStrategy.from("squash") == .squash)
     }
 
-    // MARK: - Update Settings (Phase 5.5 — auto-update parity)
+    // MARK: - Update Settings
 
     @Test("decode update settings from JSON")
     func updateSettingsDecode() throws {
@@ -265,8 +265,7 @@ struct ServerSettingsTests {
                     "enabled": true,
                     "channel": "beta",
                     "frequency": "hourly",
-                    "action": "download",
-                    "allowDowngradeOnRollback": false
+                    "action": "notify"
                 }
             }
         }
@@ -275,8 +274,7 @@ struct ServerSettingsTests {
         #expect(settings.updateEnabled == true)
         #expect(settings.updateChannel == "beta")
         #expect(settings.updateFrequency == "hourly")
-        #expect(settings.updateAction == "download")
-        #expect(settings.updateAllowDowngradeOnRollback == false)
+        #expect(settings.updateAction == "notify")
     }
 
     @Test("update settings defaults when key missing")
@@ -284,12 +282,11 @@ struct ServerSettingsTests {
         let json = "{}"
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
         // The default from the Rust UpdateSettings struct: opt-in (enabled=false),
-        // stable channel, daily cadence, notify-only, allow-downgrade=true.
+        // stable channel, daily cadence, notify-only.
         #expect(settings.updateEnabled == false)
         #expect(settings.updateChannel == "stable")
         #expect(settings.updateFrequency == "daily")
         #expect(settings.updateAction == "notify")
-        #expect(settings.updateAllowDowngradeOnRollback == true)
     }
 
     @Test("update settings defaults when server present but update missing")
@@ -314,8 +311,8 @@ struct ServerSettingsTests {
         #expect(UpdateFrequency.from("weekly") == .weekly)
 
         #expect(UpdateAction.from("notify") == .notify)
-        #expect(UpdateAction.from("download") == .download)
-        #expect(UpdateAction.from("install") == .install)
+        #expect(UpdateAction.from("download") == nil)
+        #expect(UpdateAction.from("install") == nil)
     }
 
     @Test("ServerSettingsUpdate encodes update block under server.update")
@@ -325,8 +322,7 @@ struct ServerSettingsTests {
             enabled: true,
             channel: .beta,
             frequency: .weekly,
-            action: .install,
-            allowDowngradeOnRollback: false
+            action: .notify
         ))
         let data = try JSONEncoder().encode(update)
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
@@ -335,8 +331,7 @@ struct ServerSettingsTests {
         #expect(updateBlock["enabled"] as? Bool == true)
         #expect(updateBlock["channel"] as? String == "beta")
         #expect(updateBlock["frequency"] as? String == "weekly")
-        #expect(updateBlock["action"] as? String == "install")
-        #expect(updateBlock["allowDowngradeOnRollback"] as? Bool == false)
+        #expect(updateBlock["action"] as? String == "notify")
     }
 
     @Test("ServerSettingsUpdate omits update block when nil (partial update)")
@@ -353,6 +348,5 @@ struct ServerSettingsTests {
         #expect(updateBlock["channel"] == nil)
         #expect(updateBlock["frequency"] == nil)
         #expect(updateBlock["action"] == nil)
-        #expect(updateBlock["allowDowngradeOnRollback"] == nil)
     }
 }

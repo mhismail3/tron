@@ -9,7 +9,7 @@ repository = "https://github.com/mhismail3/tron"
 
 [features]
 default = ["apns"]
-apns = ["dep:jsonwebtoken"]
+apns = []
 
 
 [lib]
@@ -112,9 +112,6 @@ url = "2"
 urlencoding = "2"
 unicode-normalization = "0.1"
 home = "0.5"
-
-# APNS (optional)
-jsonwebtoken = { version = "9", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

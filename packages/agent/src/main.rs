@@ -66,8 +66,6 @@ use tool_factory::ToolRegistryConfig;
 #[cfg(feature = "apns")]
 #[derive(Clone)]
 enum PushService {
-    /// Direct APNs delivery via .p8 key on disk.
-    Direct(Arc<tron::server::platform::apns::ApnsService>),
     /// Relay delivery via Cloudflare Worker.
     Relay(Arc<tron::server::platform::apns::relay::RelayClient>),
 }
@@ -77,7 +75,6 @@ impl PushService {
     /// Get a type-erased push sender for consumers that don't need to know the transport.
     fn as_sender(&self) -> Arc<dyn tron::server::platform::apns::PushSender> {
         match self {
-            PushService::Direct(apns) => apns.clone(),
             PushService::Relay(relay) => relay.clone(),
         }
     }
@@ -140,7 +137,7 @@ enum Command {
 #[derive(clap::Subcommand, Debug)]
 enum AuthAction {
     /// Generate a fresh bearer token, persist it to
-    /// `~/.tron/system/auth-token.json` (atomic, 0o600), and print it to
+    /// `~/.tron/system/auth.json` as `bearerToken` (atomic, 0o600), and print it to
     /// stdout. After this completes, every paired iOS device must
     /// re-pair (their cached token is invalidated).
     ///
@@ -223,48 +220,13 @@ fn auth_path() -> PathBuf {
     tron::settings::loader::auth_path()
 }
 
-/// INVARIANT: Deploy crash-loop protection runs FIRST (pure filesystem, no dependencies).
-/// If the previous deploy crashed the process before self-test could run, this catches it
-/// after `MAX_DEPLOY_STARTUP_ATTEMPTS` and auto-rolls back to the backup binary.
-fn init_crash_recovery() {
-    const MAX_DEPLOY_STARTUP_ATTEMPTS: u32 = 3;
-    let deploy_dir = tron::settings::deploy_dir();
-    let sentinel = tron::server::deploy::read_sentinel(&deploy_dir);
-
-    if let Some(ref s) = sentinel
-        && s.status == "restarting"
-    {
-        let attempts_path = deploy_dir.join("startup-attempts");
-        let attempt = std::fs::read_to_string(&attempts_path)
-            .ok()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-            .unwrap_or(0);
-
-        if attempt >= MAX_DEPLOY_STARTUP_ATTEMPTS {
-            eprintln!(
-                "DEPLOY SAFETY: {MAX_DEPLOY_STARTUP_ATTEMPTS} startup attempts exceeded, auto-rolling back"
-            );
-            tron::server::deploy::auto_rollback(
-                &deploy_dir,
-                &tron::core::paths::tron_binary_path(),
-                &format!("exceeded {MAX_DEPLOY_STARTUP_ATTEMPTS} startup attempts"),
-            );
-            // auto_rollback never returns
-        }
-
-        let _ = std::fs::create_dir_all(&deploy_dir);
-        let _ = std::fs::write(&attempts_path, (attempt + 1).to_string());
-    }
-}
-
 /// System subdirectories created on ordinary server startup.
 ///
-/// Deployment state is intentionally excluded: `deployment/` is for
-/// contributor/dev/deploy/update artifacts and should not appear just
-/// because a user installed and launched the server.
+/// Contributor-only directories are intentionally excluded so ordinary
+/// startup only creates runtime data required by the installed server.
 fn startup_system_subdirs() -> &'static [&'static str] {
     use tron::core::paths::dirs;
-    &[dirs::DB]
+    &[dirs::DB, dirs::RUN]
 }
 
 /// Ensure `~/.tron/` directory structure exists and seed the system prompt.
@@ -275,7 +237,6 @@ fn init_directories() {
     for subdir in startup_system_subdirs() {
         let _ = std::fs::create_dir_all(system.join(subdir));
     }
-    let _ = std::fs::create_dir_all(system.join(dirs::APP_BUNDLE).join("Contents").join("MacOS"));
     for subdir in &[
         dirs::KNOWLEDGE,
         dirs::REPORTS,
@@ -381,26 +342,13 @@ fn init_logging(
 
 /// Initialize push notification service.
 ///
-/// Priority: direct .p8 on disk → relay (build-time or runtime env) → disabled.
+/// Priority: relay (build-time or runtime env) → disabled.
 fn init_push() -> PushServiceOption {
     #[cfg(feature = "apns")]
     {
         use tron::server::platform::apns::{PushConfig, load_push_config};
 
         match load_push_config() {
-            PushConfig::Direct(config) => {
-                match tron::server::platform::apns::ApnsService::new(config) {
-                    Ok(svc) => {
-                        tracing::info!("Push: direct APNs (local .p8 key)");
-                        Some(PushService::Direct(Arc::new(svc)))
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Direct APNs init failed — checking relay...");
-                        // Fall through to relay if direct fails
-                        init_push_relay()
-                    }
-                }
-            }
             PushConfig::Relay(config) => {
                 tracing::info!(
                     relay_url = %config.relay_url,
@@ -412,31 +360,13 @@ fn init_push() -> PushServiceOption {
                 )))
             }
             PushConfig::Disabled => {
-                tracing::info!("Push: disabled (no APNs config or relay)");
+                tracing::info!("Push: disabled (relay not configured)");
                 None
             }
         }
     }
     #[cfg(not(feature = "apns"))]
     {
-        None
-    }
-}
-
-/// Try relay as fallback when direct APNs init fails.
-#[cfg(feature = "apns")]
-fn init_push_relay() -> PushServiceOption {
-    if let Some(config) = tron::server::platform::apns::load_relay_config() {
-        tracing::info!(
-            relay_url = %config.relay_url,
-            environment = %config.environment,
-            "Push: falling back to relay mode"
-        );
-        Some(PushService::Relay(Arc::new(
-            tron::server::platform::apns::relay::RelayClient::new(config),
-        )))
-    } else {
-        tracing::info!("Push: disabled (direct failed, no relay configured)");
         None
     }
 }
@@ -748,7 +678,7 @@ struct CronState {
 fn init_cron(services: &ServiceState, origin: &str) -> CronState {
     let cancel = tokio_util::sync::CancellationToken::new();
     let config_path = tron::core::paths::automations_path();
-    let backup_path = tron::settings::deploy_dir().join("automations.json.bak");
+    let backup_path = tron::core::paths::automations_backup_path();
 
     let agent_executor = services.agent_deps.as_ref().map(|deps| {
         Arc::new(tron::cron::impls::CronAgentTurnExecutor::new(
@@ -838,216 +768,6 @@ fn init_worktree(
         sm.set_worktree_coordinator(coord.clone());
     }
     Some(coord)
-}
-
-/// Run the post-deploy self-test. If it fails, auto-rollback (never returns).
-fn run_deploy_self_test(db_path: &std::path::Path, settings_path: &std::path::Path) {
-    let deploy_dir = tron::settings::deploy_dir();
-    if let Some(sentinel) = tron::server::deploy::read_sentinel(&deploy_dir)
-        && sentinel.status == "restarting"
-    {
-        let auth = auth_path();
-        let binary_path = tron::core::paths::tron_binary_path();
-        let test_result = tron::server::deploy::run_self_test(
-            db_path,
-            settings_path,
-            &auth,
-            &binary_path,
-            &deploy_dir,
-        );
-
-        if !test_result.passed {
-            let failed: Vec<&str> = test_result
-                .checks
-                .iter()
-                .filter(|c| !c.passed)
-                .map(|c| c.name.as_str())
-                .collect();
-            let reason = format!("self-test failed: {}", failed.join(", "));
-            eprintln!("DEPLOY SAFETY: {reason}");
-            tron::server::deploy::auto_rollback(&deploy_dir, &binary_path, &reason);
-            // auto_rollback never returns
-        }
-
-        tracing::info!(
-            checks = test_result.checks.len(),
-            "post-deploy self-test passed"
-        );
-
-        // Clear attempt counter — self-test passed
-        let _ = std::fs::remove_file(deploy_dir.join("startup-attempts"));
-
-        // Store self-test result in sentinel for audit
-        if let Some(mut s) = tron::server::deploy::read_sentinel(&deploy_dir) {
-            s.self_test = Some(test_result);
-            let _ = tron::server::deploy::write_sentinel(&deploy_dir, &s);
-        }
-    }
-}
-
-/// Process deploy sentinel completion and send APNS notifications.
-fn process_deploy_sentinel(
-    #[cfg_attr(not(feature = "apns"), allow(unused_variables))] push_for_deploy: &PushServiceOption,
-    #[cfg_attr(not(feature = "apns"), allow(unused_variables))] pool_for_deploy: &r2d2::Pool<
-        r2d2_sqlite::SqliteConnectionManager,
-    >,
-) {
-    /// Fetch all active device tokens with their environments from the database.
-    #[cfg(feature = "apns")]
-    fn active_device_tokens(
-        pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
-    ) -> Vec<(String, String, String)> {
-        pool.get()
-            .ok()
-            .and_then(|conn| {
-                conn.prepare(
-                    "SELECT device_token, environment, bundle_id FROM device_tokens WHERE is_active = 1",
-                )
-                .ok()
-                .and_then(|mut stmt| {
-                    stmt.query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    })
-                    .ok()
-                    .map(|rows| rows.filter_map(Result::ok).collect())
-                })
-            })
-            .unwrap_or_default()
-    }
-
-    /// Send a push notification to all active devices, grouped by `(environment, bundle_id)`.
-    ///
-    /// Matches the grouping used by the main notify path in
-    /// `server::platform::apns::push_helpers::group_tokens`. Without the
-    /// bundle_id axis, Beta tokens go out with the production topic and
-    /// APNs rejects with `DeviceTokenNotForTopic`. `bundle_id` is NOT NULL
-    /// on the row (v001 schema) so every group carries a concrete topic.
-    #[cfg(feature = "apns")]
-    fn send_push(
-        push: &PushService,
-        tokens_with_meta: Vec<(String, String, String)>,
-        notification: tron::server::platform::apns::ApnsNotification,
-    ) {
-        let sender = push.as_sender();
-        drop(tokio::spawn(async move {
-            let mut groups: std::collections::HashMap<(String, String), Vec<String>> =
-                std::collections::HashMap::new();
-            for (token, env, bundle_id) in tokens_with_meta {
-                groups.entry((env, bundle_id)).or_default().push(token);
-            }
-            for ((env, bundle_id), tokens) in &groups {
-                let batch = tron::server::platform::apns::ApnsBatch {
-                    device_tokens: tokens,
-                    environment: env,
-                    bundle_id,
-                };
-                let _ = sender.send_to_many(&batch, &notification).await;
-            }
-        }));
-    }
-
-    let deploy_dir = tron::settings::deploy_dir();
-    match tron::server::deploy::complete_sentinel(&deploy_dir) {
-        Ok(Some(sentinel)) => {
-            tracing::info!(
-                commit = sentinel.commit.as_str(),
-                previous = sentinel.previous_commit.as_str(),
-                "post-deploy restart completed successfully"
-            );
-            if let Err(e) = tron::server::deploy::write_last_deployment(&deploy_dir, &sentinel) {
-                tracing::warn!(error = %e, "failed to write last-deployment.json");
-            }
-
-            #[cfg(feature = "apns")]
-            if let Some(push) = push_for_deploy {
-                let short_commit = &sentinel.commit[..7.min(sentinel.commit.len())];
-                let commit_subject =
-                    tron::server::deploy::resolve_workspace_root().and_then(|root| {
-                        std::process::Command::new("git")
-                            .args(["log", "-1", "--format=%s", &sentinel.commit])
-                            .current_dir(root)
-                            .output()
-                            .ok()
-                            .and_then(|o| {
-                                if o.status.success() {
-                                    String::from_utf8(o.stdout)
-                                        .ok()
-                                        .map(|s| s.trim().to_string())
-                                        .filter(|s| !s.is_empty())
-                                } else {
-                                    None
-                                }
-                            })
-                    });
-                let body = match commit_subject {
-                    Some(subject) => format!("{short_commit}: {subject}"),
-                    None => format!("Tron updated to {short_commit}"),
-                };
-                let tokens = active_device_tokens(pool_for_deploy);
-                if !tokens.is_empty() {
-                    send_push(
-                        push,
-                        tokens,
-                        tron::server::platform::apns::ApnsNotification {
-                            title: "Deploy Complete".into(),
-                            body,
-                            data: std::collections::HashMap::from([
-                                ("type".into(), "deploy.completed".into()),
-                                ("commit".into(), sentinel.commit.clone()),
-                            ]),
-                            priority: "high".into(),
-                            sound: None,
-                            badge: None,
-                            thread_id: None,
-                        },
-                    );
-                }
-            }
-        }
-        Ok(None) => {}
-        Err(e) => tracing::warn!(error = %e, "failed to process restart sentinel"),
-    }
-
-    // Send pending rollback notification (written by auto_rollback on previous startup)
-    let pending_path = deploy_dir.join("deploy-notification-pending.json");
-    if pending_path.exists() {
-        #[cfg(feature = "apns")]
-        if let Some(push) = push_for_deploy
-            && let Ok(content) = std::fs::read_to_string(&pending_path)
-            && let Ok(data) = serde_json::from_str::<serde_json::Value>(&content)
-        {
-            let tokens = active_device_tokens(pool_for_deploy);
-            if !tokens.is_empty() {
-                let ntype = data["type"].as_str().unwrap_or("deploy.rolled_back");
-                let reason = data["reason"].as_str().unwrap_or("unknown");
-                send_push(
-                    push,
-                    tokens,
-                    tron::server::platform::apns::ApnsNotification {
-                        title: "Deploy Rolled Back".into(),
-                        body: format!("Tron restored: {reason}"),
-                        data: std::collections::HashMap::from([
-                            ("type".into(), ntype.into()),
-                            (
-                                "commit".into(),
-                                data["commit"].as_str().unwrap_or("unknown").into(),
-                            ),
-                            ("reason".into(), reason.into()),
-                        ]),
-                        priority: "high".into(),
-                        sound: None,
-                        badge: None,
-                        thread_id: None,
-                    },
-                );
-            }
-        }
-        let _ = std::fs::remove_file(&pending_path);
-    }
 }
 
 /// Build the RPC context that holds all shared state for RPC handlers.
@@ -1155,7 +875,6 @@ async fn main() -> Result<()> {
     }
 
     // Phase 1: Pre-database filesystem operations
-    init_crash_recovery();
     init_directories();
     let bearer_token_path = tron::server::onboarding::bearer_token_path();
     let _bearer_token = ensure_bearer_token_at(&bearer_token_path)?;
@@ -1202,7 +921,6 @@ async fn main() -> Result<()> {
 
     // Phase 3: Core services (orchestrator, providers, tools, subagents)
     let push_service = init_push();
-    let push_for_deploy = push_service.clone();
     let mcp = init_mcp(&settings, &settings_path).await;
     let mcp_router = mcp.router.clone();
     let mcp_router_for_shutdown = mcp_router.clone();
@@ -1212,8 +930,6 @@ async fn main() -> Result<()> {
     let cron = init_cron(&services, &origin);
     let worktree_coordinator = init_worktree(&services, &settings);
     let session_manager_for_startup = services.session_manager.clone();
-    let settings_path_for_selftest = settings_path.clone();
-    let pool_for_deploy = services.event_store.pool().clone();
     let orchestrator_for_bridge = services.orchestrator.clone();
     let process_manager_for_shutdown = services.process_manager.clone();
     let rpc_context = build_rpc_context(
@@ -1275,10 +991,9 @@ async fn main() -> Result<()> {
         });
     }
 
-    // Phase 6: Background tasks, self-test, bind
+    // Phase 6: Background tasks and bind
     spawn_background_tasks(&session_manager_for_startup, &server);
     let (cron_sched_handle, cron_watcher_handle) = cron.scheduler.clone().start();
-    run_deploy_self_test(&db_path, &settings_path_for_selftest);
 
     // User-mode auto-update scheduler (Plan §H.2, Phase 5.5). Spawned
     // unconditionally; the task checks `server.update.enabled` on every
@@ -1308,8 +1023,6 @@ async fn main() -> Result<()> {
         "{}",
         format_listening_log(&addr, &bind_host_label, method_count)
     );
-
-    process_deploy_sentinel(&push_for_deploy, &pool_for_deploy);
 
     // Wait for shutdown signal
     tokio::signal::ctrl_c()

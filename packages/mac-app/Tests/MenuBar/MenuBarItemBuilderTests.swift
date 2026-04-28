@@ -10,10 +10,11 @@ struct MenuBarItemBuilderTests {
     static func makeSetup(in tmp: URL, port: Int = 9847) -> EnvironmentSetup {
         EnvironmentSetup(
             tronHome: tmp,
-            installedBundle: tmp.appendingPathComponent("Tron.app"),
-            installedBinary: tmp.appendingPathComponent("Tron.app/Contents/MacOS/tron"),
-            bearerTokenPath: tmp.appendingPathComponent("auth-token.json"),
-            onboardedMarkerPath: tmp.appendingPathComponent(".onboarded"),
+            applicationBundle: tmp.appendingPathComponent("Tron.app"),
+            serverHelperBundle: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app"),
+            serverHelperBinary: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"),
+            bearerTokenPath: tmp.appendingPathComponent("auth.json"),
+            onboardedMarkerPath: tmp.appendingPathComponent("run/.onboarded"),
             settingsPath: tmp.appendingPathComponent("settings.json"),
             launchAgentPlistPath: tmp.appendingPathComponent("com.tron.server.plist"),
             serverPort: port,
@@ -22,13 +23,12 @@ struct MenuBarItemBuilderTests {
             readTailscaleIPFromSettings: { nil },
             cacheTailscaleIP: { _ in },
             probeTailscale: { .notInstalled },
-            probePermission: { _ in .notDetermined },
-            probeAgentPermissions: { [:] },
-            requestAgentPermission: { _ in false },
+            probePermissions: { [:] },
             detectExistingInstall: { .none },
+            validateApplicationLocation: { nil },
+            validateBundledHelper: { nil },
             pingServer: { _ in .unreachable },
             launchAgentManager: MockLaunchAgentManager(),
-            cleanupInstallArtifacts: { .success(removed: []) },
             touchOnboardedSentinel: { }
         )
     }

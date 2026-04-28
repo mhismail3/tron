@@ -1684,7 +1684,7 @@ fn integration_read_tool_not_affected_by_path_protection() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
     let eval = engine.evaluate(&make_read_ctx(&format!(
-        "{home}/.tron/system/deployment/server.log"
+        "{home}/.tron/system/run/server.log"
     )));
     assert!(!eval.blocked);
 }

@@ -1,6 +1,6 @@
 //! # server/updater — user-mode GitHub Releases auto-updater
 //!
-//! The server-side half of the user-facing auto-update flow (Plan §H.2).
+//! The server-side half of the user-facing update-check flow.
 //! Distinct from the contributor-focused `scripts/auto-deploy` loop:
 //! that one pulls from `origin/main` via git and `tron deploy --force`
 //! and requires a cloned repository. This module operates on installed
@@ -11,18 +11,17 @@
 //!
 //! ## What this module owns
 //!
-//! - **`updater-state.json`** at
+//! - **`run/updater-state.json`** at
 //!   [`crate::core::paths::updater_state_path()`]. Durable record of
 //!   the last check timestamp, the last installed version, and a
-//!   `consecutiveFailures` counter that auto-downgrades the install
-//!   action to `notify` after three in-a-row post-install failures.
+//!   reserved failure counter for future app-bundle updater work.
 //!   Mode `0o644` (non-secret); atomic writes via the same
-//!   `tempfile + sync_all + rename` pattern used for `auth-token.json`
+//!   `tempfile + sync_all + rename` pattern used for `auth.json`
 //!   so readers never observe a torn file.
 //! - **`auto-update.pause`** sentinel at
 //!   [`crate::core::paths::auto_update_pause_path()`]. Mirrors the
 //!   contributor `auto-deploy.pause` convention: the file's presence
-//!   blocks any install action without mutating settings.
+//!   blocks update actions without mutating settings.
 //! - **Pure-value primitives** — `UpdateChannel`, `UpdateAction`,
 //!   `UpdateFrequency` enums; `UpdaterState` (and its serde layout);
 //!   `compare_versions` (semver-lite for the CARGO_PKG_VERSION
@@ -54,24 +53,19 @@
 //!   the updater can refuse to act rather than guessing.
 //! - **Channel filter is conservative.** On the `Stable` channel the
 //!   fetcher consumer strips any pre-release entries before comparing
-//!   so `notify`/`download`/`install` never fires on a `beta.N` build
+//!   so `notify`/`download` never fires on a `beta.N` build
 //!   for a user who didn't opt in.
-//! - **`consecutiveFailures` only ticks post-install.** Network errors
-//!   during a check do NOT increment the counter. Only a full
-//!   download → signature-verify → install → post-ping flow that
-//!   fails increments it. At 3, the module flips the action back to
-//!   `Notify` and emits `update_disabled_after_failures` so the user
-//!   sees a visible prompt to investigate.
+//! - **No app-bundle mutation.** Production updates stop at notifying
+//!   the user with the release download URL. Installing remains a
+//!   user-visible DMG replacement of `/Applications/Tron.app` until a
+//!   full app-bundle updater is designed.
 //!
 //! ## Submodules
 //!
-//! Currently a single-file module. Follow-up work (Plan §H.2, Phase
-//! 6+) will likely split out:
+//! Currently a single-file module. If app-bundle updating is added,
+//! split out:
 //! - `fetcher_http.rs` — the live GitHub Releases fetcher.
-//! - `install.rs` — the download + codesign-verify + swap pipeline.
-//! These are deferred until the Mac DMG release pipeline lands
-//! (Phase 6) because they depend on real release artifacts to
-//! integration-test against.
+//! - `install.rs` — the signed app-bundle replacement pipeline.
 
 #![deny(unsafe_code)]
 
@@ -218,14 +212,6 @@ pub enum UpdateAction {
     /// URL; leave the install to the user. The conservative default.
     #[default]
     Notify,
-    /// Download the DMG to
-    /// `~/.tron/system/updates/<asset>`, verify its codesign
-    /// signature, then emit `update_downloaded` + wait for an
-    /// explicit `system.applyUpdate` to install.
-    Download,
-    /// Download → verify → atomically swap the server binary →
-    /// restart the LaunchAgent → re-ping. Rolls back on failure.
-    Install,
 }
 
 impl UpdateAction {
@@ -233,8 +219,6 @@ impl UpdateAction {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Notify => "notify",
-            Self::Download => "download",
-            Self::Install => "install",
         }
     }
 }
@@ -243,7 +227,7 @@ impl UpdateAction {
 // UpdaterState (persisted JSON)
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Durable state written to `~/.tron/system/updater-state.json`.
+/// Durable state written to `~/.tron/system/run/updater-state.json`.
 ///
 /// Read on every server start, written on every successful check or
 /// install attempt. Fields are individually optional so the on-disk
@@ -254,16 +238,10 @@ pub struct UpdaterState {
     /// ISO 8601 timestamp of the last completed check (success or
     /// failure). `None` until the first check runs.
     pub last_check_at: Option<String>,
-    /// Semantic version of the last release we successfully
-    /// installed through this updater. `None` if no install has
-    /// run yet, or if the current running binary was installed
-    /// manually (via DMG drag-drop or `scripts/tron install`).
+    /// Semantic version of the last release observed as installed by a
+    /// future app-bundle updater. Current production updates are DMG
+    /// replacement, so this usually stays `None`.
     pub last_installed_version: Option<String>,
-    /// Count of consecutive post-install failures. At 3 the module
-    /// auto-degrades the configured action back to `Notify` and
-    /// emits `update_disabled_after_failures`. Reset on any
-    /// successful install.
-    pub consecutive_failures: u32,
     /// Last observed "latest available" version from a successful
     /// check. Cleared when `last_installed_version` catches up. The
     /// Mac menu bar + iOS settings page render a "Up to date" vs
@@ -285,34 +263,7 @@ impl UpdaterState {
         self.latest_available_version = latest.map(|r| r.version.clone());
         self.latest_download_url = latest.and_then(|r| r.download_url.clone());
     }
-
-    /// Mark a successful install of `version`. Clears the failure
-    /// counter and the "update available" banner fields.
-    pub fn record_install_success(&mut self, version: String) {
-        self.last_installed_version = Some(version);
-        self.consecutive_failures = 0;
-        self.latest_available_version = None;
-        self.latest_download_url = None;
-    }
-
-    /// Mark a failed install. Increments the failure counter.
-    pub fn record_install_failure(&mut self) {
-        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
-    }
-
-    /// Returns `true` once `consecutive_failures` reaches the
-    /// auto-degrade threshold. At that point `record_install_failure`
-    /// callers should flip the configured `UpdateAction` back to
-    /// `Notify` so the loop can't keep retrying a broken upgrade.
-    pub fn should_auto_degrade(&self) -> bool {
-        self.consecutive_failures >= AUTO_DEGRADE_FAILURE_THRESHOLD
-    }
 }
-
-/// Post-install failure count at which the updater auto-degrades the
-/// configured action back to `Notify`. Documented as "three" in Plan
-/// §H.2 — kept as a named constant so tests and docs agree.
-pub const AUTO_DEGRADE_FAILURE_THRESHOLD: u32 = 3;
 
 // ─────────────────────────────────────────────────────────────────────────
 // State file I/O
@@ -582,8 +533,7 @@ pub trait ReleaseFetcher: Send + Sync {
 }
 
 /// Fetcher error surface. Opaque by design — the updater handles
-/// all variants the same way (log + skip the check, don't increment
-/// `consecutive_failures`).
+/// all variants the same way (log + skip the check).
 #[derive(Debug)]
 pub enum FetchError {
     /// Transport-level failure (DNS, TCP, TLS, connection reset).
@@ -758,9 +708,7 @@ impl HttpReleaseFetcher {
     pub fn for_repo(repo: impl Into<String>) -> Self {
         // 10-second network timeout keeps the check from blocking the
         // scheduler for minutes if GitHub is down. On transport failure
-        // the check is simply skipped — `consecutive_failures` is not
-        // bumped (network errors shouldn't count as post-install
-        // failures).
+        // the check is simply skipped.
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .user_agent(concat!("tron-agent/", env!("CARGO_PKG_VERSION")))
@@ -848,9 +796,8 @@ impl From<GitHubRelease> for ReleaseInfo {
             Some(idx) => raw.tag_name[idx + 1..].to_string(),
             None => raw.tag_name.clone(),
         };
-        // Pick the first `.dmg` asset we see. If a release has multiple
-        // DMGs (e.g. arch-split), Phase 6 will add per-arch selection;
-        // for now the single-DMG convention matches our publish flow.
+        // Pick the first `.dmg` asset we see. The release workflow
+        // currently publishes a single DMG per release.
         let download_url = raw
             .assets
             .into_iter()
@@ -1076,7 +1023,6 @@ mod tests {
         let s = UpdaterState::default();
         assert!(s.last_check_at.is_none());
         assert!(s.last_installed_version.is_none());
-        assert_eq!(s.consecutive_failures, 0);
         assert!(s.latest_available_version.is_none());
         assert!(s.latest_download_url.is_none());
     }
@@ -1086,11 +1032,10 @@ mod tests {
         let mut s = UpdaterState::default();
         s.last_check_at = Some("2026-04-23T12:00:00.000Z".into());
         s.last_installed_version = Some("0.5.0".into());
-        s.consecutive_failures = 2;
         let json = serde_json::to_value(&s).unwrap();
         assert!(json.get("lastCheckAt").is_some(), "got {json:?}");
         assert!(json.get("lastInstalledVersion").is_some(), "got {json:?}");
-        assert_eq!(json["consecutiveFailures"], 2);
+        assert!(json.get("consecutiveFailures").is_none(), "got {json:?}");
     }
 
     #[test]
@@ -1113,7 +1058,6 @@ mod tests {
     fn state_write_then_read_roundtrips() {
         let (_dir, path) = temp_state_path();
         let mut s = UpdaterState::default();
-        s.consecutive_failures = 1;
         s.last_installed_version = Some("0.4.9".into());
         write_update_state(&path, &s).unwrap();
         let back = read_update_state(&path).unwrap();
@@ -1123,7 +1067,7 @@ mod tests {
     #[test]
     fn state_write_creates_parent_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let nested = dir.path().join("nested/system/updater-state.json");
+        let nested = dir.path().join("nested/system/run/updater-state.json");
         write_update_state(&nested, &UpdaterState::default()).unwrap();
         assert!(nested.exists());
     }
@@ -1166,46 +1110,6 @@ mod tests {
         s.record_check(None, "2026-04-23T00:00:00Z".into());
         assert!(s.latest_available_version.is_none());
         assert!(s.latest_download_url.is_none());
-    }
-
-    #[test]
-    fn state_record_install_success_clears_counters_and_banner() {
-        let mut s = UpdaterState {
-            consecutive_failures: 2,
-            latest_available_version: Some("0.5.1".into()),
-            latest_download_url: Some("u.dmg".into()),
-            ..Default::default()
-        };
-        s.record_install_success("0.5.1".into());
-        assert_eq!(s.last_installed_version.as_deref(), Some("0.5.1"));
-        assert_eq!(s.consecutive_failures, 0);
-        assert!(s.latest_available_version.is_none());
-        assert!(s.latest_download_url.is_none());
-    }
-
-    #[test]
-    fn state_record_install_failure_ticks_counter() {
-        let mut s = UpdaterState::default();
-        assert!(!s.should_auto_degrade());
-        s.record_install_failure();
-        s.record_install_failure();
-        assert!(!s.should_auto_degrade(), "2 failures below threshold");
-        s.record_install_failure();
-        assert!(s.should_auto_degrade(), "3 failures triggers auto-degrade");
-    }
-
-    #[test]
-    fn state_record_install_failure_saturates_at_u32_max() {
-        let mut s = UpdaterState {
-            consecutive_failures: u32::MAX,
-            ..Default::default()
-        };
-        s.record_install_failure();
-        assert_eq!(
-            s.consecutive_failures,
-            u32::MAX,
-            "saturating_add must not wrap"
-        );
     }
 
     #[test]
@@ -1263,7 +1167,7 @@ mod tests {
 
         for i in 0..100 {
             let mut s = UpdaterState::default();
-            s.consecutive_failures = i;
+            s.last_check_at = Some(format!("2026-04-23T00:00:{i:02}Z"));
             write_update_state(&path, &s).unwrap();
         }
         thread::sleep(Duration::from_millis(20));
@@ -1419,11 +1323,12 @@ mod tests {
     #[test]
     fn action_serde_lowercase() {
         assert_eq!(
-            serde_json::to_string(&UpdateAction::Install).unwrap(),
-            "\"install\""
+            serde_json::to_string(&UpdateAction::Notify).unwrap(),
+            "\"notify\""
         );
-        let back: UpdateAction = serde_json::from_str("\"download\"").unwrap();
-        assert_eq!(back, UpdateAction::Download);
+        let back: UpdateAction = serde_json::from_str("\"notify\"").unwrap();
+        assert_eq!(back, UpdateAction::Notify);
+        assert!(serde_json::from_str::<UpdateAction>("\"download\"").is_err());
     }
 
     #[test]
@@ -1441,7 +1346,7 @@ mod tests {
     #[test]
     fn default_state_path_under_system() {
         let s = updater_state_path().to_string_lossy().into_owned();
-        assert!(s.ends_with("/updater-state.json"));
+        assert!(s.ends_with("/run/updater-state.json"));
         assert!(s.contains("/.tron/system/"));
     }
 
