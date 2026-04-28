@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ProviderCredentialRow: View {
     let isActive: Bool
-    let icon: String
     let label: String
     let status: String
     let statusColor: Color
@@ -12,42 +11,38 @@ struct ProviderCredentialRow: View {
     @State private var showDeleteConfirm = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(isActive ? .tronEmerald : .tronTextMuted)
                 .frame(width: 18)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTextPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(status)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(statusColor)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
+            Text(label)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
 
-            Spacer()
+            Spacer(minLength: 12)
 
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronEmerald)
+            Text(status)
+                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                .foregroundStyle(statusColor)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 170, alignment: .trailing)
 
             Button {
                 showDeleteConfirm = true
             } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronTextMuted)
+                Text(ProviderCredentialStatusAction.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                    .foregroundStyle(.tronError)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Remove \(label)")
-            .confirmationDialog("Remove credential?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                Button("Remove", role: .destructive) {
+            .accessibilityLabel("\(ProviderCredentialStatusAction.title) \(label)")
+            .confirmationDialog(ProviderCredentialStatusAction.confirmationTitle, isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                Button(ProviderCredentialStatusAction.confirmationButtonTitle, role: .destructive) {
                     Task { await onDelete() }
                 }
                 Button("Cancel", role: .cancel) {}
@@ -65,9 +60,8 @@ struct ProviderCredentialRow: View {
     VStack(spacing: 0) {
         ProviderCredentialRow(
             isActive: true,
-            icon: "lock.shield.fill",
             label: "work",
-            status: "Active",
+            status: "Logged in with OAuth",
             statusColor: .tronSuccess,
             onSelect: {},
             onDelete: {}
@@ -81,9 +75,8 @@ struct ProviderCredentialRow: View {
 #Preview("Expired with refresh") {
     ProviderCredentialRow(
         isActive: false,
-        icon: "lock.shield.fill",
         label: "personal",
-        status: "Will refresh",
+        status: "OAuth will refresh",
         statusColor: .tronAmber,
         onSelect: {},
         onDelete: {}
@@ -96,7 +89,6 @@ struct ProviderCredentialRow: View {
 #Preview("API key row") {
     ProviderCredentialRow(
         isActive: false,
-        icon: "key.horizontal",
         label: "production-key-with-long-name",
         status: "sk-ant-...xyz",
         statusColor: .tronTextSecondary,

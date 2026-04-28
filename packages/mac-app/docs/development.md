@@ -151,15 +151,16 @@ To simulate the menu-bar-only mode without onboarding, just `touch ~/.tron/syste
 
 Defined in `.github/workflows/release-mac.yml`. Broadly:
 
-1. `cargo build --release --bin tron --locked` on the same `macos-14` runner with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` from GitHub secrets (cross-compile is avoided for code-signing reasons).
-2. `bash packages/mac-app/scripts/bundle-agent.sh --skip-build` inside `packages/mac-app`, which stages `packages/agent/target/release/tron`.
-3. `xcodegen generate` inside `packages/mac-app/`.
-4. `xcodebuild -scheme TronMac -configuration Release archive -archivePath build/TronMac.xcarchive`; the target post-build script copies transcription sidecar source files into `Contents/Resources/Transcription/`.
-5. Export the `.app`, verify the helper, LaunchAgent plist, and transcription resource files are present, then code-sign inside-out with Developer ID (no `--deep` on the re-sign — `--deep` would clobber the helper signature; it's used only for read-only `--verify`).
-6. Notarize via `xcrun notarytool submit --keychain-profile tron-notarize` (credentials live ONLY in an isolated path-based keychain at `$RUNNER_TEMP/tron-build.keychain-db`, never on argv), staple, package into DMG via `create-dmg`.
-7. Optional dSYM upload via `sentry-cli` (Phase 7; `continue-on-error` so a missing DSN doesn't fail the release).
-8. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg --clobber` (idempotent on re-run).
-9. `if: always()` cleanup: remove the keychain from the search list, delete it, dd-overwrite the password file, remove `cert.p12`.
+1. `scripts/tron version check` validates that `VERSION.env` matches Cargo, Cargo.lock, Mac/iOS XcodeGen settings, custom bundle canonical version keys, and release docs. Tag runs must match `mac-v$(TRON_VERSION)`, so manual workflow input cannot create a mismatched artifact.
+2. `cargo build --release --bin tron --locked` on the same `macos-15` runner with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` from GitHub secrets (cross-compile is avoided for code-signing reasons).
+3. `bash packages/mac-app/scripts/bundle-agent.sh --skip-build` inside `packages/mac-app`, which stages `packages/agent/target/release/tron`.
+4. `xcodegen generate` inside `packages/mac-app/`.
+5. `xcodebuild -scheme TronMac -configuration Release archive -archivePath build/TronMac.xcarchive`; the target post-build script copies transcription sidecar source files into `Contents/Resources/Transcription/`.
+6. Export the `.app`, verify the helper, LaunchAgent plist, managed skills, and transcription resource files are present, then code-sign inside-out with Developer ID (no `--deep` on the re-sign — `--deep` would clobber the helper signature; it's used only for read-only `--verify`).
+7. Notarize via `xcrun notarytool submit --keychain-profile tron-notarize` (credentials live ONLY in an isolated path-based keychain at `$RUNNER_TEMP/tron-build.keychain-db`, never on argv), staple, package into DMG via `create-dmg`.
+8. Optional dSYM upload via `sentry-cli` (Phase 7; `continue-on-error` so a missing DSN doesn't fail the release).
+9. `gh release create mac-v0.1.0-beta.1 ./Tron-mac-v0.1.0-beta.1.dmg` creates or updates a draft pre-release titled `Tron Mac v0.1 (Beta 1)`.
+10. `if: always()` cleanup: remove the keychain from the search list, delete it, dd-overwrite the password file, remove `cert.p12`.
 
 PR builds (no tag) take a dry-run path: same `xcodebuild archive` + DMG assembly but ad-hoc-signed (`-`) so fork PRs without certs still validate the pipeline.
 

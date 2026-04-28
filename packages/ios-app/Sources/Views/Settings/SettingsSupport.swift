@@ -11,6 +11,65 @@ enum SettingsLabels {
     static let updates = "Updates"
 }
 
+enum ProvidersSettingsSummary {
+    struct Context: Equatable, Sendable {
+        let isLoaded: Bool
+        let configuredModelProviderCount: Int
+        let totalModelProviderCount: Int
+        let configuredServiceCount: Int
+        let totalServiceCount: Int
+    }
+
+    static func title(for context: Context) -> String {
+        guard context.isLoaded else {
+            return "Load credential status"
+        }
+
+        let totalConfigured = context.configuredModelProviderCount + context.configuredServiceCount
+        guard totalConfigured > 0 else {
+            return "Connect providers"
+        }
+
+        return "\(totalConfigured) \(totalConfigured == 1 ? "connection" : "connections") ready"
+    }
+
+    static func description(for context: Context) -> String {
+        guard context.isLoaded else {
+            return "Loading provider and service credential status from the active server."
+        }
+
+        let totalConfigured = context.configuredModelProviderCount + context.configuredServiceCount
+        guard totalConfigured > 0 else {
+            return "No model providers or services are configured. Add OAuth accounts or API keys; secrets stay on the Mac server."
+        }
+
+        let modelSummary = countSummary(
+            configured: context.configuredModelProviderCount,
+            total: context.totalModelProviderCount,
+            singular: "model provider",
+            plural: "model providers"
+        )
+        let serviceSummary = countSummary(
+            configured: context.configuredServiceCount,
+            total: context.totalServiceCount,
+            singular: "service",
+            plural: "services"
+        )
+        return "\(modelSummary) and \(serviceSummary) are configured. Secrets stay on the Mac server."
+    }
+
+    private static func countSummary(configured: Int, total: Int, singular: String, plural: String) -> String {
+        let noun = configured == 1 ? singular : plural
+        if configured == 0 {
+            return "0 \(plural)"
+        }
+        if configured == total {
+            return "all \(total) \(plural)"
+        }
+        return "\(configured) \(noun)"
+    }
+}
+
 enum ServerOnboardingLauncher {
     static let serverIdUserInfoKey = "serverId"
 
@@ -97,7 +156,7 @@ enum ServerUpdateSettingsItem: CaseIterable, Hashable, Sendable {
         case .automaticChecks:
             return "When off, the server never contacts GitHub Releases. Opt in to be notified of new versions."
         case .releaseChannel:
-            return "Stable tracks only `latest` GitHub releases. Beta also includes pre-release tags, such as `mac-v0.5.0-beta.1`."
+            return "Stable tracks only `latest` GitHub releases. Beta also includes pre-release tags, such as `mac-v0.1.0-beta.1`."
         case .checkFrequency:
             return "Manual means only the button below and the Mac menu bar fire checks. Startup checks once per server launch."
         case .manualCheck:

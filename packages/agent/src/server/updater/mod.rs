@@ -134,8 +134,8 @@ pub fn resume(path: &Path) -> io::Result<()> {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdateChannel {
-    /// Only releases without a pre-release suffix (e.g. `mac-v0.5.0`,
-    /// not `mac-v0.5.0-beta.1`). The safe default.
+    /// Only releases without a pre-release suffix (e.g. `mac-v0.1.0`,
+    /// not `mac-v0.1.0-beta.1`). The safe default.
     #[default]
     Stable,
     /// All releases, including pre-releases. Used by early adopters
@@ -334,9 +334,7 @@ fn write_lock() -> &'static Mutex<()> {
 /// Comparison follows the obvious semver rules: numeric triples
 /// lexicographically, then a release WITHOUT a pre-release tag sorts
 /// strictly GREATER than the same triple WITH one. Pre-release tags
-/// compare lexicographically (so `beta.10 > beta.2` — good enough for
-/// now; a follow-up can split on `.` to get numeric comparison of
-/// `beta.N` components).
+/// compare token by token, so `beta.10 > beta.2`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VersionId {
     major: u64,
@@ -463,10 +461,34 @@ impl VersionId {
         }
     }
 
+    /// Return the human-facing release label used by iOS, the Mac menu,
+    /// and GitHub release titles.
+    pub fn display_label(&self) -> String {
+        let mut label = if self.patch == 0 {
+            format!("v{}.{}", self.major, self.minor)
+        } else {
+            format!("v{}.{}.{}", self.major, self.minor, self.patch)
+        };
+        if let Some(beta) = self
+            .pre
+            .0
+            .as_deref()
+            .and_then(|pre| pre.strip_prefix("beta."))
+        {
+            label.push_str(&format!(" (Beta {beta})"));
+        }
+        label
+    }
+
     /// `true` when this version carries a pre-release suffix.
     pub fn is_prerelease(&self) -> bool {
         self.pre.0.is_some()
     }
+}
+
+/// Parse and format a canonical version into the user-facing release label.
+pub fn display_version_label(raw: &str) -> Result<String, VersionParseError> {
+    VersionId::parse(raw).map(|v| v.display_label())
 }
 
 /// Decision from a version check. Used to drive event / action
@@ -505,7 +527,7 @@ pub struct ReleaseInfo {
     /// Parsed version (already stripped of the `mac-v` scope prefix
     /// and any leading `v`).
     pub version: String,
-    /// The original GitHub Release `tag_name` (e.g. `mac-v0.5.0`).
+    /// The original GitHub Release `tag_name` (e.g. `mac-v0.1.0`).
     /// Kept around so telemetry / logs can cite the exact tag the
     /// fetcher resolved against.
     pub tag: String,
@@ -767,7 +789,7 @@ impl ReleaseFetcher for HttpReleaseFetcher {
 /// Subset of the GitHub Releases API response we consume.
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
-    /// Git tag associated with the release (e.g. `mac-v0.5.0`).
+    /// Git tag associated with the release (e.g. `mac-v0.1.0`).
     tag_name: String,
     /// Release notes in Markdown.
     body: Option<String>,
@@ -791,7 +813,7 @@ struct GitHubAsset {
 
 impl From<GitHubRelease> for ReleaseInfo {
     fn from(raw: GitHubRelease) -> Self {
-        // Normalize the tag → version: `mac-v0.5.0` → `0.5.0`.
+        // Normalize the tag -> version: `mac-v0.1.0` -> `0.1.0`.
         let version = match raw.tag_name.rfind('v') {
             Some(idx) => raw.tag_name[idx + 1..].to_string(),
             None => raw.tag_name.clone(),
@@ -851,6 +873,26 @@ mod tests {
         let v = VersionId::parse("0.5.0-beta.1").expect("parse");
         assert_eq!(v.to_string_canonical(), "0.5.0-beta.1");
         assert!(v.is_prerelease());
+    }
+
+    #[test]
+    fn display_label_trims_zero_patch_and_formats_beta() {
+        let v = VersionId::parse("0.1.0-beta.1").expect("parse");
+        assert_eq!(v.display_label(), "v0.1 (Beta 1)");
+    }
+
+    #[test]
+    fn display_label_keeps_nonzero_patch() {
+        let v = VersionId::parse("0.1.1").expect("parse");
+        assert_eq!(v.display_label(), "v0.1.1");
+    }
+
+    #[test]
+    fn display_version_label_parses_scope_prefix() {
+        assert_eq!(
+            display_version_label("mac-v0.2.0-beta.3").unwrap(),
+            "v0.2 (Beta 3)"
+        );
     }
 
     #[test]

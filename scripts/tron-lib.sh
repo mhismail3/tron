@@ -63,6 +63,54 @@ OPENAI_OAUTH_REDIRECT_URI="http://localhost:1455/auth/callback"
 OPENAI_OAUTH_SCOPES="openid profile email offline_access"
 OPENAI_OAUTH_PORT=1455
 
+tron_version_env_file() {
+    local roots=()
+    [ -n "${PROJECT_DIR:-}" ] && roots+=("$PROJECT_DIR")
+
+    local script_root
+    if script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"; then
+        roots+=("$script_root")
+    fi
+
+    local workspace_root
+    if workspace_root="$(cat "$CONTRIBUTOR_DIR/workspace-path" 2>/dev/null)" && [ -n "$workspace_root" ]; then
+        roots+=("$workspace_root")
+    fi
+
+    local root candidate
+    for root in "${roots[@]}"; do
+        candidate="$root/VERSION.env"
+        if [ -f "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+tron_version_env_value() {
+    local key="$1"
+    local version_file
+    version_file="$(tron_version_env_file)" || return 1
+    awk -F= -v key="$key" '
+        $1 == key {
+            sub(/\r$/, "", $2)
+            print $2
+            found = 1
+            exit
+        }
+        END { if (!found) exit 1 }
+    ' "$version_file"
+}
+
+tron_marketing_version() {
+    local canonical="$1"
+    case "$canonical" in
+        *-*) echo "${canonical%%-*}" ;;
+        *) echo "$canonical" ;;
+    esac
+}
+
 #=============================================================================
 # COLORS & PRINT HELPERS
 #=============================================================================
@@ -288,7 +336,20 @@ health_check() {
 create_app_bundle() {
     local bundle_path="$1"
     local binary_src="$2"
-    local version="${3:-1.0.0}"
+    local canonical_version="${3:-}"
+    if [ -z "$canonical_version" ]; then
+        canonical_version="$(tron_version_env_value TRON_VERSION)" || {
+            print_error "Cannot create app bundle without VERSION.env"
+            return 1
+        }
+    fi
+    local marketing_version
+    marketing_version="$(tron_marketing_version "$canonical_version")"
+    local build_version
+    build_version="$(tron_version_env_value TRON_APPLE_BUILD)" || {
+        print_error "Cannot create app bundle without TRON_APPLE_BUILD in VERSION.env"
+        return 1
+    }
 
     # Delete the entire .app bundle, not just its contents. macOS App
     # Management TCC protects files *inside* .app bundles from modification
@@ -317,9 +378,11 @@ create_app_bundle() {
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleVersion</key>
-    <string>$version</string>
+    <string>$build_version</string>
     <key>CFBundleShortVersionString</key>
-    <string>$version</string>
+    <string>$marketing_version</string>
+    <key>TRONCanonicalVersion</key>
+    <string>$canonical_version</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key>

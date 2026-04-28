@@ -15,6 +15,39 @@ struct ProvidersSettingsPageTests {
         #expect(!ProviderAuthActionResult.failed.shouldCommitLocalFormChanges)
     }
 
+    @Test("providers summary describes unloaded empty and configured states")
+    func providersSummaryDescribesCredentialState() {
+        let unloaded = ProvidersSettingsSummary.Context(
+            isLoaded: false,
+            configuredModelProviderCount: 0,
+            totalModelProviderCount: 5,
+            configuredServiceCount: 0,
+            totalServiceCount: 2
+        )
+        #expect(ProvidersSettingsSummary.title(for: unloaded) == "Load credential status")
+        #expect(ProvidersSettingsSummary.description(for: unloaded) == "Loading provider and service credential status from the active server.")
+
+        let empty = ProvidersSettingsSummary.Context(
+            isLoaded: true,
+            configuredModelProviderCount: 0,
+            totalModelProviderCount: 5,
+            configuredServiceCount: 0,
+            totalServiceCount: 2
+        )
+        #expect(ProvidersSettingsSummary.title(for: empty) == "Connect providers")
+        #expect(ProvidersSettingsSummary.description(for: empty) == "No model providers or services are configured. Add OAuth accounts or API keys; secrets stay on the Mac server.")
+
+        let configured = ProvidersSettingsSummary.Context(
+            isLoaded: true,
+            configuredModelProviderCount: 3,
+            totalModelProviderCount: 5,
+            configuredServiceCount: 1,
+            totalServiceCount: 2
+        )
+        #expect(ProvidersSettingsSummary.title(for: configured) == "4 connections ready")
+        #expect(ProvidersSettingsSummary.description(for: configured) == "3 model providers and 1 service are configured. Secrets stay on the Mac server.")
+    }
+
     @Test("credential row ids are stable and credential-type scoped")
     func credentialRowIdsAreStableAndCredentialTypeScoped() {
         let oauth = ProviderCredentialRowItem(kind: .oauth, label: "work")
@@ -47,6 +80,28 @@ struct ProvidersSettingsPageTests {
     func apiKeyOnlyProviders() {
         let apiKeyOnly = ProviderInfo.modelProviders.filter { !$0.supportsOAuth }.map(\.id)
         #expect(Set(apiKeyOnly) == ["minimax", "kimi"])
+    }
+
+    @Test("provider section containers separate status actions and Google Cloud details")
+    func providerSectionContainersSeparateStatusActionsAndDetails() {
+        let anthropic = ProviderInfo.modelProviders.first { $0.id == "anthropic" }!
+        let google = ProviderInfo.modelProviders.first { $0.id == "google" }!
+        let minimax = ProviderInfo.modelProviders.first { $0.id == "minimax" }!
+
+        #expect(ProviderSettingsContainer.containers(for: anthropic) == [.status, .actions])
+        #expect(ProviderSettingsContainer.containers(for: google) == [.status, .actions, .googleCloud])
+        #expect(ProviderSettingsContainer.containers(for: minimax) == [.status, .actions])
+    }
+
+    @Test("provider auth actions match OAuth capability")
+    func providerAuthActionsMatchOAuthCapability() {
+        let anthropic = ProviderInfo.modelProviders.first { $0.id == "anthropic" }!
+        let minimax = ProviderInfo.modelProviders.first { $0.id == "minimax" }!
+
+        #expect(ProviderAuthActionItem.items(for: anthropic) == [.oauthLogin, .addApiKey])
+        #expect(ProviderAuthActionItem.items(for: minimax) == [.addApiKey])
+        #expect(ProviderAuthActionItem.oauthLogin.title == "OAuth Login")
+        #expect(ProviderAuthActionItem.addApiKey.title == "Add API Key")
     }
 
     @Test("service system icon dispatches by id")

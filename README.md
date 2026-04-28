@@ -78,12 +78,14 @@ This README is the single, canonical reference for the project and is expected t
 
 ```
 tron/
++-- VERSION.env             Canonical release version + Apple build source of truth
 +-- packages/
 |   +-- agent/              Rust agent server (single `tron` crate, modular layout)
 |   +-- ios-app/            SwiftUI iOS application
 |   +-- mac-app/            SwiftUI Mac menu-bar wrapper (Tron.app) — install wizard + server lifecycle
 +-- scripts/
 |   +-- tron                CLI for build, deploy, service management
+|   +-- tron-version        Version print/check/sync helper used by CI + releases
 |   +-- tron-lib.sh         Shared bash helpers used by scripts/tron
 |   +-- tron-cli            Contributor CLI helper for local service management
 |   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
@@ -231,6 +233,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` background). Stops the installed `com.tron.server` job before binding port `9847` and restores it through `/Applications/Tron.app` on exit. |
 | `tron ci` | CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc` |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
+| `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
 | `tron setup` | First-time project setup |
 
 ### Deployment (workspace only)
@@ -922,21 +925,22 @@ For local Mac wrapper builds that need real push delivery, copy `packages/mac-ap
 
 ### DMG Release Pipeline
 
-End-users install `Tron.app` via a notarized DMG published to GitHub Releases. The pipeline lives at `.github/workflows/release-mac.yml` and triggers on `mac-v*` tag push:
+End-users install `Tron.app` via a notarized DMG published to GitHub Releases. Release identity is centralized in `VERSION.env`: the first beta is canonical `0.1.0-beta.1`, Apple bundles receive numeric `MARKETING_VERSION = 0.1.0` / `CURRENT_PROJECT_VERSION = 1`, and human-facing UI renders `v0.1 (Beta 1)`. The pipeline lives at `.github/workflows/release-mac.yml` and triggers on a matching `mac-v*` tag push:
 
 1. Checkout + Rust toolchain/cache (`actions-rust-lang/setup-rust-toolchain`).
-2. `cargo build --release --bin tron --locked` in `packages/agent/`, with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` supplied from GitHub secrets so push delivery is enabled for release users without local config.
-3. Install XcodeGen + `create-dmg`.
-4. `packages/mac-app/scripts/bundle-agent.sh --skip-build` stages `packages/agent/target/release/tron` into `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` and writes the bundled LaunchAgent plist.
-5. `xcodegen generate` inside `packages/mac-app/`.
-6. Create an isolated release keychain from the signing/notarization secrets, or fall back to dry-run ad-hoc signing when secrets are absent.
-7. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
-8. Verify `Contents/Resources/Transcription/worker.py` and `requirements.txt` are present in the archive so the first-run transcription opt-in can seed `~/.tron/system/transcription/`.
-9. Sign the helper app first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
-10. `xcrun notarytool submit` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple on success.
-11. Build the DMG with `create-dmg`.
-12. Upload dSYMs to Sentry via `sentry-cli`.
-13. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg` with auto-generated notes.
+2. `scripts/tron version check` verifies `VERSION.env`, Cargo, Cargo.lock, Mac/iOS `project.yml`, custom bundle canonical version keys, and release docs agree before any artifact is built. A tag push must equal `mac-v$(TRON_VERSION)`.
+3. `cargo build --release --bin tron --locked` in `packages/agent/`, with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` supplied from GitHub secrets so push delivery is enabled for release users without local config.
+4. Install XcodeGen + `create-dmg`.
+5. `packages/mac-app/scripts/bundle-agent.sh --skip-build` stages `packages/agent/target/release/tron` into `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` and writes the bundled LaunchAgent plist.
+6. `xcodegen generate` inside `packages/mac-app/`.
+7. Create an isolated release keychain from the signing/notarization secrets, or fall back to dry-run ad-hoc signing when secrets are absent.
+8. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
+9. Verify the bundled helper, LaunchAgent plist, managed skills, and transcription resources are present in the archive.
+10. Sign the helper app first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
+11. `xcrun notarytool submit` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple on success.
+12. Build the DMG with `create-dmg`.
+13. Upload dSYMs to Sentry via `sentry-cli`.
+14. `gh release create mac-v0.1.0-beta.1 ./Tron-mac-v0.1.0-beta.1.dmg` creates a draft GitHub pre-release titled `Tron Mac v0.1 (Beta 1)`; maintainers publish after installing and verifying the DMG.
 
 A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or the workflow itself. The dry-run stops before notarization (no cert needed) so PR contributors can verify the assembly pipeline without secrets.
 

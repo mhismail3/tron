@@ -445,7 +445,7 @@ struct ConnectionSettingsPage: View {
         do {
             let result = try await dependencies.rpcClient.misc.checkForUpdates()
             if result.available, let latest = result.latestVersion {
-                checkResultMessage = "Update available: \(latest)"
+                checkResultMessage = "Update available: \(VersionDisplay.label(for: latest))"
             } else {
                 checkResultMessage = "You're up to date."
             }

@@ -4,6 +4,4 @@
 MACOSX_DEPLOYMENT_TARGET = 15.0
 SWIFT_VERSION = 6.0
 
-// App info
-MARKETING_VERSION = 0.5.0
-CURRENT_PROJECT_VERSION = 1
+// App info lives in project.yml and is generated from VERSION.env.

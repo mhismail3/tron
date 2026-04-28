@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-04-28 (settings revamp: local paired servers, server-owned settings, summary cards, and onboarding handoff)
+> Last verified: 2026-04-28 (settings revamp: local paired servers, server-owned settings, provider status/action cards, summary cards, and onboarding handoff)
 
 ## Overview
 
@@ -207,6 +207,12 @@ Uses XcodeGen with `project.yml`:
 - **Configs**: Beta (debug), Prod (release)
 - **Minimum iOS**: 18.0
 - **Swift**: 6.0
+- **Versioning**: `VERSION.env` is the only hand-edited release identity file.
+  `scripts/tron version sync` mirrors `TRON_VERSION` into the app and share
+  extension as `TRON_CANONICAL_VERSION`, while Apple receives numeric
+  `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` values. UI surfaces format
+  canonical versions through `VersionDisplay`, so `0.1.0-beta.1` renders as
+  `v0.1 (Beta 1)` without leaking Apple/Cargo constraints into user copy.
 
 ```bash
 xcodegen generate

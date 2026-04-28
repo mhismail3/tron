@@ -1,5 +1,59 @@
 import SwiftUI
 
+enum ProviderSettingsContainer: Equatable, Sendable {
+    case status
+    case actions
+    case googleCloud
+
+    static func containers(for provider: ProviderInfo) -> [Self] {
+        provider.id == "google" ? [.status, .actions, .googleCloud] : [.status, .actions]
+    }
+}
+
+enum ProviderAuthActionItem: Equatable, Identifiable, Sendable {
+    case oauthLogin
+    case addApiKey
+
+    var id: String { title }
+
+    static func items(for provider: ProviderInfo) -> [Self] {
+        provider.supportsOAuth ? [.oauthLogin, .addApiKey] : [.addApiKey]
+    }
+
+    var title: String {
+        switch self {
+        case .oauthLogin:
+            return "OAuth Login"
+        case .addApiKey:
+            return "Add API Key"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .oauthLogin:
+            return "lock.shield"
+        case .addApiKey:
+            return "plus"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .oauthLogin:
+            return "Sign in with OAuth"
+        case .addApiKey:
+            return "Add API key"
+        }
+    }
+}
+
+enum ProviderCredentialStatusAction {
+    static let title = "Clear"
+    static let confirmationTitle = "Clear credential?"
+    static let confirmationButtonTitle = "Clear"
+}
+
 enum ProviderStatusHelpers {
     static func accountStatus(_ account: AccountInfo) -> String {
         if account.isExpired {
@@ -13,6 +67,13 @@ enum ProviderStatusHelpers {
             return account.hasRefreshToken ? .tronAmber : .tronError
         }
         return .tronSuccess
+    }
+
+    static func accountDetail(_ account: AccountInfo) -> String {
+        if account.isExpired {
+            return account.hasRefreshToken ? "OAuth will refresh" : "OAuth expired"
+        }
+        return "Logged in with OAuth"
     }
 
     static func isProviderConfigured(_ info: ProviderAuthInfo?) -> Bool {
@@ -35,6 +96,10 @@ enum ProviderStatusHelpers {
     static func hasRefreshableOAuth(_ info: ProviderAuthInfo?) -> Bool {
         guard let accounts = info?.accounts, !accounts.isEmpty else { return false }
         return accounts.contains { !$0.isExpired || $0.hasRefreshToken }
+    }
+
+    static func isServiceConfigured(_ info: ServiceAuthInfo?) -> Bool {
+        info?.hasApiKey == true
     }
 
     static func isApiKeyFormValid(label: String, key: String) -> Bool {

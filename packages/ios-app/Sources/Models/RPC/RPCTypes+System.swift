@@ -30,7 +30,7 @@ struct SystemPingParams: Encodable {
 struct SystemCheckForUpdatesResult: Decodable {
     /// `true` if a newer version exists for the configured channel.
     let available: Bool
-    /// The matched release's semver (e.g. `"0.5.1"`). `nil` when nothing
+    /// The matched release's semver (e.g. `"0.1.1"`). `nil` when nothing
     /// beats the current running version.
     let latestVersion: String?
     /// Direct DMG download URL. `nil` when `available == false`.

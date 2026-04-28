@@ -10,15 +10,15 @@ struct FeedbackComposerTests {
 
     @Test("subject includes app version + build number")
     func subjectIncludesVersion() {
-        let composer = FeedbackComposer(appVersion: "0.5.0", buildNumber: "42")
-        #expect(composer.subject() == "Tron feedback — v0.5.0 (42)")
+        let composer = FeedbackComposer(appVersion: "0.1.0-beta.1", buildNumber: "1")
+        #expect(composer.subject() == "Tron feedback — v0.1 (Beta 1) (build 1)")
     }
 
     // MARK: - Log attachment formatting
 
     @Test("formats log lines oldest-first, one per line, with iso8601 timestamp + category + level")
     func logLinesFormattedCorrectly() {
-        let composer = FeedbackComposer(appVersion: "0.5.0", buildNumber: "1")
+        let composer = FeedbackComposer(appVersion: "0.1.0-beta.1", buildNumber: "1")
         let ts1 = Date(timeIntervalSince1970: 1_700_000_000)
         let ts2 = Date(timeIntervalSince1970: 1_700_000_001)
         let entries: [(Date, LogCategory, LogLevel, String)] = [
@@ -38,7 +38,7 @@ struct FeedbackComposerTests {
 
     @Test("log body redacts bearer tokens + home paths via SentryRedactor")
     func logBodyRedacted() {
-        let composer = FeedbackComposer(appVersion: "0.5.0", buildNumber: "1")
+        let composer = FeedbackComposer(appVersion: "0.1.0-beta.1", buildNumber: "1")
         let entries: [(Date, LogCategory, LogLevel, String)] = [
             (Date(timeIntervalSince1970: 1), .network, .info,
              "Authorization: Bearer 1234567890abcdef1234567890 /Users/alice/x"),
@@ -52,7 +52,7 @@ struct FeedbackComposerTests {
 
     @Test("tail limit respected — returns at most N entries")
     func tailLimitRespected() {
-        let composer = FeedbackComposer(appVersion: "0.5.0", buildNumber: "1")
+        let composer = FeedbackComposer(appVersion: "0.1.0-beta.1", buildNumber: "1")
         var entries: [(Date, LogCategory, LogLevel, String)] = []
         for i in 0..<500 {
             entries.append((Date(timeIntervalSince1970: TimeInterval(i)), .general, .info, "line \(i)"))
@@ -69,7 +69,7 @@ struct FeedbackComposerTests {
 
     @Test("full body has header + log section + footer")
     func fullBodyHasAllSections() {
-        let composer = FeedbackComposer(appVersion: "0.5.0", buildNumber: "42")
+        let composer = FeedbackComposer(appVersion: "0.1.0-beta.1", buildNumber: "1")
         let entries: [(Date, LogCategory, LogLevel, String)] = [
             (Date(timeIntervalSince1970: 1), .general, .info, "hi")
         ]
@@ -82,7 +82,7 @@ struct FeedbackComposerTests {
 
     @Test("empty log tail yields a short body with 'no logs captured' note")
     func emptyLogsHandledGracefully() {
-        let composer = FeedbackComposer(appVersion: "0.5.0", buildNumber: "42")
+        let composer = FeedbackComposer(appVersion: "0.1.0-beta.1", buildNumber: "1")
         let body = composer.assembleBody(userNotes: "", logs: [])
         #expect(body.contains("no logs captured"))
     }

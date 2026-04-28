@@ -60,6 +60,33 @@ struct ProviderStatusHelpersTests {
         #expect(ProviderStatusHelpers.accountStatusColor(a) == Color.tronError)
     }
 
+    // MARK: - accountDetail
+
+    @Test("accountDetail describes fresh OAuth account")
+    func accountDetailFresh() throws {
+        let a = try account(isExpired: false)
+        #expect(ProviderStatusHelpers.accountDetail(a) == "Logged in with OAuth")
+    }
+
+    @Test("accountDetail describes refreshable expired OAuth account")
+    func accountDetailRefreshing() throws {
+        let a = try account(isExpired: true, hasRefreshToken: true)
+        #expect(ProviderStatusHelpers.accountDetail(a) == "OAuth will refresh")
+    }
+
+    @Test("accountDetail describes expired OAuth account without refresh")
+    func accountDetailExpired() throws {
+        let a = try account(isExpired: true, hasRefreshToken: false)
+        #expect(ProviderStatusHelpers.accountDetail(a) == "OAuth expired")
+    }
+
+    @Test("credential status rows use explicit clear action copy")
+    func credentialStatusRowsUseExplicitClearActionCopy() {
+        #expect(ProviderCredentialStatusAction.title == "Clear")
+        #expect(ProviderCredentialStatusAction.confirmationTitle == "Clear credential?")
+        #expect(ProviderCredentialStatusAction.confirmationButtonTitle == "Clear")
+    }
+
     // MARK: - isProviderConfigured
 
     @Test("isProviderConfigured returns false for nil")
@@ -162,6 +189,18 @@ struct ProviderStatusHelpersTests {
         let json = #"{"accounts":[{"label":"a","expiresAt":0,"isExpired":true,"hasRefreshToken":false}]}"#
         let info = try providerInfo(json: json)
         #expect(ProviderStatusHelpers.hasRefreshableOAuth(info) == false)
+    }
+
+    // MARK: - isServiceConfigured
+
+    @Test("isServiceConfigured reflects service API key state")
+    func isServiceConfiguredReflectsApiKeyState() throws {
+        let configured = try JSONDecoder().decode(ServiceAuthInfo.self, from: Data(#"{"hasApiKey":true,"apiKeyHint":"BSA0...abc"}"#.utf8))
+        let empty = try JSONDecoder().decode(ServiceAuthInfo.self, from: Data(#"{"hasApiKey":false}"#.utf8))
+
+        #expect(ProviderStatusHelpers.isServiceConfigured(configured))
+        #expect(!ProviderStatusHelpers.isServiceConfigured(empty))
+        #expect(!ProviderStatusHelpers.isServiceConfigured(nil))
     }
 
     // MARK: - isApiKeyFormValid

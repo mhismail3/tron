@@ -2,13 +2,14 @@
 #
 # Builds a signed, notarized, stapled DMG for `Tron.app` and attaches it to
 # a GitHub Release. Triggered by:
-#   - Tag push matching `mac-v*` (e.g. `mac-v0.5.0`, `mac-v0.5.1-beta.1`)
-#   - Manual `workflow_dispatch` with an explicit version (enables dry-run
-#     without tagging).
+#   - Tag push matching `mac-v*` (e.g. `mac-v0.1.0-beta.1`)
+#   - Manual `workflow_dispatch` dry-run. The version always comes from
+#     VERSION.env so manual runs cannot produce mismatched artifacts.
 #
 # ─── Pipeline overview ──────────────────────────────────────────────────
 #
-#   1. Resolve the target version from the tag or the manual input.
+#   1. Resolve the target version from VERSION.env and verify any tag
+#      matches the centralized release tag.
 #   2. Build the Rust agent binary in release mode (cached).
 #   3. Stage the agent into the embedded `Tron Server.app` Login Item via
 #      `packages/mac-app/scripts/bundle-agent.sh`.
@@ -16,7 +17,7 @@
 #      `TronMac` scheme with automatic signing.
 #   5. Export the `.app` from the archive (Developer ID Application).
 #   6. Notarize via `xcrun notarytool submit --wait`; staple with `stapler`.
-#   7. Build the DMG via `create-dmg` into `dist/Tron-mac-vX.Y.Z.dmg`.
+#   7. Build the DMG via `create-dmg` into `dist/Tron-mac-v0.1.0-beta.1.dmg`.
 #   8. Generate a SHA256 manifest next to the DMG.
 #   9. Attach the DMG + manifest to a GitHub Release (draft by default —
 #      flipped live by a maintainer after verifying the assets).
@@ -37,7 +38,7 @@
 #   SENTRY_ORG              Sentry organization slug (defaults to "tron")
 #   SENTRY_PROJECT_MAC      Sentry project slug for the Mac app (defaults to "tron-mac")
 #
-# All five required secrets must be present for notarization to run. In
+# All required signing, notarization, and relay secrets must be present for notarization to run. In
 # dry-run mode (workflow_dispatch with `dry_run=true`) missing secrets
 # are tolerated and the job short-circuits before the notarization step.
 #
@@ -58,9 +59,9 @@
 #
 # ─── Rollback ───────────────────────────────────────────────────────────
 #
-# Bad release? `gh release delete mac-vX.Y.Z` pulls the DMG. Existing
+# Bad release? `gh release delete mac-v0.1.0-beta.1` pulls the DMG. Existing
 # installs are unaffected (they don't auto-pull deletions). Cut a fixed
-# release at `mac-vX.Y.Z+1`.
+# release at the next beta or patch version.
 
 name: Release (Mac DMG)
 
@@ -70,10 +71,6 @@ on:
       - "mac-v*"
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to build (e.g. 0.5.0-beta.1). Leave blank for tag-driven run."
-        required: false
-        type: string
       dry_run:
         description: "Skip notarization + release publish (true/false)."
         required: false
@@ -98,7 +95,6 @@ jobs:
       APP_NAME: Tron
       APP_BUNDLE: Tron.app
       MAC_APP_DIR: packages/mac-app
-      DMG_BASENAME: Tron-mac
 
     steps:
       - name: Checkout
@@ -112,26 +108,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          ./scripts/tron version check
+          while IFS='=' read -r key value; do
+            case "$key" in
+              TRON_VERSION) version="$value" ;;
+              TRON_RELEASE_TAG) tag="$value" ;;
+              TRON_DMG_NAME) dmg_name="$value" ;;
+              TRON_DISPLAY_VERSION) display_version="$value" ;;
+              TRON_RELEASE_TITLE) release_title="$value" ;;
+              TRON_IS_PRERELEASE) is_prerelease="$value" ;;
+            esac
+          done < <(./scripts/tron version print)
+
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == mac-v* ]]; then
-            v="${GITHUB_REF_NAME#mac-v}"
+            if [[ "${GITHUB_REF_NAME}" != "$tag" ]]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION.env release tag $tag"
+              exit 1
+            fi
             mode="tag"
-          elif [[ -n "${{ inputs.version }}" ]]; then
-            v="${{ inputs.version }}"
-            mode="manual"
           else
-            # Manual trigger without a version → read MARKETING_VERSION from
-            # project.yml so a dry-run still produces consistent artifacts.
-            v=$(awk -F'"' '/MARKETING_VERSION:/ { print $2; exit }' "$MAC_APP_DIR/project.yml")
-            mode="project.yml"
+            mode="VERSION.env"
           fi
-          if [[ -z "$v" ]]; then echo "::error::could not resolve version"; exit 1; fi
+          if [[ -z "${version:-}" || -z "${tag:-}" || -z "${dmg_name:-}" ]]; then
+            echo "::error::could not resolve centralized version fields"
+            exit 1
+          fi
           {
-            echo "version=$v"
+            echo "version=$version"
             echo "mode=$mode"
-            echo "tag=mac-v$v"
-            echo "dmg_name=${DMG_BASENAME}-v${v}.dmg"
+            echo "tag=$tag"
+            echo "dmg_name=$dmg_name"
+            echo "display_version=$display_version"
+            echo "release_title=$release_title"
+            echo "is_prerelease=$is_prerelease"
           } >> "$GITHUB_OUTPUT"
-          echo "Resolved version=$v (from $mode)"
+          echo "Resolved version=$version ($display_version) from $mode"
 
       - name: Resolve dry-run flag
         id: drymode
@@ -558,10 +569,16 @@ jobs:
             echo "::notice::Release $TAG already exists — uploading assets with --clobber"
             gh release upload "$TAG" "$DMG" "$SHA" --clobber
           else
+            args=(
+              --draft
+              --title "${{ steps.ver.outputs.release_title }}"
+              --notes "Automated draft release for ${{ steps.ver.outputs.display_version }}. Verify the DMG and SHA256 before publishing."
+            )
+            if [[ "${{ steps.ver.outputs.is_prerelease }}" == "true" ]]; then
+              args+=(--prerelease)
+            fi
             gh release create "$TAG" "$DMG" "$SHA" \
-              --draft \
-              --title "Tron Mac ${{ steps.ver.outputs.version }}" \
-              --notes "Automated release. See CHANGELOG for details; edit this draft before publishing."
+              "${args[@]}"
           fi
 
       - name: Summary
@@ -571,6 +588,7 @@ jobs:
             echo "## Mac DMG Build"
             echo ""
             echo "- Version: \`${{ steps.ver.outputs.version }}\`"
+            echo "- Display: \`${{ steps.ver.outputs.display_version }}\`"
             echo "- Mode:    \`${{ steps.ver.outputs.mode }}\`"
             echo "- Dry run: \`${{ steps.drymode.outputs.dry_run }}\`"
             echo "- DMG:     \`$(basename "${{ steps.dmg.outputs.dmg_path }}")\`"

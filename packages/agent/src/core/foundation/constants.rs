@@ -12,10 +12,20 @@ mod tests {
 
     #[test]
     fn version_is_semver() {
-        let parts: Vec<&str> = VERSION.split('.').collect();
+        let (base, prerelease) = VERSION
+            .split_once('-')
+            .map_or((VERSION, None), |(base, pre)| (base, Some(pre)));
+        let parts: Vec<&str> = base.split('.').collect();
         assert_eq!(parts.len(), 3, "VERSION must be semver (MAJOR.MINOR.PATCH)");
         for part in parts {
             let _: u32 = part.parse().expect("each semver segment must be a number");
+        }
+        if let Some(pre) = prerelease {
+            let beta = pre
+                .strip_prefix("beta.")
+                .expect("only beta.N prereleases are supported");
+            let parsed: u32 = beta.parse().expect("beta prerelease must be numeric");
+            assert!(parsed > 0, "beta prerelease must be positive");
         }
     }
 

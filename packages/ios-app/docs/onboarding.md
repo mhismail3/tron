@@ -160,6 +160,14 @@ the model providers page refreshes even if the server event arrives later.
 Settings provider forms keep their local input until the auth RPC returns an
 updated `AuthState`; failed saves leave labels, API keys, and Google Cloud
 fields visible for correction or retry.
+The Providers settings sheet starts with a dynamic summary card computed from
+the loaded `AuthState`. Each model provider then uses separate cards for
+current credential status, auth actions, and provider-specific details such as
+Google Cloud OAuth configuration. API-key-only providers and search services
+follow the same status-card plus action-card pattern, so masked server-returned
+hints never share a container with unsaved secret entry fields. Credential
+status cards keep OAuth state and masked key hints in the trailing monospace
+slot next to an explicit red Clear action.
 
 Provider credentials are written through `auth.*` RPCs, so secrets land
 in `auth.json`, not `settings.json`.

@@ -118,7 +118,7 @@ struct PrivacySettingsPage: View {
             return
         }
         let composer = FeedbackComposer(
-            appVersion: AppConstants.appVersion,
+            appVersion: AppConstants.canonicalVersion,
             buildNumber: AppConstants.buildNumber
         )
         let logs = Self.recentLogs()

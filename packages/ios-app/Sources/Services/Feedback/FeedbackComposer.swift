@@ -23,7 +23,7 @@ struct FeedbackComposer {
     static let defaultLogTailLimit = 200
 
     func subject() -> String {
-        "Tron feedback — v\(appVersion) (\(buildNumber))"
+        "Tron feedback — \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))"
     }
 
     /// Formats a sequence of log entries as one line per entry with
@@ -55,7 +55,7 @@ struct FeedbackComposer {
         }
 
         parts.append("---")
-        parts.append("App version: \(appVersion) (\(buildNumber))")
+        parts.append("App version: \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))")
         parts.append("Platform: iOS")
         parts.append("")
 

@@ -15,7 +15,9 @@ enum MenuBarFeedbackAction {
         }
 
         let composer = FeedbackIssueComposer(
-            appVersion: bundleVersion(key: "CFBundleShortVersionString") ?? "0.0.0",
+            appVersion: bundleVersion(key: "TRONCanonicalVersion")
+                ?? bundleVersion(key: "CFBundleShortVersionString")
+                ?? "0.1.0",
             buildNumber: bundleVersion(key: "CFBundleVersion") ?? "0",
             osVersion: ProcessInfo.processInfo.operatingSystemVersionString
         )

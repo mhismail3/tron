@@ -63,6 +63,7 @@ cmd_help() {
         echo "  deploy          Build, test, deploy (--force, --ci for non-interactive)"
         echo "  ci              Run CI checks (fmt, check, clippy, test, doc)"
         echo "  bench           Performance benchmarks (run, bless, compare)"
+        echo "  version         Print/check/sync centralized release version mirrors"
         echo "  setup           First-time project setup"
         echo "  install         Initial setup (launchd + CLI)"
         echo "  auto-deploy     Remote auto-deploy watcher"
@@ -92,7 +93,7 @@ case "$1" in
     rollback)        shift; cmd_rollback "$@" ;;
     login)           shift; cmd_login "$@" ;;
     # Dev (delegate to workspace)
-    dev|deploy|ci|bench|preflight|setup|install|auto-deploy)
+    dev|deploy|ci|bench|version|preflight|setup|install|auto-deploy)
         delegate_to_workspace "$@" ;;
     *)
         print_error "Unknown command: $1"

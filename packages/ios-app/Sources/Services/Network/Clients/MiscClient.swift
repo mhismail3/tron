@@ -13,7 +13,7 @@ final class MiscClient: RPCDomainClient {
             method: "system.ping",
             params: SystemPingParams(
                 protocolVersion: 1,
-                clientVersion: AppConstants.appVersion
+                clientVersion: AppConstants.canonicalVersion
             )
         )
     }

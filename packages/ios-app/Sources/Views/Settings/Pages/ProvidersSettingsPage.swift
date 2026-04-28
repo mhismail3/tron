@@ -17,6 +17,8 @@ struct ProvidersSettingsPage: View {
 
     var body: some View {
         SettingsPageContainer(title: Self.title) {
+            providersInfoCard
+
             ForEach(ProviderInfo.modelProviders) { provider in
                 ModelProviderSection(
                     provider: provider,
@@ -49,6 +51,35 @@ struct ProvidersSettingsPage: View {
         }
         .task(id: dependencies.authVersion) { await loadAuthState() }
         .tronErrorAlert(message: $error)
+    }
+
+    private var providersInfoCard: some View {
+        SettingsInfoCard(
+            icon: "key.horizontal",
+            title: ProvidersSettingsSummary.title(for: summaryContext),
+            description: ProvidersSettingsSummary.description(for: summaryContext)
+        )
+    }
+
+    private var summaryContext: ProvidersSettingsSummary.Context {
+        let configuredModelProviderCount = authState.map { state in
+            ProviderInfo.modelProviders.filter {
+                ProviderStatusHelpers.isProviderConfigured(state.providers[$0.id])
+            }.count
+        } ?? 0
+        let configuredServiceCount = authState.map { state in
+            ProviderInfo.services.filter {
+                ProviderStatusHelpers.isServiceConfigured(state.services[$0.id])
+            }.count
+        } ?? 0
+
+        return ProvidersSettingsSummary.Context(
+            isLoaded: authState != nil,
+            configuredModelProviderCount: configuredModelProviderCount,
+            totalModelProviderCount: ProviderInfo.modelProviders.count,
+            configuredServiceCount: configuredServiceCount,
+            totalServiceCount: ProviderInfo.services.count
+        )
     }
 
     // MARK: - Actions

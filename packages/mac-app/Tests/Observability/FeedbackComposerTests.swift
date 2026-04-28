@@ -7,20 +7,20 @@ import Testing
 struct FeedbackComposerTests {
     @Test("title includes app version and build number")
     func titleFormat() {
-        let composer = FeedbackIssueComposer(appVersion: "0.5.0", buildNumber: "12", osVersion: "macOS 15.0")
-        #expect(composer.title() == "Mac menu bar feedback - v0.5.0 (12)")
+        let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
+        #expect(composer.title() == "Mac menu bar feedback - v0.1 (Beta 1) (build 1)")
     }
 
     @Test("body includes environment, status, and redacted logs")
     func bodyRedactsLogs() {
-        let composer = FeedbackIssueComposer(appVersion: "0.5.0", buildNumber: "1", osVersion: "macOS 15.0")
+        let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
         let snapshot = ServerStatusSnapshot(state: .failed(reason: "timeout"))
         let body = composer.body(
             snapshot: snapshot,
             logs: "Bearer 1234567890abcdef1234 failed from /Users/alice/project"
         )
 
-        #expect(body.contains("App: 0.5.0 (1)"))
+        #expect(body.contains("App: v0.1 (Beta 1) (build 1)"))
         #expect(body.contains("macOS: macOS 15.0"))
         #expect(body.contains("Server: failed (timeout)"))
         #expect(!body.contains("1234567890abcdef1234"))
@@ -30,8 +30,8 @@ struct FeedbackComposerTests {
 
     @Test("issue URL targets GitHub issues, not mail")
     func issueURL() throws {
-        let composer = FeedbackIssueComposer(appVersion: "0.5.0", buildNumber: "1", osVersion: "macOS 15.0")
-        let snapshot = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
+        let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
+        let snapshot = ServerStatusSnapshot(state: .running(version: "0.1.0-beta.1", port: 9847))
         let plan = try #require(composer.openPlan(snapshot: snapshot, logs: "hello"))
 
         #expect(plan.url.scheme == "https")
@@ -44,8 +44,8 @@ struct FeedbackComposerTests {
 
     @Test("oversized body opens title-only issue and marks body for clipboard")
     func oversizedBodyUsesClipboardPlan() throws {
-        let composer = FeedbackIssueComposer(appVersion: "0.5.0", buildNumber: "1", osVersion: "macOS 15.0")
-        let snapshot = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
+        let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
+        let snapshot = ServerStatusSnapshot(state: .running(version: "0.1.0-beta.1", port: 9847))
         let plan = try #require(composer.openPlan(snapshot: snapshot, logs: String(repeating: "x", count: 20_000)))
 
         #expect(plan.copiedFullBodyToClipboard)

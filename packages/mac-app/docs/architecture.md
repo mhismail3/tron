@@ -330,6 +330,11 @@ Four workflows operate against the same `~/.tron/system/` data tree and share `p
 - **`~/.tron/system/`** data tree — settings, auth, sessions, log database, and `run/` state. Wrappers in workflows 1, 2, and 3 mutate the wrapper-side files (`run/.onboarded`, `run/.mac-wrapper.lock`); the agent owns the rest.
 - **`auth.json.bearerToken`** — bearer issued by the agent on first start. Same token regardless of which workflow started the agent.
 - **`~/.tron/skills/`** — managed skills synced from the wrapper's bundled `Contents/Resources/Skills/` by production install/menu-bar start paths, and from `packages/agent/skills/` by `tron install` / `tron dev`. Same-name user-owned directories without `.managed` are preserved; stale `.managed` directories disappear when the bundled set no longer contains them.
+- **Release identity** — `VERSION.env` is the only hand-edited release source.
+  `scripts/tron version sync` mirrors the canonical Cargo/GitHub version into
+  the Mac bundle as `TRON_CANONICAL_VERSION`, while `MARKETING_VERSION` remains
+  numeric for Apple tooling. Menu-bar feedback and server-version surfaces use
+  `VersionDisplay`, so `0.1.0-beta.1` renders as `v0.1 (Beta 1)`.
 
 ### Mutual exclusion (how they coexist without conflict)
 

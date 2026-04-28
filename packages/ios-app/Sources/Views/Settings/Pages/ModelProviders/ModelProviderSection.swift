@@ -25,6 +25,12 @@ struct ModelProviderSection: View {
     private var apiKeyRows: [ProviderApiKeyCredentialRow] {
         apiKeys.map { ProviderApiKeyCredentialRow(key: $0) }
     }
+    private var credentialRows: [ProviderCredentialDisplayRow] {
+        accountRows.map { .account($0.account) } + apiKeyRows.map { .apiKey($0.key) }
+    }
+    private var actionItems: [ProviderAuthActionItem] {
+        ProviderAuthActionItem.items(for: provider)
+    }
     private var oauthLoginDisabled: Bool {
         provider.supportsOAuth && ProviderStatusHelpers.hasRefreshableOAuth(providerAuth)
     }
@@ -33,90 +39,63 @@ struct ModelProviderSection: View {
         VStack(alignment: .leading, spacing: 0) {
             ProviderSectionHeader(provider: provider, isConfigured: isConfigured)
 
-            SettingsCard {
-                cardContents
+            VStack(alignment: .leading, spacing: 8) {
+                providerStatusCard
+                providerActionsCard
+
+                if ProviderSettingsContainer.containers(for: provider).contains(.googleCloud) {
+                    googleCloudCard
+                }
             }
         }
     }
 
-    @ViewBuilder
-    private var cardContents: some View {
-        if provider.supportsOAuth {
-            ForEach(accountRows) { row in
-                ProviderCredentialRow(
-                    isActive: ProviderStatusHelpers.isAccountActive(providerAuth, label: row.account.label),
-                    icon: "lock.shield.fill",
-                    label: row.account.label,
-                    status: ProviderStatusHelpers.accountStatus(row.account),
-                    statusColor: ProviderStatusHelpers.accountStatusColor(row.account),
-                    onSelect: {
-                        _ = await onSetActive(ActiveCredentialParam(type: "oauth", label: row.account.label))
+    private var providerStatusCard: some View {
+        SettingsCard {
+            if credentialRows.isEmpty {
+                emptyStatusRow
+            } else {
+                ForEach(Array(credentialRows.enumerated()), id: \.element.id) { index, row in
+                    credentialStatusRow(row)
+                    if index < credentialRows.count - 1 {
+                        SettingsRowDivider()
+                    }
+                }
+            }
+        }
+    }
+
+    private var providerActionsCard: some View {
+        SettingsCard {
+            ForEach(Array(actionItems.enumerated()), id: \.element.id) { index, item in
+                actionRow(item)
+                if index < actionItems.count - 1 || (item == .addApiKey && showAddApiKey) {
+                    SettingsRowDivider()
+                }
+            }
+
+            if showAddApiKey {
+                AddApiKeyForm(
+                    onAdd: { label, key in
+                        let result = await onAddApiKey(label, key)
+                        guard result.shouldCommitLocalFormChanges else { return result }
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showAddApiKey = false
+                        }
+                        return result
                     },
-                    onDelete: { _ = await onRemoveAccount(row.account.label) }
+                    onCancel: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showAddApiKey = false
+                        }
+                    }
                 )
-                SettingsRowDivider()
             }
         }
+    }
 
-        ForEach(apiKeyRows) { row in
-            ProviderCredentialRow(
-                isActive: ProviderStatusHelpers.isApiKeyActive(providerAuth, label: row.key.label),
-                icon: "key.horizontal",
-                label: row.key.label,
-                status: row.key.keyHint,
-                statusColor: .tronTextSecondary,
-                onSelect: {
-                    _ = await onSetActive(ActiveCredentialParam(type: "apiKey", label: row.key.label))
-                },
-                onDelete: { _ = await onRemoveApiKey(row.key.label) }
-            )
-            SettingsRowDivider()
-        }
-
-        if provider.supportsOAuth {
-            actionRow(
-                icon: "lock.shield",
-                label: "OAuth Login",
-                disabled: oauthLoginDisabled,
-                accessibility: "Sign in with OAuth",
-                onTap: onOAuthLogin
-            )
-            SettingsRowDivider()
-        }
-
-        actionRow(
-            icon: showAddApiKey ? "chevron.up" : "plus",
-            label: showAddApiKey ? "Hide" : "Add API Key",
-            disabled: false,
-            accessibility: "Add API key",
-            onTap: {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    showAddApiKey.toggle()
-                }
-            }
-        )
-
-        if showAddApiKey {
-            SettingsRowDivider()
-            AddApiKeyForm(
-                onAdd: { label, key in
-                    let result = await onAddApiKey(label, key)
-                    guard result.shouldCommitLocalFormChanges else { return result }
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        showAddApiKey = false
-                    }
-                    return result
-                },
-                onCancel: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        showAddApiKey = false
-                    }
-                }
-            )
-        }
-
-        if provider.id == "google" {
-            SettingsRowDivider()
+    private var googleCloudCard: some View {
+        SettingsCard {
             GoogleCloudRows(
                 providerInfo: providerAuth,
                 onSave: { params in await onSaveProvider(params) },
@@ -125,23 +104,72 @@ struct ModelProviderSection: View {
         }
     }
 
-    private func actionRow(
-        icon: String,
-        label: String,
-        disabled: Bool,
-        accessibility: String,
-        onTap: @escaping () -> Void
-    ) -> some View {
-        HStack {
+    private var emptyStatusRow: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "circle")
+                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                .foregroundStyle(.tronTextMuted.opacity(0.45))
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Not connected")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.tronTextPrimary)
+                Text(provider.supportsOAuth ? "Use OAuth or an API key to connect \(provider.displayName)." : "Add an API key to connect \(provider.displayName).")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private func credentialStatusRow(_ row: ProviderCredentialDisplayRow) -> some View {
+        switch row {
+        case .account(let account):
+            ProviderCredentialRow(
+                isActive: ProviderStatusHelpers.isAccountActive(providerAuth, label: account.label),
+                label: account.label,
+                status: ProviderStatusHelpers.accountDetail(account),
+                statusColor: ProviderStatusHelpers.accountStatusColor(account),
+                onSelect: {
+                    _ = await onSetActive(ActiveCredentialParam(type: "oauth", label: account.label))
+                },
+                onDelete: { _ = await onRemoveAccount(account.label) }
+            )
+        case .apiKey(let key):
+            ProviderCredentialRow(
+                isActive: ProviderStatusHelpers.isApiKeyActive(providerAuth, label: key.label),
+                label: key.label,
+                status: key.keyHint,
+                statusColor: .tronTextSecondary,
+                onSelect: {
+                    _ = await onSetActive(ActiveCredentialParam(type: "apiKey", label: key.label))
+                },
+                onDelete: { _ = await onRemoveApiKey(key.label) }
+            )
+        }
+    }
+
+    private func actionRow(_ item: ProviderAuthActionItem) -> some View {
+        let disabled = item == .oauthLogin && oauthLoginDisabled
+        let title = item == .addApiKey && showAddApiKey ? "Hide API Key" : item.title
+        let icon = item == .addApiKey && showAddApiKey ? "chevron.up" : item.icon
+
+        return HStack {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                 .foregroundStyle(.tronEmerald)
                 .frame(width: 18)
-            Text(label)
+            Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronTextPrimary)
             Spacer()
-            Image(systemName: "chevron.right")
+            Image(systemName: item == .addApiKey && showAddApiKey ? "chevron.up" : "chevron.right")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
         }
@@ -149,14 +177,20 @@ struct ModelProviderSection: View {
         .padding(.vertical, 12)
         .contentShape(Rectangle())
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(accessibility)
+        .accessibilityLabel(item.accessibilityLabel)
         .opacity(disabled ? 0.5 : 1.0)
         .onTapGesture {
             guard !disabled else { return }
-            onTap()
+            switch item {
+            case .oauthLogin:
+                onOAuthLogin()
+            case .addApiKey:
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    showAddApiKey.toggle()
+                }
+            }
         }
     }
-
 }
 
 struct ProviderSectionHeader: View {
@@ -209,5 +243,19 @@ private struct ProviderApiKeyCredentialRow: Identifiable {
 
     var id: String {
         item.id
+    }
+}
+
+private enum ProviderCredentialDisplayRow: Identifiable {
+    case account(AccountInfo)
+    case apiKey(ApiKeyInfo)
+
+    var id: String {
+        switch self {
+        case .account(let account):
+            return ProviderCredentialRowItem.oauth(account).id
+        case .apiKey(let key):
+            return ProviderCredentialRowItem.apiKey(key).id
+        }
     }
 }

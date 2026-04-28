@@ -7,6 +7,7 @@
 #   dev             Start dev server (dev-server profile, -b build, -t test, -d background)
 #   ci              Run CI checks (fmt, check, clippy, test, bench, doc)
 #   bench           Performance benchmarks (run, bless, compare)
+#   version         Print/check/sync centralized release version mirrors
 #   setup           First-time project setup
 #
 # Service:
@@ -1655,6 +1656,7 @@ cmd_help() {
     echo "  dev             Start server (dev-server profile; -b build, -t test, -d background)"
     echo "  ci              Run CI checks (fmt, check, clippy, test, bench, doc)"
     echo "  bench           Performance benchmarks (run, bless, compare)"
+    echo "  version         Print/check/sync centralized release version mirrors"
     echo "  setup           First-time project setup"
     echo ""
     echo -e "${BOLD}Deployment (workspace only):${NC}"
@@ -1697,6 +1699,7 @@ case "$1" in
     dev)       shift; cmd_dev "$@" ;;
     ci)        shift; cmd_ci "$@" ;;
     bench)     shift; cmd_bench "$@" ;;
+    version)   shift; "$SCRIPT_DIR/tron-version" "$@" ;;
     preflight) cmd_preflight ;;
     deploy)    shift; cmd_deploy "$@" ;;
     install)   shift; cmd_install "$@" ;;

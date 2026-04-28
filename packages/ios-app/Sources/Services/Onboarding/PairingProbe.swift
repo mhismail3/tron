@@ -4,7 +4,7 @@ import Foundation
 /// branch on every outcome without inspecting NSError details.
 enum PairingProbeOutcome: Equatable, Sendable {
     /// `system.ping` returned success. The optional `serverVersion` lets
-    /// the UI confirm "you're talking to Tron 0.5.0".
+    /// the UI confirm "you're talking to Tron 0.1.0-beta.1".
     case ok(serverVersion: String?)
     /// HTTP 401 on the WebSocket upgrade — bearer wrong/missing/rotated.
     case unauthorized
@@ -101,7 +101,7 @@ final class URLSessionPairingProbe: PairingProbing {
         let requestId = UUID().uuidString
         let payload = Self.pingRequestData(
             protocolVersion: 1,
-            clientVersion: AppConstants.appVersion,
+            clientVersion: AppConstants.canonicalVersion,
             requestId: requestId
         )
 

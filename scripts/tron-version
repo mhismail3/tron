@@ -1,0 +1,355 @@
+#!/usr/bin/env bash
+# tron-version - centralized release version helper
+#
+# VERSION.env is the only hand-edited release identity file. Every
+# platform-specific version field is a generated mirror for a tool that
+# cannot read VERSION.env directly.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+VERSION_FILE="$PROJECT_DIR/VERSION.env"
+
+failures=0
+
+die() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+note_failure() {
+    echo "version drift: $*" >&2
+    failures=$((failures + 1))
+}
+
+usage() {
+    cat <<'USAGE'
+Usage: tron version <command>
+
+Commands:
+  print              Print derived version fields as KEY=value lines
+  check              Validate all mirrored version fields
+  sync [--check]     Update mirrors from VERSION.env, or validate with --check
+  bump beta|patch|minor
+                     Update VERSION.env, sync mirrors, and print the result
+  test               Run shell-level version helper tests
+USAGE
+}
+
+read_env_value() {
+    local key="$1"
+    awk -F= -v key="$key" '
+        $1 == key {
+            sub(/\r$/, "", $2)
+            print $2
+            found = 1
+            exit
+        }
+        END { if (!found) exit 1 }
+    ' "$VERSION_FILE"
+}
+
+load_version_env() {
+    [ -f "$VERSION_FILE" ] || die "missing $VERSION_FILE"
+    TRON_VERSION="$(read_env_value TRON_VERSION)" || die "VERSION.env missing TRON_VERSION"
+    TRON_APPLE_BUILD="$(read_env_value TRON_APPLE_BUILD)" || die "VERSION.env missing TRON_APPLE_BUILD"
+}
+
+derive_version_fields() {
+    load_version_env
+
+    if [[ "$TRON_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-beta\.([1-9][0-9]*))?$ ]]; then
+        TRON_MAJOR="${BASH_REMATCH[1]}"
+        TRON_MINOR="${BASH_REMATCH[2]}"
+        TRON_PATCH="${BASH_REMATCH[3]}"
+        TRON_BETA_NUMBER="${BASH_REMATCH[5]-}"
+    else
+        die "TRON_VERSION must be MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-beta.N: $TRON_VERSION"
+    fi
+    if [[ ! "$TRON_APPLE_BUILD" =~ ^[1-9][0-9]*$ ]]; then
+        die "TRON_APPLE_BUILD must be a positive integer: $TRON_APPLE_BUILD"
+    fi
+
+    TRON_APPLE_MARKETING_VERSION="${TRON_MAJOR}.${TRON_MINOR}.${TRON_PATCH}"
+    if [ "$TRON_PATCH" = "0" ]; then
+        TRON_DISPLAY_VERSION="v${TRON_MAJOR}.${TRON_MINOR}"
+    else
+        TRON_DISPLAY_VERSION="v${TRON_MAJOR}.${TRON_MINOR}.${TRON_PATCH}"
+    fi
+    if [ -n "$TRON_BETA_NUMBER" ]; then
+        TRON_DISPLAY_VERSION="${TRON_DISPLAY_VERSION} (Beta ${TRON_BETA_NUMBER})"
+    fi
+
+    TRON_RELEASE_TAG="mac-v${TRON_VERSION}"
+    TRON_RELEASE_TITLE="Tron Mac ${TRON_DISPLAY_VERSION}"
+    TRON_DMG_NAME="Tron-mac-v${TRON_VERSION}.dmg"
+    if [[ "$TRON_VERSION" == *-* ]]; then
+        TRON_IS_PRERELEASE="true"
+    else
+        TRON_IS_PRERELEASE="false"
+    fi
+}
+
+print_version_fields() {
+    derive_version_fields
+    cat <<EOF
+TRON_VERSION=$TRON_VERSION
+TRON_APPLE_MARKETING_VERSION=$TRON_APPLE_MARKETING_VERSION
+TRON_APPLE_BUILD=$TRON_APPLE_BUILD
+TRON_DISPLAY_VERSION=$TRON_DISPLAY_VERSION
+TRON_RELEASE_TAG=$TRON_RELEASE_TAG
+TRON_RELEASE_TITLE=$TRON_RELEASE_TITLE
+TRON_DMG_NAME=$TRON_DMG_NAME
+TRON_IS_PRERELEASE=$TRON_IS_PRERELEASE
+EOF
+}
+
+replace_regex() {
+    local file="$1"
+    local pattern="$2"
+    local replacement="$3"
+    perl -0pi -e "s{$pattern}{$replacement}g" "$file"
+}
+
+sync_versions() {
+    derive_version_fields
+
+    replace_regex "$PROJECT_DIR/packages/agent/Cargo.toml" \
+        '(?m)(^version = ")[^"]+(")' \
+        "\${1}${TRON_VERSION}\${2}"
+    replace_regex "$PROJECT_DIR/packages/agent/Cargo.lock" \
+        '(\[\[package\]\]\nname = "tron"\nversion = ")[^"]+(")' \
+        "\${1}${TRON_VERSION}\${2}"
+
+    replace_regex "$PROJECT_DIR/packages/mac-app/project.yml" \
+        '(MARKETING_VERSION: ")[^"]+(")' \
+        "\${1}${TRON_APPLE_MARKETING_VERSION}\${2}"
+    replace_regex "$PROJECT_DIR/packages/mac-app/project.yml" \
+        '(CURRENT_PROJECT_VERSION: ")[^"]+(")' \
+        "\${1}${TRON_APPLE_BUILD}\${2}"
+    replace_regex "$PROJECT_DIR/packages/mac-app/project.yml" \
+        '(TRON_CANONICAL_VERSION: ")[^"]+(")' \
+        "\${1}${TRON_VERSION}\${2}"
+
+    replace_regex "$PROJECT_DIR/packages/ios-app/project.yml" \
+        '(MARKETING_VERSION: ")[^"]+(")' \
+        "\${1}${TRON_APPLE_MARKETING_VERSION}\${2}"
+    replace_regex "$PROJECT_DIR/packages/ios-app/project.yml" \
+        '(CURRENT_PROJECT_VERSION: ")[^"]+(")' \
+        "\${1}${TRON_APPLE_BUILD}\${2}"
+    replace_regex "$PROJECT_DIR/packages/ios-app/project.yml" \
+        '(TRON_CANONICAL_VERSION: ")[^"]+(")' \
+        "\${1}${TRON_VERSION}\${2}"
+
+    # VERSION.env owns iOS versions now; leaving xcconfig mirrors around
+    # creates a second source of truth that XcodeGen may merge differently
+    # across configs.
+    perl -0pi -e 's{(?m)^// App info\nMARKETING_VERSION = [^\n]+\nCURRENT_PROJECT_VERSION = [^\n]+\n}{// App info lives in project.yml and is generated from VERSION.env.\n}' \
+        "$PROJECT_DIR/packages/ios-app/Configuration/Base.xcconfig"
+    perl -0pi -e 's{(?m)^// App info\nMARKETING_VERSION = [^\n]+\nCURRENT_PROJECT_VERSION = [^\n]+\n}{// App info lives in project.yml and is generated from VERSION.env.\n}' \
+        "$PROJECT_DIR/packages/mac-app/Configuration/Base.xcconfig"
+}
+
+value_after_key() {
+    local file="$1"
+    local key="$2"
+    awk -v key="$key" '
+        $0 ~ key {
+            getline
+            sub(/^.*<string>/, "")
+            sub(/<\/string>.*$/, "")
+            print
+            exit
+        }
+    ' "$file"
+}
+
+check_equals() {
+    local label="$1"
+    local actual="$2"
+    local expected="$3"
+    if [ "$actual" != "$expected" ]; then
+        note_failure "$label is '$actual', expected '$expected'"
+    fi
+}
+
+check_grep_count() {
+    local label="$1"
+    local expected_count="$2"
+    local pattern="$3"
+    local file="$4"
+    local count
+    count=$(grep -F "$pattern" "$file" | wc -l | tr -d ' ')
+    if [ "$count" != "$expected_count" ]; then
+        note_failure "$label matched $count time(s), expected $expected_count"
+    fi
+}
+
+cargo_lock_tron_version() {
+    awk '
+        $0 == "[[package]]" { in_pkg = 1; name = ""; version = ""; next }
+        in_pkg && $1 == "name" && $3 == "\"tron\"" { name = "tron"; next }
+        in_pkg && $1 == "version" { gsub(/"/, "", $3); version = $3; next }
+        in_pkg && $0 == "" {
+            if (name == "tron") { print version; printed = 1; exit }
+            in_pkg = 0
+        }
+        END {
+            if (!printed && in_pkg && name == "tron") print version
+        }
+    ' "$PROJECT_DIR/packages/agent/Cargo.lock"
+}
+
+check_versions() {
+    failures=0
+    derive_version_fields
+
+    local cargo_version
+    cargo_version=$(awk -F'"' '$1 == "version = " { print $2; exit }' "$PROJECT_DIR/packages/agent/Cargo.toml")
+    check_equals "Cargo.toml package version" "$cargo_version" "$TRON_VERSION"
+    check_equals "Cargo.lock tron package version" "$(cargo_lock_tron_version)" "$TRON_VERSION"
+
+    check_grep_count "Mac MARKETING_VERSION" 1 "MARKETING_VERSION: \"${TRON_APPLE_MARKETING_VERSION}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
+    check_grep_count "Mac CURRENT_PROJECT_VERSION" 1 "CURRENT_PROJECT_VERSION: \"${TRON_APPLE_BUILD}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
+    check_grep_count "Mac TRON_CANONICAL_VERSION" 1 "TRON_CANONICAL_VERSION: \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
+
+    check_grep_count "iOS MARKETING_VERSION" 2 "MARKETING_VERSION: \"${TRON_APPLE_MARKETING_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
+    check_grep_count "iOS CURRENT_PROJECT_VERSION" 2 "CURRENT_PROJECT_VERSION: \"${TRON_APPLE_BUILD}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
+    check_grep_count "iOS TRON_CANONICAL_VERSION" 2 "TRON_CANONICAL_VERSION: \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
+
+    if grep -Eq '^(MARKETING_VERSION|CURRENT_PROJECT_VERSION)[[:space:]]*=' "$PROJECT_DIR/packages/ios-app/Configuration/Base.xcconfig"; then
+        note_failure "iOS Base.xcconfig still defines MARKETING_VERSION/CURRENT_PROJECT_VERSION"
+    fi
+    if grep -Eq '^(MARKETING_VERSION|CURRENT_PROJECT_VERSION)[[:space:]]*=' "$PROJECT_DIR/packages/mac-app/Configuration/Base.xcconfig"; then
+        note_failure "Mac Base.xcconfig still defines MARKETING_VERSION/CURRENT_PROJECT_VERSION"
+    fi
+
+    check_equals "iOS app Info.plist TRONCanonicalVersion" \
+        "$(value_after_key "$PROJECT_DIR/packages/ios-app/Sources/Info.plist" "TRONCanonicalVersion")" \
+        '$(TRON_CANONICAL_VERSION)'
+    check_equals "iOS share extension Info.plist TRONCanonicalVersion" \
+        "$(value_after_key "$PROJECT_DIR/packages/ios-app/ShareExtension/Info.plist" "TRONCanonicalVersion")" \
+        '$(TRON_CANONICAL_VERSION)'
+    check_equals "Mac Info.plist TRONCanonicalVersion" \
+        "$(value_after_key "$PROJECT_DIR/packages/mac-app/Sources/Info.plist" "TRONCanonicalVersion")" \
+        '$(TRON_CANONICAL_VERSION)'
+
+    local drift_pattern='0\.5\.0|0\.5\.1|mac-v0\.5|1\.0\.0|mac-vX\.Y\.Z|vX\.Y\.Z'
+    local drift_targets=(
+        "$PROJECT_DIR/README.md"
+        "$PROJECT_DIR/CONTRIBUTING.md"
+        "$PROJECT_DIR/packages/mac-app/docs"
+        "$PROJECT_DIR/packages/ios-app/docs"
+        "$PROJECT_DIR/.github/workflows/release-mac.yml"
+        "$PROJECT_DIR/scripts/tron-lib.sh"
+    )
+    if command -v rg >/dev/null 2>&1; then
+        rg -n "$drift_pattern" "${drift_targets[@]}" >/tmp/tron-version-doc-drift.txt || true
+    else
+        grep -RInE "$drift_pattern" "${drift_targets[@]}" >/tmp/tron-version-doc-drift.txt || true
+    fi
+    if [ -s /tmp/tron-version-doc-drift.txt ]; then
+        cat /tmp/tron-version-doc-drift.txt >&2
+        note_failure "release docs/workflow still mention stale version examples"
+    fi
+
+    if [ "$failures" -ne 0 ]; then
+        echo "$failures version drift issue(s) found" >&2
+        return 1
+    fi
+    echo "Version mirrors are in sync: ${TRON_VERSION} -> ${TRON_DISPLAY_VERSION}"
+}
+
+write_version_file() {
+    local version="$1"
+    local build="$2"
+    local tmp
+    tmp="$(mktemp "$PROJECT_DIR/.VERSION.env.XXXXXX")"
+    {
+        echo "TRON_VERSION=$version"
+        echo "TRON_APPLE_BUILD=$build"
+    } > "$tmp"
+    mv "$tmp" "$VERSION_FILE"
+}
+
+bump_version() {
+    local kind="${1:-}"
+    [ -n "$kind" ] || die "bump requires beta, patch, or minor"
+    derive_version_fields
+
+    local next
+    case "$kind" in
+        beta)
+            if [ -n "$TRON_BETA_NUMBER" ]; then
+                next="${TRON_MAJOR}.${TRON_MINOR}.${TRON_PATCH}-beta.$((TRON_BETA_NUMBER + 1))"
+            else
+                next="${TRON_MAJOR}.${TRON_MINOR}.${TRON_PATCH}-beta.1"
+            fi
+            ;;
+        patch)
+            next="${TRON_MAJOR}.${TRON_MINOR}.$((TRON_PATCH + 1))"
+            ;;
+        minor)
+            next="${TRON_MAJOR}.$((TRON_MINOR + 1)).0"
+            ;;
+        *)
+            die "unknown bump kind: $kind"
+            ;;
+    esac
+
+    write_version_file "$next" "$((TRON_APPLE_BUILD + 1))"
+    sync_versions
+    print_version_fields
+}
+
+self_test() {
+    local out
+    out="$("$PROJECT_DIR/scripts/tron" version print)"
+    grep -qx 'TRON_VERSION=0.1.0-beta.1' <<<"$out" || die "print omitted canonical version"
+    grep -qx 'TRON_APPLE_MARKETING_VERSION=0.1.0' <<<"$out" || die "print omitted Apple marketing version"
+    grep -qx 'TRON_DISPLAY_VERSION=v0.1 (Beta 1)' <<<"$out" || die "print omitted display version"
+    "$PROJECT_DIR/scripts/tron" version check >/dev/null
+    "$PROJECT_DIR/scripts/tron" version sync --check >/dev/null
+
+    local invalid
+    for invalid in 0.1 0.1-b1 v0.1.b1 0.1.0.0 0.1.0-beta.x 0.1.0-beta.0; do
+        TRON_VERSION="$invalid"
+        if [[ "$TRON_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-beta\.([1-9][0-9]*))?$ ]]; then
+            die "invalid version unexpectedly accepted by test regex: $invalid"
+        fi
+    done
+
+    echo "Version helper tests passed"
+}
+
+cmd="${1:-}"
+case "$cmd" in
+    print)
+        print_version_fields
+        ;;
+    check)
+        check_versions
+        ;;
+    sync)
+        if [ "${2:-}" = "--check" ]; then
+            check_versions
+        else
+            sync_versions
+            check_versions
+        fi
+        ;;
+    bump)
+        shift
+        bump_version "$@"
+        ;;
+    test)
+        self_test
+        ;;
+    ""|-h|--help|help)
+        usage
+        ;;
+    *)
+        die "unknown version command: $cmd"
+        ;;
+esac

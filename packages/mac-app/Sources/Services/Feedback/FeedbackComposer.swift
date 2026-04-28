@@ -19,7 +19,7 @@ struct FeedbackIssueComposer {
     private let redactor = SentryRedactor()
 
     func title() -> String {
-        "Mac menu bar feedback - v\(appVersion) (\(buildNumber))"
+        "Mac menu bar feedback - \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))"
     }
 
     func body(snapshot: ServerStatusSnapshot, logs: String) -> String {
@@ -30,7 +30,7 @@ struct FeedbackIssueComposer {
 
         ### Environment
 
-        - App: \(appVersion) (\(buildNumber))
+        - App: \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))
         - macOS: \(osVersion)
         - Server: \(snapshot.feedbackDescription)
 
@@ -77,7 +77,7 @@ private extension ServerStatusSnapshot {
         case .checking:
             return "checking"
         case .running(let version, let port):
-            return "running on port \(port), version \(version ?? "?")"
+            return "running on port \(port), version \(version.map { VersionDisplay.label(for: $0) } ?? "?")"
         case .busy(let action):
             return action.rawValue.lowercased()
         case .paused:

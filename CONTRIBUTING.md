@@ -190,14 +190,16 @@ Two release lanes:
 | What | How | Cadence |
 |---|---|---|
 | iOS Beta to TestFlight | Maintainer runs the `/publish` skill (`/publish bump && /publish build`). App ID `6761511764`. | On request, ad-hoc. |
-| Mac DMG to GitHub Releases | Tag `mac-vX.Y.Z` on a green main commit. CI workflow `release-mac.yml` builds + notarizes + attaches the DMG. | Ad-hoc. |
+| Mac DMG to GitHub Releases | Tag `mac-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-mac.yml` builds + notarizes + attaches the DMG as a draft pre-release when the version has a beta suffix. | Ad-hoc. |
 
 Versioning sources:
-- **Rust agent** — `packages/agent/Cargo.toml` `[package].version`. Bump with
-  `cargo set-version` in the same PR as the release tag.
-- **iOS app** — `packages/ios-app/project.yml` `MARKETING_VERSION`. The
-  `/publish bump` skill handles this.
-- **Mac wrapper** — `packages/mac-app/project.yml` `MARKETING_VERSION`.
+- **Source of truth** — root `VERSION.env`. `TRON_VERSION` is canonical
+  SemVer (`0.1.0-beta.1`), and `TRON_APPLE_BUILD` is the numeric Apple
+  build. Human-facing surfaces format that first beta as `v0.1 (Beta 1)`.
+- **Generated mirrors** — `packages/agent/Cargo.toml`, `packages/agent/Cargo.lock`,
+  Mac/iOS `project.yml`, and custom `TRONCanonicalVersion` bundle keys.
+  Run `scripts/tron version sync` after editing `VERSION.env`; CI runs
+  `scripts/tron version check` to prevent drift.
 
 ### Cutting a Mac DMG release
 
@@ -205,12 +207,14 @@ Versioning sources:
 # 1. Confirm main is green.
 git checkout main && git pull && git log -1 --oneline
 
-# 2. Bump MARKETING_VERSION in packages/mac-app/project.yml.
-#    Match Cargo.toml — the wrapper and the agent ship together.
+# 2. Set VERSION.env, then sync generated mirrors.
+# For the first beta this is already 0.1.0-beta.1; subsequent betas can use
+# `scripts/tron version bump beta`.
+scripts/tron version sync
 
 # 3. Commit the bump and tag.
-git commit -am "chore(release): Mac wrapper vX.Y.Z"
-git tag mac-vX.Y.Z
+git commit -am "chore(release): Tron v0.1 (Beta 1)"
+git tag "$(scripts/tron version print | awk -F= '$1 == "TRON_RELEASE_TAG" { print $2 }')"
 git push && git push --tags
 
 # 4. The release-mac.yml workflow runs: build → codesign → notarize →
@@ -236,9 +240,9 @@ git push && git push --tags
 Rotate by regenerating the `.p12`, re-encoding (`base64 -i Tron.p12 | pbcopy`),
 and updating the secret in GitHub → Settings → Secrets and variables → Actions.
 
-**Rollback a bad Mac release**: `gh release delete mac-vX.Y.Z` pulls the DMG.
+**Rollback a bad Mac release**: `gh release delete mac-v0.1.0-beta.1` pulls the DMG.
 Existing installs are unaffected (they don't auto-pull deletions). Cut a fixed
-release at `mac-vX.Y.Z+1`.
+release at the next beta or patch version.
 
 Hotfix path: cherry-pick the fix to `main`, tag a new patch release.
 

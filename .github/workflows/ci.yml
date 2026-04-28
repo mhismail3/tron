@@ -1,7 +1,8 @@
 # Continuous Integration
 #
-# Four workloads, two cost tiers:
+# Five workloads, two cost tiers:
 #   - personal-info-guard: ubuntu, ~30s, runs every PR + push (always).
+#   - version-drift:       ubuntu, ~10s, validates VERSION.env mirrors.
 #   - rust:                ubuntu (1x), runs when packages/agent/** changes,
 #                          on every push to main, or when labeled `rust`.
 #   - ios:                 macos (10x), runs when packages/ios-app/** changes,
@@ -13,9 +14,10 @@
 #                          dry-run DMG assembly on PR to catch release-mac.yml
 #                          drift before tag push.
 #
-# Path-gating happens via `dorny/paths-filter` so PRs that only touch docs or
-# the other platform don't burn macos minutes. Pushes to main always run
-# everything to catch any cross-cutting regressions.
+# Path-gating happens via `dorny/paths-filter` for Rust/iOS/Mac so PRs that
+# only touch docs or the other platform don't burn macos minutes. The guard
+# jobs always run. Pushes to main always run everything to catch cross-cutting
+# regressions.
 #
 # Concurrency: in-flight runs for the same PR are cancelled on new pushes
 # (cheap on push to main — only one run can be in flight there anyway).
@@ -81,6 +83,16 @@ jobs:
           fetch-depth: 0
       - name: Run personal-info-guard
         run: ./scripts/personal-info-guard.sh
+
+  version-drift:
+    name: Version drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check centralized version mirrors
+        run: ./scripts/tron version check
+      - name: Run version helper tests
+        run: ./scripts/tron version test
 
   rust:
     name: Rust (fmt + clippy + test)
@@ -289,10 +301,11 @@ jobs:
   ci:
     name: CI summary
     runs-on: ubuntu-latest
-    needs: [personal-info-guard, rust, ios, mac]
+    needs: [personal-info-guard, version-drift, rust, ios, mac]
     if: always()
     env:
       RESULT_GUARD: ${{ needs.personal-info-guard.result }}
+      RESULT_VERSION: ${{ needs.version-drift.result }}
       RESULT_RUST: ${{ needs.rust.result }}
       RESULT_IOS: ${{ needs.ios.result }}
       RESULT_MAC: ${{ needs.mac.result }}
@@ -303,6 +316,9 @@ jobs:
           # personal-info-guard never path-gates — must be success.
           if [[ "$RESULT_GUARD" != "success" ]]; then
             echo "::error::personal-info-guard: $RESULT_GUARD"; fail=1
+          fi
+          if [[ "$RESULT_VERSION" != "success" ]]; then
+            echo "::error::version-drift: $RESULT_VERSION"; fail=1
           fi
           # rust + ios + mac may be `skipped` by the path filter — treat as success.
           for name in RUST IOS MAC; do

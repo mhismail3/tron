@@ -3,8 +3,14 @@ import Foundation
 enum AppConstants {
     static let defaultWorkspace = ""
     static let prodPort = "9847"
+    static var canonicalVersion: String {
+        Bundle.main.infoDictionary?["TRONCanonicalVersion"] as? String ?? appVersion
+    }
+    static var displayVersion: String {
+        VersionDisplay.label(for: canonicalVersion)
+    }
     static var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
     }
     static var buildNumber: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
