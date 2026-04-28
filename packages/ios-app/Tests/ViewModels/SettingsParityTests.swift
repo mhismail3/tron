@@ -64,6 +64,8 @@ final class SettingsParityTests: XCTestCase {
         "connectionPresets",
         // MCP
         "mcpSchemaRefreshTtlMs",
+        // Transcription (ConnectionSettingsPage.swift)
+        "transcriptionEnabled",
         // Server auth + Tailscale identity (ConnectionSettingsPage:88-156)
         "authEnforced",
         "tailscaleIp",

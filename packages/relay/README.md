@@ -39,18 +39,17 @@ The bundle ID is configured in `wrangler.toml` as a plain variable (not a secret
 
 ## Build Integration
 
-The Tron build scripts (`scripts/tron`) read relay credentials from `~/.tron/system/auth.json` and pass them as compile-time environment variables:
+The server reads relay credentials from compile-time environment variables via `option_env!()`. Release builds set them from GitHub Actions secrets in `.github/workflows/release-mac.yml`, so installed users do not need any local relay config:
 
-```json
-{
-  "relay": {
-    "url": "https://tron-push-relay.<subdomain>.workers.dev",
-    "secret": "<same HMAC secret set in Wrangler>"
-  }
-}
+```bash
+TRON_RELAY_URL="https://tron-push-relay.<subdomain>.workers.dev"
+TRON_RELAY_SECRET="<same HMAC secret set in Wrangler>"
+TRON_RELAY_ENVIRONMENT=production
 ```
 
-These values are baked into the server binary via `option_env!()` so users never need to configure anything.
+Developers testing push delivery locally may export the same variables before building/running `tron`. They are never read from `~/.tron/system/auth.json`.
+
+For Xcode Mac wrapper dogfood, prefer `packages/mac-app/.env.local`: copy `packages/mac-app/.env.local.example`, fill in the same relay values, then run `packages/mac-app/scripts/bundle-agent.sh`. The bundle script reads only the relay keys from that ignored file before Cargo compiles the staged helper.
 
 ## API
 

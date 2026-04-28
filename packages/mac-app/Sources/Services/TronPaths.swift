@@ -63,6 +63,15 @@ enum TronPaths {
         systemDir.appendingPathComponent("settings.json", isDirectory: false)
     }
 
+    static var transcriptionDir: URL {
+        systemDir.appendingPathComponent("transcription", isDirectory: true)
+    }
+
+    static var transcriptionResourceDir: URL {
+        (Bundle.main.resourceURL ?? applicationBundle.appendingPathComponent("Contents/Resources", isDirectory: true))
+            .appendingPathComponent("Transcription", isDirectory: true)
+    }
+
     static var launchAgentPlistPath: URL {
         applicationBundle
             .appendingPathComponent("Contents/Library/LaunchAgents", isDirectory: true)

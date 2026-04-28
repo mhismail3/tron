@@ -29,6 +29,7 @@ struct MenuBarItemBuilderTests {
             validateBundledHelper: { nil },
             pingServer: { _ in .unreachable },
             launchAgentManager: MockLaunchAgentManager(),
+            applyTranscriptionPreference: { _ in .disabled },
             touchOnboardedSentinel: { }
         )
     }

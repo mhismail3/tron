@@ -1313,14 +1313,14 @@ mod tests {
         serde_json::from_str(&content).unwrap()
     }
 
-    /// Auth.json with a relay section for testing extra-field preservation.
-    const AUTH_WITH_RELAY: &str = r#"{
+    /// Auth.json with an unknown section for testing extra-field preservation.
+    const AUTH_WITH_EXTRA: &str = r#"{
         "version": 1,
         "providers": {},
         "lastUpdated": "2026-01-01T00:00:00Z",
-        "relay": {
-            "url": "https://relay.tron.dev",
-            "secret": "hmac-shared-secret-123"
+        "customMetadata": {
+            "url": "https://example.invalid",
+            "secret": "opaque-test-value"
         }
     }"#;
 
@@ -1328,21 +1328,21 @@ mod tests {
     fn extra_fields_survive_roundtrip() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
-        write_raw_auth(&path, AUTH_WITH_RELAY);
+        write_raw_auth(&path, AUTH_WITH_EXTRA);
 
         let mut storage = load_auth_storage(&path).unwrap().unwrap();
         save_auth_storage(&path, &mut storage).unwrap();
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["url"], "https://relay.tron.dev");
-        assert_eq!(raw["relay"]["secret"], "hmac-shared-secret-123");
+        assert_eq!(raw["customMetadata"]["url"], "https://example.invalid");
+        assert_eq!(raw["customMetadata"]["secret"], "opaque-test-value");
     }
 
     #[test]
     fn extra_fields_survive_multiple_saves() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
-        write_raw_auth(&path, AUTH_WITH_RELAY);
+        write_raw_auth(&path, AUTH_WITH_EXTRA);
 
         for _ in 0..3 {
             let mut storage = load_auth_storage(&path).unwrap().unwrap();
@@ -1350,8 +1350,8 @@ mod tests {
         }
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["url"], "https://relay.tron.dev");
-        assert_eq!(raw["relay"]["secret"], "hmac-shared-secret-123");
+        assert_eq!(raw["customMetadata"]["url"], "https://example.invalid");
+        assert_eq!(raw["customMetadata"]["secret"], "opaque-test-value");
     }
 
     #[test]
@@ -1364,7 +1364,7 @@ mod tests {
                 "version": 1,
                 "providers": {},
                 "lastUpdated": "2026-01-01T00:00:00Z",
-                "relay": {"url": "https://relay.tron.dev", "secret": "s"},
+                "customMetadata": {"url": "https://example.invalid", "secret": "s"},
                 "customThing": "hello",
                 "anotherField": [1, 2, 3]
             }"#,
@@ -1374,7 +1374,7 @@ mod tests {
         save_auth_storage(&path, &mut storage).unwrap();
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["url"], "https://relay.tron.dev");
+        assert_eq!(raw["customMetadata"]["url"], "https://example.invalid");
         assert_eq!(raw["customThing"], "hello");
         assert_eq!(raw["anotherField"], serde_json::json!([1, 2, 3]));
     }
@@ -1383,13 +1383,13 @@ mod tests {
     fn save_oauth_tokens_preserves_extra() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
-        write_raw_auth(&path, AUTH_WITH_RELAY);
+        write_raw_auth(&path, AUTH_WITH_EXTRA);
 
         save_account_oauth_tokens(&path, "anthropic", "test", &make_tokens()).unwrap();
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["url"], "https://relay.tron.dev");
-        assert_eq!(raw["relay"]["secret"], "hmac-shared-secret-123");
+        assert_eq!(raw["customMetadata"]["url"], "https://example.invalid");
+        assert_eq!(raw["customMetadata"]["secret"], "opaque-test-value");
         // Also verify the tokens were saved
         assert!(raw["providers"]["anthropic"].is_object());
     }
@@ -1398,12 +1398,12 @@ mod tests {
     fn save_named_api_key_preserves_extra() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
-        write_raw_auth(&path, AUTH_WITH_RELAY);
+        write_raw_auth(&path, AUTH_WITH_EXTRA);
 
         save_named_api_key(&path, "openai", "(default)", "sk-key").unwrap();
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["url"], "https://relay.tron.dev");
+        assert_eq!(raw["customMetadata"]["url"], "https://example.invalid");
     }
 
     #[test]
@@ -1416,14 +1416,14 @@ mod tests {
                 "version": 1,
                 "providers": {"anthropic": {"apiKeys": [{"label": "x", "key": "sk-x"}]}},
                 "lastUpdated": "2026-01-01T00:00:00Z",
-                "relay": {"url": "https://relay.tron.dev", "secret": "s"}
+                "customMetadata": {"url": "https://example.invalid", "secret": "s"}
             }"#,
         );
 
         clear_provider_auth(&path, "anthropic").unwrap();
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["url"], "https://relay.tron.dev");
+        assert_eq!(raw["customMetadata"]["url"], "https://example.invalid");
         assert!(raw["providers"]["anthropic"].is_null());
     }
 
@@ -1431,20 +1431,20 @@ mod tests {
     fn remove_account_preserves_extra() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
-        write_raw_auth(&path, AUTH_WITH_RELAY);
+        write_raw_auth(&path, AUTH_WITH_EXTRA);
         save_account_oauth_tokens(&path, "anthropic", "work", &make_tokens()).unwrap();
 
         remove_account(&path, "anthropic", "work").unwrap();
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["url"], "https://relay.tron.dev");
+        assert_eq!(raw["customMetadata"]["url"], "https://example.invalid");
     }
 
     #[test]
     fn set_active_credential_preserves_extra() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
-        write_raw_auth(&path, AUTH_WITH_RELAY);
+        write_raw_auth(&path, AUTH_WITH_EXTRA);
         save_account_oauth_tokens(&path, "anthropic", "main", &make_tokens()).unwrap();
 
         set_active_credential(
@@ -1457,27 +1457,27 @@ mod tests {
         .unwrap();
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["url"], "https://relay.tron.dev");
+        assert_eq!(raw["customMetadata"]["url"], "https://example.invalid");
     }
 
     #[test]
     fn rename_account_preserves_extra() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
-        write_raw_auth(&path, AUTH_WITH_RELAY);
+        write_raw_auth(&path, AUTH_WITH_EXTRA);
         save_account_oauth_tokens(&path, "anthropic", "old", &make_tokens()).unwrap();
 
         rename_account(&path, "anthropic", "old", "new").unwrap();
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["url"], "https://relay.tron.dev");
+        assert_eq!(raw["customMetadata"]["url"], "https://example.invalid");
     }
 
     #[test]
     fn save_google_provider_auth_preserves_extra() {
         let dir = TempDir::new().unwrap();
         let path = test_path(&dir);
-        write_raw_auth(&path, AUTH_WITH_RELAY);
+        write_raw_auth(&path, AUTH_WITH_EXTRA);
 
         let gpa = GoogleProviderAuth {
             project_id: Some("test-proj".to_string()),
@@ -1486,7 +1486,7 @@ mod tests {
         save_google_provider_auth(&path, &gpa).unwrap();
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["url"], "https://relay.tron.dev");
+        assert_eq!(raw["customMetadata"]["url"], "https://example.invalid");
     }
 
     #[test]
@@ -1529,8 +1529,8 @@ mod tests {
                 "version": 1,
                 "providers": {},
                 "lastUpdated": "2026-01-01T00:00:00Z",
-                "relay": {
-                    "url": "https://relay.tron.dev",
+                "customMetadata": {
+                    "url": "https://example.invalid",
                     "secret": "s",
                     "nested": {"deep": {"value": 42}}
                 }
@@ -1541,7 +1541,7 @@ mod tests {
         save_auth_storage(&path, &mut storage).unwrap();
 
         let raw = read_raw_auth(&path);
-        assert_eq!(raw["relay"]["nested"]["deep"]["value"], 42);
+        assert_eq!(raw["customMetadata"]["nested"]["deep"]["value"], 42);
     }
 
     #[test]

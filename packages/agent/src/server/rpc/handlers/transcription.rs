@@ -75,6 +75,12 @@ async fn transcribe_audio_full(
 ) -> Result<TranscribeResponse, RpcError> {
     let start = std::time::Instant::now();
 
+    if !crate::settings::get_settings().server.transcription.enabled {
+        return Err(RpcError::NotAvailable {
+            message: "Transcription disabled".into(),
+        });
+    }
+
     let engine = ctx
         .transcription_engine
         .get()
@@ -214,6 +220,7 @@ impl MethodHandler for ListModelsHandler {
     #[instrument(skip(self, ctx), fields(method = "transcribe.listModels"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let engine_loaded = ctx.transcription_engine.get().is_some();
+        let enabled = crate::settings::get_settings().server.transcription.enabled;
 
         Ok(serde_json::json!({
             "models": [
@@ -223,6 +230,7 @@ impl MethodHandler for ListModelsHandler {
                     "size": "600M",
                     "language": "en",
                     "default": true,
+                    "enabled": enabled,
                     "cached": engine_loaded,
                     "engineLoaded": engine_loaded,
                 }
@@ -239,6 +247,15 @@ impl MethodHandler for DownloadModelHandler {
     #[instrument(skip(self, _ctx), fields(method = "transcribe.downloadModel"))]
     async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let engine_loaded = _ctx.transcription_engine.get().is_some();
+        let enabled = crate::settings::get_settings().server.transcription.enabled;
+
+        if !enabled {
+            return Ok(serde_json::json!({
+                "started": false,
+                "reason": "transcription_disabled",
+                "message": "Enable transcription in settings, then restart Tron Server to load the local model.",
+            }));
+        }
 
         if engine_loaded {
             return Ok(serde_json::json!({
@@ -250,7 +267,7 @@ impl MethodHandler for DownloadModelHandler {
         Ok(serde_json::json!({
             "started": false,
             "reason": "sidecar_manages_model_download",
-            "message": "Model downloads automatically when the sidecar starts. Restart the server to retry.",
+            "message": "Model downloads automatically when the sidecar starts. Restart Tron Server to retry.",
         }))
     }
 }

@@ -57,6 +57,19 @@ final class WizardState {
     /// one helper restart.
     var permissionsRestartInProgress = false
 
+    /// User's first-run choice for local voice transcription. Fresh
+    /// installs default off because enabling it downloads the Parakeet
+    /// model into `~/.tron/system/transcription/models/hf/`.
+    var transcriptionEnabledSelection = false
+
+    /// Outcome of applying the transcription preference. The wizard
+    /// advances only after this is `.enabled` or `.disabled`.
+    var transcriptionOutcome: TranscriptionSetupResult?
+
+    /// True while the Transcription step is copying sidecar files,
+    /// writing settings, and restarting the helper when needed.
+    var transcriptionIsApplying = false
+
     /// Existing Login Item detection result. Set on entry so the
     /// Install step can surface clean, approval, partial, or registered
     /// states. A registered service still has to be started and pinged
@@ -109,12 +122,14 @@ final class WizardState {
             let raw = defaults.string(forKey: Self.stepStorageKey)
             let persisted = raw.flatMap(WizardStep.init(rawValue:)) ?? .welcome
             // Only resume at steps that are safe to cold-start on.
-            // Post-install steps (.permissions, .pairingInfo, .done)
-            // depend on transient state (installOutcome, pairingPayload,
-            // …) that doesn't survive a relaunch; if we honour those on
-            // cold boot the user lands mid-wizard with greyed-out
-            // Continue buttons and nothing to click. Clamp them back to
-            // welcome so onboarding always has a coherent entry point.
+            // Post-install steps (.permissions, .transcription,
+            // .pairingInfo, .done) depend on transient state
+            // (installOutcome, permissionStatuses, transcriptionOutcome,
+            // pairingPayload, …) that doesn't survive a relaunch. If
+            // we honour those on cold boot, the user lands mid-wizard
+            // with greyed-out Continue buttons and nothing to click.
+            // Clamp them back to welcome so onboarding always has a
+            // coherent entry point.
             self.step = Self.isSafeToResume(persisted) ? persisted : .welcome
             if self.step != persisted {
                 defaults.set(self.step.rawValue, forKey: Self.stepStorageKey)
@@ -124,14 +139,15 @@ final class WizardState {
 
     /// Steps the wizard can cold-resume at without transient runtime
     /// state. Pre-permissions steps are always safe; post-install steps
-    /// assume `installOutcome` / `pairingPayload` / `permissionStatuses`
+    /// assume `installOutcome` / `permissionStatuses` /
+    /// `transcriptionOutcome` / `pairingPayload`
     /// from an earlier navigation, so cold-booting into them strands the
     /// user behind a disabled Continue button.
     private static func isSafeToResume(_ step: WizardStep) -> Bool {
         switch step {
         case .welcome, .tailscale, .install:
             return true
-        case .permissions, .pairingInfo, .done:
+        case .permissions, .transcription, .pairingInfo, .done:
             return false
         }
     }
@@ -180,6 +196,9 @@ final class WizardState {
         permissionStatuses.removeAll()
         permissionsServerRestarted = false
         permissionsRestartInProgress = false
+        transcriptionEnabledSelection = false
+        transcriptionOutcome = nil
+        transcriptionIsApplying = false
         existingInstallStatus = .none
         installOutcome = nil
         installRequestID = 0

@@ -35,6 +35,7 @@ struct ServerStatusPollerTests {
             validateBundledHelper: { nil },
             pingServer: { _ in pingResult },
             launchAgentManager: launchAgentManager,
+            applyTranscriptionPreference: { _ in .disabled },
             touchOnboardedSentinel: { }
         )
     }

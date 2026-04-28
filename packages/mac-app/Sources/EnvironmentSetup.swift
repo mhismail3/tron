@@ -69,6 +69,12 @@ struct EnvironmentSetup: Sendable {
     /// LaunchAgent control surface - load/unload/restart/check.
     var launchAgentManager: LaunchAgentManaging
 
+    /// Applies the first-run transcription preference. The wizard seeds
+    /// bundled sidecar support files into `~/.tron/system/transcription/`
+    /// either way so iOS can enable it later; enabling also writes
+    /// `settings.json`, restarts the helper, and waits for ping.
+    var applyTranscriptionPreference: @Sendable (Bool) async -> TranscriptionSetupResult
+
     /// Touches the `~/.tron/system/run/.onboarded` sentinel atomically.
     var touchOnboardedSentinel: @Sendable () throws -> Void
 
@@ -121,6 +127,20 @@ struct EnvironmentSetup: Sendable {
             await ServerPing.ping(host: "127.0.0.1", port: TronPaths.defaultServerPort, token: token)
         },
         launchAgentManager: LiveLaunchAgentManager(),
+        applyTranscriptionPreference: { enabled in
+            await TranscriptionSetupCoordinator.apply(
+                enabled: enabled,
+                sidecarSource: TronPaths.transcriptionResourceDir,
+                sidecarDestination: TronPaths.transcriptionDir,
+                settingsPath: TronPaths.settingsPath,
+                bearerToken: BearerTokenReader.read(at: TronPaths.bearerTokenPath),
+                launchAgentManager: LiveLaunchAgentManager(),
+                label: TronPaths.launchAgentLabel,
+                pingServer: { token in
+                    await ServerPing.ping(host: "127.0.0.1", port: TronPaths.defaultServerPort, token: token)
+                }
+            )
+        },
         touchOnboardedSentinel: {
             try OnboardedSentinelWriter.touch(at: TronPaths.onboardedMarkerPath)
         }

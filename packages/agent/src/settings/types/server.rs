@@ -142,7 +142,7 @@ pub struct TranscriptionSettings {
 
 impl Default for TranscriptionSettings {
     fn default() -> Self {
-        Self { enabled: true }
+        Self { enabled: false }
     }
 }
 
@@ -641,7 +641,7 @@ mod tests {
     #[test]
     fn transcription_defaults() {
         let t = TranscriptionSettings::default();
-        assert!(t.enabled);
+        assert!(!t.enabled);
     }
 
     #[test]

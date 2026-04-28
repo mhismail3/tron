@@ -2,6 +2,9 @@
 //!
 //! Replaces the previous ONNX-native approach with an MLX backend (Apple Silicon)
 //! that correctly handles speech onset (no first-word-loss).
+//! The sidecar is disabled by default on fresh installs because enabling it
+//! downloads a local Parakeet model. The Mac wizard or iOS settings flip
+//! `server.transcription.enabled` after the user opts in.
 //!
 //! # Architecture
 //!
@@ -9,6 +12,11 @@
 //! audio bytes → temp file → worker.py (stdin/stdout JSON lines)
 //! → parakeet-mlx (MLX backend) → text result
 //! ```
+//!
+//! The app bundle ships only `worker.py` and `requirements.txt`. The Mac
+//! wrapper copies those files into `~/.tron/system/transcription/` during
+//! first-run setup; the Python venv and HuggingFace cache are created there
+//! by the sidecar only after transcription is enabled.
 //!
 //! ## Module Position
 //!

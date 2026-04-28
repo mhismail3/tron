@@ -6,17 +6,19 @@ import Testing
 /// failing test instead of a confused user.
 @Suite("WizardStep ordering")
 struct WizardStepOrderingTests {
-    @Test("allCases is in canonical order (install precedes permissions)")
+    @Test("allCases is in canonical order (install precedes permissions and transcription)")
     func canonicalOrder() {
         // Install runs BEFORE permissions on purpose: the wrapper first
         // registers the LaunchAgent with its associated bundle IDs, then
         // probes/prompts the wrapper-owned TCC rows that macOS shows in
-        // System Settings.
+        // System Settings. Transcription comes after permissions so its
+        // optional helper restart is the final first-run server restart.
         #expect(WizardStep.allCases == [
             .welcome,
             .tailscale,
             .install,
             .permissions,
+            .transcription,
             .pairingInfo,
             .done,
         ])
@@ -27,6 +29,7 @@ struct WizardStepOrderingTests {
         #expect(WizardStep.welcome.rawValue == "welcome")
         #expect(WizardStep.tailscale.rawValue == "tailscale")
         #expect(WizardStep.permissions.rawValue == "permissions")
+        #expect(WizardStep.transcription.rawValue == "transcription")
         #expect(WizardStep.install.rawValue == "install")
         #expect(WizardStep.pairingInfo.rawValue == "pairingInfo")
         #expect(WizardStep.done.rawValue == "done")
@@ -353,6 +356,7 @@ struct WizardVisualLayoutTests {
         for path in [
             "Sources/Wizard/Steps/TailscaleStep.swift",
             "Sources/Wizard/Steps/PermissionsStep.swift",
+            "Sources/Wizard/Steps/TranscriptionStep.swift",
             "Sources/Wizard/Steps/PairingInfoStep.swift",
         ] {
             let source = try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
@@ -367,6 +371,24 @@ struct WizardVisualLayoutTests {
         #expect(install.contains("WizardCardLayout.iconTextSpacing"))
         #expect(install.contains("WizardCardLayout.horizontalInset"))
         #expect(install.contains("WizardCardLayout.iconColumnWidth"))
+    }
+
+    @Test("transcription step owns local model opt-in")
+    func transcriptionStepOwnsLocalModelOptIn() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let step = packageRoot.appending(path: "Sources/Wizard/Steps/TranscriptionStep.swift")
+        let source = try String(contentsOf: step, encoding: .utf8)
+        let shell = try String(contentsOf: packageRoot.appending(path: "Sources/Wizard/WizardView.swift"), encoding: .utf8)
+
+        #expect(TranscriptionStepContent.toggleTitle == "Enable local transcription")
+        #expect(source.contains("state.transcriptionEnabledSelection"))
+        #expect(source.contains("~/.tron/system/transcription/models/hf"))
+        #expect(shell.contains("setup.applyTranscriptionPreference"))
+        #expect(shell.contains("case .transcription:"))
+        #expect(shell.contains("transcriptionPrimaryLabel"))
     }
 
     @Test("low-density install and Tailscale pages use top-biased breathing room")

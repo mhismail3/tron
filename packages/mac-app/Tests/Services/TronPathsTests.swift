@@ -89,4 +89,11 @@ struct TronPathsTests {
         let s = TronPaths.settingsPath.path
         #expect(s.hasSuffix("/system/settings.json"))
     }
+
+    @Test("transcription sidecar files live under system/transcription")
+    func transcriptionShape() {
+        #expect(TronPaths.transcriptionDir.path.hasSuffix("/system/transcription"))
+        #expect(TronPaths.transcriptionResourceDir.path.hasSuffix("/Contents/Resources/Transcription")
+                || TronPaths.transcriptionResourceDir.path.contains("/Resources/Transcription"))
+    }
 }

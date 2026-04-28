@@ -28,6 +28,8 @@
 #   NOTARIZE_APPLE_ID       Apple ID email for notarytool
 #   NOTARIZE_TEAM_ID        Apple Developer team ID
 #   NOTARIZE_APP_PASSWORD   app-specific password for the Apple ID
+#   TRON_RELAY_URL          Cloudflare Worker URL for iOS push delivery
+#   TRON_RELAY_SECRET       HMAC secret shared with the Worker
 #
 # Optional secrets (warned-and-skipped when absent):
 #
@@ -147,9 +149,11 @@ jobs:
           if [[ -z "${{ secrets.MACOS_CERT_P12_BASE64 }}" \
              || -z "${{ secrets.NOTARIZE_APPLE_ID }}" \
              || -z "${{ secrets.NOTARIZE_TEAM_ID }}" \
-             || -z "${{ secrets.NOTARIZE_APP_PASSWORD }}" ]]; then
+             || -z "${{ secrets.NOTARIZE_APP_PASSWORD }}" \
+             || -z "${{ secrets.TRON_RELAY_URL }}" \
+             || -z "${{ secrets.TRON_RELAY_SECRET }}" ]]; then
             flag="true"
-            echo "::notice::Notarization secrets missing → forcing dry-run"
+            echo "::notice::Release signing or relay secrets missing → forcing dry-run"
           fi
           echo "dry_run=$flag" >> "$GITHUB_OUTPUT"
           echo "Dry-run=$flag"
@@ -162,6 +166,10 @@ jobs:
 
       - name: Build agent (release)
         working-directory: packages/agent
+        env:
+          TRON_RELAY_URL: ${{ secrets.TRON_RELAY_URL }}
+          TRON_RELAY_SECRET: ${{ secrets.TRON_RELAY_SECRET }}
+          TRON_RELAY_ENVIRONMENT: production
         run: cargo build --release --bin tron --locked
 
       # ── Xcode toolchain ────────────────────────────────────────────
@@ -328,6 +336,10 @@ jobs:
             || { echo "::error::Tron Server.app helper missing"; exit 1; }
           test -f "$APP_PATH/Contents/Library/LaunchAgents/com.tron.server.plist" \
             || { echo "::error::bundled LaunchAgent plist missing"; exit 1; }
+          test -f "$APP_PATH/Contents/Resources/Transcription/worker.py" \
+            || { echo "::error::bundled transcription worker missing"; exit 1; }
+          test -f "$APP_PATH/Contents/Resources/Transcription/requirements.txt" \
+            || { echo "::error::bundled transcription requirements missing"; exit 1; }
 
       # Inside-out signing — required for hardened runtime + notarization.
       #

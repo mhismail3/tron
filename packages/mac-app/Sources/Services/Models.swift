@@ -7,6 +7,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     case tailscale
     case install
     case permissions
+    case transcription
     case pairingInfo
     case done
 
@@ -21,6 +22,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .welcome: return "Tron Installer"
         case .tailscale: return "Tailscale"
         case .permissions: return "Permissions"
+        case .transcription: return "Transcription"
         case .install: return "Install Tron"
         case .pairingInfo: return "Pair your iPhone"
         case .done: return "You're all set"
@@ -36,6 +38,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .welcome: return .asset("TronLogo")
         case .tailscale: return .symbol("network")
         case .permissions: return .symbol("lock.shield.fill")
+        case .transcription: return .symbol("waveform")
         case .install: return .symbol("arrow.down.circle.fill")
         case .pairingInfo: return .symbol("qrcode")
         case .done: return .symbol("checkmark.seal.fill")
@@ -56,6 +59,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .welcome: return 360
         case .tailscale: return 360
         case .permissions: return 480
+        case .transcription: return 400
         case .install: return 440
         case .pairingInfo: return 420
         case .done: return 320
@@ -139,6 +143,20 @@ struct PairingPayload: Equatable, Sendable, Hashable {
     var port: Int
     var token: String
     var label: String?
+}
+
+/// Result of applying the first-run transcription preference.
+enum TranscriptionSetupResult: Equatable, Sendable {
+    case enabled
+    case disabled
+    case failed(String)
+
+    var succeeded: Bool {
+        switch self {
+        case .enabled, .disabled: return true
+        case .failed: return false
+        }
+    }
 }
 
 /// Discrete steps in the install pipeline. Each is

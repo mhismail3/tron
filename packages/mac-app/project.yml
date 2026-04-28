@@ -69,6 +69,13 @@ targets:
           rm -rf "$DST"
           mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
           ditto "$SRC" "$DST"
+          TRANSCRIPTION_SRC="$SRCROOT/../agent/src/transcription/sidecar"
+          TRANSCRIPTION_DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/Transcription"
+          test -f "$TRANSCRIPTION_SRC/worker.py" || { echo "Missing transcription worker at $TRANSCRIPTION_SRC/worker.py" >&2; exit 1; }
+          test -f "$TRANSCRIPTION_SRC/requirements.txt" || { echo "Missing transcription requirements at $TRANSCRIPTION_SRC/requirements.txt" >&2; exit 1; }
+          rm -rf "$TRANSCRIPTION_DST"
+          mkdir -p "$TRANSCRIPTION_DST"
+          ditto "$TRANSCRIPTION_SRC" "$TRANSCRIPTION_DST"
           HELPER="$DST/LoginItems/Tron Server.app"
           if [ -d "$HELPER" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
             SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"

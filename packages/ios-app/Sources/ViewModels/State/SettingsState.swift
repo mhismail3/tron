@@ -76,6 +76,11 @@ final class SettingsState {
     /// older than this TTL, detecting drift and rebuilding the tool index.
     var mcpSchemaRefreshTtlMs: UInt64 = 30_000
 
+    // MARK: - Transcription
+
+    /// Whether the Mac server loads the local MLX transcription sidecar.
+    var transcriptionEnabled: Bool = false
+
     // MARK: - Connection Presets
 
     var connectionPresets: [ConnectionPreset] = []
@@ -236,6 +241,7 @@ final class SettingsState {
         promptHistoryAutoPrune = settings.promptHistoryAutoPrune
 
         mcpSchemaRefreshTtlMs = settings.mcpSchemaRefreshTtlMs
+        transcriptionEnabled = settings.transcriptionEnabled
 
         authEnforced = settings.authEnforced
         tailscaleIp = settings.tailscaleIp

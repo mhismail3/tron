@@ -148,6 +148,23 @@ enum ServerSettingsWriter {
         try write(data, to: path)
     }
 
+    static func setTranscriptionEnabled(_ enabled: Bool, at path: URL) throws {
+        var root = try readRootObject(at: path)
+        var server = root["server"] as? [String: Any] ?? [:]
+        var transcription = server["transcription"] as? [String: Any] ?? [:]
+        transcription["enabled"] = enabled
+        server["transcription"] = transcription
+        root["server"] = server
+
+        let data: Data
+        do {
+            data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        } catch {
+            throw Failure.writeFailed(error.localizedDescription)
+        }
+        try write(data, to: path)
+    }
+
     private static func readRootObject(at path: URL) throws -> [String: Any] {
         guard FileManager.default.fileExists(atPath: path.path) else {
             return [:]

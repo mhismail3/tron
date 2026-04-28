@@ -470,7 +470,7 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
     "defaultProvider": "anthropic",
     "defaultModel": "claude-sonnet-4-6",
     "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
-    "transcription": { "enabled": true },
+    "transcription": { "enabled": false },
     "connectionPresets": [],        // iOS quick-connect host/port presets
     "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
     "auth": {
@@ -750,7 +750,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app` plus a bundled LaunchAgent plist, registers it through `SMAppService`, confirms permissions, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, confirms permissions, optionally enables local transcription, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
 
 ```
 packages/mac-app/Sources/
@@ -759,7 +759,7 @@ packages/mac-app/Sources/
 +-- Wizard/                    First-run flow
 |   +-- WizardState.swift      @Observable state machine + `WizardStep` enum
 |   +-- WizardView.swift       NavigationStack shell
-|   +-- Steps/                 Welcome, Tailscale, Install, Permissions, Pairing, Done
+|   +-- Steps/                 Welcome, Tailscale, Install, Permissions, Transcription, Pairing, Done
 +-- MenuBar/                   NSStatusItem controller, status polling, copy actions, update submenu
 +-- Services/
 |   +-- Server/                Bearer-token reader, `system.ping` client, status poller
@@ -770,6 +770,7 @@ packages/mac-app/Sources/
 |   +-- LaunchAgentManaging.swift
 |   +-- TronPaths.swift        ~/.tron/ path helpers (mirrors Rust `core::foundation::paths`)
 +-- Resources/
+    +-- Transcription/worker.py + requirements.txt
     +-- Library/
         +-- LoginItems/Tron Server.app/Contents/MacOS/tron
         +-- LaunchAgents/com.tron.server.plist
@@ -781,8 +782,9 @@ packages/mac-app/Sources/
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
 3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system.ping` answers. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles `requiresApproval` by opening Login Items settings, and polls `system.ping` while ignoring initial `connection.established` frames.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, labels the exact app entry to enable for each permission, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after wizard-opened Settings panes, and keeps Re-check as a non-restarting probe.
-5. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
-6. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
+5. **Transcription** — opt-in step for local voice transcription. The step copies `worker.py` and `requirements.txt` from the signed app bundle into `~/.tron/system/transcription/` so the setting can be enabled later. Enabling writes `server.transcription.enabled = true`, restarts the helper once, and lets the Parakeet model download into `~/.tron/system/transcription/models/hf/` when the sidecar starts. Skipping writes `enabled = false` and does not restart the server.
+6. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
+7. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
 
 ### Menu-bar Actions
 
@@ -885,11 +887,11 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   |   +-- tron-cli              Optional contributor CLI shim symlinked from `~/.local/bin/tron`
 |   |   +-- tron-lib.sh           Optional contributor CLI helper library
 |   |   +-- *.log, *.json, *.bak  Optional contributor run logs, sentinels, and rollback backup
-|   +-- transcription/            Speech-to-text sidecar
-|       +-- worker.py             parakeet-mlx Python worker (stdin/stdout JSON-line protocol)
-|       +-- requirements.txt      Pip deps for the venv
-|       +-- venv/                 Auto-created on first transcription request
-|       +-- models/hf/            HuggingFace model cache (HF_HOME)
+|   +-- transcription/            Speech-to-text sidecar, created by the Mac wizard transcription step or contributor tooling
+|       +-- worker.py             parakeet-mlx Python worker copied from the signed app bundle or repo source
+|       +-- requirements.txt      Pip deps for the venv, copied with worker.py
+|       +-- venv/                 Auto-created when enabled and the sidecar starts
+|       +-- models/hf/            HuggingFace model cache (HF_HOME), populated by the first enabled sidecar run
 +-- workspace/                    User working area (mounted into agent context)
     +-- vault/                    AES-256-CBC encrypted credential store (entries/, index.json, .master-key)
     +-- knowledge/                Long-term notes and research
@@ -919,22 +921,25 @@ The production Mac app registers `com.tron.server` with `SMAppService.agent(plis
 
 Local Release builds use the same path rule: copy the built `Tron.app` to `/Applications/Tron.app` before testing install/registration. If a DMG build is already installed, the local Release build replaces that same slot; stop the wrapper/server before copying, then reopen `/Applications/Tron.app` and restart/resume the helper. Debug Xcode builds use bundle ID `com.tron.mac.dev`, may run from DerivedData for wrapper dogfood, and must be Apple Development signed with a hardened-runtime helper because `SMAppService` can register an ad-hoc bundle but launchd will refuse to spawn it. For agent-only iteration, `tron dev` stops the LaunchAgent, binds port `9847`, and later restores the installed helper through the wrapper's internal `--tron-start-server-and-quit` command so ServiceManagement remains the only registration path.
 
+For local Mac wrapper builds that need real push delivery, copy `packages/mac-app/.env.local.example` to `packages/mac-app/.env.local` and set `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and optionally `TRON_RELAY_ENVIRONMENT`. `packages/mac-app/scripts/bundle-agent.sh` reads only those relay keys from the ignored file immediately before Cargo compiles the staged helper, so Xcode Debug and local Release tests do not require repeated shell exports. Production DMG builds still get relay values only from GitHub Actions secrets.
+
 ### DMG Release Pipeline
 
 End-users install `Tron.app` via a notarized DMG published to GitHub Releases. The pipeline lives at `.github/workflows/release-mac.yml` and triggers on `mac-v*` tag push:
 
 1. Checkout + Rust toolchain/cache (`actions-rust-lang/setup-rust-toolchain`).
-2. `cargo build --release --bin tron --locked` in `packages/agent/`.
+2. `cargo build --release --bin tron --locked` in `packages/agent/`, with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` supplied from GitHub secrets so push delivery is enabled for release users without local config.
 3. Install XcodeGen + `create-dmg`.
 4. `packages/mac-app/scripts/bundle-agent.sh --skip-build` stages `packages/agent/target/release/tron` into `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` and writes the bundled LaunchAgent plist.
 5. `xcodegen generate` inside `packages/mac-app/`.
 6. Create an isolated release keychain from the signing/notarization secrets, or fall back to dry-run ad-hoc signing when secrets are absent.
 7. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
-8. Sign the helper app first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
-9. `xcrun notarytool submit` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple on success.
-10. Build the DMG with `create-dmg`.
-11. Upload dSYMs to Sentry via `sentry-cli`.
-12. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg` with auto-generated notes.
+8. Verify `Contents/Resources/Transcription/worker.py` and `requirements.txt` are present in the archive so the first-run transcription opt-in can seed `~/.tron/system/transcription/`.
+9. Sign the helper app first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
+10. `xcrun notarytool submit` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple on success.
+11. Build the DMG with `create-dmg`.
+12. Upload dSYMs to Sentry via `sentry-cli`.
+13. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg` with auto-generated notes.
 
 A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or the workflow itself. The dry-run stops before notarization (no cert needed) so PR contributors can verify the assembly pipeline without secrets.
 

@@ -554,7 +554,7 @@ async fn init_services(
     let shared_subagent_manager = Some(subagent_manager) as Option<Arc<SubagentManager>>;
     let hook_abort_tracker = Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new());
 
-    let transcription_engine = spawn_transcription_sidecar();
+    let transcription_engine = spawn_transcription_sidecar(settings.server.transcription.enabled);
 
     Ok(ServiceState {
         event_store,
@@ -649,9 +649,15 @@ fn build_tool_factory(
     })
 }
 
-/// Spawn the transcription sidecar (parakeet-mlx via Python worker).
-fn spawn_transcription_sidecar() -> Arc<std::sync::OnceLock<Arc<tron::transcription::MlxEngine>>> {
+/// Spawn the transcription sidecar (parakeet-mlx via Python worker) when enabled.
+fn spawn_transcription_sidecar(
+    enabled: bool,
+) -> Arc<std::sync::OnceLock<Arc<tron::transcription::MlxEngine>>> {
     let transcription_engine = Arc::new(std::sync::OnceLock::new());
+    if !enabled {
+        tracing::info!("transcription sidecar disabled");
+        return transcription_engine;
+    }
     let cell = Arc::clone(&transcription_engine);
     #[allow(clippy::let_underscore_future)]
     let _ = tokio::spawn(async move {

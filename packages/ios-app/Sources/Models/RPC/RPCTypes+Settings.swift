@@ -12,6 +12,10 @@ struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
     let connectionPresets: [ConnectionPreset]
+    /// Whether the local Mac server loads the MLX transcription sidecar.
+    /// Fresh installs default this off; Mac onboarding can enable it after
+    /// seeding the sidecar files and restarting the helper.
+    let transcriptionEnabled: Bool
     /// Whether the server enforces bearer-token WebSocket auth.
     /// `false` (default) means iOS may connect without an `Authorization`
     /// header. `true` means a header must be present and match
@@ -125,7 +129,11 @@ struct ServerSettings: Decodable {
     }
 
     private enum ServerKeys: String, CodingKey {
-        case defaultModel, defaultWorkspace, connectionPresets, auth, tailscaleIp, update
+        case defaultModel, defaultWorkspace, connectionPresets, transcription, auth, tailscaleIp, update
+    }
+
+    private enum TranscriptionKeys: String, CodingKey {
+        case enabled
     }
 
     private enum AuthKeys: String, CodingKey {
@@ -151,6 +159,11 @@ struct ServerSettings: Decodable {
             defaultWorkspace = try? serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
             connectionPresets = (try? serverContainer.decodeIfPresent([ConnectionPreset].self, forKey: .connectionPresets)) ?? []
             tailscaleIp = try? serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
+            if let transcriptionContainer = try? serverContainer.nestedContainer(keyedBy: TranscriptionKeys.self, forKey: .transcription) {
+                transcriptionEnabled = (try? transcriptionContainer.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
+            } else {
+                transcriptionEnabled = false
+            }
             // server.auth.enforced — defaults to false (Phase 2 default-off
             // rollout). Older servers don't send the `auth` block at all.
             if let authContainer = try? serverContainer.nestedContainer(keyedBy: AuthKeys.self, forKey: .auth) {
@@ -175,6 +188,7 @@ struct ServerSettings: Decodable {
         } else {
             defaultWorkspace = nil
             connectionPresets = []
+            transcriptionEnabled = false
             authEnforced = false
             tailscaleIp = nil
             updateEnabled = false
@@ -456,6 +470,8 @@ struct ServerSettingsUpdate: Encodable {
         /// `settings/storage/loader.rs::deep_merge`) so iOS sends the full
         /// post-edit list whenever it adds, removes, or renames a preset.
         var connectionPresets: [ConnectionPreset]?
+        /// Partial update for local transcription sidecar settings.
+        var transcription: TranscriptionUpdate?
         /// Partial update for user-mode update checks/downloads.
         /// Only the fields the user actually changed are set; the encoder
         /// drops `nil` so the server's deep-merge preserves everything else.
@@ -463,6 +479,10 @@ struct ServerSettingsUpdate: Encodable {
 
         struct AuthUpdate: Encodable {
             var enforced: Bool?
+        }
+
+        struct TranscriptionUpdate: Encodable {
+            var enabled: Bool?
         }
 
         struct UpdateUpdate: Encodable {

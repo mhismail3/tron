@@ -1,6 +1,6 @@
 # Mac App Development
 
-> Last verified: 2026-04-27 (clean SMAppService distribution layout)
+> Last verified: 2026-04-28 (transcription opt-in + relay-secret release builds)
 
 ## Setup
 
@@ -28,7 +28,7 @@ Both configurations manage the same LaunchAgent (`com.tron.server`) and port (`9
 
 > **Disambiguation**: the Debug-config `TronMac.app` (wizard dogfood) is unrelated to `Tron-Dev.app` at `~/.tron/system/run/Tron-Dev.app`, which is the headless agent built by `tron dev` (bundle ID `com.tron.agent`, no SwiftUI). See [architecture.md → Workflows & Variants](./architecture.md#workflows--variants) for the canonical workflow breakdown.
 
-The wizard install path validates the bundled helper app + LaunchAgent plist, registers or refreshes `com.tron.server` through `SMAppService`, and waits for the server heartbeat. A previously enabled Login Item registration is shown as registered, not ready; the user still has to press Start server and the wizard still waits for `system.ping` before continuing. Release builds must run from `/Applications/Tron.app`; Debug builds may run from DerivedData for dogfood. The wizard does not copy a server bundle into `~/.tron/system/`, write `~/Library/LaunchAgents`, or stage contributor CLI artifacts under `~/.tron/system/run/`.
+The wizard install path validates the bundled helper app + LaunchAgent plist, registers or refreshes `com.tron.server` through `SMAppService`, and waits for the server heartbeat. A previously enabled Login Item registration is shown as registered, not ready; the user still has to press Start server and the wizard still waits for `system.ping` before continuing. Release builds must run from `/Applications/Tron.app`; Debug builds may run from DerivedData for dogfood. The wizard does not copy a server bundle into `~/.tron/system/`, write `~/Library/LaunchAgents`, or stage contributor CLI artifacts under `~/.tron/system/run/`. The only app-bundled files copied into `~/.tron/system/` are the transcription sidecar source files (`worker.py`, `requirements.txt`) when the user applies the transcription step.
 
 ## Workflow quick reference
 
@@ -39,7 +39,7 @@ Run these commands from the repo root unless a step says otherwise. The wrapper 
 | Xcode Debug wizard/menu-bar dogfood | `bash packages/mac-app/scripts/bundle-agent.sh --profile debug`<br>`cd packages/mac-app && xcodegen generate`<br>Open `TronMac.xcodeproj`, select `TronMac`, Run | Builds `TronMac.app` in DerivedData with bundle id `com.tron.mac.dev`; registers/runs the Debug-bundled helper when the wizard Install step is used |
 | Local Release install test | `bash packages/mac-app/scripts/bundle-agent.sh`<br>`cd packages/mac-app && xcodegen generate`<br>`xcodebuild -scheme TronMac -destination 'platform=macOS' -configuration Release build`<br>`ditto "$HOME/Library/Developer/Xcode/DerivedData/TronMac-"*/Build/Products/Release/Tron.app /Applications/Tron.app`<br>`open /Applications/Tron.app` | Replaces the single installed-release slot with a local `com.tron.mac` build; exercises the same path and SMAppService registration as the DMG, without notarization/Gatekeeper |
 | Rust server iteration only | `./scripts/tron dev` | Stops `com.tron.server`, runs `~/.tron/system/run/Tron-Dev.app` on port `9847`, then restores `/Applications/Tron.app` through `--tron-start-server-and-quit` on exit |
-| Production DMG release | Push/run the `mac-v*` release workflow in `.github/workflows/release-mac.yml` | Builds the release agent, stages it into `Tron.app`, signs helper then wrapper, notarizes/staples, creates the DMG, and publishes it |
+| Production DMG release | Push/run the `mac-v*` release workflow in `.github/workflows/release-mac.yml` | Builds the release agent with relay secrets, stages it into `Tron.app`, verifies bundled transcription resources, signs helper then wrapper, notarizes/staples, creates the DMG, and publishes it |
 
 ## Local dev loop
 
@@ -64,6 +64,18 @@ packages/mac-app/scripts/bundle-agent.sh --source /absolute/path/to/tron
 packages/mac-app/scripts/bundle-agent.sh --clean
 ```
 
+For local push relay dogfood, copy `packages/mac-app/.env.local.example` to `packages/mac-app/.env.local` and fill in the Cloudflare Worker values once:
+
+```bash
+TRON_RELAY_URL=https://tron-push-relay.<subdomain>.workers.dev
+TRON_RELAY_SECRET=<same HMAC secret set in Wrangler>
+TRON_RELAY_ENVIRONMENT=production
+```
+
+`bundle-agent.sh` reads only `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT` from that ignored file immediately before it runs Cargo, so every Debug or local Release helper you stage from Xcode has the same relay config without repeating shell exports. Already-exported environment variables still take precedence, which keeps CI and one-off builds explicit.
+
+The Xcode target also copies `packages/agent/src/transcription/sidecar/worker.py` and `requirements.txt` into `Contents/Resources/Transcription/` on every build. These are source files only; the MLX venv and Parakeet model cache are created later under `~/.tron/system/transcription/` if the wizard or iOS settings enables transcription.
+
 After staging, regenerate the Xcode project so it picks up the file reference:
 
 ```bash
@@ -73,7 +85,9 @@ xcodegen generate
 
 If you ship the wrapper without the staged helper binary or bundled LaunchAgent plist, `InstallStep` surfaces a helper validation failure. The wizard refuses to advance past the Install step.
 
-If you change Rust agent code that the Mac wrapper depends on — RPC handlers, onboarding/install behavior, or anything used before pairing — rerun `packages/mac-app/scripts/bundle-agent.sh` before launching the Mac app from Xcode. Xcode copies the already-staged `Sources/Resources/Library` tree; it does not rebuild that binary for you. Forgetting this step makes the Swift UI talk to an older embedded server, which is especially confusing when testing new RPCs such as `logs.recent`.
+If you change Rust agent code that the Mac wrapper depends on — RPC handlers, onboarding/install behavior, settings defaults, or anything used before pairing — rerun `packages/mac-app/scripts/bundle-agent.sh` before launching the Mac app from Xcode. Xcode copies the already-staged `Sources/Resources/Library` tree; it does not rebuild that binary for you. Forgetting this step makes the Swift UI talk to an older embedded server, which is especially confusing when testing new RPCs such as `logs.recent`.
+
+Push relay config is not read from `~/.tron/system/auth.json`. Production releases compile it from GitHub secrets. Local Mac wrapper dogfood uses `packages/mac-app/.env.local` through `bundle-agent.sh`; agent-only `tron dev` sessions can still use exported `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and optionally `TRON_RELAY_ENVIRONMENT` before starting the dev server.
 
 There is no installer cleanup path that edits production artifacts in place: the app bundle is immutable, launch registration is owned by `SMAppService`, and user data is preserved under `~/.tron`. Menu-bar uninstall unregisters `com.tron.server`, removes runtime state in `system/run/`, and can optionally remove `settings.json` and/or `auth.json`; database and workspace data stay intact. For pre-onboarding/debug cleanup where no menu bar exists, run the current wrapper once with `--tron-uninstall-and-quit` so the same SMAppService unregister path executes without opening the wizard.
 
@@ -137,14 +151,15 @@ To simulate the menu-bar-only mode without onboarding, just `touch ~/.tron/syste
 
 Defined in `.github/workflows/release-mac.yml`. Broadly:
 
-1. `cargo build --release --bin tron --locked` on the same `macos-14` runner (cross-compile is avoided for code-signing reasons).
+1. `cargo build --release --bin tron --locked` on the same `macos-14` runner with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` from GitHub secrets (cross-compile is avoided for code-signing reasons).
 2. `bash packages/mac-app/scripts/bundle-agent.sh --skip-build` inside `packages/mac-app`, which stages `packages/agent/target/release/tron`.
 3. `xcodegen generate` inside `packages/mac-app/`.
-4. `xcodebuild -scheme TronMac -configuration Release archive -archivePath build/TronMac.xcarchive`.
-5. Export the `.app`, code-sign inside-out with Developer ID (no `--deep` on the re-sign — `--deep` would clobber the helper signature; it's used only for read-only `--verify`), notarize via `xcrun notarytool submit --keychain-profile tron-notarize` (credentials live ONLY in an isolated path-based keychain at `$RUNNER_TEMP/tron-build.keychain-db`, never on argv), staple, package into DMG via `create-dmg`.
-6. Optional dSYM upload via `sentry-cli` (Phase 7; `continue-on-error` so a missing DSN doesn't fail the release).
-7. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg --clobber` (idempotent on re-run).
-8. `if: always()` cleanup: remove the keychain from the search list, delete it, dd-overwrite the password file, remove `cert.p12`.
+4. `xcodebuild -scheme TronMac -configuration Release archive -archivePath build/TronMac.xcarchive`; the target post-build script copies transcription sidecar source files into `Contents/Resources/Transcription/`.
+5. Export the `.app`, verify the helper, LaunchAgent plist, and transcription resource files are present, then code-sign inside-out with Developer ID (no `--deep` on the re-sign — `--deep` would clobber the helper signature; it's used only for read-only `--verify`).
+6. Notarize via `xcrun notarytool submit --keychain-profile tron-notarize` (credentials live ONLY in an isolated path-based keychain at `$RUNNER_TEMP/tron-build.keychain-db`, never on argv), staple, package into DMG via `create-dmg`.
+7. Optional dSYM upload via `sentry-cli` (Phase 7; `continue-on-error` so a missing DSN doesn't fail the release).
+8. `gh release create mac-v$VERSION ./Tron-mac-v$VERSION.dmg --clobber` (idempotent on re-run).
+9. `if: always()` cleanup: remove the keychain from the search list, delete it, dd-overwrite the password file, remove `cert.p12`.
 
 PR builds (no tag) take a dry-run path: same `xcodebuild archive` + DMG assembly but ad-hoc-signed (`-`) so fork PRs without certs still validate the pipeline.
 

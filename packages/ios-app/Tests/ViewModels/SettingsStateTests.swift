@@ -90,6 +90,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.updateChannel, "stable")
         XCTAssertEqual(state.updateFrequency, "daily")
         XCTAssertEqual(state.updateAction, "notify")
+        XCTAssertFalse(state.transcriptionEnabled)
     }
 
     // MARK: - Server Switching

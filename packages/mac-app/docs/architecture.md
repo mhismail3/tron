@@ -1,17 +1,17 @@
 # Mac App Architecture
 
-> Last verified: 2026-04-27 (clean SMAppService distribution layout)
+> Last verified: 2026-04-28 (transcription opt-in + clean SMAppService layout)
 
 ## Overview
 
 `Tron.app` is the macOS SwiftUI wrapper around the headless Rust agent. It has two runtime modes:
 
-- **Wizard mode** — shown on first launch, before `~/.tron/system/run/.onboarded` exists. Walks the user through Tailscale, Login Item registration, permissions, and pairing-info display.
+- **Wizard mode** — shown on first launch, before `~/.tron/system/run/.onboarded` exists. Walks the user through Tailscale, Login Item registration, permissions, optional local transcription setup, and pairing-info display.
 - **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system.ping` and exposes status + copy actions + diagnostics.
 
 The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side.
 
-`Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. The release binary is produced by `cargo build --release --bin tron` and staged into the bundled helper app at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron`; the helper is signed before the outer app. See [development.md](./development.md) for the build pipeline.
+`Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. The release binary is produced by `cargo build --release --bin tron` and staged into the bundled helper app at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron`; the helper is signed before the outer app. The app bundle also carries only the transcription sidecar source files (`worker.py`, `requirements.txt`) under `Contents/Resources/Transcription/`; the venv and model cache are mutable user data under `~/.tron/system/transcription/` after the user enables transcription. See [development.md](./development.md) for the build pipeline.
 
 ## Directory Structure
 
@@ -28,9 +28,12 @@ packages/mac-app/
 │   │   ├── MenuBarActionHandler.swift # routes menu-item descriptors → side effects (subprocess, NSWorkspace, notifications)
 │   │   ├── MenuBarController.swift    # NSStatusItem lifecycle + poller task + custom header view
 │   │   └── MenuBarItemBuilder.swift   # Pure builder: snapshot → [MenuItemDescriptor]
-│   ├── Resources/                  # bundled Library tree + AppIcon.icns + fonts
-│   │   └── Fonts/
-│   │       └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
+│   ├── Resources/                  # bundled Library tree + AppIcon.icns + fonts + transcription source files
+│   │   ├── Fonts/
+│   │   │   └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
+│   │   └── Transcription/
+│   │       ├── worker.py           # copied to ~/.tron/system/transcription/ by the wizard step
+│   │       └── requirements.txt
 │   ├── Theme/
 │   │   ├── TronColors.swift        # emerald palette + shared gradients
 │   │   ├── TronFontLoader.swift    # CoreText registration for bundled fonts
@@ -41,6 +44,7 @@ packages/mac-app/
 │   │   ├── MacRuntimeVariant.swift   # Debug vs installed-release path/ownership rules
 │   │   ├── Models.swift            # TailscaleStatus, PermissionStatus, ExistingInstallStatus…
 │   │   ├── TronPaths.swift         # Single source of truth for all on-disk paths
+│   │   ├── TranscriptionSetup.swift # opt-in sidecar copy, settings write, helper restart
 │   │   ├── Feedback/
 │   │   │   ├── FeedbackComposer.swift      # pure GitHub issue composer with redacted log context
 │   │   │   └── MenuBarFeedbackAction.swift # menu-bar handler (NSWorkspace.open GitHub issue URL)
@@ -127,7 +131,8 @@ TronMacApp.main()
            └─ RootView → WizardView
                 └─ WizardState.step = .welcome
                     → .tailscale → .install
-                    → .permissions → .pairingInfo → .done
+                    → .permissions → .transcription
+                    → .pairingInfo → .done
                 └─ DoneStep taps "Finish"
                     ├─ setup.touchOnboardedSentinel()  ← atomic tempfile+rename
                     └─ post .tronWizardDidComplete
@@ -161,6 +166,18 @@ fast-probe watcher until that specific permission turns green. App activation,
 Re-check, and the watcher never restart the server. Once all three rows are
 green and the user presses Continue, the wizard restarts the helper once so
 newly enabled launch-time grants are available before pairing.
+
+The Transcription step runs after the server is reachable and permissions
+are settled. Default settings keep `server.transcription.enabled = false`,
+so a fresh server logs `transcription sidecar disabled` instead of trying to
+download a model. Applying the step copies only `worker.py` and
+`requirements.txt` from the signed app bundle into
+`~/.tron/system/transcription/`, making later iOS Settings enablement safe.
+If the user enables the toggle, the wrapper writes
+`server.transcription.enabled = true` into `settings.json`, restarts
+`com.tron.server`, and waits for `system.ping`. The helper then owns the
+Python venv and HuggingFace cache under that same directory. If the user skips
+the step, the wrapper writes `enabled = false` and does not restart the helper.
 
 The Pairing step does not require a pre-existing `settings.json`. It
 reads the agent-issued `auth.json` bearer token, confirms the server is answering
@@ -255,7 +272,7 @@ and/or `auth.json`; databases and workspace files are still preserved.
 
 ## Key Invariants
 
-- **`Tron.app` never builds the Rust agent.** The helper binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helper/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side RPC/TCC/install change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`.
+- **`Tron.app` never builds the Rust agent.** The helper binary is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helper/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side RPC/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`. Local relay dogfood is configured through the ignored `packages/mac-app/.env.local` file that the bundle script reads before Cargo compiles the helper; production releases use GitHub Actions secrets instead.
 - **The Install step is not an `onAppear` side effect.** Landing on the page is read-only; the user must press Install before the wrapper registers the service.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` does not render install detection state; the Install step owns that status.
@@ -263,6 +280,7 @@ and/or `auth.json`; databases and workspace files are still preserved.
 - **Uninstall preserves user data.** Menu-bar uninstall and `--tron-uninstall-and-quit` unregister the SMAppService agent and clear runtime state. Menu-bar uninstall may remove `settings.json` and/or `auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
 - **A loaded LaunchAgent label is not proof that the correct helper is running.** Registration inspects `launchctl print` for the loaded job's parent bundle identifier before deciding whether to reuse, take over, or fail. Debug wrapper builds may take over installed-release jobs for local dogfood; installed-release builds do not take over Debug jobs.
 - **Permission checks are wrapper-owned and probe-only.** The Permissions step records when it opened System Settings only to decide whether to show the visible "Checking permissions..." activity state on return. App activation, Re-check, and the gear-button watcher call native wrapper probes without `launchctl kickstart`, and transient `.probeUnavailable` snapshots preserve the last concrete badge state instead of turning the page gray. The only permission-time restart is the one-time helper restart after all rows are green and the user presses Continue.
+- **Transcription is opt-in user data.** `worker.py` and `requirements.txt` ship read-only in the app bundle, and the wizard copies them to `~/.tron/system/transcription/` when the user applies the Transcription step. The app bundle never contains the Python venv or Parakeet model cache, and skipping the step leaves the server setting false.
 - **App bundles are immutable at runtime.** Mutable files live under `~/.tron`; ephemeral locks live under `~/.tron/system/run`; `Tron.app` is only replaced by a new notarized DMG.
 - **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth.json`, `settings.json`, `run/.onboarded`) or a WS RPC call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
 - **Single port (`9847`) and single LaunchAgent label (`com.tron.server`) across every workflow.** The DMG-installed `Tron.app` (`com.tron.mac`), the Xcode-built `TronMac.app` dogfood wrapper (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/system/run/Tron-Dev.app` (`com.tron.agent`) are all distinct on-disk artifacts that share the same server port and `~/.tron/system/` data tree. The installer never writes app bundles or contributor CLI artifacts into `~/.tron`; all mutable local/runtime artifacts that do exist live directly under `system/run/`. Mutual exclusion is enforced at runtime: the wrapper's `run/.mac-wrapper.lock` rejects a second wrapper, the agent's `log.db.lock` rejects a second agent, and `tron dev` explicitly stops the LaunchAgent before binding 9847. See [Workflows & Variants](#workflows--variants) below for the full breakdown.
@@ -276,9 +294,9 @@ Four workflows operate against the same `~/.tron/system/` data tree and share `p
 
 | Workflow | Audience | Build product | Bundle ID | On-disk path | What it ships | Server entry point |
 |---|---|---|---|---|---|---|
-| **1. Production (DMG)** | End users downloading from GitHub Releases | `Tron.app` (notarized + stapled DMG) | `com.tron.mac` | `/Applications/Tron.app` | SwiftUI wrapper (wizard + menu bar) AND the embedded headless agent | `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` inside `/Applications/Tron.app` |
+| **1. Production (DMG)** | End users downloading from GitHub Releases | `Tron.app` (notarized + stapled DMG) | `com.tron.mac` | `/Applications/Tron.app` | SwiftUI wrapper (wizard + menu bar), embedded headless agent, and transcription source files | `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` inside `/Applications/Tron.app` |
 | **2. Local Release test** | Contributors validating a Release build without the DMG wrapper | `Tron.app` (Release build copied into place) | `com.tron.mac` | `/Applications/Tron.app` | Same runtime shape as Production, usually not notarized | Same installed-release helper path inside `/Applications/Tron.app` |
-| **3. Wizard dogfood (Xcode Run)** | Contributors testing the wrapper UI | `TronMac.app` (Debug build, Xcode/xcodebuild) | `com.tron.mac.dev` | `~/Library/Developer/Xcode/DerivedData/TronMac-*/Build/Products/Debug/TronMac.app` | Same SwiftUI wrapper as Production but with a debug-profile bundled helper (faster recompiles) | The helper bundled inside the Debug app |
+| **3. Wizard dogfood (Xcode Run)** | Contributors testing the wrapper UI | `TronMac.app` (Debug build, Xcode/xcodebuild) | `com.tron.mac.dev` | `~/Library/Developer/Xcode/DerivedData/TronMac-*/Build/Products/Debug/TronMac.app` | Same SwiftUI wrapper as Production with a debug-profile bundled helper and transcription source files | The helper bundled inside the Debug app |
 | **4. Agent dev (`tron dev`)** | Contributors iterating on the Rust agent without wrapper UI | `Tron-Dev.app` (no SwiftUI — just a `.app` bundle wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/system/run/Tron-Dev.app` | Headless Rust agent only (no menu bar, no wizard) | Takes over port 9847 in-process; the system-wide LaunchAgent is stopped first |
 
 > **Naming guard.** `TronMac.app` (workflow 3's build product) and `Tron-Dev.app` (workflow 4's agent bundle) are unrelated. Workflow 3 is the wrapper UI compiled in Debug mode; workflow 4 is just the Rust agent recompiled in dev. They share neither code nor purpose.

@@ -145,3 +145,26 @@ fn contributor_scripts_keep_runtime_artifacts_under_system_run() {
     assert!(tron_lib.contains("CONTRIBUTOR_DIR=\"$RUN_DIR\""));
     assert!(tron_lib.contains("DEV_BUNDLE=\"$RUN_DIR/Tron-Dev.app\""));
 }
+
+#[test]
+fn mac_bundle_script_loads_gitignored_local_relay_env() {
+    let root = repo_root();
+    let script_path = root.join("packages/mac-app/scripts/bundle-agent.sh");
+    let script = std::fs::read_to_string(&script_path).unwrap();
+
+    assert!(
+        script.contains("LOCAL_ENV_FILE=\"$SCRIPT_DIR/../.env.local\""),
+        "{} should use the mac app's ignored local env file",
+        script_path.display()
+    );
+    assert!(script.contains("load_local_relay_env"));
+    assert!(script.contains("TRON_RELAY_URL"));
+    assert!(script.contains("TRON_RELAY_SECRET"));
+    assert!(script.contains("TRON_RELAY_ENVIRONMENT"));
+
+    let gitignore = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+    assert!(
+        gitignore.lines().any(|line| line.trim() == ".env.local"),
+        "packages/mac-app/.env.local must stay gitignored because it can contain relay secrets"
+    );
+}

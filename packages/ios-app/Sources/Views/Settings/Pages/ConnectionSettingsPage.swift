@@ -145,6 +145,50 @@ struct ConnectionSettingsPage: View {
                 SettingsCaption(text: "Tokens live in `~/.tron/system/auth.json` on your Mac. Rotate from the menu bar or with `tron auth rotate`.")
             }
 
+            // Transcription (server.transcription.enabled)
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsSectionHeader(title: "Transcription")
+
+                SettingsCard {
+                    HStack {
+                        Image(systemName: "waveform")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.tronEmerald)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Local transcription")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            Text("Uses the Mac's local Parakeet sidecar when enabled.")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextSecondary)
+                        }
+                        Spacer()
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { settingsState.transcriptionEnabled },
+                                set: { newValue in
+                                    settingsState.transcriptionEnabled = newValue
+                                    updateServerSetting {
+                                        var update = ServerSettingsUpdate()
+                                        update.server = ServerSettingsUpdate.ServerUpdate(
+                                            transcription: ServerSettingsUpdate.ServerUpdate.TranscriptionUpdate(enabled: newValue)
+                                        )
+                                        return update
+                                    }
+                                }
+                            )
+                        )
+                        .labelsHidden()
+                        .tint(.tronEmerald)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 14)
+                }
+
+                SettingsCaption(text: "The Mac wizard seeds the sidecar files. Changing this setting takes effect after Tron Server restarts from the Mac menu bar.")
+            }
+
             // Tailscale identity (read-only display when populated)
             if let ip = settingsState.tailscaleIp, !ip.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {

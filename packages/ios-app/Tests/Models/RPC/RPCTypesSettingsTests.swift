@@ -297,6 +297,19 @@ struct ServerSettingsTests {
         #expect(settings.updateChannel == "stable")
     }
 
+    @Test("decode transcription setting from JSON")
+    func transcriptionSettingDecode() throws {
+        let json = #"{"server":{"transcription":{"enabled":true}}}"#
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
+        #expect(settings.transcriptionEnabled == true)
+    }
+
+    @Test("transcription setting defaults off when missing")
+    func transcriptionSettingDefaultsOff() throws {
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{}"#.utf8))
+        #expect(settings.transcriptionEnabled == false)
+    }
+
     @Test("UpdateChannel/Frequency/Action enum from(_:) accepts wire values")
     func updateEnumsFromString() {
         #expect(UpdateChannel.from("stable") == .stable)
@@ -332,6 +345,17 @@ struct ServerSettingsTests {
         #expect(updateBlock["channel"] as? String == "beta")
         #expect(updateBlock["frequency"] as? String == "weekly")
         #expect(updateBlock["action"] as? String == "notify")
+    }
+
+    @Test("ServerSettingsUpdate encodes transcription block under server.transcription")
+    func transcriptionSettingsUpdateEncode() throws {
+        var update = ServerSettingsUpdate()
+        update.server = .init(transcription: .init(enabled: true))
+        let data = try JSONEncoder().encode(update)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let server = json["server"] as! [String: Any]
+        let transcription = server["transcription"] as! [String: Any]
+        #expect(transcription["enabled"] as? Bool == true)
     }
 
     @Test("ServerSettingsUpdate omits update block when nil (partial update)")

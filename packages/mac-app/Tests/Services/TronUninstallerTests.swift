@@ -99,6 +99,7 @@ struct TronUninstallerTests {
             validateBundledHelper: { nil },
             pingServer: { _ in .unreachable },
             launchAgentManager: manager,
+            applyTranscriptionPreference: { _ in .disabled },
             touchOnboardedSentinel: { }
         )
     }

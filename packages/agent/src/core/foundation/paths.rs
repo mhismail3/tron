@@ -179,7 +179,9 @@ pub fn journals_dir() -> PathBuf {
 //
 // The transcription sidecar is a Python venv + parakeet-mlx worker that
 // lives entirely under one directory, with a HuggingFace model cache
-// inside it. All references to these paths across the Rust agent, the
+// inside it. The Mac wizard or contributor tooling seeds worker.py and
+// requirements.txt before enabling it; runtime-generated venv/model data
+// stays here. All references to these paths across the Rust agent, the
 // Python worker, and `scripts/tron` should go through the helpers below.
 
 /// `~/.tron/system/transcription/` — parent dir for venv, worker, model cache.

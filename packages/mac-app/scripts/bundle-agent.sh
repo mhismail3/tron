@@ -16,11 +16,16 @@
 #   bundle-agent.sh --source PATH   # explicit path to a prebuilt binary
 #   bundle-agent.sh --clean         # remove the staged binary, nothing else
 #
+# Local push relay dogfood:
+#   put TRON_RELAY_URL / TRON_RELAY_SECRET in packages/mac-app/.env.local.
+#   The script reads only those relay keys before Cargo builds the helper.
+#
 # Exit codes:
 #   0  — staged binary is up to date
 #   1  — build failed
 #   2  — source binary missing (with --skip-build or --source)
 #   3  — staging path not writable
+#   64 — invalid arguments or malformed local relay env
 #
 # The script is idempotent. It refuses to run inside DerivedData / Xcode
 # archive contexts to avoid recursive rebuilds when invoked from a Run
@@ -35,6 +40,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 AGENT_DIR="$REPO_ROOT/packages/agent"
 RESOURCES_DIR="$SCRIPT_DIR/../Sources/Resources"
+LOCAL_ENV_FILE="$SCRIPT_DIR/../.env.local"
 LIBRARY_DIR="$RESOURCES_DIR/Library"
 HELPER_BUNDLE="$LIBRARY_DIR/LoginItems/Tron Server.app"
 HELPER_CONTENTS="$HELPER_BUNDLE/Contents"
@@ -98,9 +104,83 @@ resolve_source() {
 
 source_bin="$(resolve_source)"
 
+# --- local build env -----------------------------------------------------
+
+trim() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+
+strip_optional_quotes() {
+    local value="$1"
+    if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+        value="${value:1:${#value}-2}"
+    elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+        value="${value:1:${#value}-2}"
+    fi
+    printf '%s' "$value"
+}
+
+set_if_unset() {
+    local key="$1"
+    local value="$2"
+    if [ -z "${!key+x}" ]; then
+        export "$key=$value"
+    fi
+}
+
+load_local_relay_env() {
+    [ -f "$LOCAL_ENV_FILE" ] || return 0
+
+    local line key value loaded=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="$(trim "$line")"
+        [ -z "$line" ] && continue
+        [[ "$line" == \#* ]] && continue
+
+        if [[ "$line" =~ ^(export[[:space:]]+)?(TRON_RELAY_URL|TRON_RELAY_SECRET|TRON_RELAY_ENVIRONMENT)=(.*)$ ]]; then
+            key="${BASH_REMATCH[2]}"
+            value="$(strip_optional_quotes "$(trim "${BASH_REMATCH[3]}")")"
+            set_if_unset "$key" "$value"
+            loaded=1
+        elif [[ "$line" == TRON_RELAY_* || "$line" == export[[:space:]]TRON_RELAY_* ]]; then
+            echo "error: malformed relay env line in $LOCAL_ENV_FILE: $line" >&2
+            exit 64
+        fi
+    done < "$LOCAL_ENV_FILE"
+
+    if [ "$loaded" -eq 1 ]; then
+        echo "loaded local relay build env from $LOCAL_ENV_FILE"
+    fi
+}
+
+prepare_relay_env_for_build() {
+    load_local_relay_env
+
+    local has_url=0
+    local has_secret=0
+    [ -n "${TRON_RELAY_URL:-}" ] && has_url=1
+    [ -n "${TRON_RELAY_SECRET:-}" ] && has_secret=1
+
+    if [ "$has_url" -ne "$has_secret" ]; then
+        echo "error: TRON_RELAY_URL and TRON_RELAY_SECRET must be set together" >&2
+        echo "hint: add both to packages/mac-app/.env.local or unset both for a push-disabled local helper" >&2
+        exit 64
+    fi
+
+    if [ "$has_url" -eq 1 ]; then
+        export TRON_RELAY_ENVIRONMENT="${TRON_RELAY_ENVIRONMENT:-production}"
+        echo "relay config will be compiled into the staged helper (secret hidden)"
+    fi
+}
+
 # --- build step ----------------------------------------------------------
 
 if [ "$skip_build" -eq 0 ] && [ -z "$source_override" ]; then
+    prepare_relay_env_for_build
+
     # Cargo's `--debug` flag does NOT exist (dev is the default profile —
     # omit any flag, or use `--profile dev`). Only `--release` is a
     # shorthand. Branch explicitly so we never pass an invalid flag.

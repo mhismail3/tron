@@ -213,7 +213,7 @@ pub struct AuthStorage {
     pub services: Option<HashMap<String, ServiceAuth>>,
     /// ISO 8601 timestamp of last update.
     pub last_updated: String,
-    /// Preserves unknown top-level keys (e.g. "relay") through load/save round-trips.
+    /// Preserves unknown top-level keys through load/save round-trips.
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }
