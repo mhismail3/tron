@@ -15,6 +15,13 @@ struct ProvidersSettingsPageTests {
         #expect(!ProviderAuthActionResult.failed.shouldCommitLocalFormChanges)
     }
 
+    @Test("services section header is a stronger boundary than provider headers")
+    func servicesSectionHeaderIsStrongerBoundaryThanProviderHeaders() {
+        #expect(ProvidersServicesSectionHeaderStyle.fontSize > TronTypography.sizeBodySM)
+        #expect(ProvidersServicesSectionHeaderStyle.topPadding > ProvidersServicesSectionHeaderStyle.bottomPadding)
+        #expect(ProvidersServicesSectionHeaderStyle.bottomPadding < 8)
+    }
+
     @Test("providers summary describes unloaded empty and configured states")
     func providersSummaryDescribesCredentialState() {
         let unloaded = ProvidersSettingsSummary.Context(
@@ -46,6 +53,16 @@ struct ProvidersSettingsPageTests {
         )
         #expect(ProvidersSettingsSummary.title(for: configured) == "4 connections ready")
         #expect(ProvidersSettingsSummary.description(for: configured) == "3 model providers and 1 service are configured. Secrets stay on the Mac server.")
+
+        let allConfigured = ProvidersSettingsSummary.Context(
+            isLoaded: true,
+            configuredModelProviderCount: 5,
+            totalModelProviderCount: 5,
+            configuredServiceCount: 2,
+            totalServiceCount: 2
+        )
+        #expect(ProvidersSettingsSummary.title(for: allConfigured) == "7 connections ready")
+        #expect(ProvidersSettingsSummary.description(for: allConfigured) == "All 5 model providers and all 2 services are configured. Secrets stay on the Mac server.")
     }
 
     @Test("credential row ids are stable and credential-type scoped")

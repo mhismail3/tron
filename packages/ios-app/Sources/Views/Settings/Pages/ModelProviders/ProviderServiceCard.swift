@@ -49,9 +49,7 @@ struct ProviderServiceCard: View {
                     Button(role: .destructive) {
                         Task { _ = await onClear() }
                     } label: {
-                        Text(ProviderCredentialStatusAction.title)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                            .foregroundStyle(.tronError)
+                        ProviderCredentialClearPillLabel()
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Clear \(service.displayName) API key")

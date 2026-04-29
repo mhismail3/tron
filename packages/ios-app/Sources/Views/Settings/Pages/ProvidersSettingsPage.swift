@@ -33,7 +33,7 @@ struct ProvidersSettingsPage: View {
                 )
             }
 
-            SettingsSectionHeader(title: "Services")
+            ProvidersServicesSectionHeader()
 
             ForEach(ProviderInfo.services) { service in
                 ProviderServiceCard(
@@ -142,5 +142,22 @@ struct ProvidersSettingsPage: View {
             self.error = error.localizedDescription
             return .failed
         }
+    }
+}
+
+enum ProvidersServicesSectionHeaderStyle {
+    static let fontSize = TronTypography.sizeBody
+    static let topPadding: CGFloat = 26
+    static let bottomPadding: CGFloat = 4
+}
+
+private struct ProvidersServicesSectionHeader: View {
+    var body: some View {
+        Text("Services")
+            .font(TronTypography.sans(size: ProvidersServicesSectionHeaderStyle.fontSize, weight: .semibold))
+            .foregroundStyle(.tronTextSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, ProvidersServicesSectionHeaderStyle.topPadding)
+            .padding(.bottom, ProvidersServicesSectionHeaderStyle.bottomPadding)
     }
 }

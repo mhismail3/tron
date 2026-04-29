@@ -54,6 +54,30 @@ enum ProviderCredentialStatusAction {
     static let confirmationButtonTitle = "Clear"
 }
 
+enum ProviderCredentialClearPillStyle {
+    static let fontSize = TronTypography.sizeSM
+    static let horizontalPadding: CGFloat = 8
+    static let verticalPadding: CGFloat = 4
+    static let backgroundOpacity = 0.12
+    static let borderOpacity = 0.2
+}
+
+struct ProviderCredentialClearPillLabel: View {
+    var body: some View {
+        Text(ProviderCredentialStatusAction.title)
+            .font(TronTypography.sans(size: ProviderCredentialClearPillStyle.fontSize, weight: .semibold))
+            .foregroundStyle(.tronError)
+            .padding(.horizontal, ProviderCredentialClearPillStyle.horizontalPadding)
+            .padding(.vertical, ProviderCredentialClearPillStyle.verticalPadding)
+            .background(.tronError.opacity(ProviderCredentialClearPillStyle.backgroundOpacity), in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(.tronError.opacity(ProviderCredentialClearPillStyle.borderOpacity), lineWidth: 1)
+            }
+            .contentShape(Capsule())
+    }
+}
+
 enum ProviderStatusHelpers {
     static func accountStatus(_ account: AccountInfo) -> String {
         if account.isExpired {

@@ -87,6 +87,14 @@ struct ProviderStatusHelpersTests {
         #expect(ProviderCredentialStatusAction.confirmationButtonTitle == "Clear")
     }
 
+    @Test("credential clear action uses compact pill styling")
+    func credentialClearActionUsesCompactPillStyling() {
+        #expect(ProviderCredentialClearPillStyle.fontSize == TronTypography.sizeSM)
+        #expect(ProviderCredentialClearPillStyle.horizontalPadding == 8)
+        #expect(ProviderCredentialClearPillStyle.verticalPadding == 4)
+        #expect(ProviderCredentialClearPillStyle.backgroundOpacity == 0.12)
+    }
+
     // MARK: - isProviderConfigured
 
     @Test("isProviderConfigured returns false for nil")

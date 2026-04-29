@@ -55,7 +55,7 @@ enum ProvidersSettingsSummary {
             singular: "service",
             plural: "services"
         )
-        return "\(modelSummary) and \(serviceSummary) are configured. Secrets stay on the Mac server."
+        return sentenceCase("\(modelSummary) and \(serviceSummary) are configured. Secrets stay on the Mac server.")
     }
 
     private static func countSummary(configured: Int, total: Int, singular: String, plural: String) -> String {
@@ -67,6 +67,11 @@ enum ProvidersSettingsSummary {
             return "all \(total) \(plural)"
         }
         return "\(configured) \(noun)"
+    }
+
+    private static func sentenceCase(_ value: String) -> String {
+        guard let first = value.first else { return value }
+        return first.uppercased() + value.dropFirst()
     }
 }
 

@@ -35,9 +35,7 @@ struct ProviderCredentialRow: View {
             Button {
                 showDeleteConfirm = true
             } label: {
-                Text(ProviderCredentialStatusAction.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                    .foregroundStyle(.tronError)
+                ProviderCredentialClearPillLabel()
             }
             .buttonStyle(.plain)
             .accessibilityLabel("\(ProviderCredentialStatusAction.title) \(label)")

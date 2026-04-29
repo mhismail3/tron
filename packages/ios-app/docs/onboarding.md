@@ -167,7 +167,9 @@ Google Cloud OAuth configuration. API-key-only providers and search services
 follow the same status-card plus action-card pattern, so masked server-returned
 hints never share a container with unsaved secret entry fields. Credential
 status cards keep OAuth state and masked key hints in the trailing monospace
-slot next to an explicit red Clear action.
+slot next to an explicit small red Clear pill. The Services group uses a
+stronger spaced header than individual provider rows so the sheet reads as two
+clear sections: model providers first, then search services.
 
 Provider credentials are written through `auth.*` RPCs, so secrets land
 in `auth.json`, not `settings.json`.
