@@ -2,6 +2,7 @@ use super::*;
 
 impl ComputerUseTool {
     /// Run an osascript command via the process runner.
+    #[cfg(target_os = "macos")]
     pub(super) async fn run_osascript(
         &self,
         script: &str,
@@ -144,6 +145,7 @@ impl ComputerUseTool {
             }
             #[cfg(not(target_os = "macos"))]
             {
+                let _ = ctx;
                 Err::<(), String>("ComputerUse keypress is only supported on macOS".into())
             }
         };
@@ -196,6 +198,7 @@ impl ComputerUseTool {
             }
             #[cfg(not(target_os = "macos"))]
             {
+                let _ = ctx;
                 Err::<(), String>("ComputerUse scroll is only supported on macOS".into())
             }
         };
