@@ -87,6 +87,10 @@ enum MainSettingsFooterLayout {
     static let textLeadingPadding: CGFloat = 8
     static let topPadding: CGFloat = 10
     static let bottomPadding: CGFloat = 10
+    static let feedbackButtonCornerRadius: CGFloat = 13
+    static let feedbackButtonGlassTintOpacity = 0.14
+    static let feedbackButtonFallbackTintOpacity = 0.08
+    static let feedbackButtonFallbackStrokeOpacity = 0.16
 }
 
 struct BuiltinHookInfo: Equatable, Identifiable, Sendable {

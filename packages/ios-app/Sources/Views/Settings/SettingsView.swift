@@ -505,7 +505,10 @@ struct SettingsView: View {
     }
 
     private var feedbackFooterButton: some View {
-        let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
+        let shape = RoundedRectangle(
+            cornerRadius: MainSettingsFooterLayout.feedbackButtonCornerRadius,
+            style: .continuous
+        )
         return Button {
             prepareAndPresentFeedback()
         } label: {
@@ -694,24 +697,31 @@ struct SettingsView: View {
 }
 
 private struct FooterFeedbackButtonChromeModifier: ViewModifier {
-    private let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
+    private let shape = RoundedRectangle(
+        cornerRadius: MainSettingsFooterLayout.feedbackButtonCornerRadius,
+        style: .continuous
+    )
 
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content
-                .glassEffect(
-                    .regular.tint(Color.tronTextMuted.opacity(0.14)).interactive(),
-                    in: shape
-                )
-                .overlay {
-                    shape.stroke(.gray.opacity(0.14), lineWidth: 1)
-                }
+            content.glassEffect(
+                .regular
+                    .tint(Color.tronTextMuted.opacity(MainSettingsFooterLayout.feedbackButtonGlassTintOpacity))
+                    .interactive(),
+                in: shape
+            )
         } else {
             content
                 .background(.ultraThinMaterial, in: shape)
-                .background(Color.tronTextMuted.opacity(0.08), in: shape)
+                .background(
+                    Color.tronTextMuted.opacity(MainSettingsFooterLayout.feedbackButtonFallbackTintOpacity),
+                    in: shape
+                )
                 .overlay {
-                    shape.stroke(.gray.opacity(0.16), lineWidth: 1)
+                    shape.stroke(
+                        .gray.opacity(MainSettingsFooterLayout.feedbackButtonFallbackStrokeOpacity),
+                        lineWidth: 1
+                    )
                 }
         }
     }
