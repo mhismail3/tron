@@ -36,7 +36,7 @@ struct FeedbackComposerTests {
         #expect(lines[1].contains("ERROR"))
     }
 
-    @Test("log body redacts bearer tokens + home paths via SentryRedactor")
+    @Test("log body redacts bearer tokens + local paths via DiagnosticsRedactor")
     func logBodyRedacted() {
         let composer = FeedbackComposer(appVersion: "0.1.0-beta.1", buildNumber: "1")
         let entries: [(Date, LogCategory, LogLevel, String)] = [
@@ -47,7 +47,7 @@ struct FeedbackComposerTests {
         #expect(!body.contains("1234567890abcdef1234567890"))
         #expect(!body.contains("/Users/alice"))
         #expect(body.contains("[redacted:len=26]"))
-        #expect(body.contains("~/x"))
+        #expect(body.contains("[redacted:path]"))
     }
 
     @Test("tail limit respected — returns at most N entries")
@@ -67,30 +67,47 @@ struct FeedbackComposerTests {
 
     // MARK: - Body assembly
 
-    @Test("full body has header + log section + footer")
+    @Test("full body has header + attachment note")
     func fullBodyHasAllSections() {
         let composer = FeedbackComposer(appVersion: "0.1.0-beta.1", buildNumber: "1")
         let entries: [(Date, LogCategory, LogLevel, String)] = [
             (Date(timeIntervalSince1970: 1), .general, .info, "hi")
         ]
-        let body = composer.assembleBody(userNotes: "Saw a bug", logs: entries)
+        let body = composer.assembleBody(
+            userNotes: "Saw a bug",
+            attachmentFileName: "tron-diagnostics-20260429-210000Z.json",
+            logs: entries
+        )
         #expect(body.contains("Saw a bug"))
         #expect(body.contains("App version:"))
-        #expect(body.contains("Recent logs"))
+        #expect(body.contains("Attached diagnostics bundle: tron-diagnostics-20260429-210000Z.json"))
         #expect(body.contains("hi"))
     }
 
-    @Test("empty log tail yields a short body with 'no logs captured' note")
+    @Test("empty log tail yields a short body with no inline log section")
     func emptyLogsHandledGracefully() {
         let composer = FeedbackComposer(appVersion: "0.1.0-beta.1", buildNumber: "1")
-        let body = composer.assembleBody(userNotes: "", logs: [])
-        #expect(body.contains("no logs captured"))
+        let body = composer.assembleBody(userNotes: "", attachmentFileName: nil, logs: [])
+        #expect(body.contains("No diagnostics attachment was generated."))
+        #expect(!body.contains("Recent logs preview"))
     }
 
     // MARK: - Recipient
 
-    @Test("recipient is feedback@tron.computer — pinned for privacy-policy compliance")
-    func recipientPinned() {
-        #expect(FeedbackComposer.recipient == "feedback@tron.computer")
+    @Test("recipient is read from Info.plist-style runtime configuration")
+    func recipientConfiguredAtRuntime() {
+        #expect(FeedbackComposer.configuredRecipient(infoDictionary: [:]) == nil)
+        #expect(FeedbackComposer.configuredRecipient(infoDictionary: [
+            FeedbackComposer.recipientInfoPlistKey: "$(TRON_FEEDBACK_EMAIL)"
+        ]) == nil)
+        #expect(FeedbackComposer.configuredRecipient(infoDictionary: [
+            FeedbackComposer.recipientInfoPlistKey: "feedback@example.invalid"
+        ]) == "feedback@example.invalid")
+    }
+
+    @Test("delivery falls back to share sheet without configured Mail route")
+    func deliveryFallsBackWithoutMailRoute() {
+        #expect(FeedbackDeliveryPlanner.route(configuredRecipient: nil, canSendMail: true) == .shareSheet)
+        #expect(FeedbackDeliveryPlanner.route(configuredRecipient: "feedback@example.invalid", canSendMail: false) == .shareSheet)
     }
 }

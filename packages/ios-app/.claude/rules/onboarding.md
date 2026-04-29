@@ -48,9 +48,9 @@ OnboardingState.complete()
 All onboarding-specific keys are exposed as `nonisolated static let` on
 `OnboardingState`. Never duplicate the literal strings.
 
-`telemetryEnabled` is intentionally owned by
-`SettingsState.telemetryEnabledStorageKey`; telemetry is a Privacy
-Settings concern, not an onboarding concern.
+There is no onboarding-owned analytics opt-in. Local diagnostics are bounded
+on-device and can leave the phone only through the explicit Settings feedback
+action.
 
 `@AppStorage` is intentionally backed by `UserDefaults.standard`, not
 `NSUbiquitousKeyValueStore`. Cross-device iCloud sync of the gate would

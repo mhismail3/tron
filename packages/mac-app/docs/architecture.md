@@ -49,7 +49,7 @@ packages/mac-app/
 │   │   │   ├── FeedbackComposer.swift      # pure GitHub issue composer with redacted log context
 │   │   │   └── MenuBarFeedbackAction.swift # menu-bar handler (NSWorkspace.open GitHub issue URL)
 │   │   ├── Observability/
-│   │   │   └── SentryRedactor.swift        # beforeSend hook: strip paths, mask tokens, drop chat content (Phase 7)
+│   │   │   └── DiagnosticsRedactor.swift   # strip paths, mask tokens, drop chat content
 │   │   ├── Onboarding/
 │   │   │   ├── ExistingInstallDetector.swift
 │   │   │   ├── InstallPlanner.swift    # pure-value plan + plist renderer

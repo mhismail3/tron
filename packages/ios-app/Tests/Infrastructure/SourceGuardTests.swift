@@ -55,4 +55,56 @@ struct SourceGuardTests {
             }
         }
     }
+
+    @Test("Removed implementation names do not reappear")
+    func testRemovedNamesStayRemoved() throws {
+        let forbidden: [String] = [
+            "Tele" + "metry" + "Client",
+            "Tele" + "metry" + "Event",
+            "Token" + "Bucket",
+            "Privacy" + "Settings" + "Page",
+            "tele" + "metry" + "Enabled" + "Storage" + "Key",
+            "Sen" + "try" + "Redactor",
+            "Post" + "Hog",
+            "Open" + "Tele" + "metry",
+            "github" + "Issue" + "Page",
+            "open" + "Feedback" + "Issue",
+            "Create" + " Issue",
+        ]
+
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+
+        for root in sourceRoots {
+            guard let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                Issue.record("Could not enumerate \(root.path)")
+                continue
+            }
+
+            while let any = enumerator.nextObject() {
+                guard let url = any as? URL else { continue }
+                guard url.pathExtension == "swift" else { continue }
+                if url.path == #filePath { continue }
+
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for needle in forbidden {
+                    #expect(
+                        !content.contains(needle),
+                        "\(url.lastPathComponent) contains removed diagnostics scaffold `\(needle)`"
+                    )
+                }
+            }
+        }
+    }
 }

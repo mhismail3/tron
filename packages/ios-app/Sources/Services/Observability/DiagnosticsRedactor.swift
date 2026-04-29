@@ -1,8 +1,8 @@
 import Foundation
 
-/// Scrubs PII from log lines + Sentry event payloads before they leave
+/// Scrubs PII from log lines + diagnostic event payloads before they leave
 /// the device. All mutation lives here (tests pin the exact output
-/// format) so Sentry SDK integration is a one-line `beforeSend` wrapper.
+/// format) so diagnostic exporter integration is a one-line `beforeSend` wrapper.
 ///
 /// Redactions applied:
 /// - `Authorization: Bearer <token>` and bare `Bearer <token>` →
@@ -10,14 +10,16 @@ import Foundation
 /// - JSON-shaped `"token":"..."`, `"authorization":"Bearer ..."`,
 ///   `"access_token":"..."`, `"api_key":"..."` → value replaced with
 ///   `[redacted:len=N]`.
-/// - `/Users/<username>/...` → `~/...` (home-directory stripping).
+/// - Local filesystem paths such as `/Users/<username>/...`,
+///   `/private/var/...`, `/tmp/...`, and `~/...` →
+///   `[redacted:path]`.
 /// - `message`, `userMessage`, `chatText`, `prompt`, `messageContent`
 ///   fields in event payloads are fully replaced with `"[redacted]"`
-///   — no chat content can ever reach Sentry.
+///   — no chat content can ever reach diagnostics.
 ///
 /// The redactor is stateless; create one per send call or share a
 /// single instance — both are safe.
-struct SentryRedactor {
+struct DiagnosticsRedactor {
     /// Fields dropped entirely (case-insensitive match). They commonly
     /// carry user chat content.
     static let dropFields: Set<String> = [
@@ -34,11 +36,11 @@ struct SentryRedactor {
         var out = input
         out = Self.redactBearerRuns(out)
         out = Self.redactJSONTokenValues(out)
-        out = Self.redactHomePaths(out)
+        out = Self.redactLocalPaths(out)
         return out
     }
 
-    /// Redacts a top-level Sentry event dict. Applies the full drop-
+    /// Redacts a top-level diagnostic event dict. Applies the full drop-
     /// fields rule (primary `message`, `userMessage`, etc. replaced
     /// with `[redacted]`). Nested dicts reached through `extra`,
     /// `tags`, `contexts` etc. also apply the drop rule.
@@ -108,11 +110,13 @@ struct SentryRedactor {
         )
     }()
 
-    /// `/Users/<segment>/` where segment is 1+ non-slash, non-space chars.
-    private static let homePathRegex: NSRegularExpression = {
+    /// Common local path prefixes that can reveal usernames, workspace
+    /// names, or simulator/container IDs. The match intentionally stops
+    /// at punctuation commonly used to delimit paths in log messages.
+    private static let localPathRegex: NSRegularExpression = {
         // swiftlint:disable:next force_try — static pattern
         try! NSRegularExpression(
-            pattern: #"/Users/[^/\s"']+/"#,
+            pattern: #"(?:file://)?(?:/Users|/home|/private/var|/var|/tmp|/Volumes|/Applications|~/)[^\s"'<>),;]*"#,
             options: []
         )
     }()
@@ -153,15 +157,15 @@ struct SentryRedactor {
         return out
     }
 
-    /// `/Users/<name>/` → `~/` across all occurrences.
-    private static func redactHomePaths(_ input: String) -> String {
+    /// Local filesystem paths → `[redacted:path]` across all occurrences.
+    private static func redactLocalPaths(_ input: String) -> String {
         let ns = input as NSString
         let fullRange = NSRange(location: 0, length: ns.length)
-        return homePathRegex.stringByReplacingMatches(
+        return localPathRegex.stringByReplacingMatches(
             in: input,
             options: [],
             range: fullRange,
-            withTemplate: "~/"
+            withTemplate: "[redacted:path]"
         )
     }
 }

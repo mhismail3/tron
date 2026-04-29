@@ -15,6 +15,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     ) -> Bool {
         // Set notification center delegate for foreground handling
         UNUserNotificationCenter.current().delegate = self
+        MetricKitDiagnosticsStore.shared.start()
         return true
     }
 

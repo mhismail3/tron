@@ -1,6 +1,12 @@
 import SwiftUI
 import MessageUI
 
+struct FeedbackMailAttachment: Equatable, Sendable {
+    let data: Data
+    let mimeType: String
+    let fileName: String
+}
+
 /// UIViewControllerRepresentable wrapping `MFMailComposeViewController`
 /// so the SwiftUI settings page can present it in a `.sheet(...)`.
 ///
@@ -11,6 +17,7 @@ struct FeedbackMailView: UIViewControllerRepresentable {
     let subject: String
     let body: String
     let recipient: String
+    let attachments: [FeedbackMailAttachment]
     let onDismiss: @MainActor () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -22,6 +29,13 @@ struct FeedbackMailView: UIViewControllerRepresentable {
         controller.setToRecipients([recipient])
         controller.setSubject(subject)
         controller.setMessageBody(body, isHTML: false)
+        for attachment in attachments {
+            controller.addAttachmentData(
+                attachment.data,
+                mimeType: attachment.mimeType,
+                fileName: attachment.fileName
+            )
+        }
         controller.mailComposeDelegate = context.coordinator
         return controller
     }
@@ -58,7 +72,43 @@ struct FeedbackMailView: UIViewControllerRepresentable {
 /// fallback when `canSendMail()` is false. Returns `true` if the
 /// device has a configured mail account.
 enum FeedbackMailAvailability {
+    @MainActor
     static func canSendMail() -> Bool {
         MFMailComposeViewController.canSendMail()
+    }
+}
+
+struct FeedbackShareView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    let onDismiss: @MainActor () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onDismiss: onDismiss)
+    }
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: nil
+        )
+        controller.completionWithItemsHandler = { _, _, _, _ in
+            Task { @MainActor in
+                context.coordinator.onDismiss()
+            }
+        }
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {
+        // No-op — activity items are fixed for each presentation.
+    }
+
+    @MainActor
+    final class Coordinator {
+        let onDismiss: @MainActor () -> Void
+
+        init(onDismiss: @escaping @MainActor () -> Void) {
+            self.onDismiss = onDismiss
+        }
     }
 }

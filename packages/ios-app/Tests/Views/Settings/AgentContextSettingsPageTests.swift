@@ -26,7 +26,7 @@ struct AgentContextSettingsPageTests {
         #expect(ServerSettingsCategory.mcpServers.title == "MCP")
         #expect(MainSettingsListLayout.categorySpacing == 8)
         #expect(MainSettingsLocalCategoryStyle.accent == .tronEmerald)
-        #expect(MainSettingsLocalCategoryStyle.privacyIcon == "lock.shield")
+        #expect(MainSettingsLocalCategoryStyle.appIcon == "paintbrush")
         #expect(!ServerSettingsCategory.serverBackedOrder.map(\.title).contains("Hooks"))
         #expect(!ServerSettingsCategory.serverBackedOrder.map(\.title).contains("Prompt Library"))
         #expect(!ServerSettingsCategory.serverBackedOrder.map(\.title).contains("Git Workflow"))

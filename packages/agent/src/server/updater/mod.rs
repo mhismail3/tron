@@ -533,7 +533,7 @@ pub struct ReleaseInfo {
     /// and any leading `v`).
     pub version: String,
     /// The original GitHub Release `tag_name` (e.g. `server-v0.1.0`).
-    /// Kept around so telemetry / logs can cite the exact tag the
+    /// Kept around so diagnostics / logs can cite the exact tag the
     /// fetcher resolved against.
     pub tag: String,
     /// Direct download URL for the Mac DMG asset attached to this

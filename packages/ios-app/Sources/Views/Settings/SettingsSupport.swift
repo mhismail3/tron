@@ -76,7 +76,6 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
 enum MainSettingsLocalCategoryStyle {
     static let accent: Color = .tronEmerald
     static let appIcon = "paintbrush"
-    static let privacyIcon = "lock.shield"
 }
 
 enum MainSettingsListLayout {

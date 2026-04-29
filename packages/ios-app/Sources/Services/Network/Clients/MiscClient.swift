@@ -138,9 +138,19 @@ final class MiscClient: RPCDomainClient {
         }
     }
 
-    #if DEBUG || BETA
     // MARK: - Logs Methods
 
+    /// Fetch recent server logs for an explicit user-generated diagnostics bundle.
+    func recentLogs(limit: Int = 1000) async throws -> LogsRecentResult {
+        let ws = try requireTransport().requireConnection()
+
+        return try await ws.send(
+            method: "logs.recent",
+            params: LogsRecentParams(limit: min(max(limit, 1), 1000))
+        )
+    }
+
+    #if DEBUG || BETA
     /// Ingest structured client logs into the server database.
     func ingestLogs(entries: [ClientLogEntry]) async throws -> LogsIngestResult {
         let ws = try requireTransport().requireConnection()

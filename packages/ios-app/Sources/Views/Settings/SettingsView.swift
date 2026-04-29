@@ -23,9 +23,13 @@ struct SettingsView: View {
     @State private var clearPromptHistoryResultMessage: String?
     @State private var activePage: SettingsPage?
     @State private var cardsVisible = false
+    @State private var feedbackMailDraft: FeedbackMailDraft?
+    @State private var feedbackShareDraft: FeedbackShareDraft?
+    @State private var feedbackResultMessage: String?
+    @State private var isPreparingFeedback = false
 
     enum SettingsPage: String, Identifiable {
-        case server, agent, context, providers, app, mcpServers, privacy
+        case server, agent, context, providers, app, mcpServers
         var id: String { rawValue }
     }
 
@@ -111,12 +115,26 @@ struct SettingsView: View {
                         settingsState: settingsState,
                         updateServerSetting: updateServerSetting
                     )
-                case .privacy:
-                    PrivacySettingsPage()
                 }
             }
             .adaptivePresentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
+        }
+        .sheet(item: $feedbackMailDraft) { draft in
+            FeedbackMailView(
+                subject: draft.subject,
+                body: draft.body,
+                recipient: draft.recipient,
+                attachments: draft.attachments
+            ) {
+                feedbackMailDraft = nil
+            }
+        }
+        .sheet(item: $feedbackShareDraft) { draft in
+            FeedbackShareView(activityItems: [draft.fileURL]) {
+                try? FileManager.default.removeItem(at: draft.fileURL)
+                feedbackShareDraft = nil
+            }
         }
         .task {
             cardsVisible = true
@@ -159,6 +177,15 @@ struct SettingsView: View {
         ) {
             Button("OK", role: .cancel) { clearPromptHistoryResultMessage = nil }
         }
+        .alert(
+            feedbackResultMessage ?? "",
+            isPresented: Binding(
+                get: { feedbackResultMessage != nil },
+                set: { if !$0 { feedbackResultMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { feedbackResultMessage = nil }
+        }
         .adaptivePresentationDetents([.large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
@@ -185,17 +212,6 @@ struct SettingsView: View {
                     ) {
                         activePage = .app
                     }
-                }
-            }
-
-            SettingsCard(accent: MainSettingsLocalCategoryStyle.accent, interactive: true) {
-                categoryRow(
-                    icon: MainSettingsLocalCategoryStyle.privacyIcon,
-                    label: "Privacy",
-                    subtitle: "Telemetry opt-in and feedback composer",
-                    accent: MainSettingsLocalCategoryStyle.accent
-                ) {
-                    activePage = .privacy
                 }
             }
         }
@@ -461,11 +477,42 @@ struct SettingsView: View {
     }
 
     private var footerView: some View {
+        HStack(alignment: .center, spacing: 12) {
+            footerText
+            Spacer(minLength: 12)
+            feedbackFooterButton
+        }
+        .padding(.top, 16)
+    }
+
+    private var footerText: some View {
         Text("Built by Moose \u{1FACE} \u{00B7} v0.1.0")
             .font(TronTypography.sans(size: TronTypography.sizeCaption))
             .foregroundStyle(.tronTextMuted)
-            .frame(maxWidth: .infinity)
-            .padding(.top, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lineLimit(1)
+            .minimumScaleFactor(0.92)
+            .padding(.leading, 8)
+    }
+
+    private var feedbackFooterButton: some View {
+        let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
+        return Button {
+            prepareAndPresentFeedback()
+        } label: {
+            Text("Send Feedback")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .footerFeedbackButtonChrome()
+        .disabled(isPreparingFeedback)
+        .opacity(isPreparingFeedback ? 0.55 : 1)
     }
 
     // MARK: - Actions
@@ -552,6 +599,61 @@ struct SettingsView: View {
         }
     }
 
+    private func prepareAndPresentFeedback() {
+        guard !isPreparingFeedback else { return }
+        isPreparingFeedback = true
+
+        Task { @MainActor in
+            defer { isPreparingFeedback = false }
+            do {
+                let attachment = try await DiagnosticsBundleBuilder(dependencies: dependencies).build()
+                let mailAttachment = FeedbackMailAttachment(
+                    data: attachment.data,
+                    mimeType: attachment.mimeType,
+                    fileName: attachment.fileName
+                )
+                let composer = FeedbackComposer(
+                    appVersion: AppConstants.canonicalVersion,
+                    buildNumber: AppConstants.buildNumber
+                )
+                let body = composer.assembleBody(
+                    userNotes: "",
+                    attachmentFileName: attachment.fileName
+                )
+
+                switch FeedbackDeliveryPlanner.route(
+                    configuredRecipient: FeedbackComposer.configuredRecipient(),
+                    canSendMail: FeedbackMailAvailability.canSendMail()
+                ) {
+                case .mail(let recipient):
+                    feedbackMailDraft = FeedbackMailDraft(
+                        subject: composer.subject(),
+                        body: body,
+                        recipient: recipient,
+                        attachments: [mailAttachment]
+                    )
+                case .shareSheet:
+                    let fileURL = try writeFeedbackAttachment(attachment)
+                    feedbackShareDraft = FeedbackShareDraft(fileURL: fileURL)
+                }
+            } catch {
+                feedbackResultMessage = "Could not prepare diagnostics: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func writeFeedbackAttachment(_ attachment: DiagnosticsBundleAttachment) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TronFeedback", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let fileURL = directory.appendingPathComponent(attachment.fileName)
+        try attachment.data.write(to: fileURL, options: [.atomic])
+        return fileURL
+    }
+
     private func updateServerSetting(_ build: () -> ServerSettingsUpdate) {
         let update = build()
         let client = rpcClient
@@ -580,6 +682,49 @@ struct SettingsView: View {
             }
         }
     }
+}
+
+private struct FooterFeedbackButtonChromeModifier: ViewModifier {
+    private let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(
+                    .regular.tint(Color.tronTextMuted.opacity(0.14)).interactive(),
+                    in: shape
+                )
+                .overlay {
+                    shape.stroke(.gray.opacity(0.14), lineWidth: 1)
+                }
+        } else {
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .background(Color.tronTextMuted.opacity(0.08), in: shape)
+                .overlay {
+                    shape.stroke(.gray.opacity(0.16), lineWidth: 1)
+                }
+        }
+    }
+}
+
+private extension View {
+    func footerFeedbackButtonChrome() -> some View {
+        modifier(FooterFeedbackButtonChromeModifier())
+    }
+}
+
+private struct FeedbackMailDraft: Identifiable {
+    let id = UUID()
+    let subject: String
+    let body: String
+    let recipient: String
+    let attachments: [FeedbackMailAttachment]
+}
+
+private struct FeedbackShareDraft: Identifiable {
+    let id = UUID()
+    let fileURL: URL
 }
 
 #if DEBUG

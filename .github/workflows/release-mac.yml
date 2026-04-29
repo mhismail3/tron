@@ -35,13 +35,6 @@
 #   NOTARIZE_APP_PASSWORD   app-specific password for the Apple ID
 #   TRON_RELAY_URL          Cloudflare Worker URL for iOS push delivery
 #   TRON_RELAY_SECRET       HMAC secret shared with the Worker
-#
-# Optional secrets (warned-and-skipped when absent):
-#
-#   SENTRY_AUTH_TOKEN       org/project token with project:write — uploads dSYMs
-#   SENTRY_ORG              Sentry organization slug (defaults to "tron")
-#   SENTRY_PROJECT_MAC      Sentry project slug for the Mac app (defaults to "tron-mac")
-#
 # All required signing, notarization, and relay secrets must be present for notarization to run. In
 # dry-run mode (workflow_dispatch with `dry_run=true`) missing secrets
 # are tolerated and the job short-circuits before the notarization step.
@@ -424,53 +417,6 @@ jobs:
       - name: Staple
         if: steps.drymode.outputs.dry_run != 'true'
         run: xcrun stapler staple "$APP_PATH"
-
-      # ── dSYM upload (Sentry) ──────────────────────────────────────
-      #
-      # Symbolicates Mac crashes in Sentry. Skipped when SENTRY_AUTH_TOKEN
-      # is unset (forks, dry-run, or before Sentry is provisioned).
-      # Failures are non-fatal — a release without symbol upload is still
-      # shippable; we just lose stack-frame symbol resolution for crashes
-      # in this build.
-      - name: Upload dSYMs to Sentry
-        if: |
-          steps.drymode.outputs.dry_run != 'true' &&
-          env.SENTRY_AUTH_TOKEN != ''
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG:        ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT:    ${{ secrets.SENTRY_PROJECT_MAC }}
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          : "${SENTRY_ORG:=tron}"
-          : "${SENTRY_PROJECT:=tron-mac}"
-          # Install sentry-cli if not present (the macos-15 image ships
-          # without it).
-          if ! command -v sentry-cli >/dev/null 2>&1; then
-            brew install getsentry/tools/sentry-cli
-          fi
-          DSYM_DIR="$ARCHIVE_PATH/dSYMs"
-          if [[ ! -d "$DSYM_DIR" ]]; then
-            echo "::warning::no dSYMs found at $DSYM_DIR — skipping upload"
-            exit 0
-          fi
-          sentry-cli debug-files upload \
-            --org "$SENTRY_ORG" \
-            --project "$SENTRY_PROJECT" \
-            --include-sources \
-            --wait \
-            "$DSYM_DIR"
-          # Tag the release in Sentry so the dSYMs are associated with
-          # the version users see in their crash dialog.
-          sentry-cli releases new \
-            --org "$SENTRY_ORG" \
-            --project "$SENTRY_PROJECT" \
-            "tron-mac@${{ steps.ver.outputs.version }}"
-          sentry-cli releases finalize \
-            --org "$SENTRY_ORG" \
-            --project "$SENTRY_PROJECT" \
-            "tron-mac@${{ steps.ver.outputs.version }}"
 
       # ── DMG assembly ──────────────────────────────────────────────
       - name: Build DMG

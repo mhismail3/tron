@@ -17,7 +17,7 @@ SwiftUI view composition patterns.
 | `Views/Tools/` | Tool chips + detail sheets (paired) |
 | `Views/Components/` | Reusable UI components |
 | `Views/Onboarding/` | First-run swipeable onboarding sheet (`OnboardingFlowView`, `OnboardingShell`, `QRCodeScannerSheet`, `Steps/PairingStep.swift`) |
-| `Views/Settings/` | Settings pages including `PrivacySettingsPage` (telemetry + feedback), `ConnectionSettingsPage` (preset + re-pair) |
+| `Views/Settings/` | Settings pages including main-sheet feedback diagnostics actions and `ConnectionSettingsPage` (preset + re-pair) |
 | `Views/{Feature}/` | Feature-specific views |
 
 ## Patterns

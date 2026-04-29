@@ -98,11 +98,6 @@ final class SettingsState {
     /// `"notify"`.
     var updateAction: String = "notify"
 
-    /// UserDefaults key for the iOS-only telemetry opt-in. Kept with
-    /// settings/privacy ownership because telemetry is configured from
-    /// Settings, not onboarding.
-    nonisolated static let telemetryEnabledStorageKey = "telemetryEnabled"
-
     @ObservationIgnored
     private var lastLoadedSettings: ServerSettings?
 

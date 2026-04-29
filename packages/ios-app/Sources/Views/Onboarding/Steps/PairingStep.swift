@@ -364,7 +364,6 @@ struct PairingStep: View {
         }
 
         state.isConnecting = false
-        dependencies.telemetryClient.track(.pairingCompleted)
         onPaired()
     }
 

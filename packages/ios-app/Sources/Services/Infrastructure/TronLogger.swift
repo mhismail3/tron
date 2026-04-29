@@ -154,8 +154,7 @@ final class TronLogger: @unchecked Sendable {
         // Log to OS unified logging (also appears in Xcode console)
         loggers[category]?.log(level: level.osLogType, "\(formattedMessage)")
 
-        #if DEBUG || BETA
-        // Add to category-specific buffer (only needed for LogViewer)
+        // Add to category-specific buffer for local diagnostics and debug LogViewer.
         bufferLock.lock()
         var buffer = categoryBuffers[category] ?? []
         buffer.append((Date(), category, level, msg))
@@ -165,7 +164,6 @@ final class TronLogger: @unchecked Sendable {
         }
         categoryBuffers[category] = buffer
         bufferLock.unlock()
-        #endif
     }
 
     // Convenience methods — @autoclosure defers string evaluation until after level check
@@ -260,7 +258,6 @@ final class TronLogger: @unchecked Sendable {
 
     // MARK: - Buffer Access
 
-    #if DEBUG || BETA
     func getRecentLogs(count: Int = 100, level: LogLevel? = nil, category: LogCategory? = nil) -> [(Date, LogCategory, LogLevel, String)] {
         bufferLock.lock()
         defer { bufferLock.unlock() }
@@ -285,7 +282,6 @@ final class TronLogger: @unchecked Sendable {
         categoryBuffers[category] = []
         bufferLock.unlock()
     }
-    #endif
 
 }
 

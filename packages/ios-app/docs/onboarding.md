@@ -187,9 +187,9 @@ Server settings and app settings are intentionally separate. Settings backed
 by `~/.tron/system/settings.json` live in the server-backed settings rows and
 are shown only after the active server connects and `settings.get` returns real
 values. Device-only preferences such as onboarding completion, paired servers,
-active server id, appearance, dashboard presentation, telemetry consent, and
-bearer tokens live in iOS `UserDefaults`/Keychain; App and Privacy use
-cyan-tinted cards in the main sheet. When the user switches Macs, the app
+active server id, appearance, dashboard presentation, and bearer tokens live in
+iOS `UserDefaults`/Keychain; App and Feedback use cyan-tinted cards in the main
+sheet. When the user switches Macs, the app
 clears server-backed controls immediately and reloads them from the newly active
 Mac.
 The Servers sheet starts with a dynamic summary card, then groups settings as:
@@ -296,8 +296,9 @@ Never duplicate these literals inline.
 | `pairedServers` | Local paired Mac list | Data (JSON) |
 | `activePairedServerId` | Active paired server id | String |
 
-`telemetryEnabled` belongs to `SettingsState.telemetryEnabledStorageKey`
-because privacy/telemetry is configured from Settings, not onboarding.
+Tron does not persist an analytics opt-in key. Local diagnostics are collected
+bounded on-device and leave the phone only when the user explicitly sends or
+shares a diagnostics bundle from Settings.
 
 `@AppStorage` uses `UserDefaults.standard`, not
 `NSUbiquitousKeyValueStore`. Onboarding completion is per-device:

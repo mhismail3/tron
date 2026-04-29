@@ -16,7 +16,7 @@ struct FeedbackIssueComposer {
     let buildNumber: String
     let osVersion: String
 
-    private let redactor = SentryRedactor()
+    private let redactor = DiagnosticsRedactor()
 
     func title() -> String {
         "Mac menu bar feedback - \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))"

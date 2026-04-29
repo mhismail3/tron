@@ -1,7 +1,7 @@
 import Foundation
 
-/// Mac port of the iOS `SentryRedactor` (see
-/// `packages/ios-app/Sources/Services/Observability/SentryRedactor.swift`).
+/// Mac port of the iOS `DiagnosticsRedactor` (see
+/// `packages/ios-app/Sources/Services/Observability/DiagnosticsRedactor.swift`).
 ///
 /// Kept as a direct copy rather than a shared module because the iOS
 /// and Mac projects don't currently share a Swift package. If this
@@ -11,10 +11,12 @@ import Foundation
 /// - `Bearer <token>` → `Bearer [redacted:len=N]`.
 /// - `"token":"..."` / `"authorization":"Bearer ..."` / `"access_token":"..."`
 ///   / `"api_key":"..."` → value replaced with `[redacted:len=N]`.
-/// - `/Users/<username>/...` → `~/...`.
+/// - Local filesystem paths such as `/Users/<username>/...`,
+///   `/private/var/...`, `/tmp/...`, and `~/...` →
+///   `[redacted:path]`.
 /// - `message`, `userMessage`, `chatText`, `prompt`, `messageContent`
 ///   top-level dict keys → `"[redacted]"`.
-struct SentryRedactor {
+struct DiagnosticsRedactor {
     static let dropFields: Set<String> = [
         "message",
         "usermessage",
@@ -27,7 +29,7 @@ struct SentryRedactor {
         var out = input
         out = Self.redactBearerRuns(out)
         out = Self.redactJSONTokenValues(out)
-        out = Self.redactHomePaths(out)
+        out = Self.redactLocalPaths(out)
         return out
     }
 
@@ -80,9 +82,12 @@ struct SentryRedactor {
         )
     }()
 
-    private static let homePathRegex: NSRegularExpression = {
+    private static let localPathRegex: NSRegularExpression = {
         // swiftlint:disable:next force_try
-        try! NSRegularExpression(pattern: #"/Users/[^/\s"']+/"#, options: [])
+        try! NSRegularExpression(
+            pattern: #"(?:file://)?(?:/Users|/home|/private/var|/var|/tmp|/Volumes|/Applications|~/)[^\s"'<>),;]*"#,
+            options: []
+        )
     }()
 
     private static func redactBearerRuns(_ input: String) -> String {
@@ -115,11 +120,11 @@ struct SentryRedactor {
         return out
     }
 
-    private static func redactHomePaths(_ input: String) -> String {
+    private static func redactLocalPaths(_ input: String) -> String {
         let ns = input as NSString
         let fullRange = NSRange(location: 0, length: ns.length)
-        return homePathRegex.stringByReplacingMatches(
-            in: input, options: [], range: fullRange, withTemplate: "~/"
+        return localPathRegex.stringByReplacingMatches(
+            in: input, options: [], range: fullRange, withTemplate: "[redacted:path]"
         )
     }
 }

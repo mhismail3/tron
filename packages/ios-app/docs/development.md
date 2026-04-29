@@ -83,6 +83,22 @@ eventPublisherV2.sink { event in
 }
 ```
 
+### Local Diagnostics
+
+Tron does not send usage analytics. `MetricKitDiagnosticsStore` subscribes to
+Apple MetricKit in `AppDelegate` and stores payload JSON under Application
+Support with 30-day / 50-file / 10 MB retention. Settings -> Send Feedback
+builds a redacted `tron-diagnostics-<timestamp>.json` attachment that includes
+bounded iOS logs, `logs.recent(limit: 1000)` when connected, local session and
+event summaries, and MetricKit payloads.
+
+Mail delivery uses `TRON_FEEDBACK_EMAIL` from build/runtime configuration. Keep
+the value out of git by setting it in `Configuration/Local.xcconfig`, which is
+ignored. If the value is blank or Mail is unavailable, the app presents the
+share sheet so the user can save or attach the JSON manually. Release builds
+must keep `DEBUG_INFORMATION_FORMAT = dwarf-with-dsym`; App Store/TestFlight
+crashes are retrieved through Apple's Xcode Organizer diagnostics path.
+
 ## Common Tasks
 
 ### Adding a New Screen

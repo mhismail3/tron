@@ -9,9 +9,9 @@ body:
         Thanks for taking the time to report a bug. The more detail below, the
         faster this gets fixed.
 
-        Before filing: please run `tron logs --tail 50` (Mac) or copy the recent
-        log snippet from iOS Settings → Send Feedback. Paste the relevant lines
-        in the "Logs" section below — most bugs are diagnosed straight from logs.
+        Before filing: please run `tron logs --tail 50` (Mac). For iOS bugs,
+        use Settings → Send Feedback to generate a redacted diagnostics JSON
+        bundle, then attach it to this issue manually if Mail was not used.
 
   - type: input
     id: tron-version
@@ -88,7 +88,7 @@ body:
       description: |
         Server logs (last ~50 lines around the failure) help a lot.
         Get them via `tron logs --tail 50` on Mac.
-        For iOS bugs, use Settings → Send Feedback (which attaches logs automatically).
+        For iOS bugs, use Settings → Send Feedback and attach the generated diagnostics JSON.
       render: shell
     validations:
       required: false

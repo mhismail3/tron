@@ -14,6 +14,7 @@
 project.xcworkspace/
 xcuserdata/
 packages/ios-app/.build/
+packages/ios-app/Configuration/Local.xcconfig
 
 # OS
 .DS_Store

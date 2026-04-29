@@ -142,7 +142,26 @@ struct DeviceTokenUnregisterResult: Decodable {
 
 // MARK: - Logs Methods
 
-#if DEBUG || BETA
+struct LogsRecentParams: Encodable {
+    let limit: Int?
+}
+
+struct LogsRecentResult: Decodable, Sendable {
+    let entries: [RecentLogEntry]
+    let count: Int
+}
+
+struct RecentLogEntry: Decodable, Sendable {
+    let id: Int64
+    let timestamp: String
+    let level: String
+    let component: String
+    let message: String
+    let origin: String?
+    let sessionId: String?
+    let errorMessage: String?
+}
+
 /// A single log entry for ingestion into the server database.
 struct ClientLogEntry: Encodable {
     let timestamp: String   // ISO 8601 with millis ("2026-03-03T14:30:05.123Z")
@@ -161,4 +180,3 @@ struct LogsIngestResult: Decodable {
     let success: Bool
     let inserted: Int
 }
-#endif

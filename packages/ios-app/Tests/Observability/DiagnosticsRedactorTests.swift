@@ -3,13 +3,13 @@ import Foundation
 
 @testable import TronMobile
 
-@Suite("SentryRedactor")
-struct SentryRedactorTests {
+@Suite("DiagnosticsRedactor")
+struct DiagnosticsRedactorTests {
     // MARK: - Bearer token redaction
 
     @Test("redacts Authorization: Bearer <token> occurrences in strings")
     func redactsBearerHeader() {
-        let redactor = SentryRedactor()
+        let redactor = DiagnosticsRedactor()
         let input = "WS upgrade failed: Authorization: Bearer abc123def456GHI789jklmnopqrs header rejected"
         let redacted = redactor.redactMessage(input)
         #expect(!redacted.contains("abc123def456GHI789jklmnopqrs"))
@@ -18,7 +18,7 @@ struct SentryRedactorTests {
 
     @Test("redacts bearer-like JSON values without false positives on short words")
     func redactsJSONBearerValue() {
-        let redactor = SentryRedactor()
+        let redactor = DiagnosticsRedactor()
         let input = #"{"token":"abc123def456GHI789jklmnopqrs","other":"foo"}"#
         let redacted = redactor.redactMessage(input)
         #expect(!redacted.contains("abc123def456GHI789jklmnopqrs"))
@@ -27,7 +27,7 @@ struct SentryRedactorTests {
 
     @Test("leaves plain text without tokens untouched")
     func leavesPlainTextAlone() {
-        let redactor = SentryRedactor()
+        let redactor = DiagnosticsRedactor()
         let input = "Normal log line describing WebSocket state change"
         let redacted = redactor.redactMessage(input)
         #expect(redacted == input)
@@ -35,31 +35,44 @@ struct SentryRedactorTests {
 
     // MARK: - Path redaction
 
-    @Test("strips /Users/<username>/ to ~/")
+    @Test("redacts local file paths to placeholders")
     func stripsHomeDirectoryPaths() {
-        let redactor = SentryRedactor()
+        let redactor = DiagnosticsRedactor()
         let input = "Failed to open /Users/alice/Downloads/projects/tron/packages/agent/target/debug/tron"
         let redacted = redactor.redactMessage(input)
         #expect(!redacted.contains("/Users/alice"))
-        #expect(redacted.contains("~/Downloads/projects/tron/packages/agent/target/debug/tron"))
+        #expect(!redacted.contains("Downloads/projects/tron"))
+        #expect(redacted.contains("[redacted:path]"))
     }
 
-    @Test("strips workspace log-db paths to placeholder")
+    @Test("redacts workspace log-db paths to placeholder")
     func stripsWorkspacePath() {
-        let redactor = SentryRedactor()
+        let redactor = DiagnosticsRedactor()
         let input = "SQLite open failed: /Users/bob/.tron/system/database/log.db row not found"
         let redacted = redactor.redactMessage(input)
         #expect(!redacted.contains("/Users/bob"))
-        #expect(redacted.contains("~/.tron/system/database/log.db"))
+        #expect(!redacted.contains(".tron/system/database/log.db"))
+        #expect(redacted.contains("[redacted:path]"))
+    }
+
+    @Test("redacts simulator and file-url paths")
+    func redactsSimulatorAndFileURLPaths() {
+        let redactor = DiagnosticsRedactor()
+        let input = "db=file:///private/var/mobile/Containers/Data/Application/ABC/prod.db temp=/tmp/tron/log.txt"
+        let redacted = redactor.redactMessage(input)
+        #expect(!redacted.contains("/private/var"))
+        #expect(!redacted.contains("/tmp/tron"))
+        let occurrences = redacted.components(separatedBy: "[redacted:path]").count - 1
+        #expect(occurrences == 2)
     }
 
     @Test("handles multiple occurrences in same string")
     func redactsMultipleOccurrences() {
-        let redactor = SentryRedactor()
+        let redactor = DiagnosticsRedactor()
         let input = "from /Users/alice/a to /Users/alice/b via /Users/alice/c"
         let redacted = redactor.redactMessage(input)
         #expect(!redacted.contains("/Users/alice"))
-        let occurrences = redacted.components(separatedBy: "~/").count - 1
+        let occurrences = redacted.components(separatedBy: "[redacted:path]").count - 1
         #expect(occurrences == 3)
     }
 
@@ -67,7 +80,7 @@ struct SentryRedactorTests {
 
     @Test("drops message/chat content fields entirely")
     func dropsChatContentFields() {
-        let redactor = SentryRedactor()
+        let redactor = DiagnosticsRedactor()
         var event: [String: Any] = [
             "message": "User chat content that must never leak",
             "level": "error",
@@ -85,7 +98,7 @@ struct SentryRedactorTests {
 
     @Test("redacts bearer tokens inside nested breadcrumbs")
     func redactsNestedBreadcrumbBearer() {
-        let redactor = SentryRedactor()
+        let redactor = DiagnosticsRedactor()
         var event: [String: Any] = [
             "breadcrumbs": [
                 [
@@ -104,7 +117,7 @@ struct SentryRedactorTests {
 
     @Test("redacts file paths inside the tags section")
     func redactsPathsInTags() {
-        let redactor = SentryRedactor()
+        let redactor = DiagnosticsRedactor()
         var event: [String: Any] = [
             "tags": [
                 "path": "/Users/charlie/Library/Preferences/com.tron.plist"
@@ -119,7 +132,7 @@ struct SentryRedactorTests {
 
     @Test("is idempotent — running redactor twice equals running once")
     func isIdempotent() {
-        let redactor = SentryRedactor()
+        let redactor = DiagnosticsRedactor()
         let input = "Bearer abcdefghijklmnopqrstuvwxyz012 in /Users/alice/x"
         let once = redactor.redactMessage(input)
         let twice = redactor.redactMessage(once)

@@ -70,23 +70,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     @ObservationIgnored
     lazy var pairingProbe: any PairingProbing = URLSessionPairingProbe()
 
-    /// Live telemetry sink. Initialized from
-    /// `@AppStorage("telemetryEnabled")` on container build and rebuilt
-    /// in-place when the user toggles the Privacy → Telemetry switch
-    /// (no app restart needed). Defaults to `NullTelemetryClient` when
-    /// disabled — opt-in is the contract.
-    private(set) var telemetryClient: TelemetryClient
-
-    /// Last persisted state of the telemetry toggle. We track this
-    /// ourselves (rather than reading `telemetryClient.isEnabled`)
-    /// because while the PostHog SDK is still un-wired,
-    /// `TelemetryClientFactory.make(enabled: true)` returns a
-    /// `NullTelemetryClient` whose `isEnabled` is `false` — comparing
-    /// against the client would loop. The persisted setting IS the
-    /// source of truth.
-    @ObservationIgnored
-    private var lastTelemetryEnabledState: Bool = false
-
     // MARK: - Recreatable Services (When Server Changes)
 
     /// RPC client for server communication - recreated when active server changes
@@ -181,15 +164,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         pushNotificationService = PushNotificationService()
         deepLinkRouter = DeepLinkRouter()
 
-        // Build the telemetry client from the persisted opt-in. Subscribed
-        // below to UserDefaults.didChangeNotification so flipping the toggle
-        // mid-session rebuilds the client without an app restart.
-        let telemetryEnabled = UserDefaults.standard.bool(
-            forKey: SettingsState.telemetryEnabledStorageKey
-        )
-        lastTelemetryEnabledState = telemetryEnabled
-        telemetryClient = TelemetryClientFactory.make(enabled: telemetryEnabled)
-
         // Build initial server URL from the iOS-local active pairing. With no
         // pair, use a non-routable placeholder so app launch never silently
         // falls back to localhost.
@@ -251,35 +225,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             }
         }
 
-        // Listen for telemetry-toggle flips. UserDefaults.didChangeNotification
-        // fires synchronously on the writing thread for any key change in the
-        // observed suite — we filter by reading the specific key and bailing
-        // when the value matches the last-seen state.
-        NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification,
-            object: UserDefaults.standard,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.refreshTelemetryClientIfChanged()
-            }
-        }
-    }
-
-    /// Rebuilds `telemetryClient` if the persisted opt-in flipped. No-op
-    /// when the value is unchanged — UserDefaults posts didChange for
-    /// every key write and the container has many of them.
-    private func refreshTelemetryClientIfChanged() {
-        let nowEnabled = UserDefaults.standard.bool(
-            forKey: SettingsState.telemetryEnabledStorageKey
-        )
-        guard nowEnabled != lastTelemetryEnabledState else { return }
-        lastTelemetryEnabledState = nowEnabled
-        telemetryClient = TelemetryClientFactory.make(enabled: nowEnabled)
-        TronLogger.shared.info(
-            "Telemetry client rebuilt: enabled=\(nowEnabled)",
-            category: .general
-        )
     }
 
     // MARK: - Async Initialization

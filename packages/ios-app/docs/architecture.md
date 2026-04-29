@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-04-29 (settings revamp: local paired servers, server-owned settings, provider status cards, native credential alerts, summary cards, Agent/Context split, icon metadata, and onboarding handoff)
+> Last verified: 2026-04-29 (local diagnostics, MetricKit retention, feedback bundle, settings revamp, local paired servers, server-owned settings, provider status cards, and onboarding handoff)
 
 ## Overview
 
@@ -34,9 +34,10 @@ Sources/
 │   ├── Network/            # RPC, WebSocket (with Bearer auth), deep links
 │   ├── Events/             # Event store, sync
 │   ├── Audio/              # Recording, transcription
-│   ├── Feedback/           # Mailto composer + log-tail attachment (Phase 7)
+│   ├── Diagnostics/        # Local MetricKit store + redacted feedback bundle builder
+│   ├── Feedback/           # Mail/share envelope for explicit diagnostics bundles
 │   ├── Notifications/      # Push notifications
-│   ├── Observability/      # Sentry redactor + TelemetryClient (Phase 7)
+│   ├── Observability/      # DiagnosticsRedactor shared with Mac
 │   ├── Onboarding/         # Pairing validator/probe/persistor
 │   ├── PairingURLParser.swift  # tron://pair?host&port&token&label parser + builder
 │   ├── Parsing/            # Tool result parsers (delegated by ToolResultParser)

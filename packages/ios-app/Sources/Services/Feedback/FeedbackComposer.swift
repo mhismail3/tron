@@ -1,29 +1,33 @@
 import Foundation
 
-/// Prepares the subject + body for the iOS "Send feedback" mail
-/// composer. All mail formatting lives here — the SwiftUI wrapper
-/// around `MFMailComposeViewController` just hands these strings to
-/// UIKit.
-///
-/// Redaction is applied to log lines via `SentryRedactor` so bearer
-/// tokens and `/Users/<name>/` paths never leak into a feedback
-/// thread.
+/// Prepares subject/body text for the iOS "Send feedback" action.
+/// Diagnostic data is attached separately as a redacted JSON bundle; this
+/// composer only owns the human-readable envelope around that attachment.
 ///
 /// Tests in `Tests/Observability/FeedbackComposerTests.swift` pin
 /// the output format so future SDK changes don't silently regress.
 struct FeedbackComposer {
-    static let recipient = "feedback@tron.computer"
+    static let recipientInfoPlistKey = "TRONFeedbackEmail"
 
     let appVersion: String
     let buildNumber: String
 
-    private let redactor = SentryRedactor()
+    private let redactor = DiagnosticsRedactor()
 
     /// Default tail size matches plan §F "last 200 lines of logs".
     static let defaultLogTailLimit = 200
 
     func subject() -> String {
         "Tron feedback — \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))"
+    }
+
+    static func configuredRecipient(
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary
+    ) -> String? {
+        guard let raw = infoDictionary?[recipientInfoPlistKey] as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("$(") else { return nil }
+        return trimmed
     }
 
     /// Formats a sequence of log entries as one line per entry with
@@ -45,8 +49,12 @@ struct FeedbackComposer {
         }.joined(separator: "\n")
     }
 
-    /// Full body: user notes, environment block, log tail.
-    func assembleBody(userNotes: String, logs: [(Date, LogCategory, LogLevel, String)]) -> String {
+    /// Full body: user notes, environment block, and attachment note.
+    func assembleBody(
+        userNotes: String,
+        attachmentFileName: String?,
+        logs: [(Date, LogCategory, LogLevel, String)] = []
+    ) -> String {
         var parts: [String] = []
 
         if !userNotes.isEmpty {
@@ -59,10 +67,15 @@ struct FeedbackComposer {
         parts.append("Platform: iOS")
         parts.append("")
 
-        parts.append("Recent logs (last \(Self.defaultLogTailLimit)):")
-        if logs.isEmpty {
-            parts.append("(no logs captured)")
+        if let attachmentFileName {
+            parts.append("Attached diagnostics bundle: \(attachmentFileName)")
         } else {
+            parts.append("No diagnostics attachment was generated.")
+        }
+
+        if !logs.isEmpty {
+            parts.append("")
+            parts.append("Recent logs preview (last \(Self.defaultLogTailLimit)):")
             parts.append(formatLogs(logs))
         }
 
@@ -91,5 +104,17 @@ struct FeedbackComposer {
         case .error: return "ERROR"
         case .none: return "NONE"
         }
+    }
+}
+
+enum FeedbackDeliveryRoute: Equatable, Sendable {
+    case mail(recipient: String)
+    case shareSheet
+}
+
+enum FeedbackDeliveryPlanner {
+    static func route(configuredRecipient: String?, canSendMail: Bool) -> FeedbackDeliveryRoute {
+        guard let configuredRecipient, canSendMail else { return .shareSheet }
+        return .mail(recipient: configuredRecipient)
     }
 }

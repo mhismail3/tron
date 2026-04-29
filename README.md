@@ -480,8 +480,6 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
       "frequency": "daily",         // "manual" | "startup" | "hourly" | "daily" | "weekly"
       "action": "notify"            // notify-only; installing remains DMG replacement
     }
-    // NB: telemetry is an iOS-only opt-in stored under `@AppStorage("telemetryEnabled")`;
-    // no corresponding server setting exists because the server never emits telemetry.
   },
 
   "agent": {
@@ -694,7 +692,7 @@ packages/ios-app/Sources/
 +-- Models/               Data models, RPC codables, event types
 +-- Protocols/            Coordinator and view model protocols
 +-- Services/             Network (RPC client, WebSocket, deep links), paired servers, audio,
-+                         push notifications, feedback composer, telemetry redactor, Keychain tokens
++                         push notifications, local diagnostics, feedback composer, Keychain tokens
 +-- ViewModels/           Chat view models, handlers, managers, @Observable state, OnboardingState
 +-- Views/                SwiftUI views (chat, tools, voice notes, settings, Onboarding/, ...)
 +-- Theme/                Colors, typography, design tokens
@@ -718,7 +716,7 @@ packages/ios-app/Sources/
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `settings.json`.
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings.get` response and best-effort `auth.get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
-- **Telemetry + feedback**: `SentryRedactor` scrubs bearer tokens, file paths, and chat content before crash events leave the device. `FeedbackComposer` builds a redacted log tail and opens a prefilled GitHub issue instead of launching Mail. Opt-in toggle on the Privacy settings page stores to `@AppStorage("telemetryEnabled")` (default OFF).
+- **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Mail is used only when `TRON_FEEDBACK_EMAIL` is supplied by untracked build/runtime config, otherwise the share sheet lets the user save or attach the bundle manually. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
 
 ### Data Flow
 
@@ -766,7 +764,7 @@ packages/mac-app/Sources/
 |   +-- Onboarding/            SMAppService install planner, permission/Tailscale probes, existing-install detection
 |   +-- Pairing/               Tailscale live probe + auth.json bearer-token reader; QR + tron:// URL generation
 |   +-- Feedback/              GitHub issue composer with redacted log context
-|   +-- Observability/         SentryRedactor (shared pattern with iOS)
+|   +-- Observability/         DiagnosticsRedactor (shared pattern with iOS)
 |   +-- LaunchAgentManaging.swift
 |   +-- TronPaths.swift        ~/.tron/ path helpers (mirrors Rust `core::foundation::paths`)
 +-- Resources/
@@ -946,7 +944,7 @@ End-users install `Tron.app` via a notarized DMG published to GitHub Releases. R
 10. Sign the helper app first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
 11. `xcrun notarytool submit` the signed `Tron.app` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple the app on success.
 12. Build the DMG with `create-dmg`, sign the DMG, submit that signed DMG to `notarytool`, then staple the DMG. The app and DMG require separate notary tickets.
-13. Upload dSYMs to Sentry via `sentry-cli`.
+13. Keep dSYMs in the Xcode archive/release artifacts for Apple crash diagnostics.
 14. `scripts/tron-release-notes` writes a bounded draft changelog body from first-parent git history since the previous release tag, including the DMG filename, SHA256, and a full compare link. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta1-to-beta2 bridge recognizes the historical Mac-scoped beta1 tag so the first `server-v*` release does not include the entire repo history.
 15. `gh release create server-v0.1.0-beta.1 ./tron-v0.1.0-beta1.dmg` creates a draft GitHub pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog; maintainers publish after installing and verifying the DMG.
 
