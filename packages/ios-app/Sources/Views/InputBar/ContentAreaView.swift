@@ -2,8 +2,26 @@ import SwiftUI
 
 // MARK: - Content Area View (Attachments + Skills)
 
+enum ContentAreaChipItem: Identifiable, Equatable {
+    case skill(Skill)
+    case attachment(Attachment)
+
+    var id: String {
+        switch self {
+        case .skill(let skill):
+            return "skill:\(skill.id)"
+        case .attachment(let attachment):
+            return "attachment:\(attachment.id.uuidString)"
+        }
+    }
+
+    static func items(selectedSkills: [Skill], attachments: [Attachment]) -> [ContentAreaChipItem] {
+        selectedSkills.map(ContentAreaChipItem.skill) + attachments.map(ContentAreaChipItem.attachment)
+    }
+}
+
 /// Main content area showing skills, attachments (with wrapping), and status pills.
-/// All items in one wrapping container - skills at bottom, attachments wrap above.
+/// Skills and attachments share one wrapping container so mixed chips align row-by-row.
 struct ContentAreaView: View {
     let selectedSkills: [Skill]
     let attachments: [Attachment]
@@ -14,39 +32,34 @@ struct ContentAreaView: View {
 
     var body: some View {
         WrappingHStack(spacing: 8, lineSpacing: 8) {
-            // Skills first (will appear on bottom rows)
-            ForEach(selectedSkills, id: \.name) { skill in
-                SkillChip(
-                    skill: skill,
-                    showRemoveButton: true,
-                    onRemove: { onSkillRemove?(skill) },
-                    onTap: { onSkillDetailTap?(skill) }
-                )
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.8).combined(with: .opacity),
-                    removal: .scale(scale: 0.6).combined(with: .opacity)
-                ))
-            }
+            ForEach(ContentAreaChipItem.items(selectedSkills: selectedSkills, attachments: attachments)) { item in
+                switch item {
+                case .skill(let skill):
+                    SkillChip(
+                        skill: skill,
+                        showRemoveButton: true,
+                        onRemove: { onSkillRemove?(skill) },
+                        onTap: { onSkillDetailTap?(skill) }
+                    )
+                    .transition(chipTransition)
 
-            // Line break to ensure attachments always start on new row above skills
-            if !selectedSkills.isEmpty && !attachments.isEmpty {
-                LineBreak()
-            }
-
-            // Attachments after (will wrap to rows above skills)
-            ForEach(attachments) { attachment in
-                AttachmentBubble(attachment: attachment, capability: attachmentCapability) {
-                    onRemoveAttachment(attachment)
+                case .attachment(let attachment):
+                    AttachmentBubble(attachment: attachment, capability: attachmentCapability) {
+                        onRemoveAttachment(attachment)
+                    }
+                    .transition(chipTransition)
                 }
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.8).combined(with: .opacity),
-                    removal: .scale(scale: 0.6).combined(with: .opacity)
-                ))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selectedSkills.count)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: attachments.count)
     }
-}
 
+    private var chipTransition: AnyTransition {
+        .asymmetric(
+            insertion: .scale(scale: 0.8).combined(with: .opacity),
+            removal: .scale(scale: 0.6).combined(with: .opacity)
+        )
+    }
+}

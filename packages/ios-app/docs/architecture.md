@@ -10,6 +10,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Event-sourced state reconstruction
 - Push notifications for background alerts
 - Voice transcription input
+- A staged input composer where pending skills and attachments share one wrapping chip row before send
 
 ## Directory Structure
 

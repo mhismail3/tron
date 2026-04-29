@@ -1,76 +1,55 @@
 import SwiftUI
+import UIKit
 
-/// Compact bubble for displaying attachment previews above the input bar
-/// Sized to fit 2 attachments per row
+/// Compact chip for displaying staged attachments above the input bar.
 struct AttachmentBubble: View {
     let attachment: Attachment
     let capability: AttachmentCapability
     let onRemove: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let fileNameMaxWidth: CGFloat = 76
+    private var tint: TintedColors { TintedColors(accent: .tronSlate, colorScheme: colorScheme) }
+    private var warning: String? { attachment.warningText(for: capability) }
+    private var fileNameWidth: CGFloat {
+        let font = TronTypography.uiFont(mono: false, size: TronTypography.sizeBody2, weight: .medium)
+        let width = (attachment.displayName as NSString).size(withAttributes: [.font: font]).width.rounded(.up)
+        return min(max(width, 1), fileNameMaxWidth)
+    }
+
     var body: some View {
         HStack(spacing: 5) {
-            // Thumbnail or icon
-            thumbnailView
+            Image(systemName: iconName)
+                .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
+                .foregroundStyle(iconColor)
+                .accessibilityHidden(true)
 
-            // File info
-            VStack(alignment: .leading, spacing: 1) {
-                Text(attachment.displayName)
-                    .font(TronTypography.codeSM)
-                    .lineLimit(1)
-                    .foregroundStyle(.primary)
+            Text(attachment.displayName)
+                .font(TronTypography.filePath)
+                .foregroundStyle(tint.name)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: fileNameWidth, alignment: .leading)
 
-                if let warning = attachment.warningText(for: capability) {
-                    Text(warning)
-                        .font(TronTypography.pill)
-                        .foregroundStyle(.orange)
-                        .lineLimit(2)
-                } else {
-                    Text(attachment.formattedSize)
-                        .font(TronTypography.pill)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: 60, alignment: .leading)
+            Text(attachment.formattedSize)
+                .font(TronTypography.pill)
+                .foregroundStyle(sizeColor)
+                .lineLimit(1)
 
-            // Remove button
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(tint.dismiss)
             }
             .buttonStyle(.plain)
+            .contentShape(Circle())
+            .accessibilityLabel(removeAccessibilityLabel)
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.tronOverlay(0.1), lineWidth: 0.5)
-        )
-    }
-
-    @ViewBuilder
-    private var thumbnailView: some View {
-        Group {
-            if attachment.isImage {
-                DecodedImageView(data: attachment.data, size: CGSize(width: 28, height: 28))
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
-            } else {
-                iconView
-            }
-        }
-    }
-
-    private var iconView: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(iconBackgroundColor)
-                .frame(width: 28, height: 28)
-
-            Image(systemName: iconName)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(iconForegroundColor)
-        }
+        .chipStyleMaterial(tint.accent, tintOpacity: 0.32)
+        .contentShape(Capsule())
     }
 
     private var iconName: String {
@@ -84,25 +63,25 @@ struct AttachmentBubble: View {
         }
     }
 
-    private var iconBackgroundColor: Color {
-        switch attachment.type {
-        case .pdf:
-            return .red.opacity(0.15)
-        case .document:
-            return .blue.opacity(0.15)
-        case .image:
-            return .green.opacity(0.15)
+    private var iconColor: Color {
+        if warning != nil {
+            return .tronAmber
         }
+        return tint.accent
     }
 
-    private var iconForegroundColor: Color {
-        switch attachment.type {
-        case .pdf:
-            return .red
-        case .document:
-            return .blue
-        case .image:
-            return .green
+    private var sizeColor: Color {
+        if warning != nil {
+            return .tronAmber.opacity(0.85)
         }
+        return tint.secondary
+    }
+
+    private var removeAccessibilityLabel: String {
+        var label = "Remove attachment, \(attachment.displayName), \(attachment.formattedSize)"
+        if let warning {
+            label += ", \(warning)"
+        }
+        return label
     }
 }
