@@ -178,19 +178,35 @@ Provider credentials are written through `auth.*` RPCs, so secrets land
 in `auth.json`, not `settings.json`.
 
 Server settings and app settings are intentionally separate. Settings backed
-by `~/.tron/system/settings.json` live in the Server Settings section and are
-shown only after the active server connects and `settings.get` returns real
+by `~/.tron/system/settings.json` live in the server-backed settings rows and
+are shown only after the active server connects and `settings.get` returns real
 values. Device-only preferences such as onboarding completion, paired servers,
 active server id, appearance, dashboard presentation, telemetry consent, and
-bearer tokens live in iOS `UserDefaults`/Keychain. When the user switches
-Macs, the app clears server-backed controls immediately and reloads them from
-the newly active Mac.
-The Server sheet starts with a dynamic summary card, then groups settings as:
+bearer tokens live in iOS `UserDefaults`/Keychain; App and Privacy use
+cyan-tinted cards in the main sheet. When the user switches Macs, the app
+clears server-backed controls immediately and reloads them from the newly active
+Mac.
+The Servers sheet starts with a dynamic summary card, then groups settings as:
 header, one or more glass containers with control titles, and optional
 description text below each container. Transcription, paired-device token
 enforcement, and update checks all live in this sheet because they are active
 Mac server settings; update controls sit at the bottom after security under one
 Updates header.
+The Agent and Context settings sheets follow the same top summary-card pattern
+and divide server settings by ownership. Agent owns execution and lifecycle
+behavior: quick-session defaults, hook model/error/context budgets,
+built-in/user hooks, prompt-history capture/retention controls, queued-message
+delivery, and protected branches. Hooks and Prompt Library each use one grouped
+header, but each setting keeps its own glass container and description unless
+the controls are intentionally coupled. The user hook directory card keeps the
+folder label and `~/.tron/hooks/` value in one status row, then shows a small
+empty-state placeholder until a hook-listing API exists. Context owns
+context-management behavior: individual compaction controls, memory
+auto-retain, retain model, and standalone rule discovery. Hooks and Prompt
+Library no longer appear as separate Settings destinations; their
+non-destructive controls live inside Agent. Clearing prompt history is a
+destructive server action and therefore lives in the main Settings Danger Zone
+above Archive All Sessions and Reset All Settings.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system.ping`. The server emits a
@@ -244,7 +260,7 @@ trailing dot.
 
 ## Forgetting a Mac
 
-Settings → Server Settings → Server → menu → "Forget" is the local reset path for a
+Settings → Servers → menu → "Forget" is the local reset path for a
 paired server. It deletes the matching iOS Keychain bearer token and removes
 the server from `PairedServerStore`; server settings and sessions on the Mac
 are unchanged. If another paired server remains, iOS switches locally to it.

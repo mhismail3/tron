@@ -41,7 +41,7 @@ struct MCPServersPage: View {
     }
 
     var body: some View {
-        SettingsPageContainer(title: "MCP Servers") {
+        SettingsPageContainer(title: "MCP") {
             Button { showAddSheet = true } label: {
                 Image(systemName: "plus")
                     .font(TronTypography.buttonSM)

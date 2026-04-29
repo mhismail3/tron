@@ -21,7 +21,7 @@ struct ConnectionSettingsPage: View {
     }
 
     var body: some View {
-        SettingsPageContainer(title: "Server") {
+        SettingsPageContainer(title: "Servers") {
             serverInfoCard
             pairedServersSection
             if settingsState.isLoaded {

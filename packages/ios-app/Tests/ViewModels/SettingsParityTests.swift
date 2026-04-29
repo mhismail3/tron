@@ -31,8 +31,7 @@ final class SettingsParityTests: XCTestCase {
         "triggerTokenThreshold",
         // Rules
         "rulesDiscoverStandaloneFiles",
-        // Session isolation + queue
-        "isolationMode",
+        // Message queue
         "queueDrainMode",
         // Hooks
         "hooksLlmModel",
@@ -45,16 +44,8 @@ final class SettingsParityTests: XCTestCase {
         // Memory
         "autoRetainInterval",
         "retainModel",
-        // Git workflow
-        "gitTargetBranch",
+        // Git safety
         "gitProtectedBranches",
-        "gitSessionBranchPolicy",
-        "gitMergeStrategy",
-        "gitAutoSetUpstream",
-        "gitCrashRecoveryAbortTimeoutMs",
-        "gitOpTimeoutNetworkMs",
-        "gitOpTimeoutLocalMs",
-        "gitSubagentConflictResolutionEnabled",
         // Prompt library
         "promptHistoryEnabled",
         "promptHistoryMaxEntries",
@@ -81,6 +72,15 @@ final class SettingsParityTests: XCTestCase {
         "isLoadingModels": "UI loading flag — not persisted",
         "loadError": "transient error state — surfaced inline in the UI, not a setting",
         "lastLoadedSettings": "rollback snapshot for failed sparse updates — not a setting",
+        "isolationMode": "session default still comes from server settings; new-session flow exposes the per-session isolation choice",
+        "gitTargetBranch": "source-control action sheets choose targets per action or let the server auto-detect the repository default",
+        "gitSessionBranchPolicy": "merge/finalize action sheets expose branch cleanup per action instead of a global settings sheet toggle",
+        "gitMergeStrategy": "merge/finalize action sheets expose strategy per action instead of a global settings sheet toggle",
+        "gitAutoSetUpstream": "push action sheet exposes upstream behavior per push; the server default remains decoded for action-sheet initialization",
+        "gitCrashRecoveryAbortTimeoutMs": "operational timeout kept server-side; not exposed as an end-user settings control",
+        "gitOpTimeoutNetworkMs": "operational timeout kept server-side; not exposed as an end-user settings control",
+        "gitOpTimeoutLocalMs": "operational timeout kept server-side; not exposed as an end-user settings control",
+        "gitSubagentConflictResolutionEnabled": "conflict resolution is offered in the source-control flow; the global offer gate is intentionally not exposed in settings",
     ]
 
     /// Normalize a Mirror child label into the user-level field name.

@@ -1,62 +1,17 @@
 import SwiftUI
 
 struct ContextSettingsPage: View {
-    @Environment(\.dependencies) var dependencies
     let settingsState: SettingsState
-    let selectedModelDisplayName: String
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
-    @State private var showQuickSessionWorkspaceSelector = false
-    @State private var showModelPicker = false
     @State private var showRetainModelPicker = false
 
-    private var rpcClient: RPCClient { dependencies.rpcClient }
-    private var defaultModelValue: String { dependencies.defaultModel }
-    private var defaultModelBinding: Binding<String> {
-        Binding(
-            get: { dependencies.defaultModel },
-            set: { dependencies.defaultModel = $0 }
-        )
-    }
-
     var body: some View {
-        SettingsPageContainer(title: "Agent") {
-            if #available(iOS 26.0, *) {
-                quickSessionCard
-            }
-            messageQueueCard
-            compactionCard
+        SettingsPageContainer(title: "Context") {
+            summaryCard
+            compactionSection
             memoryCard
             rulesCard
-        }
-        .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
-            WorkspaceSelector(
-                rpcClient: rpcClient,
-                selectedPath: Binding(
-                    get: { settingsState.quickSessionWorkspace },
-                    set: { newValue in
-                        settingsState.quickSessionWorkspace = newValue
-                        dependencies.quickSessionWorkspace = newValue
-                        updateServerSetting {
-                            ServerSettingsUpdate(server: .init(defaultWorkspace: newValue))
-                        }
-                    }
-                )
-            )
-        }
-        .sheet(isPresented: $showModelPicker) {
-            if #available(iOS 26.0, *) {
-                ModelPickerSheet(
-                    models: settingsState.availableModels,
-                    currentModelId: defaultModelValue,
-                    onSelect: { model in
-                        defaultModelBinding.wrappedValue = model.id
-                        updateServerSetting {
-                            ServerSettingsUpdate(server: .init(defaultModel: model.id))
-                        }
-                    }
-                )
-            }
         }
         .sheet(isPresented: $showRetainModelPicker) {
             if #available(iOS 26.0, *) {
@@ -74,6 +29,27 @@ struct ContextSettingsPage: View {
         }
     }
 
+    private var summaryCard: some View {
+        SettingsInfoCard(
+            icon: "rectangle.stack",
+            title: ContextSettingsSummary.title(for: summaryContext),
+            description: ContextSettingsSummary.description(for: summaryContext)
+        )
+    }
+
+    private var summaryContext: ContextSettingsSummary.Context {
+        ContextSettingsSummary.Context(
+            isLoaded: settingsState.isLoaded,
+            triggerTokenThreshold: settingsState.triggerTokenThreshold,
+            preserveRecentCount: settingsState.preserveRecentCount,
+            skillsCompactionPolicy: settingsState.skillsCompactionPolicy,
+            skillsShowIndex: settingsState.skillsShowIndex,
+            autoRetainInterval: settingsState.autoRetainInterval,
+            retainModelDisplayName: retainModelDisplayName,
+            rulesDiscoverStandaloneFiles: settingsState.rulesDiscoverStandaloneFiles
+        )
+    }
+
     private var retainModelDisplayName: String {
         if let model = settingsState.availableModels.first(where: { $0.id == settingsState.retainModel }) {
             return model.formattedModelName
@@ -81,82 +57,7 @@ struct ContextSettingsPage: View {
         return settingsState.retainModel.shortModelName
     }
 
-    // MARK: - Quick Session Card
-
-    @available(iOS 26.0, *)
-    private var quickSessionCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Quick Session")
-
-            SettingsCard {
-                navigationRow(
-                    icon: "folder",
-                    label: "Workspace",
-                    value: settingsState.displayQuickSessionWorkspace,
-                    action: { showQuickSessionWorkspaceSelector = true }
-                )
-
-                SettingsRowDivider()
-
-                navigationRow(
-                    icon: "cpu",
-                    label: "Model",
-                    value: selectedModelDisplayName,
-                    action: { showModelPicker = true }
-                )
-            }
-
-            SettingsCaption(text: "Long-press the + button to instantly start a session with these defaults.")
-        }
-    }
-
-    // MARK: - Message Queue Card
-
-    private var queueDrainDescription: String {
-        switch settingsState.queueDrainMode {
-        case "batched":
-            return "All queued messages are combined into a single prompt when the agent finishes."
-        default:
-            return "Each queued message is sent as its own turn — the agent responds to each individually."
-        }
-    }
-
-    private var messageQueueCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Message Queue")
-
-            SettingsCard {
-                HStack {
-                    Image(systemName: "tray.and.arrow.down")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 18)
-                    Text("Queued Message Delivery")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    Spacer()
-                    queueDrainModeToggle
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 14)
-            }
-
-            SettingsCaption(text: queueDrainDescription)
-        }
-    }
-
-    private var queueDrainModeToggle: some View {
-        SettingsCycleToggle(
-            options: [("sequential", "Sequential"), ("batched", "Batched")],
-            current: settingsState.queueDrainMode
-        ) { newValue in
-            settingsState.queueDrainMode = newValue
-            updateServerSetting {
-                ServerSettingsUpdate(session: .init(queueDrainMode: QueueDrainMode.from(newValue)))
-            }
-        }
-    }
-
-    // MARK: - Compaction Card
+    // MARK: - Compaction
 
     private var skillsCompactionCaption: String {
         switch settingsState.skillsCompactionPolicy {
@@ -169,98 +70,113 @@ struct ContextSettingsPage: View {
         }
     }
 
-    private var compactionCard: some View {
+    private var compactionSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "Compaction")
 
-            SettingsCard {
-                // Threshold slider
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Image(systemName: "gauge.with.dots.needle.67percent")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .foregroundStyle(.tronEmerald)
-                            .frame(width: 18)
-                        Text("Threshold")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                        Spacer()
-                        Text("\(Int(settingsState.triggerTokenThreshold * 100))%")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .foregroundStyle(.tronEmerald)
-                            .monospacedDigit()
-                    }
-                    Slider(
-                        value: Bindable(settingsState).triggerTokenThreshold,
-                        in: 0.10...0.85,
-                        step: 0.05
-                    )
-                    .tint(.tronEmerald)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
-                .onChange(of: settingsState.triggerTokenThreshold) { _, newValue in
-                    updateServerSetting {
-                        ServerSettingsUpdate(context: .init(compactor: .init(
-                            triggerTokenThreshold: newValue
-                        )))
-                    }
-                }
-
-                SettingsRowDivider()
-
-                // Keep Recent Turns
-                SettingsRow(icon: "arrow.counterclockwise.circle", label: "Keep Recent Turns") {
-                    Text("\(settingsState.preserveRecentCount)")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .monospacedDigit()
-                        .frame(minWidth: 20)
-                    TronStepper(
-                        value: Bindable(settingsState).preserveRecentCount,
-                        range: 0...10
-                    )
-                }
-                .onChange(of: settingsState.preserveRecentCount) { _, newValue in
-                    updateServerSetting {
-                        ServerSettingsUpdate(context: .init(compactor: .init(preserveRecentCount: newValue)))
+            VStack(spacing: 12) {
+                compactionSettingBlock(.threshold) {
+                    SettingsCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Image(systemName: "gauge.with.dots.needle.67percent")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                    .foregroundStyle(.tronEmerald)
+                                    .frame(width: 18)
+                                Text(ContextCompactionSetting.threshold.title)
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                                Spacer()
+                                Text("\(Int(settingsState.triggerTokenThreshold * 100))%")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                    .foregroundStyle(.tronEmerald)
+                                    .monospacedDigit()
+                            }
+                            Slider(
+                                value: Bindable(settingsState).triggerTokenThreshold,
+                                in: 0.10...0.85,
+                                step: 0.05
+                            )
+                            .tint(.tronEmerald)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .onChange(of: settingsState.triggerTokenThreshold) { _, newValue in
+                            updateServerSetting {
+                                ServerSettingsUpdate(context: .init(compactor: .init(
+                                    triggerTokenThreshold: newValue
+                                )))
+                            }
+                        }
                     }
                 }
 
-                SettingsRowDivider()
-
-                // Active Skills policy
-                HStack {
-                    Image(systemName: "wand.and.stars")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 18)
-                    Text("Active Skills")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    Spacer()
-                    skillsCompactionToggle
+                compactionSettingBlock(.recentTurns) {
+                    SettingsCard {
+                        SettingsRow(icon: "arrow.counterclockwise.circle", label: ContextCompactionSetting.recentTurns.title) {
+                            Text("\(settingsState.preserveRecentCount)")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                .foregroundStyle(.tronEmerald)
+                                .monospacedDigit()
+                                .frame(minWidth: 20)
+                            TronStepper(
+                                value: Bindable(settingsState).preserveRecentCount,
+                                range: 0...10
+                            )
+                        }
+                        .onChange(of: settingsState.preserveRecentCount) { _, newValue in
+                            updateServerSetting {
+                                ServerSettingsUpdate(context: .init(compactor: .init(preserveRecentCount: newValue)))
+                            }
+                        }
+                    }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 14)
 
-                SettingsRowDivider()
-
-                // Skill index visibility in system prompt
-                HStack {
-                    Image(systemName: "list.bullet.rectangle")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 18)
-                    Text("Skill Index")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    Spacer()
-                    skillsShowIndexToggle
+                compactionSettingBlock(.activeSkills, description: skillsCompactionCaption) {
+                    SettingsCard {
+                        HStack {
+                            Image(systemName: "wand.and.stars")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                .foregroundStyle(.tronEmerald)
+                                .frame(width: 18)
+                            Text(ContextCompactionSetting.activeSkills.title)
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            Spacer()
+                            skillsCompactionToggle
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 14)
+                    }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 14)
+
+                compactionSettingBlock(.skillIndex, description: skillsShowIndexCaption) {
+                    SettingsCard {
+                        HStack {
+                            Image(systemName: "list.bullet.rectangle")
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                .foregroundStyle(.tronEmerald)
+                                .frame(width: 18)
+                            Text(ContextCompactionSetting.skillIndex.title)
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            Spacer()
+                            skillsShowIndexToggle
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 14)
+                    }
+                }
             }
+        }
+    }
 
-            SettingsCaption(text: skillsCompactionCaption)
-            SettingsCaption(text: skillsShowIndexCaption)
+    @ViewBuilder
+    private func compactionSettingBlock<Content: View>(
+        _ setting: ContextCompactionSetting,
+        description: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content()
+            SettingsCaption(text: description ?? setting.description)
         }
     }
 
@@ -307,7 +223,7 @@ struct ContextSettingsPage: View {
         }
     }
 
-    // MARK: - Memory Card
+    // MARK: - Memory
 
     private var autoRetainDisplayText: String {
         if settingsState.autoRetainInterval == 0 {
@@ -354,7 +270,7 @@ struct ContextSettingsPage: View {
         }
     }
 
-    // MARK: - Rules Card
+    // MARK: - Rules
 
     private var rulesCard: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -377,7 +293,7 @@ struct ContextSettingsPage: View {
         }
     }
 
-    // MARK: - Shared Row (chevron navigation rows)
+    // MARK: - Shared Row
 
     private func navigationRow(icon: String, label: String, value: String, action: @escaping () -> Void) -> some View {
         HStack {

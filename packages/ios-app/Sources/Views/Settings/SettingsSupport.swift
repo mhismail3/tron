@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import SwiftUI
 
 // ARCHITECTURE: Shared settings copy and sheet-launch contracts live here so
 // page views stay focused on layout and state binding.
@@ -9,6 +10,421 @@ enum SettingsLabels {
     static let connectToNewServer = "Connect to a new server"
     static let transcriptionSidecar = "Transcription Sidecar"
     static let updates = "Updates"
+}
+
+enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
+    case server
+    case providers
+    case agent
+    case context
+    case mcpServers
+
+    static let serverBackedOrder: [Self] = [
+        .server,
+        .providers,
+        .agent,
+        .context,
+        .mcpServers,
+    ]
+
+    var icon: String {
+        switch self {
+        case .server:
+            return "network"
+        case .providers:
+            return "key.horizontal"
+        case .agent:
+            return "wand.and.stars"
+        case .context:
+            return "rectangle.stack"
+        case .mcpServers:
+            return "server.rack"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .server:
+            return "Servers"
+        case .providers:
+            return SettingsLabels.providers
+        case .agent:
+            return "Agent"
+        case .context:
+            return "Context"
+        case .mcpServers:
+            return "MCP"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .server:
+            return "Paired servers, security, transcription, and updates"
+        case .providers:
+            return "Login with OAuth and configure API keys"
+        case .agent:
+            return "Hooks, prompts, queueing, and branch safety"
+        case .context:
+            return "Compaction, memory retention, skills, and rules"
+        case .mcpServers:
+            return "Configure external tool servers"
+        }
+    }
+}
+
+enum MainSettingsLocalCategoryStyle {
+    static let accent: Color = .tronCyan
+}
+
+enum MainSettingsListLayout {
+    static let categorySpacing: CGFloat = 8
+}
+
+struct BuiltinHookInfo: Equatable, Identifiable, Sendable {
+    let id: String
+    let label: String
+    let description: String
+    let event: String
+}
+
+enum BuiltinHookCatalog {
+    static let all: [BuiltinHookInfo] = [
+        BuiltinHookInfo(
+            id: "builtin:title-gen",
+            label: "Generate Session Title",
+            description: "Auto-generates a short title when a session starts",
+            event: "session-start"
+        ),
+        BuiltinHookInfo(
+            id: "builtin:branch-name-gen",
+            label: "Generate Branch Name",
+            description: "Renames worktree branches to memorable 3-word names",
+            event: "worktree-acquired"
+        ),
+        BuiltinHookInfo(
+            id: "builtin:suggest-prompts",
+            label: "Suggest Follow-up Prompts",
+            description: "Suggests short follow-up prompts when the agent finishes",
+            event: "stop"
+        ),
+    ]
+}
+
+enum AgentSettingsSection: String, CaseIterable, Sendable {
+    case quickSession = "Quick Session"
+    case hooks = "Hooks"
+    case promptLibrary = "Prompt Library"
+    case messageQueue = "Message Queue"
+    case protectedBranches = "Protected Branches"
+}
+
+enum AgentHookSetting: CaseIterable, Hashable, Sendable {
+    case llmModel
+    case errorPolicy
+    case addedContextBudget
+    case builtInHooks
+    case userHooks
+
+    var title: String {
+        switch self {
+        case .builtInHooks:
+            return "Built-in lifecycle hooks"
+        case .llmModel:
+            return "LLM Hook Model"
+        case .errorPolicy:
+            return "Hook error policy"
+        case .addedContextBudget:
+            return "Hook added-context budget"
+        case .userHooks:
+            return "User hook directory"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .builtInHooks:
+            return "Enable platform hooks that create session titles, branch names, and follow-up suggestions as the agent runs."
+        case .llmModel:
+            return "Model used for built-in and .prompt hooks. Defaults to Haiku for speed."
+        case .errorPolicy:
+            return "Continue lets the agent proceed when a hook fails. Block stops execution with a safety reason."
+        case .addedContextBudget:
+            return "Maximum text a hook may inject via add_context per event. Over-budget content is dropped, not truncated."
+        case .userHooks:
+            return "Place .prompt or script files (.sh, .js, .ts) with YAML frontmatter. Hooks are discovered fresh each session."
+        }
+    }
+}
+
+enum UserHookDirectoryDisplay {
+    static let path = "~/.tron/hooks/"
+    static let emptyState = "No user added hooks found"
+}
+
+enum PromptLibrarySetting: CaseIterable, Hashable, Sendable {
+    case recordHistory
+    case autoPrune
+    case retention
+
+    var title: String {
+        switch self {
+        case .recordHistory:
+            return "Record prompt history"
+        case .autoPrune:
+            return "Prune on record / startup"
+        case .retention:
+            return "Prompt retention"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .recordHistory:
+            return "When recording is off, new prompts are not saved to the server prompt history."
+        case .autoPrune:
+            return "When enabled, the server removes prompt-history entries that exceed retention limits after recording a prompt and during startup."
+        case .retention:
+            return "0 means unlimited. Retention rules only apply when auto-prune is enabled."
+        }
+    }
+}
+
+enum ContextCompactionSetting: CaseIterable, Hashable, Sendable {
+    case threshold
+    case recentTurns
+    case activeSkills
+    case skillIndex
+
+    var title: String {
+        switch self {
+        case .threshold:
+            return "Threshold"
+        case .recentTurns:
+            return "Keep Recent Turns"
+        case .activeSkills:
+            return "Active Skills"
+        case .skillIndex:
+            return "Skill Index"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .threshold:
+            return "Compaction starts when context usage reaches this percentage of the model window."
+        case .recentTurns:
+            return "Most recent turns to keep verbatim when older context is compacted."
+        case .activeSkills:
+            return "Controls whether active skills are cleared, restored, or require confirmation after compaction."
+        case .skillIndex:
+            return "Controls when the lightweight skill index is included in the system prompt."
+        }
+    }
+}
+
+enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
+    case clearPromptHistory
+    case archiveAllSessions
+    case resetAllSettings
+
+    static let order: [Self] = [
+        .clearPromptHistory,
+        .archiveAllSessions,
+        .resetAllSettings,
+    ]
+
+    var title: String {
+        switch self {
+        case .clearPromptHistory:
+            return "Clear Prompt History"
+        case .archiveAllSessions:
+            return "Archive All Sessions"
+        case .resetAllSettings:
+            return "Reset All Settings"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .clearPromptHistory:
+            return "clock.badge.xmark"
+        case .archiveAllSessions:
+            return "archivebox"
+        case .resetAllSettings:
+            return "arrow.trianglehead.counterclockwise"
+        }
+    }
+}
+
+enum AgentSettingsSummary {
+    struct Context: Equatable, Sendable {
+        let isLoaded: Bool
+        let queueDrainMode: String
+        let enabledBuiltinHookCount: Int
+        let totalBuiltinHookCount: Int
+        let hooksErrorPolicy: String
+        let hooksMaxAddedContextChars: UInt32
+        let promptHistoryEnabled: Bool
+        let promptHistoryMaxEntries: Int
+        let promptHistoryMaxAgeDays: Int
+        let promptHistoryAutoPrune: Bool
+        let protectedBranchCount: Int
+    }
+
+    static func title(for context: Context) -> String {
+        guard context.isLoaded else {
+            return "Load agent settings"
+        }
+
+        return "Agent behavior"
+    }
+
+    static func description(for context: Context) -> String {
+        guard context.isLoaded else {
+            return "Loading agent execution, hook, and prompt-history settings from the active server."
+        }
+
+        let queue = queueDescription(context.queueDrainMode)
+        let hooks = hooksDescription(
+            enabled: context.enabledBuiltinHookCount,
+            total: context.totalBuiltinHookCount,
+            errorPolicy: context.hooksErrorPolicy,
+            addedContextChars: context.hooksMaxAddedContextChars
+        )
+        let prompt = promptHistoryDescription(
+            enabled: context.promptHistoryEnabled,
+            maxEntries: context.promptHistoryMaxEntries,
+            maxAgeDays: context.promptHistoryMaxAgeDays,
+            autoPrune: context.promptHistoryAutoPrune
+        )
+        let protectedBranches = protectedBranchesDescription(context.protectedBranchCount)
+        return "\(queue) \(hooks). \(prompt) \(protectedBranches)"
+    }
+
+    private static func queueDescription(_ mode: String) -> String {
+        switch mode {
+        case "batched":
+            return "Queued messages are batched into one prompt."
+        default:
+            return "Queued messages are delivered one turn at a time."
+        }
+    }
+
+    private static func hooksDescription(
+        enabled: Int,
+        total: Int,
+        errorPolicy: String,
+        addedContextChars: UInt32
+    ) -> String {
+        let safeEnabled = max(0, enabled)
+        let safeTotal = max(safeEnabled, total)
+        let failureBehavior = errorPolicy == "block" ? "block execution" : "let execution continue"
+        let addedContext = addedContextChars == 0
+            ? "hook-added context is off"
+            : "hooks may add up to \(formattedChars(addedContextChars)) of context per event"
+        return "\(safeEnabled) of \(safeTotal) built-in hooks are enabled; hook failures \(failureBehavior) and \(addedContext)"
+    }
+
+    private static func promptHistoryDescription(
+        enabled: Bool,
+        maxEntries: Int,
+        maxAgeDays: Int,
+        autoPrune: Bool
+    ) -> String {
+        guard enabled else {
+            return "Prompt history is off."
+        }
+
+        var limits: [String] = []
+        if maxEntries > 0 {
+            limits.append("\(maxEntries) entries")
+        }
+        if maxAgeDays > 0 {
+            limits.append("\(maxAgeDays) days")
+        }
+        let retention = limits.isEmpty ? "unlimited retention" : limits.joined(separator: " and ")
+        let pruning = autoPrune ? "auto-prune is on" : "auto-prune is off"
+        return "Prompt history is on with \(retention); \(pruning)."
+    }
+
+    private static func formattedChars(_ value: UInt32) -> String {
+        if value >= 1024, value % 1024 == 0 {
+            return "\(value / 1024) KB"
+        }
+        return "\(value) characters"
+    }
+
+    private static func protectedBranchesDescription(_ count: Int) -> String {
+        guard count > 0 else {
+            return "No protected branches are configured."
+        }
+        return "\(count) protected \(count == 1 ? "branch requires" : "branches require") push override."
+    }
+}
+
+enum ContextSettingsSummary {
+    struct Context: Equatable, Sendable {
+        let isLoaded: Bool
+        let triggerTokenThreshold: Double
+        let preserveRecentCount: Int
+        let skillsCompactionPolicy: String
+        let skillsShowIndex: String
+        let autoRetainInterval: Int
+        let retainModelDisplayName: String
+        let rulesDiscoverStandaloneFiles: Bool
+    }
+
+    static func title(for context: Context) -> String {
+        guard context.isLoaded else {
+            return "Load context settings"
+        }
+        return "Context management"
+    }
+
+    static func description(for context: Context) -> String {
+        guard context.isLoaded else {
+            return "Loading compaction, memory, skills, and rule discovery settings from the active server."
+        }
+
+        let threshold = Int((context.triggerTokenThreshold * 100).rounded())
+        let compaction = "Compaction starts at \(threshold)%, keeps \(context.preserveRecentCount) recent \(context.preserveRecentCount == 1 ? "turn" : "turns"), and \(skillsPolicyDescription(context.skillsCompactionPolicy)); the skill index \(skillIndexDescription(context.skillsShowIndex))."
+        let memory = memoryDescription(
+            interval: context.autoRetainInterval,
+            retainModelDisplayName: context.retainModelDisplayName
+        )
+        let rules = "Standalone rule discovery is \(context.rulesDiscoverStandaloneFiles ? "on" : "off")."
+        return "\(compaction) \(memory) \(rules)"
+    }
+
+    private static func skillsPolicyDescription(_ value: String) -> String {
+        switch value {
+        case "autoRestore":
+            return "auto-restores active skills"
+        case "askUser":
+            return "asks before restoring active skills"
+        default:
+            return "clears active skills"
+        }
+    }
+
+    private static func skillIndexDescription(_ value: String) -> String {
+        switch value {
+        case "never":
+            return "is hidden"
+        case "whenNoActiveSkills":
+            return "appears when no skills are active"
+        default:
+            return "is always visible"
+        }
+    }
+
+    private static func memoryDescription(interval: Int, retainModelDisplayName: String) -> String {
+        guard interval > 0 else {
+            return "Memory auto-retain is off."
+        }
+        return "Memory auto-retain runs every \(interval) \(interval == 1 ? "turn" : "turns") using \(retainModelDisplayName)."
+    }
 }
 
 enum ProvidersSettingsSummary {
@@ -25,12 +441,7 @@ enum ProvidersSettingsSummary {
             return "Load credential status"
         }
 
-        let totalConfigured = context.configuredModelProviderCount + context.configuredServiceCount
-        guard totalConfigured > 0 else {
-            return "Connect providers"
-        }
-
-        return "\(totalConfigured) \(totalConfigured == 1 ? "connection" : "connections") ready"
+        return "Provider connections"
     }
 
     static func description(for context: Context) -> String {

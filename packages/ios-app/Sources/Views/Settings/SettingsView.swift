@@ -18,11 +18,14 @@ struct SettingsView: View {
     #endif
     @State private var showArchiveAllConfirmation = false
     @State private var isArchivingAll = false
+    @State private var showClearPromptHistoryConfirmation = false
+    @State private var isClearingPromptHistory = false
+    @State private var clearPromptHistoryResultMessage: String?
     @State private var activePage: SettingsPage?
     @State private var cardsVisible = false
 
     enum SettingsPage: String, Identifiable {
-        case server, agent, providers, app, mcpServers, hooks, gitWorkflow, promptLibrary, privacy
+        case server, agent, context, providers, app, mcpServers, privacy
         var id: String { rawValue }
     }
 
@@ -60,14 +63,12 @@ struct SettingsView: View {
             }
             #endif
         } content: {
-            serverSettingsSection
+            mainSettingsSection
                 .cardEntrance(visible: cardsVisible, index: 0)
-            appSettingsSection
-                .cardEntrance(visible: cardsVisible, index: 1)
             dangerZoneCard
-                .cardEntrance(visible: cardsVisible, index: 2)
+                .cardEntrance(visible: cardsVisible, index: 1)
             footerView
-                .cardEntrance(visible: cardsVisible, index: 3)
+                .cardEntrance(visible: cardsVisible, index: 2)
         }
         #if DEBUG || BETA
         .sheet(isPresented: $showLogViewer) {
@@ -86,9 +87,14 @@ struct SettingsView: View {
                         startServerOnboarding: { startOnboarding(prefill: $0) }
                     )
                 case .agent:
-                    ContextSettingsPage(
+                    AgentSettingsPage(
                         settingsState: settingsState,
                         selectedModelDisplayName: selectedModelDisplayName,
+                        updateServerSetting: updateServerSetting
+                    )
+                case .context:
+                    ContextSettingsPage(
+                        settingsState: settingsState,
                         updateServerSetting: updateServerSetting
                     )
                 case .providers:
@@ -104,16 +110,6 @@ struct SettingsView: View {
                     MCPServersPage(
                         settingsState: settingsState,
                         updateServerSetting: updateServerSetting
-                    )
-                case .hooks:
-                    HooksSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
-                case .gitWorkflow:
-                    GitWorkflowSettingsPage(settingsState: settingsState, updateServerSetting: updateServerSetting)
-                case .promptLibrary:
-                    PromptLibrarySettingsPage(
-                        settingsState: settingsState,
-                        updateServerSetting: updateServerSetting,
-                        rpcClient: rpcClient
                     )
                 case .privacy:
                     PrivacySettingsPage()
@@ -148,6 +144,21 @@ struct SettingsView: View {
                 return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
             }())
         }
+        .alert("Clear Prompt History?", isPresented: $showClearPromptHistoryConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear", role: .destructive) { clearPromptHistory() }
+        } message: {
+            Text("This permanently removes every prompt-history entry on the active server.")
+        }
+        .alert(
+            clearPromptHistoryResultMessage ?? "",
+            isPresented: Binding(
+                get: { clearPromptHistoryResultMessage != nil },
+                set: { if !$0 { clearPromptHistoryResultMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { clearPromptHistoryResultMessage = nil }
+        }
         .adaptivePresentationDetents([.large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
@@ -155,20 +166,35 @@ struct SettingsView: View {
 
     // MARK: - Main Sections
 
-    private var appSettingsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SettingsSectionHeader(title: "App Settings")
+    private var mainSettingsSection: some View {
+        VStack(alignment: .leading, spacing: MainSettingsListLayout.categorySpacing) {
+            serverSettingsSection
+            appSettingsSection
+        }
+    }
 
+    private var appSettingsSection: some View {
+        VStack(alignment: .leading, spacing: MainSettingsListLayout.categorySpacing) {
             if #available(iOS 26.0, *) {
-                SettingsCard(interactive: true) {
-                    categoryRow(icon: "paintbrush", label: "App", subtitle: "Appearance, notifications, and local behavior") {
+                SettingsCard(accent: MainSettingsLocalCategoryStyle.accent, interactive: true) {
+                    categoryRow(
+                        icon: "paintbrush",
+                        label: "App",
+                        subtitle: "Appearance, notifications, and local behavior",
+                        accent: MainSettingsLocalCategoryStyle.accent
+                    ) {
                         activePage = .app
                     }
                 }
             }
 
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "hand.raised", label: "Privacy", subtitle: "Telemetry opt-in and feedback composer") {
+            SettingsCard(accent: MainSettingsLocalCategoryStyle.accent, interactive: true) {
+                categoryRow(
+                    icon: "hand.raised",
+                    label: "Privacy",
+                    subtitle: "Telemetry opt-in and feedback composer",
+                    accent: MainSettingsLocalCategoryStyle.accent
+                ) {
                     activePage = .privacy
                 }
             }
@@ -176,9 +202,7 @@ struct SettingsView: View {
     }
 
     private var serverSettingsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SettingsSectionHeader(title: "Server Settings")
-
+        VStack(alignment: .leading, spacing: MainSettingsListLayout.categorySpacing) {
             if !hasPairedServers {
                 noServerCard
             } else {
@@ -264,7 +288,7 @@ struct SettingsView: View {
     }
 
     private var serverSettingsCategories: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: MainSettingsListLayout.categorySpacing) {
             if let error = settingsState.loadError {
                 SettingsCard(accent: .tronError) {
                     Text(error)
@@ -278,39 +302,11 @@ struct SettingsView: View {
 
             serverManagementCard
 
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "key.horizontal", label: SettingsLabels.providers, subtitle: "Login with OAuth and configure API keys") {
-                    activePage = .providers
-                }
-            }
-
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "brain", label: "Agent", subtitle: "Session defaults, compaction, memory, and queueing") {
-                    activePage = .agent
-                }
-            }
-
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "server.rack", label: "MCP Servers", subtitle: "Configure external tool servers") {
-                    activePage = .mcpServers
-                }
-            }
-
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "point.topright.arrow.triangle.backward.to.point.bottomleft.scurvepath.fill", label: "Hooks", subtitle: "Manage agent lifecycle events") {
-                    activePage = .hooks
-                }
-            }
-
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "point.3.connected.trianglepath.dotted", label: "Git Workflow", subtitle: "Configure sync, merge, push, and conflict policies") {
-                    activePage = .gitWorkflow
-                }
-            }
-
-            SettingsCard(interactive: true) {
-                categoryRow(icon: "text.book.closed", label: "Prompt Library", subtitle: "Configure prompt history and quick-prompt snippets") {
-                    activePage = .promptLibrary
+            ForEach(ServerSettingsCategory.serverBackedOrder.filter { $0 != .server }, id: \.self) { category in
+                SettingsCard(interactive: true) {
+                    categoryRow(icon: category.icon, label: category.title, subtitle: category.subtitle) {
+                        activePage = settingsPage(for: category)
+                    }
                 }
             }
         }
@@ -318,18 +314,43 @@ struct SettingsView: View {
 
     private var serverManagementCard: some View {
         SettingsCard(interactive: true) {
-            categoryRow(icon: "network", label: "Server", subtitle: "Paired servers, security, transcription, and updates") {
+            categoryRow(
+                icon: ServerSettingsCategory.server.icon,
+                label: ServerSettingsCategory.server.title,
+                subtitle: ServerSettingsCategory.server.subtitle
+            ) {
                 activePage = .server
             }
         }
     }
 
-    private func categoryRow(icon: String, label: String, subtitle: String, action: @escaping () -> Void) -> some View {
+    private func settingsPage(for category: ServerSettingsCategory) -> SettingsPage {
+        switch category {
+        case .server:
+            return .server
+        case .providers:
+            return .providers
+        case .agent:
+            return .agent
+        case .context:
+            return .context
+        case .mcpServers:
+            return .mcpServers
+        }
+    }
+
+    private func categoryRow(
+        icon: String,
+        label: String,
+        subtitle: String,
+        accent: Color = .tronEmerald,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
                 Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(accent)
                     .frame(width: 18)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -339,6 +360,7 @@ struct SettingsView: View {
                     Text(subtitle)
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer()
@@ -363,14 +385,42 @@ struct SettingsView: View {
             VStack(spacing: 8) {
                 SettingsCard(accent: .tronError, interactive: true) {
                     Button {
-                        showArchiveAllConfirmation = true
+                        showClearPromptHistoryConfirmation = true
                     } label: {
                         HStack {
-                            Image(systemName: "archivebox")
+                            Image(systemName: SettingsDangerZoneAction.clearPromptHistory.icon)
                                 .font(TronTypography.sans(size: TronTypography.sizeBody))
                                 .foregroundStyle(.tronError)
                                 .frame(width: 18)
-                            Text("Archive All Sessions")
+                            Text(SettingsDangerZoneAction.clearPromptHistory.title)
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                                .foregroundStyle(.tronError)
+                            Spacer()
+                            if isClearingPromptHistory {
+                                ProgressView()
+                                    .tint(.tronError)
+                                    .scaleEffect(0.7)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!serverSettingsReady || isClearingPromptHistory)
+                    .opacity(!serverSettingsReady || isClearingPromptHistory ? 0.4 : 1)
+                }
+
+                SettingsCard(accent: .tronError, interactive: true) {
+                    Button {
+                        showArchiveAllConfirmation = true
+                    } label: {
+                        HStack {
+                            Image(systemName: SettingsDangerZoneAction.archiveAllSessions.icon)
+                                .font(TronTypography.sans(size: TronTypography.sizeBody))
+                                .foregroundStyle(.tronError)
+                                .frame(width: 18)
+                            Text(SettingsDangerZoneAction.archiveAllSessions.title)
                                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                                 .foregroundStyle(.tronError)
                             Spacer()
@@ -393,7 +443,12 @@ struct SettingsView: View {
                     Button {
                         showingResetAlert = true
                     } label: {
-                        SettingsRow(icon: "arrow.trianglehead.counterclockwise", label: "Reset All Settings", accentColor: .tronError, labelColor: .tronError) {
+                        SettingsRow(
+                            icon: SettingsDangerZoneAction.resetAllSettings.icon,
+                            label: SettingsDangerZoneAction.resetAllSettings.title,
+                            accentColor: .tronError,
+                            labelColor: .tronError
+                        ) {
                             EmptyView()
                         }
                     }
@@ -455,6 +510,43 @@ struct SettingsView: View {
         Task {
             await eventStoreManager.archiveAllSessions()
             isArchivingAll = false
+        }
+    }
+
+    private func clearPromptHistory() {
+        guard serverSettingsReady else {
+            clearPromptHistoryResultMessage = "Connect to the active server before clearing prompt history."
+            return
+        }
+
+        isClearingPromptHistory = true
+        let client = rpcClient
+        let activeServerId = dependencies.pairedServerStore.activeServer?.id
+        Task {
+            do {
+                let result = try await client.promptLibrary.clearHistory()
+                await MainActor.run {
+                    guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
+                          dependencies.rpcClient === client
+                    else {
+                        isClearingPromptHistory = false
+                        return
+                    }
+                    clearPromptHistoryResultMessage = "Cleared \(result.deletedCount) entr\(result.deletedCount == 1 ? "y" : "ies")."
+                    isClearingPromptHistory = false
+                }
+            } catch {
+                await MainActor.run {
+                    guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
+                          dependencies.rpcClient === client
+                    else {
+                        isClearingPromptHistory = false
+                        return
+                    }
+                    clearPromptHistoryResultMessage = "Failed to clear prompt history: \(error.localizedDescription)"
+                    isClearingPromptHistory = false
+                }
+            }
         }
     }
 

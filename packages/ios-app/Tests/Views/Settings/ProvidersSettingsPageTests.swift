@@ -41,7 +41,7 @@ struct ProvidersSettingsPageTests {
             configuredServiceCount: 0,
             totalServiceCount: 2
         )
-        #expect(ProvidersSettingsSummary.title(for: empty) == "Connect providers")
+        #expect(ProvidersSettingsSummary.title(for: empty) == "Provider connections")
         #expect(ProvidersSettingsSummary.description(for: empty) == "No model providers or services are configured. Add OAuth accounts or API keys; secrets stay on the Mac server.")
 
         let configured = ProvidersSettingsSummary.Context(
@@ -51,7 +51,7 @@ struct ProvidersSettingsPageTests {
             configuredServiceCount: 1,
             totalServiceCount: 2
         )
-        #expect(ProvidersSettingsSummary.title(for: configured) == "4 connections ready")
+        #expect(ProvidersSettingsSummary.title(for: configured) == "Provider connections")
         #expect(ProvidersSettingsSummary.description(for: configured) == "3 model providers and 1 service are configured. Secrets stay on the Mac server.")
 
         let allConfigured = ProvidersSettingsSummary.Context(
@@ -61,7 +61,7 @@ struct ProvidersSettingsPageTests {
             configuredServiceCount: 2,
             totalServiceCount: 2
         )
-        #expect(ProvidersSettingsSummary.title(for: allConfigured) == "7 connections ready")
+        #expect(ProvidersSettingsSummary.title(for: allConfigured) == "Provider connections")
         #expect(ProvidersSettingsSummary.description(for: allConfigured) == "All 5 model providers and all 2 services are configured. Secrets stay on the Mac server.")
     }
 
