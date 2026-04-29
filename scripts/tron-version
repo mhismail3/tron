@@ -83,12 +83,18 @@ derive_version_fields() {
 
     TRON_RELEASE_TAG="server-v${TRON_VERSION}"
     TRON_RELEASE_TITLE="Tron Server ${TRON_DISPLAY_VERSION}"
-    TRON_DMG_NAME="Tron-mac-v${TRON_VERSION}.dmg"
+    TRON_ASSET_VERSION="$(asset_version "$TRON_VERSION")"
+    TRON_DMG_NAME="tron-v${TRON_ASSET_VERSION}.dmg"
     if [[ "$TRON_VERSION" == *-* ]]; then
         TRON_IS_PRERELEASE="true"
     else
         TRON_IS_PRERELEASE="false"
     fi
+}
+
+asset_version() {
+    local version="$1"
+    printf '%s\n' "${version/-beta./-beta}"
 }
 
 print_version_fields() {
@@ -313,6 +319,10 @@ self_test() {
     grep -Fqx "TRON_RELEASE_TAG=$TRON_RELEASE_TAG" <<<"$out" || die "print omitted server release tag"
     grep -Fqx "TRON_RELEASE_TITLE=$TRON_RELEASE_TITLE" <<<"$out" || die "print omitted server release title"
     grep -Fqx "TRON_DMG_NAME=$TRON_DMG_NAME" <<<"$out" || die "print omitted platform DMG name"
+    [ "$(asset_version 0.1.0-beta.3)" = "0.1.0-beta3" ] || die "asset version failed beta dot compaction"
+    [ "$(asset_version 0.1.0-beta.10)" = "0.1.0-beta10" ] || die "asset version failed numeric beta compaction"
+    [ "$(asset_version 0.1.1)" = "0.1.1" ] || die "asset version changed stable patch"
+    [[ "$TRON_DMG_NAME" =~ ^tron-v[0-9]+\.[0-9]+\.[0-9]+(-beta[1-9][0-9]*)?\.dmg$ ]] || die "DMG name has unexpected format: $TRON_DMG_NAME"
     "$PROJECT_DIR/scripts/tron" version check >/dev/null
     "$PROJECT_DIR/scripts/tron" version sync --check >/dev/null
 

@@ -165,7 +165,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 ### End Users (recommended)
 
 1. Install [Tailscale](https://tailscale.com) and sign in on the Mac that will host the agent.
-2. Download the latest `Tron-mac-v*.dmg` from [GitHub Releases](https://github.com/mhismail3/tron/releases) and drag `Tron.app` into `/Applications`.
+2. Download the latest `tron-v*.dmg` from [GitHub Releases](https://github.com/mhismail3/tron/releases) and drag `Tron.app` into `/Applications`.
 3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, and displays pairing info (Tailscale IP + port + bearer token + server name + QR code).
 4. On iPhone, install the Tron TestFlight build. The app opens to the dashboard and presents a compact onboarding sheet; install/sign in to Tailscale on the phone, then scan the Mac pairing QR or enter the pairing fields manually.
 
@@ -946,7 +946,7 @@ End-users install `Tron.app` via a notarized DMG published to GitHub Releases. R
 12. Build the DMG with `create-dmg`, sign the DMG, submit that signed DMG to `notarytool`, then staple the DMG. The app and DMG require separate notary tickets.
 13. Upload dSYMs to Sentry via `sentry-cli`.
 14. `scripts/tron-release-notes` writes a bounded draft changelog body from first-parent git history since the previous release tag, including the DMG filename, SHA256, and a full compare link. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta1-to-beta2 bridge recognizes the historical Mac-scoped beta1 tag so the first `server-v*` release does not include the entire repo history.
-15. `gh release create server-v0.1.0-beta.1 ./Tron-mac-v0.1.0-beta.1.dmg` creates a draft GitHub pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog; maintainers publish after installing and verifying the DMG.
+15. `gh release create server-v0.1.0-beta.1 ./tron-v0.1.0-beta1.dmg` creates a draft GitHub pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog; maintainers publish after installing and verifying the DMG.
 
 A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or the workflow itself. The dry-run stops before notarization (no cert needed) so PR contributors can verify the assembly pipeline without secrets.
 

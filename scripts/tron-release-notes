@@ -263,8 +263,8 @@ self_test() {
     git -C "$tmp" commit -am "Add install repair flow" -q
     git -C "$tmp" tag server-v0.1.0-beta.2
 
-    sha="$tmp/Tron-mac-v0.1.0-beta.2.dmg.sha256"
-    echo "abcdef1234567890  Tron-mac-v0.1.0-beta.2.dmg" > "$sha"
+    sha="$tmp/tron-v0.1.0-beta2.dmg.sha256"
+    echo "abcdef1234567890  tron-v0.1.0-beta2.dmg" > "$sha"
     notes="$tmp/notes.md"
     (
         cd "$tmp"
@@ -274,7 +274,7 @@ self_test() {
             --version 0.1.0-beta.2 \
             --display-version "v0.1 (Beta 2)" \
             --apple-build 2 \
-            --asset "$tmp/Tron-mac-v0.1.0-beta.2.dmg" \
+            --asset "$tmp/tron-v0.1.0-beta2.dmg" \
             --sha256-file "$sha" \
             --repo-url https://example.com/acme/tron \
             --output "$notes"
@@ -283,6 +283,7 @@ self_test() {
     [ "$(head -n 1 "$notes")" = "## Release" ] || die "notes body must start below GitHub's release title"
     ! grep -qx "# Tron Server v0.1 (Beta 2)" "$notes" || die "notes duplicated release title"
     grep -qx -- "- Git tag: \`server-v0.1.0-beta.2\`" "$notes" || die "notes omitted tag"
+    grep -qx -- "- macOS DMG: \`tron-v0.1.0-beta2.dmg\`" "$notes" || die "notes omitted normalized asset name"
     grep -qx -- "- SHA256: \`abcdef1234567890\`" "$notes" || die "notes omitted sha"
     grep -q "changes since \`mac-v0.1.0-beta.1\`" "$notes" || die "notes omitted previous range"
     grep -q "Add install repair flow" "$notes" || die "notes omitted release commit"
@@ -301,7 +302,7 @@ self_test() {
             --version 0.1.0-beta.3 \
             --display-version "v0.1 (Beta 3)" \
             --apple-build 3 \
-            --asset "$tmp/Tron-mac-v0.1.0-beta.3.dmg" \
+            --asset "$tmp/tron-v0.1.0-beta3.dmg" \
             --sha256-file "$sha" \
             --repo-url https://example.com/acme/tron \
             --output "$notes"
@@ -325,7 +326,7 @@ self_test() {
             --title "Tron Server v0.1 (Beta 1)" \
             --version 0.1.0-beta.1 \
             --display-version "v0.1 (Beta 1)" \
-            --asset "$first_tmp/Tron-mac-v0.1.0-beta.1.dmg" \
+            --asset "$first_tmp/tron-v0.1.0-beta1.dmg" \
             --sha256-file "$sha" \
             --repo-url https://example.com/acme/tron \
             --output "$notes"

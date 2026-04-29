@@ -178,7 +178,7 @@ Defined in `.github/workflows/release-mac.yml`. Broadly:
 7. Notarize the signed app via `xcrun notarytool submit --keychain-profile tron-notarize` (credentials live ONLY in an isolated path-based keychain at `$RUNNER_TEMP/tron-build.keychain-db`, never on argv), staple the app, package it into a DMG via `create-dmg`, sign the DMG, then notarize and staple the DMG separately because notary tickets are artifact-specific.
 8. Optional dSYM upload via `sentry-cli` (Phase 7; `continue-on-error` so a missing DSN doesn't fail the release).
 9. `scripts/tron-release-notes` generates a bounded draft changelog body from first-parent git history since the previous release tag, with DMG, SHA256, and full compare-link details included. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta2 release intentionally compares against the historical Mac-scoped beta1 tag so the tag-prefix rename does not turn beta2 into an all-history changelog.
-10. `gh release create server-v0.1.0-beta.1 ./Tron-mac-v0.1.0-beta.1.dmg` creates or updates a draft pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog.
+10. `gh release create server-v0.1.0-beta.1 ./tron-v0.1.0-beta1.dmg` creates or updates a draft pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog.
 11. `if: always()` cleanup: remove the keychain from the search list, delete it, dd-overwrite the password file, remove `cert.p12`.
 
 PR builds (no tag) take a dry-run path: same `xcodebuild archive` + DMG assembly but ad-hoc-signed (`-`) so fork PRs without certs still validate the pipeline.

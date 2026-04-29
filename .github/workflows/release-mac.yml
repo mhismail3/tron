@@ -19,7 +19,7 @@
 #   6. Notarize the `.app` via `xcrun notarytool submit --wait`; staple with
 #      `stapler`.
 #   7. Build and sign the DMG via `create-dmg` into
-#      `dist/Tron-mac-v0.1.0-beta.1.dmg`.
+#      `dist/tron-v0.1.0-beta1.dmg`.
 #   8. Notarize the signed DMG separately, then staple it. Notary tickets are
 #      artifact-specific; the stapled `.app` ticket does not apply to the DMG.
 #   9. Generate a SHA256 manifest and deterministic changelog.
