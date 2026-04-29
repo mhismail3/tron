@@ -59,21 +59,26 @@ impl ProcessRunner for MockRunner {
 }
 
 fn tool(confirm: bool) -> ComputerUseTool {
-    let mut t = ComputerUseTool::new(Arc::new(MockRunner::success("")), confirm, 500);
-    #[cfg(target_os = "macos")]
-    {
-        t.use_native_input = false;
-    }
-    t
+    configure_test_tool(ComputerUseTool::new(
+        Arc::new(MockRunner::success("")),
+        confirm,
+        500,
+    ))
 }
 
 fn tool_with_runner(runner: MockRunner, confirm: bool) -> ComputerUseTool {
-    let mut t = ComputerUseTool::new(Arc::new(runner), confirm, 500);
-    #[cfg(target_os = "macos")]
-    {
-        t.use_native_input = false;
-    }
-    t
+    configure_test_tool(ComputerUseTool::new(Arc::new(runner), confirm, 500))
+}
+
+#[cfg(target_os = "macos")]
+fn configure_test_tool(mut tool: ComputerUseTool) -> ComputerUseTool {
+    tool.use_native_input = false;
+    tool
+}
+
+#[cfg(not(target_os = "macos"))]
+fn configure_test_tool(tool: ComputerUseTool) -> ComputerUseTool {
+    tool
 }
 
 // ─── Schema tests ───
@@ -1701,11 +1706,11 @@ async fn screenshot_details_include_screen_resolution() {
         .await
         .unwrap();
     assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
-    let d = r.details.unwrap();
     // On macOS test environment, screen_bounds() should return real values
     // On non-macOS or test, these may be absent — that's OK
     #[cfg(target_os = "macos")]
     {
+        let d = r.details.unwrap();
         assert!(d.get("screenWidth").is_some(), "should have screenWidth");
         assert!(d.get("screenHeight").is_some(), "should have screenHeight");
     }
@@ -1724,9 +1729,9 @@ async fn screenshot_window_details_include_screen_resolution() {
         .await
         .unwrap();
     assert!(r.is_error.is_none(), "should succeed: {}", extract_text(&r));
-    let d = r.details.unwrap();
     #[cfg(target_os = "macos")]
     {
+        let d = r.details.unwrap();
         assert!(d.get("screenWidth").is_some(), "should have screenWidth");
         assert!(d.get("screenHeight").is_some(), "should have screenHeight");
     }
