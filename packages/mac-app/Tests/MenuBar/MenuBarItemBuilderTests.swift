@@ -475,6 +475,10 @@ struct MenuBarItemBuilderTests {
         #expect(MenuBarUptimeFormatter.parse("2-01:07:42") == 176_862)
         #expect(MenuBarUptimeFormatter.parse("1:bad") == nil)
         #expect(MenuBarUptimeFormatter.parse("1::02") == nil)
+        #expect(MenuBarUptimeFormatter.display("07:42") == "00:07:42")
+        #expect(MenuBarUptimeFormatter.display("10:48") == "00:10:48")
+        #expect(MenuBarUptimeFormatter.display("2-01:07:42") == "2-01:07:42")
+        #expect(MenuBarUptimeFormatter.display("unknown") == "unknown")
         #expect(MenuBarUptimeFormatter.format(4_062) == "01:07:42")
         #expect(MenuBarUptimeFormatter.format(176_862) == "2-01:07:42")
     }

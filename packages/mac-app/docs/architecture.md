@@ -1,6 +1,6 @@
 # Mac App Architecture
 
-> Last verified: 2026-04-29 (dev menu busy-state preservation + command log)
+> Last verified: 2026-04-29 (menu uptime normalization + dev command status)
 
 ## Overview
 
@@ -235,6 +235,9 @@ The shared pairing surface resolves live when it opens, and copy actions quickly
 swap to a checkmark for two seconds so the user gets deterministic visual
 feedback. "Show logs" opens a native logs window fed by the read-only
 `logs.recent` RPC, with refresh and copy controls.
+The uptime row normalizes raw `ps` elapsed-time strings such as `10:48` to the
+same `HH:MM:SS` format used by the live one-second ticker, so opening the menu
+does not briefly switch display styles.
 While `Tron-Dev.app` owns port 9847, the bottom developer section shows a
 `Stop dev server` action even when developer options are collapsed. Pause,
 restart, and uninstall remain disabled during dev takeover. The stop action

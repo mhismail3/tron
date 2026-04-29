@@ -265,7 +265,7 @@ private final class MenuBarHeaderView: NSView {
             rows.append(pidField)
         }
         if let uptime = content.uptime {
-            let uptimeField = NSTextField(labelWithString: "Uptime: \(uptime)")
+            let uptimeField = NSTextField(labelWithString: "Uptime: \(MenuBarUptimeFormatter.display(uptime))")
             uptimeField.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
             uptimeField.textColor = .secondaryLabelColor
             rows.append(uptimeField)
@@ -345,6 +345,11 @@ private final class MenuBarHeaderView: NSView {
 }
 
 enum MenuBarUptimeFormatter {
+    static func display(_ uptime: String) -> String {
+        guard let seconds = parse(uptime) else { return uptime }
+        return format(seconds)
+    }
+
     static func parse(_ uptime: String) -> Int? {
         let dayAndTime = uptime.split(separator: "-", maxSplits: 1).map(String.init)
         let dayOffset: Int

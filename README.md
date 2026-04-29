@@ -791,7 +791,7 @@ packages/mac-app/Sources/
 
 | Item | Action |
 |------|--------|
-| Custom status header | Shows `Tron`, the Tailscale endpoint, color-coded state, PID, live uptime, and a `Dev Server active` marker when `tron dev` owns port 9847 |
+| Custom status header | Shows `Tron`, the Tailscale endpoint, color-coded state, PID, normalized live uptime, and a `Dev Server active` marker when `tron dev` owns port 9847 |
 | Show pairing info | Opens a pairing-only window with QR + manual copy buttons for host, port, token, and server name; copy actions quickly show a checkmark for two seconds on success |
 | Restart / Pause / Resume server | `SMAppService.register` repair/load before restart or resume, then `launchctl kickstart` when the label was already loaded; shows busy state and posts success/failure notifications |
 | Update finalization | On the first menu-bar launch for a new app build, syncs managed skills, refreshes stale SMAppService metadata, and restarts the bundled server once; `tron dev` takeover defers this until the production server is active again |
