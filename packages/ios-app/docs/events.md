@@ -171,6 +171,18 @@ dictionaries for tool calls, tool results, and consumed subagent event IDs so
 that downstream handlers can resolve `tool_use` content blocks and filter
 already-consumed notifications in a single pass.
 
+### Payload Compatibility
+
+History reconstruction must accept the payload shape emitted by the server, not
+only the shape used by local tests. In particular, persisted `message.user`
+events from prompt and subagent paths may contain only `content`; their `turn`
+field is optional during reconstruction. Renderable persisted event types are
+guarded by transformer fixtures so messages, tool chips, notifications, memory
+cards, errors, and configuration chips keep reconstructing when payload contracts
+change. The test suite also requires every persisted event type to have an
+explicit reconstruction disposition: rendered, state-handled, consumed through
+assistant content, streaming replay-only, or intentionally no-state.
+
 ### Reconstruction Pagination
 
 The `session.reconstruct` RPC supports cursor-based pagination:

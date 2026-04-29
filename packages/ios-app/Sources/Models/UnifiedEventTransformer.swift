@@ -374,8 +374,8 @@ extension UnifiedEventTransformer {
                  .configModelSwitch, .configReasoningLevel,
                  .contextCleared, .skillDeactivated, .skillsCleared,
                  .rulesLoaded, .rulesActivated,
-                 .errorAgent, .errorTool, .errorProvider,
-                 .memoryRetained:
+                 .errorAgent, .errorTool, .errorProvider, .turnFailed,
+                 .memoryRetained, .memoryAutoRetainFailed:
                 if var message = transformPersistedEvent(event) {
                     if eventType == .messageUser {
                         message.eventId = event.id

@@ -99,7 +99,20 @@ mod session_event_tests {
         match payload {
             SessionEventPayload::MessageUser(p) => {
                 assert_eq!(p.content, json!("Hello"));
-                assert_eq!(p.turn, 1);
+                assert_eq!(p.turn, Some(1));
+            }
+            other => panic!("expected MessageUser, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn typed_payload_message_user_without_turn() {
+        let event = make_event(EventType::MessageUser, json!({ "content": "Hello" }));
+        let payload = event.typed_payload().unwrap();
+        match payload {
+            SessionEventPayload::MessageUser(p) => {
+                assert_eq!(p.content, json!("Hello"));
+                assert_eq!(p.turn, None);
             }
             other => panic!("expected MessageUser, got {other:?}"),
         }
@@ -332,7 +345,7 @@ mod session_event_tests {
                 EventType::SessionFork,
                 json!({"sourceSessionId": "s", "sourceEventId": "e"}),
             ),
-            (EventType::MessageUser, json!({"content": "hi", "turn": 1})),
+            (EventType::MessageUser, json!({"content": "hi"})),
             (
                 EventType::MessageAssistant,
                 json!({"content": [], "turn": 1, "tokenUsage": {"inputTokens": 0, "outputTokens": 0}, "stopReason": "end_turn", "model": "m"}),

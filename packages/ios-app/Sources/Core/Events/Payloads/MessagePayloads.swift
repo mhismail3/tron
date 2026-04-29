@@ -11,7 +11,9 @@ import Foundation
 /// 3. Image/document content blocks (displayable as thumbnails above text)
 struct UserMessagePayload {
     let content: String
-    let turn: Int
+    /// Optional because live Tron prompt/subagent emitters historically stored
+    /// user messages with only `content`; imported sessions may include it.
+    let turn: Int?
     let imageCount: Int?
     /// True if this message contains ONLY tool_result blocks (no text)
     /// These are LLM conversation context, not displayable user messages
@@ -103,17 +105,7 @@ struct UserMessagePayload {
             return nil
         }
 
-        // `turn` is non-optional on the server's `UserMessagePayload`
-        // (`turn: i64`). Dropping the `?? 1` default keeps a malformed
-        // import from silently pinning a message to turn 1.
-        guard let turn = payload.int("turn") else {
-            TronLogger.shared.warning(
-                "message.user event missing required field 'turn'; dropping",
-                category: .events
-            )
-            return nil
-        }
-        self.turn = turn
+        self.turn = payload.int("turn")
         self.imageCount = payload.int("imageCount")
         self.attachments = extractedAttachments.isEmpty ? nil : extractedAttachments
 

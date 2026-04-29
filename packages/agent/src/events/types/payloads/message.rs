@@ -11,8 +11,11 @@ use super::token_usage::{TokenRecord, TokenUsage};
 pub struct UserMessagePayload {
     /// User message content — either a plain string or array of content blocks.
     pub content: Value,
-    /// Turn number.
-    pub turn: i64,
+    /// Turn number, when known. Live prompt/subagent emitters historically
+    /// persisted user messages before turn start, so production events may
+    /// contain only `content`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn: Option<i64>,
     /// Number of images attached.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_count: Option<i64>,

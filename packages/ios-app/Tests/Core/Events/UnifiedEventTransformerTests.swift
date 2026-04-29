@@ -72,8 +72,6 @@ final class UnifiedEventTransformerTests: XCTestCase {
             if augmented["turn"] == nil { augmented["turn"] = AnyCodable(1) }
             if augmented["model"] == nil { augmented["model"] = AnyCodable("claude-sonnet-4") }
             if augmented["stopReason"] == nil { augmented["stopReason"] = AnyCodable("end_turn") }
-        case "message.user":
-            if augmented["turn"] == nil { augmented["turn"] = AnyCodable(1) }
         case "message.system":
             if augmented["source"] == nil { augmented["source"] = AnyCodable("compaction") }
         case "session.start":
@@ -84,6 +82,110 @@ final class UnifiedEventTransformerTests: XCTestCase {
             break
         }
         return augmented
+    }
+
+    /// Canonical minimal payloads for every persisted event type that claims
+    /// `rendersAsChatMessage == true`. Keep this in lockstep with
+    /// `PersistedEventType.classification`; the coverage test below fails when
+    /// a new rendered event is added without a reconstruction fixture.
+    private func renderableEventFixtures() -> [PersistedEventType: [String: AnyCodable]] {
+        [
+            .messageUser: [
+                // Production `session.reconstruct` payloads may omit `turn`.
+                "content": AnyCodable("Hello from the persisted event log")
+            ],
+            .messageAssistant: [
+                "content": AnyCodable([["type": "text", "text": "Assistant response"] as [String: Any]]),
+                "turn": AnyCodable(1),
+                "model": AnyCodable("claude-sonnet-4"),
+                "stopReason": AnyCodable("end_turn")
+            ],
+            .messageSystem: [
+                "content": AnyCodable("System note"),
+                "source": AnyCodable("compaction")
+            ],
+            .toolCall: [
+                "toolCallId": AnyCodable("tool-fixture"),
+                "name": AnyCodable("Bash"),
+                "arguments": AnyCodable(["command": "true"]),
+                "turn": AnyCodable(1)
+            ],
+            .toolResult: [
+                "toolCallId": AnyCodable("tool-fixture"),
+                "content": AnyCodable("ok"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(25)
+            ],
+            .configModelSwitch: [
+                "previousModel": AnyCodable("claude-sonnet-4"),
+                "newModel": AnyCodable("claude-opus-4")
+            ],
+            .configReasoningLevel: [
+                "previousLevel": AnyCodable("medium"),
+                "newLevel": AnyCodable("high")
+            ],
+            .notificationInterrupted: [:],
+            .notificationSubagentResult: [
+                "subagentSessionId": AnyCodable("sub-session"),
+                "task": AnyCodable("Check a detail"),
+                "success": AnyCodable(true)
+            ],
+            .skillDeactivated: [
+                "skillName": AnyCodable("browser")
+            ],
+            .skillsCleared: [
+                "clearedSkills": AnyCodable(["browser", "code-review"]),
+                "reason": AnyCodable("compaction"),
+                "mode": AnyCodable("askUser")
+            ],
+            .rulesLoaded: [
+                "totalFiles": AnyCodable(1),
+                "dynamicRulesCount": AnyCodable(0)
+            ],
+            .rulesActivated: [
+                "totalActivated": AnyCodable(1),
+                "rules": AnyCodable([
+                    ["relativePath": "AGENTS.md", "scopeDir": "."] as [String: Any]
+                ])
+            ],
+            .compactBoundary: [
+                "originalTokens": AnyCodable(10_000),
+                "compactedTokens": AnyCodable(2_000),
+                "reason": AnyCodable("manual")
+            ],
+            .contextCleared: [
+                "tokensBefore": AnyCodable(10_000),
+                "tokensAfter": AnyCodable(500)
+            ],
+            .errorAgent: [
+                "error": AnyCodable("Agent failed"),
+                "recoverable": AnyCodable(false)
+            ],
+            .errorTool: [
+                "toolName": AnyCodable("Bash"),
+                "toolCallId": AnyCodable("tool-fixture"),
+                "error": AnyCodable("Command failed")
+            ],
+            .errorProvider: [
+                "provider": AnyCodable("anthropic"),
+                "error": AnyCodable("Rate limited"),
+                "category": AnyCodable("rate_limit"),
+                "retryable": AnyCodable(true)
+            ],
+            .turnFailed: [
+                "turn": AnyCodable(1),
+                "error": AnyCodable("Turn failed"),
+                "recoverable": AnyCodable(true)
+            ],
+            .memoryRetained: [
+                "title": AnyCodable("Session summary"),
+                "summary": AnyCodable("Important points were retained.")
+            ],
+            .memoryAutoRetainFailed: [
+                "intervalFired": AnyCodable(6),
+                "reason": AnyCodable("summarizer_failed")
+            ]
+        ]
     }
 
     // MARK: - User Message Tests
@@ -103,6 +205,32 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         if case .text(let text) = message?.content {
             XCTAssertEqual(text, "Hello, Claude!")
+        } else {
+            XCTFail("Expected text content")
+        }
+    }
+
+    func testTransformUserMessageWithoutTurnMatchesProductionWirePayload() {
+        // `session.reconstruct` returns live prompt/subagent user messages
+        // with content-only payloads. This is the regression guard for the
+        // resume bug where every user bubble disappeared.
+        let event = RawEvent(
+            id: "user-without-turn",
+            parentId: nil,
+            sessionId: "test-session",
+            workspaceId: "/test/workspace",
+            type: "message.user",
+            timestamp: timestamp(),
+            sequence: 1,
+            payload: ["content": AnyCodable("Persisted without a turn")]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        XCTAssertNotNil(message)
+        XCTAssertEqual(message?.role, .user)
+        if case .text(let text) = message?.content {
+            XCTAssertEqual(text, "Persisted without a turn")
         } else {
             XCTFail("Expected text content")
         }
@@ -425,6 +553,128 @@ final class UnifiedEventTransformerTests: XCTestCase {
             let message = UnifiedEventTransformer.transformPersistedEvent(event)
             XCTAssertNil(message, "Expected \(type) to be filtered out")
         }
+    }
+
+    func testEveryRenderablePersistedEventHasAWorkingReconstructionFixture() {
+        let fixtures = renderableEventFixtures()
+        let renderableTypes = PersistedEventType.allCases.filter(\.rendersAsChatMessage)
+        let missingFixtures = renderableTypes
+            .filter { fixtures[$0] == nil }
+            .map(\.rawValue)
+            .sorted()
+
+        XCTAssertTrue(
+            missingFixtures.isEmpty,
+            "Missing reconstruction fixtures for renderable persisted event types: \(missingFixtures)"
+        )
+
+        for (offset, eventType) in renderableTypes.enumerated() {
+            guard let payload = fixtures[eventType] else { continue }
+            let event = RawEvent(
+                id: "fixture-\(eventType.rawValue)",
+                parentId: nil,
+                sessionId: "test-session",
+                workspaceId: "/test/workspace",
+                type: eventType.rawValue,
+                timestamp: timestamp(TimeInterval(offset)),
+                sequence: offset + 1,
+                payload: payload
+            )
+
+            let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+            XCTAssertNotNil(
+                message,
+                "\(eventType.rawValue) is marked renderable but did not reconstruct from its canonical payload"
+            )
+        }
+    }
+
+    func testEveryStandaloneRenderableEventReconstructsInSessionState() {
+        let fixtures = renderableEventFixtures()
+        let standaloneRenderableTypes = PersistedEventType.allCases.filter {
+            $0.rendersAsChatMessage &&
+            $0 != .toolCall &&
+            $0 != .toolResult
+        }
+
+        for (offset, eventType) in standaloneRenderableTypes.enumerated() {
+            let payload = fixtures[eventType]
+            XCTAssertNotNil(payload, "Missing reconstruction fixture for \(eventType.rawValue)")
+            guard let payload else { continue }
+
+            let event = RawEvent(
+                id: "state-fixture-\(eventType.rawValue)",
+                parentId: nil,
+                sessionId: "test-session",
+                workspaceId: "/test/workspace",
+                type: eventType.rawValue,
+                timestamp: timestamp(TimeInterval(offset)),
+                sequence: offset + 1,
+                payload: payload
+            )
+
+            let state = UnifiedEventTransformer.reconstructSessionState(from: [event])
+
+            XCTAssertFalse(
+                state.messages.isEmpty,
+                "\(eventType.rawValue) is marked renderable but full session reconstruction did not include it"
+            )
+        }
+    }
+
+    func testEveryPersistedEventTypeHasExplicitReconstructionDisposition() {
+        let rendered = Set(renderableEventFixtures().keys)
+        let stateHandled: Set<PersistedEventType> = [
+            .sessionStart, .sessionBranch,
+            .messageDeleted,
+            .streamTurnEnd,
+            .configModelSwitch, .configReasoningLevel,
+            .notificationSubagentResult,
+            .subagentSpawned, .subagentCompleted, .subagentFailed, .subagentResultsConsumed,
+            .fileRead, .fileWrite, .fileEdit,
+            .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged, .worktreeRenamed,
+            .compactBoundary, .compactSummary,
+            .metadataUpdate, .metadataTag,
+            .llmHookResult
+        ]
+        let consumedThroughAssistantMessage: Set<PersistedEventType> = [
+            .toolCall,
+            .toolResult,
+            .streamThinkingComplete
+        ]
+        let streamingReplayOnly: Set<PersistedEventType> = [
+            .streamTextDelta,
+            .streamThinkingDelta,
+            .streamTurnStart
+        ]
+        let intentionallyNoStateImpact: Set<PersistedEventType> = [
+            // Session tree / completion metadata lives outside ReconstructedState.
+            .sessionEnd,
+            .sessionFork,
+            // Prompt/skill/process/memory trigger events do not currently restore
+            // user-visible chat or persisted ReconstructedState fields.
+            .configPromptUpdate,
+            .skillActivated,
+            .memoryAutoRetainTriggered,
+            .notificationProcessResult,
+            .processResultsConsumed
+        ]
+
+        let accounted = rendered
+            .union(stateHandled)
+            .union(consumedThroughAssistantMessage)
+            .union(streamingReplayOnly)
+            .union(intentionallyNoStateImpact)
+        let missing = Set(PersistedEventType.allCases)
+            .subtracting(accounted)
+            .map(\.rawValue)
+            .sorted()
+
+        XCTAssertTrue(
+            missing.isEmpty,
+            "Every persisted event type must have an explicit reconstruction disposition. Missing: \(missing)"
+        )
     }
 
     // MARK: - Batch Transformation Tests

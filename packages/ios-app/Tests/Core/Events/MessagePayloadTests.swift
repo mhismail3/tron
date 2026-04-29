@@ -110,9 +110,6 @@ final class AssistantMessagePayloadTests: XCTestCase {
 
 final class UserMessagePayloadTests: XCTestCase {
 
-    /// `turn` is non-optional on the Rust payload (`UserMessagePayload.turn: i64`).
-    /// Every fixture must include it; the `testMissingTurnFailsDecode` case
-    /// guards against regression of the removed "default to 1" back-compat.
     private func validPayload(content: AnyCodable, turn: Int = 1) -> [String: AnyCodable] {
         ["content": content, "turn": AnyCodable(turn)]
     }
@@ -153,13 +150,18 @@ final class UserMessagePayloadTests: XCTestCase {
         XCTAssertEqual(parsed?.attachments?.count ?? 0, 0)
     }
 
-    func testMissingTurnFailsDecode() {
-        // `turn` is non-optional on the Rust payload. Regression guard
-        // against the removed "default to 1" back-compat behavior.
+    func testMissingTurnStillDecodes() {
+        // Production prompt/subagent paths historically persist user messages
+        // with only `content`. Reconstruction must keep rendering those
+        // messages instead of dropping every user bubble on resume.
         let payload: [String: AnyCodable] = [
             "content": AnyCodable("Hello")
         ]
 
-        XCTAssertNil(UserMessagePayload(from: payload))
+        let parsed = UserMessagePayload(from: payload)
+
+        XCTAssertNotNil(parsed)
+        XCTAssertEqual(parsed?.content, "Hello")
+        XCTAssertNil(parsed?.turn)
     }
 }
