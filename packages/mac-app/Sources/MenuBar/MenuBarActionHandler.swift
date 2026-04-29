@@ -120,7 +120,11 @@ final class MenuBarActionHandler {
             await refreshStatus()
             return
         }
-        let outcome = await setup.launchAgentManager.restart(label: setup.launchAgentLabel)
+        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+            manager: setup.launchAgentManager,
+            plistPath: setup.launchAgentPlistPath,
+            label: setup.launchAgentLabel
+        )
         await refreshStatus()
         switch outcome {
         case .ok, .alreadyLoaded:

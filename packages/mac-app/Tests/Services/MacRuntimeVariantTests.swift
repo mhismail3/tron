@@ -26,6 +26,7 @@ struct MacRuntimeVariantTests {
         )
         #expect(installed == .installedRelease)
         #expect(installed.locationProblem == nil)
+        #expect(installed.precedence > MacRuntimeVariant.xcodeDebug(bundlePath: "/tmp/TronMac.app").precedence)
 
         let misplaced = MacRuntimeVariant.detect(
             bundleURL: URL(fileURLWithPath: "/Users/dev/Downloads/Tron.app", isDirectory: true),
@@ -45,9 +46,9 @@ struct MacRuntimeVariantTests {
         #expect(variant.precedence == 0)
     }
 
-    @Test("parent bundle precedence treats debug and installed release as peer wrappers")
+    @Test("parent bundle precedence makes installed release authoritative")
     func parentPrecedence() {
-        #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac.dev") == MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac"))
+        #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac") > MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac.dev"))
         #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac") > MacRuntimeVariant.precedence(forParentBundleIdentifier: "other"))
         #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: nil) == 0)
     }

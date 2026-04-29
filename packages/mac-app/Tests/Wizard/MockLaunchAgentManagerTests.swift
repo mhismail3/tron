@@ -98,20 +98,32 @@ struct MockLaunchAgentManagerTests {
         )
     }
 
-    @Test("installed release does not take over debug wrapper")
-    func installedReleaseDoesNotTakeOverDebugWrapper() {
+    @Test("installed release reclaims stale debug production registration")
+    func installedReleaseReclaimsDebugProductionRegistration() {
         #expect(
             LiveLaunchAgentManager.preRegistrationOutcome(
                 for: .notRegistered,
                 currentVariant: .installedRelease,
                 runningParentBundleIdentifier: "com.tron.mac.dev"
-            ) == .launchdRefused(message: "Tron Server is currently managed by com.tron.mac.dev. Stop that build before installing this one.")
+            ) == nil
         )
         #expect(
-            !LiveLaunchAgentManager.shouldBootoutForTakeover(
+            LiveLaunchAgentManager.shouldBootoutForTakeover(
                 status: .enabled,
                 currentVariant: .installedRelease,
                 runningParentBundleIdentifier: "com.tron.mac.dev"
+            )
+        )
+    }
+
+    @Test("debug companion never reclaims installed release registration")
+    func debugCompanionDoesNotReclaimInstalledReleaseRegistration() {
+        #expect(
+            !LiveLaunchAgentManager.shouldBootoutForTakeover(
+                status: .enabled,
+                currentVariant: .xcodeDebug(bundlePath: "/tmp/Debug/TronMac.app"),
+                runningParentBundleIdentifier: "com.tron.mac",
+                canManageLaunchAgent: false
             )
         )
     }
@@ -137,6 +149,34 @@ struct MockLaunchAgentManagerTests {
                 runtimeInfo: runtime,
                 expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
             ) == nil
+        )
+    }
+
+    @Test("takeover unregisters stale enabled registration before register")
+    func takeoverUnregistersEnabledRegistrationBeforeRegister() {
+        #expect(
+            LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
+                status: .enabled,
+                runningParentBundleIdentifier: "com.tron.mac.dev",
+                shouldReplaceStaleRuntime: false,
+                shouldTakeOverRuntime: true
+            )
+        )
+        #expect(
+            !LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
+                status: .notRegistered,
+                runningParentBundleIdentifier: "com.tron.mac.dev",
+                shouldReplaceStaleRuntime: false,
+                shouldTakeOverRuntime: true
+            )
+        )
+        #expect(
+            !LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
+                status: .enabled,
+                runningParentBundleIdentifier: "com.tron.mac",
+                shouldReplaceStaleRuntime: false,
+                shouldTakeOverRuntime: false
+            )
         )
     }
 

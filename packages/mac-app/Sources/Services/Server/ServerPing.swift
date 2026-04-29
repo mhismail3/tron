@@ -224,6 +224,12 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             runtimeInfo: runtime,
             expectedHelperPath: TronPaths.serverHelperBinary.path
         )
+        let shouldTakeOverRuntime = Self.shouldBootoutForTakeover(
+            status: status,
+            currentVariant: currentVariant,
+            runningParentBundleIdentifier: runningParent,
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent
+        )
 
         if let outcome = Self.preRegistrationOutcome(
             for: status,
@@ -235,18 +241,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         ) {
             return outcome
         }
-        if shouldReplaceStaleRuntime {
-            _ = await Subprocess.run(
-                executable: URL(fileURLWithPath: "/bin/launchctl"),
-                arguments: ["bootout", "gui/\(currentUID())/\(label)"]
-            )
-        }
-        if Self.shouldBootoutForTakeover(
-            status: status,
-            currentVariant: currentVariant,
-            runningParentBundleIdentifier: runningParent,
-            canManageLaunchAgent: TronPaths.canManageLaunchAgent
-        ) {
+        if shouldReplaceStaleRuntime || shouldTakeOverRuntime {
             _ = await Subprocess.run(
                 executable: URL(fileURLWithPath: "/bin/launchctl"),
                 arguments: ["bootout", "gui/\(currentUID())/\(label)"]
@@ -263,7 +258,12 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             return .launchdRefused(message: "Another Tron server is already running on port \(TronPaths.defaultServerPort). Stop it before installing Tron Server.")
         }
 
-        if status == .enabled, runningParent == nil || shouldReplaceStaleRuntime {
+        if Self.shouldUnregisterBeforeRegister(
+            status: status,
+            runningParentBundleIdentifier: runningParent,
+            shouldReplaceStaleRuntime: shouldReplaceStaleRuntime,
+            shouldTakeOverRuntime: shouldTakeOverRuntime
+        ) {
             do {
                 try await service.unregister()
             } catch {
@@ -369,6 +369,16 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             return false
         }
         return portBound || databaseLockHeld
+    }
+
+    static func shouldUnregisterBeforeRegister(
+        status: ExistingInstallDetector.ServiceRegistrationStatus,
+        runningParentBundleIdentifier: String?,
+        shouldReplaceStaleRuntime: Bool,
+        shouldTakeOverRuntime: Bool
+    ) -> Bool {
+        status == .enabled
+            && (runningParentBundleIdentifier == nil || shouldReplaceStaleRuntime || shouldTakeOverRuntime)
     }
 
     static func runtimeRequiresReplacement(

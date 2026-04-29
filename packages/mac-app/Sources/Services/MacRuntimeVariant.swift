@@ -51,7 +51,7 @@ enum MacRuntimeVariant: Equatable, Sendable {
         case .xcodeDebug:
             return 2
         case .installedRelease:
-            return 2
+            return 3
         case .misplacedRelease, .unsupported:
             return 0
         }
@@ -71,7 +71,9 @@ enum MacRuntimeVariant: Equatable, Sendable {
 
     static func precedence(forParentBundleIdentifier bundleIdentifier: String?) -> Int {
         switch bundleIdentifier {
-        case debugBundleIdentifier, releaseBundleIdentifier:
+        case releaseBundleIdentifier:
+            return 3
+        case debugBundleIdentifier:
             return 2
         case .some:
             return 1
