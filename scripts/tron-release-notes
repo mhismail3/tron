@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # tron-release-notes - deterministic GitHub Release changelog generator.
 #
-# The GitHub release title/body describes the Tron Server release while
-# individual assets stay platform-specific (today: macOS DMG). The body is
-# generated from git history so a tagged release never ships with placeholder
-# notes.
+# The GitHub release title names the Tron Server release while individual
+# assets stay platform-specific (today: macOS DMG). The body starts below that
+# title and is generated from git history so a tagged release never ships with
+# placeholder notes or a duplicated H1.
 
 set -euo pipefail
 
@@ -201,8 +201,6 @@ emit_notes() {
     fi
 
     {
-        echo "# $TITLE"
-        echo ""
         echo "## Release"
         echo ""
         echo "- Canonical version: \`$VERSION\`"
@@ -226,7 +224,7 @@ emit_notes() {
         echo ""
         echo "- This GitHub release groups server/runtime artifacts. The current asset is the macOS wrapper DMG that installs and manages Tron Server."
         echo "- iOS builds are distributed through TestFlight/App Store Connect while sharing the same canonical version from \`VERSION.env\`."
-        echo "- Keep this release as a draft until the DMG has been downloaded, installed, launched, and paired successfully on a clean Mac."
+        echo "- Maintainers publish the draft only after downloading, installing, launching, and pairing the DMG successfully."
         echo ""
         echo "## Full Changelog"
         echo ""
@@ -282,7 +280,8 @@ self_test() {
             --output "$notes"
     )
 
-    grep -qx "# Tron Server v0.1 (Beta 2)" "$notes" || die "notes omitted release title"
+    [ "$(head -n 1 "$notes")" = "## Release" ] || die "notes body must start below GitHub's release title"
+    ! grep -qx "# Tron Server v0.1 (Beta 2)" "$notes" || die "notes duplicated release title"
     grep -qx -- "- Git tag: \`server-v0.1.0-beta.2\`" "$notes" || die "notes omitted tag"
     grep -qx -- "- SHA256: \`abcdef1234567890\`" "$notes" || die "notes omitted sha"
     grep -q "changes since \`mac-v0.1.0-beta.1\`" "$notes" || die "notes omitted previous range"

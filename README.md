@@ -943,7 +943,7 @@ End-users install `Tron.app` via a notarized DMG published to GitHub Releases. R
 11. `xcrun notarytool submit` the signed `Tron.app` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple the app on success.
 12. Build the DMG with `create-dmg`, sign the DMG, submit that signed DMG to `notarytool`, then staple the DMG. The app and DMG require separate notary tickets.
 13. Upload dSYMs to Sentry via `sentry-cli`.
-14. `scripts/tron-release-notes` writes a bounded draft changelog from first-parent git history since the previous release tag, including the DMG filename, SHA256, and a full compare link. The beta1-to-beta2 bridge recognizes the historical Mac-scoped beta1 tag so the first `server-v*` release does not include the entire repo history.
+14. `scripts/tron-release-notes` writes a bounded draft changelog body from first-parent git history since the previous release tag, including the DMG filename, SHA256, and a full compare link. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta1-to-beta2 bridge recognizes the historical Mac-scoped beta1 tag so the first `server-v*` release does not include the entire repo history.
 15. `gh release create server-v0.1.0-beta.1 ./Tron-mac-v0.1.0-beta.1.dmg` creates a draft GitHub pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog; maintainers publish after installing and verifying the DMG.
 
 A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or the workflow itself. The dry-run stops before notarization (no cert needed) so PR contributors can verify the assembly pipeline without secrets.
