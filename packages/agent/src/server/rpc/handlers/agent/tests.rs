@@ -74,22 +74,50 @@ fn make_text_context(text: &str) -> RpcContext {
     ctx
 }
 
+const RUN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(30);
+const EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const PROMPT_TEST_WORKDIR: &str = "/tmp/tron-agent-rpc-test-workdir";
+
+fn persisted_event_types(ctx: &RpcContext, session_id: &str) -> Vec<String> {
+    ctx.event_store
+        .get_events_by_session(
+            session_id,
+            &crate::events::sqlite::repositories::event::ListEventsOptions::default(),
+        )
+        .map(|events| events.into_iter().map(|event| event.event_type).collect())
+        .unwrap_or_default()
+}
+
+fn timeout_diagnostics(ctx: &RpcContext, session_id: &str) -> String {
+    format!(
+        "active_run={}, persisted_events={:?}",
+        ctx.orchestrator.has_active_run(session_id),
+        persisted_event_types(ctx, session_id)
+    )
+}
+
 async fn wait_for_run_completion(ctx: &RpcContext, session_id: &str) {
     // Budget must cover the worst-case retry sequence for tests that simulate
-    // transient provider errors: with DEFAULT_MAX_RETRIES = 3 and a 1s base
-    // delay, exhausting retries takes ~1 + 2 + 4 = 7s of backoff plus the
-    // attempts themselves. 20s gives headroom without making successful-path
-    // tests feel slow (they short-circuit the moment the run clears).
-    tokio::time::timeout(Duration::from_secs(20), async {
+    // transient provider errors. The retry wrapper increments before computing
+    // backoff, so defaults spend about 2.4s + 4.8s + 9.6s retrying before the
+    // final attempt and cleanup. Successful paths still short-circuit as soon
+    // as the run clears.
+    tokio::time::timeout(RUN_COMPLETION_TIMEOUT, async {
         loop {
             if !ctx.orchestrator.has_active_run(session_id) {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(POLL_INTERVAL).await;
         }
     })
     .await
-    .unwrap_or_else(|_| panic!("timed out waiting for run completion for session {session_id}"));
+    .unwrap_or_else(|_| {
+        panic!(
+            "timed out waiting for run completion for session {session_id}; {}",
+            timeout_diagnostics(ctx, session_id)
+        )
+    });
 }
 
 fn retryable_event_read_error(error: &crate::events::EventStoreError) -> bool {
@@ -106,12 +134,12 @@ async fn read_events_by_type(
     session_id: &str,
     event_types: &[&str],
 ) -> Vec<EventRow> {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(EVENT_WAIT_TIMEOUT, async {
         loop {
             match ctx.event_store.get_events_by_type(session_id, event_types, None) {
                 Ok(events) => break events,
                 Err(error) if retryable_event_read_error(&error) => {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    tokio::time::sleep(POLL_INTERVAL).await;
                 }
                 Err(error) => {
                     panic!(
@@ -123,7 +151,10 @@ async fn read_events_by_type(
     })
     .await
     .unwrap_or_else(|_| {
-        panic!("timed out reading events {event_types:?} in session {session_id}")
+        panic!(
+            "timed out reading events {event_types:?} in session {session_id}; {}",
+            timeout_diagnostics(ctx, session_id)
+        )
     })
 }
 
@@ -132,19 +163,49 @@ async fn wait_for_events_by_type(
     session_id: &str,
     event_types: &[&str],
 ) -> Vec<EventRow> {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(EVENT_WAIT_TIMEOUT, async {
         loop {
             let events = read_events_by_type(ctx, session_id, event_types).await;
             if !events.is_empty() {
                 break events;
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(POLL_INTERVAL).await;
         }
     })
     .await
     .unwrap_or_else(|_| {
-        panic!("timed out waiting for events {event_types:?} in session {session_id}")
+        panic!(
+            "timed out waiting for events {event_types:?} in session {session_id}; {}",
+            timeout_diagnostics(ctx, session_id)
+        )
     })
+}
+
+async fn wait_for_session_updated(
+    ctx: &RpcContext,
+    rx: &mut tokio::sync::broadcast::Receiver<crate::core::events::TronEvent>,
+    session_id: &str,
+) {
+    tokio::time::timeout(EVENT_WAIT_TIMEOUT, async {
+        loop {
+            match rx.recv().await {
+                Ok(crate::core::events::TronEvent::SessionUpdated { base, .. })
+                    if base.session_id == session_id =>
+                {
+                    break;
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(err) => panic!("unexpected broadcast error: {err}"),
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "timed out waiting for session_updated in session {session_id}; {}",
+            timeout_diagnostics(ctx, session_id)
+        )
+    });
 }
 
 /// A mock provider that yields partial text then sleeps, allowing cancellation.
@@ -248,7 +309,7 @@ async fn prompt_returns_acknowledged() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     let result = PromptHandler
@@ -297,7 +358,7 @@ async fn prompt_missing_prompt() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
     let err = PromptHandler
         .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -311,7 +372,7 @@ async fn prompt_rejects_oversized_prompt() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
     let oversized = "x".repeat(crate::server::rpc::validation::MAX_PROMPT_LENGTH.saturating_add(1));
 
@@ -343,7 +404,7 @@ async fn prompt_rejects_busy_session() {
     let ctx = make_slow_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     // First prompt succeeds
@@ -361,6 +422,13 @@ async fn prompt_rejects_busy_session() {
         .await
         .unwrap_err();
     assert_eq!(err.code(), "SESSION_BUSY");
+
+    let abort = AbortHandler
+        .handle(Some(json!({"sessionId": sid})), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(abort["aborted"], true);
+    wait_for_run_completion(&ctx, &sid).await;
 }
 
 #[tokio::test]
@@ -368,7 +436,7 @@ async fn abort_active_returns_true() {
     let ctx = make_slow_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     // Start a run so there's something to abort
@@ -382,6 +450,7 @@ async fn abort_active_returns_true() {
         .await
         .unwrap();
     assert_eq!(result["aborted"], true);
+    wait_for_run_completion(&ctx, &sid).await;
 }
 
 #[tokio::test]
@@ -405,7 +474,7 @@ async fn abort_active_cancels_pending_device_requests() {
 
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -438,6 +507,7 @@ async fn abort_active_cancels_pending_device_requests() {
 
     let request_result = pending.await.unwrap();
     assert!(matches!(request_result, Err(DeviceRequestError::Cancelled)));
+    wait_for_run_completion(&ctx, &sid).await;
 }
 
 #[tokio::test]
@@ -525,7 +595,7 @@ async fn prompt_accepts_reasoning_level() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -542,7 +612,7 @@ async fn prompt_accepts_images() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -559,7 +629,7 @@ async fn prompt_accepts_attachments() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -580,7 +650,7 @@ async fn prompt_with_images_creates_multimodal_message() {
     let ctx = make_text_context("Analyzed image.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -605,7 +675,7 @@ async fn prompt_with_reasoning_level_runs_successfully() {
     let ctx = make_text_context("Thought deeply.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -630,7 +700,7 @@ async fn prompt_accepts_xhigh_reasoning_level() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -647,7 +717,7 @@ async fn prompt_accepts_max_reasoning_level() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
     let result = PromptHandler
         .handle(
@@ -664,7 +734,7 @@ async fn prompt_with_xhigh_reasoning_runs_successfully() {
     let ctx = make_text_context("Deep reasoning.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -689,7 +759,7 @@ async fn prompt_with_skills_runs_successfully() {
     let ctx = make_text_context("Using skills.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -714,7 +784,7 @@ async fn prompt_empty_images_no_multimodal() {
     let ctx = make_text_context("Plain text.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -741,7 +811,7 @@ async fn prompt_spawns_background_task() {
     let ctx = make_text_context("Hello!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     let result = PromptHandler
@@ -762,7 +832,7 @@ async fn prompt_without_agent_deps_returns_not_available() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let err = PromptHandler
@@ -779,7 +849,7 @@ async fn prompt_complete_run_on_success() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -823,7 +893,7 @@ async fn prompt_complete_run_on_error() {
 
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -865,7 +935,7 @@ async fn prompt_cleans_run_on_panic() {
 
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -910,7 +980,7 @@ async fn prompt_error_emits_agent_error_event() {
 
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
     let mut rx = ctx.orchestrator.subscribe();
 
@@ -959,9 +1029,11 @@ async fn prompt_error_agent_error_has_rate_limit_category() {
             _c: &crate::core::messages::Context,
             _o: &ProviderStreamOptions,
         ) -> Result<StreamEventStream, ProviderError> {
-            Err(ProviderError::RateLimited {
+            Err(ProviderError::Api {
+                status: 429,
                 message: "429 Too Many Requests".into(),
-                retry_after_ms: 0,
+                code: None,
+                retryable: false,
             })
         }
     }
@@ -975,7 +1047,7 @@ async fn prompt_error_agent_error_has_rate_limit_category() {
 
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
     let mut rx = ctx.orchestrator.subscribe();
 
@@ -984,9 +1056,10 @@ async fn prompt_error_agent_error_has_rate_limit_category() {
         .await
         .unwrap();
 
-    // With retry enabled (default: 3 retries, 1s base, exponential + jitter),
-    // the error propagates only after retry exhaustion (~7s of backoff).
-    // wait_for_run_completion budgets 20s for this path.
+    // This test verifies RPC error categorization, not provider retry timing.
+    // Use a 429-shaped non-retryable provider error so the final event still
+    // parses as rate_limit/retryable without spending the test budget in
+    // exponential backoff.
     wait_for_run_completion(&ctx, &sid).await;
 
     let mut found_error = false;
@@ -1013,7 +1086,7 @@ async fn prompt_success_no_agent_error() {
     let ctx = make_text_context("Hello!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
     let mut rx = ctx.orchestrator.subscribe();
 
@@ -1037,7 +1110,7 @@ async fn prompt_forwards_events_to_broadcast() {
     let ctx = make_text_context("Hello events!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let mut rx = ctx.orchestrator.subscribe();
@@ -1071,7 +1144,7 @@ async fn prompt_emits_session_updated_after_completion() {
     let ctx = make_text_context("Hello session update!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let mut rx = ctx.orchestrator.subscribe();
@@ -1081,23 +1154,7 @@ async fn prompt_emits_session_updated_after_completion() {
         .await
         .unwrap();
 
-    let found = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            match rx.recv().await {
-                Ok(crate::core::events::TronEvent::SessionUpdated { base, .. }) => {
-                    if base.session_id == sid {
-                        break true;
-                    }
-                }
-                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(err) => panic!("unexpected broadcast error: {err}"),
-            }
-        }
-    })
-    .await
-    .expect("timed out waiting for session_updated");
-
-    assert!(found);
+    wait_for_session_updated(&ctx, &mut rx, &sid).await;
 }
 
 #[tokio::test]
@@ -1105,7 +1162,7 @@ async fn prompt_event_ordering() {
     let ctx = make_text_context("Ordered!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let mut rx = ctx.orchestrator.subscribe();
@@ -1143,7 +1200,7 @@ async fn prompt_sequential_after_complete() {
     let ctx = make_text_context("Hello!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     // First prompt
@@ -1168,7 +1225,7 @@ async fn prompt_concurrent_reject() {
     let ctx = make_text_context("Hello!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     // First prompt
@@ -1235,7 +1292,7 @@ async fn prompt_restores_messages_from_session() {
     let ctx = make_text_context("Response.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     // Store message events in the session
@@ -1273,7 +1330,7 @@ async fn prompt_empty_session_no_messages() {
     let ctx = make_text_context("Hello.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1377,7 +1434,7 @@ async fn prompt_with_registered_skill_loads_content() {
     register_test_skill(&ctx, "web-search", "Search the web using Bing API.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1398,7 +1455,7 @@ async fn prompt_with_unknown_skill_still_works() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1421,7 +1478,7 @@ async fn prompt_with_pdf_attachment_runs_successfully() {
     let ctx = make_text_context("Received your PDF.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1450,7 +1507,7 @@ async fn prompt_with_image_attachment_uses_image_block() {
     let ctx = make_text_context("Nice image.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1478,7 +1535,7 @@ async fn prompt_with_text_attachment_uses_document_block() {
     let ctx = make_text_context("Read your text.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1507,7 +1564,7 @@ async fn prompt_with_mixed_images_and_attachments() {
     let ctx = make_text_context("Got both.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1533,7 +1590,7 @@ async fn prompt_attachment_without_data_skipped() {
     let ctx = make_text_context("No attachment data.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let result = PromptHandler
@@ -1560,7 +1617,7 @@ async fn gather_recent_events_returns_event_types() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -1588,7 +1645,7 @@ async fn gather_recent_events_since_boundary() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     // Events before boundary
@@ -1627,7 +1684,7 @@ async fn gather_recent_events_no_boundary_returns_all() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -1661,7 +1718,7 @@ async fn gather_recent_tool_calls_extracts_bash() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -1682,7 +1739,7 @@ async fn gather_recent_tool_calls_skips_non_bash() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = ctx.event_store.append(&crate::events::AppendOptions {
@@ -1702,7 +1759,7 @@ async fn prompt_persists_token_record_in_assistant_events() {
     let ctx = make_text_context("Hello!");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -1727,10 +1784,11 @@ async fn prompt_persists_token_record_in_assistant_events() {
 
 #[tokio::test]
 async fn interrupted_run_persists_notification_event() {
-    let ctx = make_slow_context();
+    let ready = Arc::new(tokio::sync::Notify::new());
+    let ctx = make_signalled_slow_context(ready.clone());
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -1738,8 +1796,18 @@ async fn interrupted_run_persists_notification_event() {
         .await
         .unwrap();
 
-    // Wait for the stream to start yielding
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // Abort only after the mock stream has yielded its first text delta; a
+    // fixed sleep can fire before the run reaches the provider under load.
+    tokio::time::timeout(EVENT_WAIT_TIMEOUT, async {
+        ready.notified().await;
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "timed out waiting for first text delta in session {sid}; {}",
+            timeout_diagnostics(&ctx, &sid)
+        )
+    });
 
     // Abort the session
     let _ = AbortHandler
@@ -1758,6 +1826,7 @@ async fn interrupted_run_persists_notification_event() {
     let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
     assert!(payload.get("timestamp").is_some());
     assert!(payload.get("turn").is_some());
+    wait_for_run_completion(&ctx, &sid).await;
 }
 
 #[tokio::test]
@@ -1794,6 +1863,7 @@ async fn interrupted_run_persists_partial_assistant_message() {
     assert_eq!(payload["interrupted"], true);
     let content = payload["content"].as_array().unwrap();
     assert!(!content.is_empty(), "content should contain partial text");
+    wait_for_run_completion(&ctx, &sid).await;
 }
 
 #[tokio::test]
@@ -1801,7 +1871,7 @@ async fn normal_run_does_not_persist_interrupted_notification() {
     let ctx = make_text_context("hello world");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -1834,7 +1904,7 @@ fn make_event_store() -> Arc<crate::events::EventStore> {
 fn get_pending_no_notifications_returns_empty() {
     let store = make_event_store();
     let sid = store
-        .create_session("mock", "/tmp", None, None, None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None, None, None)
         .unwrap()
         .session
         .id;
@@ -1847,7 +1917,7 @@ fn get_pending_no_notifications_returns_empty() {
 fn get_pending_with_notification_returns_it() {
     let store = make_event_store();
     let sid = store
-        .create_session("mock", "/tmp", None, None, None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None, None, None)
         .unwrap()
         .session
         .id;
@@ -1882,7 +1952,7 @@ fn get_pending_with_notification_returns_it() {
 fn get_pending_skips_consumed() {
     let store = make_event_store();
     let sid = store
-        .create_session("mock", "/tmp", None, None, None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None, None, None)
         .unwrap()
         .session
         .id;
@@ -1930,7 +2000,7 @@ fn get_pending_skips_consumed() {
 fn get_pending_partial_consumed() {
     let store = make_event_store();
     let sid = store
-        .create_session("mock", "/tmp", None, None, None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None, None, None)
         .unwrap()
         .session
         .id;
@@ -1998,7 +2068,7 @@ fn get_pending_partial_consumed() {
 fn get_pending_multiple_consumption_events() {
     let store = make_event_store();
     let sid = store
-        .create_session("mock", "/tmp", None, None, None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None, None, None)
         .unwrap()
         .session
         .id;
@@ -2104,7 +2174,7 @@ async fn prompt_text_only_event_has_string_content() {
     let ctx = make_text_context("Reply.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -2125,7 +2195,7 @@ async fn prompt_with_images_event_has_content_blocks() {
     let ctx = make_text_context("I see the image.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", None, None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     let _ = PromptHandler
@@ -2536,7 +2606,7 @@ async fn gather_recent_events_uses_latest_boundary() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     // Progress signal before first boundary
@@ -2598,7 +2668,7 @@ async fn gather_recent_events_falls_back_to_compact_summary() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     // Progress signal before summary
@@ -2644,7 +2714,7 @@ async fn stale_git_push_excluded_after_boundary() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("m", "/tmp", None, None)
+        .create_session("m", PROMPT_TEST_WORKDIR, None, None)
         .unwrap();
 
     // Prior interaction: git push
@@ -2747,7 +2817,7 @@ async fn prompt_records_history_on_interactive_call() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     PromptHandler
@@ -2825,7 +2895,7 @@ async fn prompt_with_cron_source_does_not_record_history() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     PromptHandler
@@ -2855,7 +2925,7 @@ async fn prompt_with_history_disabled_does_not_record() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     PromptHandler
@@ -2878,7 +2948,7 @@ async fn prompt_validation_failure_does_not_record_history() {
     let ctx = make_text_context("Done.");
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     let oversized = "x".repeat(crate::server::rpc::validation::MAX_PROMPT_LENGTH.saturating_add(1));
@@ -2900,7 +2970,7 @@ async fn status_returns_idle_phase_for_session_with_no_active_run() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     let result = StatusHandler
@@ -2919,7 +2989,7 @@ async fn status_reports_processing_phase_when_run_is_active() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     // Register an active run (simulates mid-turn state without actually
@@ -2963,7 +3033,7 @@ async fn status_surfaces_running_tool_snapshot_from_turn_accumulator() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     // Seed the accumulator: start a turn, register a tool call, flip
@@ -2998,7 +3068,7 @@ async fn status_current_tool_is_null_when_only_generating_tools() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     let accumulators = ctx.orchestrator.turn_accumulators();
@@ -3023,7 +3093,7 @@ async fn status_picks_most_recent_running_tool_when_several_are_active() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     let accumulators = ctx.orchestrator.turn_accumulators();
@@ -3050,7 +3120,7 @@ async fn status_skips_completed_tools() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     let accumulators = ctx.orchestrator.turn_accumulators();
@@ -3075,7 +3145,7 @@ async fn status_exposes_last_event_timestamp_and_elapsed_when_events_exist() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     // Append an event so the session has a latest-event timestamp.
@@ -3110,7 +3180,7 @@ async fn status_reports_no_elapsed_when_session_has_no_events() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("mock", "/tmp", Some("t"), None)
+        .create_session("mock", PROMPT_TEST_WORKDIR, Some("t"), None)
         .unwrap();
 
     // Don't append anything — but session-create itself DOES emit

@@ -38,7 +38,7 @@ async fn e2e_session_lifecycle() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "claude-opus-4-6", "workingDirectory": "/tmp", "title": "Test"})),
+        Some(json!({"model": "claude-opus-4-6", "workingDirectory": integration_prompt_workdir(), "title": "Test"})),
     )
     .await;
     assert_eq!(resp["success"], true);
@@ -86,7 +86,7 @@ async fn e2e_events_round_trip() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_string();
@@ -164,7 +164,7 @@ async fn e2e_agent_prompt_acknowledged() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_string();
@@ -180,6 +180,8 @@ async fn e2e_agent_prompt_acknowledged() {
     assert_eq!(resp["result"]["acknowledged"], true);
     assert!(resp["result"]["runId"].is_string());
 
+    wait_until_run_cleared(&server, &sid).await;
+
     server.shutdown().shutdown();
 }
 
@@ -193,7 +195,7 @@ async fn e2e_agent_abort() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_string();
@@ -209,6 +211,8 @@ async fn e2e_agent_abort() {
     let resp = rpc_call(&mut ws, 3, "agent.abort", Some(json!({"sessionId": sid}))).await;
     assert_eq!(resp["success"], true);
     assert_eq!(resp["result"]["aborted"], true);
+
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -278,7 +282,13 @@ async fn e2e_skill_list() {
     let mut ws = connect(&url).await;
     let _ = read_json(&mut ws).await;
 
-    let resp = rpc_call(&mut ws, 1, "skill.list", None).await;
+    let resp = rpc_call(
+        &mut ws,
+        1,
+        "skill.list",
+        Some(json!({"workingDirectory": integration_prompt_workdir()})),
+    )
+    .await;
     assert_eq!(resp["success"], true);
     assert!(resp["result"]["skills"].is_array());
 
@@ -353,7 +363,7 @@ async fn e2e_context_snapshot() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_string();
@@ -426,7 +436,7 @@ async fn e2e_tree_visualization() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_string();
@@ -454,7 +464,7 @@ async fn e2e_agent_get_state() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_string();
@@ -490,6 +500,10 @@ async fn e2e_agent_get_state() {
     assert_eq!(resp["success"], true);
     assert_eq!(resp["result"]["isRunning"], true);
 
+    let abort = rpc_call(&mut ws, 5, "agent.abort", Some(json!({"sessionId": sid}))).await;
+    assert_eq!(abort["result"]["aborted"], true);
+    wait_until_run_cleared(&server, &sid).await;
+
     server.shutdown().shutdown();
 }
 
@@ -503,7 +517,7 @@ async fn e2e_session_archive_unarchive() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_string();
@@ -573,7 +587,7 @@ async fn e2e_session_list_enriched_fields() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp", "title": "Test Session"})),
+        Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir(), "title": "Test Session"})),
     )
     .await;
 
@@ -625,13 +639,23 @@ async fn e2e_graceful_shutdown() {
 // Phase 12: Event streaming tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+const INTEGRATION_PROMPT_WORKDIR: &str = "/tmp/tron-integration-prompt-workdir";
+const PROMPT_EVENT_TIMEOUT: Duration = Duration::from_secs(20);
+const PROMPT_STATE_TIMEOUT: Duration = Duration::from_secs(20);
+const PROMPT_STATE_POLL: Duration = Duration::from_millis(10);
+
+fn integration_prompt_workdir() -> &'static str {
+    std::fs::create_dir_all(INTEGRATION_PROMPT_WORKDIR).unwrap();
+    INTEGRATION_PROMPT_WORKDIR
+}
+
 /// Helper to create a session and bind the client to it.
 async fn create_and_bind_session(ws: &mut WsStream, id: u64) -> String {
     let resp = rpc_call(
         ws,
         id,
         "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     resp["result"]["sessionId"].as_str().unwrap().to_string()
@@ -652,19 +676,8 @@ async fn try_read_json(ws: &mut WsStream, dur: Duration) -> Option<Value> {
 
 /// Read until we see a specific event type. Returns the matching event.
 async fn read_until_event_type(ws: &mut WsStream, event_type: &str) -> Option<Value> {
-    let deadline = Duration::from_secs(3);
-    let start = tokio::time::Instant::now();
-    while start.elapsed() < deadline {
-        let remaining = deadline.saturating_sub(start.elapsed());
-        if let Some(msg) = try_read_json(ws, remaining).await {
-            if msg.get("type").and_then(|v| v.as_str()) == Some(event_type) {
-                return Some(msg);
-            }
-        } else {
-            break;
-        }
-    }
-    None
+    let mut events = collect_events_until_type(ws, event_type, PROMPT_EVENT_TIMEOUT).await;
+    take_event_type(&mut events, event_type)
 }
 
 fn take_event_type(events: &mut Vec<Value>, event_type: &str) -> Option<Value> {
@@ -1254,7 +1267,7 @@ async fn e2e_many_sessions_stress() {
             &mut ws,
             (i + 1) as u64,
             "session.create",
-            Some(json!({"model": "m", "workingDirectory": format!("/tmp/{i}")})),
+            Some(json!({"model": "m", "workingDirectory": format!("{}/{i}", integration_prompt_workdir())})),
         )
         .await;
         assert_eq!(resp["success"], true, "session {i} creation failed");
@@ -1307,6 +1320,9 @@ async fn e2e_concurrent_prompts_different_sessions() {
     .await;
     assert_eq!(resp1["success"], true);
     assert_eq!(resp2["success"], true);
+
+    wait_until_run_cleared(&server, &sid1).await;
+    wait_until_run_cleared(&server, &sid2).await;
 
     server.shutdown().shutdown();
 }
@@ -1520,6 +1536,8 @@ async fn e2e_reject_concurrent_same_session() {
     assert_eq!(resp2["success"], false);
     assert_eq!(resp2["error"]["code"], "SESSION_BUSY");
 
+    wait_until_run_cleared(&server, &sid).await;
+
     server.shutdown().shutdown();
 }
 
@@ -1556,6 +1574,10 @@ async fn e2e_sequential_prompts_after_abort() {
     .await;
     assert_eq!(resp2["success"], true);
 
+    let ready = read_until_event_type(&mut ws, "agent.ready").await;
+    assert!(ready.is_some(), "second prompt should complete after abort");
+    wait_until_run_cleared(&server, &sid).await;
+
     server.shutdown().shutdown();
 }
 
@@ -1567,23 +1589,31 @@ async fn e2e_sequential_prompts_after_abort() {
 // Phase 14: Prompt execution chain e2e tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Collect all WebSocket messages until timeout.
-async fn collect_events(ws: &mut WsStream, dur: Duration) -> Vec<Value> {
+/// Collect WebSocket messages until a target event arrives or the timeout
+/// expires. Prompt e2e tests use this instead of sleeps because the first
+/// prompt in this integration binary can pay context warmup and scheduler cost
+/// before provider output begins.
+async fn collect_events_until_type(
+    ws: &mut WsStream,
+    event_type: &str,
+    dur: Duration,
+) -> Vec<Value> {
     let mut events = Vec::new();
     let start = tokio::time::Instant::now();
     while start.elapsed() < dur {
         let remaining = dur.saturating_sub(start.elapsed());
         if let Some(msg) = try_read_json(ws, remaining).await {
+            let matched = msg.get("type").and_then(|v| v.as_str()) == Some(event_type);
             events.push(msg);
+            if matched {
+                break;
+            }
         } else {
             break;
         }
     }
     events
 }
-
-const PROMPT_STATE_TIMEOUT: Duration = Duration::from_secs(20);
-const PROMPT_STATE_POLL: Duration = Duration::from_millis(10);
 
 /// Wait until agent.getState shows not busy, with a timeout.
 async fn wait_until_not_busy(ws: &mut WsStream, sid: &str, id_start: u64) {
@@ -1665,6 +1695,7 @@ async fn e2e_prompt_text_response() {
     )
     .await);
     assert!(ready.is_some(), "should receive agent.ready event");
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -1723,6 +1754,7 @@ async fn e2e_prompt_panic_cleans_up_and_server_recovers() {
 
     let ready = read_until_event_type(&mut ws, "agent.ready").await;
     assert!(ready.is_some(), "recovery prompt should complete");
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -1744,8 +1776,7 @@ async fn e2e_prompt_event_ordering() {
     )
     .await;
 
-    // Collect events for up to 3 seconds
-    events.extend(collect_events(&mut ws, Duration::from_secs(3)).await);
+    events.extend(collect_events_until_type(&mut ws, "agent.ready", PROMPT_EVENT_TIMEOUT).await);
     let types: Vec<&str> = events
         .iter()
         .filter_map(|e| e.get("type").and_then(|v| v.as_str()))
@@ -1768,6 +1799,7 @@ async fn e2e_prompt_event_ordering() {
         complete_pos.unwrap(),
         ready_pos.unwrap()
     );
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -1799,6 +1831,7 @@ async fn e2e_prompt_error_from_provider() {
         ready.is_some(),
         "agent.ready must arrive even after provider error"
     );
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -1820,8 +1853,11 @@ async fn e2e_prompt_cleans_up_on_complete() {
     )
     .await;
 
-    // Wait for agent.ready
-    let _ = read_until_event_type(&mut ws, "agent.ready").await;
+    // agent.ready is emitted before the async prompt task returns to its cleanup
+    // path, so wait for both the event and the orchestrator cleanup.
+    let ready = read_until_event_type(&mut ws, "agent.ready").await;
+    assert!(ready.is_some(), "agent.ready must arrive before cleanup");
+    wait_until_run_cleared(&server, &sid).await;
 
     // getState should show not busy
     let resp = rpc_call(
@@ -1854,8 +1890,9 @@ async fn e2e_prompt_sequential() {
     )
     .await;
 
-    // Wait for it to complete
-    let _ = read_until_event_type(&mut ws, "agent.ready").await;
+    let ready = read_until_event_type(&mut ws, "agent.ready").await;
+    assert!(ready.is_some(), "first prompt should complete");
+    wait_until_run_cleared(&server, &sid).await;
 
     // Second prompt should succeed
     let resp = rpc_call(
@@ -1867,6 +1904,10 @@ async fn e2e_prompt_sequential() {
     .await;
     assert_eq!(resp["success"], true);
     assert_eq!(resp["result"]["acknowledged"], true);
+
+    let ready = read_until_event_type(&mut ws, "agent.ready").await;
+    assert!(ready.is_some(), "second prompt should complete");
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -1900,6 +1941,10 @@ async fn e2e_prompt_reject_concurrent() {
     .await;
     assert_eq!(resp2["success"], false);
     assert_eq!(resp2["error"]["code"], "SESSION_BUSY");
+
+    let abort = rpc_call(&mut ws, 4, "agent.abort", Some(json!({"sessionId": sid}))).await;
+    assert_eq!(abort["result"]["aborted"], true);
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -1962,8 +2007,7 @@ async fn e2e_prompt_abort_mid_stream() {
     )
     .await;
 
-    // Give the agent a moment to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_until_active_run(&server, &sid).await;
 
     // Abort
     let resp = rpc_call(&mut ws, 3, "agent.abort", Some(json!({"sessionId": sid}))).await;
@@ -1971,6 +2015,7 @@ async fn e2e_prompt_abort_mid_stream() {
 
     // Wait for the run to be cleaned up (agent_runner calls complete_run)
     wait_until_not_busy(&mut ws, &sid, 100).await;
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -2052,6 +2097,7 @@ async fn e2e_prompt_run_id_matches() {
     assert!(!run_id.is_empty());
 
     // session.reconstruct should show running while agent is busy
+    wait_until_active_run(&server, &sid).await;
     let resp = rpc_call(
         &mut ws,
         3,
@@ -2060,6 +2106,10 @@ async fn e2e_prompt_run_id_matches() {
     )
     .await;
     assert_eq!(resp["result"]["isRunning"], true);
+
+    let abort = rpc_call(&mut ws, 4, "agent.abort", Some(json!({"sessionId": sid}))).await;
+    assert_eq!(abort["result"]["aborted"], true);
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -2081,8 +2131,7 @@ async fn e2e_prompt_text_content_arrives() {
     )
     .await;
 
-    // Collect events and find text_delta
-    events.extend(collect_events(&mut ws, Duration::from_secs(3)).await);
+    events.extend(collect_events_until_type(&mut ws, "agent.ready", PROMPT_EVENT_TIMEOUT).await);
     let text_deltas: Vec<&Value> = events
         .iter()
         .filter(|e| e.get("type").and_then(|v| v.as_str()) == Some("agent.text_delta"))
@@ -2105,6 +2154,7 @@ async fn e2e_prompt_text_content_arrives() {
             .contains("specific text content")
     });
     assert!(has_content, "text_delta should contain provider text");
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -2126,7 +2176,7 @@ async fn e2e_prompt_events_scoped_to_session() {
     )
     .await;
 
-    let events = collect_events(&mut ws, Duration::from_secs(3)).await;
+    let events = collect_events_until_type(&mut ws, "agent.ready", PROMPT_EVENT_TIMEOUT).await;
 
     // All agent events should have the correct session ID
     for evt in &events {
@@ -2140,6 +2190,8 @@ async fn e2e_prompt_events_scoped_to_session() {
             );
         }
     }
+
+    wait_until_run_cleared(&server, &sid).await;
 
     server.shutdown().shutdown();
 }
@@ -2172,8 +2224,9 @@ async fn e2e_prompt_state_transitions() {
     )
     .await;
 
-    // Wait for completion
-    let _ = read_until_event_type(&mut ws, "agent.ready").await;
+    let ready = read_until_event_type(&mut ws, "agent.ready").await;
+    assert!(ready.is_some(), "prompt should complete");
+    wait_until_run_cleared(&server, &sid).await;
 
     // Should be not busy again
     let resp = rpc_call(
@@ -2286,7 +2339,7 @@ async fn e2e_session_list_has_cache_tokens() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "m", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "m", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
 
@@ -2340,7 +2393,7 @@ async fn e2e_context_snapshot_has_real_tokens() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "claude-opus-4-6", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "claude-opus-4-6", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_owned();
@@ -2380,7 +2433,7 @@ async fn e2e_detailed_snapshot_has_system_prompt() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "claude-opus-4-6", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "claude-opus-4-6", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_owned();
@@ -2453,7 +2506,7 @@ async fn e2e_should_compact_reflects_usage() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "claude-opus-4-6", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "claude-opus-4-6", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_owned();
@@ -2481,7 +2534,7 @@ async fn e2e_can_accept_turn_empty_session() {
         &mut ws,
         1,
         "session.create",
-        Some(json!({"model": "claude-opus-4-6", "workingDirectory": "/tmp"})),
+        Some(json!({"model": "claude-opus-4-6", "workingDirectory": integration_prompt_workdir()})),
     )
     .await;
     let sid = resp["result"]["sessionId"].as_str().unwrap().to_owned();
