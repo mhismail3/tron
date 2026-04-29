@@ -12,7 +12,9 @@ struct TronMacApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if MacCommandLineMode.current.isCommand {
+                if TronMacRuntime.isRunningUnderTests() {
+                    TestHostView()
+                } else if MacCommandLineMode.current.isCommand {
                     CommandModeHostView()
                 } else {
                     RootView()
@@ -68,6 +70,34 @@ struct TronMacApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
         .commandsRemoved()
+    }
+}
+
+enum TronMacRuntime {
+    /// Xcode has exposed different test-host markers across XCTest,
+    /// Swift Testing, and runner generations. Treat any known marker as
+    /// a test host so CI never boots wizard/menu side effects just to run
+    /// logic tests.
+    static func isRunningUnderTests(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        environment["TRON_MAC_TEST_HOST"] == "1"
+            || environment["XCTestSessionIdentifier"] != nil
+            || environment["XCTestConfigurationFilePath"] != nil
+            || environment["XCTestBundlePath"] != nil
+    }
+}
+
+struct TestHostView: View {
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .onAppear {
+                NSApp.setActivationPolicy(.prohibited)
+                for window in NSApp.windows {
+                    window.orderOut(nil)
+                }
+            }
     }
 }
 
@@ -188,13 +218,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             break
         }
 
-        // Skip the single-instance lock when running under XCTest. The
-        // test host app launches inside `xcodebuild test` and would
-        // otherwise refuse to start whenever a real Tron.app is running
-        // on the dev machine, breaking tests for any contributor who
-        // dogfoods. The env var is set by Xcode for every test run.
-        let isUnderXCTest = ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
-        if isUnderXCTest {
+        // The test host app launches inside `xcodebuild test`; skip
+        // wrapper locks, menu-bar setup, launchd checks, and wizard
+        // observers so logic tests do not manage a real server.
+        if TronMacRuntime.isRunningUnderTests() {
             return
         }
 

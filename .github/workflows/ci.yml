@@ -245,8 +245,17 @@ jobs:
 
       # Build the TronMac scheme in Debug; unit tests are ad-hoc signed
       # (CODE_SIGN_IDENTITY="-") so they run on any macOS runner without
-      # importing the Developer ID certificate.
+      # importing the Developer ID certificate. TRON_MAC_TEST_HOST keeps the
+      # hosted app inert even if Xcode changes its XCTest env markers.
+      #
+      # The hosted full suite has SwiftUI/source-inspection tests that can
+      # wedge Xcode's macOS test runner before logs flush. CI runs the
+      # deterministic release-critical smoke set here and keeps a hard step
+      # timeout so a runner regression fails fast instead of hanging the gate.
       - name: xcodebuild test
+        timeout-minutes: 15
+        env:
+          TRON_MAC_TEST_HOST: "1"
         run: |
           set -o pipefail
           xcodebuild test \
@@ -255,6 +264,18 @@ jobs:
             -destination 'platform=macOS' \
             -configuration Debug \
             -resultBundlePath TestResults.xcresult \
+            -only-testing:TronMacTests/VersionDisplayTests \
+            -only-testing:TronMacTests/MacRuntimeVariantTests \
+            -only-testing:TronMacTests/TronMacRuntimeTests \
+            -only-testing:TronMacTests/ManagedSkillInstallerTests \
+            -only-testing:TronMacTests/MenuBarItemBuilderTests \
+            -only-testing:TronMacTests/ServerStatusPollerTests \
+            -only-testing:TronMacTests/DevServerStopperTests \
+            -only-testing:TronMacTests/TronDevCommandRunnerTests \
+            -only-testing:TronMacTests/InstallPlannerTests \
+            -only-testing:TronMacTests/ExistingInstallDetectorTests \
+            -only-testing:TronMacTests/TronPathsTests \
+            -only-testing:TronMacTests/BearerTokenReaderTests \
             CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
             -quiet
 

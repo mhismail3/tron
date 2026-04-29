@@ -151,6 +151,10 @@ Tests/
 
 All tests use **Swift Testing** (`@Test`, `@Suite`, `#expect`) rather than XCTest. `TestTempDir` creates throwaway directories under `NSTemporaryDirectory()` for any test that touches the filesystem.
 
+Mac wrapper tests run through the `TronMac` scheme so `@testable import TronMac` exercises the real app target. CI sets `TRON_MAC_TEST_HOST=1`, and the app also recognizes Xcode's test-host environment markers, then renders an inert hidden host instead of the onboarding wizard or menu bar. Keep that path side-effect free: CI must never register Login Items, acquire production wrapper locks, or manage a real server just to run unit tests. If Xcode changes its test-host markers, update `TronMacRuntime.isRunningUnderTests` and its test in `MacRuntimeVariantTests.swift` together.
+
+GitHub's Mac CI uses a deterministic smoke set covering release version display, runtime mode detection, managed skill sync, menu-bar rendering/status, developer controls, install planning, existing-install detection, path constants, and bearer-token parsing. Keep that smoke set in `.github/workflows/ci.yml` aligned with release-critical wrapper behavior. Run broader local Mac tests from Xcode while iterating on wizard-only visual/source-inspection tests.
+
 ## Running the wizard during dev
 
 1. Stage a debug-profile agent: `bash packages/mac-app/scripts/bundle-agent.sh --profile debug`

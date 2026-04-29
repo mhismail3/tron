@@ -76,3 +76,15 @@ struct MacCommandLineModeTests {
         #expect(!MacCommandLineMode.normal.isCommand)
     }
 }
+
+@Suite("TronMacRuntime")
+struct TronMacRuntimeTests {
+    @Test("test-host detection accepts Xcode test environment markers")
+    func testHostDetectionMarkers() {
+        #expect(TronMacRuntime.isRunningUnderTests(environment: ["TRON_MAC_TEST_HOST": "1"]))
+        #expect(TronMacRuntime.isRunningUnderTests(environment: ["XCTestSessionIdentifier": "session"]))
+        #expect(TronMacRuntime.isRunningUnderTests(environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"]))
+        #expect(TronMacRuntime.isRunningUnderTests(environment: ["XCTestBundlePath": "/tmp/TronMacTests.xctest"]))
+        #expect(!TronMacRuntime.isRunningUnderTests(environment: [:]))
+    }
+}
