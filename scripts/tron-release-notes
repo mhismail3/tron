@@ -10,6 +10,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+MAX_RELEASE_NOTES_BYTES="${TRON_RELEASE_NOTES_MAX_BYTES:-120000}"
+TRUNCATION_NOTICE_RESERVE_BYTES=1024
 
 die() {
     echo "error: $*" >&2
@@ -23,7 +25,7 @@ Usage: tron-release-notes --tag TAG --title TITLE --version VERSION \
 
 Options:
   --apple-build N       Include the Apple build number when available
-  --previous-tag TAG    Override automatic previous server-v* tag detection
+  --previous-tag TAG    Override automatic previous release-tag detection
   --repo-url URL        Override the GitHub repository URL used in compare links
   --test                Run shell-level tests
 USAGE
@@ -107,11 +109,56 @@ find_previous_tag() {
     local candidate
     while IFS= read -r candidate; do
         [ "$candidate" = "$TAG" ] && continue
+        [[ "$candidate" =~ ^(server|mac)-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || continue
         if git merge-base --is-ancestor "$candidate" "$TAG" 2>/dev/null; then
             printf '%s\n' "$candidate"
             return
         fi
-    done < <(git tag --list 'server-v*' --sort=-v:refname)
+    done < <(git tag --list '*-v*' --sort=-creatordate)
+}
+
+validate_output_budget() {
+    [[ "$MAX_RELEASE_NOTES_BYTES" =~ ^[0-9]+$ ]] || die "TRON_RELEASE_NOTES_MAX_BYTES must be numeric"
+    [ "$MAX_RELEASE_NOTES_BYTES" -gt "$TRUNCATION_NOTICE_RESERVE_BYTES" ] || die "TRON_RELEASE_NOTES_MAX_BYTES is too small"
+}
+
+file_size_bytes() {
+    wc -c < "$1" | tr -d '[:space:]'
+}
+
+emit_bounded_commit_log() {
+    local input="$1"
+    local output="$2"
+    local available_bytes="$3"
+    local included=0
+    local omitted=0
+    local used=0
+    local line
+    local line_bytes
+
+    if [ ! -s "$input" ]; then
+        echo "_No commits found in this release range._" > "$output"
+        return
+    fi
+
+    : > "$output"
+    while IFS= read -r line || [ -n "$line" ]; do
+        line_bytes="$(printf '%s\n' "$line" | wc -c | tr -d '[:space:]')"
+        if [ "$omitted" -eq 0 ] && [ $((used + line_bytes)) -le "$available_bytes" ]; then
+            printf '%s\n' "$line" >> "$output"
+            used=$((used + line_bytes))
+            included=$((included + 1))
+        else
+            omitted=$((omitted + 1))
+        fi
+    done < "$input"
+
+    if [ "$omitted" -gt 0 ]; then
+        {
+            echo ""
+            echo "_Changelog truncated in the GitHub release body after $included commits; $omitted older commits are available from the Full Changelog link below._"
+        } >> "$output"
+    fi
 }
 
 emit_notes() {
@@ -121,20 +168,36 @@ emit_notes() {
     local sha256
     local range_label
     local compare_url
-    local commit_log
+    local tmp_dir
+    local prefix_file
+    local commit_file
+    local bounded_log_file
+    local suffix_file
+    local prefix_bytes
+    local suffix_bytes
+    local available_commit_bytes
+    local output_bytes
 
+    validate_output_budget
     asset_name="$(basename "$ASSET")"
     sha256="$(awk '{ print $1; exit }' "$SHA256_FILE")"
     [ -n "$sha256" ] || die "SHA256 file is empty: $SHA256_FILE"
 
+    tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/tron-release-notes.XXXXXX")"
+    trap 'rm -rf "$tmp_dir"' RETURN
+    prefix_file="$tmp_dir/prefix.md"
+    commit_file="$tmp_dir/commits.md"
+    bounded_log_file="$tmp_dir/bounded-commits.md"
+    suffix_file="$tmp_dir/suffix.md"
+
     if [ -n "$previous_tag" ]; then
         range_label="changes since \`$previous_tag\`"
         compare_url="${repo_url}/compare/${previous_tag}...${TAG}"
-        commit_log="$(git log --first-parent --reverse --pretty=format:'- %s (%h)' "${previous_tag}..${TAG}")"
+        git log --first-parent --reverse --pretty=format:'- %s (%h)' "${previous_tag}..${TAG}" > "$commit_file"
     else
         range_label="initial release history through \`$TAG\`"
         compare_url="${repo_url}/commits/${TAG}"
-        commit_log="$(git log --first-parent --reverse --pretty=format:'- %s (%h)' "$TAG")"
+        git log --first-parent --reverse --pretty=format:'- %s (%h)' "$TAG" > "$commit_file"
     fi
 
     {
@@ -155,11 +218,9 @@ emit_notes() {
         echo ""
         echo "Generated from first-parent git history for $range_label."
         echo ""
-        if [ -n "$commit_log" ]; then
-            printf '%s\n' "$commit_log"
-        else
-            echo "_No commits found in this release range._"
-        fi
+    } > "$prefix_file"
+
+    {
         echo ""
         echo "## Distribution Notes"
         echo ""
@@ -170,14 +231,26 @@ emit_notes() {
         echo "## Full Changelog"
         echo ""
         echo "$compare_url"
-    } > "$OUTPUT"
+    } > "$suffix_file"
+
+    prefix_bytes="$(file_size_bytes "$prefix_file")"
+    suffix_bytes="$(file_size_bytes "$suffix_file")"
+    available_commit_bytes=$((MAX_RELEASE_NOTES_BYTES - prefix_bytes - suffix_bytes - TRUNCATION_NOTICE_RESERVE_BYTES))
+    [ "$available_commit_bytes" -gt 0 ] || die "release notes fixed sections exceed output budget"
+
+    emit_bounded_commit_log "$commit_file" "$bounded_log_file" "$available_commit_bytes"
+    cat "$prefix_file" "$bounded_log_file" "$suffix_file" > "$OUTPUT"
+
+    output_bytes="$(file_size_bytes "$OUTPUT")"
+    [ "$output_bytes" -le "$MAX_RELEASE_NOTES_BYTES" ] || die "release notes exceed GitHub body budget: $output_bytes > $MAX_RELEASE_NOTES_BYTES"
 }
 
 self_test() {
-    local tmp script notes sha
+    local tmp first_tmp script notes sha
     script="$PROJECT_DIR/scripts/tron-release-notes"
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/tron-release-notes-test.XXXXXX")"
-    trap "rm -rf \"$tmp\"" EXIT
+    first_tmp=""
+    trap 'rm -rf "$tmp" "$first_tmp"' EXIT
 
     git -C "$tmp" init -q
     git -C "$tmp" config user.email "release-notes-test@example.invalid"
@@ -186,7 +259,7 @@ self_test() {
     printf 'root\n' > "$tmp/file.txt"
     git -C "$tmp" add file.txt
     git -C "$tmp" commit -qm "Initial server release"
-    git -C "$tmp" tag server-v0.1.0-beta.1
+    git -C "$tmp" tag mac-v0.1.0-beta.1
 
     printf 'next\n' >> "$tmp/file.txt"
     git -C "$tmp" commit -am "Add install repair flow" -q
@@ -212,22 +285,51 @@ self_test() {
     grep -qx "# Tron Server v0.1 (Beta 2)" "$notes" || die "notes omitted release title"
     grep -qx -- "- Git tag: \`server-v0.1.0-beta.2\`" "$notes" || die "notes omitted tag"
     grep -qx -- "- SHA256: \`abcdef1234567890\`" "$notes" || die "notes omitted sha"
-    grep -q "changes since \`server-v0.1.0-beta.1\`" "$notes" || die "notes omitted previous range"
+    grep -q "changes since \`mac-v0.1.0-beta.1\`" "$notes" || die "notes omitted previous range"
     grep -q "Add install repair flow" "$notes" || die "notes omitted release commit"
-    grep -qx "https://example.com/acme/tron/compare/server-v0.1.0-beta.1...server-v0.1.0-beta.2" "$notes" || die "notes omitted compare URL"
+    grep -qx "https://example.com/acme/tron/compare/mac-v0.1.0-beta.1...server-v0.1.0-beta.2" "$notes" || die "notes omitted compare URL"
 
+    for i in $(seq 1 80); do
+        printf 'line %s\n' "$i" >> "$tmp/file.txt"
+        git -C "$tmp" commit -am "Add generated release note entry $i with enough extra text to force deterministic truncation under the configured GitHub release body budget" -q
+    done
+    git -C "$tmp" tag server-v0.1.0-beta.3
     (
         cd "$tmp"
+        TRON_RELEASE_NOTES_MAX_BYTES=4000 "$script" \
+            --tag server-v0.1.0-beta.3 \
+            --title "Tron Server v0.1 (Beta 3)" \
+            --version 0.1.0-beta.3 \
+            --display-version "v0.1 (Beta 3)" \
+            --apple-build 3 \
+            --asset "$tmp/Tron-mac-v0.1.0-beta.3.dmg" \
+            --sha256-file "$sha" \
+            --repo-url https://example.com/acme/tron \
+            --output "$notes"
+    )
+    grep -q "Changelog truncated in the GitHub release body" "$notes" || die "notes omitted truncation marker"
+    [ "$(wc -c < "$notes" | tr -d '[:space:]')" -le 4000 ] || die "notes exceeded configured body budget"
+
+    first_tmp="$(mktemp -d "${TMPDIR:-/tmp}/tron-release-notes-first.XXXXXX")"
+    git -C "$first_tmp" init -q
+    git -C "$first_tmp" config user.email "release-notes-test@example.invalid"
+    git -C "$first_tmp" config user.name "Release Notes Test"
+    printf 'root\n' > "$first_tmp/file.txt"
+    git -C "$first_tmp" add file.txt
+    git -C "$first_tmp" commit -qm "Initial server release"
+    git -C "$first_tmp" tag server-v0.1.0-beta.1
+
+    (
+        cd "$first_tmp"
         "$script" \
             --tag server-v0.1.0-beta.1 \
             --title "Tron Server v0.1 (Beta 1)" \
             --version 0.1.0-beta.1 \
             --display-version "v0.1 (Beta 1)" \
-            --asset "$tmp/Tron-mac-v0.1.0-beta.1.dmg" \
+            --asset "$first_tmp/Tron-mac-v0.1.0-beta.1.dmg" \
             --sha256-file "$sha" \
             --repo-url https://example.com/acme/tron \
-            --output "$notes" \
-            --previous-tag ""
+            --output "$notes"
     )
     grep -q "initial release history through \`server-v0.1.0-beta.1\`" "$notes" || die "first-release notes omitted initial range"
     grep -qx "https://example.com/acme/tron/commits/server-v0.1.0-beta.1" "$notes" || die "first-release notes omitted commits URL"
