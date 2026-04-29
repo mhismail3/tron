@@ -121,7 +121,7 @@ struct ProviderSetupOnboardingPage: View {
 
                 if allowsOAuth, let oauth = OAuthProvider.from(provider.id) {
                     SetupActionButton(
-                        title: "Sign in with \(provider.displayName)",
+                        title: "Sign in with OAuth",
                         systemImage: "person.crop.circle.badge.checkmark"
                     ) {
                         oauthProvider = oauth
@@ -422,29 +422,30 @@ private struct CompactApiKeyCard: View {
     var body: some View {
         OnboardingGlassCard {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
-                HStack(spacing: TronSpacing.md) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-
-                        if let existingSummary {
-                            Text(existingSummary.title)
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                                .foregroundStyle(existingSummary.isExpired ? Color.tronWarning : Color.tronEmerald)
-                            Text(existingSummary.detail)
-                                .font(TronTypography.code(size: TronTypography.sizeCaption))
-                                .foregroundStyle(Color.tronTextSecondary)
-                                .lineLimit(1)
-                        }
-                    }
+                HStack(alignment: .top, spacing: TronSpacing.md) {
+                    Text(title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .lineLimit(1)
 
                     Spacer(minLength: 0)
 
-                    if let status {
-                        Text(status)
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(Color.tronTextSecondary)
+                    if let existingSummary {
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(existingSummary.title)
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                                .foregroundStyle(existingSummary.isExpired ? Color.tronWarning : Color.tronEmerald)
+                                .multilineTextAlignment(.trailing)
+                                .lineLimit(1)
+
+                            Text(keyPreviewText(for: existingSummary))
+                                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .multilineTextAlignment(.trailing)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .frame(maxWidth: 190, alignment: .trailing)
                     }
                 }
 
@@ -456,8 +457,16 @@ private struct CompactApiKeyCard: View {
                     action: saveKey
                 )
                 .disabled(isSaving)
+
+                if let status {
+                    SetupStatusText(status)
+                }
             }
         }
+    }
+
+    private func keyPreviewText(for summary: OnboardingCredentialSummary) -> String {
+        summary.keyPreview ?? summary.detail
     }
 
     private func saveKey() {
@@ -474,7 +483,7 @@ private struct CompactApiKeyCard: View {
                 let authState = try await save(trimmed)
                 onSaved(authState)
                 key = ""
-                status = "Saved"
+                status = nil
             } catch {
                 status = "Failed"
             }
@@ -489,25 +498,66 @@ private struct ExistingCredentialCard: View {
 
     var body: some View {
         OnboardingGlassCard {
-            HStack(alignment: .top, spacing: TronSpacing.md) {
-                Image(systemName: summary.isExpired ? "exclamationmark.triangle" : "checkmark.seal")
-                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(summary.isExpired ? Color.tronWarning : Color.tronEmerald)
-                    .frame(width: 30, height: 30)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(summary.title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                    Text(summary.detail)
-                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .lineLimit(2)
-                }
-
-                Spacer(minLength: 0)
+            if summary.kind == .oauth {
+                oauthRow
+            } else {
+                defaultRow
             }
         }
+    }
+
+    private var oauthRow: some View {
+        HStack(alignment: .center, spacing: TronSpacing.md) {
+            statusIcon
+
+            Text(oauthPrimaryText)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronTextPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: TronSpacing.sm)
+
+            Text(oauthStatusText)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(summary.isExpired ? Color.tronWarning : Color.tronTextSecondary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var defaultRow: some View {
+        HStack(alignment: .top, spacing: TronSpacing.md) {
+            statusIcon
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(summary.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                Text(summary.detail)
+                    .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var statusIcon: some View {
+        Image(systemName: summary.isExpired ? "exclamationmark.triangle" : "checkmark.seal")
+            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+            .foregroundStyle(summary.isExpired ? Color.tronWarning : Color.tronEmerald)
+            .frame(width: 30, height: 30)
+    }
+
+    private var oauthPrimaryText: String {
+        summary.credentialLabel ?? summary.detail
+    }
+
+    private var oauthStatusText: String {
+        summary.isExpired ? summary.title : "Logged in with OAuth"
     }
 }
 

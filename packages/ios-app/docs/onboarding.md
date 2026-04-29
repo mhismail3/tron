@@ -132,11 +132,17 @@ After pairing succeeds, onboarding continues with optional setup pages:
   updates the local quick-chat workspace so long-press plus uses it
   immediately.
 - **Anthropic** and **OpenAI** reuse `OAuthLoginSheet` for OAuth and
-  expose a named API-key field for users who prefer keys.
+  expose a named API-key field for users who prefer keys. Saved OAuth
+  credentials render as one compact status row: status icon, account label,
+  and trailing `Logged in with OAuth`.
 - **Other providers** exposes compact API-key rows for Google, MiniMax,
-  and Kimi. These quick rows save the key under the `Default` label unless
-  the user later renames it from Settings.
+  and Kimi. Saved rows keep the provider name on the left and move
+  `API key saved` plus the masked key preview into a right-aligned status
+  column. These quick rows save the key under the `Default` label unless the
+  user later renames it from Settings.
 - **Search services** exposes API-key rows for Brave Search and Exa.
+  Saved service keys use the same right-aligned masked preview layout as
+  optional model providers.
 - **Default model** reuses `ModelPickerSheet`, then writes both
   `server.defaultModel` and `memory.retainModel`.
 

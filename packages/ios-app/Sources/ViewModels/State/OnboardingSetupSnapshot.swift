@@ -61,17 +61,21 @@ struct OnboardingSetupSnapshot {
                     title: oauthTitle(for: providerId, isExpired: account?.isExpired == true),
                     detail: active.label,
                     isExpired: account?.isExpired == true,
-                    kind: .oauth
+                    kind: .oauth,
+                    credentialLabel: active.label
                 )
             }
 
             if active.isApiKey {
                 let key = info.apiKeys?.first { $0.label == active.label }
+                let keyHint = key?.keyHint ?? info.apiKeyHint
                 return OnboardingCredentialSummary(
                     title: "API key saved",
-                    detail: joinedDetail(active.label, key?.keyHint ?? info.apiKeyHint),
+                    detail: joinedDetail(active.label, keyHint),
                     isExpired: false,
-                    kind: .apiKey
+                    kind: .apiKey,
+                    credentialLabel: active.label,
+                    keyPreview: keyHint
                 )
             }
         }
@@ -81,7 +85,8 @@ struct OnboardingSetupSnapshot {
                 title: oauthTitle(for: providerId, isExpired: account.isExpired),
                 detail: account.label,
                 isExpired: account.isExpired,
-                kind: .oauth
+                kind: .oauth,
+                credentialLabel: account.label
             )
         }
 
@@ -90,7 +95,9 @@ struct OnboardingSetupSnapshot {
                 title: "API key saved",
                 detail: joinedDetail(key.label, key.keyHint),
                 isExpired: false,
-                kind: .apiKey
+                kind: .apiKey,
+                credentialLabel: key.label,
+                keyPreview: key.keyHint
             )
         }
 
@@ -99,7 +106,8 @@ struct OnboardingSetupSnapshot {
                 title: "API key saved",
                 detail: info.apiKeyHint ?? "Saved on this server",
                 isExpired: false,
-                kind: .apiKey
+                kind: .apiKey,
+                keyPreview: info.apiKeyHint
             )
         }
 
@@ -124,7 +132,8 @@ struct OnboardingSetupSnapshot {
             title: "API key saved",
             detail: info.apiKeyHint ?? "Saved on this server",
             isExpired: false,
-            kind: .apiKey
+            kind: .apiKey,
+            keyPreview: info.apiKeyHint
         )
     }
 
@@ -168,6 +177,24 @@ struct OnboardingCredentialSummary: Equatable {
     let detail: String
     let isExpired: Bool
     let kind: OnboardingCredentialKind
+    let credentialLabel: String?
+    let keyPreview: String?
+
+    init(
+        title: String,
+        detail: String,
+        isExpired: Bool,
+        kind: OnboardingCredentialKind,
+        credentialLabel: String? = nil,
+        keyPreview: String? = nil
+    ) {
+        self.title = title
+        self.detail = detail
+        self.isExpired = isExpired
+        self.kind = kind
+        self.credentialLabel = credentialLabel
+        self.keyPreview = keyPreview
+    }
 }
 
 enum OnboardingCredentialKind: Equatable {
