@@ -181,8 +181,12 @@ fn resolve_command(path: &PathBuf) -> (String, Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
+    use tempfile::TempDir;
+
+    struct TestScript {
+        _dir: TempDir,
+        path: PathBuf,
+    }
 
     fn make_session_start_context() -> HookContext {
         HookContext::SessionStart {
@@ -192,29 +196,31 @@ mod tests {
         }
     }
 
-    fn create_script(content: &str) -> NamedTempFile {
-        let mut file = tempfile::Builder::new().suffix(".sh").tempfile().unwrap();
-        file.write_all(content.as_bytes()).unwrap();
-        file.flush().unwrap();
+    fn create_script(content: &str) -> TestScript {
+        create_script_with_mode(content, 0o755)
+    }
 
-        // Make executable
+    fn create_script_with_mode(content: &str, mode: u32) -> TestScript {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hook.sh");
+        std::fs::write(&path, content).unwrap();
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let path = file.path();
-            let mut perms = std::fs::metadata(path).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(path, perms).unwrap();
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(mode);
+            std::fs::set_permissions(&path, perms).unwrap();
         }
 
-        file
+        TestScript { _dir: dir, path }
     }
 
-    fn make_handler(script: &NamedTempFile, hook_type: HookType) -> ScriptHookHandler {
+    fn make_handler(script: &TestScript, hook_type: HookType) -> ScriptHookHandler {
         ScriptHookHandler::new(
             "test-hook".to_string(),
             hook_type,
-            script.path().to_path_buf(),
+            script.path.clone(),
             0,
             5000,
         )
@@ -355,21 +361,13 @@ echo "{\"action\":\"continue\",\"message\":\"session=$SESSION_ID\"}"
     #[tokio::test]
     #[cfg(unix)]
     async fn test_script_not_executable_returns_error() {
-        let mut file = tempfile::Builder::new().suffix(".sh").tempfile().unwrap();
-        file.write_all(b"#!/bin/bash\necho '{\"action\":\"continue\"}'")
-            .unwrap();
-        file.flush().unwrap();
-        // Intentionally NOT setting executable permission
-
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(file.path()).unwrap().permissions();
-        perms.set_mode(0o644); // read/write only
-        std::fs::set_permissions(file.path(), perms).unwrap();
+        let script =
+            create_script_with_mode("#!/bin/bash\necho '{\"action\":\"continue\"}'", 0o644);
 
         let handler = ScriptHookHandler::new(
             "no-exec".to_string(),
             HookType::SessionStart,
-            file.path().to_path_buf(),
+            script.path.clone(),
             0,
             5000,
         );

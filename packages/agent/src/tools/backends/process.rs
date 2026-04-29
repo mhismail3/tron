@@ -401,6 +401,14 @@ mod tests {
         }
     }
 
+    fn command_available(name: &str) -> bool {
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("command -v {name} >/dev/null 2>&1"))
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
     #[tokio::test]
     async fn run_echo() {
         let runner = TokioProcessRunner;
@@ -656,6 +664,10 @@ mod tests {
 
     #[tokio::test]
     async fn shell_zsh() {
+        if !command_available("zsh") {
+            return;
+        }
+
         let runner = TokioProcessRunner;
         let mut opts = default_opts();
         opts.shell = "zsh".into();
@@ -922,6 +934,10 @@ mod tests {
 
     #[tokio::test]
     async fn login_shell_zsh() {
+        if !command_available("zsh") {
+            return;
+        }
+
         let runner = TokioProcessRunner;
         let mut opts = default_opts();
         opts.shell = "zsh".into();

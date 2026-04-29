@@ -200,6 +200,7 @@ async fn mutating_action_requires_confirmation_when_enabled() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn mutating_action_proceeds_with_confirmed_flag() {
     let t = tool(true);
     let r = t
@@ -213,6 +214,7 @@ async fn mutating_action_proceeds_with_confirmed_flag() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn mutating_action_proceeds_when_confirmation_disabled() {
     let t = tool(false);
     let r = t
@@ -261,6 +263,7 @@ async fn missing_action_returns_error() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn type_text() {
     let t = tool(false);
     let r = t
@@ -286,6 +289,7 @@ async fn type_requires_text() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn type_special_characters() {
     let t = tool(false);
     let r = t
@@ -299,6 +303,7 @@ async fn type_special_characters() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn type_unicode() {
     let t = tool(false);
     let r = t
@@ -312,6 +317,7 @@ async fn type_unicode() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn keypress_enter() {
     let t = tool(false);
     let r = t
@@ -326,6 +332,7 @@ async fn keypress_enter() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn keypress_cmd_c() {
     let t = tool(false);
     let r = t
@@ -340,6 +347,7 @@ async fn keypress_cmd_c() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn keypress_multi_modifier() {
     let t = tool(false);
     let r = t
@@ -354,6 +362,7 @@ async fn keypress_multi_modifier() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn keypress_invalid_key() {
     let t = tool(false);
     let r = t
@@ -495,6 +504,7 @@ async fn focus_window_requires_window_param() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn scroll_down() {
     let t = tool(false);
     let r = t
@@ -522,6 +532,7 @@ async fn scroll_invalid_direction() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn scroll_defaults_to_down() {
     let t = tool(false);
     let r = t
@@ -1844,6 +1855,7 @@ fn readonly_actions_not_mutating() {
 // ─── Details/audit logging tests ───
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn scroll_details_include_direction() {
     let t = tool(false);
     let r = t
@@ -1860,6 +1872,7 @@ async fn scroll_details_include_direction() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn type_details_include_length() {
     let t = tool(false);
     let r = t
@@ -1872,6 +1885,7 @@ async fn type_details_include_length() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn keypress_details_include_keys() {
     let t = tool(false);
     let r = t

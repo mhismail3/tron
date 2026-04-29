@@ -44,8 +44,20 @@ fn discover_projects_nonexistent_dir() {
 
 #[test]
 fn discover_projects_with_sessions() {
-    let dir = tempfile::tempdir().unwrap();
-    let proj_dir = dir.path().join("-Users-test-project");
+    let claude_dir = tempfile::tempdir().unwrap();
+    let real_root = tempfile::tempdir().unwrap();
+    let real_parent = real_root.path().join("projects");
+    fs::create_dir_all(&real_parent).unwrap();
+
+    let expected_project = real_parent.join("test-project");
+    let expected_project_str = expected_project.to_str().unwrap();
+    let encoded_project = format!(
+        "-{}",
+        expected_project_str
+            .trim_start_matches('/')
+            .replace('/', "-")
+    );
+    let proj_dir = claude_dir.path().join(encoded_project);
     fs::create_dir(&proj_dir).unwrap();
 
     // Write a sample JSONL file
@@ -53,11 +65,9 @@ fn discover_projects_with_sessions() {
     let mut f = fs::File::create(&session_file).unwrap();
     writeln!(f, r#"{{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{{"role":"user","content":"hi"}}}}"#).unwrap();
 
-    let projects = discover_projects(dir.path()).unwrap();
+    let projects = discover_projects(claude_dir.path()).unwrap();
     assert_eq!(projects.len(), 1);
-    // decode_project_dir checks the filesystem to resolve ambiguous hyphens.
-    // /Users exists but /Users/test doesn't, so "test-project" stays hyphenated.
-    assert_eq!(projects[0].project_path, "/Users/test-project");
+    assert_eq!(projects[0].project_path, expected_project_str);
     assert_eq!(projects[0].session_count, 1);
 }
 
