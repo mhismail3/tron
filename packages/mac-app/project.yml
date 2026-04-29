@@ -123,6 +123,8 @@ schemes:
         TRON_PROJECT_ROOT: "$(SRCROOT)/../.."
     test:
       config: Debug
+      environmentVariables:
+        TRON_MAC_TEST_HOST: "1"
       targets:
         - TronMacTests
     profile:
@@ -144,6 +146,8 @@ schemes:
         TRON_HOME_NAME: ".tron-dev"
     test:
       config: Debug
+      environmentVariables:
+        TRON_MAC_TEST_HOST: "1"
       targets:
         - TronMacTests
     profile:

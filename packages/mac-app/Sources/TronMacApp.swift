@@ -48,6 +48,10 @@ struct TronMacApp: App {
                 // region.
                 .containerBackground(.regularMaterial, for: .window)
                 .configureHostingWindow { window in
+                    if TronMacRuntime.isRunningUnderTests() {
+                        window.orderOut(nil)
+                        return
+                    }
                     window.isOpaque = false
                     window.backgroundColor = .clear
                     window.titlebarAppearsTransparent = true
@@ -92,12 +96,6 @@ struct TestHostView: View {
     var body: some View {
         Color.clear
             .frame(width: 1, height: 1)
-            .onAppear {
-                NSApp.setActivationPolicy(.prohibited)
-                for window in NSApp.windows {
-                    window.orderOut(nil)
-                }
-            }
     }
 }
 

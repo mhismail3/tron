@@ -258,12 +258,14 @@ jobs:
           TRON_MAC_TEST_HOST: "1"
         run: |
           set -o pipefail
+          destination="platform=macOS,arch=$(uname -m)"
           xcodebuild test \
             -project TronMac.xcodeproj \
             -scheme TronMac \
-            -destination 'platform=macOS' \
+            -destination "$destination" \
             -configuration Debug \
             -resultBundlePath TestResults.xcresult \
+            -parallel-testing-enabled NO \
             -only-testing:TronMacTests/VersionDisplayTests \
             -only-testing:TronMacTests/MacRuntimeVariantTests \
             -only-testing:TronMacTests/TronMacRuntimeTests \
