@@ -230,6 +230,13 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             runningParentBundleIdentifier: runningParent,
             canManageLaunchAgent: TronPaths.canManageLaunchAgent
         )
+        let shouldRefreshCurrentRegistration = Self.shouldRefreshRegistrationForCurrentBundle(
+            status: status,
+            currentVariant: currentVariant,
+            runtimeInfo: runtime,
+            currentParentBundleVersion: Self.currentParentBundleVersion(),
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent
+        )
 
         if let outcome = Self.preRegistrationOutcome(
             for: status,
@@ -237,11 +244,12 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             runtimeInfo: runtime,
             runningParentBundleIdentifier: runningParent,
             canManageLaunchAgent: TronPaths.canManageLaunchAgent,
-            expectedHelperPath: TronPaths.serverHelperBinary.path
+            expectedHelperPath: TronPaths.serverHelperBinary.path,
+            shouldRefreshCurrentRegistration: shouldRefreshCurrentRegistration
         ) {
             return outcome
         }
-        if shouldReplaceStaleRuntime || shouldTakeOverRuntime {
+        if shouldReplaceStaleRuntime || shouldTakeOverRuntime || shouldRefreshCurrentRegistration {
             _ = await Subprocess.run(
                 executable: URL(fileURLWithPath: "/bin/launchctl"),
                 arguments: ["bootout", "gui/\(currentUID())/\(label)"]
@@ -262,7 +270,8 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             status: status,
             runningParentBundleIdentifier: runningParent,
             shouldReplaceStaleRuntime: shouldReplaceStaleRuntime,
-            shouldTakeOverRuntime: shouldTakeOverRuntime
+            shouldTakeOverRuntime: shouldTakeOverRuntime,
+            shouldRefreshCurrentRegistration: shouldRefreshCurrentRegistration
         ) {
             do {
                 try await service.unregister()
@@ -299,7 +308,8 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         runtimeInfo: LaunchAgentRuntimeInfo? = nil,
         runningParentBundleIdentifier: String? = nil,
         canManageLaunchAgent: Bool = true,
-        expectedHelperPath: String = TronPaths.serverHelperBinary.path
+        expectedHelperPath: String = TronPaths.serverHelperBinary.path,
+        shouldRefreshCurrentRegistration: Bool = false
     ) -> LaunchAgentOutcome? {
         switch status {
         case .requiresApproval:
@@ -331,6 +341,9 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             }
 
             if resolvedParent == currentVariant.expectedParentBundleIdentifier {
+                if shouldRefreshCurrentRegistration {
+                    return nil
+                }
                 return .alreadyLoaded
             }
             if currentVariant.precedence > MacRuntimeVariant.precedence(forParentBundleIdentifier: resolvedParent) {
@@ -375,10 +388,38 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         status: ExistingInstallDetector.ServiceRegistrationStatus,
         runningParentBundleIdentifier: String?,
         shouldReplaceStaleRuntime: Bool,
-        shouldTakeOverRuntime: Bool
+        shouldTakeOverRuntime: Bool,
+        shouldRefreshCurrentRegistration: Bool
     ) -> Bool {
         status == .enabled
-            && (runningParentBundleIdentifier == nil || shouldReplaceStaleRuntime || shouldTakeOverRuntime)
+            && (runningParentBundleIdentifier == nil
+                || shouldReplaceStaleRuntime
+                || shouldTakeOverRuntime
+                || shouldRefreshCurrentRegistration)
+    }
+
+    static func shouldRefreshRegistrationForCurrentBundle(
+        status: ExistingInstallDetector.ServiceRegistrationStatus,
+        currentVariant: MacRuntimeVariant,
+        runtimeInfo: LaunchAgentRuntimeInfo?,
+        currentParentBundleVersion: String?,
+        canManageLaunchAgent: Bool = true
+    ) -> Bool {
+        guard canManageLaunchAgent,
+              status == .enabled,
+              let runtimeInfo,
+              runtimeInfo.parentBundleIdentifier == currentVariant.expectedParentBundleIdentifier,
+              let registeredVersion = runtimeInfo.parentBundleVersion?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !registeredVersion.isEmpty,
+              let currentParentBundleVersion = currentParentBundleVersion?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !currentParentBundleVersion.isEmpty else {
+            return false
+        }
+        return registeredVersion != currentParentBundleVersion
+    }
+
+    static func currentParentBundleVersion(bundle: Bundle = .main) -> String? {
+        bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     }
 
     static func runtimeRequiresReplacement(
@@ -462,6 +503,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 named: "parent bundle identifier",
                 from: result.stdout
             ),
+            parentBundleVersion: parseLaunchctlValue(named: "parent bundle version", from: result.stdout),
             programIdentifier: parseLaunchctlValue(named: "program identifier", from: result.stdout),
             executablePath: parseLaunchctlDictionaryValue(named: "Executable", from: result.stdout)
         )

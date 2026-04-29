@@ -159,7 +159,8 @@ struct MockLaunchAgentManagerTests {
                 status: .enabled,
                 runningParentBundleIdentifier: "com.tron.mac.dev",
                 shouldReplaceStaleRuntime: false,
-                shouldTakeOverRuntime: true
+                shouldTakeOverRuntime: true,
+                shouldRefreshCurrentRegistration: false
             )
         )
         #expect(
@@ -167,7 +168,8 @@ struct MockLaunchAgentManagerTests {
                 status: .notRegistered,
                 runningParentBundleIdentifier: "com.tron.mac.dev",
                 shouldReplaceStaleRuntime: false,
-                shouldTakeOverRuntime: true
+                shouldTakeOverRuntime: true,
+                shouldRefreshCurrentRegistration: false
             )
         )
         #expect(
@@ -175,7 +177,58 @@ struct MockLaunchAgentManagerTests {
                 status: .enabled,
                 runningParentBundleIdentifier: "com.tron.mac",
                 shouldReplaceStaleRuntime: false,
-                shouldTakeOverRuntime: false
+                shouldTakeOverRuntime: false,
+                shouldRefreshCurrentRegistration: false
+            )
+        )
+    }
+
+    @Test("installed release refreshes same-bundle registration when parent build is stale")
+    func installedReleaseRefreshesStaleParentBundleVersion() {
+        let runtime = LaunchAgentRuntimeInfo(
+            pid: 123,
+            parentBundleIdentifier: "com.tron.mac",
+            parentBundleVersion: "1"
+        )
+        #expect(
+            LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
+                status: .enabled,
+                currentVariant: .installedRelease,
+                runtimeInfo: runtime,
+                currentParentBundleVersion: "3"
+            )
+        )
+        #expect(
+            LiveLaunchAgentManager.preRegistrationOutcome(
+                for: .enabled,
+                currentVariant: .installedRelease,
+                runtimeInfo: runtime,
+                shouldRefreshCurrentRegistration: true
+            ) == nil
+        )
+        #expect(
+            LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
+                status: .enabled,
+                runningParentBundleIdentifier: "com.tron.mac",
+                shouldReplaceStaleRuntime: false,
+                shouldTakeOverRuntime: false,
+                shouldRefreshCurrentRegistration: true
+            )
+        )
+    }
+
+    @Test("current parent bundle version is not refreshed")
+    func currentParentBundleVersionDoesNotRefresh() {
+        let runtime = LaunchAgentRuntimeInfo(
+            parentBundleIdentifier: "com.tron.mac",
+            parentBundleVersion: "3"
+        )
+        #expect(
+            !LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
+                status: .enabled,
+                currentVariant: .installedRelease,
+                runtimeInfo: runtime,
+                currentParentBundleVersion: "3"
             )
         )
     }

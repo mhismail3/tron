@@ -178,6 +178,7 @@ struct MenuHeaderContent: Equatable, Sendable {
 }
 
 enum ServerBusyAction: String, Equatable, Sendable {
+    case starting = "Starting"
     case restarting = "Restarting"
     case pausing = "Pausing"
     case resuming = "Resuming"

@@ -80,6 +80,7 @@ struct TronPathsTests {
     @Test("runtime uninstall files live in system/run/")
     func runtimeUninstallFilesShape() {
         #expect(TronPaths.updaterStatePath.path.hasSuffix("/system/run/updater-state.json"))
+        #expect(TronPaths.macAppVersionMarkerPath.path.hasSuffix("/system/run/mac-app-version.json"))
         #expect(TronPaths.authLockPath.path.hasSuffix("/system/run/auth.lock"))
         #expect(TronPaths.macWrapperLockPath.path.contains("/system/run/.mac-wrapper."))
         #expect(TronPaths.macWrapperLockPath.path.hasSuffix(".lock"))

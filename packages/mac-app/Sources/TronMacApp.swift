@@ -236,7 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         instanceLock = lock
 
         if setup.onboardedSentinelExists() {
-            installMenuBar(setup: setup)
+            installMenuBar(setup: setup, context: .existingOnboardedLaunch)
         }
         // Otherwise the WindowGroup shows WizardView; menu bar is installed
         // when the wizard completes via NotificationCenter event.
@@ -256,7 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSLog("[Tron] Debug companion wizard completion does not install the production menu bar.")
                     return
                 }
-                self.installMenuBar(setup: setup)
+                self.installMenuBar(setup: setup, context: .wizardCompletion)
                 NSApp.setActivationPolicy(.accessory)
                 for window in NSApp.windows {
                     window.orderOut(nil)
@@ -290,13 +290,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            let outcome = await setup.launchAgentManager.load(
+            let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+                manager: setup.launchAgentManager,
                 plistPath: setup.launchAgentPlistPath,
                 label: setup.launchAgentLabel
             )
-            if outcome == .alreadyLoaded {
-                _ = await setup.launchAgentManager.restart(label: setup.launchAgentLabel)
-            } else if outcome != .ok {
+            if outcome != .ok, outcome != .alreadyLoaded {
                 NSLog("[Tron] Command-mode server start returned %@", String(describing: outcome))
             }
         }
@@ -343,13 +342,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         instanceLock = nil
     }
 
-    private func installMenuBar(setup: EnvironmentSetup) {
+    private func installMenuBar(setup: EnvironmentSetup, context: MacAppStartupContext) {
         guard menuBarController == nil else { return }
-        Task {
-            if case .failed(let message) = await setup.syncManagedSkills() {
-                NSLog("[Tron] Menu-bar startup failed to sync managed skills: %@", message)
-            }
-        }
         let controller = MenuBarController(setup: setup)
         let handler = MenuBarActionHandler(setup: setup)
         handler.menuBarController = controller
@@ -357,6 +351,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.install()
         menuBarController = controller
         actionHandler = handler
+        Task { [weak controller] in
+            _ = await MacAppStartupMaintenance.run(
+                setup: setup,
+                controller: controller,
+                context: context
+            )
+        }
     }
 }
 

@@ -106,6 +106,18 @@ struct EnvironmentSetup: Sendable {
     /// Touches the `~/.tron/system/run/.onboarded` sentinel atomically.
     var touchOnboardedSentinel: @Sendable () throws -> Void
 
+    /// Current app version identity and the last version whose menu-bar
+    /// startup finalized the bundled server.
+    var currentAppVersion: @Sendable () -> MacAppVersionIdentity = {
+        MacAppVersionIdentity.current()
+    }
+    var readRecordedAppVersion: @Sendable () -> MacAppVersionIdentity? = {
+        MacAppVersionMarkerStore.read(at: TronPaths.macAppVersionMarkerPath)
+    }
+    var writeRecordedAppVersion: @Sendable (MacAppVersionIdentity) throws -> Void = { version in
+        try MacAppVersionMarkerStore.write(version, at: TronPaths.macAppVersionMarkerPath)
+    }
+
     static let live = EnvironmentSetup(
         tronHome: TronPaths.tronHome,
         applicationBundle: TronPaths.applicationBundle,
