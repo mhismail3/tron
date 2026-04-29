@@ -243,51 +243,28 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # Build the TronMac scheme in Debug; unit tests are ad-hoc signed
-      # (CODE_SIGN_IDENTITY="-") so they run on any macOS runner without
-      # importing the Developer ID certificate. TRON_MAC_TEST_HOST keeps the
-      # hosted app inert even if Xcode changes its XCTest env markers.
+      # Build the TronMac scheme in Debug and compile its unit-test bundle;
+      # ad-hoc signing (CODE_SIGN_IDENTITY="-") keeps this portable to any
+      # macOS runner without importing the Developer ID certificate.
       #
-      # The hosted full suite has SwiftUI/source-inspection tests that can
-      # wedge Xcode's macOS test runner before logs flush. CI runs the
-      # deterministic release-critical smoke set here and keeps a hard step
-      # timeout so a runner regression fails fast instead of hanging the gate.
-      - name: xcodebuild test
+      # GitHub's hosted app-hosted macOS test runner can wedge before Swift
+      # Testing starts. `build-for-testing` still catches Swift compile/link
+      # drift in the app + tests without launching the UI process. Run the
+      # app-hosted Mac tests locally from Xcode when changing wrapper logic.
+      - name: xcodebuild build-for-testing
         timeout-minutes: 15
         env:
           TRON_MAC_TEST_HOST: "1"
         run: |
           set -o pipefail
           destination="platform=macOS,arch=$(uname -m)"
-          xcodebuild test \
+          xcodebuild build-for-testing \
             -project TronMac.xcodeproj \
             -scheme TronMac \
             -destination "$destination" \
             -configuration Debug \
-            -resultBundlePath TestResults.xcresult \
-            -parallel-testing-enabled NO \
-            -only-testing:TronMacTests/VersionDisplayTests \
-            -only-testing:TronMacTests/MacRuntimeVariantTests \
-            -only-testing:TronMacTests/TronMacRuntimeTests \
-            -only-testing:TronMacTests/ManagedSkillInstallerTests \
-            -only-testing:TronMacTests/MenuBarItemBuilderTests \
-            -only-testing:TronMacTests/ServerStatusPollerTests \
-            -only-testing:TronMacTests/DevServerStopperTests \
-            -only-testing:TronMacTests/TronDevCommandRunnerTests \
-            -only-testing:TronMacTests/InstallPlannerTests \
-            -only-testing:TronMacTests/ExistingInstallDetectorTests \
-            -only-testing:TronMacTests/TronPathsTests \
-            -only-testing:TronMacTests/BearerTokenReaderTests \
             CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
             -quiet
-
-      - name: Upload xcresult on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mac-test-results
-          path: packages/mac-app/TestResults.xcresult
-          retention-days: 7
 
       # Dry-run the DMG build so breakage in release-mac.yml is caught
       # on PR rather than on tag push. We skip notarization + release
