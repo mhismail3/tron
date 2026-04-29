@@ -87,6 +87,9 @@ enum MenuBarItemBuilder {
         }))
         items.append(.quit(title: "Quit Tron"))
         items.append(.separator)
+        if snapshot.state.isStartingDevServer || snapshot.isDevServerActive {
+            items.append(.openLink(title: "Open dev command log", url: devCommandLogURL(paths: paths)))
+        }
         if snapshot.isDevServerActive {
             items.append(.action(title: "Stop dev server", isEnabled: controlsEnabled, handler: { @MainActor in
                 NotificationCenter.default.post(name: .tronMenuBarStopDevServer, object: nil)
@@ -116,6 +119,13 @@ enum MenuBarItemBuilder {
         ))
 
         return items
+    }
+
+    static func devCommandLogURL(paths: EnvironmentSetup) -> URL {
+        paths.tronHome
+            .appendingPathComponent("system", isDirectory: true)
+            .appendingPathComponent("run", isDirectory: true)
+            .appendingPathComponent("dev-menu-command.log", isDirectory: false)
     }
 
     static func statusLabel(snapshot: ServerStatusSnapshot) -> String {
@@ -155,8 +165,18 @@ enum MenuBarItemBuilder {
             health: health,
             pid: snapshot.processID,
             uptime: snapshot.uptime,
-            modeDetail: snapshot.isDevServerActive ? "Dev Server active" : nil
+            modeDetail: modeDetail(snapshot: snapshot)
         )
+    }
+
+    private static func modeDetail(snapshot: ServerStatusSnapshot) -> String? {
+        if snapshot.state.isStartingDevServer {
+            return "Dev command running"
+        }
+        if snapshot.isDevServerActive {
+            return "Dev Server active"
+        }
+        return nil
     }
 }
 
@@ -214,6 +234,11 @@ enum ServerStatusState: Equatable, Sendable {
 
     var isRunning: Bool {
         if case .running = self { return true }
+        return false
+    }
+
+    var isStartingDevServer: Bool {
+        if case .busy(.startingDevServer) = self { return true }
         return false
     }
 

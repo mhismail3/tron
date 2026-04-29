@@ -229,17 +229,6 @@ pub struct HookSettings {
     ///   handler and the failure kind. Security / guard hooks that
     ///   should not silently fail open opt into this.
     pub error_policy: crate::runtime::hooks::types::HookErrorPolicy,
-    /// Maximum total characters a hook may inject via
-    /// `HookAction::AddContext` into a single prompt. Applies to the
-    /// aggregated content across all hooks on a single event; the
-    /// limit is a soft cap to keep a misbehaving hook from flooding
-    /// the LLM context window. Over-budget `AddContext` is dropped
-    /// silently-with-warn (not truncated) so hooks can rely on
-    /// "either all or nothing" semantics.
-    ///
-    /// Default 4096 chars ≈ 1 KB of extra context per prompt. Zero
-    /// disables the feature entirely (hooks can inject nothing).
-    pub max_added_context_chars: u32,
 }
 
 impl Default for HookSettings {
@@ -259,7 +248,6 @@ impl Default for HookSettings {
             llm_model: "claude-haiku-4-5-20251001".to_string(),
             builtin_hooks: BuiltinHookSetting::defaults(),
             error_policy: crate::runtime::hooks::types::HookErrorPolicy::default(),
-            max_added_context_chars: 4096,
         }
     }
 }
@@ -672,6 +660,11 @@ mod tests {
         assert!(h.builtin_hooks[1].enabled);
         assert_eq!(h.builtin_hooks[2].id, "builtin:suggest-prompts");
         assert!(h.builtin_hooks[2].enabled);
+        let json = serde_json::to_value(&h).unwrap();
+        assert!(
+            json.get("maxAddedContextChars").is_none(),
+            "hook add-context budget is an internal engine fuse, not a user setting"
+        );
     }
 
     #[test]

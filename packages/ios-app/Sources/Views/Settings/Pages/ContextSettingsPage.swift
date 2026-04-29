@@ -31,7 +31,7 @@ struct ContextSettingsPage: View {
 
     private var summaryCard: some View {
         SettingsInfoCard(
-            icon: "rectangle.stack",
+            icon: ServerSettingsCategory.context.icon,
             title: ContextSettingsSummary.title(for: summaryContext),
             description: ContextSettingsSummary.description(for: summaryContext)
         )

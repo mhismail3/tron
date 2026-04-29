@@ -37,7 +37,6 @@ final class SettingsParityTests: XCTestCase {
         "hooksLlmModel",
         "builtinHooks",
         "hooksErrorPolicy",
-        "hooksMaxAddedContextChars",
         // Skills
         "skillsCompactionPolicy",
         "skillsShowIndex",

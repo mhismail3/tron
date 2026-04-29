@@ -92,7 +92,6 @@ struct AgentSettingsPage: View {
             enabledBuiltinHookCount: enabledBuiltinHookCount,
             totalBuiltinHookCount: BuiltinHookCatalog.all.count,
             hooksErrorPolicy: settingsState.hooksErrorPolicy,
-            hooksMaxAddedContextChars: settingsState.hooksMaxAddedContextChars,
             promptHistoryEnabled: settingsState.promptHistoryEnabled,
             promptHistoryMaxEntries: settingsState.promptHistoryMaxEntries,
             promptHistoryMaxAgeDays: settingsState.promptHistoryMaxAgeDays,
@@ -217,22 +216,6 @@ struct AgentSettingsPage: View {
                     }
                 }
 
-                hookSettingBlock(.addedContextBudget) {
-                    SettingsCard {
-                        SettingsRow(icon: "text.insert", label: AgentHookSetting.addedContextBudget.title) {
-                            SettingsCycleToggle(
-                                options: addedContextOptions.map { (value: $0.value, label: $0.label) },
-                                current: settingsState.hooksMaxAddedContextChars
-                            ) { newValue in
-                                settingsState.hooksMaxAddedContextChars = newValue
-                                updateServerSetting {
-                                    ServerSettingsUpdate(hooks: .init(maxAddedContextChars: newValue))
-                                }
-                            }
-                        }
-                    }
-                }
-
                 hookSettingBlock(.builtInHooks) {
                     SettingsCard {
                         ForEach(Array(BuiltinHookCatalog.all.enumerated()), id: \.element.id) { index, meta in
@@ -296,15 +279,6 @@ struct AgentSettingsPage: View {
             return model.formattedModelName
         }
         return ModelNameFormatter.format(settingsState.hooksLlmModel, style: .short)
-    }
-
-    private var addedContextOptions: [(label: String, value: UInt32)] {
-        [
-            (label: "Off", value: 0),
-            (label: "Small (1 KB)", value: 1024),
-            (label: "Medium (4 KB)", value: 4096),
-            (label: "Large (16 KB)", value: 16384),
-        ]
     }
 
     private var userHooksBlock: some View {

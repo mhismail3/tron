@@ -1,4 +1,5 @@
 import Testing
+import SwiftUI
 @testable import TronMobile
 
 @Suite("Agent and Context Settings Page Tests")
@@ -15,13 +16,17 @@ struct AgentContextSettingsPageTests {
         ])
 
         #expect(ServerSettingsCategory.server.title == "Servers")
+        #expect(ServerSettingsCategory.providers.icon == "circle.hexagongrid")
         #expect(ServerSettingsCategory.agent.title == "Agent")
         #expect(ServerSettingsCategory.agent.subtitle == "Hooks, prompts, queueing, and branch safety")
         #expect(ServerSettingsCategory.agent.subtitle.count <= 44)
         #expect(ServerSettingsCategory.context.title == "Context")
+        #expect(ServerSettingsCategory.context.icon == "gauge.with.dots.needle.67percent")
         #expect(ServerSettingsCategory.context.subtitle == "Compaction, memory retention, skills, and rules")
         #expect(ServerSettingsCategory.mcpServers.title == "MCP")
         #expect(MainSettingsListLayout.categorySpacing == 8)
+        #expect(MainSettingsLocalCategoryStyle.accent == .tronEmerald)
+        #expect(MainSettingsLocalCategoryStyle.privacyIcon == "lock.shield")
         #expect(!ServerSettingsCategory.serverBackedOrder.map(\.title).contains("Hooks"))
         #expect(!ServerSettingsCategory.serverBackedOrder.map(\.title).contains("Prompt Library"))
         #expect(!ServerSettingsCategory.serverBackedOrder.map(\.title).contains("Git Workflow"))
@@ -47,7 +52,6 @@ struct AgentContextSettingsPageTests {
         #expect(AgentHookSetting.allCases.map(\.title) == [
             "LLM Hook Model",
             "Hook error policy",
-            "Hook added-context budget",
             "Built-in lifecycle hooks",
             "User hook directory",
         ])
@@ -117,7 +121,6 @@ struct AgentContextSettingsPageTests {
             enabledBuiltinHookCount: 0,
             totalBuiltinHookCount: 3,
             hooksErrorPolicy: "continue",
-            hooksMaxAddedContextChars: 4096,
             promptHistoryEnabled: true,
             promptHistoryMaxEntries: 10_000,
             promptHistoryMaxAgeDays: 0,
@@ -133,7 +136,6 @@ struct AgentContextSettingsPageTests {
             enabledBuiltinHookCount: 2,
             totalBuiltinHookCount: 3,
             hooksErrorPolicy: "block",
-            hooksMaxAddedContextChars: 0,
             promptHistoryEnabled: false,
             promptHistoryMaxEntries: 0,
             promptHistoryMaxAgeDays: 30,
@@ -141,7 +143,7 @@ struct AgentContextSettingsPageTests {
             protectedBranchCount: 2
         )
         #expect(AgentSettingsSummary.title(for: loaded) == "Agent behavior")
-        #expect(AgentSettingsSummary.description(for: loaded) == "Queued messages are batched into one prompt. 2 of 3 built-in hooks are enabled; hook failures block execution and hook-added context is off. Prompt history is off. 2 protected branches require push override.")
+        #expect(AgentSettingsSummary.description(for: loaded) == "Queued messages are batched into one prompt. 2 of 3 built-in hooks are enabled; hook failures block execution. Prompt history is off. 2 protected branches require push override.")
     }
 
     @Test("context summary describes compaction memory skills and rules")

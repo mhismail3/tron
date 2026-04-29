@@ -139,6 +139,7 @@ struct MenuBarItemBuilderTests {
             "Uninstall Tron",
             "Quit Tron",
             "—",
+            "Open dev command log",
             "Stop dev server",
             "Show Developer Options",
         ])
@@ -166,8 +167,9 @@ struct MenuBarItemBuilderTests {
         )
         let titles = MenuBarItemBuilder.build(snapshot: snap, paths: setup).map(\.title)
 
-        #expect(Array(titles.suffix(3)) == [
+        #expect(Array(titles.suffix(4)) == [
             "—",
+            "Open dev command log",
             "Stop dev server",
             "Show Developer Options",
         ])
@@ -323,8 +325,9 @@ struct MenuBarItemBuilderTests {
         )
         let titles = items.map(\.title)
 
-        #expect(Array(titles.suffix(6)) == [
+        #expect(Array(titles.suffix(7)) == [
             "—",
+            "Open dev command log",
             "Stop dev server",
             "Start dev server",
             "Start dev server after tests",
@@ -339,6 +342,39 @@ struct MenuBarItemBuilderTests {
             }
         }
         #expect(titles.last == "Hide Developer Options")
+    }
+
+    @Test("starting dev snapshot keeps busy status and exposes command log")
+    func startingDevSnapshotShowsLog() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp)
+        let snap = ServerStatusSnapshot(state: .busy(.startingDevServer))
+        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+        let titles = items.map(\.title)
+
+        if case .header(let content) = items[0] {
+            #expect(content.status == "Starting dev")
+            #expect(content.health == .attention)
+            #expect(content.modeDetail == "Dev command running")
+        } else {
+            Issue.record("first item should be header")
+        }
+
+        #expect(titles.contains("Open dev command log"))
+        #expect(!titles.contains("Stop dev server"))
+
+        let logItem = items.first { item in
+            if case .openLink(let title, _) = item, title == "Open dev command log" {
+                return true
+            }
+            return false
+        }
+        guard case .openLink(_, let url) = logItem else {
+            Issue.record("expected Open dev command log link")
+            return
+        }
+        #expect(url == tmp.appendingPathComponent("system/run/dev-menu-command.log", isDirectory: false))
     }
 
     @Test("busy snapshot disables server controls and shows transient action title")

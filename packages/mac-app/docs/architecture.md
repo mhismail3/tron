@@ -1,13 +1,13 @@
 # Mac App Architecture
 
-> Last verified: 2026-04-28 (transcription opt-in + clean SMAppService layout)
+> Last verified: 2026-04-29 (dev menu busy-state preservation + command log)
 
 ## Overview
 
 `Tron.app` is the macOS SwiftUI wrapper around the headless Rust agent. It has two runtime modes:
 
 - **Wizard mode** — shown on first launch, before `~/.tron/system/run/.onboarded` exists. Walks the user through Tailscale, Login Item registration, permissions, optional local transcription setup, and pairing-info display.
-- **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system.ping` and exposes status + copy actions + diagnostics.
+- **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system.ping` and exposes status + copy actions + diagnostics. Passive poll/menu-open refreshes never overwrite an explicit busy action such as "Starting dev"; the action handler owns the final status refresh when the command exits.
 
 The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side.
 
@@ -100,6 +100,11 @@ Long-running operations (install, pairing, menu construction) are split into:
 3. A **view** — renders both the plan and the outcome.
 
 Example: `InstallPlanner.plan(paths:) -> Result<InstallPlan, Failure>` is entirely pure and tested with `InstallPlannerTests`. `InstallStep` validates the bundled helper/plist/signature, then asks `LaunchAgentManaging` to register or refresh the service.
+
+Developer menu commands run through `TronDevCommandRunner`, which appends
+output to `~/.tron/system/run/dev-menu-command.log`. While a dev server command
+is starting, the menu-bar snapshot stays busy and the menu exposes that log so
+build/test progress is inspectable even before a server is reachable.
 
 ### Protocol-bounded subprocess surface
 

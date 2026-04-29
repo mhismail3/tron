@@ -1,6 +1,6 @@
 # Mac App Development
 
-> Last verified: 2026-04-28 (transcription opt-in + relay-secret release builds)
+> Last verified: 2026-04-29 (dev menu busy-state preservation + command log)
 
 ## Setup
 
@@ -232,6 +232,7 @@ swiftformat packages/mac-app/Sources packages/mac-app/Tests
 | Install shows Login Items approval required | macOS returned `SMAppService.Status.requiresApproval`. Open Login Items settings and enable Tron Server; the app does not fall back to writing launchd plists manually. |
 | Release install is blocked from Downloads or the DMG | Move the app to `/Applications/Tron.app` and relaunch. Release registration from any other path is intentionally unsupported. |
 | Debug wrapper cannot pause/restart/uninstall the server | This is expected in companion mode. Use `/Applications/Tron.app` for production server controls, `tron dev` for server takeover, or `TronMac Isolated Install` for installer testing. If a legacy Debug/DerivedData build owns the production label, launching the installed app repairs that registration during update finalization or the next Restart server action. |
+| `Start dev server` stays on `Starting dev` for a while | The menu command is still running `scripts/tron dev ...`, usually building or testing before the background dev server binds port 9847. Open `~/.tron/system/run/dev-menu-command.log` from the menu's `Open dev command log` item to watch the command output. |
 | Release install repairs a stale DerivedData helper registration | Expected. The installer reads `launchctl print`; if the loaded label points at a missing/mismatched helper executable, the installed app replaces that stale SMAppService registration before waiting for heartbeat. |
 | Debug install registers, then heartbeat times out with `launchctl` exit `78` | The wrapper/helper were ad-hoc signed. `SMAppService` can register that bundle, but launchd refuses to spawn it. Regenerate the project after this refactor and let Xcode sign Debug with `Apple Development`; `codesign -dv` should show a TeamIdentifier. |
 | Permission row stays red even though System Settings shows a Tron app enabled | All three rows should enable the wrapper (`Tron.app` for Release, `TronMac.app` for Debug). Screen Recording may require dragging the row's wrapper icon into System Settings before enabling it. Remove stale `Tron Server.app` rows if macOS shows them, then enable the wrapper row and press Re-check. |

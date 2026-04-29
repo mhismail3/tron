@@ -105,9 +105,9 @@ pub enum HookAction {
     /// inject context (reminders, policy excerpts, fetched state) into
     /// the next LLM turn. The engine aggregates the `added_context`
     /// field across all `AddContext`-returning hooks before returning
-    /// the final `HookResult`. Subject to `hooks.maxAddedContextChars`
-    /// — over-budget aggregated content is dropped with a warn log
-    /// rather than truncated.
+    /// the final `HookResult`. Subject to the engine's fixed
+    /// add-context budget — over-budget aggregated content is dropped
+    /// with a warn log rather than truncated.
     ///
     /// Serializes as `"add_context"` (snake_case) on the wire so
     /// scripts returning JSON can opt in cleanly.

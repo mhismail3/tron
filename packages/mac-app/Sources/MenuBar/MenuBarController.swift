@@ -44,10 +44,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             guard let self else { return }
             for await snapshot in await self.poller.snapshots() {
                 await MainActor.run {
-                    self.snapshot = snapshot
-                    self.statusItem?.button?.image = MenuBarIcon.image(for: snapshot.state)
-                    self.statusItem?.button?.toolTip = snapshot.state.tooltip
-                    self.rebuildMenu()
+                    self.applyPolledSnapshot(snapshot)
                 }
             }
         }
@@ -73,12 +70,21 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         rebuildMenu()
     }
 
+    /// Applies a snapshot produced by passive polling. Poll/menu refreshes
+    /// must not overwrite an explicit in-flight action such as "Starting dev";
+    /// the action handler applies its own final snapshot when the command
+    /// exits.
+    func applyPolledSnapshot(_ snapshot: ServerStatusSnapshot) {
+        guard !self.snapshot.state.isBusy else { return }
+        applySnapshot(snapshot)
+    }
+
     func menuWillOpen(_ menu: NSMenu) {
         Task { [weak self] in
             guard let self else { return }
             let freshSnapshot = await ServerStatusPoller.singleSnapshot(setup: self.setup)
             await MainActor.run {
-                self.applySnapshot(freshSnapshot)
+                self.applyPolledSnapshot(freshSnapshot)
             }
         }
     }

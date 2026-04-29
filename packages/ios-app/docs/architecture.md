@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-04-28 (settings revamp: local paired servers, server-owned settings, provider status cards, native credential alerts, summary cards, Agent/Context split, and onboarding handoff)
+> Last verified: 2026-04-29 (settings revamp: local paired servers, server-owned settings, provider status cards, native credential alerts, summary cards, Agent/Context split, icon metadata, and onboarding handoff)
 
 ## Overview
 
@@ -206,13 +206,17 @@ grouped by behavior owner: Servers covers pairing/security/transcription/updates
 Providers covers auth credentials, Agent covers execution lifecycle including
 hooks, prompt-history capture/retention, queued-message delivery, and protected
 branches, Context covers compaction/memory/skills/rules, and MCP covers external
-tools. Source-control action sheets expose merge, push, branch, and upstream
-choices at the moment of action rather than through a separate source-control
-settings destination. Destructive cross-cutting actions such as clearing prompt
-history stay in the main Settings Danger Zone. Sheets that summarize
-server-backed behavior start with `SettingsInfoCard` and derive the
+tools. Low-level hook `add_context` budgeting stays an internal server fuse,
+not an end-user Agent setting. Source-control action sheets expose merge, push,
+branch, and upstream choices at the moment of action rather than through a
+separate source-control settings destination. Destructive cross-cutting actions
+such as clearing prompt history stay in the main Settings Danger Zone. Sheets
+that summarize server-backed behavior start with `SettingsInfoCard` and derive the
 mostly-static title plus dynamic description through small helpers in
 `SettingsSupport.swift` so copy and grouping rules are covered by focused tests.
+Main-sheet icon strings live in the same support file, and server-backed
+destination summary cards reuse their `ServerSettingsCategory` icons so the
+launcher row and destination stay visually aligned.
 Static status rows such as the user hook directory keep their path/value in the
 trailing position and show a small empty-state placeholder when the server has
 no listable detail to return.

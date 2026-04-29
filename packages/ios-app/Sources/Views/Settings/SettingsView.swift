@@ -178,7 +178,7 @@ struct SettingsView: View {
             if #available(iOS 26.0, *) {
                 SettingsCard(accent: MainSettingsLocalCategoryStyle.accent, interactive: true) {
                     categoryRow(
-                        icon: "paintbrush",
+                        icon: MainSettingsLocalCategoryStyle.appIcon,
                         label: "App",
                         subtitle: "Appearance, notifications, and local behavior",
                         accent: MainSettingsLocalCategoryStyle.accent
@@ -190,7 +190,7 @@ struct SettingsView: View {
 
             SettingsCard(accent: MainSettingsLocalCategoryStyle.accent, interactive: true) {
                 categoryRow(
-                    icon: "hand.raised",
+                    icon: MainSettingsLocalCategoryStyle.privacyIcon,
                     label: "Privacy",
                     subtitle: "Telemetry opt-in and feedback composer",
                     accent: MainSettingsLocalCategoryStyle.accent
@@ -451,6 +451,8 @@ struct SettingsView: View {
                         ) {
                             EmptyView()
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }

@@ -520,7 +520,7 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
   },
 
   "retry":  { "maxRetries": 1 },
-  "hooks":  { "defaultTimeoutMs": 5000, "discoveryTimeoutMs": 10000, "extensions": [".ts", ".js", ".mjs", ".sh"] },
+  "hooks":  { "defaultTimeoutMs": 5000, "discoveryTimeoutMs": 10000, "extensions": [".prompt", ".ts", ".js", ".mjs", ".sh"] },
 
   "promptLibrary": {
     "historyEnabled": true,         // Auto-save interactive prompts to history
@@ -646,8 +646,9 @@ Reusable context packages stored as `SKILL.md` files with optional YAML frontmat
 Async lifecycle hooks execute before/after tool calls and around prompts:
 
 - **Discovery:** `.agent/hooks/` (project), `~/.config/tron/hooks/` (global)
-- **Extensions:** configurable via `hooks.extensions` (default `.ts`, `.js`, `.mjs`, `.sh`)
+- **Extensions:** configurable via `hooks.extensions` (default `.prompt`, `.ts`, `.js`, `.mjs`, `.sh`)
 - **Background hooks:** drained before accepting a new prompt and before session reconstruction (see Core Invariant #7)
+- **AddContext budget:** fixed at 16384 characters per event inside `HookEngine`; over-budget context is dropped all-or-nothing and is not a user-facing setting
 
 ---
 
@@ -794,6 +795,7 @@ packages/mac-app/Sources/
 | Show pairing info | Opens a pairing-only window with QR + manual copy buttons for host, port, token, and server name; copy actions quickly show a checkmark for two seconds on success |
 | Restart / Pause / Resume server | `SMAppService.register` repair/load before restart or resume, then `launchctl kickstart` when the label was already loaded; shows busy state and posts success/failure notifications |
 | Update finalization | On the first menu-bar launch for a new app build, syncs managed skills, refreshes stale SMAppService metadata, and restarts the bundled server once; `tron dev` takeover defers this until the production server is active again |
+| Open dev command log | Appears while a menu-launched dev command is still starting or while `Tron-Dev.app` owns port 9847; opens `~/.tron/system/run/dev-menu-command.log` so build/test/start output is visible before the server is reachable |
 | Stop dev server | Appears in the bottom developer section whenever `Tron-Dev.app` owns port 9847, even while developer options are collapsed; stops the dev process and resumes the installed Login Item. Pause, restart, and uninstall are disabled while dev takeover is active. |
 | Developer options | A collapsed bottom section exposes `Show Developer Options`; when expanded it runs background-safe `scripts/tron dev -d`, `scripts/tron dev -td`, and `scripts/tron dev -btd` commands from the checkout resolved by `TRON_PROJECT_ROOT` or a nearby source tree |
 | Show logs | Opens the native logs window backed by the read-only `logs.recent` RPC |

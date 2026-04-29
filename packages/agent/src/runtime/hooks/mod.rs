@@ -64,6 +64,10 @@
 //! - `builtin:branch-name-gen` — renames worktree branches to memorable 3-word names
 //! - `builtin:suggest-prompts` — suggests follow-up prompts when the agent finishes
 //!
+//! `AddContext` hook output is bounded by a fixed engine-level 16384-character
+//! per-event budget. The budget is a safety fuse rather than a user setting;
+//! over-budget context is dropped all-or-nothing and logged.
+//!
 //! # Hot Reload
 //!
 //! Hooks are discovered fresh each session in [`agent_prompt_service`].

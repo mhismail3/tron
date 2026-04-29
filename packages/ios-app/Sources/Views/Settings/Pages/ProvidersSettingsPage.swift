@@ -55,7 +55,7 @@ struct ProvidersSettingsPage: View {
 
     private var providersInfoCard: some View {
         SettingsInfoCard(
-            icon: "key.horizontal",
+            icon: ServerSettingsCategory.providers.icon,
             title: ProvidersSettingsSummary.title(for: summaryContext),
             description: ProvidersSettingsSummary.description(for: summaryContext)
         )

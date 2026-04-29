@@ -32,11 +32,11 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
         case .server:
             return "network"
         case .providers:
-            return "key.horizontal"
+            return "circle.hexagongrid"
         case .agent:
             return "wand.and.stars"
         case .context:
-            return "rectangle.stack"
+            return "gauge.with.dots.needle.67percent"
         case .mcpServers:
             return "server.rack"
         }
@@ -74,7 +74,9 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
 }
 
 enum MainSettingsLocalCategoryStyle {
-    static let accent: Color = .tronCyan
+    static let accent: Color = .tronEmerald
+    static let appIcon = "paintbrush"
+    static let privacyIcon = "lock.shield"
 }
 
 enum MainSettingsListLayout {
@@ -122,7 +124,6 @@ enum AgentSettingsSection: String, CaseIterable, Sendable {
 enum AgentHookSetting: CaseIterable, Hashable, Sendable {
     case llmModel
     case errorPolicy
-    case addedContextBudget
     case builtInHooks
     case userHooks
 
@@ -134,8 +135,6 @@ enum AgentHookSetting: CaseIterable, Hashable, Sendable {
             return "LLM Hook Model"
         case .errorPolicy:
             return "Hook error policy"
-        case .addedContextBudget:
-            return "Hook added-context budget"
         case .userHooks:
             return "User hook directory"
         }
@@ -149,8 +148,6 @@ enum AgentHookSetting: CaseIterable, Hashable, Sendable {
             return "Model used for built-in and .prompt hooks. Defaults to Haiku for speed."
         case .errorPolicy:
             return "Continue lets the agent proceed when a hook fails. Block stops execution with a safety reason."
-        case .addedContextBudget:
-            return "Maximum text a hook may inject via add_context per event. Over-budget content is dropped, not truncated."
         case .userHooks:
             return "Place .prompt or script files (.sh, .js, .ts) with YAML frontmatter. Hooks are discovered fresh each session."
         }
@@ -264,7 +261,6 @@ enum AgentSettingsSummary {
         let enabledBuiltinHookCount: Int
         let totalBuiltinHookCount: Int
         let hooksErrorPolicy: String
-        let hooksMaxAddedContextChars: UInt32
         let promptHistoryEnabled: Bool
         let promptHistoryMaxEntries: Int
         let promptHistoryMaxAgeDays: Int
@@ -289,8 +285,7 @@ enum AgentSettingsSummary {
         let hooks = hooksDescription(
             enabled: context.enabledBuiltinHookCount,
             total: context.totalBuiltinHookCount,
-            errorPolicy: context.hooksErrorPolicy,
-            addedContextChars: context.hooksMaxAddedContextChars
+            errorPolicy: context.hooksErrorPolicy
         )
         let prompt = promptHistoryDescription(
             enabled: context.promptHistoryEnabled,
@@ -314,16 +309,12 @@ enum AgentSettingsSummary {
     private static func hooksDescription(
         enabled: Int,
         total: Int,
-        errorPolicy: String,
-        addedContextChars: UInt32
+        errorPolicy: String
     ) -> String {
         let safeEnabled = max(0, enabled)
         let safeTotal = max(safeEnabled, total)
         let failureBehavior = errorPolicy == "block" ? "block execution" : "let execution continue"
-        let addedContext = addedContextChars == 0
-            ? "hook-added context is off"
-            : "hooks may add up to \(formattedChars(addedContextChars)) of context per event"
-        return "\(safeEnabled) of \(safeTotal) built-in hooks are enabled; hook failures \(failureBehavior) and \(addedContext)"
+        return "\(safeEnabled) of \(safeTotal) built-in hooks are enabled; hook failures \(failureBehavior)"
     }
 
     private static func promptHistoryDescription(
@@ -346,13 +337,6 @@ enum AgentSettingsSummary {
         let retention = limits.isEmpty ? "unlimited retention" : limits.joined(separator: " and ")
         let pruning = autoPrune ? "auto-prune is on" : "auto-prune is off"
         return "Prompt history is on with \(retention); \(pruning)."
-    }
-
-    private static func formattedChars(_ value: UInt32) -> String {
-        if value >= 1024, value % 1024 == 0 {
-            return "\(value / 1024) KB"
-        }
-        return "\(value) characters"
     }
 
     private static func protectedBranchesDescription(_ count: Int) -> String {

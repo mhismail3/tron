@@ -26,9 +26,6 @@ final class SettingsState {
     /// - `"continue"` (default) — fail-open
     /// - `"block"` — synthesize a Block with a reason
     var hooksErrorPolicy: String = "continue"
-    /// Max characters of hook `add_context` content aggregated per
-    /// event. 0 disables the feature.
-    var hooksMaxAddedContextChars: UInt32 = 4096
 
     // MARK: - Skills
 
@@ -216,7 +213,6 @@ final class SettingsState {
         hooksLlmModel = settings.hooksLlmModel
         builtinHooks = settings.builtinHooks
         hooksErrorPolicy = settings.hooksErrorPolicy
-        hooksMaxAddedContextChars = settings.hooksMaxAddedContextChars
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
         skillsCompactionPolicy = settings.skillsCompactionPolicy
         skillsShowIndex = settings.skillsShowIndex
