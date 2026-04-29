@@ -16,10 +16,14 @@
 #   4. Generate the Xcode project with XcodeGen and archive the
 #      `TronMac` scheme with automatic signing.
 #   5. Export the `.app` from the archive (Developer ID Application).
-#   6. Notarize via `xcrun notarytool submit --wait`; staple with `stapler`.
-#   7. Build the DMG via `create-dmg` into `dist/Tron-mac-v0.1.0-beta.1.dmg`.
-#   8. Generate a SHA256 manifest next to the DMG.
-#   9. Attach the DMG + manifest to a GitHub Release (draft by default —
+#   6. Notarize the `.app` via `xcrun notarytool submit --wait`; staple with
+#      `stapler`.
+#   7. Build and sign the DMG via `create-dmg` into
+#      `dist/Tron-mac-v0.1.0-beta.1.dmg`.
+#   8. Notarize the signed DMG separately, then staple it. Notary tickets are
+#      artifact-specific; the stapled `.app` ticket does not apply to the DMG.
+#   9. Generate a SHA256 manifest next to the DMG.
+#   10. Attach the DMG + manifest to a GitHub Release (draft by default —
 #      flipped live by a maintainer after verifying the assets).
 #
 # ─── Required secrets ───────────────────────────────────────────────────
@@ -508,9 +512,21 @@ jobs:
             "${{ steps.dmg.outputs.dmg_path }}"
           codesign --verify --strict --verbose=2 "${{ steps.dmg.outputs.dmg_path }}"
 
-      # Stapling the DMG (post-notarize, post-sign) embeds the
-      # notarization ticket so first-run on an offline Mac doesn't
-      # have to round-trip to Apple.
+      # The app and DMG are separate notarization artifacts. We notarize
+      # the signed DMG after packaging so stapler can fetch the DMG's own
+      # ticket instead of looking for the app ticket and failing with
+      # "Record not found".
+      - name: Notarize DMG
+        if: steps.drymode.outputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          xcrun notarytool submit "${{ steps.dmg.outputs.dmg_path }}" \
+            --keychain-profile "$NOTARYTOOL_PROFILE" \
+            --keychain "$KEYCHAIN" \
+            --wait
+
+      # Stapling the DMG embeds its notarization ticket so first-run on an
+      # offline Mac does not have to round-trip to Apple.
       - name: Staple DMG
         if: steps.drymode.outputs.dry_run != 'true'
         run: xcrun stapler staple "${{ steps.dmg.outputs.dmg_path }}"

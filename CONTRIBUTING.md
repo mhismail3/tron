@@ -217,9 +217,10 @@ git commit -am "chore(release): Tron v0.1 (Beta 1)"
 git tag "$(scripts/tron version print | awk -F= '$1 == "TRON_RELEASE_TAG" { print $2 }')"
 git push && git push --tags
 
-# 4. The release-mac.yml workflow runs: build → codesign → notarize →
-#    staple → DMG → GitHub Release draft. Verify the DMG artifact + SHA256
-#    manifest on the draft release, then click Publish in the GitHub UI.
+# 4. The release-mac.yml workflow runs: build → codesign → app notarize/staple →
+#    DMG build/sign → DMG notarize/staple → GitHub Release draft. Verify the
+#    DMG artifact + SHA256 manifest on the draft release, then click Publish
+#    in the GitHub UI.
 
 # 5. To test the pipeline without cutting a real release, use
 #    Actions → Release (Mac DMG) → Run workflow with `dry_run=true`.

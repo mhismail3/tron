@@ -168,3 +168,37 @@ fn mac_bundle_script_loads_gitignored_local_relay_env() {
         "packages/mac-app/.env.local must stay gitignored because it can contain relay secrets"
     );
 }
+
+#[test]
+fn mac_release_workflow_notarizes_dmg_before_stapling() {
+    let root = repo_root();
+    let workflow_path = root.join(".github/workflows/release-mac.yml");
+    let workflow = std::fs::read_to_string(&workflow_path).unwrap();
+
+    let sign_dmg = workflow
+        .find("- name: Sign DMG")
+        .unwrap_or_else(|| panic!("{} should sign the DMG", workflow_path.display()));
+    let notarize_dmg = workflow.find("- name: Notarize DMG").unwrap_or_else(|| {
+        panic!(
+            "{} should notarize the signed DMG before stapling it",
+            workflow_path.display()
+        )
+    });
+    let staple_dmg = workflow
+        .find("- name: Staple DMG")
+        .unwrap_or_else(|| panic!("{} should staple the DMG", workflow_path.display()));
+
+    assert!(
+        sign_dmg < notarize_dmg && notarize_dmg < staple_dmg,
+        "{} should run Sign DMG -> Notarize DMG -> Staple DMG",
+        workflow_path.display()
+    );
+    assert!(
+        workflow[notarize_dmg..staple_dmg].contains("xcrun notarytool submit"),
+        "Notarize DMG step should submit the signed DMG to Apple"
+    );
+    assert!(
+        workflow[notarize_dmg..staple_dmg].contains("${{ steps.dmg.outputs.dmg_path }}"),
+        "Notarize DMG step should submit the generated DMG artifact"
+    );
+}

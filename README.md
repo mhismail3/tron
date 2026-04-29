@@ -937,8 +937,8 @@ End-users install `Tron.app` via a notarized DMG published to GitHub Releases. R
 8. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
 9. Verify the bundled helper, LaunchAgent plist, managed skills, and transcription resources are present in the archive.
 10. Sign the helper app first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
-11. `xcrun notarytool submit` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple on success.
-12. Build the DMG with `create-dmg`.
+11. `xcrun notarytool submit` the signed `Tron.app` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple the app on success.
+12. Build the DMG with `create-dmg`, sign the DMG, submit that signed DMG to `notarytool`, then staple the DMG. The app and DMG require separate notary tickets.
 13. Upload dSYMs to Sentry via `sentry-cli`.
 14. `gh release create mac-v0.1.0-beta.1 ./Tron-mac-v0.1.0-beta.1.dmg` creates a draft GitHub pre-release titled `Tron Mac v0.1 (Beta 1)`; maintainers publish after installing and verifying the DMG.
 
