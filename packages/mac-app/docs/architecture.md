@@ -231,10 +231,13 @@ a normal menu action below the header separator. The menu does not repeat the
 pairing token because the pairing-only window owns QR/manual copy details for
 host, port, token, and server name. That window reuses the
 pairing resolver/QR/copy controls without wizard navigation or a progress pill.
-The shared pairing surface resolves live when it opens, and copy actions quickly
-swap to a checkmark for two seconds so the user gets deterministic visual
-feedback. "Show logs" opens a native logs window fed by the read-only
-`logs.recent` RPC, with refresh and copy controls.
+The shared pairing surface resolves live when it opens, showing one centered
+emerald spinner directly on the window background until the complete payload
+and QR code are ready; it keeps the generated QR image in state so the spinner
+can crossfade smoothly into the QR/manual-value containers on a custom timing
+curve. Copy actions quickly swap to a checkmark for two seconds so the user gets
+deterministic visual feedback. "Show logs" opens a native logs window fed by
+the read-only `logs.recent` RPC, with refresh and copy controls.
 The uptime row normalizes raw `ps` elapsed-time strings such as `10:48` to the
 same `HH:MM:SS` format used by the live one-second ticker, so opening the menu
 does not briefly switch display styles.

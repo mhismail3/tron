@@ -13,6 +13,7 @@ struct PairingInfoStep: View {
     @State private var failureReason: PairingFailureReason?
     @State private var isRefreshing = false
     @State private var copiedField: PairingCopyField?
+    @State private var resolvedQRCode: NSImage?
 
     /// Why we couldn't render a pairing payload. Drives the warning
     /// panel copy so the user knows whether to wait (server still
@@ -43,17 +44,46 @@ struct PairingInfoStep: View {
 
     @ViewBuilder
     private var pairingCluster: some View {
-        HStack(alignment: .center, spacing: PairingInfoStepLayout.columnSpacing) {
-            qrPanel
-            infoPanel
+        ZStack {
+            loadingPanel
+                .opacity(shouldShowLoading ? 1 : 0)
+                .scaleEffect(shouldShowLoading ? 1 : 0.985)
+                .allowsHitTesting(false)
+
+            if shouldShowResolvedPairing {
+                HStack(alignment: .center, spacing: PairingInfoStepLayout.columnSpacing) {
+                    qrPanel
+                    infoPanel
+                }
+                .transition(PairingInfoStepLayout.revealTransition)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .center)
+        .animation(PairingInfoStepLayout.revealAnimation, value: shouldShowLoading)
+        .animation(PairingInfoStepLayout.revealAnimation, value: shouldShowResolvedPairing)
+        .animation(PairingInfoStepLayout.revealAnimation, value: failureReason != nil)
+    }
+
+    private var shouldShowLoading: Bool {
+        state.pairingPayload == nil && failureReason == nil
+    }
+
+    private var shouldShowResolvedPairing: Bool {
+        state.pairingPayload != nil || failureReason != nil
+    }
+
+    private var loadingPanel: some View {
+        PairingResolvingSpinner()
+            .frame(
+                width: PairingInfoStepLayout.clusterWidth,
+                height: PairingInfoStepLayout.clusterHeight
+            )
     }
 
     @ViewBuilder
     private var qrPanel: some View {
         ZStack {
-            if let qrImage = currentQRCode {
+            if let qrImage = resolvedQRCode {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color.white)
                     .overlay {
@@ -63,10 +93,7 @@ struct PairingInfoStep: View {
                             .scaledToFit()
                             .padding(8)
                     }
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-            } else if isRefreshing {
-                ProgressView().controlSize(.large)
-                    .transition(.opacity)
+                    .transition(PairingInfoStepLayout.revealTransition)
             } else {
                 VStack(spacing: 6) {
                     Image(systemName: "qrcode.viewfinder")
@@ -83,7 +110,7 @@ struct PairingInfoStep: View {
         }
         .frame(width: PairingInfoStepLayout.qrSize, height: PairingInfoStepLayout.qrSize)
         .wizardGlassCard()
-        .animation(WizardLayout.transitionAnimation, value: state.pairingPayload)
+        .animation(PairingInfoStepLayout.revealAnimation, value: state.pairingPayload)
     }
 
     @ViewBuilder
@@ -96,27 +123,31 @@ struct PairingInfoStep: View {
                     pairingRow(field: .pairingToken, label: "Pairing token", value: payload.token, masked: true)
                     pairingRow(field: .serverName, label: "Server name", value: payload.label ?? LocalComputerName.fallback)
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-            } else {
-                WizardInfoCard {
-                    WizardIconTextRow(alignment: .top) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.title)
-                            .foregroundStyle(.orange)
-                    } content: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(failureHeadline).font(TronTypography.wizardSubheadline)
-                            Text(failureBody)
-                                .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                .transition(PairingInfoStepLayout.revealTransition)
+            } else if let failureReason {
+                failurePanel(for: failureReason)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
         }
         .frame(width: PairingInfoStepLayout.valueColumnWidth, alignment: .center)
-        .animation(WizardLayout.transitionAnimation, value: state.pairingPayload)
+        .animation(PairingInfoStepLayout.revealAnimation, value: state.pairingPayload)
+    }
+
+    private func failurePanel(for reason: PairingFailureReason) -> some View {
+        WizardInfoCard {
+            WizardIconTextRow(alignment: .top) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title)
+                    .foregroundStyle(.orange)
+            } content: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(failureHeadline(for: reason)).font(TronTypography.wizardSubheadline)
+                    Text(failureBody(for: reason))
+                        .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -157,19 +188,18 @@ struct PairingInfoStep: View {
         return "\(value.prefix(4))…\(value.suffix(4))"
     }
 
-    private var failureHeadline: String {
-        switch failureReason {
+    private func failureHeadline(for reason: PairingFailureReason) -> String {
+        switch reason {
         case .noTailscaleIP: return "Tailscale IP not detected"
         case .noToken: return "Pairing token missing"
         case .serverUnreachable: return "Server not reachable"
         case .tokenRejected: return "Pairing token rejected"
         case .qrGenerationFailed: return "QR code failed"
-        case .none: return "Pairing info loading"
         }
     }
 
-    private var failureBody: String {
-        switch failureReason {
+    private func failureBody(for reason: PairingFailureReason) -> String {
+        switch reason {
         case .noTailscaleIP:
             return "Open Tailscale on this Mac and confirm it is signed in. Fresh installs do not need a pre-existing settings.json."
         case .noToken:
@@ -180,17 +210,7 @@ struct PairingInfoStep: View {
             return "The local token file does not match the running server. Restart Tron Server from the menu bar, then reopen Pairing Info."
         case .qrGenerationFailed:
             return "The pairing values were resolved, but the QR code could not be generated. Use the manual values or reopen Pairing Info."
-        case .none:
-            return "Resolving Tron Server, Tailscale, and the local pairing token."
         }
-    }
-
-    private var currentQRCode: NSImage? {
-        guard let payload = state.pairingPayload,
-              let url = PairingURLBuilder.makeURL(payload) else {
-            return nil
-        }
-        return QRCodeGenerator.makeImage(payload: url.absoluteString, size: PairingInfoStepLayout.qrSize)
     }
 
     @MainActor
@@ -246,17 +266,21 @@ struct PairingInfoStep: View {
 
         let payload = PairingPayload(host: host, port: info.port, token: token, label: LocalComputerName.current())
         guard let url = PairingURLBuilder.makeURL(payload),
-              QRCodeGenerator.makeImage(payload: url.absoluteString, size: PairingInfoStepLayout.qrSize) != nil else {
+              let qrImage = QRCodeGenerator.makeImage(payload: url.absoluteString, size: PairingInfoStepLayout.qrSize) else {
             fail(.qrGenerationFailed)
             return
         }
 
-        state.pairingPayload = payload
-        failureReason = nil
+        withAnimation(PairingInfoStepLayout.revealAnimation) {
+            resolvedQRCode = qrImage
+            state.pairingPayload = payload
+            failureReason = nil
+        }
     }
 
     @MainActor
     private func fail(_ reason: PairingFailureReason) {
+        resolvedQRCode = nil
         state.pairingPayload = nil
         failureReason = reason
     }
@@ -298,14 +322,47 @@ private enum PairingCopyField: Hashable {
     case serverName
 }
 
+private struct PairingResolvingSpinner: View {
+    @State private var isRotating = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0.14, to: 0.82)
+            .stroke(
+                Color.tronEmerald,
+                style: StrokeStyle(lineWidth: 4, lineCap: .round)
+            )
+            .frame(width: 34, height: 34)
+            .rotationEffect(.degrees(isRotating ? 360 : 0))
+            .animation(
+                .linear(duration: PairingInfoStepLayout.spinnerRotationSeconds)
+                    .repeatForever(autoreverses: false),
+                value: isRotating
+            )
+            .onAppear {
+                isRotating = true
+            }
+    }
+}
+
 enum PairingInfoStepLayout {
     /// QR code rendered side dimension. Picked to fit alongside the
     /// info panel inside the shell's fixed-height content area.
     static let qrSize: CGFloat = 170
     static let columnSpacing: CGFloat = 20
     static let valueColumnWidth: CGFloat = 218
+    static let clusterWidth: CGFloat = qrSize + columnSpacing + valueColumnWidth
+    static let clusterHeight: CGFloat = qrSize
     static let valueCardVerticalPadding: CGFloat = 6
     static let valueCardHorizontalPadding: CGFloat = 12
+    static let spinnerRotationSeconds = 0.82
+    static let revealAnimation = Animation.timingCurve(0.18, 0.86, 0.24, 1.0, duration: 0.36)
+    @MainActor
+    static var revealTransition: AnyTransition {
+        AnyTransition.opacity
+            .combined(with: .scale(scale: 0.96, anchor: .center))
+            .combined(with: .offset(y: 8))
+    }
     /// Avoids the first fast refresh racing the shell's page-slide
     /// transition, which made the QR appear at its final coordinate
     /// before the rest of the step finished entering.
