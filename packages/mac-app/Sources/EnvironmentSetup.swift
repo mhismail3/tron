@@ -16,7 +16,10 @@ struct EnvironmentSetup: Sendable {
     var settingsPath: URL
     var launchAgentPlistPath: URL
 
+    var launchAgentLabel: String
     var serverPort: Int
+    var canManageLaunchAgent: Bool
+    var wrapperLockPath: URL
 
     /// Returns true if the on-disk first-run sentinel exists.
     var onboardedSentinelExists: @Sendable () -> Bool
@@ -112,7 +115,10 @@ struct EnvironmentSetup: Sendable {
         onboardedMarkerPath: TronPaths.onboardedMarkerPath,
         settingsPath: TronPaths.settingsPath,
         launchAgentPlistPath: TronPaths.launchAgentPlistPath,
+        launchAgentLabel: TronPaths.launchAgentLabel,
         serverPort: TronPaths.defaultServerPort,
+        canManageLaunchAgent: TronPaths.canManageLaunchAgent,
+        wrapperLockPath: TronPaths.macWrapperLockPath,
         onboardedSentinelExists: {
             FileManager.default.fileExists(atPath: TronPaths.onboardedMarkerPath.path)
         },

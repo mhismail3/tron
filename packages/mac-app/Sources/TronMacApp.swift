@@ -171,6 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
     private var actionHandler: MenuBarActionHandler?
     private var wizardCompletionObserver: NSObjectProtocol?
+    private var instanceLock: SingleInstanceLock?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         switch MacCommandLineMode.current {
@@ -197,16 +198,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Install single-instance lock first — if another Tron.app
-        // is already running, this returns false and we exit
-        // gracefully.
-        guard SingleInstanceLock.shared.acquire() else {
-            NSLog("[Tron] Another Tron.app instance is already running. Exiting.")
+        let setup = EnvironmentSetup.live
+        // Install the per-wrapper lock first. The installed release and
+        // an Xcode Debug companion intentionally use different lock
+        // files so wrapper UI work can happen while production runs.
+        let lock = SingleInstanceLock(lockFileURL: setup.wrapperLockPath)
+        guard lock.acquire() else {
+            NSLog("[Tron] Another instance of this Tron wrapper is already running. Exiting.")
             NSApp.terminate(nil)
             return
         }
+        instanceLock = lock
 
-        let setup = EnvironmentSetup.live
         if setup.onboardedSentinelExists() {
             installMenuBar(setup: setup)
         }
@@ -223,7 +226,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // task so we can touch `self` + AppKit APIs safely.
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.installMenuBar(setup: EnvironmentSetup.live)
+                let setup = EnvironmentSetup.live
+                if !setup.canManageLaunchAgent {
+                    NSLog("[Tron] Debug companion wizard completion does not install the production menu bar.")
+                    return
+                }
+                self.installMenuBar(setup: setup)
                 NSApp.setActivationPolicy(.accessory)
                 for window in NSApp.windows {
                     window.orderOut(nil)
@@ -245,6 +253,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("[Tron] Cannot start server from command mode: %@", problem)
                 return
             }
+            guard setup.canManageLaunchAgent else {
+                NSLog("[Tron] Cannot start server from command mode: Debug companion mode does not manage the production server")
+                return
+            }
             switch await setup.syncManagedSkills() {
             case .synced:
                 break
@@ -255,10 +267,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let outcome = await setup.launchAgentManager.load(
                 plistPath: setup.launchAgentPlistPath,
-                label: TronPaths.launchAgentLabel
+                label: setup.launchAgentLabel
             )
             if outcome == .alreadyLoaded {
-                _ = await setup.launchAgentManager.restart(label: TronPaths.launchAgentLabel)
+                _ = await setup.launchAgentManager.restart(label: setup.launchAgentLabel)
             } else if outcome != .ok {
                 NSLog("[Tron] Command-mode server start returned %@", String(describing: outcome))
             }
@@ -302,7 +314,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         actionHandler = nil
         menuBarController?.dispose()
         menuBarController = nil
-        SingleInstanceLock.shared.release()
+        instanceLock?.release()
+        instanceLock = nil
     }
 
     private func installMenuBar(setup: EnvironmentSetup) {

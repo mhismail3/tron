@@ -572,7 +572,7 @@ enum ServerUpdateSettingsItem: CaseIterable, Hashable, Sendable {
         case .automaticChecks:
             return "When off, the server never contacts GitHub Releases. Opt in to be notified of new versions."
         case .releaseChannel:
-            return "Stable tracks only `latest` GitHub releases. Beta also includes pre-release tags, such as `mac-v0.1.0-beta.1`."
+            return "Stable tracks only `latest` GitHub releases. Beta also includes pre-release tags, such as `server-v0.1.0-beta.1`."
         case .checkFrequency:
             return "Manual means only the button below and the Mac menu bar fire checks. Startup checks once per server launch."
         case .manualCheck:

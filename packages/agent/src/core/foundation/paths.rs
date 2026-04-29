@@ -7,6 +7,13 @@
 
 use std::path::PathBuf;
 
+/// Absolute data-root override used only by explicit developer/test launch modes.
+pub const TRON_DATA_DIR_ENV: &str = "TRON_DATA_DIR";
+/// Home-relative data-root override used by the Mac isolated install scheme.
+pub const TRON_HOME_NAME_ENV: &str = "TRON_HOME_NAME";
+/// Production Mac wrapper bundle identifier.
+pub const MAC_RELEASE_BUNDLE_ID: &str = "com.tron.mac";
+
 // ── Directory segment constants ────────────────────────────────────────
 
 /// Directory name constants for the `~/.tron/` layout.
@@ -131,9 +138,35 @@ pub fn home_dir() -> String {
     );
 }
 
-/// Get the `~/.tron` directory path.
+/// Get the Tron data directory path.
+///
+/// Defaults to `~/.tron`. Explicit developer/test launch modes may set
+/// `TRON_DATA_DIR` to an absolute path or `TRON_HOME_NAME` to a single
+/// home-relative directory name such as `.tron-dev`.
 pub fn tron_home() -> PathBuf {
-    PathBuf::from(home_dir()).join(".tron")
+    resolve_tron_home(
+        &home_dir(),
+        std::env::var(TRON_DATA_DIR_ENV).ok().as_deref(),
+        std::env::var(TRON_HOME_NAME_ENV).ok().as_deref(),
+    )
+}
+
+fn resolve_tron_home(home: &str, data_dir: Option<&str>, home_name: Option<&str>) -> PathBuf {
+    if let Some(data_dir) = data_dir.filter(|value| !value.is_empty()) {
+        return PathBuf::from(data_dir);
+    }
+    if let Some(home_name) = home_name.filter(|value| !value.is_empty()) {
+        assert!(
+            valid_home_relative_name(home_name),
+            "{TRON_HOME_NAME_ENV} must be a single home-relative directory name"
+        );
+        return PathBuf::from(home).join(home_name);
+    }
+    PathBuf::from(home).join(".tron")
+}
+
+fn valid_home_relative_name(value: &str) -> bool {
+    value != "." && value != ".." && !value.contains('/')
 }
 
 // ── Top-level directory helpers ────────────────────────────────────────
@@ -337,9 +370,24 @@ pub fn auth_lock_path() -> PathBuf {
     run_dir().join("auth.lock")
 }
 
-/// `~/.tron/system/run/.mac-wrapper.lock` — Mac wrapper single-instance lock.
+/// `~/.tron/system/run/.mac-wrapper.com.tron.mac.lock` — production Mac wrapper lock.
 pub fn mac_wrapper_lock_path() -> PathBuf {
-    run_dir().join(".mac-wrapper.lock")
+    mac_wrapper_lock_path_for(MAC_RELEASE_BUNDLE_ID)
+}
+
+/// `~/.tron/system/run/.mac-wrapper.<bundle-id>.lock` — per-wrapper lock.
+pub fn mac_wrapper_lock_path_for(bundle_identifier: &str) -> PathBuf {
+    let safe_identifier: String = bundle_identifier
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    run_dir().join(format!(".mac-wrapper.{safe_identifier}.lock"))
 }
 
 /// `~/.tron/system/run/.onboarded` — first-run sentinel marker.
@@ -609,6 +657,26 @@ mod tests {
     }
 
     #[test]
+    fn tron_home_supports_explicit_developer_roots() {
+        assert_eq!(
+            resolve_tron_home("/Users/dev", Some("/tmp/tron-data"), None),
+            PathBuf::from("/tmp/tron-data")
+        );
+        assert_eq!(
+            resolve_tron_home("/Users/dev", None, Some(".tron-dev")),
+            PathBuf::from("/Users/dev/.tron-dev")
+        );
+    }
+
+    #[test]
+    fn tron_home_name_rejects_nested_paths() {
+        assert!(!valid_home_relative_name("../other"));
+        assert!(!valid_home_relative_name("nested/path"));
+        assert!(!valid_home_relative_name("."));
+        assert!(valid_home_relative_name(".tron-dev"));
+    }
+
+    #[test]
     fn tron_home_returns_pathbuf() {
         let result = tron_home();
         assert!(result.to_string_lossy().ends_with(".tron"));
@@ -731,10 +799,17 @@ mod tests {
     fn runtime_locks_under_run_dir() {
         assert!(auth_lock_path().ends_with(format!("{}/{}/auth.lock", dirs::SYSTEM, dirs::RUN)));
         assert!(mac_wrapper_lock_path().ends_with(format!(
-            "{}/{}/.mac-wrapper.lock",
+            "{}/{}/.mac-wrapper.com.tron.mac.lock",
             dirs::SYSTEM,
             dirs::RUN
         )));
+        assert!(
+            mac_wrapper_lock_path_for("com.tron.mac.dev").ends_with(format!(
+                "{}/{}/.mac-wrapper.com.tron.mac.dev.lock",
+                dirs::SYSTEM,
+                dirs::RUN
+            ))
+        );
     }
 
     #[test]

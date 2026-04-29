@@ -1,11 +1,12 @@
 import Foundation
 import AppKit
 
-/// Single-instance guard. When a second `Tron.app` launches, it should
-/// see that one is already running and exit cleanly with a banner.
+/// Per-wrapper-instance guard. A second copy of the same wrapper build
+/// exits cleanly, while `/Applications/Tron.app` and an Xcode Debug
+/// companion can run side by side.
 ///
 /// Implementation: exclusive `fcntl(F_SETLK, F_WRLCK)` advisory lock on
-/// `~/.tron/system/run/.mac-wrapper.lock`. The kernel cleans up the lock on
+/// `~/.tron/system/run/.mac-wrapper.<bundle-id>.lock`. The kernel cleans up the lock on
 /// process exit (including crash), so we don't have to worry about
 /// stale lockfiles. The PID is written to the file body so `tron
 /// status` can report "held by PID 12345".
@@ -21,8 +22,6 @@ import AppKit
 /// previous design did `DispatchQueue.sync` from main, which works but
 /// imposes unnecessary GCD overhead for a single-shot file-lock op.
 final class SingleInstanceLock: @unchecked Sendable {
-    static let shared = SingleInstanceLock()
-
     private let lockFileURL: URL
     private var fileDescriptor: Int32 = -1
     private let mutex = NSLock()

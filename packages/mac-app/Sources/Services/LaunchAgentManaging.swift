@@ -17,17 +17,20 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     var uptime: String?
     var parentBundleIdentifier: String?
     var programIdentifier: String?
+    var executablePath: String?
 
     init(
         pid: Int? = nil,
         uptime: String? = nil,
         parentBundleIdentifier: String? = nil,
-        programIdentifier: String? = nil
+        programIdentifier: String? = nil,
+        executablePath: String? = nil
     ) {
         self.pid = pid
         self.uptime = uptime
         self.parentBundleIdentifier = parentBundleIdentifier
         self.programIdentifier = programIdentifier
+        self.executablePath = executablePath
     }
 }
 

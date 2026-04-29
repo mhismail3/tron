@@ -80,6 +80,11 @@ pub mod scheduler;
 
 pub use scheduler::{SchedulerDeps, TickReport, perform_tick};
 
+/// Canonical GitHub Release tag prefix for server/runtime releases.
+/// Platform assets (for example the macOS DMG) attach under this shared
+/// release namespace instead of creating separate platform-scoped tags.
+pub const RELEASE_TAG_PREFIX: &str = "server-v";
+
 // ─────────────────────────────────────────────────────────────────────────
 // Public path helpers
 // ─────────────────────────────────────────────────────────────────────────
@@ -134,8 +139,8 @@ pub fn resume(path: &Path) -> io::Result<()> {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdateChannel {
-    /// Only releases without a pre-release suffix (e.g. `mac-v0.1.0`,
-    /// not `mac-v0.1.0-beta.1`). The safe default.
+    /// Only releases without a pre-release suffix (e.g. `server-v0.1.0`,
+    /// not `server-v0.1.0-beta.1`). The safe default.
     #[default]
     Stable,
     /// All releases, including pre-releases. Used by early adopters
@@ -328,7 +333,7 @@ fn write_lock() -> &'static Mutex<()> {
 /// - `1.2.3`
 /// - `1.2.3-beta.1`
 /// - `v1.2.3` (leading `v` is stripped)
-/// - `mac-v1.2.3-beta.1` (GitHub Release tag form — everything up to
+/// - `server-v1.2.3-beta.1` (GitHub Release tag form — everything up to
 ///   the last `v` is treated as a scope prefix and stripped)
 ///
 /// Comparison follows the obvious semver rules: numeric triples
@@ -524,10 +529,10 @@ pub fn compare_versions(current: &VersionId, latest: &VersionId) -> UpdateDecisi
 /// updater doesn't depend on `octocrab` / raw `reqwest` types.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReleaseInfo {
-    /// Parsed version (already stripped of the `mac-v` scope prefix
+    /// Parsed version (already stripped of the `server-v` scope prefix
     /// and any leading `v`).
     pub version: String,
-    /// The original GitHub Release `tag_name` (e.g. `mac-v0.1.0`).
+    /// The original GitHub Release `tag_name` (e.g. `server-v0.1.0`).
     /// Kept around so telemetry / logs can cite the exact tag the
     /// fetcher resolved against.
     pub tag: String,
@@ -782,14 +787,17 @@ impl ReleaseFetcher for HttpReleaseFetcher {
             .await
             .map_err(|e| FetchError::Parse(e.to_string()))?;
 
-        Ok(raw.into_iter().map(Into::into).collect())
+        Ok(raw
+            .into_iter()
+            .filter_map(release_info_from_github)
+            .collect())
     }
 }
 
 /// Subset of the GitHub Releases API response we consume.
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
-    /// Git tag associated with the release (e.g. `mac-v0.1.0`).
+    /// Git tag associated with the release (e.g. `server-v0.1.0`).
     tag_name: String,
     /// Release notes in Markdown.
     body: Option<String>,
@@ -811,28 +819,25 @@ struct GitHubAsset {
     browser_download_url: String,
 }
 
-impl From<GitHubRelease> for ReleaseInfo {
-    fn from(raw: GitHubRelease) -> Self {
-        // Normalize the tag -> version: `mac-v0.1.0` -> `0.1.0`.
-        let version = match raw.tag_name.rfind('v') {
-            Some(idx) => raw.tag_name[idx + 1..].to_string(),
-            None => raw.tag_name.clone(),
-        };
-        // Pick the first `.dmg` asset we see. The release workflow
-        // currently publishes a single DMG per release.
-        let download_url = raw
-            .assets
-            .into_iter()
-            .find(|a| a.name.to_lowercase().ends_with(".dmg"))
-            .map(|a| a.browser_download_url);
-        Self {
-            version,
-            tag: raw.tag_name,
-            download_url,
-            release_notes: raw.body,
-            is_prerelease: raw.prerelease,
-        }
-    }
+fn release_info_from_github(raw: GitHubRelease) -> Option<ReleaseInfo> {
+    let version = raw
+        .tag_name
+        .strip_prefix(RELEASE_TAG_PREFIX)
+        .map(str::to_string)?;
+    // Pick the first `.dmg` asset we see. The release workflow
+    // currently publishes a single DMG per release.
+    let download_url = raw
+        .assets
+        .into_iter()
+        .find(|a| a.name.to_lowercase().ends_with(".dmg"))
+        .map(|a| a.browser_download_url);
+    Some(ReleaseInfo {
+        version,
+        tag: raw.tag_name,
+        download_url,
+        release_notes: raw.body,
+        is_prerelease: raw.prerelease,
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -864,7 +869,7 @@ mod tests {
 
     #[test]
     fn parse_with_scope_prefix() {
-        let v = VersionId::parse("mac-v0.5.0").expect("parse");
+        let v = VersionId::parse("server-v0.5.0").expect("parse");
         assert_eq!(v.to_string_canonical(), "0.5.0");
     }
 
@@ -890,14 +895,14 @@ mod tests {
     #[test]
     fn display_version_label_parses_scope_prefix() {
         assert_eq!(
-            display_version_label("mac-v0.2.0-beta.3").unwrap(),
+            display_version_label("server-v0.2.0-beta.3").unwrap(),
             "v0.2 (Beta 3)"
         );
     }
 
     #[test]
     fn parse_with_scope_and_prerelease() {
-        let v = VersionId::parse("mac-v0.5.0-beta.2").expect("parse");
+        let v = VersionId::parse("server-v0.5.0-beta.2").expect("parse");
         assert_eq!(v.to_string_canonical(), "0.5.0-beta.2");
         assert!(v.is_prerelease());
     }
@@ -988,34 +993,34 @@ mod tests {
     #[test]
     fn stable_channel_ignores_prereleases() {
         let releases = vec![
-            rel("mac-v0.5.0-beta.3", "0.5.0-beta.3", true, None),
-            rel("mac-v0.4.9", "0.4.9", false, None),
+            rel("server-v0.5.0-beta.3", "0.5.0-beta.3", true, None),
+            rel("server-v0.4.9", "0.4.9", false, None),
         ];
         let latest = select_latest_release(&releases, UpdateChannel::Stable).unwrap();
-        assert_eq!(latest.tag, "mac-v0.4.9");
+        assert_eq!(latest.tag, "server-v0.4.9");
     }
 
     #[test]
     fn beta_channel_includes_prereleases() {
         let releases = vec![
-            rel("mac-v0.5.0-beta.3", "0.5.0-beta.3", true, None),
-            rel("mac-v0.4.9", "0.4.9", false, None),
+            rel("server-v0.5.0-beta.3", "0.5.0-beta.3", true, None),
+            rel("server-v0.4.9", "0.4.9", false, None),
         ];
         let latest = select_latest_release(&releases, UpdateChannel::Beta).unwrap();
         // Even though beta.3 < 0.4.9? No — 0.5.0-beta.3 > 0.4.9 (major/minor dominate).
-        assert_eq!(latest.tag, "mac-v0.5.0-beta.3");
+        assert_eq!(latest.tag, "server-v0.5.0-beta.3");
     }
 
     #[test]
     fn stable_picks_highest_stable_even_when_beta_is_newer() {
         // Users on the stable channel should NOT see a newer beta.
         let releases = vec![
-            rel("mac-v0.6.0-beta.1", "0.6.0-beta.1", true, None),
-            rel("mac-v0.5.0", "0.5.0", false, None),
-            rel("mac-v0.4.9", "0.4.9", false, None),
+            rel("server-v0.6.0-beta.1", "0.6.0-beta.1", true, None),
+            rel("server-v0.5.0", "0.5.0", false, None),
+            rel("server-v0.4.9", "0.4.9", false, None),
         ];
         let latest = select_latest_release(&releases, UpdateChannel::Stable).unwrap();
-        assert_eq!(latest.tag, "mac-v0.5.0");
+        assert_eq!(latest.tag, "server-v0.5.0");
     }
 
     #[test]
@@ -1027,7 +1032,7 @@ mod tests {
     #[test]
     fn stable_filter_with_only_prereleases_returns_none() {
         let releases = vec![rel(
-            "mac-v0.5.0-beta.1",
+            "server-v0.5.0-beta.1",
             "0.5.0-beta.1",
             true,
             Some("u.dmg"),
@@ -1037,19 +1042,49 @@ mod tests {
             select_latest_release(&releases, UpdateChannel::Beta)
                 .unwrap()
                 .tag,
-            "mac-v0.5.0-beta.1"
+            "server-v0.5.0-beta.1"
         );
     }
 
     #[test]
     fn unparseable_release_versions_are_skipped() {
         let releases = vec![
-            rel("mac-v0.5.0", "0.5.0", false, None),
+            rel("server-v0.5.0", "0.5.0", false, None),
             rel("garbage-tag", "not-a-version", false, None),
         ];
         let latest = select_latest_release(&releases, UpdateChannel::Stable).unwrap();
         // garbage-tag is skipped because VersionId::parse("not-a-version") fails.
-        assert_eq!(latest.tag, "mac-v0.5.0");
+        assert_eq!(latest.tag, "server-v0.5.0");
+    }
+
+    #[test]
+    fn github_release_mapping_accepts_only_server_tags() {
+        let server = release_info_from_github(GitHubRelease {
+            tag_name: "server-v0.5.1-beta.2".into(),
+            body: Some("notes".into()),
+            prerelease: true,
+            assets: vec![GitHubAsset {
+                name: "Tron-mac-v0.5.1-beta.2.dmg".into(),
+                browser_download_url: "https://example.test/Tron.dmg".into(),
+            }],
+        })
+        .expect("server tag should map");
+        assert_eq!(server.version, "0.5.1-beta.2");
+        assert_eq!(
+            server.download_url.as_deref(),
+            Some("https://example.test/Tron.dmg")
+        );
+
+        let ignored = release_info_from_github(GitHubRelease {
+            tag_name: "mac-v0.5.1".into(),
+            body: None,
+            prerelease: false,
+            assets: vec![],
+        });
+        assert!(
+            ignored.is_none(),
+            "platform-scoped tags must not drive server updates"
+        );
     }
 
     // ── State serde + I/O ──
@@ -1135,7 +1170,7 @@ mod tests {
     #[test]
     fn state_record_check_populates_fields() {
         let mut s = UpdaterState::default();
-        let release = rel("mac-v0.5.1", "0.5.1", false, Some("u.dmg"));
+        let release = rel("server-v0.5.1", "0.5.1", false, Some("u.dmg"));
         s.record_check(Some(&release), "2026-04-23T00:00:00Z".into());
         assert_eq!(s.last_check_at.as_deref(), Some("2026-04-23T00:00:00Z"));
         assert_eq!(s.latest_available_version.as_deref(), Some("0.5.1"));
@@ -1226,7 +1261,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_reports_up_to_date_when_latest_matches() {
-        let fetcher = MockReleaseFetcher::new(vec![rel("mac-v0.5.0", "0.5.0", false, None)]);
+        let fetcher = MockReleaseFetcher::new(vec![rel("server-v0.5.0", "0.5.0", false, None)]);
         let outcome = check_for_update("0.5.0", UpdateChannel::Stable, &fetcher)
             .await
             .unwrap();
@@ -1237,20 +1272,20 @@ mod tests {
     #[tokio::test]
     async fn check_reports_available_when_newer_release() {
         let fetcher = MockReleaseFetcher::new(vec![
-            rel("mac-v0.5.1", "0.5.1", false, Some("dmg-url")),
-            rel("mac-v0.5.0", "0.5.0", false, None),
+            rel("server-v0.5.1", "0.5.1", false, Some("dmg-url")),
+            rel("server-v0.5.0", "0.5.0", false, None),
         ]);
         let outcome = check_for_update("0.5.0", UpdateChannel::Stable, &fetcher)
             .await
             .unwrap();
         assert_eq!(outcome.decision, UpdateDecision::Available);
-        assert_eq!(outcome.latest.as_ref().unwrap().tag, "mac-v0.5.1");
+        assert_eq!(outcome.latest.as_ref().unwrap().tag, "server-v0.5.1");
     }
 
     #[tokio::test]
     async fn check_reports_ahead_when_current_is_higher() {
         // Dev build: we're running 0.6.0 but latest release is 0.5.0.
-        let fetcher = MockReleaseFetcher::new(vec![rel("mac-v0.5.0", "0.5.0", false, None)]);
+        let fetcher = MockReleaseFetcher::new(vec![rel("server-v0.5.0", "0.5.0", false, None)]);
         let outcome = check_for_update("0.6.0", UpdateChannel::Stable, &fetcher)
             .await
             .unwrap();
@@ -1270,8 +1305,8 @@ mod tests {
     #[tokio::test]
     async fn check_respects_channel() {
         let fetcher = MockReleaseFetcher::new(vec![
-            rel("mac-v0.5.1-beta.1", "0.5.1-beta.1", true, None),
-            rel("mac-v0.5.0", "0.5.0", false, None),
+            rel("server-v0.5.1-beta.1", "0.5.1-beta.1", true, None),
+            rel("server-v0.5.0", "0.5.0", false, None),
         ]);
         // Stable user: beta ignored, so 0.5.0 is still "latest".
         let outcome = check_for_update("0.5.0", UpdateChannel::Stable, &fetcher)

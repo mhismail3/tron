@@ -13,7 +13,9 @@ struct MacRuntimeVariantTests {
 
         #expect(variant.locationProblem == nil)
         #expect(variant.expectedParentBundleIdentifier == "com.tron.mac.dev")
-        #expect(variant.precedence == 3)
+        #expect(variant.precedence == 2)
+        #expect(!variant.canManageLaunchAgent(isIsolatedInstallMode: false))
+        #expect(variant.canManageLaunchAgent(isIsolatedInstallMode: true))
     }
 
     @Test("release builds must be installed at Applications")
@@ -43,9 +45,9 @@ struct MacRuntimeVariantTests {
         #expect(variant.precedence == 0)
     }
 
-    @Test("parent bundle precedence orders debug over installed release")
+    @Test("parent bundle precedence treats debug and installed release as peer wrappers")
     func parentPrecedence() {
-        #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac.dev") > MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac"))
+        #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac.dev") == MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac"))
         #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: "com.tron.mac") > MacRuntimeVariant.precedence(forParentBundleIdentifier: "other"))
         #expect(MacRuntimeVariant.precedence(forParentBundleIdentifier: nil) == 0)
     }

@@ -44,7 +44,7 @@ actor ServerStatusPoller {
         let result = await setup.pingServer(token)
         switch result {
         case .success(let info):
-            async let launchAgentRuntime = setup.launchAgentManager.runtimeInfo(label: TronPaths.launchAgentLabel)
+            async let launchAgentRuntime = setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
             async let portProcess = setup.probeServerProcess(info.port)
             let runtimeInfo = await launchAgentRuntime
             let serverProcess = await portProcess
@@ -77,7 +77,7 @@ actor ServerStatusPoller {
         token: String?,
         reason: String
     ) async -> ServerStatusSnapshot {
-        let isLoaded = await setup.launchAgentManager.isLoaded(label: TronPaths.launchAgentLabel)
+        let isLoaded = await setup.launchAgentManager.isLoaded(label: setup.launchAgentLabel)
         return ServerStatusSnapshot(
             state: isLoaded ? .failed(reason: reason) : .paused,
             port: setup.serverPort,

@@ -801,7 +801,7 @@ mod tests {
     fn rel(version: &str, is_prerelease: bool, dmg_url: Option<&str>) -> ReleaseInfo {
         ReleaseInfo {
             version: version.to_string(),
-            tag: format!("mac-v{version}"),
+            tag: format!("server-v{version}"),
             download_url: dmg_url.map(String::from),
             release_notes: Some(format!("Notes for {version}")),
             is_prerelease,

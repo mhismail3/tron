@@ -610,7 +610,7 @@ struct WizardVisualLayoutTests {
 
         #expect(wizardView.contains("permissionsServerRestarted"))
         #expect(wizardView.contains("permissionsRestartInProgress"))
-        #expect(wizardView.contains("launchAgentManager.restart(label: TronPaths.launchAgentLabel)"))
+        #expect(wizardView.contains("launchAgentManager.restart(label: setup.launchAgentLabel)"))
         #expect(wizardView.contains("Finalizing…"))
         #expect(wizardState.contains("var permissionsServerRestarted = false"))
         #expect(wizardState.contains("var permissionsRestartInProgress = false"))

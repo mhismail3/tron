@@ -387,9 +387,9 @@ mod tests {
     fn release(version: &str, prerelease: bool) -> ReleaseInfo {
         ReleaseInfo {
             version: version.to_string(),
-            tag: format!("mac-v{version}"),
+            tag: format!("server-v{version}"),
             download_url: Some(format!(
-                "https://github.com/mhismail3/tron/releases/download/mac-v{version}/Tron.dmg"
+                "https://github.com/mhismail3/tron/releases/download/server-v{version}/Tron.dmg"
             )),
             release_notes: Some(format!("Release {version}")),
             is_prerelease: prerelease,
@@ -639,7 +639,7 @@ mod tests {
         assert_eq!(persisted.latest_available_version.as_deref(), Some("0.6.0"));
         assert_eq!(
             persisted.latest_download_url.as_deref(),
-            Some("https://github.com/mhismail3/tron/releases/download/mac-v0.6.0/Tron.dmg")
+            Some("https://github.com/mhismail3/tron/releases/download/server-v0.6.0/Tron.dmg")
         );
         assert!(persisted.last_check_at.is_some());
     }

@@ -81,8 +81,8 @@ derive_version_fields() {
         TRON_DISPLAY_VERSION="${TRON_DISPLAY_VERSION} (Beta ${TRON_BETA_NUMBER})"
     fi
 
-    TRON_RELEASE_TAG="mac-v${TRON_VERSION}"
-    TRON_RELEASE_TITLE="Tron Mac ${TRON_DISPLAY_VERSION}"
+    TRON_RELEASE_TAG="server-v${TRON_VERSION}"
+    TRON_RELEASE_TITLE="Tron Server ${TRON_DISPLAY_VERSION}"
     TRON_DMG_NAME="Tron-mac-v${TRON_VERSION}.dmg"
     if [[ "$TRON_VERSION" == *-* ]]; then
         TRON_IS_PRERELEASE="true"
@@ -235,7 +235,7 @@ check_versions() {
         "$(value_after_key "$PROJECT_DIR/packages/mac-app/Sources/Info.plist" "TRONCanonicalVersion")" \
         '$(TRON_CANONICAL_VERSION)'
 
-    local drift_pattern='0\.5\.0|0\.5\.1|mac-v0\.5|1\.0\.0|mac-vX\.Y\.Z|vX\.Y\.Z'
+    local drift_pattern='0\.5\.0|0\.5\.1|(^|[^A-Za-z-])mac-v[0-9]|(^|[^A-Za-z-])mac-v\*|mac-vX\.Y\.Z|server-v0\.5|1\.0\.0|server-vX\.Y\.Z|vX\.Y\.Z'
     local drift_targets=(
         "$PROJECT_DIR/README.md"
         "$PROJECT_DIR/CONTRIBUTING.md"
@@ -304,11 +304,15 @@ bump_version() {
 }
 
 self_test() {
+    derive_version_fields
     local out
     out="$("$PROJECT_DIR/scripts/tron" version print)"
-    grep -qx 'TRON_VERSION=0.1.0-beta.1' <<<"$out" || die "print omitted canonical version"
-    grep -qx 'TRON_APPLE_MARKETING_VERSION=0.1.0' <<<"$out" || die "print omitted Apple marketing version"
-    grep -qx 'TRON_DISPLAY_VERSION=v0.1 (Beta 1)' <<<"$out" || die "print omitted display version"
+    grep -Fqx "TRON_VERSION=$TRON_VERSION" <<<"$out" || die "print omitted canonical version"
+    grep -Fqx "TRON_APPLE_MARKETING_VERSION=$TRON_APPLE_MARKETING_VERSION" <<<"$out" || die "print omitted Apple marketing version"
+    grep -Fqx "TRON_DISPLAY_VERSION=$TRON_DISPLAY_VERSION" <<<"$out" || die "print omitted display version"
+    grep -Fqx "TRON_RELEASE_TAG=$TRON_RELEASE_TAG" <<<"$out" || die "print omitted server release tag"
+    grep -Fqx "TRON_RELEASE_TITLE=$TRON_RELEASE_TITLE" <<<"$out" || die "print omitted server release title"
+    grep -Fqx "TRON_DMG_NAME=$TRON_DMG_NAME" <<<"$out" || die "print omitted platform DMG name"
     "$PROJECT_DIR/scripts/tron" version check >/dev/null
     "$PROJECT_DIR/scripts/tron" version sync --check >/dev/null
 

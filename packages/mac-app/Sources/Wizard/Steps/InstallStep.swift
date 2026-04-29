@@ -191,7 +191,11 @@ struct InstallStep: View {
             stages[.validateHelper] = .failed(helperProblem)
             return
         }
-        guard ExistingInstallDetector.launchAgentPlistIsCurrent(plistPath: setup.launchAgentPlistPath) else {
+        guard ExistingInstallDetector.launchAgentPlistIsCurrent(
+            plistPath: setup.launchAgentPlistPath,
+            label: setup.launchAgentLabel,
+            port: setup.serverPort
+        ) else {
             let message = "The bundled LaunchAgent plist is invalid. Reinstall Tron.app."
             state.installOutcome = .helperValidationFailed(message)
             stages[.validateHelper] = .failed(message)
@@ -205,7 +209,7 @@ struct InstallStep: View {
                 helperBundle: setup.serverHelperBundle,
                 helperBinary: setup.serverHelperBinary,
                 plistPath: setup.launchAgentPlistPath,
-                label: TronPaths.launchAgentLabel,
+                label: setup.launchAgentLabel,
                 port: setup.serverPort
             )
         )
@@ -222,6 +226,13 @@ struct InstallStep: View {
             return
         case .success(let value):
             plan = value
+        }
+
+        guard setup.canManageLaunchAgent else {
+            let message = "This Xcode Debug wrapper is in companion mode. Use /Applications/Tron.app for the production install, or run the isolated install-testing scheme."
+            stages[.registerAgent] = .failed(message)
+            state.installOutcome = .serviceRegistrationFailed(message)
+            return
         }
 
         // 3. Sync bundled managed skills into the user's mutable skill tree.
@@ -242,7 +253,7 @@ struct InstallStep: View {
         let outcome = await InstallLaunchAgentRunner.ensureLoaded(
             manager: setup.launchAgentManager,
             plistPath: plan.plistPath,
-            label: TronPaths.launchAgentLabel
+            label: setup.launchAgentLabel
         )
         switch outcome {
         case .ok, .alreadyLoaded:

@@ -189,8 +189,8 @@ Two release lanes:
 
 | What | How | Cadence |
 |---|---|---|
-| iOS Beta to TestFlight | Maintainer runs the `/publish` skill (`/publish bump && /publish build`). App ID `6761511764`. | On request, ad-hoc. |
-| Mac DMG to GitHub Releases | Tag `mac-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-mac.yml` builds + notarizes + attaches the DMG as a draft pre-release when the version has a beta suffix. | Ad-hoc. |
+| iOS Beta to TestFlight | Maintainer runs the `/publish` skill (`/publish bump && /publish build`). App ID `6761511764`. No GitHub release is cut unless an iOS artifact is intentionally published through GitHub. | On request, ad-hoc. |
+| Server DMG to GitHub Releases | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-mac.yml` builds + notarizes + attaches the macOS DMG as a draft `Tron Server ...` pre-release with generated changelog notes. | Ad-hoc. |
 
 Versioning sources:
 - **Source of truth** — root `VERSION.env`. `TRON_VERSION` is canonical
@@ -218,9 +218,10 @@ git tag "$(scripts/tron version print | awk -F= '$1 == "TRON_RELEASE_TAG" { prin
 git push && git push --tags
 
 # 4. The release-mac.yml workflow runs: build → codesign → app notarize/staple →
-#    DMG build/sign → DMG notarize/staple → GitHub Release draft. Verify the
-#    DMG artifact + SHA256 manifest on the draft release, then click Publish
-#    in the GitHub UI.
+#    DMG build/sign → DMG notarize/staple → changelog generation →
+#    GitHub Release draft. Verify the generated notes, DMG artifact, and SHA256
+#    manifest on the draft `Tron Server ...` release, then click Publish in the
+#    GitHub UI.
 
 # 5. To test the pipeline without cutting a real release, use
 #    Actions → Release (Mac DMG) → Run workflow with `dry_run=true`.
@@ -241,7 +242,7 @@ git push && git push --tags
 Rotate by regenerating the `.p12`, re-encoding (`base64 -i Tron.p12 | pbcopy`),
 and updating the secret in GitHub → Settings → Secrets and variables → Actions.
 
-**Rollback a bad Mac release**: `gh release delete mac-v0.1.0-beta.1` pulls the DMG.
+**Rollback a bad server release**: `gh release delete server-v0.1.0-beta.1` pulls the DMG.
 Existing installs are unaffected (they don't auto-pull deletions). Cut a fixed
 release at the next beta or patch version.
 

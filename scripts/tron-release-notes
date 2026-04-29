@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+# tron-release-notes - deterministic GitHub Release changelog generator.
+#
+# The GitHub release title/body describes the Tron Server release while
+# individual assets stay platform-specific (today: macOS DMG). The body is
+# generated from git history so a tagged release never ships with placeholder
+# notes.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+die() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'USAGE'
+Usage: tron-release-notes --tag TAG --title TITLE --version VERSION \
+  --display-version LABEL --asset PATH --sha256-file PATH --output PATH
+
+Options:
+  --apple-build N       Include the Apple build number when available
+  --previous-tag TAG    Override automatic previous server-v* tag detection
+  --repo-url URL        Override the GitHub repository URL used in compare links
+  --test                Run shell-level tests
+USAGE
+}
+
+TAG=""
+TITLE=""
+VERSION=""
+DISPLAY_VERSION=""
+APPLE_BUILD=""
+ASSET=""
+SHA256_FILE=""
+OUTPUT=""
+PREVIOUS_TAG=""
+REPO_URL=""
+
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --tag) TAG="${2:-}"; shift 2 ;;
+            --title) TITLE="${2:-}"; shift 2 ;;
+            --version) VERSION="${2:-}"; shift 2 ;;
+            --display-version) DISPLAY_VERSION="${2:-}"; shift 2 ;;
+            --apple-build) APPLE_BUILD="${2:-}"; shift 2 ;;
+            --asset) ASSET="${2:-}"; shift 2 ;;
+            --sha256-file) SHA256_FILE="${2:-}"; shift 2 ;;
+            --output) OUTPUT="${2:-}"; shift 2 ;;
+            --previous-tag) PREVIOUS_TAG="${2:-}"; shift 2 ;;
+            --repo-url) REPO_URL="${2:-}"; shift 2 ;;
+            -h|--help|help) usage; exit 0 ;;
+            --test) self_test; exit 0 ;;
+            *) die "unknown argument: $1" ;;
+        esac
+    done
+}
+
+require_inputs() {
+    [ -n "$TAG" ] || die "--tag is required"
+    [ -n "$TITLE" ] || die "--title is required"
+    [ -n "$VERSION" ] || die "--version is required"
+    [ -n "$DISPLAY_VERSION" ] || die "--display-version is required"
+    [ -n "$ASSET" ] || die "--asset is required"
+    [ -n "$SHA256_FILE" ] || die "--sha256-file is required"
+    [ -n "$OUTPUT" ] || die "--output is required"
+    [ -f "$SHA256_FILE" ] || die "missing SHA256 file: $SHA256_FILE"
+    git rev-parse --verify "$TAG^{commit}" >/dev/null 2>&1 || die "tag does not resolve to a commit: $TAG"
+}
+
+repository_url() {
+    if [ -n "$REPO_URL" ]; then
+        printf '%s\n' "${REPO_URL%/}"
+        return
+    fi
+    if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+        printf 'https://github.com/%s\n' "$GITHUB_REPOSITORY"
+        return
+    fi
+    local origin
+    origin="$(git config --get remote.origin.url || true)"
+    case "$origin" in
+        git@github.com:*)
+            origin="${origin#git@github.com:}"
+            printf 'https://github.com/%s\n' "${origin%.git}"
+            ;;
+        https://github.com/*)
+            printf '%s\n' "${origin%.git}"
+            ;;
+        *)
+            printf 'https://github.com/mhismail3/tron\n'
+            ;;
+    esac
+}
+
+find_previous_tag() {
+    if [ -n "$PREVIOUS_TAG" ]; then
+        git rev-parse --verify "$PREVIOUS_TAG^{commit}" >/dev/null 2>&1 || die "previous tag does not resolve to a commit: $PREVIOUS_TAG"
+        printf '%s\n' "$PREVIOUS_TAG"
+        return
+    fi
+
+    local candidate
+    while IFS= read -r candidate; do
+        [ "$candidate" = "$TAG" ] && continue
+        if git merge-base --is-ancestor "$candidate" "$TAG" 2>/dev/null; then
+            printf '%s\n' "$candidate"
+            return
+        fi
+    done < <(git tag --list 'server-v*' --sort=-v:refname)
+}
+
+emit_notes() {
+    local previous_tag="$1"
+    local repo_url="$2"
+    local asset_name
+    local sha256
+    local range_label
+    local compare_url
+    local commit_log
+
+    asset_name="$(basename "$ASSET")"
+    sha256="$(awk '{ print $1; exit }' "$SHA256_FILE")"
+    [ -n "$sha256" ] || die "SHA256 file is empty: $SHA256_FILE"
+
+    if [ -n "$previous_tag" ]; then
+        range_label="changes since \`$previous_tag\`"
+        compare_url="${repo_url}/compare/${previous_tag}...${TAG}"
+        commit_log="$(git log --first-parent --reverse --pretty=format:'- %s (%h)' "${previous_tag}..${TAG}")"
+    else
+        range_label="initial release history through \`$TAG\`"
+        compare_url="${repo_url}/commits/${TAG}"
+        commit_log="$(git log --first-parent --reverse --pretty=format:'- %s (%h)' "$TAG")"
+    fi
+
+    {
+        echo "# $TITLE"
+        echo ""
+        echo "## Release"
+        echo ""
+        echo "- Canonical version: \`$VERSION\`"
+        echo "- Display version: \`$DISPLAY_VERSION\`"
+        if [ -n "$APPLE_BUILD" ]; then
+            echo "- Apple build: \`$APPLE_BUILD\`"
+        fi
+        echo "- Git tag: \`$TAG\`"
+        echo "- macOS DMG: \`$asset_name\`"
+        echo "- SHA256: \`$sha256\`"
+        echo ""
+        echo "## Changelog"
+        echo ""
+        echo "Generated from first-parent git history for $range_label."
+        echo ""
+        if [ -n "$commit_log" ]; then
+            printf '%s\n' "$commit_log"
+        else
+            echo "_No commits found in this release range._"
+        fi
+        echo ""
+        echo "## Distribution Notes"
+        echo ""
+        echo "- This GitHub release groups server/runtime artifacts. The current asset is the macOS wrapper DMG that installs and manages Tron Server."
+        echo "- iOS builds are distributed through TestFlight/App Store Connect while sharing the same canonical version from \`VERSION.env\`."
+        echo "- Keep this release as a draft until the DMG has been downloaded, installed, launched, and paired successfully on a clean Mac."
+        echo ""
+        echo "## Full Changelog"
+        echo ""
+        echo "$compare_url"
+    } > "$OUTPUT"
+}
+
+self_test() {
+    local tmp script notes sha
+    script="$PROJECT_DIR/scripts/tron-release-notes"
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/tron-release-notes-test.XXXXXX")"
+    trap "rm -rf \"$tmp\"" EXIT
+
+    git -C "$tmp" init -q
+    git -C "$tmp" config user.email "release-notes-test@example.invalid"
+    git -C "$tmp" config user.name "Release Notes Test"
+
+    printf 'root\n' > "$tmp/file.txt"
+    git -C "$tmp" add file.txt
+    git -C "$tmp" commit -qm "Initial server release"
+    git -C "$tmp" tag server-v0.1.0-beta.1
+
+    printf 'next\n' >> "$tmp/file.txt"
+    git -C "$tmp" commit -am "Add install repair flow" -q
+    git -C "$tmp" tag server-v0.1.0-beta.2
+
+    sha="$tmp/Tron-mac-v0.1.0-beta.2.dmg.sha256"
+    echo "abcdef1234567890  Tron-mac-v0.1.0-beta.2.dmg" > "$sha"
+    notes="$tmp/notes.md"
+    (
+        cd "$tmp"
+        "$script" \
+            --tag server-v0.1.0-beta.2 \
+            --title "Tron Server v0.1 (Beta 2)" \
+            --version 0.1.0-beta.2 \
+            --display-version "v0.1 (Beta 2)" \
+            --apple-build 2 \
+            --asset "$tmp/Tron-mac-v0.1.0-beta.2.dmg" \
+            --sha256-file "$sha" \
+            --repo-url https://example.com/acme/tron \
+            --output "$notes"
+    )
+
+    grep -qx "# Tron Server v0.1 (Beta 2)" "$notes" || die "notes omitted release title"
+    grep -qx -- "- Git tag: \`server-v0.1.0-beta.2\`" "$notes" || die "notes omitted tag"
+    grep -qx -- "- SHA256: \`abcdef1234567890\`" "$notes" || die "notes omitted sha"
+    grep -q "changes since \`server-v0.1.0-beta.1\`" "$notes" || die "notes omitted previous range"
+    grep -q "Add install repair flow" "$notes" || die "notes omitted release commit"
+    grep -qx "https://example.com/acme/tron/compare/server-v0.1.0-beta.1...server-v0.1.0-beta.2" "$notes" || die "notes omitted compare URL"
+
+    (
+        cd "$tmp"
+        "$script" \
+            --tag server-v0.1.0-beta.1 \
+            --title "Tron Server v0.1 (Beta 1)" \
+            --version 0.1.0-beta.1 \
+            --display-version "v0.1 (Beta 1)" \
+            --asset "$tmp/Tron-mac-v0.1.0-beta.1.dmg" \
+            --sha256-file "$sha" \
+            --repo-url https://example.com/acme/tron \
+            --output "$notes" \
+            --previous-tag ""
+    )
+    grep -q "initial release history through \`server-v0.1.0-beta.1\`" "$notes" || die "first-release notes omitted initial range"
+    grep -qx "https://example.com/acme/tron/commits/server-v0.1.0-beta.1" "$notes" || die "first-release notes omitted commits URL"
+
+    rm -rf "$tmp"
+    trap - EXIT
+    echo "Release notes helper tests passed"
+}
+
+parse_args "$@"
+require_inputs
+emit_notes "$(find_previous_tag)" "$(repository_url)"

@@ -75,6 +75,24 @@ struct TronUninstallerTests {
         #expect(FileManager.default.fileExists(atPath: marker.path))
     }
 
+    @Test("debug companion cannot unregister production service")
+    func companionCannotUnregisterProductionService() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let manager = MockLaunchAgentManager()
+        var setup = makeSetup(tmp: tmp, manager: manager)
+        setup.canManageLaunchAgent = false
+
+        let outcome = await TronUninstaller.unregisterAndClean(setup: setup)
+
+        if case .launchdRefused(let message) = outcome {
+            #expect(message.contains("companion mode"))
+        } else {
+            Issue.record("companion uninstall should be refused")
+        }
+        #expect(manager.calls.isEmpty)
+    }
+
     private func makeSetup(tmp: URL, manager: MockLaunchAgentManager) -> EnvironmentSetup {
         let system = tmp.appendingPathComponent("system", isDirectory: true)
         let run = system.appendingPathComponent("run", isDirectory: true)
@@ -87,7 +105,10 @@ struct TronUninstallerTests {
             onboardedMarkerPath: run.appendingPathComponent(".onboarded", isDirectory: false),
             settingsPath: system.appendingPathComponent("settings.json", isDirectory: false),
             launchAgentPlistPath: tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist"),
+            launchAgentLabel: "com.tron.server",
             serverPort: 9847,
+            canManageLaunchAgent: true,
+            wrapperLockPath: run.appendingPathComponent(".mac-wrapper.com.tron.mac.lock"),
             onboardedSentinelExists: { false },
             readBearerToken: { nil },
             readTailscaleIPFromSettings: { nil },

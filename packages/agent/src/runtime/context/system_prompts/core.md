@@ -136,7 +136,7 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 | SETTINGS | `~/.tron/system/settings.json` | Server configuration |
 | AUTH | `~/.tron/system/auth.json` | API keys, OAuth tokens, and bearerToken |
 | VAULT | `~/.tron/workspace/vault/` | Encrypted credential store |
-| RUN | `~/.tron/system/run/` | Runtime state and local contributor artifacts: `auth.lock`, `.mac-wrapper.lock`, `.onboarded`, `updater-state.json`, optional `Tron-Dev.app` |
+| RUN | `~/.tron/system/run/` | Runtime state and local contributor artifacts: `auth.lock`, `.mac-wrapper.<bundle-id>.lock`, `.onboarded`, `updater-state.json`, optional `Tron-Dev.app` |
 | TRANSCRIPTION | `~/.tron/system/transcription/` | Speech-to-text sidecar: `worker.py`, `venv/`, `models/hf/` |
 
 **Workspace (your working area):**

@@ -291,7 +291,7 @@ Settings live at `~/.tron/system/settings.json`. All keys are camelCase. Missing
 | Path | Purpose |
 |------|---------|
 | `~/.tron/system/run/auth.lock` | Auth serialization lock |
-| `~/.tron/system/run/.mac-wrapper.lock` | Mac wrapper single-instance lock |
+| `~/.tron/system/run/.mac-wrapper.<bundle-id>.lock` | Per-wrapper Mac menu app lock |
 | `~/.tron/system/run/.onboarded` | First-run sentinel |
 | `~/.tron/system/run/updater-state.json` | Update-check scheduler state |
 | `~/.tron/system/database/log.db.lock` | SQLite process lock beside `log.db` |

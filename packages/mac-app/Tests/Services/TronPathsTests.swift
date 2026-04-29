@@ -14,16 +14,16 @@ struct TronPathsTests {
         #expect(TronPaths.defaultServerPort == 9847)
     }
 
-    @Test("bundle ID matches the LaunchAgent label")
+    @Test("helper bundle ID matches the production LaunchAgent label")
     func bundleIDMatches() {
         // The agent's CFBundleIdentifier MUST equal the LaunchAgent
-        // label so SMAppService registration and launchctl diagnostics
-        // always refer to the same service. Historical mismatch
+        // production label so SMAppService registration and launchctl diagnostics
+        // refer to the same production service. Historical mismatch
         // (bundleID="com.tron.agent", label="com.tron.server") caused
         // status checks to report the wrong service; the two unified
         // as `com.tron.server`.
         #expect(TronPaths.bundleID == "com.tron.server")
-        #expect(TronPaths.bundleID == TronPaths.launchAgentLabel)
+        #expect(TronPaths.bundleID == TronPaths.productionLaunchAgentLabel)
     }
 
     @Test("agent display name is 'Tron Server'")
@@ -81,7 +81,11 @@ struct TronPathsTests {
     func runtimeUninstallFilesShape() {
         #expect(TronPaths.updaterStatePath.path.hasSuffix("/system/run/updater-state.json"))
         #expect(TronPaths.authLockPath.path.hasSuffix("/system/run/auth.lock"))
-        #expect(TronPaths.macWrapperLockPath.path.hasSuffix("/system/run/.mac-wrapper.lock"))
+        #expect(TronPaths.macWrapperLockPath.path.contains("/system/run/.mac-wrapper."))
+        #expect(TronPaths.macWrapperLockPath.path.hasSuffix(".lock"))
+        #expect(TronPaths.macWrapperLockFileName(bundleIdentifier: "com.tron.mac") == ".mac-wrapper.com.tron.mac.lock")
+        #expect(TronPaths.macWrapperLockFileName(bundleIdentifier: "com.tron.mac.dev") == ".mac-wrapper.com.tron.mac.dev.lock")
+        #expect(TronPaths.macWrapperLockFileName(bundleIdentifier: "com/tron/mac") == ".mac-wrapper.com-tron-mac.lock")
     }
 
     @Test("settings.json lives in system/")

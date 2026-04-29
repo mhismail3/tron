@@ -93,6 +93,8 @@ jobs:
         run: ./scripts/tron version check
       - name: Run version helper tests
         run: ./scripts/tron version test
+      - name: Run release notes helper tests
+        run: ./scripts/tron-release-notes --test
 
   rust:
     name: Rust (fmt + clippy + test)
@@ -267,7 +269,7 @@ jobs:
       # on PR rather than on tag push. We skip notarization + release
       # publish (the forced dry-run mode) by running release-mac.yml's
       # shell steps inline against the debug-signed binary. A real
-      # signed DMG only happens on `mac-v*` tag pushes.
+      # signed DMG only happens on `server-v*` tag pushes.
       - name: Dry-run DMG assembly
         if: github.event_name == 'pull_request'
         run: |

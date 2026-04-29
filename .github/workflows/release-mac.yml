@@ -2,7 +2,7 @@
 #
 # Builds a signed, notarized, stapled DMG for `Tron.app` and attaches it to
 # a GitHub Release. Triggered by:
-#   - Tag push matching `mac-v*` (e.g. `mac-v0.1.0-beta.1`)
+#   - Tag push matching `server-v*` (e.g. `server-v0.1.0-beta.1`)
 #   - Manual `workflow_dispatch` dry-run. The version always comes from
 #     VERSION.env so manual runs cannot produce mismatched artifacts.
 #
@@ -22,7 +22,7 @@
 #      `dist/Tron-mac-v0.1.0-beta.1.dmg`.
 #   8. Notarize the signed DMG separately, then staple it. Notary tickets are
 #      artifact-specific; the stapled `.app` ticket does not apply to the DMG.
-#   9. Generate a SHA256 manifest next to the DMG.
+#   9. Generate a SHA256 manifest and deterministic changelog.
 #   10. Attach the DMG + manifest to a GitHub Release (draft by default —
 #      flipped live by a maintainer after verifying the assets).
 #
@@ -63,7 +63,7 @@
 #
 # ─── Rollback ───────────────────────────────────────────────────────────
 #
-# Bad release? `gh release delete mac-v0.1.0-beta.1` pulls the DMG. Existing
+# Bad release? `gh release delete server-v0.1.0-beta.1` pulls the DMG. Existing
 # installs are unaffected (they don't auto-pull deletions). Cut a fixed
 # release at the next beta or patch version.
 
@@ -72,7 +72,7 @@ name: Release (Mac DMG)
 on:
   push:
     tags:
-      - "mac-v*"
+      - "server-v*"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -119,12 +119,13 @@ jobs:
               TRON_RELEASE_TAG) tag="$value" ;;
               TRON_DMG_NAME) dmg_name="$value" ;;
               TRON_DISPLAY_VERSION) display_version="$value" ;;
+              TRON_APPLE_BUILD) apple_build="$value" ;;
               TRON_RELEASE_TITLE) release_title="$value" ;;
               TRON_IS_PRERELEASE) is_prerelease="$value" ;;
             esac
           done < <(./scripts/tron version print)
 
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == mac-v* ]]; then
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == server-v* ]]; then
             if [[ "${GITHUB_REF_NAME}" != "$tag" ]]; then
               echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION.env release tag $tag"
               exit 1
@@ -133,7 +134,7 @@ jobs:
           else
             mode="VERSION.env"
           fi
-          if [[ -z "${version:-}" || -z "${tag:-}" || -z "${dmg_name:-}" ]]; then
+          if [[ -z "${version:-}" || -z "${tag:-}" || -z "${dmg_name:-}" || -z "${display_version:-}" || -z "${apple_build:-}" || -z "${release_title:-}" || -z "${is_prerelease:-}" ]]; then
             echo "::error::could not resolve centralized version fields"
             exit 1
           fi
@@ -143,6 +144,7 @@ jobs:
             echo "tag=$tag"
             echo "dmg_name=$dmg_name"
             echo "display_version=$display_version"
+            echo "apple_build=$apple_build"
             echo "release_title=$release_title"
             echo "is_prerelease=$is_prerelease"
           } >> "$GITHUB_OUTPUT"
@@ -552,6 +554,29 @@ jobs:
             exit 1
           fi
 
+      - name: Generate release notes
+        id: notes
+        if: |
+          steps.drymode.outputs.dry_run != 'true' &&
+          github.event_name == 'push'
+        shell: bash
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          notes_path="$RUNNER_TEMP/tron-release-notes.md"
+          ./scripts/tron-release-notes \
+            --tag "${{ steps.ver.outputs.tag }}" \
+            --title "${{ steps.ver.outputs.release_title }}" \
+            --version "${{ steps.ver.outputs.version }}" \
+            --display-version "${{ steps.ver.outputs.display_version }}" \
+            --apple-build "${{ steps.ver.outputs.apple_build }}" \
+            --asset "${{ steps.dmg.outputs.dmg_path }}" \
+            --sha256-file "${{ steps.dmg.outputs.dmg_path }}.sha256" \
+            --output "$notes_path"
+          cat "$notes_path"
+          echo "path=$notes_path" >> "$GITHUB_OUTPUT"
+
       # ── Artifact upload (always) + Release publish (tag only) ─────
       - name: Upload DMG as workflow artifact
         uses: actions/upload-artifact@v4
@@ -580,15 +605,24 @@ jobs:
           TAG="${{ steps.ver.outputs.tag }}"
           DMG="${{ steps.dmg.outputs.dmg_path }}"
           SHA="${{ steps.dmg.outputs.dmg_path }}.sha256"
+          NOTES="${{ steps.notes.outputs.path }}"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
             echo "::notice::Release $TAG already exists — uploading assets with --clobber"
             gh release upload "$TAG" "$DMG" "$SHA" --clobber
+            if [[ "$is_draft" == "true" ]]; then
+              gh release edit "$TAG" \
+                --title "${{ steps.ver.outputs.release_title }}" \
+                --notes-file "$NOTES"
+            else
+              echo "::notice::Release $TAG is already published; leaving title and notes unchanged"
+            fi
           else
             args=(
               --draft
               --title "${{ steps.ver.outputs.release_title }}"
-              --notes "Automated draft release for ${{ steps.ver.outputs.display_version }}. Verify the DMG and SHA256 before publishing."
+              --notes-file "$NOTES"
             )
             if [[ "${{ steps.ver.outputs.is_prerelease }}" == "true" ]]; then
               args+=(--prerelease)

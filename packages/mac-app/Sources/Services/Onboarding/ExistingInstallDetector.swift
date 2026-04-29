@@ -98,16 +98,22 @@ enum ExistingInstallDetector {
         ).locationProblem
     }
 
-    static func launchAgentPlistIsCurrent(plistPath: URL = TronPaths.launchAgentPlistPath) -> Bool {
+    static func launchAgentPlistIsCurrent(
+        plistPath: URL = TronPaths.launchAgentPlistPath,
+        label: String = TronPaths.launchAgentLabel,
+        port: Int = TronPaths.defaultServerPort
+    ) -> Bool {
         guard let data = try? Data(contentsOf: plistPath),
               let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let plistLabel = plist["Label"] as? String,
               let bundleProgram = plist["BundleProgram"] as? String,
               let args = plist["ProgramArguments"] as? [String],
               let associatedBundleIDs = plist["AssociatedBundleIdentifiers"] as? [String] else {
             return false
         }
-        return bundleProgram == "Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
-            && args == ["tron", "--port", "9847", "--quiet"]
+        return plistLabel == label
+            && bundleProgram == "Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+            && args == ["tron", "--port", "\(port)", "--quiet"]
             && associatedBundleIDs == TronPaths.associatedWrapperBundleIDs
     }
 

@@ -351,7 +351,7 @@ struct WizardShell<Content: View>: View {
                     guard permissionsCanContinue else { return }
                     if !state.permissionsServerRestarted {
                         state.permissionsRestartInProgress = true
-                        _ = await setup.launchAgentManager.restart(label: TronPaths.launchAgentLabel)
+                        _ = await setup.launchAgentManager.restart(label: setup.launchAgentLabel)
                         state.permissionsServerRestarted = true
                         state.permissionsRestartInProgress = false
                     }

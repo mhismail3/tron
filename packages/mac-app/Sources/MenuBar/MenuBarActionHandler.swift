@@ -114,12 +114,13 @@ final class MenuBarActionHandler {
     // MARK: - Actions
 
     func restartServer() async {
+        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Restart blocked") else { return }
         applyBusy(.restarting)
         guard await syncManagedSkillsForServerStart(action: "restart") else {
             await refreshStatus()
             return
         }
-        let outcome = await setup.launchAgentManager.restart(label: TronPaths.launchAgentLabel)
+        let outcome = await setup.launchAgentManager.restart(label: setup.launchAgentLabel)
         await refreshStatus()
         switch outcome {
         case .ok, .alreadyLoaded:
@@ -140,8 +141,9 @@ final class MenuBarActionHandler {
     }
 
     func pauseServer() async {
+        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Pause blocked") else { return }
         applyBusy(.pausing)
-        let outcome = await setup.launchAgentManager.unload(label: TronPaths.launchAgentLabel)
+        let outcome = await setup.launchAgentManager.unload(label: setup.launchAgentLabel)
         await refreshStatus()
         switch outcome {
         case .ok, .alreadyLoaded:
@@ -161,6 +163,7 @@ final class MenuBarActionHandler {
     }
 
     func resumeServer() async {
+        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Resume blocked") else { return }
         applyBusy(.resuming)
         guard await syncManagedSkillsForServerStart(action: "resume") else {
             await refreshStatus()
@@ -168,7 +171,7 @@ final class MenuBarActionHandler {
         }
         let outcome = await setup.launchAgentManager.load(
             plistPath: setup.launchAgentPlistPath,
-            label: TronPaths.launchAgentLabel
+            label: setup.launchAgentLabel
         )
         await refreshStatus()
         switch outcome {
@@ -196,14 +199,13 @@ final class MenuBarActionHandler {
 
         switch await setup.stopDevServer(port) {
         case .stopped:
-            guard await syncManagedSkillsForServerStart(action: "resume") else {
-                await refreshStatus()
-                return
+            if setup.canManageLaunchAgent {
+                guard await syncManagedSkillsForServerStart(action: "resume") else {
+                    await refreshStatus()
+                    return
+                }
             }
-            let outcome = await setup.launchAgentManager.load(
-                plistPath: setup.launchAgentPlistPath,
-                label: TronPaths.launchAgentLabel
-            )
+            let outcome = await resumeServerAfterDevStop()
             await refreshStatus()
             switch outcome {
             case .ok, .alreadyLoaded:
@@ -288,6 +290,7 @@ final class MenuBarActionHandler {
     }
 
     func confirmAndUninstall() async {
+        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Uninstall blocked") else { return }
         let alert = NSAlert()
         alert.messageText = "Uninstall Tron?"
         alert.informativeText = """
@@ -406,6 +409,44 @@ final class MenuBarActionHandler {
         // and the user explicitly invoked this action, so a brief modal is
         // expected UX (mirrors System Settings deep-link confirms).
         _ = alert.runModal()
+    }
+
+    private func ensureLaunchAgentManagementAllowed(actionTitle: String) async -> Bool {
+        guard setup.canManageLaunchAgent else {
+            let message = "This Xcode wrapper is running in companion mode. Use the installed Tron.app for server install, pause, restart, and uninstall actions, or use the isolated install scheme for reinstall testing."
+            await MenuBarNotifier.post(title: actionTitle, body: message)
+            await presentNonBlockingError(title: actionTitle, message: message)
+            return false
+        }
+        return true
+    }
+
+    private func resumeServerAfterDevStop() async -> LaunchAgentOutcome {
+        if setup.canManageLaunchAgent {
+            return await setup.launchAgentManager.load(
+                plistPath: setup.launchAgentPlistPath,
+                label: setup.launchAgentLabel
+            )
+        }
+
+        let executable = TronPaths.releaseApplicationURL
+            .appendingPathComponent("Contents/MacOS", isDirectory: true)
+            .appendingPathComponent("Tron", isDirectory: false)
+        guard FileManager.default.fileExists(atPath: executable.path) else {
+            return .launchdRefused(
+                message: "The installed Tron.app is required to resume the production server after stopping dev mode."
+            )
+        }
+        let result = await Subprocess.run(
+            executable: executable,
+            arguments: ["--tron-start-server-and-quit"]
+        )
+        guard result.exitCode == 0 else {
+            return .launchdRefused(
+                message: result.stderr.isEmpty ? result.stdout : result.stderr
+            )
+        }
+        return .ok
     }
 
 }

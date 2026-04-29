@@ -4,13 +4,31 @@ import Foundation
 /// with. Mirrors `packages/agent/src/core/foundation/paths.rs` exports
 /// for user data and the macOS bundle layout for app-owned artifacts.
 enum TronPaths {
+    static let tronDataDirEnv = "TRON_DATA_DIR"
+    static let tronHomeNameEnv = "TRON_HOME_NAME"
+    static let isolatedInstallModeEnv = "TRON_MAC_INSTALL_MODE"
+    static let isolatedInstallModeValue = "isolated"
+    static let productionLaunchAgentLabel = "com.tron.server"
+    static let isolatedLaunchAgentLabel = "com.tron.server.dev"
+    static let productionServerPort = 9847
+    static let isolatedServerPort = 9848
+
     static let homeDirectory: URL = {
         FileManager.default.homeDirectoryForCurrentUser
     }()
 
     static let tronHome: URL = {
-        if let override = ProcessInfo.processInfo.environment["TRON_DATA_DIR"], !override.isEmpty {
+        let environment = ProcessInfo.processInfo.environment
+        if let override = environment[tronDataDirEnv], !override.isEmpty {
+            precondition(override.hasPrefix("/"), "\(tronDataDirEnv) must be an absolute path")
             return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        if let homeName = environment[tronHomeNameEnv], !homeName.isEmpty {
+            precondition(validHomeName(homeName), "\(tronHomeNameEnv) must be a single home-relative directory name")
+            return homeDirectory.appendingPathComponent(homeName, isDirectory: true)
+        }
+        if isIsolatedInstallMode(environment: environment) {
+            return homeDirectory.appendingPathComponent(".tron-dev", isDirectory: true)
         }
         return homeDirectory.appendingPathComponent(".tron", isDirectory: true)
     }()
@@ -56,7 +74,7 @@ enum TronPaths {
     }
 
     static var macWrapperLockPath: URL {
-        runDir.appendingPathComponent(".mac-wrapper.lock", isDirectory: false)
+        runDir.appendingPathComponent(macWrapperLockFileName(bundleIdentifier: Bundle.main.bundleIdentifier), isDirectory: false)
     }
 
     static var settingsPath: URL {
@@ -93,14 +111,24 @@ enum TronPaths {
             .appendingPathComponent("com.tron.auto-deploy.plist", isDirectory: false)
     }
 
-    static let launchAgentLabel = "com.tron.server"
-    static let defaultServerPort = 9847
+    static var launchAgentLabel: String {
+        isIsolatedInstallMode() ? isolatedLaunchAgentLabel : productionLaunchAgentLabel
+    }
+
+    static var defaultServerPort: Int {
+        return isIsolatedInstallMode() ? isolatedServerPort : productionServerPort
+    }
+
+    static var canManageLaunchAgent: Bool {
+        MacRuntimeVariant.detect().canManageLaunchAgent(isIsolatedInstallMode: isIsolatedInstallMode())
+    }
     /// Bundle identifier for the embedded server helper
     /// (`Contents/Library/LoginItems/Tron Server.app`), not the
-    /// menu-bar wrapper. Intentionally matches `launchAgentLabel` so
-    /// launchd diagnostics and helper signature checks name the same
-    /// service. The menu-bar wrapper's own bundle id lives in its
-    /// Info.plist (`com.tron.mac` / `com.tron.mac.dev`).
+    /// menu-bar wrapper. Intentionally matches the production
+    /// LaunchAgent label so launchd diagnostics and helper signature
+    /// checks name the same service. The isolated install-test label is
+    /// `com.tron.server.dev`; it reuses the same signed helper bundle
+    /// but runs under a separate LaunchAgent plist.
     static let bundleID = "com.tron.server"
     /// User-facing display name for the agent in System Settings, Activity
     /// Monitor, and the Dock (if it ever surfaced). Kept separate from the
@@ -115,4 +143,27 @@ enum TronPaths {
         MacRuntimeVariant.releaseBundleIdentifier,
         MacRuntimeVariant.debugBundleIdentifier,
     ]
+
+    static func isIsolatedInstallMode(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        environment[isolatedInstallModeEnv] == isolatedInstallModeValue
+    }
+
+    static func macWrapperLockFileName(bundleIdentifier: String?) -> String {
+        let rawIdentifier = bundleIdentifier?.isEmpty == false ? bundleIdentifier! : "unknown"
+        let safeIdentifier = rawIdentifier.unicodeScalars.map { scalar -> Character in
+            if CharacterSet.alphanumerics.contains(scalar)
+                || scalar == UnicodeScalar(".")
+                || scalar == UnicodeScalar("-") {
+                return Character(scalar)
+            }
+            return "-"
+        }
+        return ".mac-wrapper.\(String(safeIdentifier)).lock"
+    }
+
+    private static func validHomeName(_ value: String) -> Bool {
+        value != "." && value != ".." && !value.contains("/")
+    }
 }

@@ -25,7 +25,7 @@ enum AppConstants {
     private static let githubRepoOwner = "mh" + "is" + "mail" + "3"
 
     /// GitHub Releases page where the user downloads the Mac DMG.
-    /// Phase 6 (`.github/workflows/release-mac.yml`) ships `mac-v*` tags
+    /// Phase 6 (`.github/workflows/release-mac.yml`) ships `server-v*` tags
     /// here. The URL stays stable across releases — the page lists every
     /// asset including dSYM and SHA-256.
     static let dmgDownloadPage: URL = URL(string: "https://github.com/\(githubRepoOwner)/tron/releases")!

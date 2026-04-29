@@ -218,19 +218,34 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         let service = SMAppService.agent(plistName: "\(label).plist")
         let status = ExistingInstallDetector.serviceStatus(label: label)
         let currentVariant = MacRuntimeVariant.detect()
-        let runningParent = await runtimeInfo(label: label)?.parentBundleIdentifier
+        let runtime = await runtimeInfo(label: label)
+        let runningParent = runtime?.parentBundleIdentifier
+        let shouldReplaceStaleRuntime = Self.runtimeRequiresReplacement(
+            runtimeInfo: runtime,
+            expectedHelperPath: TronPaths.serverHelperBinary.path
+        )
 
         if let outcome = Self.preRegistrationOutcome(
             for: status,
             currentVariant: currentVariant,
-            runningParentBundleIdentifier: runningParent
+            runtimeInfo: runtime,
+            runningParentBundleIdentifier: runningParent,
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent,
+            expectedHelperPath: TronPaths.serverHelperBinary.path
         ) {
             return outcome
+        }
+        if shouldReplaceStaleRuntime {
+            _ = await Subprocess.run(
+                executable: URL(fileURLWithPath: "/bin/launchctl"),
+                arguments: ["bootout", "gui/\(currentUID())/\(label)"]
+            )
         }
         if Self.shouldBootoutForTakeover(
             status: status,
             currentVariant: currentVariant,
-            runningParentBundleIdentifier: runningParent
+            runningParentBundleIdentifier: runningParent,
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent
         ) {
             _ = await Subprocess.run(
                 executable: URL(fileURLWithPath: "/bin/launchctl"),
@@ -248,7 +263,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             return .launchdRefused(message: "Another Tron server is already running on port \(TronPaths.defaultServerPort). Stop it before installing Tron Server.")
         }
 
-        if status == .enabled, runningParent == nil {
+        if status == .enabled, runningParent == nil || shouldReplaceStaleRuntime {
             do {
                 try await service.unregister()
             } catch {
@@ -281,13 +296,32 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     static func preRegistrationOutcome(
         for status: ExistingInstallDetector.ServiceRegistrationStatus,
         currentVariant: MacRuntimeVariant = MacRuntimeVariant.detect(),
-        runningParentBundleIdentifier: String? = nil
+        runtimeInfo: LaunchAgentRuntimeInfo? = nil,
+        runningParentBundleIdentifier: String? = nil,
+        canManageLaunchAgent: Bool = true,
+        expectedHelperPath: String = TronPaths.serverHelperBinary.path
     ) -> LaunchAgentOutcome? {
         switch status {
         case .requiresApproval:
             return .requiresApproval(message: "Approve Tron Server in Login Items to finish installation.")
         case .enabled, .notRegistered, .notFound, .unknown:
-            guard let runningParentBundleIdentifier else {
+            let runtimeIsStale = runtimeRequiresReplacement(runtimeInfo: runtimeInfo, expectedHelperPath: expectedHelperPath)
+            let resolvedParent = runtimeInfo?.parentBundleIdentifier ?? runningParentBundleIdentifier
+
+            if !canManageLaunchAgent {
+                if runtimeIsStale || resolvedParent == nil {
+                    return .launchdRefused(
+                        message: "This Xcode Debug wrapper is in companion mode and cannot install or repair the production Tron Server. Use /Applications/Tron.app, or run the isolated install-testing scheme."
+                    )
+                }
+                return .alreadyLoaded
+            }
+
+            if runtimeIsStale {
+                return nil
+            }
+
+            guard let resolvedParent else {
                 // SMAppService can report an enabled Login Item even
                 // when launchd has no loaded job for the label, e.g. a
                 // stale DerivedData Debug registration. Do not treat
@@ -295,14 +329,15 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 // the current app bundle is the source of truth.
                 return nil
             }
-            if runningParentBundleIdentifier == currentVariant.expectedParentBundleIdentifier {
+
+            if resolvedParent == currentVariant.expectedParentBundleIdentifier {
                 return .alreadyLoaded
             }
-            if currentVariant.precedence > MacRuntimeVariant.precedence(forParentBundleIdentifier: runningParentBundleIdentifier) {
+            if currentVariant.precedence > MacRuntimeVariant.precedence(forParentBundleIdentifier: resolvedParent) {
                 return nil
             }
             return .launchdRefused(
-                message: "Tron Server is currently managed by \(runningParentBundleIdentifier). Stop that build before installing this one."
+                message: "Tron Server is currently managed by \(resolvedParent). Stop that build before installing this one."
             )
         }
     }
@@ -310,9 +345,11 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     static func shouldBootoutForTakeover(
         status: ExistingInstallDetector.ServiceRegistrationStatus,
         currentVariant: MacRuntimeVariant,
-        runningParentBundleIdentifier: String?
+        runningParentBundleIdentifier: String?,
+        canManageLaunchAgent: Bool = true
     ) -> Bool {
-        guard status != .requiresApproval,
+        guard canManageLaunchAgent,
+              status != .requiresApproval,
               let runningParentBundleIdentifier,
               runningParentBundleIdentifier != currentVariant.expectedParentBundleIdentifier else {
             return false
@@ -332,6 +369,23 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             return false
         }
         return portBound || databaseLockHeld
+    }
+
+    static func runtimeRequiresReplacement(
+        runtimeInfo: LaunchAgentRuntimeInfo?,
+        expectedHelperPath: String,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> Bool {
+        guard let runtimeInfo,
+              runtimeInfo.pid == nil,
+              let executablePath = runtimeInfo.executablePath,
+              !executablePath.isEmpty else {
+            return false
+        }
+
+        let expected = URL(fileURLWithPath: expectedHelperPath).standardizedFileURL.path
+        let actual = URL(fileURLWithPath: executablePath).standardizedFileURL.path
+        return actual != expected || !fileExists(actual)
     }
 
     func unload(label: String) async -> LaunchAgentOutcome {
@@ -398,7 +452,8 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 named: "parent bundle identifier",
                 from: result.stdout
             ),
-            programIdentifier: parseLaunchctlValue(named: "program identifier", from: result.stdout)
+            programIdentifier: parseLaunchctlValue(named: "program identifier", from: result.stdout),
+            executablePath: parseLaunchctlDictionaryValue(named: "Executable", from: result.stdout)
         )
     }
 
@@ -418,6 +473,19 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard trimmed.hasPrefix(prefix) else { continue }
             let value = trimmed.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+            return value.isEmpty ? nil : value
+        }
+        return nil
+    }
+
+    private func parseLaunchctlDictionaryValue(named key: String, from launchctlOutput: String) -> String? {
+        let prefix = "\"\(key)\" => \""
+        for line in launchctlOutput.split(whereSeparator: \.isNewline) {
+            let text = String(line)
+            guard let range = text.range(of: prefix) else { continue }
+            let remainder = text[range.upperBound...]
+            guard let end = remainder.firstIndex(of: "\"") else { continue }
+            let value = String(remainder[..<end])
             return value.isEmpty ? nil : value
         }
         return nil

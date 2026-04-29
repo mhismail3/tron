@@ -46,7 +46,7 @@ enum MenuBarItemBuilder {
         var items: [MenuItemDescriptor] = []
 
         let controlsEnabled = !snapshot.state.isBusy
-        let serviceControlsEnabled = controlsEnabled && !snapshot.isDevServerActive
+        let serviceControlsEnabled = controlsEnabled && !snapshot.isDevServerActive && paths.canManageLaunchAgent
 
         items.append(.header(headerContent(snapshot: snapshot, paths: paths)))
         items.append(.separator)
@@ -82,7 +82,7 @@ enum MenuBarItemBuilder {
         items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, handler: { @MainActor in
             NotificationCenter.default.post(name: .tronMenuBarRestartServer, object: nil)
         }))
-        items.append(.action(title: "Uninstall Tron", isEnabled: !snapshot.isDevServerActive, handler: { @MainActor in
+        items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, handler: { @MainActor in
             NotificationCenter.default.post(name: .tronMenuBarUninstall, object: nil)
         }))
         items.append(.quit(title: "Quit Tron"))

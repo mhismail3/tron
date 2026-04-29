@@ -1,10 +1,13 @@
 import Foundation
 
-/// The wrapper has three supported operating modes:
-/// - Debug/Xcode (`com.tron.mac.dev`), allowed from DerivedData or a local build path.
+/// The wrapper has four supported operating modes:
+/// - Debug/Xcode (`com.tron.mac.dev`) companion mode, allowed from DerivedData and
+///   meant to observe/control UI while the installed app owns production server registration.
+/// - Debug/Xcode isolated install mode, opt-in via `TRON_MAC_INSTALL_MODE=isolated`
+///   for testing first-run/reinstall flows against a separate label, port, and data tree.
 /// - Installed release (`com.tron.mac` at `/Applications/Tron.app`), used by both
 ///   a real DMG install and a local Release build copied into Applications.
-/// - Unsupported/misplaced release builds, which must fail loudly before register.
+/// - Unsupported/misplaced release builds, which must fail loudly before registration.
 enum MacRuntimeVariant: Equatable, Sendable {
     case xcodeDebug(bundlePath: String)
     case installedRelease
@@ -46,7 +49,7 @@ enum MacRuntimeVariant: Equatable, Sendable {
     var precedence: Int {
         switch self {
         case .xcodeDebug:
-            return 3
+            return 2
         case .installedRelease:
             return 2
         case .misplacedRelease, .unsupported:
@@ -68,14 +71,23 @@ enum MacRuntimeVariant: Equatable, Sendable {
 
     static func precedence(forParentBundleIdentifier bundleIdentifier: String?) -> Int {
         switch bundleIdentifier {
-        case debugBundleIdentifier:
-            return 3
-        case releaseBundleIdentifier:
+        case debugBundleIdentifier, releaseBundleIdentifier:
             return 2
         case .some:
             return 1
         case nil:
             return 0
+        }
+    }
+
+    func canManageLaunchAgent(isIsolatedInstallMode: Bool) -> Bool {
+        switch self {
+        case .installedRelease:
+            return true
+        case .xcodeDebug:
+            return isIsolatedInstallMode
+        case .misplacedRelease, .unsupported:
+            return false
         }
     }
 }

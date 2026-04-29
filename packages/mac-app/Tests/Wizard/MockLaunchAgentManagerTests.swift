@@ -77,21 +77,23 @@ struct MockLaunchAgentManagerTests {
         )
     }
 
-    @Test("debug wrapper may take over installed release service")
-    func debugWrapperMayTakeOverReleaseService() {
+    @Test("debug companion treats an installed release service as already loaded")
+    func debugCompanionWrapsReleaseService() {
         let variant = MacRuntimeVariant.xcodeDebug(bundlePath: "/tmp/Debug/Tron.app")
         #expect(
             LiveLaunchAgentManager.preRegistrationOutcome(
                 for: .notRegistered,
                 currentVariant: variant,
-                runningParentBundleIdentifier: "com.tron.mac"
-            ) == nil
+                runningParentBundleIdentifier: "com.tron.mac",
+                canManageLaunchAgent: false
+            ) == .alreadyLoaded
         )
         #expect(
-            LiveLaunchAgentManager.shouldBootoutForTakeover(
+            !LiveLaunchAgentManager.shouldBootoutForTakeover(
                 status: .notRegistered,
                 currentVariant: variant,
-                runningParentBundleIdentifier: "com.tron.mac"
+                runningParentBundleIdentifier: "com.tron.mac",
+                canManageLaunchAgent: false
             )
         )
     }
@@ -112,6 +114,51 @@ struct MockLaunchAgentManagerTests {
                 runningParentBundleIdentifier: "com.tron.mac.dev"
             )
         )
+    }
+
+    @Test("stale missing runtime is repaired by a manager build")
+    func staleRuntimeIsRepairedByManagerBuild() {
+        let runtime = LaunchAgentRuntimeInfo(
+            pid: nil,
+            parentBundleIdentifier: "com.tron.mac.dev",
+            executablePath: "/tmp/DerivedData/Deleted.app/Contents/MacOS/tron"
+        )
+        #expect(
+            LiveLaunchAgentManager.runtimeRequiresReplacement(
+                runtimeInfo: runtime,
+                expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron",
+                fileExists: { _ in false }
+            )
+        )
+        #expect(
+            LiveLaunchAgentManager.preRegistrationOutcome(
+                for: .enabled,
+                currentVariant: .installedRelease,
+                runtimeInfo: runtime,
+                expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+            ) == nil
+        )
+    }
+
+    @Test("debug companion cannot repair stale production registration")
+    func debugCompanionCannotRepairProductionRegistration() {
+        let runtime = LaunchAgentRuntimeInfo(
+            pid: nil,
+            parentBundleIdentifier: "com.tron.mac.dev",
+            executablePath: "/tmp/DerivedData/Deleted.app/Contents/MacOS/tron"
+        )
+        let outcome = LiveLaunchAgentManager.preRegistrationOutcome(
+            for: .enabled,
+            currentVariant: .xcodeDebug(bundlePath: "/tmp/Debug/TronMac.app"),
+            runtimeInfo: runtime,
+            canManageLaunchAgent: false,
+            expectedHelperPath: "/tmp/Debug/TronMac.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+        )
+        if case .launchdRefused(let message) = outcome {
+            #expect(message.contains("companion mode"))
+        } else {
+            Issue.record("debug companion should refuse stale production repair")
+        }
     }
 
     @Test("external direct server blocks registration")

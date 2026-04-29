@@ -21,6 +21,6 @@ struct VersionDisplayTests {
 
     @Test("scoped tag display is accepted")
     func scopedTagDisplay() {
-        #expect(VersionDisplay.label(for: "mac-v0.2.0-beta.3") == "v0.2 (Beta 3)")
+        #expect(VersionDisplay.label(for: "server-v0.2.0-beta.3") == "v0.2 (Beta 3)")
     }
 }

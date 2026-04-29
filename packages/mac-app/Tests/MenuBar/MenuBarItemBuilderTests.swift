@@ -7,7 +7,11 @@ struct MenuBarItemBuilderTests {
     /// Returns a synthetic EnvironmentSetup pointing at a throwaway tmp
     /// directory. We only consume `serverPort` and `tronHome` from the
     /// builder, so all the closures can be stub `{ _ in nil }`.
-    static func makeSetup(in tmp: URL, port: Int = 9847) -> EnvironmentSetup {
+    static func makeSetup(
+        in tmp: URL,
+        port: Int = 9847,
+        canManageLaunchAgent: Bool = true
+    ) -> EnvironmentSetup {
         EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp.appendingPathComponent("Tron.app"),
@@ -17,7 +21,10 @@ struct MenuBarItemBuilderTests {
             onboardedMarkerPath: tmp.appendingPathComponent("run/.onboarded"),
             settingsPath: tmp.appendingPathComponent("settings.json"),
             launchAgentPlistPath: tmp.appendingPathComponent("com.tron.server.plist"),
+            launchAgentLabel: "com.tron.server",
             serverPort: port,
+            canManageLaunchAgent: canManageLaunchAgent,
+            wrapperLockPath: tmp.appendingPathComponent("run/.mac-wrapper.com.tron.mac.lock"),
             onboardedSentinelExists: { false },
             readBearerToken: { nil },
             readTailscaleIPFromSettings: { nil },
@@ -240,6 +247,22 @@ struct MenuBarItemBuilderTests {
             "—",
             "Show Developer Options",
         ])
+    }
+
+    @Test("debug companion disables production LaunchAgent controls")
+    func companionDisablesProductionControls() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp, canManageLaunchAgent: false)
+        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
+        let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
+
+        for item in items {
+            if case .action(let title, let isEnabled, _) = item,
+               ["Pause server", "Restart server", "Uninstall Tron"].contains(title) {
+                #expect(!isEnabled, "\(title) should be disabled in companion mode")
+            }
+        }
     }
 
     @Test("developer options are collapsed by default at the bottom")

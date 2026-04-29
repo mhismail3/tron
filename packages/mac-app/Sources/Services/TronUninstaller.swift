@@ -16,7 +16,12 @@ enum TronUninstaller {
         setup: EnvironmentSetup,
         options: Options = .preserveUserData
     ) async -> LaunchAgentOutcome {
-        let outcome = await setup.launchAgentManager.unload(label: TronPaths.launchAgentLabel)
+        guard setup.canManageLaunchAgent else {
+            return .launchdRefused(
+                message: "This Xcode Debug wrapper is in companion mode and cannot uninstall the production Tron Server."
+            )
+        }
+        let outcome = await setup.launchAgentManager.unload(label: setup.launchAgentLabel)
         guard outcome.isSuccessfulUninstall else {
             return outcome
         }
@@ -44,7 +49,7 @@ enum TronUninstaller {
             setup.onboardedMarkerPath,
             runDir.appendingPathComponent("updater-state.json", isDirectory: false),
             runDir.appendingPathComponent("auth.lock", isDirectory: false),
-            runDir.appendingPathComponent(".mac-wrapper.lock", isDirectory: false),
+            setup.wrapperLockPath,
         ]
     }
 }
