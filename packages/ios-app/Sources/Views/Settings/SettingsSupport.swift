@@ -82,6 +82,13 @@ enum MainSettingsListLayout {
     static let categorySpacing: CGFloat = 8
 }
 
+enum MainSettingsFooterLayout {
+    static let horizontalPadding: CGFloat = 20
+    static let textLeadingPadding: CGFloat = 8
+    static let topPadding: CGFloat = 10
+    static let bottomPadding: CGFloat = 10
+}
+
 struct BuiltinHookInfo: Equatable, Identifiable, Sendable {
     let id: String
     let label: String

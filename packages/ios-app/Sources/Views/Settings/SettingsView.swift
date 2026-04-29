@@ -71,8 +71,9 @@ struct SettingsView: View {
                 .cardEntrance(visible: cardsVisible, index: 0)
             dangerZoneCard
                 .cardEntrance(visible: cardsVisible, index: 1)
-            footerView
-                .cardEntrance(visible: cardsVisible, index: 2)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            pinnedFooterView
         }
         #if DEBUG || BETA
         .sheet(isPresented: $showLogViewer) {
@@ -476,13 +477,21 @@ struct SettingsView: View {
         }
     }
 
+    private var pinnedFooterView: some View {
+        footerView
+            .padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)
+            .padding(.top, MainSettingsFooterLayout.topPadding)
+            .padding(.bottom, MainSettingsFooterLayout.bottomPadding)
+            .cardEntrance(visible: cardsVisible, index: 2)
+    }
+
     private var footerView: some View {
         HStack(alignment: .center, spacing: 12) {
             footerText
             Spacer(minLength: 12)
             feedbackFooterButton
         }
-        .padding(.top, 16)
+        .frame(maxWidth: .infinity)
     }
 
     private var footerText: some View {
@@ -492,7 +501,7 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .lineLimit(1)
             .minimumScaleFactor(0.92)
-            .padding(.leading, 8)
+            .padding(.leading, MainSettingsFooterLayout.textLeadingPadding)
     }
 
     private var feedbackFooterButton: some View {
