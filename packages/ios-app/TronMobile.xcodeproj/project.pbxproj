@@ -628,7 +628,6 @@
 		BE14596152E3CE6BAB68CC07 /* ProviderInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD5C91E7AAA586FB919432A7 /* ProviderInfo.swift */; };
 		BE18FB4573C7040136A27766 /* ChatSheetContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23BAFE526BBB04BE9DF43E92 /* ChatSheetContent.swift */; };
 		BE4EAC4C20BA7126DD0CAED2 /* ModelClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CACCE43ACD5950824F4E40C0 /* ModelClientTests.swift */; };
-		BED1DD8CD791C08547A7DE0A /* AddApiKeyForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39D99EBFB6FD9B428C02E5AA /* AddApiKeyForm.swift */; };
 		BF364C2C63D745D901379478 /* ProvidersSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1766887FF62266447575270B /* ProvidersSettingsPage.swift */; };
 		BF42DD0709FA150C1963684B /* View+Accessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA715AADCFEE5E7FC2F9E0B /* View+Accessibility.swift */; };
 		BF70EFC1F265BF52CB973CFC /* RPCTypes+Reconstruct.swift in Sources */ = {isa = PBXBuildFile; fileRef = 658C6845E870DB3CFF798DB0 /* RPCTypes+Reconstruct.swift */; };
@@ -794,6 +793,7 @@
 		ECBB40661FD1D4894EC7AA30 /* AuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABC4D8415F891AA6E1D9BFF6 /* AuthClient.swift */; };
 		ED0A6AB3EBFD528E7E044977 /* PromptHistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FB19369A52E8FB5F224718A /* PromptHistoryListView.swift */; };
 		ED208B0DC1AC47E2ED6C56E1 /* SubagentEventFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D46621337C6C107BF33474BD /* SubagentEventFormatter.swift */; };
+		ED578A9FDC1FCE890E0421C6 /* ProviderApiKeyAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9C54BA9728C3C1FFA992375 /* ProviderApiKeyAlert.swift */; };
 		ED8BA0615A7A2176C243E084 /* ChatViewModelFindMessageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4399074B1EA0E047BA57077 /* ChatViewModelFindMessageTests.swift */; };
 		EDD1E63AD8B4C85206FB80A8 /* WriteToolDetailSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272CFD5FF021F314737B8249 /* WriteToolDetailSheetTests.swift */; };
 		EE6AF3EC6356EEF2D20145E9 /* ErrorHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7450E3BB7E98F9D547C4CBB6 /* ErrorHandler.swift */; };
@@ -1078,7 +1078,6 @@
 		393AD46FAE358E76760BB9D0 /* JobBackgroundedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobBackgroundedPlugin.swift; sourceTree = "<group>"; };
 		393C89DB821923F90B216AFE /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		39A5A64462586B615B431492 /* RPCDomainClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCDomainClient.swift; sourceTree = "<group>"; };
-		39D99EBFB6FD9B428C02E5AA /* AddApiKeyForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddApiKeyForm.swift; sourceTree = "<group>"; };
 		3A26519A8458DB5FAB4229CC /* ProvidersStatusHelpersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersStatusHelpersTests.swift; sourceTree = "<group>"; };
 		3ACFA2E1D7E2775277E8E1C4 /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Fonts; path = Sources/Resources/Fonts; sourceTree = SOURCE_ROOT; };
 		3B223ED62D974D65D6BE578B /* MemorySectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemorySectionTests.swift; sourceTree = "<group>"; };
@@ -1601,6 +1600,7 @@
 		D87057AD1E2CD2A9641CD4EF /* ReadToolDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadToolDetailSheet.swift; sourceTree = "<group>"; };
 		D8CAAD30176960052D589E37 /* ForkButtonTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForkButtonTests.swift; sourceTree = "<group>"; };
 		D993D7E0FB114273142BEA70 /* StreamSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSheetView.swift; sourceTree = "<group>"; };
+		D9C54BA9728C3C1FFA992375 /* ProviderApiKeyAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderApiKeyAlert.swift; sourceTree = "<group>"; };
 		D9C61CC4EF13C0488F2EBD3C /* DisplayFramePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayFramePlugin.swift; sourceTree = "<group>"; };
 		DA8FDCC64B0601587EB34331 /* DraftStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftStore.swift; sourceTree = "<group>"; };
 		DAB63A06F10DECB64865B025 /* SineWaveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SineWaveView.swift; sourceTree = "<group>"; };
@@ -2315,9 +2315,9 @@
 		5F551FC6AFDE3B673F125267 /* ModelProviders */ = {
 			isa = PBXGroup;
 			children = (
-				39D99EBFB6FD9B428C02E5AA /* AddApiKeyForm.swift */,
 				149661EBE1315B91F970FB61 /* GoogleCloudRows.swift */,
 				29A1A128621BEC68283D71CF /* ModelProviderSection.swift */,
+				D9C54BA9728C3C1FFA992375 /* ProviderApiKeyAlert.swift */,
 				EF830BFBE8F4F9BB271C80E2 /* ProviderAuthActionResult.swift */,
 				A96433DEBC39B73C3FBA9D29 /* ProviderCredentialRow.swift */,
 				DC6A716874598F1F237E68B0 /* ProviderCredentialRowItem.swift */,
@@ -3945,7 +3945,6 @@
 				A950E54356B7A1FE57F1592A /* APNsEnvironment.swift in Sources */,
 				7127CD7F5CB602A8E4D1E18D /* ActionButtons.swift in Sources */,
 				60BD069F485C8701BE6D627B /* ActivityLine.swift in Sources */,
-				BED1DD8CD791C08547A7DE0A /* AddApiKeyForm.swift in Sources */,
 				986B1FC75FD5F6A90F5C7376 /* AgentClient.swift in Sources */,
 				3F8D7A923D0785D4217D6732 /* AgentClientProtocol.swift in Sources */,
 				BDE1BFDD6DB202EEF1614671 /* AgentControlCards.swift in Sources */,
@@ -4270,6 +4269,7 @@
 				CFB4087B4F8737F90DA88AE8 /* PromptSnippetListView.swift in Sources */,
 				2A4D4BB877E25110A250A7ED /* PromptSnippetRow.swift in Sources */,
 				D87A2FDE217076C80382BF8F /* ProtocolConstants.swift in Sources */,
+				ED578A9FDC1FCE890E0421C6 /* ProviderApiKeyAlert.swift in Sources */,
 				B0E2155F1D4CA6DC0895710D /* ProviderAuthActionResult.swift in Sources */,
 				BD209F7463A2C3EC8C8EDBAE /* ProviderCredentialRow.swift in Sources */,
 				4EDEC7AE84E0B9C276B231A3 /* ProviderCredentialRowItem.swift in Sources */,

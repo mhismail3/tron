@@ -6,11 +6,12 @@ struct ProviderServiceCard: View {
     let onSave: (AuthUpdateParams) async -> ProviderAuthActionResult
     let onClear: () async -> ProviderAuthActionResult
 
-    @State private var apiKey = ""
-    @State private var isSaving = false
+    @State private var showAddApiKeyPrompt = false
 
     private var isConfigured: Bool { serviceAuth?.hasApiKey == true }
-    private var canSave: Bool { !apiKey.isEmpty && !isSaving }
+    private var apiKeyPromptScope: ProviderApiKeyPromptScope {
+        .service(id: service.id, displayName: service.displayName)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -18,7 +19,7 @@ struct ProviderServiceCard: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 statusCard
-                actionCard
+                serviceActionButtons
             }
         }
     }
@@ -60,36 +61,15 @@ struct ProviderServiceCard: View {
         }
     }
 
-    private var actionCard: some View {
-        SettingsCard {
-            keyEntryRow
+    private var serviceActionButtons: some View {
+        ProviderAuthActionButtons(
+            items: [.addApiKey],
+            isDisabled: { _ in false },
+            onSelect: { _ in showAddApiKeyPrompt = true }
+        )
+        .providerApiKeyAlert(isPresented: $showAddApiKeyPrompt, scope: apiKeyPromptScope) { draft in
+            await onSave(AuthUpdateParams(service: service.id, apiKey: .value(draft.apiKey)))
         }
-    }
-
-    private var keyEntryRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "key.horizontal")
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 18)
-            SecureField("API Key", text: $apiKey)
-                .font(TronTypography.codeCaption)
-                .textContentType(.password)
-                .autocorrectionDisabled()
-
-            Button {
-                save()
-            } label: {
-                Text("Save")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-            }
-            .disabled(!canSave)
-            .buttonStyle(.borderedProminent)
-            .tint(canSave ? .tronEmerald : .tronTextMuted.opacity(0.25))
-            .opacity(canSave ? 1 : 0.55)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
     }
 }
 
@@ -114,18 +94,5 @@ private struct ProviderServiceSectionHeader: View {
             Spacer()
         }
         .padding(.bottom, 8)
-    }
-}
-
-private extension ProviderServiceCard {
-    private func save() {
-        guard !apiKey.isEmpty else { return }
-        isSaving = true
-        Task { @MainActor in
-            let result = await onSave(AuthUpdateParams(service: service.id, apiKey: .value(apiKey)))
-            isSaving = false
-            guard result.shouldCommitLocalFormChanges else { return }
-            apiKey = ""
-        }
     }
 }

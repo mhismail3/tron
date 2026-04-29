@@ -99,15 +99,15 @@ struct ProvidersSettingsPageTests {
         #expect(Set(apiKeyOnly) == ["minimax", "kimi"])
     }
 
-    @Test("provider section containers separate status actions and Google Cloud details")
-    func providerSectionContainersSeparateStatusActionsAndDetails() {
+    @Test("provider section containers exclude auth action buttons")
+    func providerSectionContainersExcludeAuthActionButtons() {
         let anthropic = ProviderInfo.modelProviders.first { $0.id == "anthropic" }!
         let google = ProviderInfo.modelProviders.first { $0.id == "google" }!
         let minimax = ProviderInfo.modelProviders.first { $0.id == "minimax" }!
 
-        #expect(ProviderSettingsContainer.containers(for: anthropic) == [.status, .actions])
-        #expect(ProviderSettingsContainer.containers(for: google) == [.status, .actions, .googleCloud])
-        #expect(ProviderSettingsContainer.containers(for: minimax) == [.status, .actions])
+        #expect(ProviderSettingsContainer.containers(for: anthropic) == [.status])
+        #expect(ProviderSettingsContainer.containers(for: google) == [.status, .googleCloud])
+        #expect(ProviderSettingsContainer.containers(for: minimax) == [.status])
     }
 
     @Test("provider auth actions match OAuth capability")
@@ -119,6 +119,11 @@ struct ProvidersSettingsPageTests {
         #expect(ProviderAuthActionItem.items(for: minimax) == [.addApiKey])
         #expect(ProviderAuthActionItem.oauthLogin.title == "OAuth Login")
         #expect(ProviderAuthActionItem.addApiKey.title == "Add API Key")
+    }
+
+    @Test("provider auth action buttons are leading aligned")
+    func providerAuthActionButtonsAreLeadingAligned() {
+        #expect(ProviderAuthActionButtonsLayout.alignment == .leading)
     }
 
     @Test("service system icon dispatches by id")

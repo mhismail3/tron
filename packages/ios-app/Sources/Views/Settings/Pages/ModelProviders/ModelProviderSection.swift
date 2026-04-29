@@ -11,7 +11,7 @@ struct ModelProviderSection: View {
     let onSaveProvider: (AuthUpdateParams) async -> ProviderAuthActionResult
     let onClear: () async -> ProviderAuthActionResult
 
-    @State private var showAddApiKey = false
+    @State private var showAddApiKeyPrompt = false
 
     private var isConfigured: Bool {
         ProviderStatusHelpers.isProviderConfigured(providerAuth)
@@ -34,6 +34,9 @@ struct ModelProviderSection: View {
     private var oauthLoginDisabled: Bool {
         provider.supportsOAuth && ProviderStatusHelpers.hasRefreshableOAuth(providerAuth)
     }
+    private var apiKeyPromptScope: ProviderApiKeyPromptScope {
+        .provider(id: provider.id, displayName: provider.displayName)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,11 +44,12 @@ struct ModelProviderSection: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 providerStatusCard
-                providerActionsCard
 
                 if ProviderSettingsContainer.containers(for: provider).contains(.googleCloud) {
                     googleCloudCard
                 }
+
+                providerActionButtons
             }
         }
     }
@@ -65,35 +69,6 @@ struct ModelProviderSection: View {
         }
     }
 
-    private var providerActionsCard: some View {
-        SettingsCard {
-            ForEach(Array(actionItems.enumerated()), id: \.element.id) { index, item in
-                actionRow(item)
-                if index < actionItems.count - 1 || (item == .addApiKey && showAddApiKey) {
-                    SettingsRowDivider()
-                }
-            }
-
-            if showAddApiKey {
-                AddApiKeyForm(
-                    onAdd: { label, key in
-                        let result = await onAddApiKey(label, key)
-                        guard result.shouldCommitLocalFormChanges else { return result }
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            showAddApiKey = false
-                        }
-                        return result
-                    },
-                    onCancel: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            showAddApiKey = false
-                        }
-                    }
-                )
-            }
-        }
-    }
-
     private var googleCloudCard: some View {
         SettingsCard {
             GoogleCloudRows(
@@ -101,6 +76,24 @@ struct ModelProviderSection: View {
                 onSave: { params in await onSaveProvider(params) },
                 onClear: { await onClear() }
             )
+        }
+    }
+
+    private var providerActionButtons: some View {
+        ProviderAuthActionButtons(
+            items: actionItems,
+            isDisabled: { item in item == .oauthLogin && oauthLoginDisabled },
+            onSelect: { item in
+                switch item {
+                case .oauthLogin:
+                    onOAuthLogin()
+                case .addApiKey:
+                    showAddApiKeyPrompt = true
+                }
+            }
+        )
+        .providerApiKeyAlert(isPresented: $showAddApiKeyPrompt, scope: apiKeyPromptScope) { draft in
+            await onAddApiKey(draft.saveLabel(for: apiKeyPromptScope), draft.apiKey)
         }
     }
 
@@ -155,42 +148,6 @@ struct ModelProviderSection: View {
         }
     }
 
-    private func actionRow(_ item: ProviderAuthActionItem) -> some View {
-        let disabled = item == .oauthLogin && oauthLoginDisabled
-        let title = item == .addApiKey && showAddApiKey ? "Hide API Key" : item.title
-        let icon = item == .addApiKey && showAddApiKey ? "chevron.up" : item.icon
-
-        return HStack {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 18)
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronTextPrimary)
-            Spacer()
-            Image(systemName: item == .addApiKey && showAddApiKey ? "chevron.up" : "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(item.accessibilityLabel)
-        .opacity(disabled ? 0.5 : 1.0)
-        .onTapGesture {
-            guard !disabled else { return }
-            switch item {
-            case .oauthLogin:
-                onOAuthLogin()
-            case .addApiKey:
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    showAddApiKey.toggle()
-                }
-            }
-        }
-    }
 }
 
 struct ProviderSectionHeader: View {
@@ -215,6 +172,62 @@ struct ProviderSectionHeader: View {
             Spacer()
         }
         .padding(.bottom, 8)
+    }
+}
+
+struct ProviderAuthActionButtons: View {
+    let items: [ProviderAuthActionItem]
+    let isDisabled: (ProviderAuthActionItem) -> Bool
+    let onSelect: (ProviderAuthActionItem) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(items) { item in
+                let disabled = isDisabled(item)
+
+                Button {
+                    guard !disabled else { return }
+                    onSelect(item)
+                } label: {
+                    ProviderAuthActionButtonLabel(item: item, isDisabled: disabled)
+                }
+                .buttonStyle(.plain)
+                .disabled(disabled)
+                .accessibilityLabel(item.accessibilityLabel)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
+        .padding(.bottom, 4)
+    }
+}
+
+private struct ProviderAuthActionButtonLabel: View {
+    let item: ProviderAuthActionItem
+    let isDisabled: Bool
+
+    private var foreground: Color {
+        isDisabled ? .tronTextMuted : .tronEmerald
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: item.icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+            Text(item.title)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+        }
+        .foregroundStyle(foreground)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(foreground.opacity(isDisabled ? 0.06 : 0.12), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(foreground.opacity(isDisabled ? 0.12 : 0.2), lineWidth: 1)
+        }
+        .contentShape(Capsule())
+        .opacity(isDisabled ? 0.55 : 1)
     }
 }
 

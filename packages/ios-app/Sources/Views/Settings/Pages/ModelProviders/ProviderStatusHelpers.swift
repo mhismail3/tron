@@ -2,11 +2,10 @@ import SwiftUI
 
 enum ProviderSettingsContainer: Equatable, Sendable {
     case status
-    case actions
     case googleCloud
 
     static func containers(for provider: ProviderInfo) -> [Self] {
-        provider.id == "google" ? [.status, .actions, .googleCloud] : [.status, .actions]
+        provider.id == "google" ? [.status, .googleCloud] : [.status]
     }
 }
 
@@ -52,6 +51,68 @@ enum ProviderCredentialStatusAction {
     static let title = "Clear"
     static let confirmationTitle = "Clear credential?"
     static let confirmationButtonTitle = "Clear"
+}
+
+enum ProviderAuthActionButtonsAlignment: Equatable, Sendable {
+    case leading
+}
+
+enum ProviderAuthActionButtonsLayout {
+    static let alignment = ProviderAuthActionButtonsAlignment.leading
+}
+
+enum ProviderApiKeyPromptPresentation: Equatable, Sendable {
+    case nativeAlert
+}
+
+enum ProviderApiKeyPrompt {
+    static let presentation = ProviderApiKeyPromptPresentation.nativeAlert
+    static let labelPlaceholder = "Label"
+    static let keyPlaceholder = "API Key"
+    static let cancelButtonTitle = "Cancel"
+    static let saveButtonTitle = "Save"
+}
+
+enum ProviderApiKeyPromptScope: Equatable, Sendable {
+    case provider(id: String, displayName: String)
+    case service(id: String, displayName: String)
+
+    var title: String {
+        "Add \(displayName) API Key"
+    }
+
+    var displayName: String {
+        switch self {
+        case .provider(_, let displayName), .service(_, let displayName):
+            return displayName
+        }
+    }
+
+    var showsLabelField: Bool {
+        switch self {
+        case .provider:
+            return true
+        case .service:
+            return false
+        }
+    }
+}
+
+struct ProviderApiKeyPromptDraft: Equatable, Sendable {
+    var label = ""
+    var apiKey = ""
+
+    func isValid(for scope: ProviderApiKeyPromptScope) -> Bool {
+        !apiKey.isEmpty && (!scope.showsLabelField || !trimmedLabel.isEmpty)
+    }
+
+    func saveLabel(for scope: ProviderApiKeyPromptScope) -> String {
+        scope.showsLabelField ? trimmedLabel : ""
+    }
+
+    private var trimmedLabel: String {
+        ProviderStatusHelpers.trimmedLabel(label)
+    }
 }
 
 enum ProviderCredentialClearPillStyle {
@@ -124,10 +185,6 @@ enum ProviderStatusHelpers {
 
     static func isServiceConfigured(_ info: ServiceAuthInfo?) -> Bool {
         info?.hasApiKey == true
-    }
-
-    static func isApiKeyFormValid(label: String, key: String) -> Bool {
-        !trimmedLabel(label).isEmpty && !key.isEmpty
     }
 
     static func trimmedLabel(_ label: String) -> String {

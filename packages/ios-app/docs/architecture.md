@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-04-28 (settings revamp: local paired servers, server-owned settings, provider status/action cards, summary cards, and onboarding handoff)
+> Last verified: 2026-04-28 (settings revamp: local paired servers, server-owned settings, provider status cards, native credential alerts, summary cards, and onboarding handoff)
 
 ## Overview
 

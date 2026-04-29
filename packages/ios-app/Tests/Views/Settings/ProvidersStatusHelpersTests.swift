@@ -95,6 +95,39 @@ struct ProviderStatusHelpersTests {
         #expect(ProviderCredentialClearPillStyle.backgroundOpacity == 0.12)
     }
 
+    @Test("API key prompt uses native alert presentation")
+    func apiKeyPromptUsesNativeAlertPresentation() {
+        #expect(ProviderApiKeyPrompt.presentation == .nativeAlert)
+        #expect(ProviderApiKeyPrompt.labelPlaceholder == "Label")
+        #expect(ProviderApiKeyPrompt.keyPlaceholder == "API Key")
+        #expect(ProviderApiKeyPrompt.cancelButtonTitle == "Cancel")
+        #expect(ProviderApiKeyPrompt.saveButtonTitle == "Save")
+    }
+
+    @Test("API key prompt scopes require labels only for model providers")
+    func apiKeyPromptScopesRequireLabelsOnlyForModelProviders() {
+        let providerScope = ProviderApiKeyPromptScope.provider(id: "anthropic", displayName: "Anthropic")
+        let serviceScope = ProviderApiKeyPromptScope.service(id: "brave", displayName: "Brave Search")
+
+        #expect(providerScope.title == "Add Anthropic API Key")
+        #expect(providerScope.showsLabelField)
+        #expect(serviceScope.title == "Add Brave Search API Key")
+        #expect(!serviceScope.showsLabelField)
+    }
+
+    @Test("API key prompt drafts validate trimmed provider labels and service keys")
+    func apiKeyPromptDraftsValidateByScope() {
+        let providerScope = ProviderApiKeyPromptScope.provider(id: "anthropic", displayName: "Anthropic")
+        let serviceScope = ProviderApiKeyPromptScope.service(id: "brave", displayName: "Brave Search")
+
+        #expect(!ProviderApiKeyPromptDraft(label: "  ", apiKey: "sk-test").isValid(for: providerScope))
+        #expect(!ProviderApiKeyPromptDraft(label: "work", apiKey: "").isValid(for: providerScope))
+        #expect(ProviderApiKeyPromptDraft(label: " work ", apiKey: "sk-test").isValid(for: providerScope))
+        #expect(ProviderApiKeyPromptDraft(label: "", apiKey: "BSA0-test").isValid(for: serviceScope))
+        #expect(ProviderApiKeyPromptDraft(label: "ignored", apiKey: "BSA0-test").saveLabel(for: serviceScope) == "")
+        #expect(ProviderApiKeyPromptDraft(label: " work ", apiKey: "sk-test").saveLabel(for: providerScope) == "work")
+    }
+
     // MARK: - isProviderConfigured
 
     @Test("isProviderConfigured returns false for nil")
@@ -209,28 +242,6 @@ struct ProviderStatusHelpersTests {
         #expect(ProviderStatusHelpers.isServiceConfigured(configured))
         #expect(!ProviderStatusHelpers.isServiceConfigured(empty))
         #expect(!ProviderStatusHelpers.isServiceConfigured(nil))
-    }
-
-    // MARK: - isApiKeyFormValid
-
-    @Test("isApiKeyFormValid false for empty label")
-    func isApiKeyFormValidEmptyLabel() {
-        #expect(ProviderStatusHelpers.isApiKeyFormValid(label: "", key: "sk-abc") == false)
-    }
-
-    @Test("isApiKeyFormValid false for whitespace-only label")
-    func isApiKeyFormValidWhitespaceLabel() {
-        #expect(ProviderStatusHelpers.isApiKeyFormValid(label: "   ", key: "sk-abc") == false)
-    }
-
-    @Test("isApiKeyFormValid false for empty key")
-    func isApiKeyFormValidEmptyKey() {
-        #expect(ProviderStatusHelpers.isApiKeyFormValid(label: "work", key: "") == false)
-    }
-
-    @Test("isApiKeyFormValid true when both are present")
-    func isApiKeyFormValidBothPresent() {
-        #expect(ProviderStatusHelpers.isApiKeyFormValid(label: "work", key: "sk-abc") == true)
     }
 
     // MARK: - trimmedLabel
