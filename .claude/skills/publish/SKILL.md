@@ -39,8 +39,10 @@ Use GitHub Actions for beta uploads whenever possible. A `server-v*` tag starts
 4. Archives the `Tron` scheme with the `Prod` configuration.
 5. Exports an App Store Connect IPA with `xcodebuild -exportArchive`.
 6. Uploads with `asc builds upload`.
-7. Waits for processing, verifies the internal TestFlight group has access to
-   all builds, and assigns the build to the public external TestFlight group.
+7. Waits for processing, resolves export compliance, updates What to Test notes,
+   submits/waits for TestFlight beta review when external testing requires it,
+   verifies the internal TestFlight group has access to all builds, and assigns
+   the build to the public external TestFlight group.
 
 CI exports with local App Store signing when these GitHub secrets are present:
 `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`,
@@ -51,6 +53,9 @@ automatic-local export with the installed `.p12` and profiles. If the local
 signing secrets are absent, CI falls back to automatic Xcode cloud signing
 through `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_P8_BASE64`; that path
 requires Apple to allow the API key/account to manage App Store signing assets.
+The app and share extension declare `ITSAppUsesNonExemptEncryption=false`; if
+that release assertion changes, update the Info.plists and the release workflow
+before uploading the next TestFlight build.
 
 Manual `/publish build` is a local fallback for interactive diagnosis or
 one-off uploads. It requires an installed Apple Distribution identity and App
@@ -227,13 +232,15 @@ scripts/tron version print
 
 ```bash
 # Submit for external beta review
-asc testflight submissions create --app 6761511764 --build "<build_number>"
+asc testflight review submit --build "<build_id>" --confirm
 
 # Submit for App Store review
 asc appstore submissions create --app 6761511764
 ```
 
-The first external TestFlight build triggers Apple review (~24-48 hours). Subsequent builds to the same group typically skip re-review.
+The CI release path handles TestFlight beta review when a build reaches
+`READY_FOR_BETA_SUBMISSION`. A local `/publish submit` should be a diagnostic
+fallback only. CI does not submit to App Store review.
 
 ## Entitlements Files
 

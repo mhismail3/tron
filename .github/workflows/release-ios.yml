@@ -24,9 +24,11 @@
 # Real releases archive the Prod app, export with Apple's app-store-connect
 # method, then upload with `asc builds upload`. Exports use explicit manual
 # signing when the optional iOS signing secrets are configured; otherwise they
-# fall back to Xcode cloud signing through the ASC API key. Dry-runs still create
-# an unsigned IPA from the archive to validate package layout without requiring
-# Apple signing credentials.
+# fall back to Xcode cloud signing through the ASC API key. The app declares
+# `ITSAppUsesNonExemptEncryption=false`; CI also patches reused builds that were
+# uploaded before that key existed so idempotent reruns can still distribute.
+# Dry-runs still create an unsigned IPA from the archive to validate package
+# layout without requiring Apple signing credentials.
 
 name: Release (iOS TestFlight)
 
@@ -490,7 +492,10 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = "$IOS_BUNDLE_ID"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "${{ steps.ver.outputs.marketing_version }}"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" = "${{ steps.ver.outputs.apple_build }}"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$plist")" = "false"
           test "$(/usr/libexec/PlistBuddy -c 'Print :TRONCanonicalVersion' "$plist")" = "${{ steps.ver.outputs.version }}"
+          appex_plist="$app_path/PlugIns/TronShareExtension.appex/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$appex_plist")" = "false"
 
       - name: Upload archive dSYMs
         if: steps.drymode.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
@@ -615,6 +620,8 @@ jobs:
           test -d "$appex_payload" || { echo "::error::exported IPA missing TronShareExtension.appex"; exit 1; }
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_payload/Info.plist")" = "$IOS_BUNDLE_ID"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$appex_payload/Info.plist")" = "$IOS_SHARE_EXTENSION_BUNDLE_ID"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$app_payload/Info.plist")" = "false"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$appex_payload/Info.plist")" = "false"
           /usr/bin/codesign --verify --strict "$appex_payload"
           /usr/bin/codesign --verify --deep --strict "$app_payload"
 
@@ -684,6 +691,274 @@ jobs:
             --fail-on-invalid \
             --output json \
             --pretty
+
+      - name: Resolve processed ASC build
+        id: asc_build
+        if: steps.drymode.outputs.dry_run != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_json="$RUNNER_TEMP/processed-build.json"
+          asc builds list \
+            --app "$ASC_APP_ID" \
+            --version "${{ steps.ver.outputs.marketing_version }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --limit 10 \
+            --output json > "$build_json"
+          build_id="$(jq -r '(.data // []) | if type == "array" then .[0].id // empty else .id // empty end' "$build_json")"
+          test -n "$build_id" || { echo "::error::could not resolve processed ASC build id"; exit 1; }
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+          echo "::notice::resolved ASC build ${{ steps.ver.outputs.apple_build }} as $build_id"
+
+      - name: Resolve export compliance
+        id: export_compliance
+        if: steps.drymode.outputs.dry_run != 'true'
+        shell: bash
+        env:
+          BUILD_ID: ${{ steps.asc_build.outputs.build_id }}
+        run: |
+          set -euo pipefail
+
+          detail_json="$RUNNER_TEMP/build-beta-detail.json"
+          fetch_detail() {
+            asc testflight beta-details get \
+              --build "$BUILD_ID" \
+              --output json > "$detail_json"
+            internal_state="$(
+              jq -r '(.data // []) | if type == "array" then .[0].attributes.internalBuildState // empty else .attributes.internalBuildState // empty end' "$detail_json"
+            )"
+            external_state="$(
+              jq -r '(.data // []) | if type == "array" then .[0].attributes.externalBuildState // empty else .attributes.externalBuildState // empty end' "$detail_json"
+            )"
+            if [[ -z "$internal_state" || -z "$external_state" ]]; then
+              echo "::error::could not read TestFlight build beta detail for $BUILD_ID"
+              cat "$detail_json"
+              exit 1
+            fi
+          }
+
+          fetch_detail
+          echo "::notice::TestFlight states before export-compliance check: internal=$internal_state external=$external_state"
+          if [[ "$internal_state" != "MISSING_EXPORT_COMPLIANCE" && "$external_state" != "MISSING_EXPORT_COMPLIANCE" ]]; then
+            {
+              echo "internal_state=$internal_state"
+              echo "external_state=$external_state"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::notice::ASC build $BUILD_ID is missing export compliance; setting usesNonExemptEncryption=false"
+          token="$(./scripts/asc-jwt \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer-id "$APPLE_API_ISSUER_ID" \
+            --key-path "$APPLE_API_KEY_PATH")"
+          request_body="$RUNNER_TEMP/build-export-compliance.json"
+          response_body="$RUNNER_TEMP/build-export-compliance-response.json"
+          jq -n --arg id "$BUILD_ID" '{
+            data: {
+              type: "builds",
+              id: $id,
+              attributes: {
+                usesNonExemptEncryption: false
+              }
+            }
+          }' > "$request_body"
+          http_code="$(
+            curl -sS \
+              -o "$response_body" \
+              -w "%{http_code}" \
+              -X PATCH \
+              -H "Authorization: Bearer $token" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              --data-binary "@$request_body" \
+              "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID"
+          )"
+          if [[ "$http_code" != 2* ]]; then
+            cat "$response_body"
+            echo "::error::failed to set usesNonExemptEncryption=false for ASC build $BUILD_ID (HTTP $http_code)"
+            exit 1
+          fi
+
+          for _ in {1..20}; do
+            fetch_detail
+            echo "::notice::TestFlight states after export-compliance update: internal=$internal_state external=$external_state"
+            if [[ "$internal_state" != "MISSING_EXPORT_COMPLIANCE" && "$external_state" != "MISSING_EXPORT_COMPLIANCE" ]]; then
+              {
+                echo "internal_state=$internal_state"
+                echo "external_state=$external_state"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "::error::ASC build $BUILD_ID is still missing export compliance after setting usesNonExemptEncryption=false"
+          exit 1
+
+      - name: Update TestFlight notes
+        if: steps.drymode.outputs.dry_run != 'true'
+        shell: bash
+        env:
+          BUILD_ID: ${{ steps.asc_build.outputs.build_id }}
+        run: |
+          set -euo pipefail
+          notes="Tron ${{ steps.ver.outputs.display_version }} (${{ steps.ver.outputs.version }}), Apple build ${{ steps.ver.outputs.apple_build }}."
+          notes_error="$RUNNER_TEMP/testflight-notes-error.log"
+          if asc builds test-notes update \
+              --build "$BUILD_ID" \
+              --locale en-US \
+              --whats-new "$notes" \
+              --output json \
+              --pretty 2> "$notes_error"; then
+            exit 0
+          fi
+          if asc builds test-notes create \
+              --build "$BUILD_ID" \
+              --locale en-US \
+              --whats-new "$notes" \
+              --output json \
+              --pretty 2> "$notes_error"; then
+            exit 0
+          fi
+          if asc beta-build-localizations create \
+              --build "$BUILD_ID" \
+              --locale en-US \
+              --whats-new "$notes" \
+              --output json \
+              --pretty 2> "$notes_error"; then
+            exit 0
+          fi
+          cat "$notes_error"
+          echo "::error::failed to create or update TestFlight What to Test notes"
+          exit 1
+
+      - name: Submit TestFlight beta review when required
+        if: steps.drymode.outputs.dry_run != 'true'
+        shell: bash
+        env:
+          BUILD_ID: ${{ steps.asc_build.outputs.build_id }}
+        run: |
+          set -euo pipefail
+
+          detail_json="$RUNNER_TEMP/beta-review-detail.json"
+          submissions_json="$RUNNER_TEMP/beta-review-submissions.json"
+
+          fetch_external_state() {
+            asc testflight beta-details get \
+              --build "$BUILD_ID" \
+              --output json > "$detail_json"
+            external_state="$(
+              jq -r '(.data // []) | if type == "array" then .[0].attributes.externalBuildState // empty else .attributes.externalBuildState // empty end' "$detail_json"
+            )"
+            test -n "$external_state" || { echo "::error::could not read external TestFlight state"; cat "$detail_json"; exit 1; }
+          }
+
+          fetch_review_state() {
+            if asc testflight review submissions list \
+                --build "$BUILD_ID" \
+                --output json > "$submissions_json"; then
+              review_state="$(
+                jq -r '(.data // []) | sort_by(.attributes.submittedDate // "") | last | .attributes.betaReviewState // empty' "$submissions_json"
+              )"
+            else
+              review_state=""
+            fi
+          }
+
+          submit_beta_review() {
+            if asc testflight review submit \
+                --build "$BUILD_ID" \
+                --confirm \
+                --output json \
+                --pretty; then
+              return 0
+            fi
+
+            echo "::notice::asc testflight review submit failed; falling back to the App Store Connect API"
+            token="$(./scripts/asc-jwt \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer-id "$APPLE_API_ISSUER_ID" \
+              --key-path "$APPLE_API_KEY_PATH")"
+            request_body="$RUNNER_TEMP/beta-review-submission.json"
+            response_body="$RUNNER_TEMP/beta-review-submission-response.json"
+            jq -n --arg build_id "$BUILD_ID" '{
+              data: {
+                type: "betaAppReviewSubmissions",
+                relationships: {
+                  build: {
+                    data: {
+                      type: "builds",
+                      id: $build_id
+                    }
+                  }
+                }
+              }
+            }' > "$request_body"
+            http_code="$(
+              curl -sS \
+                -o "$response_body" \
+                -w "%{http_code}" \
+                -X POST \
+                -H "Authorization: Bearer $token" \
+                -H "Content-Type: application/json" \
+                -H "Accept: application/json" \
+                --data-binary "@$request_body" \
+                "https://api.appstoreconnect.apple.com/v1/betaAppReviewSubmissions"
+            )"
+            if [[ "$http_code" != 2* ]]; then
+              cat "$response_body"
+              echo "::error::failed to submit ASC build $BUILD_ID for TestFlight beta review (HTTP $http_code)"
+              exit 1
+            fi
+          }
+
+          fetch_external_state
+          fetch_review_state
+          echo "::notice::external TestFlight state before beta-review check: $external_state; review=$review_state"
+
+          if [[ "$review_state" == "REJECTED" ]]; then
+            echo "::error::TestFlight beta review rejected ASC build $BUILD_ID"
+            exit 1
+          fi
+
+          if [[ "$external_state" == "READY_FOR_BETA_SUBMISSION" && -z "$review_state" ]]; then
+            submit_beta_review
+          fi
+
+          for _ in {1..90}; do
+            fetch_external_state
+            fetch_review_state
+            echo "::notice::external TestFlight state: $external_state; review=$review_state"
+            case "$review_state" in
+              REJECTED)
+                echo "::error::TestFlight beta review rejected ASC build $BUILD_ID"
+                exit 1
+                ;;
+              APPROVED)
+                exit 0
+                ;;
+            esac
+
+            case "$external_state" in
+              READY_FOR_BETA_TESTING|IN_BETA_TESTING|BETA_APPROVED|BETA_TESTING|AVAILABLE_FOR_EXTERNAL_TESTING)
+                exit 0
+                ;;
+              BETA_REJECTED|EXPIRED|PROCESSING_EXCEPTION)
+                echo "::error::external TestFlight state is $external_state for ASC build $BUILD_ID"
+                exit 1
+                ;;
+              READY_FOR_BETA_SUBMISSION)
+                if [[ -z "$review_state" ]]; then
+                  submit_beta_review
+                fi
+                ;;
+            esac
+            sleep 30
+          done
+
+          echo "::error::TestFlight beta review did not reach an externally assignable state within 45 minutes"
+          exit 1
 
       - name: Validate TestFlight groups
         id: testflight_groups
@@ -763,6 +1038,7 @@ jobs:
         if: steps.drymode.outputs.dry_run != 'true'
         shell: bash
         env:
+          BUILD_ID: ${{ steps.asc_build.outputs.build_id }}
           EXTERNAL_GROUP_IDS: ${{ steps.testflight_groups.outputs.external_group_ids }}
         run: |
           set -euo pipefail
@@ -771,7 +1047,7 @@ jobs:
           notes="Tron ${{ steps.ver.outputs.display_version }} (${{ steps.ver.outputs.version }}), Apple build ${{ steps.ver.outputs.apple_build }}."
           asc publish testflight \
             --app "$ASC_APP_ID" \
-            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --build "$BUILD_ID" \
             --group "$groups" \
             --test-notes "$notes" \
             --locale en-US \

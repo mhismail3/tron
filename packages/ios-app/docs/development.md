@@ -112,14 +112,25 @@ the App Store Connect bundle (`com.tron.mobile`, App ID `6761511764`); the
 CI creates or selects an available iPhone simulator, runs the simulator tests,
 archives for `generic/platform=iOS`, exports an App Store Connect IPA with
 Xcode's `app-store-connect` export method, validates the exported app/extension
-bundle IDs and entitlements, uploads with `asc builds upload`, waits for the
-build to become valid, and assigns it to the configured internal and public
-TestFlight groups. App Store Connect does not allow direct API assignment to an
-internal group, so CI verifies the configured internal group has access to all
-builds and assigns the processed build to the public external group. The group
-validation step supports both `asc testflight beta-groups list` and older
-`asc testflight groups list` CLI shapes. Reruns use `asc builds list` to reuse
-an existing Apple build number instead of uploading a duplicate binary.
+bundle IDs, entitlements, and export-compliance plist keys, uploads with
+`asc builds upload`, waits for the build to become valid, resolves TestFlight
+export compliance, updates the What to Test notes, submits/waits for TestFlight
+beta review when Apple marks the build `READY_FOR_BETA_SUBMISSION`, and assigns
+it to the configured internal and public TestFlight groups. App Store Connect
+does not allow direct API assignment to an internal group, so CI verifies the
+configured internal group has access to all builds and assigns the processed
+build to the public external group. The group validation step supports both
+`asc testflight beta-groups list` and older `asc testflight groups list` CLI
+shapes. Reruns use `asc builds list` to reuse an existing Apple build number
+instead of uploading a duplicate binary.
+
+The app and share extension Info.plists set
+`ITSAppUsesNonExemptEncryption=false`, which is the current release assertion
+for TronMobile's use of platform networking and non-encryption hashing. Revisit
+that assertion before adding non-exempt cryptography. The workflow verifies the
+key in archives and exported IPAs; for already-uploaded builds that are stuck in
+`MISSING_EXPORT_COMPLIANCE`, it uses the App Store Connect API to set
+`usesNonExemptEncryption=false` before distribution.
 
 The export step supports two signing modes. If all local signing secrets are
 present, CI imports an Apple Distribution `.p12` into a temporary keychain,
@@ -192,7 +203,10 @@ Manual workflow runs default to `dry_run=true`, which builds and tests but skips
 App Store Connect upload and TestFlight distribution. A manual run with
 `dry_run=false` exercises the full upload/distribution path without creating a
 new tag, but it must use a unique Apple build number or an existing build that
-is safe to redistribute.
+is safe to redistribute. If Apple beta review does not approve an external build
+before the workflow timeout, rerun the same workflow after App Store Connect
+shows the build as externally testable; duplicate-build detection will reuse the
+existing upload and continue distribution.
 
 ## Common Tasks
 

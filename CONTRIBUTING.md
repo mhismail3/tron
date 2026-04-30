@@ -189,7 +189,7 @@ Two release lanes:
 
 | What | How | Cadence |
 |---|---|---|
-| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, exports an App Store Connect IPA with automatic cloud signing or configured local signing secrets, uploads to App ID `6761511764`, waits for processing, verifies the internal group has all-build access, and assigns the build to the public TestFlight group. | Same tag as server release. |
+| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, exports an App Store Connect IPA with automatic cloud signing or configured local signing secrets, uploads to App ID `6761511764`, waits for processing, resolves export compliance, submits/waits for TestFlight beta review when external testing requires it, verifies the internal group has all-build access, and assigns the build to the public TestFlight group. | Same tag as server release. |
 | Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds + notarizes + attaches the macOS DMG as a draft `Tron Server ...` pre-release with generated changelog notes. | Same tag as iOS release. |
 
 Versioning sources:
@@ -221,8 +221,8 @@ git push && git push --tags
 #    - release-mac.yml: build → codesign → app notarize/staple → DMG
 #      build/sign/notarize/staple → GitHub Release draft.
 #    - release-ios.yml: archive Prod iOS app → export/sign App Store IPA →
-#      upload to App Store Connect → wait for processing → assign to
-#      internal + public TestFlight groups.
+#      upload to App Store Connect → wait for processing → resolve export
+#      compliance / beta review → assign to internal + public TestFlight groups.
 #    Verify the generated GitHub release notes, DMG artifact, SHA256 manifest,
 #    and TestFlight build before announcing the release.
 
@@ -263,6 +263,8 @@ variables -> Actions. If the iOS signing secrets are absent, CI falls back to
 automatic Xcode cloud signing, which requires the ASC key/account to have
 permission to manage App Store signing assets. The local signing lane accepts
 matching manually managed profiles or matching Xcode-managed App Store profiles.
+The iOS app and share extension declare `ITSAppUsesNonExemptEncryption=false`;
+revisit that release assertion before adding non-exempt cryptography.
 
 **Rollback a bad server release**: `gh release delete server-v0.1.0-beta.1` pulls the DMG.
 Existing installs are unaffected (they don't auto-pull deletions). Cut a fixed

@@ -1,0 +1,74 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "base64"
+require "json"
+require "openssl"
+require "optparse"
+
+options = {
+  audience: "appstoreconnect-v1",
+  ttl: 600
+}
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: scripts/asc-jwt --key-id KEY_ID --issuer-id ISSUER_ID --key-path AuthKey.p8"
+
+  opts.on("--key-id VALUE", "App Store Connect API key id") { |value| options[:key_id] = value }
+  opts.on("--issuer-id VALUE", "App Store Connect API issuer id") { |value| options[:issuer_id] = value }
+  opts.on("--key-path PATH", "Path to the App Store Connect API .p8 private key") { |value| options[:key_path] = value }
+  opts.on("--audience VALUE", "JWT audience (default: appstoreconnect-v1)") { |value| options[:audience] = value }
+  opts.on("--ttl SECONDS", Integer, "Token lifetime in seconds (default: 600)") { |value| options[:ttl] = value }
+end
+
+parser.parse!
+
+missing = []
+missing << "--key-id" if options[:key_id].to_s.empty?
+missing << "--issuer-id" if options[:issuer_id].to_s.empty?
+missing << "--key-path" if options[:key_path].to_s.empty?
+unless missing.empty?
+  warn "Missing required option(s): #{missing.join(', ')}"
+  warn parser
+  exit 64
+end
+
+unless options[:ttl].positive? && options[:ttl] <= 1_200
+  warn "--ttl must be between 1 and 1200 seconds"
+  exit 64
+end
+
+def base64url(value)
+  Base64.urlsafe_encode64(value, padding: false)
+end
+
+def ecdsa_der_to_raw(der_signature)
+  sequence = OpenSSL::ASN1.decode(der_signature)
+  unless sequence.is_a?(OpenSSL::ASN1::Sequence) && sequence.value.length == 2
+    raise "unexpected ECDSA signature shape"
+  end
+
+  sequence.value.map do |integer|
+    bytes = integer.value.to_s(2)
+    bytes = bytes.bytes.drop_while.with_index { |byte, index| byte.zero? && index < bytes.bytes.length - 1 }.pack("C*")
+    bytes.rjust(32, "\x00")[-32, 32]
+  end.join
+end
+
+header = {
+  alg: "ES256",
+  kid: options[:key_id],
+  typ: "JWT"
+}
+payload = {
+  iss: options[:issuer_id],
+  exp: Time.now.to_i + options[:ttl],
+  aud: options[:audience]
+}
+
+signing_input = [base64url(JSON.generate(header)), base64url(JSON.generate(payload))].join(".")
+key = OpenSSL::PKey.read(File.read(options[:key_path]))
+der_signature = key.sign(OpenSSL::Digest::SHA256.new, signing_input)
+raw_signature = ecdsa_der_to_raw(der_signature)
+
+puts "#{signing_input}.#{base64url(raw_signature)}"
