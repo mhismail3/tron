@@ -116,9 +116,10 @@ bundle IDs and entitlements, uploads with `asc builds upload`, waits for the
 build to become valid, and assigns it to the configured internal and public
 TestFlight groups. App Store Connect does not allow direct API assignment to an
 internal group, so CI verifies the configured internal group has access to all
-builds and assigns the processed build to the public external group. Reruns use
-`asc builds list` to reuse an existing Apple build number instead of uploading a
-duplicate binary.
+builds and assigns the processed build to the public external group. The group
+validation step supports both `asc testflight beta-groups list` and older
+`asc testflight groups list` CLI shapes. Reruns use `asc builds list` to reuse
+an existing Apple build number instead of uploading a duplicate binary.
 
 The export step supports two signing modes. If all local signing secrets are
 present, CI imports an Apple Distribution `.p12` into a temporary keychain,

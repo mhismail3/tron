@@ -695,9 +695,20 @@ jobs:
         run: |
           set -euo pipefail
           groups_json="$RUNNER_TEMP/testflight-groups.json"
-          asc testflight beta-groups list \
-            --app "$ASC_APP_ID" \
-            --output json > "$groups_json"
+          groups_error="$RUNNER_TEMP/testflight-groups-error.log"
+          if asc testflight beta-groups list \
+              --app "$ASC_APP_ID" \
+              --output json > "$groups_json" 2> "$groups_error"; then
+            :
+          elif asc testflight groups list \
+              --app "$ASC_APP_ID" \
+              --output json > "$groups_json" 2> "$groups_error"; then
+            :
+          else
+            cat "$groups_error"
+            echo "::error::failed to list TestFlight groups with asc"
+            exit 1
+          fi
 
           internal_kind="$(
             jq -r --arg id "$INTERNAL_GROUP_ID" '
