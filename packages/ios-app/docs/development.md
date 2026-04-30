@@ -111,12 +111,13 @@ the App Store Connect bundle (`com.tron.mobile`, App ID `6761511764`); the
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
 CI runs the simulator tests, archives for `generic/platform=iOS`, manually
 packages the IPA to avoid the local Xcode 26 `exportArchive` rsync failure,
-re-signs with checked-in Prod entitlements, reuses archive-embedded App Store
-provisioning profiles when Xcode provides them, falls back to Xcode's standard
-profile caches, uploads with `asc builds upload`, waits for the build to become
-valid, and assigns it to the configured internal and public TestFlight groups.
-Reruns use `asc builds list` to reuse an existing Apple build number instead of
-uploading a duplicate binary.
+forces the `Apple Distribution` signing identity, re-signs with checked-in Prod
+entitlements, reuses archive-embedded App Store provisioning profiles when
+Xcode provides them, falls back to Xcode's standard profile caches, uploads
+with `asc builds upload`, waits for the build to become valid, and assigns it
+to the configured internal and public TestFlight groups. Reruns use `asc builds
+list` to reuse an existing Apple build number instead of uploading a duplicate
+binary.
 
 Required GitHub Actions secrets:
 

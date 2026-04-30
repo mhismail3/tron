@@ -154,8 +154,10 @@ jobs:
             -project TronMobile.xcodeproj \
             -scheme "$IOS_SCHEME" \
             -configuration "$IOS_CONFIGURATION" \
-            -destination 'generic/platform=iOS' > "$settings"
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="$IOS_DISTRIBUTION_IDENTITY" > "$settings"
           grep -q "PRODUCT_BUNDLE_IDENTIFIER = $IOS_BUNDLE_ID" "$settings"
+          grep -q "CODE_SIGN_IDENTITY = $IOS_DISTRIBUTION_IDENTITY" "$settings"
           grep -q "MARKETING_VERSION = ${{ steps.ver.outputs.marketing_version }}" "$settings"
           grep -q "CURRENT_PROJECT_VERSION = ${{ steps.ver.outputs.apple_build }}" "$settings"
           grep -q "TRON_CANONICAL_VERSION = ${{ steps.ver.outputs.version }}" "$settings"
@@ -274,6 +276,7 @@ jobs:
               -authenticationKeyID "$APPLE_API_KEY_ID" \
               -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
               DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              CODE_SIGN_IDENTITY="$IOS_DISTRIBUTION_IDENTITY" \
               -quiet
           fi
           echo "ARCHIVE_PATH=$archive_path" >> "$GITHUB_ENV"
