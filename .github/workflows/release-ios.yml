@@ -720,15 +720,36 @@ jobs:
           set -euo pipefail
 
           detail_json="$RUNNER_TEMP/build-beta-detail.json"
+          response_body="$RUNNER_TEMP/build-beta-detail-response.json"
+          asc_token() {
+            ./scripts/asc-jwt \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer-id "$APPLE_API_ISSUER_ID" \
+              --key-path "$APPLE_API_KEY_PATH"
+          }
+          asc_get() {
+            local url="$1" output="$2" http_code
+            http_code="$(
+              curl -sS \
+                -o "$output" \
+                -w "%{http_code}" \
+                -H "Authorization: Bearer $(asc_token)" \
+                -H "Accept: application/json" \
+                "$url"
+            )"
+            if [[ "$http_code" != 2* ]]; then
+              cat "$output"
+              echo "::error::App Store Connect API GET failed (HTTP $http_code): $url"
+              exit 1
+            fi
+          }
           fetch_detail() {
-            asc testflight beta-details get \
-              --build "$BUILD_ID" \
-              --output json > "$detail_json"
+            asc_get "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID/buildBetaDetail" "$detail_json"
             internal_state="$(
-              jq -r '(.data // []) | if type == "array" then .[0].attributes.internalBuildState // empty else .attributes.internalBuildState // empty end' "$detail_json"
+              jq -r '.data.attributes.internalBuildState // empty' "$detail_json"
             )"
             external_state="$(
-              jq -r '(.data // []) | if type == "array" then .[0].attributes.externalBuildState // empty else .attributes.externalBuildState // empty end' "$detail_json"
+              jq -r '.data.attributes.externalBuildState // empty' "$detail_json"
             )"
             if [[ -z "$internal_state" || -z "$external_state" ]]; then
               echo "::error::could not read TestFlight build beta detail for $BUILD_ID"
@@ -748,10 +769,6 @@ jobs:
           fi
 
           echo "::notice::ASC build $BUILD_ID is missing export compliance; setting usesNonExemptEncryption=false"
-          token="$(./scripts/asc-jwt \
-            --key-id "$APPLE_API_KEY_ID" \
-            --issuer-id "$APPLE_API_ISSUER_ID" \
-            --key-path "$APPLE_API_KEY_PATH")"
           request_body="$RUNNER_TEMP/build-export-compliance.json"
           response_body="$RUNNER_TEMP/build-export-compliance-response.json"
           jq -n --arg id "$BUILD_ID" '{
@@ -768,7 +785,7 @@ jobs:
               -o "$response_body" \
               -w "%{http_code}" \
               -X PATCH \
-              -H "Authorization: Bearer $token" \
+              -H "Authorization: Bearer $(asc_token)" \
               -H "Content-Type: application/json" \
               -H "Accept: application/json" \
               --data-binary "@$request_body" \
@@ -843,43 +860,48 @@ jobs:
 
           detail_json="$RUNNER_TEMP/beta-review-detail.json"
           submissions_json="$RUNNER_TEMP/beta-review-submissions.json"
+          response_body="$RUNNER_TEMP/beta-review-response.json"
+
+          asc_token() {
+            ./scripts/asc-jwt \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer-id "$APPLE_API_ISSUER_ID" \
+              --key-path "$APPLE_API_KEY_PATH"
+          }
+
+          asc_get() {
+            local url="$1" output="$2" http_code
+            http_code="$(
+              curl -sS \
+                -o "$output" \
+                -w "%{http_code}" \
+                -H "Authorization: Bearer $(asc_token)" \
+                -H "Accept: application/json" \
+                "$url"
+            )"
+            if [[ "$http_code" != 2* ]]; then
+              cat "$output"
+              echo "::error::App Store Connect API GET failed (HTTP $http_code): $url"
+              exit 1
+            fi
+          }
 
           fetch_external_state() {
-            asc testflight beta-details get \
-              --build "$BUILD_ID" \
-              --output json > "$detail_json"
+            asc_get "https://api.appstoreconnect.apple.com/v1/builds/$BUILD_ID/buildBetaDetail" "$detail_json"
             external_state="$(
-              jq -r '(.data // []) | if type == "array" then .[0].attributes.externalBuildState // empty else .attributes.externalBuildState // empty end' "$detail_json"
+              jq -r '.data.attributes.externalBuildState // empty' "$detail_json"
             )"
             test -n "$external_state" || { echo "::error::could not read external TestFlight state"; cat "$detail_json"; exit 1; }
           }
 
           fetch_review_state() {
-            if asc testflight review submissions list \
-                --build "$BUILD_ID" \
-                --output json > "$submissions_json"; then
-              review_state="$(
-                jq -r '(.data // []) | sort_by(.attributes.submittedDate // "") | last | .attributes.betaReviewState // empty' "$submissions_json"
-              )"
-            else
-              review_state=""
-            fi
+            asc_get "https://api.appstoreconnect.apple.com/v1/betaAppReviewSubmissions?filter%5Bbuild%5D=$BUILD_ID" "$submissions_json"
+            review_state="$(
+              jq -r '(.data // []) | sort_by(.attributes.submittedDate // "") | last | .attributes.betaReviewState // empty' "$submissions_json"
+            )"
           }
 
           submit_beta_review() {
-            if asc testflight review submit \
-                --build "$BUILD_ID" \
-                --confirm \
-                --output json \
-                --pretty; then
-              return 0
-            fi
-
-            echo "::notice::asc testflight review submit failed; falling back to the App Store Connect API"
-            token="$(./scripts/asc-jwt \
-              --key-id "$APPLE_API_KEY_ID" \
-              --issuer-id "$APPLE_API_ISSUER_ID" \
-              --key-path "$APPLE_API_KEY_PATH")"
             request_body="$RUNNER_TEMP/beta-review-submission.json"
             response_body="$RUNNER_TEMP/beta-review-submission-response.json"
             jq -n --arg build_id "$BUILD_ID" '{
@@ -900,7 +922,7 @@ jobs:
                 -o "$response_body" \
                 -w "%{http_code}" \
                 -X POST \
-                -H "Authorization: Bearer $token" \
+                -H "Authorization: Bearer $(asc_token)" \
                 -H "Content-Type: application/json" \
                 -H "Accept: application/json" \
                 --data-binary "@$request_body" \

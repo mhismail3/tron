@@ -130,7 +130,9 @@ for TronMobile's use of platform networking and non-encryption hashing. Revisit
 that assertion before adding non-exempt cryptography. The workflow verifies the
 key in archives and exported IPAs; for already-uploaded builds that are stuck in
 `MISSING_EXPORT_COMPLIANCE`, it uses the App Store Connect API to set
-`usesNonExemptEncryption=false` before distribution.
+`usesNonExemptEncryption=false` before distribution. Build beta-detail and beta
+review state are also read directly from the App Store Connect API because local
+and CI `asc` installations can expose different TestFlight subcommand names.
 
 The export step supports two signing modes. If all local signing secrets are
 present, CI imports an Apple Distribution `.p12` into a temporary keychain,
