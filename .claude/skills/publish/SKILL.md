@@ -58,7 +58,10 @@ mkdir -p "$WORK_DIR/Payload"
 # 4. Embed App Store distribution profiles.
 # Prefer profiles Xcode embedded into the archive; fall back to Xcode's profile cache.
 TEAM_ID="MYGKXH6TY4"
-PROFILE_DIR="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+PROFILE_DIRS=(
+  "$HOME/Library/MobileDevice/Provisioning Profiles"
+  "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+)
 APP_PAYLOAD="$WORK_DIR/Payload/TronMobile.app"
 APPEX_PAYLOAD="$APP_PAYLOAD/PlugIns/TronShareExtension.appex"
 
@@ -83,13 +86,15 @@ profile_matches_store_bundle() {
 }
 
 find_store_profile() {
-  local bundle_id="$1" profile
+  local bundle_id="$1" profile_dir profile
   shopt -s nullglob
-  for profile in "$PROFILE_DIR"/*.mobileprovision; do
-    if profile_matches_store_bundle "$bundle_id" "$profile"; then
-      echo "$profile"
-      return 0
-    fi
+  for profile_dir in "${PROFILE_DIRS[@]}"; do
+    for profile in "$profile_dir"/*.mobileprovision; do
+      if profile_matches_store_bundle "$bundle_id" "$profile"; then
+        echo "$profile"
+        return 0
+      fi
+    done
   done
   return 1
 }

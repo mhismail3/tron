@@ -189,7 +189,7 @@ Two release lanes:
 
 | What | How | Cadence |
 |---|---|---|
-| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, manually packages and re-signs the IPA with the archive-embedded App Store profiles when available, uploads to App ID `6761511764`, waits for processing, and assigns the build to the internal + public TestFlight groups. | Same tag as server release. |
+| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, manually packages and re-signs the IPA with archive-embedded or cached App Store profiles, uploads to App ID `6761511764`, waits for processing, and assigns the build to the internal + public TestFlight groups. | Same tag as server release. |
 | Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds + notarizes + attaches the macOS DMG as a draft `Tron Server ...` pre-release with generated changelog notes. | Same tag as iOS release. |
 
 Versioning sources:

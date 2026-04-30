@@ -317,7 +317,10 @@ jobs:
           /bin/cp -Rf "$app_source" "$work_dir/Payload/"
 
           if [[ "${{ steps.drymode.outputs.dry_run }}" != "true" ]]; then
-            profile_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+            profile_dirs=(
+              "$HOME/Library/MobileDevice/Provisioning Profiles"
+              "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+            )
             profile_matches_store_bundle() {
               local bundle_id="$1"
               local profile="$2"
@@ -341,13 +344,16 @@ jobs:
 
             find_store_profile() {
               local bundle_id="$1"
-              local profile
+              local profile_dir profile
               shopt -s nullglob
-              for profile in "$profile_dir"/*.mobileprovision; do
-                if profile_matches_store_bundle "$bundle_id" "$profile"; then
-                  echo "$profile"
-                  return 0
-                fi
+              for profile_dir in "${profile_dirs[@]}"; do
+                for profile in "$profile_dir"/*.mobileprovision; do
+                  if profile_matches_store_bundle "$bundle_id" "$profile"; then
+                    echo "::notice::using cached App Store profile for $bundle_id from $profile_dir" >&2
+                    echo "$profile"
+                    return 0
+                  fi
+                done
               done
               return 1
             }
@@ -371,11 +377,27 @@ jobs:
               fi
             }
 
+            debug_profile_search() {
+              local profile_dir count embedded_count
+              for profile_dir in "${profile_dirs[@]}"; do
+                if [[ -d "$profile_dir" ]]; then
+                  count="$(find "$profile_dir" -maxdepth 1 -name '*.mobileprovision' | wc -l | tr -d ' ')"
+                else
+                  count=0
+                fi
+                echo "::notice::searched $profile_dir ($count profiles)"
+              done
+              embedded_count="$(find "$app_payload" -name embedded.mobileprovision | wc -l | tr -d ' ')"
+              echo "::notice::payload embedded.mobileprovision count: $embedded_count"
+            }
+
             app_profile="$(resolve_store_profile "$IOS_BUNDLE_ID" "$app_payload/embedded.mobileprovision")" || {
+              debug_profile_search
               echo "::error::missing App Store provisioning profile for $IOS_BUNDLE_ID"
               exit 1
             }
             share_profile="$(resolve_store_profile "$IOS_SHARE_EXTENSION_BUNDLE_ID" "$appex_payload/embedded.mobileprovision")" || {
+              debug_profile_search
               echo "::error::missing App Store provisioning profile for $IOS_SHARE_EXTENSION_BUNDLE_ID"
               exit 1
             }
