@@ -102,7 +102,7 @@ struct OnboardingFlowView: View {
                 .tabViewStyle(.page(indexDisplayMode: .never))
 
                 OnboardingPageDots(currentStep: state.currentStep)
-                    .padding(.bottom, TronSpacing.large)
+                    .padding(.bottom, OnboardingPageDotsMetrics.bottomPadding)
             }
             .animation(.snappy(duration: 0.28), value: state.currentStep)
             .navigationBarTitleDisplayMode(.inline)
@@ -209,23 +209,35 @@ internal enum OnboardingCopy {
     static let installMacReleasesButtonTitle = "Open Releases page"
 }
 
+internal enum OnboardingPageDotsMetrics {
+    static let bottomPadding: CGFloat = 10
+    static let spacing: CGFloat = 6
+    static let activeWidth: CGFloat = 16
+    static let inactiveWidth: CGFloat = 6
+    static let dotHeight: CGFloat = 6
+    static let horizontalPadding: CGFloat = 10
+    static let verticalPadding: CGFloat = 6
+}
+
 @available(iOS 26.0, *)
 private struct OnboardingPageDots: View {
     let currentStep: OnboardingState.Step
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: OnboardingPageDotsMetrics.spacing) {
             ForEach(OnboardingState.Step.allCases, id: \.self) { step in
                 Capsule()
                     .fill(dotFill(for: step))
                     .frame(
-                        width: step == currentStep ? 18 : 7,
-                        height: 7
+                        width: step == currentStep
+                            ? OnboardingPageDotsMetrics.activeWidth
+                            : OnboardingPageDotsMetrics.inactiveWidth,
+                        height: OnboardingPageDotsMetrics.dotHeight
                     )
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, OnboardingPageDotsMetrics.horizontalPadding)
+        .padding(.vertical, OnboardingPageDotsMetrics.verticalPadding)
         .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.14)), in: Capsule())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Onboarding step \(currentStep.rawValue + 1) of \(OnboardingState.Step.allCases.count)")

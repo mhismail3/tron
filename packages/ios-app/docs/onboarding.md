@@ -12,7 +12,8 @@ on Mac, connect, then a short settings setup flow for workspace,
 credentials, services, and default model. Setup pages are locked until
 the Mac connection succeeds. The sheet follows the app's
 standard Liquid Glass chrome: hidden drag handle, principal toolbar
-title, and a floating progress-dot indicator at the bottom.
+title, and a compact floating progress-dot indicator that sits low at the
+bottom of the sheet.
 
 The three preparation pages set expectations before pairing. Welcome
 introduces Tron as a local, private AI agent controlled from iPhone, then

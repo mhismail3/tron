@@ -87,6 +87,17 @@ struct OnboardingStateTests {
         #expect(OnboardingCopy.installMacReleasesButtonTitle == "Open Releases page")
     }
 
+    @Test("Page dots use compact low sheet metrics")
+    func pageDotsUseCompactLowSheetMetrics() {
+        #expect(OnboardingPageDotsMetrics.bottomPadding == 10)
+        #expect(OnboardingPageDotsMetrics.spacing == 6)
+        #expect(OnboardingPageDotsMetrics.activeWidth == 16)
+        #expect(OnboardingPageDotsMetrics.inactiveWidth == 6)
+        #expect(OnboardingPageDotsMetrics.dotHeight == 6)
+        #expect(OnboardingPageDotsMetrics.horizontalPadding == 10)
+        #expect(OnboardingPageDotsMetrics.verticalPadding == 6)
+    }
+
     @Test("complete() flips the AppStorage flag")
     func completeFlipsFlag() {
         let defaults = ephemeralDefaults()
