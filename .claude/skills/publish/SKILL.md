@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Build, upload, and manage TronMobile on TestFlight and App Store Connect using the asc CLI
+description: Build, upload, and manage TronMobile on TestFlight and App Store Connect using CI, asc, and the App Store Connect API
 disable-model-invocation: true
 allowed-tools: Bash, Read, Edit, Grep, Glob
 argument-hint: [build|status|testers|bump|submit]
@@ -58,7 +58,7 @@ The app and share extension declare `ITSAppUsesNonExemptEncryption=false`; if
 that release assertion changes, update the Info.plists and the release workflow
 before uploading the next TestFlight build.
 
-Manual `/publish build` is a local fallback for interactive diagnosis or
+Manual `/publish build` is reserved for interactive diagnosis or intentional
 one-off uploads. It requires an installed Apple Distribution identity and App
 Store Connect distribution profiles for both bundle IDs.
 
@@ -229,21 +229,18 @@ scripts/tron version print
 2. Update root `VERSION.env`
 3. Run `scripts/tron version sync && scripts/tron version check`
 
-### `/publish submit` — Submit for Review
+### `/publish submit` — Diagnostic Beta Review Submission
 
 ```bash
 # Submit for external beta review
 asc testflight review submit --build "<build_id>" --confirm
-
-# Submit for App Store review
-asc appstore submissions create --app 6761511764
 ```
 
 The CI release path handles TestFlight beta review when a build reaches
 `READY_FOR_BETA_SUBMISSION`. If Apple moves the build to waiting/in-review, CI
 should pass as pending review; rerun after approval to assign the public group.
-A local `/publish submit` should be a diagnostic fallback only. CI does not
-submit to App Store review.
+A local `/publish submit` should be used only to diagnose a TestFlight beta
+review state. Neither this skill nor CI submits builds to App Store review.
 
 ## Entitlements Files
 

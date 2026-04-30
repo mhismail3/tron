@@ -49,8 +49,9 @@ def ecdsa_der_to_raw(der_signature)
   end
 
   sequence.value.map do |integer|
-    bytes = integer.value.to_s(2)
-    bytes = bytes.bytes.drop_while.with_index { |byte, index| byte.zero? && index < bytes.bytes.length - 1 }.pack("C*")
+    bytes = integer.value.to_s(2).bytes
+    bytes.shift while bytes.length > 1 && bytes.first.zero?
+    bytes = bytes.pack("C*")
     bytes.rjust(32, "\x00")[-32, 32]
   end.join
 end
