@@ -39,8 +39,8 @@ Use GitHub Actions for beta uploads whenever possible. A `server-v*` tag starts
 4. Archives the `Tron` scheme with the `Prod` configuration.
 5. Exports an App Store Connect IPA with `xcodebuild -exportArchive`.
 6. Uploads with `asc builds upload`.
-7. Waits for processing and assigns the build to the configured internal and
-   public TestFlight groups.
+7. Waits for processing, verifies the internal TestFlight group has access to
+   all builds, and assigns the build to the public external TestFlight group.
 
 CI exports with local App Store signing when these GitHub secrets are present:
 `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`,

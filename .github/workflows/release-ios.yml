@@ -685,7 +685,8 @@ jobs:
             --output json \
             --pretty
 
-      - name: Distribute to TestFlight groups
+      - name: Validate TestFlight groups
+        id: testflight_groups
         if: steps.drymode.outputs.dry_run != 'true'
         shell: bash
         env:
@@ -693,7 +694,69 @@ jobs:
           PUBLIC_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_PUBLIC_GROUP_ID }}
         run: |
           set -euo pipefail
-          groups="${INTERNAL_GROUP_ID},${PUBLIC_GROUP_ID}"
+          groups_json="$RUNNER_TEMP/testflight-groups.json"
+          asc testflight beta-groups list \
+            --app "$ASC_APP_ID" \
+            --output json > "$groups_json"
+
+          internal_kind="$(
+            jq -r --arg id "$INTERNAL_GROUP_ID" '
+              (.data // [])
+              | map(select(.id == $id))
+              | .[0].attributes.isInternalGroup // empty
+            ' "$groups_json"
+          )"
+          internal_all_builds="$(
+            jq -r --arg id "$INTERNAL_GROUP_ID" '
+              (.data // [])
+              | map(select(.id == $id))
+              | .[0].attributes.hasAccessToAllBuilds // empty
+            ' "$groups_json"
+          )"
+          public_kind="$(
+            jq -r --arg id "$PUBLIC_GROUP_ID" '
+              (.data // [])
+              | map(select(.id == $id))
+              | .[0].attributes.isInternalGroup // false
+            ' "$groups_json"
+          )"
+          public_link="$(
+            jq -r --arg id "$PUBLIC_GROUP_ID" '
+              (.data // [])
+              | map(select(.id == $id))
+              | .[0].attributes.publicLinkEnabled // false
+            ' "$groups_json"
+          )"
+
+          if [[ "$internal_kind" != "true" ]]; then
+            echo "::error::ASC_TESTFLIGHT_INTERNAL_GROUP_ID does not identify an internal TestFlight group"
+            exit 1
+          fi
+          if [[ "$internal_all_builds" != "true" ]]; then
+            echo "::error::internal TestFlight groups cannot be directly assigned by the ASC API; enable access to all builds for ASC_TESTFLIGHT_INTERNAL_GROUP_ID"
+            exit 1
+          fi
+          if [[ "$public_kind" == "true" ]]; then
+            echo "::error::ASC_TESTFLIGHT_PUBLIC_GROUP_ID points at an internal TestFlight group"
+            exit 1
+          fi
+          if [[ "$public_link" != "true" ]]; then
+            echo "::error::ASC_TESTFLIGHT_PUBLIC_GROUP_ID must be the public-link TestFlight group used by onboarding"
+            exit 1
+          fi
+
+          echo "::notice::internal TestFlight group has access to all builds; assigning the processed build to the public group"
+          echo "external_group_ids=$PUBLIC_GROUP_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Distribute to TestFlight groups
+        if: steps.drymode.outputs.dry_run != 'true'
+        shell: bash
+        env:
+          EXTERNAL_GROUP_IDS: ${{ steps.testflight_groups.outputs.external_group_ids }}
+        run: |
+          set -euo pipefail
+          groups="$EXTERNAL_GROUP_IDS"
+          test -n "$groups" || { echo "::error::no external TestFlight groups resolved"; exit 1; }
           notes="Tron ${{ steps.ver.outputs.display_version }} (${{ steps.ver.outputs.version }}), Apple build ${{ steps.ver.outputs.apple_build }}."
           asc publish testflight \
             --app "$ASC_APP_ID" \
