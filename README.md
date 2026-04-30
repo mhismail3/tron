@@ -91,7 +91,7 @@ tron/
 |   +-- tron-cli            Contributor CLI helper for local service management
 |   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
 +-- .github/
-|   +-- workflows/          CI + Mac DMG release pipeline
+|   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
 |   +-- dependabot.yml      Weekly Cargo + GitHub Actions updates, monthly Swift
 |   +-- pull_request_template.md
@@ -948,7 +948,9 @@ End-users install `Tron.app` via a notarized DMG published to GitHub Releases. R
 
 A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or the workflow itself. The dry-run stops before notarization (no cert needed) so PR contributors can verify the assembly pipeline without secrets.
 
-**iOS distribution is separate** — use the `/publish` skill (`/publish bump && /publish build`) which handles archive → IPA → asc upload to App ID `6761511764`. TestFlight/App Store Connect is the distribution and audit surface for iOS binaries. Do not create separate GitHub releases for iOS unless an iOS artifact is intentionally published through GitHub too; the shared `VERSION.env` keeps Mac/server and iOS version labels aligned without adding duplicate tags.
+The iOS TestFlight pipeline lives at `.github/workflows/release-ios.yml` and triggers on the same `server-v*` tag push. It regenerates `packages/ios-app/TronMobile.xcodeproj` from XcodeGen, verifies `VERSION.env` mirrors, runs the iOS simulator tests, archives the `Tron` scheme with the `Prod` configuration (`com.tron.mobile` / App ID `6761511764`), uploads through Xcode's App Store Connect export path, waits for the Apple build to become valid, and assigns it to the existing internal + public TestFlight groups. The public group is the same TestFlight link shown by the Mac onboarding QR code. Reruns are idempotent: if the Apple build number already exists in App Store Connect, CI skips the binary upload and reuses that build for processing/distribution. Manual workflow runs default to `dry_run=true` and stop before ASC upload.
+
+Required iOS release credentials are GitHub Actions secrets `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_P8_BASE64`; TestFlight group IDs are repository variables `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` and `ASC_TESTFLIGHT_PUBLIC_GROUP_ID`. TestFlight/App Store Connect remains the distribution and audit surface for iOS binaries. Do not create separate GitHub releases for iOS unless an iOS artifact is intentionally published through GitHub too; the shared `VERSION.env` keeps Mac/server and iOS version labels aligned without adding duplicate tags.
 
 ### User-mode Update Checks
 

@@ -1,0 +1,380 @@
+# iOS TestFlight Release Pipeline
+#
+# Uploads the production iOS bundle (`com.tron.mobile`) to App Store Connect
+# and assigns the processed build to the existing TestFlight groups. Triggered
+# by the same `server-v*` tags that cut the Mac DMG release, so one release tag
+# advances both Apple build numbers from VERSION.env.
+#
+# Required secrets:
+#   ASC_KEY_ID        App Store Connect API key id
+#   ASC_ISSUER_ID     App Store Connect issuer id
+#   ASC_KEY_P8_BASE64 base64-encoded private key contents for the API key
+#
+# Required repository variables:
+#   ASC_TESTFLIGHT_INTERNAL_GROUP_ID existing internal TestFlight group id
+#   ASC_TESTFLIGHT_PUBLIC_GROUP_ID   existing public TestFlight group id
+
+name: Release (iOS TestFlight)
+
+on:
+  push:
+    tags:
+      - "server-v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build/test only; skip ASC upload + TestFlight distribution (true/false)."
+        required: false
+        default: "true"
+        type: string
+
+concurrency:
+  group: release-ios-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  testflight:
+    name: Build + upload + distribute
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    env:
+      ASC_APP_ID: "6761511764"
+      IOS_APP_DIR: packages/ios-app
+      IOS_SCHEME: Tron
+      IOS_CONFIGURATION: Prod
+      IOS_BUNDLE_ID: com.tron.mobile
+      APPLE_TEAM_ID: MYGKXH6TY4
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/tron version check
+          while IFS='=' read -r key value; do
+            case "$key" in
+              TRON_VERSION) version="$value" ;;
+              TRON_RELEASE_TAG) tag="$value" ;;
+              TRON_DISPLAY_VERSION) display_version="$value" ;;
+              TRON_APPLE_BUILD) apple_build="$value" ;;
+              TRON_APPLE_MARKETING_VERSION) marketing_version="$value" ;;
+            esac
+          done < <(./scripts/tron version print)
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == server-v* ]]; then
+            if [[ "${GITHUB_REF_NAME}" != "$tag" ]]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION.env release tag $tag"
+              exit 1
+            fi
+            mode="tag"
+          else
+            mode="VERSION.env"
+          fi
+          if [[ -z "${version:-}" || -z "${tag:-}" || -z "${display_version:-}" || -z "${apple_build:-}" || -z "${marketing_version:-}" ]]; then
+            echo "::error::could not resolve centralized version fields"
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "mode=$mode"
+            echo "tag=$tag"
+            echo "display_version=$display_version"
+            echo "apple_build=$apple_build"
+            echo "marketing_version=$marketing_version"
+          } >> "$GITHUB_OUTPUT"
+          echo "Resolved iOS release $version / Apple build $apple_build from $mode"
+
+      - name: Resolve dry-run flag
+        id: drymode
+        shell: bash
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          INTERNAL_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_INTERNAL_GROUP_ID }}
+          PUBLIC_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_PUBLIC_GROUP_ID }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            flag="${{ inputs.dry_run }}"
+            [[ -z "$flag" ]] && flag="true"
+          else
+            flag="false"
+          fi
+          if [[ -z "$ASC_KEY_ID" || -z "$ASC_ISSUER_ID" || -z "$ASC_KEY_P8_BASE64" \
+             || -z "$INTERNAL_GROUP_ID" || -z "$PUBLIC_GROUP_ID" ]]; then
+            flag="true"
+            echo "::notice::ASC secrets or TestFlight group variables missing -> forcing dry-run"
+          fi
+          echo "dry_run=$flag" >> "$GITHUB_OUTPUT"
+          echo "Dry-run=$flag"
+
+      - name: Pin Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen + ASC CLI
+        run: brew install xcodegen asc
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          xcodegen --version
+          asc version
+
+      - name: Generate Xcode project
+        working-directory: ${{ env.IOS_APP_DIR }}
+        run: xcodegen generate
+
+      - name: Verify release build settings
+        working-directory: ${{ env.IOS_APP_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          settings="$RUNNER_TEMP/ios-build-settings.txt"
+          xcodebuild -showBuildSettings \
+            -project TronMobile.xcodeproj \
+            -scheme "$IOS_SCHEME" \
+            -configuration "$IOS_CONFIGURATION" \
+            -destination 'generic/platform=iOS' > "$settings"
+          grep -q "PRODUCT_BUNDLE_IDENTIFIER = $IOS_BUNDLE_ID" "$settings"
+          grep -q "MARKETING_VERSION = ${{ steps.ver.outputs.marketing_version }}" "$settings"
+          grep -q "CURRENT_PROJECT_VERSION = ${{ steps.ver.outputs.apple_build }}" "$settings"
+          grep -q "TRON_CANONICAL_VERSION = ${{ steps.ver.outputs.version }}" "$settings"
+
+      - name: xcodebuild test
+        working-directory: ${{ env.IOS_APP_DIR }}
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project TronMobile.xcodeproj \
+            -scheme "$IOS_SCHEME" \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17 Pro' \
+            -resultBundlePath TestResults.xcresult \
+            -quiet
+
+      - name: Upload xcresult on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release-test-results
+          path: packages/ios-app/TestResults.xcresult
+          retention-days: 7
+
+      - name: Prepare ASC API key
+        if: steps.drymode.outputs.dry_run != 'true'
+        shell: bash
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_path="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s' "$ASC_KEY_P8_BASE64" | base64 -d > "$key_path"
+          {
+            echo "APPLE_API_KEY_ID=$ASC_KEY_ID"
+            echo "APPLE_API_ISSUER_ID=$ASC_ISSUER_ID"
+            echo "APPLE_API_KEY_PATH=$key_path"
+            echo "ASC_PROFILE=ci"
+            echo "ASC_STRICT_AUTH=true"
+            echo "ASC_BYPASS_KEYCHAIN=true"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure ASC CLI auth
+        if: steps.drymode.outputs.dry_run != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          asc auth login \
+            --bypass-keychain \
+            --local \
+            --name ci \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer-id "$APPLE_API_ISSUER_ID" \
+            --private-key "$APPLE_API_KEY_PATH" \
+            --skip-validation
+          asc auth status
+
+      - name: Check for existing ASC build
+        id: existing
+        if: steps.drymode.outputs.dry_run != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_json="$RUNNER_TEMP/existing-build.json"
+          if asc builds find \
+              --app "$ASC_APP_ID" \
+              --build-number "${{ steps.ver.outputs.apple_build }}" \
+              --platform IOS \
+              --output json > "$build_json"; then
+            build_id="$(jq -r '.data.id' "$build_json")"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+            echo "::notice::ASC build ${{ steps.ver.outputs.apple_build }} already exists ($build_id); upload will be skipped"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: xcodebuild archive
+        if: steps.drymode.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
+        working-directory: ${{ env.IOS_APP_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_path="$(pwd)/build/TronMobile.xcarchive"
+          rm -rf "$archive_path"
+          if [[ "${{ steps.drymode.outputs.dry_run }}" == "true" ]]; then
+            xcodebuild archive \
+              -project TronMobile.xcodeproj \
+              -scheme "$IOS_SCHEME" \
+              -configuration "$IOS_CONFIGURATION" \
+              -archivePath "$archive_path" \
+              -destination 'generic/platform=iOS' \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="-" \
+              CODE_SIGNING_ALLOWED=NO \
+              -quiet
+          else
+            xcodebuild archive \
+              -project TronMobile.xcodeproj \
+              -scheme "$IOS_SCHEME" \
+              -configuration "$IOS_CONFIGURATION" \
+              -archivePath "$archive_path" \
+              -destination 'generic/platform=iOS' \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$APPLE_API_KEY_PATH" \
+              -authenticationKeyID "$APPLE_API_KEY_ID" \
+              -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
+              DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              -quiet
+          fi
+          echo "ARCHIVE_PATH=$archive_path" >> "$GITHUB_ENV"
+
+      - name: Verify archive
+        if: steps.drymode.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$ARCHIVE_PATH/Products/Applications/TronMobile.app"
+          test -d "$app_path" || { echo "::error::archive missing TronMobile.app"; exit 1; }
+          plist="$app_path/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = "$IOS_BUNDLE_ID"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "${{ steps.ver.outputs.marketing_version }}"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" = "${{ steps.ver.outputs.apple_build }}"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :TRONCanonicalVersion' "$plist")" = "${{ steps.ver.outputs.version }}"
+
+      - name: Upload archive dSYMs
+        if: steps.drymode.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-dsyms-${{ steps.ver.outputs.version }}
+          path: packages/ios-app/build/TronMobile.xcarchive/dSYMs
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload to App Store Connect
+        if: steps.drymode.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export_options="$RUNNER_TEMP/ExportOptions.plist"
+          export_path="$RUNNER_TEMP/ios-export"
+          cat > "$export_options" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>destination</key>
+            <string>upload</string>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>teamID</key>
+            <string>$APPLE_TEAM_ID</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$export_path" \
+            -exportOptionsPlist "$export_options" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$APPLE_API_KEY_PATH" \
+            -authenticationKeyID "$APPLE_API_KEY_ID" \
+            -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
+            -quiet
+
+      - name: Wait for ASC processing
+        if: steps.drymode.outputs.dry_run != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          asc builds wait \
+            --app "$ASC_APP_ID" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --platform IOS \
+            --timeout 45m \
+            --poll-interval 30s \
+            --fail-on-invalid \
+            --output json \
+            --pretty
+
+      - name: Distribute to TestFlight groups
+        if: steps.drymode.outputs.dry_run != 'true'
+        shell: bash
+        env:
+          INTERNAL_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_INTERNAL_GROUP_ID }}
+          PUBLIC_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_PUBLIC_GROUP_ID }}
+        run: |
+          set -euo pipefail
+          groups="${INTERNAL_GROUP_ID},${PUBLIC_GROUP_ID}"
+          notes="Tron ${{ steps.ver.outputs.display_version }} (${{ steps.ver.outputs.version }}), Apple build ${{ steps.ver.outputs.apple_build }}."
+          asc publish testflight \
+            --app "$ASC_APP_ID" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --group "$groups" \
+            --test-notes "$notes" \
+            --locale en-US \
+            --wait \
+            --timeout 45m \
+            --poll-interval 30s \
+            --output json \
+            --pretty
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## iOS TestFlight Release"
+            echo ""
+            echo "- Version: \`${{ steps.ver.outputs.version }}\`"
+            echo "- Display: \`${{ steps.ver.outputs.display_version }}\`"
+            echo "- Apple build: \`${{ steps.ver.outputs.apple_build }}\`"
+            echo "- Bundle: \`$IOS_BUNDLE_ID\`"
+            echo "- Dry run: \`${{ steps.drymode.outputs.dry_run }}\`"
+            if [[ "${{ steps.drymode.outputs.dry_run }}" != "true" ]]; then
+              echo "- ASC app: \`$ASC_APP_ID\`"
+              echo "- Existing build reused: \`${{ steps.existing.outputs.exists || 'false' }}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

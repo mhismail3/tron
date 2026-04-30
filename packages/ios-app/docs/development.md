@@ -99,6 +99,39 @@ share sheet so the user can save or attach the JSON manually. Release builds
 must keep `DEBUG_INFORMATION_FORMAT = dwarf-with-dsym`; App Store/TestFlight
 crashes are retrieved through Apple's Xcode Organizer diagnostics path.
 
+## TestFlight Release CI
+
+The iOS beta is published by `.github/workflows/release-ios.yml` on the same
+`server-v*` tag that cuts the Mac DMG. The workflow always regenerates the
+Xcode project with XcodeGen before building, so `project.yml` and `VERSION.env`
+are the release sources of truth.
+
+The upload lane uses the `Tron` scheme with the `Prod` configuration. That is
+the App Store Connect bundle (`com.tron.mobile`, App ID `6761511764`); the
+`Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
+CI runs the simulator tests, archives for `generic/platform=iOS`, uploads via
+Xcode's App Store Connect export flow, waits for the build to become valid, and
+assigns it to the configured internal and public TestFlight groups. Reruns reuse
+an existing Apple build number instead of uploading a duplicate binary.
+
+Required GitHub Actions secrets:
+
+| Secret | Purpose |
+|---|---|
+| `ASC_KEY_ID` | App Store Connect API key id |
+| `ASC_ISSUER_ID` | App Store Connect issuer id |
+| `ASC_KEY_P8_BASE64` | base64-encoded `.p8` private key contents |
+
+Required repository variables:
+
+| Variable | Purpose |
+|---|---|
+| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Internal TestFlight group id |
+| `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Public TestFlight group id used by the Mac onboarding QR link |
+
+Manual workflow runs default to `dry_run=true`, which builds and tests but skips
+App Store Connect upload and TestFlight distribution.
+
 ## Common Tasks
 
 ### Adding a New Screen

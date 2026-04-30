@@ -63,8 +63,8 @@ open TronMobile.xcodeproj
 # or: xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-For Beta TestFlight builds, the maintainer uses the `/publish` skill (App ID
-`6761511764`); contributor PRs do not need to invoke it.
+Beta TestFlight builds are published by the tag-triggered iOS release workflow
+for App ID `6761511764`; contributor PRs do not need App Store Connect access.
 
 ### Mac wrapper
 
@@ -189,8 +189,8 @@ Two release lanes:
 
 | What | How | Cadence |
 |---|---|---|
-| iOS Beta to TestFlight | Maintainer runs the `/publish` skill (`/publish bump && /publish build`). App ID `6761511764`. No GitHub release is cut unless an iOS artifact is intentionally published through GitHub. | On request, ad-hoc. |
-| Server DMG to GitHub Releases | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-mac.yml` builds + notarizes + attaches the macOS DMG as a draft `Tron Server ...` pre-release with generated changelog notes. | Ad-hoc. |
+| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, uploads to App ID `6761511764`, waits for processing, and assigns the build to the internal + public TestFlight groups. | Same tag as server release. |
+| Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds + notarizes + attaches the macOS DMG as a draft `Tron Server ...` pre-release with generated changelog notes. | Same tag as iOS release. |
 
 Versioning sources:
 - **Source of truth** — root `VERSION.env`. `TRON_VERSION` is canonical
@@ -201,7 +201,7 @@ Versioning sources:
   Run `scripts/tron version sync` after editing `VERSION.env`; CI runs
   `scripts/tron version check` to prevent drift.
 
-### Cutting a Mac DMG release
+### Cutting a beta release
 
 ```bash
 # 1. Confirm main is green.
@@ -217,16 +217,18 @@ git commit -am "chore(release): Tron v0.1 (Beta 1)"
 git tag "$(scripts/tron version print | awk -F= '$1 == "TRON_RELEASE_TAG" { print $2 }')"
 git push && git push --tags
 
-# 4. The release-mac.yml workflow runs: build → codesign → app notarize/staple →
-#    DMG build/sign → DMG notarize/staple → changelog generation →
-#    GitHub Release draft. Verify the generated notes, DMG artifact, and SHA256
-#    manifest on the draft `Tron Server ...` release, then click Publish in the
-#    GitHub UI.
+# 4. Tag push starts both release workflows:
+#    - release-mac.yml: build → codesign → app notarize/staple → DMG
+#      build/sign/notarize/staple → GitHub Release draft.
+#    - release-ios.yml: archive Prod iOS app → upload to App Store Connect →
+#      wait for processing → assign to internal + public TestFlight groups.
+#    Verify the generated GitHub release notes, DMG artifact, SHA256 manifest,
+#    and TestFlight build before announcing the release.
 
 # 5. To test the pipeline without cutting a real release, use
-#    Actions → Release (Mac DMG) → Run workflow with `dry_run=true`.
-#    Missing notarization secrets auto-force dry-run, so forks can
-#    exercise the build without the Apple credentials.
+#    Actions → Release (Mac DMG) and Actions → Release (iOS TestFlight)
+#    with `dry_run=true`. Missing release secrets auto-force dry-run, so
+#    forks can exercise the build without the Apple credentials.
 ```
 
 **Required GitHub Actions secrets** for notarized releases:
@@ -238,9 +240,20 @@ git push && git push --tags
 | `NOTARIZE_APPLE_ID` | Apple ID email for `notarytool` |
 | `NOTARIZE_TEAM_ID` | Apple Developer team ID |
 | `NOTARIZE_APP_PASSWORD` | app-specific password for the Apple ID |
+| `ASC_KEY_ID` | App Store Connect API key id for iOS upload/distribution |
+| `ASC_ISSUER_ID` | App Store Connect API issuer id |
+| `ASC_KEY_P8_BASE64` | base64-encoded App Store Connect API private key |
+
+**Required GitHub Actions variables** for iOS TestFlight distribution:
+
+| Variable | What |
+|---|---|
+| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Existing internal TestFlight group id |
+| `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Existing public TestFlight group id behind the onboarding QR link |
 
 Rotate by regenerating the `.p12`, re-encoding (`base64 -i Tron.p12 | pbcopy`),
-and updating the secret in GitHub → Settings → Secrets and variables → Actions.
+or by creating a new App Store Connect API key and updating the corresponding
+secret in GitHub → Settings → Secrets and variables → Actions.
 
 **Rollback a bad server release**: `gh release delete server-v0.1.0-beta.1` pulls the DMG.
 Existing installs are unaffected (they don't auto-pull deletions). Cut a fixed

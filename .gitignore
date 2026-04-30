@@ -14,7 +14,12 @@
 project.xcworkspace/
 xcuserdata/
 packages/ios-app/.build/
+packages/ios-app/build/
 packages/ios-app/Configuration/Local.xcconfig
+*.xcresult
+
+# App Store Connect CLI local auth/config
+.asc/
 
 # OS
 .DS_Store

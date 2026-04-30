@@ -248,6 +248,7 @@ check_versions() {
         "$PROJECT_DIR/packages/mac-app/docs"
         "$PROJECT_DIR/packages/ios-app/docs"
         "$PROJECT_DIR/.github/workflows/release-mac.yml"
+        "$PROJECT_DIR/.github/workflows/release-ios.yml"
         "$PROJECT_DIR/scripts/tron-lib.sh"
     )
     if command -v rg >/dev/null 2>&1; then
