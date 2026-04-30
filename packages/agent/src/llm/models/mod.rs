@@ -1,6 +1,10 @@
 //! # Models
 //!
 //! Model registry, ID constants, and type definitions for all LLM providers.
+//! Provider-specific registries remain authoritative. Cross-provider helpers
+//! in [`registry`] deliberately use conservative fallbacks when metadata depends
+//! on runtime credentials, such as OpenAI's Platform API key vs ChatGPT/Codex
+//! OAuth profiles.
 
 pub mod model_ids;
 pub mod registry;

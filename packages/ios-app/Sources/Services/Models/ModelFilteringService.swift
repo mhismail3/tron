@@ -66,7 +66,7 @@ enum ModelFilteringService {
         let latestCodex = models.filter { $0.isCodex && $0.isLatestGeneration }
             |> sortByTier
         if !latestCodex.isEmpty {
-            groups.append(ModelGroup(tier: "OpenAI Codex (Latest)", models: latestCodex))
+            groups.append(ModelGroup(tier: "OpenAI (Latest)", models: latestCodex))
         }
 
         let latestGemini = models.filter { $0.isGemini && $0.isLatestGeneration }

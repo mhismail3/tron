@@ -15,8 +15,12 @@ use crate::llm::anthropic::types::{all_claude_models_api_json, get_claude_model}
 use crate::llm::google::types::{all_gemini_models_api_json, get_gemini_model};
 use crate::llm::kimi::types::all_kimi_models_api_json;
 use crate::llm::minimax::types::all_minimax_models_api_json;
+use crate::llm::models::registry::strip_provider_prefix;
 use crate::llm::ollama::types::all_ollama_models_api_json_with_availability;
-use crate::llm::openai::types::{all_openai_models_api_json, get_openai_model};
+use crate::llm::openai::types::{
+    OpenAIAuthPath, all_openai_models_api_json_for_auth_path, get_openai_model,
+    get_openai_model_profile, openai_model_available_for_auth_path,
+};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::handlers::require_string_param;
@@ -26,9 +30,9 @@ use crate::server::rpc::registry::MethodHandler;
 ///
 /// Ollama models include live availability status from the local Ollama server.
 /// Adding a new model? Update the provider's `types.rs` — it appears here automatically.
-async fn known_models() -> Vec<Value> {
+async fn known_models(openai_auth_path: OpenAIAuthPath) -> Vec<Value> {
     let mut models = all_claude_models_api_json();
-    models.extend(all_openai_models_api_json());
+    models.extend(all_openai_models_api_json_for_auth_path(openai_auth_path));
     models.extend(all_gemini_models_api_json());
     models.extend(all_minimax_models_api_json());
     models.extend(all_kimi_models_api_json());
@@ -37,23 +41,33 @@ async fn known_models() -> Vec<Value> {
 }
 
 fn is_model_supported(model_id: &str) -> bool {
-    get_claude_model(model_id).is_some()
-        || get_openai_model(model_id).is_some()
-        || get_gemini_model(model_id).is_some()
-        || crate::llm::minimax::types::get_minimax_model(model_id).is_some()
-        || crate::llm::kimi::types::get_kimi_model(model_id).is_some()
-        || crate::llm::ollama::types::get_ollama_model(model_id).is_some()
+    let bare = strip_provider_prefix(model_id);
+    get_claude_model(bare).is_some()
+        || get_openai_model(bare).is_some()
+        || get_gemini_model(bare).is_some()
+        || crate::llm::minimax::types::get_minimax_model(bare).is_some()
+        || crate::llm::kimi::types::get_kimi_model(bare).is_some()
+        || crate::llm::ollama::types::get_ollama_model(bare).is_some()
 }
 
 fn is_model_deprecated(model_id: &str) -> bool {
-    if let Some(m) = get_claude_model(model_id) {
+    let bare = strip_provider_prefix(model_id);
+    if let Some(m) = get_claude_model(bare) {
         return m.is_deprecated;
     }
-    if let Some(m) = get_gemini_model(model_id) {
+    if let Some(m) = get_openai_model(bare) {
         return m.is_deprecated;
     }
-    // OpenAI and MiniMax models currently have no deprecation field.
+    if let Some(m) = get_gemini_model(bare) {
+        return m.is_deprecated;
+    }
+    // MiniMax, Kimi, and Ollama models currently have no deprecation field.
     false
+}
+
+fn active_openai_auth_path(ctx: &RpcContext) -> OpenAIAuthPath {
+    crate::llm::auth::openai::infer_auth_path(&ctx.auth_path, None)
+        .unwrap_or(OpenAIAuthPath::ChatGptCodex)
 }
 
 /// List available models.
@@ -61,9 +75,9 @@ pub struct ListModelsHandler;
 
 #[async_trait]
 impl MethodHandler for ListModelsHandler {
-    #[instrument(skip(self, _ctx), fields(method = "model.list"))]
-    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        Ok(serde_json::json!({ "models": known_models().await }))
+    #[instrument(skip(self, ctx), fields(method = "model.list"))]
+    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        Ok(serde_json::json!({ "models": known_models(active_openai_auth_path(ctx)).await }))
     }
 }
 
@@ -75,11 +89,12 @@ impl MethodHandler for SwitchModelHandler {
     #[instrument(skip(self, ctx), fields(method = "model.switch"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let model = require_string_param(params.as_ref(), "model")?;
+        let requested_model = require_string_param(params.as_ref(), "model")?;
+        let model = strip_provider_prefix(&requested_model).to_string();
 
         if !is_model_supported(&model) {
             return Err(RpcError::InvalidParams {
-                message: format!("Unknown model: {model}"),
+                message: format!("Unknown model: {requested_model}"),
             });
         }
 
@@ -87,6 +102,18 @@ impl MethodHandler for SwitchModelHandler {
             return Err(RpcError::InvalidParams {
                 message: format!("Model '{model}' is deprecated and cannot be selected"),
             });
+        }
+
+        if get_openai_model(&model).is_some() {
+            let auth_path = active_openai_auth_path(ctx);
+            if !openai_model_available_for_auth_path(&model, auth_path) {
+                return Err(RpcError::InvalidParams {
+                    message: format!(
+                        "OpenAI model '{model}' is not available for the active auth path ({})",
+                        auth_path.as_str()
+                    ),
+                });
+            }
         }
 
         // Get current model for response
@@ -166,12 +193,13 @@ impl MethodHandler for SwitchModelHandler {
 }
 
 /// Look up the default reasoning level for a model ID from the provider registries.
-fn default_reasoning_level(model_id: &str) -> Option<String> {
-    if let Some(m) = get_claude_model(model_id) {
+fn default_reasoning_level(model_id: &str, openai_auth_path: OpenAIAuthPath) -> Option<String> {
+    let bare = strip_provider_prefix(model_id);
+    if let Some(m) = get_claude_model(bare) {
         return m.default_reasoning_level.map(String::from);
     }
-    if let Some(m) = get_openai_model(model_id) {
-        return Some(m.default_reasoning_level.to_string());
+    if let Some((_, profile)) = get_openai_model_profile(bare, openai_auth_path) {
+        return Some(profile.default_reasoning_level.to_string());
     }
     None
 }
@@ -214,7 +242,7 @@ impl MethodHandler for SetReasoningLevelHandler {
         let previous_level = state
             .reasoning_level
             .clone()
-            .or_else(|| default_reasoning_level(&state.model));
+            .or_else(|| default_reasoning_level(&state.model, active_openai_auth_path(ctx)));
 
         // Skip if level hasn't actually changed (case-insensitive)
         if previous_level.as_deref().map(str::to_lowercase) == Some(new_level.to_lowercase()) {
@@ -302,19 +330,53 @@ mod tests {
         let ctx = make_test_context();
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.5"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.4"));
-        assert!(models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.4-mini"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.3-codex"));
-        assert!(models.iter().any(|m| m["id"] == "gpt-5.3-codex-spark"));
-        assert!(models.iter().any(|m| m["id"] == "gpt-5.2-codex"));
-        assert!(models.iter().any(|m| m["id"] == "gpt-5.1-codex-max"));
-        assert!(models.iter().any(|m| m["id"] == "gpt-5.1-codex-mini"));
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.2"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.2-codex"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.1-codex-max"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.1-codex-mini"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.4-nano"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.3-codex-spark"));
         let openai_count = models
             .iter()
             .filter(|m| m["provider"] == "openai-codex")
             .count();
-        assert_eq!(openai_count, 8);
+        assert_eq!(openai_count, 5);
+        let gpt55 = models.iter().find(|m| m["id"] == "gpt-5.5").unwrap();
+        assert_eq!(gpt55["contextWindow"], 272_000);
+        assert_eq!(gpt55["apiEndpoint"], "codex");
+        assert_eq!(gpt55["authPaths"], json!(["chatgpt-codex"]));
+    }
+
+    #[tokio::test]
+    async fn list_models_uses_platform_metadata_for_active_api_key() {
+        let mut ctx = make_test_context();
+        let dir = tempfile::TempDir::new().unwrap();
+        ctx.auth_path = dir.path().join("auth.json");
+        crate::llm::auth::storage::save_named_api_key(
+            &ctx.auth_path,
+            crate::llm::auth::openai::PROVIDER_KEY,
+            "test",
+            "sk-test",
+        )
+        .unwrap();
+
+        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let models = result["models"].as_array().unwrap();
+        let gpt55 = models.iter().find(|m| m["id"] == "gpt-5.5").unwrap();
+        assert_eq!(gpt55["contextWindow"], 1_050_000);
+        assert_eq!(gpt55["apiEndpoint"], "platform");
+        assert_eq!(gpt55["authPaths"], json!(["platform-api-key"]));
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.4-nano"));
+        let gpt53 = models.iter().find(|m| m["id"] == "gpt-5.3-codex").unwrap();
+        assert_eq!(gpt53["contextWindow"], 400_000);
+        assert_eq!(gpt53["apiEndpoint"], "platform");
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.3-codex-spark"));
     }
 
     #[tokio::test]
@@ -526,6 +588,101 @@ mod tests {
             .unwrap();
         assert_eq!(result["previousModel"], "claude-opus-4-6");
         assert_eq!(result["newModel"], "claude-sonnet-4-5-20250929");
+    }
+
+    #[tokio::test]
+    async fn switch_model_accepts_openai_prefix_and_persists_bare_model() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", None, None)
+            .unwrap();
+
+        let result = SwitchModelHandler
+            .handle(
+                Some(json!({"sessionId": sid, "model": "openai/gpt-5.5"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["newModel"], "gpt-5.5");
+
+        let session = ctx.event_store.get_session(&sid).unwrap().unwrap();
+        assert_eq!(session.latest_model, "gpt-5.5");
+    }
+
+    #[tokio::test]
+    async fn switch_model_rejects_deprecated_openai_alias() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", None, None)
+            .unwrap();
+
+        let err = SwitchModelHandler
+            .handle(
+                Some(json!({"sessionId": sid, "model": "gpt-5.2-codex"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(err.to_string().contains("deprecated"));
+    }
+
+    #[tokio::test]
+    async fn switch_model_rejects_openai_unavailable_for_api_key_path() {
+        let mut ctx = make_test_context();
+        let dir = tempfile::TempDir::new().unwrap();
+        ctx.auth_path = dir.path().join("auth.json");
+        crate::llm::auth::storage::save_named_api_key(
+            &ctx.auth_path,
+            crate::llm::auth::openai::PROVIDER_KEY,
+            "test",
+            "sk-test",
+        )
+        .unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", None, None)
+            .unwrap();
+
+        let err = SwitchModelHandler
+            .handle(
+                Some(json!({"sessionId": sid, "model": "gpt-5.3-codex-spark"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(err.to_string().contains("platform-api-key"));
+    }
+
+    #[tokio::test]
+    async fn switch_model_allows_platform_only_openai_when_api_key_active() {
+        let mut ctx = make_test_context();
+        let dir = tempfile::TempDir::new().unwrap();
+        ctx.auth_path = dir.path().join("auth.json");
+        crate::llm::auth::storage::save_named_api_key(
+            &ctx.auth_path,
+            crate::llm::auth::openai::PROVIDER_KEY,
+            "test",
+            "sk-test",
+        )
+        .unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", None, None)
+            .unwrap();
+
+        let result = SwitchModelHandler
+            .handle(
+                Some(json!({"sessionId": sid, "model": "gpt-5.4-pro"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["newModel"], "gpt-5.4-pro");
     }
 
     #[tokio::test]
@@ -882,6 +1039,49 @@ mod tests {
             .get_events_by_type(&sid, &["config.reasoning_level"], None)
             .unwrap();
         assert_eq!(events.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn set_reasoning_level_uses_codex_openai_default_without_api_key() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("gpt-5.4", "/tmp", None, None)
+            .unwrap();
+
+        let result = SetReasoningLevelHandler
+            .handle(Some(json!({"sessionId": sid, "level": "medium"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["previousLevel"], "xhigh");
+        assert_eq!(result["newLevel"], "medium");
+        assert_eq!(result["changed"], true);
+    }
+
+    #[tokio::test]
+    async fn set_reasoning_level_uses_platform_openai_default_with_api_key() {
+        let mut ctx = make_test_context();
+        let dir = tempfile::TempDir::new().unwrap();
+        ctx.auth_path = dir.path().join("auth.json");
+        crate::llm::auth::storage::save_named_api_key(
+            &ctx.auth_path,
+            crate::llm::auth::openai::PROVIDER_KEY,
+            "test",
+            "sk-test",
+        )
+        .unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("gpt-5.4", "/tmp", None, None)
+            .unwrap();
+
+        let result = SetReasoningLevelHandler
+            .handle(Some(json!({"sessionId": sid, "level": "medium"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["previousLevel"], "none");
+        assert_eq!(result["newLevel"], "medium");
+        assert_eq!(result["changed"], true);
     }
 
     #[tokio::test]

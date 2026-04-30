@@ -1,6 +1,7 @@
 use super::*;
 use crate::llm::openai::types::{
-    ApiEndpoint, DEFAULT_BASE_URL, OpenAIApiSettings, OpenAIAuth, ReasoningEffort,
+    ApiEndpoint, DEFAULT_BASE_URL, DEFAULT_PLATFORM_BASE_URL, OpenAIApiSettings, OpenAIAuth,
+    ReasoningEffort,
 };
 
 fn test_tokens() -> crate::llm::auth::OAuthTokens {
@@ -16,6 +17,34 @@ fn test_config() -> OpenAIConfig {
         model: "gpt-5.3-codex".into(),
         auth: OpenAIAuth::OAuth {
             tokens: test_tokens(),
+        },
+        max_tokens: None,
+        temperature: None,
+        base_url: None,
+        reasoning_effort: None,
+        provider_settings: OpenAIApiSettings::default(),
+    }
+}
+
+fn oauth_config(model: &str) -> OpenAIConfig {
+    OpenAIConfig {
+        model: model.into(),
+        auth: OpenAIAuth::OAuth {
+            tokens: test_tokens(),
+        },
+        max_tokens: None,
+        temperature: None,
+        base_url: None,
+        reasoning_effort: None,
+        provider_settings: OpenAIApiSettings::default(),
+    }
+}
+
+fn api_key_config(model: &str) -> OpenAIConfig {
+    OpenAIConfig {
+        model: model.into(),
+        auth: OpenAIAuth::ApiKey {
+            api_key: "sk-test-key".into(),
         },
         max_tokens: None,
         temperature: None,
@@ -276,40 +305,16 @@ fn provider_endpoint_oauth_54_forced_to_codex() {
 
 #[test]
 fn provider_endpoint_api_key_54_uses_platform() {
-    let config = OpenAIConfig {
-        model: "gpt-5.4".into(),
-        auth: OpenAIAuth::ApiKey {
-            api_key: "sk-test-key".into(),
-        },
-        max_tokens: None,
-        temperature: None,
-        base_url: None,
-        reasoning_effort: None,
-        provider_settings: OpenAIApiSettings::default(),
-    };
-    let provider = OpenAIProvider::new(config);
+    let provider = OpenAIProvider::new(api_key_config("gpt-5.4"));
     assert_eq!(provider.api_endpoint, ApiEndpoint::Platform);
-    assert_eq!(
-        provider.base_url,
-        super::super::types::DEFAULT_PLATFORM_BASE_URL
-    );
+    assert_eq!(provider.base_url, DEFAULT_PLATFORM_BASE_URL);
 }
 
 #[test]
-fn provider_endpoint_api_key_codex_model_stays_codex() {
-    let config = OpenAIConfig {
-        model: "gpt-5.3-codex".into(),
-        auth: OpenAIAuth::ApiKey {
-            api_key: "sk-test-key".into(),
-        },
-        max_tokens: None,
-        temperature: None,
-        base_url: None,
-        reasoning_effort: None,
-        provider_settings: OpenAIApiSettings::default(),
-    };
-    let provider = OpenAIProvider::new(config);
-    assert_eq!(provider.api_endpoint, ApiEndpoint::Codex);
+fn provider_endpoint_api_key_never_routes_to_codex_backend() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-5.3-codex"));
+    assert_eq!(provider.api_endpoint, ApiEndpoint::Platform);
+    assert_eq!(provider.base_url, DEFAULT_PLATFORM_BASE_URL);
 }
 
 #[test]
@@ -321,6 +326,20 @@ fn provider_endpoint_unknown_model_defaults_to_codex() {
 }
 
 #[test]
+fn provider_endpoint_unknown_api_key_model_defaults_to_platform() {
+    let provider = OpenAIProvider::new(api_key_config("unknown-model"));
+    assert_eq!(provider.api_endpoint, ApiEndpoint::Platform);
+}
+
+#[test]
+fn provider_context_window_uses_auth_path_profile() {
+    let oauth = OpenAIProvider::new(oauth_config("gpt-5.5"));
+    let api_key = OpenAIProvider::new(api_key_config("gpt-5.5"));
+    assert_eq!(oauth.context_window(), 272_000);
+    assert_eq!(api_key.context_window(), 1_050_000);
+}
+
+#[test]
 fn url_codex_endpoint() {
     let provider = OpenAIProvider::new(test_config());
     let url = format!("{}{}", provider.base_url, provider.api_endpoint.path());
@@ -329,35 +348,15 @@ fn url_codex_endpoint() {
 
 #[test]
 fn url_platform_endpoint() {
-    let config = OpenAIConfig {
-        model: "gpt-5.4".into(),
-        auth: OpenAIAuth::ApiKey {
-            api_key: "sk-test".into(),
-        },
-        max_tokens: None,
-        temperature: None,
-        base_url: None,
-        reasoning_effort: None,
-        provider_settings: OpenAIApiSettings::default(),
-    };
-    let provider = OpenAIProvider::new(config);
+    let provider = OpenAIProvider::new(api_key_config("gpt-5.4"));
     let url = format!("{}{}", provider.base_url, provider.api_endpoint.path());
     assert_eq!(url, "https://api.openai.com/v1/responses");
 }
 
 #[test]
 fn base_url_override_preserves_endpoint_path() {
-    let config = OpenAIConfig {
-        model: "gpt-5.4".into(),
-        auth: OpenAIAuth::ApiKey {
-            api_key: "sk-test".into(),
-        },
-        max_tokens: None,
-        temperature: None,
-        base_url: Some("https://custom.example.com".into()),
-        reasoning_effort: None,
-        provider_settings: OpenAIApiSettings::default(),
-    };
+    let mut config = api_key_config("gpt-5.4");
+    config.base_url = Some("https://custom.example.com".into());
     let provider = OpenAIProvider::new(config);
     let url = format!("{}{}", provider.base_url, provider.api_endpoint.path());
     assert_eq!(url, "https://custom.example.com/v1/responses");
@@ -530,19 +529,36 @@ fn clamp_medium_passthrough() {
 }
 
 #[test]
-fn reasoning_effort_gpt54_defaults_to_medium() {
+fn reasoning_effort_gpt54_oauth_uses_codex_default_xhigh() {
     let mut config = test_config();
     config.model = "gpt-5.4".into();
     let provider = OpenAIProvider::new(config);
     let options = ProviderStreamOptions::default();
-    assert_eq!(provider.resolve_reasoning_effort(&options), "medium");
+    assert_eq!(provider.resolve_reasoning_effort(&options), "xhigh");
 }
 
 #[test]
-fn reasoning_effort_gpt54_none_passthrough() {
+fn reasoning_effort_gpt54_api_key_uses_platform_default_none() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-5.4"));
+    let options = ProviderStreamOptions::default();
+    assert_eq!(provider.resolve_reasoning_effort(&options), "none");
+}
+
+#[test]
+fn reasoning_effort_gpt54_none_clamps_on_codex() {
     let mut config = test_config();
     config.model = "gpt-5.4".into();
     let provider = OpenAIProvider::new(config);
+    let options = ProviderStreamOptions {
+        reasoning_effort: Some(ReasoningEffort::None),
+        ..Default::default()
+    };
+    assert_eq!(provider.resolve_reasoning_effort(&options), "low");
+}
+
+#[test]
+fn reasoning_effort_gpt54_none_passthrough_on_platform() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-5.4"));
     let options = ProviderStreamOptions {
         reasoning_effort: Some(ReasoningEffort::None),
         ..Default::default()
@@ -559,6 +575,58 @@ fn reasoning_effort_none_clamped_on_53() {
     };
     // gpt-5.3-codex doesn't support "none" — clamp to "low"
     assert_eq!(provider.resolve_reasoning_effort(&options), "low");
+}
+
+// ── Request shaping ─────────────────────────────────────────────
+
+#[test]
+fn build_request_gpt55_codex_clamps_none_and_max_output() {
+    let mut config = oauth_config("gpt-5.5");
+    config.max_tokens = Some(200_000);
+    let provider = OpenAIProvider::new(config);
+    let request = provider.build_request(
+        &Context::default(),
+        &ProviderStreamOptions {
+            reasoning_effort: Some(ReasoningEffort::None),
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(request.model, "gpt-5.5");
+    assert_eq!(request.max_output_tokens, Some(128_000));
+    assert_eq!(request.reasoning.unwrap().effort, "low");
+    assert_eq!(request.text.unwrap().verbosity, "low");
+}
+
+#[test]
+fn build_request_gpt55_platform_preserves_none_and_platform_verbosity() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-5.5"));
+    let request = provider.build_request(
+        &Context::default(),
+        &ProviderStreamOptions {
+            max_tokens: Some(200_000),
+            reasoning_effort: Some(ReasoningEffort::None),
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(request.max_output_tokens, Some(128_000));
+    assert_eq!(request.reasoning.unwrap().effort, "none");
+    assert_eq!(request.text.unwrap().verbosity, "medium");
+}
+
+#[test]
+fn build_request_deprecated_openai_alias_uses_replacement_model() {
+    let provider = OpenAIProvider::new(oauth_config("gpt-5.2-codex"));
+    let request = provider.build_request(&Context::default(), &ProviderStreamOptions::default());
+    assert_eq!(request.model, "gpt-5.2");
+}
+
+#[test]
+fn build_request_snapshot_alias_preserves_snapshot_model() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-5.5-2026-04-23"));
+    let request = provider.build_request(&Context::default(), &ProviderStreamOptions::default());
+    assert_eq!(request.model, "gpt-5.5-2026-04-23");
 }
 
 // ── is_first_turn ────────────────────────────────────────────────

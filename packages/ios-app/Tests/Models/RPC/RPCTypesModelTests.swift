@@ -298,6 +298,39 @@ struct ModelInfoStrictDecodeTests {
         #expect(m.isLegacy == false)
     }
 
+    @Test("OpenAI endpoint-aware optional fields decode")
+    func openAIEndpointAwareFieldsDecode() throws {
+        var payload = Self.validPayload()
+        payload["id"] = "gpt-5.5"
+        payload["canonicalModelId"] = "gpt-5.5"
+        payload["name"] = "GPT-5.5"
+        payload["provider"] = "openai-codex"
+        payload["contextWindow"] = 272_000
+        payload["maxContextWindow"] = 272_000
+        payload["maxOutput"] = 128_000
+        payload["apiEndpoint"] = "codex"
+        payload["authPaths"] = ["chatgpt-codex"]
+        payload["aliasIds"] = ["gpt-5.5-2026-04-23"]
+        payload["supportsReasoning"] = true
+        payload["reasoningLevels"] = ["low", "medium", "high", "xhigh"]
+        payload["defaultReasoningLevel"] = "medium"
+        payload["supportsVerbosity"] = true
+        payload["defaultVerbosity"] = "low"
+        payload["replacementModel"] = "gpt-5.5"
+        payload["isHidden"] = false
+        payload["tier"] = "flagship"
+
+        let m = try decode(payload)
+        #expect(m.canonicalModelId == "gpt-5.5")
+        #expect(m.apiEndpoint == "codex")
+        #expect(m.authPaths == ["chatgpt-codex"])
+        #expect(m.aliasIds == ["gpt-5.5-2026-04-23"])
+        #expect(m.maxContextWindow == 272_000)
+        #expect(m.supportsVerbosity == true)
+        #expect(m.defaultVerbosity == "low")
+        #expect(m.isHidden == false)
+    }
+
     @Test("missing supportsThinking fails decode")
     func missingSupportsThinking() {
         var payload = Self.validPayload()

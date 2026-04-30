@@ -177,6 +177,28 @@ fn openai_tier(input: f64, output: f64) -> PricingTier {
     }
 }
 
+/// Create an `OpenAI` pricing tier with an explicit cached-input price.
+fn openai_cached_tier(input: f64, output: f64, cached_input: f64) -> PricingTier {
+    PricingTier {
+        input_per_million: input,
+        output_per_million: output,
+        cache_write_5m_multiplier: 1.0,
+        cache_write_1h_multiplier: 1.0,
+        cache_read_multiplier: cached_input / input,
+    }
+}
+
+/// Create an `OpenAI` pricing tier for models without cached-input discount.
+fn openai_uncached_tier(input: f64, output: f64) -> PricingTier {
+    PricingTier {
+        input_per_million: input,
+        output_per_million: output,
+        cache_write_5m_multiplier: 1.0,
+        cache_write_1h_multiplier: 1.0,
+        cache_read_multiplier: 1.0,
+    }
+}
+
 /// Exact model name matching.
 fn exact_match(model: &str) -> Option<PricingTier> {
     Some(match model {
@@ -220,6 +242,16 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         "gpt-4.1" | "gpt-4.1-2025-04-14" => openai_tier(2.0, 8.0),
         "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => openai_tier(0.40, 1.60),
         "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => openai_tier(0.10, 0.40),
+        "gpt-5.5" | "gpt-5.5-2026-04-23" => openai_cached_tier(5.0, 30.0, 0.50),
+        "gpt-5.5-pro" | "gpt-5.5-pro-2026-04-23" => openai_uncached_tier(30.0, 180.0),
+        "gpt-5.4" | "gpt-5.4-2026-03-05" => openai_cached_tier(2.50, 15.0, 0.25),
+        "gpt-5.4-pro" | "gpt-5.4-pro-2026-03-05" => openai_uncached_tier(30.0, 180.0),
+        "gpt-5.4-mini" | "gpt-5.4-mini-2026-03-17" => openai_cached_tier(0.75, 4.50, 0.075),
+        "gpt-5.4-nano" | "gpt-5.4-nano-2026-03-17" => openai_cached_tier(0.20, 1.25, 0.020),
+        "gpt-5.3-codex" | "gpt-5.3-codex-spark" => openai_cached_tier(1.75, 14.0, 0.175),
+        "gpt-5.2" | "gpt-5.2-2025-12-11" | "gpt-5.2-codex" => openai_cached_tier(1.75, 14.0, 0.175),
+        "gpt-5.1-codex-max" => openai_cached_tier(1.25, 10.0, 0.125),
+        "gpt-5.1-codex-mini" => openai_cached_tier(0.25, 2.0, 0.025),
 
         // MiniMax — $0.3/M input, $1.2/M output (no cache)
         "MiniMax-M2.5"
@@ -314,6 +346,33 @@ fn pattern_match(model: &str) -> Option<PricingTier> {
     }
 
     // OpenAI patterns
+    if m.contains("gpt-5.5-pro") {
+        return Some(openai_uncached_tier(30.0, 180.0));
+    }
+    if m.contains("gpt-5.5") {
+        return Some(openai_cached_tier(5.0, 30.0, 0.50));
+    }
+    if m.contains("gpt-5.4-pro") {
+        return Some(openai_uncached_tier(30.0, 180.0));
+    }
+    if m.contains("gpt-5.4-mini") {
+        return Some(openai_cached_tier(0.75, 4.50, 0.075));
+    }
+    if m.contains("gpt-5.4-nano") {
+        return Some(openai_cached_tier(0.20, 1.25, 0.020));
+    }
+    if m.contains("gpt-5.4") {
+        return Some(openai_cached_tier(2.50, 15.0, 0.25));
+    }
+    if m.contains("gpt-5.3-codex") || m.contains("gpt-5.2") {
+        return Some(openai_cached_tier(1.75, 14.0, 0.175));
+    }
+    if m.contains("gpt-5.1-codex-max") {
+        return Some(openai_cached_tier(1.25, 10.0, 0.125));
+    }
+    if m.contains("gpt-5.1-codex-mini") {
+        return Some(openai_cached_tier(0.25, 2.0, 0.025));
+    }
     if m.starts_with("o3") {
         return Some(openai_tier(10.0, 40.0));
     }
@@ -433,6 +492,40 @@ mod tests {
         let tier = get_pricing_tier("o3").unwrap();
         assert_float_eq(tier.input_per_million, 10.0);
         assert_float_eq(tier.output_per_million, 40.0);
+    }
+
+    #[test]
+    fn pricing_gpt_55() {
+        let tier = get_pricing_tier("gpt-5.5").unwrap();
+        assert_float_eq(tier.input_per_million, 5.0);
+        assert_float_eq(tier.output_per_million, 30.0);
+        assert_float_eq(tier.cache_read_multiplier, 0.1);
+    }
+
+    #[test]
+    fn pricing_gpt_54_variants() {
+        let tier = get_pricing_tier("gpt-5.4").unwrap();
+        assert_float_eq(tier.input_per_million, 2.50);
+        assert_float_eq(tier.output_per_million, 15.0);
+
+        let tier = get_pricing_tier("gpt-5.4-mini-2026-03-17").unwrap();
+        assert_float_eq(tier.input_per_million, 0.75);
+        assert_float_eq(tier.output_per_million, 4.50);
+
+        let tier = get_pricing_tier("gpt-5.4-nano").unwrap();
+        assert_float_eq(tier.input_per_million, 0.20);
+        assert_float_eq(tier.output_per_million, 1.25);
+    }
+
+    #[test]
+    fn pricing_gpt_52_and_deprecated_alias() {
+        let tier = get_pricing_tier("gpt-5.2").unwrap();
+        assert_float_eq(tier.input_per_million, 1.75);
+        assert_float_eq(tier.output_per_million, 14.0);
+
+        let alias_tier = get_pricing_tier("gpt-5.2-codex").unwrap();
+        assert_float_eq(alias_tier.input_per_million, 1.75);
+        assert_float_eq(alias_tier.output_per_million, 14.0);
     }
 
     #[test]
@@ -600,6 +693,7 @@ mod tests {
     #[test]
     fn detect_openai() {
         assert_eq!(detect_provider("gpt-4.1"), Provider::OpenAi);
+        assert_eq!(detect_provider("gpt-5.5"), Provider::OpenAi);
     }
 
     #[test]

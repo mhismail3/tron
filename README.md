@@ -559,7 +559,7 @@ The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection
 | Provider | Module | Auth Methods | Notes |
 |----------|--------|--------------|-------|
 | Anthropic | `llm/anthropic/` | OAuth (primary), API key | PKCE OAuth flow; cache pruning supported |
-| OpenAI    | `llm/openai/`    | OAuth, API key            | Codex CLI compatibility |
+| OpenAI    | `llm/openai/`    | OAuth, API key            | OAuth uses ChatGPT/Codex metadata; API keys use Platform `/v1/responses` metadata |
 | Google    | `llm/google/`    | OAuth, API key            | Cloud Code Assist OAuth, Gemini API key |
 | MiniMax   | `llm/minimax/`   | API key only              | — |
 | Kimi      | `llm/kimi/`      | API key only              | — |
@@ -574,12 +574,14 @@ tron login --label personal
 
 `auth.json` stores accounts under `providers.<name>.accounts[]` (named OAuth entries) and `providers.<name>.apiKeys[]` (named API keys). The active credential per provider is selected by `providers.<name>.activeCredential`, which is `{type: "oauth"|"apiKey", label}`. Manage from the iOS app or via `auth.*` RPC methods. When an API key is saved without a custom label, Tron stores it as `Default`.
 
+OpenAI uses the `openai-codex` provider key for both auth modes. ChatGPT OAuth credentials route to `chatgpt.com/backend-api/codex` and use Codex catalog limits such as `gpt-5.5` and `gpt-5.3-codex` at 272K context. OpenAI API keys route to `api.openai.com/v1/responses` and use Platform limits such as `gpt-5.5` at 1.05M context and `gpt-5.3-codex` at 400K context. Dated snapshots like `gpt-5.5-2026-04-23` are accepted as aliases, while deprecated compatibility IDs such as `gpt-5.2-codex` resolve to their replacement but are hidden from the default model picker.
+
 ### Auth Precedence
 
-1. The provider's `activeCredential` from `auth.json` (OAuth or API key, by label)
-2. The provider's first non-active OAuth account
-3. The provider's first non-active API key
-4. Environment variable fallback (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+1. A session-pinned credential, when present
+2. The provider's `activeCredential` from `auth.json` (OAuth or API key, by label)
+3. The provider's first OAuth account
+4. The provider's first API key
 
 ### WebSocket Bearer Token
 

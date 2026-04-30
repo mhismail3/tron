@@ -213,26 +213,40 @@ impl DefaultProviderFactory {
             }
         };
 
-        let auth = match server_auth {
+        let (auth, auth_path) = match server_auth {
             crate::llm::auth::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
                 ..
-            } => crate::llm::openai::types::OpenAIAuth::OAuth {
-                tokens: crate::llm::auth::OAuthTokens {
-                    access_token,
-                    refresh_token,
-                    expires_at,
+            } => (
+                crate::llm::openai::types::OpenAIAuth::OAuth {
+                    tokens: crate::llm::auth::OAuthTokens {
+                        access_token,
+                        refresh_token,
+                        expires_at,
+                    },
                 },
-            },
-            crate::llm::auth::ServerAuth::ApiKey { api_key } => {
-                crate::llm::openai::types::OpenAIAuth::ApiKey { api_key }
-            }
+                crate::llm::openai::types::OpenAIAuthPath::ChatGptCodex,
+            ),
+            crate::llm::auth::ServerAuth::ApiKey { api_key } => (
+                crate::llm::openai::types::OpenAIAuth::ApiKey { api_key },
+                crate::llm::openai::types::OpenAIAuthPath::PlatformApiKey,
+            ),
         };
+        let request_model = crate::llm::openai::types::openai_request_model_id(model);
+        if crate::llm::openai::types::get_openai_model_profile(&request_model, auth_path).is_none()
+        {
+            return Err(ProviderError::Other {
+                message: format!(
+                    "OpenAI model '{model}' is not available for the active auth path ({})",
+                    auth_path.as_str()
+                ),
+            });
+        }
 
         let config = crate::llm::openai::types::OpenAIConfig {
-            model: model.to_string(),
+            model: request_model,
             auth,
             max_tokens: None,
             temperature: None,
@@ -595,6 +609,71 @@ mod tests {
         // "openai/gpt-5.3-codex" should route to OpenAI
         let err = expect_auth_error(&factory, "openai/gpt-5.3-codex").await;
         assert!(err.to_string().contains("OpenAI"));
+    }
+
+    #[tokio::test]
+    async fn factory_openai_api_key_uses_platform_profile() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+        crate::llm::auth::storage::save_named_api_key(
+            &path,
+            crate::llm::auth::openai::PROVIDER_KEY,
+            "test",
+            "sk-test",
+        )
+        .unwrap();
+
+        let settings = crate::settings::TronSettings::default();
+        let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
+        let provider = factory.create_for_model("gpt-5.5").await.unwrap();
+        assert_eq!(provider.model(), "gpt-5.5");
+        assert_eq!(provider.context_window(), 1_050_000);
+    }
+
+    #[tokio::test]
+    async fn factory_openai_oauth_uses_codex_profile() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+        let tokens = crate::llm::auth::OAuthTokens {
+            access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            expires_at: crate::llm::auth::now_ms() + 3_600_000,
+        };
+        crate::llm::auth::storage::save_account_oauth_tokens(
+            &path,
+            crate::llm::auth::openai::PROVIDER_KEY,
+            "test",
+            &tokens,
+        )
+        .unwrap();
+
+        let settings = crate::settings::TronSettings::default();
+        let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
+        let provider = factory.create_for_model("gpt-5.5").await.unwrap();
+        assert_eq!(provider.model(), "gpt-5.5");
+        assert_eq!(provider.context_window(), 272_000);
+    }
+
+    #[tokio::test]
+    async fn factory_rejects_openai_model_unavailable_for_active_auth_path() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+        crate::llm::auth::storage::save_named_api_key(
+            &path,
+            crate::llm::auth::openai::PROVIDER_KEY,
+            "test",
+            "sk-test",
+        )
+        .unwrap();
+
+        let settings = crate::settings::TronSettings::default();
+        let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
+        let err = match factory.create_for_model("gpt-5.3-codex-spark").await {
+            Ok(_) => panic!("expected auth-path availability error"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("not available"));
+        assert!(err.to_string().contains("platform-api-key"));
     }
 
     #[tokio::test]

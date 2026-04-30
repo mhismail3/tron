@@ -142,14 +142,16 @@ enum ModelNameFormatter {
     }
 
     /// Format OpenAI GPT model IDs
-    /// e.g., "gpt-5.4" -> "GPT-5.4", "gpt-5.4-pro" -> "GPT-5.4 Pro"
+    /// e.g., "gpt-5.5" -> "GPT-5.5", "gpt-5.4-pro" -> "GPT-5.4 Pro"
     ///       "gpt-5.3-codex-spark" -> "GPT-5.3 Spark"
     private static func formatGptModel(_ modelId: String, style: Style) -> String {
         let lowered = modelId.lowercased()
 
-        // Extract version (5.4, 5.3, 5.2, 5.1, etc.)
+        // Extract version (5.5, 5.4, 5.3, 5.2, 5.1, etc.)
         var version = ""
-        if lowered.contains("5.4") {
+        if lowered.contains("5.5") {
+            version = "5.5"
+        } else if lowered.contains("5.4") {
             version = "5.4"
         } else if lowered.contains("5.3") {
             version = "5.3"
@@ -165,6 +167,8 @@ enum ModelNameFormatter {
         var suffix = ""
         if lowered.hasSuffix("-pro") {
             suffix = " Pro"
+        } else if lowered.contains("-nano") {
+            suffix = " Nano"
         } else if lowered.contains("-mini") {
             suffix = " Mini"
         } else if lowered.contains("-max") {

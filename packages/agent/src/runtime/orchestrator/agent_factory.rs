@@ -99,7 +99,7 @@ impl AgentFactory {
             }
         }
 
-        let context_limit = crate::llm::model_context_window(&config.model);
+        let context_limit = opts.provider.context_window();
         let mut compaction = config.compaction.clone();
         compaction.context_limit = context_limit;
 
@@ -195,6 +195,26 @@ mod tests {
         }
         fn model(&self) -> &'static str {
             "mock"
+        }
+        async fn stream(
+            &self,
+            _c: &crate::core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            Err(ProviderError::Other {
+                message: "not impl".into(),
+            })
+        }
+    }
+
+    struct ModelAwareMockProvider(&'static str);
+    #[async_trait]
+    impl Provider for ModelAwareMockProvider {
+        fn provider_type(&self) -> ProviderKind {
+            ProviderKind::Anthropic
+        }
+        fn model(&self) -> &'static str {
+            self.0
         }
         async fn stream(
             &self,
@@ -378,7 +398,10 @@ mod tests {
             model: "claude-opus-4-6".into(),
             ..AgentConfig::default()
         };
-        let opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        let opts = default_opts(
+            Arc::new(ModelAwareMockProvider("claude-opus-4-6")),
+            ToolRegistry::new(),
+        );
         let agent = AgentFactory::create_agent(config, "s1".into(), opts);
         assert_eq!(
             agent.context_manager().get_context_limit(),
@@ -392,7 +415,10 @@ mod tests {
             model: "gemini-2.5-pro".into(),
             ..AgentConfig::default()
         };
-        let opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        let opts = default_opts(
+            Arc::new(ModelAwareMockProvider("gemini-2.5-pro")),
+            ToolRegistry::new(),
+        );
         let agent = AgentFactory::create_agent(config, "s1".into(), opts);
         assert_eq!(
             agent.context_manager().get_context_limit(),

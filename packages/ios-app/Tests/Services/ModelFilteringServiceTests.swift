@@ -26,15 +26,17 @@ final class ModelFilteringServiceTests: XCTestCase {
             makeModel(id: "claude-3-haiku-20240307", provider: "anthropic", name: "Haiku 3",
                       family: "Claude 3", tier: "haiku", isLegacy: true, sortOrder: 9),
 
-            // OpenAI Codex models
+            // OpenAI models
+            makeModel(id: "gpt-5.5", provider: "openai-codex", name: "GPT-5.5",
+                      family: "GPT-5.5", tier: "flagship", isLegacy: false, sortOrder: 0),
+            makeModel(id: "gpt-5.4", provider: "openai-codex", name: "GPT-5.4",
+                      family: "GPT-5.4", tier: "flagship", isLegacy: false, sortOrder: 2),
+            makeModel(id: "gpt-5.4-mini", provider: "openai-codex", name: "GPT-5.4 Mini",
+                      family: "GPT-5.4", tier: "standard", isLegacy: false, sortOrder: 4),
             makeModel(id: "gpt-5.3-codex", provider: "openai-codex", name: "GPT-5.3 Codex",
-                      family: "GPT-5.3", isLegacy: false, sortOrder: 0),
-            makeModel(id: "gpt-5.2-codex", provider: "openai-codex", name: "GPT-5.2 Codex",
-                      family: "GPT-5.2", isLegacy: false, sortOrder: 2),
-            makeModel(id: "gpt-5.1-codex", provider: "openai-codex", name: "GPT-5.1 Codex",
-                      family: "GPT-5.1", isLegacy: false, sortOrder: 3),
-            makeModel(id: "gpt-5.0-codex", provider: "openai-codex", name: "GPT-5.0 Codex",
-                      family: "GPT-5.0", isLegacy: false, sortOrder: 4),
+                      family: "GPT-5.3", tier: "flagship", isLegacy: true, sortOrder: 6),
+            makeModel(id: "gpt-5.2", provider: "openai-codex", name: "GPT-5.2",
+                      family: "GPT-5.2", tier: "flagship", isLegacy: true, sortOrder: 10),
 
             // Gemini models
             makeModel(id: "gemini-3-pro-preview", provider: "google", name: "Gemini 3 Pro",
@@ -144,10 +146,9 @@ final class ModelFilteringServiceTests: XCTestCase {
         let models = makeModels()
         let groups = ModelFilteringService.categorize(models)
 
-        let codexLatest = groups.first { $0.tier == "OpenAI Codex (Latest)" }
+        let codexLatest = groups.first { $0.tier == "OpenAI (Latest)" }
         XCTAssertNotNil(codexLatest)
-        // All OpenAI models in test data are isLegacy: false
-        XCTAssertEqual(codexLatest?.models.count, 4)
+        XCTAssertEqual(codexLatest?.models.count, 3)
     }
 
     func test_categorizeModels_separatesGeminiByFamily() {
@@ -226,18 +227,18 @@ final class ModelFilteringServiceTests: XCTestCase {
 
     func test_sortByTier_codexBySortOrder() {
         let models = [
-            makeModel(id: "gpt-5.0-codex", provider: "openai-codex", sortOrder: 4),
-            makeModel(id: "gpt-5.3-codex", provider: "openai-codex", sortOrder: 0),
-            makeModel(id: "gpt-5.2-codex", provider: "openai-codex", sortOrder: 2),
-            makeModel(id: "gpt-5.1-codex", provider: "openai-codex", sortOrder: 3),
+            makeModel(id: "gpt-5.4-mini", provider: "openai-codex", sortOrder: 4),
+            makeModel(id: "gpt-5.5", provider: "openai-codex", sortOrder: 0),
+            makeModel(id: "gpt-5.4", provider: "openai-codex", sortOrder: 2),
+            makeModel(id: "gpt-5.3-codex", provider: "openai-codex", sortOrder: 6),
         ]
 
         let sorted = ModelFilteringService.sortByTier(models)
 
-        XCTAssertEqual(sorted[0].id, "gpt-5.3-codex")
-        XCTAssertEqual(sorted[1].id, "gpt-5.2-codex")
-        XCTAssertEqual(sorted[2].id, "gpt-5.1-codex")
-        XCTAssertEqual(sorted[3].id, "gpt-5.0-codex")
+        XCTAssertEqual(sorted[0].id, "gpt-5.5")
+        XCTAssertEqual(sorted[1].id, "gpt-5.4")
+        XCTAssertEqual(sorted[2].id, "gpt-5.4-mini")
+        XCTAssertEqual(sorted[3].id, "gpt-5.3-codex")
     }
 
     func test_sortByTier_geminiBySortOrder() {

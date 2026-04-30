@@ -580,6 +580,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     };
 
     let compactor_settings = &settings.context.compactor;
+    let context_limit = provider.context_window();
     let config = AgentConfig {
         model: model.clone(),
         working_directory: Some(working_dir.clone()),
@@ -597,7 +598,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         compaction: crate::runtime::context::types::CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
             preserve_recent_turns: compactor_settings.preserve_recent_count,
-            context_limit: crate::llm::model_context_window(&model),
+            context_limit,
         },
         retry: Some(crate::core::retry::RetryConfig {
             max_retries: settings.retry.max_retries,

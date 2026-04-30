@@ -8,8 +8,10 @@
 
 use super::errors::AuthError;
 use super::types::{
-    ActiveCredential, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at, now_ms,
+    ActiveCredential, OAuthConfig, OAuthTokens, ProviderAuth, ServerAuth, calculate_expires_at,
+    now_ms,
 };
+use crate::llm::openai::types::OpenAIAuthPath;
 
 /// `OpenAI` token endpoint URL.
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
@@ -206,6 +208,38 @@ pub async fn load_server_auth_with_client(
     }
 }
 
+/// Infer the active `OpenAI` auth path from an already-loaded provider auth.
+///
+/// This mirrors [`super::resolve_credential`] exactly, but stops before token
+/// refresh so metadata lookups can cheaply choose the same profile as provider
+/// creation.
+#[must_use]
+pub fn infer_auth_path_from_provider_auth(
+    provider_auth: &ProviderAuth,
+    credential_override: Option<&ActiveCredential>,
+) -> Option<OpenAIAuthPath> {
+    match super::resolve_credential(provider_auth, credential_override)? {
+        super::ResolvedCredential::OAuthAccount(_) => Some(OpenAIAuthPath::ChatGptCodex),
+        super::ResolvedCredential::ApiKey(_) => Some(OpenAIAuthPath::PlatformApiKey),
+    }
+}
+
+/// Infer the active `OpenAI` auth path from `auth.json`.
+///
+/// Returns `None` if the provider is unconfigured, the auth file cannot be read,
+/// or no usable credential is available. Callers that need a display fallback
+/// should choose the conservative Codex profile.
+#[must_use]
+pub fn infer_auth_path(
+    auth_path: &std::path::Path,
+    credential_override: Option<&ActiveCredential>,
+) -> Option<OpenAIAuthPath> {
+    let provider_auth = super::storage::get_provider_auth(auth_path, PROVIDER_KEY)
+        .ok()
+        .flatten()?;
+    infer_auth_path_from_provider_auth(&provider_auth, credential_override)
+}
+
 /// Read the current tokens for a specific account from auth.json.
 ///
 /// Returns `None` both when the provider is not configured and when the
@@ -356,6 +390,56 @@ mod tests {
     #[test]
     fn provider_key_is_openai_codex() {
         assert_eq!(PROVIDER_KEY, "openai-codex");
+    }
+
+    #[test]
+    fn infer_auth_path_prefers_active_credential() {
+        let provider_auth = ProviderAuth {
+            accounts: Some(vec![super::super::types::AccountEntry {
+                label: "chatgpt".into(),
+                oauth: OAuthTokens {
+                    access_token: "tok".into(),
+                    refresh_token: "ref".into(),
+                    expires_at: now_ms() + 3_600_000,
+                },
+            }]),
+            api_keys: Some(vec![super::super::types::ApiKeyEntry {
+                label: "platform".into(),
+                key: "sk-test".into(),
+            }]),
+            active_credential: Some(ActiveCredential::ApiKey {
+                label: "platform".into(),
+            }),
+        };
+
+        assert_eq!(
+            infer_auth_path_from_provider_auth(&provider_auth, None),
+            Some(OpenAIAuthPath::PlatformApiKey)
+        );
+    }
+
+    #[test]
+    fn infer_auth_path_fallback_prefers_oauth_before_api_key() {
+        let provider_auth = ProviderAuth {
+            accounts: Some(vec![super::super::types::AccountEntry {
+                label: "chatgpt".into(),
+                oauth: OAuthTokens {
+                    access_token: "tok".into(),
+                    refresh_token: "ref".into(),
+                    expires_at: now_ms() + 3_600_000,
+                },
+            }]),
+            api_keys: Some(vec![super::super::types::ApiKeyEntry {
+                label: "platform".into(),
+                key: "sk-test".into(),
+            }]),
+            active_credential: None,
+        };
+
+        assert_eq!(
+            infer_auth_path_from_provider_auth(&provider_auth, None),
+            Some(OpenAIAuthPath::ChatGptCodex)
+        );
     }
 
     // ─── default_config tests ───────────────────────────────────────────

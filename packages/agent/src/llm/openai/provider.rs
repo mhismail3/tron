@@ -34,8 +34,9 @@ use super::message_converter::{
 };
 use super::stream_handler::{create_stream_state, process_stream_event};
 use super::types::{
-    ApiEndpoint, MessageContent, OpenAIApiSettings, OpenAIAuth, OpenAIConfig, ReasoningConfig,
-    ResponsesInputItem, ResponsesRequest, ResponsesSseEvent, get_openai_model,
+    ApiEndpoint, MessageContent, OpenAIApiSettings, OpenAIAuth, OpenAIAuthPath, OpenAIConfig,
+    OpenAIModelProfile, ReasoningConfig, ResponseTextConfig, ResponsesInputItem, ResponsesRequest,
+    ResponsesSseEvent, get_openai_model_profile, openai_request_model_id,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -237,30 +238,24 @@ pub struct OpenAIProvider {
 impl OpenAIProvider {
     /// Resolve constructor fields shared between `new` and `with_client`.
     ///
-    /// Effective endpoint depends on both the model's preference and auth type:
-    /// - **API key** → use the model's declared endpoint (Platform for GPT 5.4+, Codex for others)
-    /// - **OAuth** → always Codex (OAuth tokens lack Platform API scopes)
+    /// Effective endpoint depends on the active auth type:
+    /// - **API key** → Platform API
+    /// - **OAuth** → Codex backend
     fn resolve(config: &OpenAIConfig) -> (ApiEndpoint, String, crate::llm::auth::OAuthTokens) {
-        let model_endpoint = get_openai_model(&config.model)
-            .map(|m| m.api_endpoint)
-            .unwrap_or_default();
+        let auth_path = OpenAIAuthPath::from(&config.auth);
+        let model_endpoint = get_openai_model_profile(&config.model, auth_path)
+            .map_or_else(|| auth_path.endpoint(), |(_, profile)| profile.api_endpoint);
 
         let (api_endpoint, tokens) = match &config.auth {
-            OpenAIAuth::OAuth { tokens } => {
-                // OAuth tokens only work on Codex — force endpoint regardless of model preference.
-                (ApiEndpoint::Codex, tokens.clone())
-            }
-            OpenAIAuth::ApiKey { api_key } => {
-                // API keys work on both — use the model's preferred endpoint.
-                (
-                    model_endpoint,
-                    crate::llm::auth::OAuthTokens {
-                        access_token: api_key.clone(),
-                        refresh_token: String::new(),
-                        expires_at: i64::MAX,
-                    },
-                )
-            }
+            OpenAIAuth::OAuth { tokens } => (model_endpoint, tokens.clone()),
+            OpenAIAuth::ApiKey { api_key } => (
+                model_endpoint,
+                crate::llm::auth::OAuthTokens {
+                    access_token: api_key.clone(),
+                    refresh_token: String::new(),
+                    expires_at: i64::MAX,
+                },
+            ),
         };
 
         let base_url = config
@@ -321,6 +316,12 @@ impl OpenAIProvider {
         Ok(())
     }
 
+    /// The active auth-path profile for this provider instance.
+    fn active_profile(&self) -> Option<&'static OpenAIModelProfile> {
+        let auth_path = OpenAIAuthPath::from(&self.config.auth);
+        get_openai_model_profile(&self.config.model, auth_path).map(|(_, profile)| profile)
+    }
+
     /// Build HTTP headers for the Responses API request.
     ///
     /// Codex endpoint requires extra headers (`openai-beta`, `openai-originator`,
@@ -373,11 +374,12 @@ impl OpenAIProvider {
             .or(self.config.reasoning_effort.as_deref())
             .or(self.provider_settings.default_reasoning_effort.as_deref())
             .unwrap_or_else(|| {
-                get_openai_model(&self.config.model).map_or("medium", |m| m.default_reasoning_level)
+                self.active_profile()
+                    .map_or("medium", |profile| profile.default_reasoning_level)
             });
 
-        if let Some(model_info) = get_openai_model(&self.config.model) {
-            clamp_reasoning_effort(raw, model_info.reasoning_levels)
+        if let Some(profile) = self.active_profile() {
+            clamp_reasoning_effort(raw, profile.reasoning_levels)
         } else {
             raw.to_string()
         }
@@ -443,7 +445,31 @@ impl OpenAIProvider {
     /// Tool search is not available on the Codex backend.
     fn model_supports_tool_search(&self) -> bool {
         self.api_endpoint == ApiEndpoint::Platform
-            && get_openai_model(&self.config.model).is_some_and(|m| m.supports_tool_search)
+            && self
+                .active_profile()
+                .is_some_and(|profile| profile.supports_tool_search)
+    }
+
+    /// Resolve and clamp max output tokens for the active profile.
+    fn resolve_max_output_tokens(&self, options: &ProviderStreamOptions) -> Option<u32> {
+        let requested = options.max_tokens.or(self.config.max_tokens)?;
+        let Some(profile) = self.active_profile() else {
+            return Some(requested);
+        };
+        Some(requested.min(profile.max_output.min(u64::from(u32::MAX)) as u32))
+    }
+
+    /// Resolve optional text verbosity controls for the active profile.
+    fn resolve_text_config(&self) -> Option<ResponseTextConfig> {
+        let profile = self.active_profile()?;
+        if !profile.supports_verbosity {
+            return None;
+        }
+        profile
+            .default_verbosity
+            .map(|verbosity| ResponseTextConfig {
+                verbosity: verbosity.to_string(),
+            })
     }
 
     /// Build the full [`ResponsesRequest`] from context and options.
@@ -459,20 +485,25 @@ impl OpenAIProvider {
             .tools
             .as_ref()
             .map(|t| convert_tools_v2(t, enable_tool_search));
+        let reasoning = self
+            .active_profile()
+            .filter(|profile| profile.supports_reasoning)
+            .map(|_| ReasoningConfig {
+                effort: reasoning_effort,
+                summary: "detailed".into(),
+            });
 
         ResponsesRequest {
-            model: self.config.model.clone(),
+            model: openai_request_model_id(&self.config.model),
             input,
             instructions: Some(DEFAULT_INSTRUCTIONS.to_string()),
             stream: true,
             store: false,
             temperature: options.temperature,
             tools,
-            max_output_tokens: options.max_tokens,
-            reasoning: Some(ReasoningConfig {
-                effort: reasoning_effort,
-                summary: "detailed".into(),
-            }),
+            max_output_tokens: self.resolve_max_output_tokens(options),
+            reasoning,
+            text: self.resolve_text_config(),
         }
     }
 
@@ -557,6 +588,13 @@ impl Provider for OpenAIProvider {
 
     fn model(&self) -> &str {
         &self.config.model
+    }
+
+    fn context_window(&self) -> u64 {
+        self.active_profile().map_or_else(
+            || crate::llm::model_context_window(&self.config.model),
+            |profile| profile.context_window,
+        )
     }
 
     #[instrument(skip_all, fields(provider = "openai", model = %self.config.model))]

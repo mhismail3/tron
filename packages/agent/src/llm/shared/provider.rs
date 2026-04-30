@@ -229,6 +229,15 @@ pub trait Provider: Send + Sync {
     /// Current model ID (e.g., `"claude-opus-4-6"`).
     fn model(&self) -> &str;
 
+    /// Effective context window for the current provider instance.
+    ///
+    /// Most providers use a model-only registry value. Providers whose limits
+    /// vary by credential or endpoint should override this so runtime
+    /// compaction follows the same profile that request construction uses.
+    fn context_window(&self) -> u64 {
+        crate::llm::model_context_window(self.model())
+    }
+
     /// Stream a response from the LLM.
     ///
     /// Returns a stream of [`StreamEvent`]s. The caller should consume events

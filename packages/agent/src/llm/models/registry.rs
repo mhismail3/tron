@@ -87,13 +87,15 @@ pub fn is_model_supported(model_id: &str) -> bool {
 /// Check if a model supports image inputs.
 ///
 /// Looks up all three provider registries. Unknown models default to `true`.
+/// `OpenAI` uses its conservative default profile here; provider instances
+/// with auth context can inspect the active profile directly.
 pub fn model_supports_images(model_id: &str) -> bool {
     let bare = strip_provider_prefix(model_id);
     if let Some(m) = get_claude_model(bare) {
         return m.supports_images;
     }
     if let Some(m) = get_openai_model(bare) {
-        return m.supports_images;
+        return m.default_profile().supports_images;
     }
     if let Some(m) = get_gemini_model(bare) {
         return m.supports_images;
@@ -142,6 +144,9 @@ pub fn model_supports_documents(model_id: &str) -> DocumentSupport {
 /// Get the context window size (in tokens) for a model.
 ///
 /// Looks up the provider-specific model registry (authoritative source of truth).
+/// `OpenAI` falls back to the conservative default profile because the real
+/// limit is auth-path-specific. Provider instances override this helper when
+/// auth is available.
 /// Unknown models default to 200,000 (Anthropic-equivalent fallback).
 pub fn model_context_window(model_id: &str) -> u64 {
     let bare = strip_provider_prefix(model_id);
@@ -149,7 +154,7 @@ pub fn model_context_window(model_id: &str) -> u64 {
         return m.context_window;
     }
     if let Some(m) = get_openai_model(bare) {
-        return m.context_window;
+        return m.default_profile().context_window;
     }
     if let Some(m) = get_gemini_model(bare) {
         return m.context_window;
@@ -251,10 +256,12 @@ mod tests {
 
     #[test]
     fn detect_registry_lookup_openai() {
+        assert_eq!(detect_provider_from_model(GPT_5_5), Some(Provider::OpenAi));
         assert_eq!(
             detect_provider_from_model(GPT_5_3_CODEX),
             Some(Provider::OpenAi)
         );
+        assert_eq!(detect_provider_from_model(GPT_5_2), Some(Provider::OpenAi));
     }
 
     #[test]
@@ -266,6 +273,10 @@ mod tests {
         );
         assert_eq!(
             detect_provider_from_model(GPT_5_4_MINI),
+            Some(Provider::OpenAi)
+        );
+        assert_eq!(
+            detect_provider_from_model(GPT_5_4_NANO),
             Some(Provider::OpenAi)
         );
     }
@@ -340,6 +351,7 @@ mod tests {
     #[test]
     fn supported_model() {
         assert!(is_model_supported(CLAUDE_OPUS_4_6));
+        assert!(is_model_supported(GPT_5_5));
         assert!(is_model_supported(GPT_5_3_CODEX));
         assert!(is_model_supported(GEMINI_2_5_FLASH));
     }
@@ -448,7 +460,12 @@ mod tests {
 
     #[test]
     fn context_window_openai() {
-        assert_eq!(model_context_window(GPT_5_3_CODEX), 400_000);
+        assert_eq!(model_context_window(GPT_5_3_CODEX), 272_000);
+    }
+
+    #[test]
+    fn context_window_gpt_55_uses_conservative_codex_profile() {
+        assert_eq!(model_context_window(GPT_5_5), 272_000);
     }
 
     #[test]
@@ -458,12 +475,12 @@ mod tests {
 
     #[test]
     fn context_window_gpt_54_pro() {
-        assert_eq!(model_context_window(GPT_5_4_PRO), 272_000);
+        assert_eq!(model_context_window(GPT_5_4_PRO), 1_050_000);
     }
 
     #[test]
     fn context_window_gpt_54_mini() {
-        assert_eq!(model_context_window(GPT_5_4_MINI), 400_000);
+        assert_eq!(model_context_window(GPT_5_4_MINI), 272_000);
     }
 
     #[test]
@@ -662,12 +679,13 @@ mod tests {
     fn all_model_ids_includes_all() {
         let ids = all_model_ids();
         assert!(ids.contains(&CLAUDE_OPUS_4_6));
+        assert!(ids.contains(&GPT_5_5));
         assert!(ids.contains(&GPT_5_3_CODEX));
         assert!(ids.contains(&GEMINI_2_5_FLASH));
         assert!(ids.contains(&MINIMAX_M2_7));
         assert!(ids.contains(&MINIMAX_M2_5));
         assert!(ids.contains(&GEMMA4_E4B));
-        // Total = 11 Anthropic + 8 OpenAI + 7 Google + 7 MiniMax + 9 Kimi + 2 Ollama = 44
-        assert_eq!(ids.len(), 44);
+        // Total = 11 Anthropic + 17 OpenAI ids/aliases + 7 Google + 7 MiniMax + 9 Kimi + 2 Ollama = 53
+        assert_eq!(ids.len(), 53);
     }
 }

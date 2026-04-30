@@ -45,17 +45,26 @@ pub const CLAUDE_3_7_SONNET: &str = "claude-3-7-sonnet-20250219";
 pub const CLAUDE_3_HAIKU: &str = "claude-3-haiku-20240307";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OpenAI / GPT (Codex)
+// OpenAI / GPT
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// GPT 5.4 — latest `OpenAI` flagship with 272K context (1M with extended context opt-in) and tool search.
+/// GPT 5.5 — current `OpenAI` flagship.
+pub const GPT_5_5: &str = "gpt-5.5";
+
+/// GPT 5.5 dated snapshot.
+pub const GPT_5_5_2026_04_23: &str = "gpt-5.5-2026-04-23";
+
+/// GPT 5.4 — previous `OpenAI` flagship.
 pub const GPT_5_4: &str = "gpt-5.4";
 
-/// GPT 5.4 Pro — highest capability tier with 272K context (1M with extended context opt-in) and tool search.
+/// GPT 5.4 Pro — highest capability tier on the Platform API.
 pub const GPT_5_4_PRO: &str = "gpt-5.4-pro";
 
 /// GPT 5.4 Mini — smaller, faster variant of GPT-5.4 for high-volume agentic workloads.
 pub const GPT_5_4_MINI: &str = "gpt-5.4-mini";
+
+/// GPT 5.4 Nano — smallest GPT-5.4 variant on the Platform API.
+pub const GPT_5_4_NANO: &str = "gpt-5.4-nano";
 
 /// GPT 5.3 Codex — `OpenAI` flagship.
 pub const GPT_5_3_CODEX: &str = "gpt-5.3-codex";
@@ -63,7 +72,10 @@ pub const GPT_5_3_CODEX: &str = "gpt-5.3-codex";
 /// GPT 5.3 Codex Spark — fast distilled model (research preview).
 pub const GPT_5_3_CODEX_SPARK: &str = "gpt-5.3-codex-spark";
 
-/// GPT 5.2 Codex.
+/// GPT 5.2 — current canonical ID for GPT-5.2.
+pub const GPT_5_2: &str = "gpt-5.2";
+
+/// GPT 5.2 Codex — deprecated compatibility alias for GPT-5.2.
 pub const GPT_5_2_CODEX: &str = "gpt-5.2-codex";
 
 /// GPT 5.1 Codex Max.

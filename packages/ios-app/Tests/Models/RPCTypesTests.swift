@@ -528,9 +528,8 @@ final class ModelTypesExtendedTests: XCTestCase {
         let legacy = createModelInfo(id: "claude-sonnet-4-20250514", isLegacy: true)
         XCTAssertFalse(legacy.isLatestGeneration)
 
-        // isLegacy: nil → isLatestGeneration: true (defaults to not-legacy)
-        let unknown = createModelInfo(id: "gpt-5.2-codex", provider: "openai-codex")
-        XCTAssertTrue(unknown.isLatestGeneration)
+        let currentOpenAI = createModelInfo(id: "gpt-5.5", provider: "openai-codex")
+        XCTAssertTrue(currentOpenAI.isLatestGeneration)
     }
 
     func testModelInfoProviderFlags() throws {

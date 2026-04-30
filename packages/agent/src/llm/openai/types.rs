@@ -1,7 +1,8 @@
 //! `OpenAI` provider types, configuration, and model registry.
 //!
 //! Covers the Responses API types (not legacy Chat Completions).
-//! The `OpenAI` provider uses the Codex endpoint with OAuth authentication.
+//! The `OpenAI` provider uses auth-path-specific metadata: ChatGPT OAuth
+//! targets the Codex backend, while API keys target the OpenAI Platform API.
 //!
 //! ## Size note
 //!
@@ -22,7 +23,7 @@ pub const DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 pub const DEFAULT_PLATFORM_BASE_URL: &str = "https://api.openai.com";
 
 /// Default model.
-pub const DEFAULT_MODEL: &str = "gpt-5.3-codex";
+pub const DEFAULT_MODEL: &str = "gpt-5.5";
 
 /// Default max output tokens for unknown models.
 pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 128_000;
@@ -37,9 +38,7 @@ pub const TOOL_RESULT_MAX_LENGTH: usize = 16_384;
 // API Endpoint
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Which `OpenAI` API endpoint a model targets.
-///
-/// Codex models use the `ChatGPT` backend; GPT 5.4+ use the standard Platform API.
+/// Which `OpenAI` API endpoint a resolved auth path targets.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ApiEndpoint {
@@ -66,6 +65,49 @@ impl ApiEndpoint {
         match self {
             Self::Codex => "/codex/responses",
             Self::Platform => "/v1/responses",
+        }
+    }
+}
+
+/// Which `OpenAI` authentication path is active.
+///
+/// The same model slug can have different context windows, defaults, and
+/// availability depending on whether Tron uses a ChatGPT subscription token or
+/// a direct Platform API key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OpenAIAuthPath {
+    /// Direct OpenAI Platform API key.
+    PlatformApiKey,
+    /// ChatGPT subscription OAuth token via the Codex backend.
+    ChatGptCodex,
+}
+
+impl OpenAIAuthPath {
+    /// Stable wire label for `model.list`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PlatformApiKey => "platform-api-key",
+            Self::ChatGptCodex => "chatgpt-codex",
+        }
+    }
+
+    /// Endpoint used by this auth path.
+    #[must_use]
+    pub fn endpoint(self) -> ApiEndpoint {
+        match self {
+            Self::PlatformApiKey => ApiEndpoint::Platform,
+            Self::ChatGptCodex => ApiEndpoint::Codex,
+        }
+    }
+}
+
+impl From<&OpenAIAuth> for OpenAIAuthPath {
+    fn from(auth: &OpenAIAuth) -> Self {
+        match auth {
+            OpenAIAuth::OAuth { .. } => Self::ChatGptCodex,
+            OpenAIAuth::ApiKey { .. } => Self::PlatformApiKey,
         }
     }
 }
@@ -150,21 +192,18 @@ pub use crate::llm::provider::ReasoningEffort;
 // Model Registry
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Information about an `OpenAI` model.
+/// Auth-path-specific metadata for an `OpenAI` model.
 #[derive(Clone, Debug)]
-pub struct OpenAIModelInfo {
-    /// Display name.
-    pub name: &'static str,
-    /// Short name.
-    pub short_name: &'static str,
-    /// Model family (e.g., "GPT-5.3").
-    pub family: &'static str,
-    /// Model tier.
-    pub tier: &'static str,
-    /// Which API endpoint this model uses.
+#[allow(clippy::struct_excessive_bools)]
+pub struct OpenAIModelProfile {
+    /// Auth path this profile applies to.
+    pub auth_path: OpenAIAuthPath,
+    /// Which API endpoint this profile uses.
     pub api_endpoint: ApiEndpoint,
     /// Context window size in tokens.
     pub context_window: u64,
+    /// Larger context window available through explicit provider opt-in, if known.
+    pub max_context_window: Option<u64>,
     /// Maximum output tokens.
     pub max_output: u64,
     /// Whether the model supports tool use.
@@ -177,18 +216,43 @@ pub struct OpenAIModelInfo {
     pub supports_tool_search: bool,
     /// Whether the model supports computer use.
     pub supports_computer_use: bool,
+    /// Whether the model supports text verbosity controls.
+    pub supports_verbosity: bool,
+    /// Default text verbosity.
+    pub default_verbosity: Option<&'static str>,
     /// Supported reasoning effort levels.
     pub reasoning_levels: &'static [&'static str],
     /// Default reasoning effort level.
     pub default_reasoning_level: &'static str,
-    /// Input cost per million tokens (USD).
+    /// Input cost per million tokens (USD), where applicable.
     pub input_cost_per_million: f64,
-    /// Output cost per million tokens (USD).
+    /// Output cost per million tokens (USD), where applicable.
     pub output_cost_per_million: f64,
-    /// Cache read cost per million tokens (USD).
-    pub cache_read_cost_per_million: f64,
+    /// Cache read cost per million tokens (USD), where applicable.
+    pub cache_read_cost_per_million: Option<f64>,
+    /// Whether this profile should be shown in `model.list` for the auth path.
+    pub visible: bool,
+}
+
+/// Information about an `OpenAI` model.
+#[derive(Clone, Debug)]
+pub struct OpenAIModelInfo {
+    /// Canonical model ID.
+    pub id: &'static str,
+    /// Display name.
+    pub name: &'static str,
+    /// Short name.
+    pub short_name: &'static str,
+    /// Model family (e.g., "GPT-5.3").
+    pub family: &'static str,
+    /// Model tier.
+    pub tier: &'static str,
     /// Model description for the client UI.
     pub description: &'static str,
+    /// Hidden aliases and snapshots accepted by the registry.
+    pub aliases: &'static [&'static str],
+    /// Per-auth-path profiles.
+    pub profiles: Vec<OpenAIModelProfile>,
     /// Display sort order within the provider (lower = higher priority).
     pub sort_order: u16,
     /// Whether this model is recommended for new users.
@@ -202,8 +266,309 @@ pub struct OpenAIModelInfo {
     pub is_deprecated: bool,
     /// Retirement date (ISO-8601), if deprecated.
     pub deprecation_date: Option<&'static str>,
+    /// Replacement model for deprecated aliases.
+    pub replacement_model: Option<&'static str>,
+    /// Whether this model should be hidden from `model.list`.
+    pub is_hidden: bool,
+    /// Whether this model is a preview model.
+    pub is_preview: bool,
     /// Knowledge cutoff date (ISO-8601), if known.
     pub knowledge_cutoff: Option<&'static str>,
+}
+
+const REASONING_NONE_TO_XHIGH: &[&str] = &["none", "low", "medium", "high", "xhigh"];
+const REASONING_LOW_TO_XHIGH: &[&str] = &["low", "medium", "high", "xhigh"];
+const REASONING_MEDIUM_TO_XHIGH: &[&str] = &["medium", "high", "xhigh"];
+const REASONING_LOW_TO_HIGH: &[&str] = &["low", "medium", "high"];
+
+#[allow(clippy::too_many_arguments)]
+fn profile(
+    auth_path: OpenAIAuthPath,
+    context_window: u64,
+    max_context_window: Option<u64>,
+    max_output: u64,
+    supports_images: bool,
+    supports_tool_search: bool,
+    supports_computer_use: bool,
+    supports_verbosity: bool,
+    default_verbosity: Option<&'static str>,
+    reasoning_levels: &'static [&'static str],
+    default_reasoning_level: &'static str,
+    input_cost_per_million: f64,
+    output_cost_per_million: f64,
+    cache_read_cost_per_million: Option<f64>,
+    visible: bool,
+) -> OpenAIModelProfile {
+    OpenAIModelProfile {
+        auth_path,
+        api_endpoint: auth_path.endpoint(),
+        context_window,
+        max_context_window,
+        max_output,
+        supports_tools: true,
+        supports_images,
+        supports_reasoning: true,
+        supports_tool_search,
+        supports_computer_use,
+        supports_verbosity,
+        default_verbosity,
+        reasoning_levels,
+        default_reasoning_level,
+        input_cost_per_million,
+        output_cost_per_million,
+        cache_read_cost_per_million,
+        visible,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn model(
+    id: &'static str,
+    name: &'static str,
+    short_name: &'static str,
+    family: &'static str,
+    tier: &'static str,
+    description: &'static str,
+    aliases: &'static [&'static str],
+    profiles: Vec<OpenAIModelProfile>,
+    sort_order: u16,
+    recommended: bool,
+    is_legacy: bool,
+    is_deprecated: bool,
+    deprecation_date: Option<&'static str>,
+    replacement_model: Option<&'static str>,
+    is_hidden: bool,
+    is_preview: bool,
+    knowledge_cutoff: Option<&'static str>,
+) -> OpenAIModelInfo {
+    OpenAIModelInfo {
+        id,
+        name,
+        short_name,
+        family,
+        tier,
+        description,
+        aliases,
+        profiles,
+        sort_order,
+        recommended,
+        is_legacy,
+        is_deprecated,
+        deprecation_date,
+        replacement_model,
+        is_hidden,
+        is_preview,
+        knowledge_cutoff,
+    }
+}
+
+fn gpt_55_platform() -> OpenAIModelProfile {
+    profile(
+        OpenAIAuthPath::PlatformApiKey,
+        1_050_000,
+        Some(1_050_000),
+        128_000,
+        true,
+        true,
+        true,
+        true,
+        Some("medium"),
+        REASONING_NONE_TO_XHIGH,
+        "medium",
+        5.0,
+        30.0,
+        Some(0.50),
+        true,
+    )
+}
+
+fn gpt_55_codex() -> OpenAIModelProfile {
+    profile(
+        OpenAIAuthPath::ChatGptCodex,
+        272_000,
+        Some(272_000),
+        128_000,
+        true,
+        false,
+        true,
+        true,
+        Some("low"),
+        REASONING_LOW_TO_XHIGH,
+        "medium",
+        5.0,
+        30.0,
+        Some(0.50),
+        true,
+    )
+}
+
+fn gpt_54_platform() -> OpenAIModelProfile {
+    profile(
+        OpenAIAuthPath::PlatformApiKey,
+        1_050_000,
+        Some(1_050_000),
+        128_000,
+        true,
+        true,
+        true,
+        true,
+        Some("medium"),
+        REASONING_NONE_TO_XHIGH,
+        "none",
+        2.50,
+        15.0,
+        Some(0.25),
+        true,
+    )
+}
+
+fn gpt_54_codex() -> OpenAIModelProfile {
+    profile(
+        OpenAIAuthPath::ChatGptCodex,
+        272_000,
+        Some(1_000_000),
+        128_000,
+        true,
+        false,
+        true,
+        true,
+        Some("low"),
+        REASONING_LOW_TO_XHIGH,
+        "xhigh",
+        2.50,
+        15.0,
+        Some(0.25),
+        true,
+    )
+}
+
+fn gpt_54_mini_platform() -> OpenAIModelProfile {
+    profile(
+        OpenAIAuthPath::PlatformApiKey,
+        400_000,
+        Some(400_000),
+        128_000,
+        true,
+        true,
+        true,
+        true,
+        Some("medium"),
+        REASONING_NONE_TO_XHIGH,
+        "medium",
+        0.75,
+        4.50,
+        Some(0.075),
+        true,
+    )
+}
+
+fn gpt_54_mini_codex() -> OpenAIModelProfile {
+    profile(
+        OpenAIAuthPath::ChatGptCodex,
+        272_000,
+        Some(272_000),
+        128_000,
+        true,
+        false,
+        true,
+        true,
+        Some("medium"),
+        REASONING_LOW_TO_XHIGH,
+        "medium",
+        0.75,
+        4.50,
+        Some(0.075),
+        true,
+    )
+}
+
+fn gpt_52_platform() -> OpenAIModelProfile {
+    profile(
+        OpenAIAuthPath::PlatformApiKey,
+        400_000,
+        Some(400_000),
+        128_000,
+        true,
+        false,
+        false,
+        true,
+        Some("medium"),
+        REASONING_NONE_TO_XHIGH,
+        "none",
+        1.75,
+        14.0,
+        Some(0.175),
+        true,
+    )
+}
+
+fn gpt_53_codex_platform() -> OpenAIModelProfile {
+    profile(
+        OpenAIAuthPath::PlatformApiKey,
+        400_000,
+        Some(400_000),
+        128_000,
+        true,
+        false,
+        false,
+        true,
+        Some("medium"),
+        REASONING_LOW_TO_XHIGH,
+        "medium",
+        1.75,
+        14.0,
+        Some(0.175),
+        true,
+    )
+}
+
+fn gpt_52_codex() -> OpenAIModelProfile {
+    profile(
+        OpenAIAuthPath::ChatGptCodex,
+        272_000,
+        Some(272_000),
+        128_000,
+        true,
+        false,
+        false,
+        true,
+        Some("low"),
+        REASONING_LOW_TO_XHIGH,
+        "medium",
+        1.75,
+        14.0,
+        Some(0.175),
+        true,
+    )
+}
+
+fn legacy_codex_profile(
+    max_output: u64,
+    supports_images: bool,
+    reasoning_levels: &'static [&'static str],
+    default_reasoning_level: &'static str,
+    input_cost_per_million: f64,
+    output_cost_per_million: f64,
+    cache_read_cost_per_million: f64,
+    visible: bool,
+) -> OpenAIModelProfile {
+    profile(
+        OpenAIAuthPath::ChatGptCodex,
+        272_000,
+        Some(272_000),
+        max_output,
+        supports_images,
+        false,
+        false,
+        true,
+        Some("low"),
+        reasoning_levels,
+        default_reasoning_level,
+        input_cost_per_million,
+        output_cost_per_million,
+        Some(cache_read_cost_per_million),
+        visible,
+    )
 }
 
 /// Static model registry.
@@ -214,247 +579,327 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
     let mut m = HashMap::new();
 
     m.insert(
+        "gpt-5.5",
+        model(
+            "gpt-5.5",
+            "GPT-5.5",
+            "GPT-5.5",
+            "GPT-5.5",
+            "flagship",
+            "Newest OpenAI frontier model for complex coding, computer use, knowledge work, and research workflows.",
+            &["gpt-5.5-2026-04-23"],
+            vec![gpt_55_codex(), gpt_55_platform()],
+            0,
+            true,
+            false,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2025-12-01"),
+        ),
+    );
+
+    m.insert(
         "gpt-5.4",
-        OpenAIModelInfo {
-            name: "GPT-5.4",
-            short_name: "GPT-5.4",
-            family: "GPT-5.4",
-            tier: "flagship",
-            api_endpoint: ApiEndpoint::Platform,
-            context_window: 272_000,
-            max_output: 128_000,
-            supports_tools: true,
-            supports_images: true,
-            supports_reasoning: true,
-            supports_tool_search: true,
-            supports_computer_use: true,
-            reasoning_levels: &["none", "low", "medium", "high", "xhigh"],
-            default_reasoning_level: "medium",
-            input_cost_per_million: 2.0,
-            output_cost_per_million: 16.0,
-            cache_read_cost_per_million: 0.2,
-            description: "Latest OpenAI flagship — 272K context (1M with extended context opt-in), tool search, computer use, and expanded reasoning.",
-            sort_order: 0,
-            recommended: true,
-            is_legacy: false,
-            is_deprecated: false,
-            deprecation_date: None,
-            knowledge_cutoff: None,
-        },
+        model(
+            "gpt-5.4",
+            "GPT-5.4",
+            "GPT-5.4",
+            "GPT-5.4",
+            "flagship",
+            "OpenAI frontier model for professional coding and agentic workflows.",
+            &["gpt-5.4-2026-03-05"],
+            vec![gpt_54_codex(), gpt_54_platform()],
+            2,
+            false,
+            false,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2025-08-31"),
+        ),
     );
 
     m.insert(
         "gpt-5.4-pro",
-        OpenAIModelInfo {
-            name: "GPT-5.4 Pro",
-            short_name: "GPT-5.4 Pro",
-            family: "GPT-5.4",
-            tier: "flagship",
-            api_endpoint: ApiEndpoint::Platform,
-            context_window: 272_000,
-            max_output: 128_000,
-            supports_tools: true,
-            supports_images: true,
-            supports_reasoning: true,
-            supports_tool_search: true,
-            supports_computer_use: true,
-            reasoning_levels: &["none", "low", "medium", "high", "xhigh"],
-            default_reasoning_level: "high",
-            input_cost_per_million: 4.0,
-            output_cost_per_million: 32.0,
-            cache_read_cost_per_million: 0.4,
-            description: "Highest capability tier — 272K context (1M with extended context opt-in), tool search, computer use, and maximum reasoning.",
-            sort_order: 1,
-            recommended: false,
-            is_legacy: false,
-            is_deprecated: false,
-            deprecation_date: None,
-            knowledge_cutoff: None,
-        },
+        model(
+            "gpt-5.4-pro",
+            "GPT-5.4 Pro",
+            "GPT-5.4 Pro",
+            "GPT-5.4",
+            "flagship",
+            "Higher-compute GPT-5.4 variant for difficult professional work on the Platform API.",
+            &["gpt-5.4-pro-2026-03-05"],
+            vec![profile(
+                OpenAIAuthPath::PlatformApiKey,
+                1_050_000,
+                Some(1_050_000),
+                128_000,
+                true,
+                true,
+                true,
+                false,
+                None,
+                REASONING_MEDIUM_TO_XHIGH,
+                "medium",
+                30.0,
+                180.0,
+                None,
+                true,
+            )],
+            3,
+            false,
+            false,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2025-08-31"),
+        ),
     );
 
     m.insert(
         "gpt-5.4-mini",
-        OpenAIModelInfo {
-            name: "GPT-5.4 Mini",
-            short_name: "GPT-5.4 Mini",
-            family: "GPT-5.4",
-            tier: "standard",
-            api_endpoint: ApiEndpoint::Platform,
-            context_window: 400_000,
-            max_output: 128_000,
-            supports_tools: true,
-            supports_images: true,
-            supports_reasoning: true,
-            supports_tool_search: true,
-            supports_computer_use: true,
-            reasoning_levels: &["none", "low", "medium", "high", "xhigh"],
-            default_reasoning_level: "low",
-            input_cost_per_million: 0.75,
-            output_cost_per_million: 4.5,
-            cache_read_cost_per_million: 0.075,
-            description: "Smaller, faster GPT-5.4 — 400K context, tool search, computer use, and full reasoning levels.",
-            sort_order: 2,
-            recommended: false,
-            is_legacy: false,
-            is_deprecated: false,
-            deprecation_date: None,
-            knowledge_cutoff: None,
-        },
+        model(
+            "gpt-5.4-mini",
+            "GPT-5.4 Mini",
+            "GPT-5.4 Mini",
+            "GPT-5.4",
+            "standard",
+            "Fast GPT-5.4-class model for responsive coding tasks and subagents.",
+            &["gpt-5.4-mini-2026-03-17"],
+            vec![gpt_54_mini_codex(), gpt_54_mini_platform()],
+            4,
+            false,
+            false,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2025-08-31"),
+        ),
     );
 
-    // GPT-5.4 Nano: NOT registered — requires the Platform API but Tron uses
-    // ChatGPT OAuth (Codex-only scopes). The Codex backend explicitly rejects it:
-    // "The 'gpt-5.4-nano' model is not supported when using Codex with a ChatGPT account."
+    m.insert(
+        "gpt-5.4-nano",
+        model(
+            "gpt-5.4-nano",
+            "GPT-5.4 Nano",
+            "GPT-5.4 Nano",
+            "GPT-5.4",
+            "standard",
+            "Lowest-cost GPT-5.4-class model for simple high-volume tasks on the Platform API.",
+            &["gpt-5.4-nano-2026-03-17"],
+            vec![profile(
+                OpenAIAuthPath::PlatformApiKey,
+                400_000,
+                Some(400_000),
+                128_000,
+                true,
+                false,
+                false,
+                true,
+                Some("medium"),
+                REASONING_NONE_TO_XHIGH,
+                "medium",
+                0.20,
+                1.25,
+                Some(0.02),
+                true,
+            )],
+            5,
+            false,
+            false,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2025-08-31"),
+        ),
+    );
 
     m.insert(
         "gpt-5.3-codex",
-        OpenAIModelInfo {
-            name: "GPT-5.3 Codex",
-            short_name: "GPT-5.3",
-            family: "GPT-5.3",
-            tier: "flagship",
-            api_endpoint: ApiEndpoint::Codex,
-            context_window: 400_000,
-            max_output: 128_000,
-            supports_tools: true,
-            supports_images: true,
-            supports_reasoning: true,
-            supports_tool_search: false,
-            supports_computer_use: false,
-            reasoning_levels: &["low", "medium", "high", "xhigh"],
-            default_reasoning_level: "medium",
-            input_cost_per_million: 1.75,
-            output_cost_per_million: 14.0,
-            cache_read_cost_per_million: 0.175,
-            description: "Agentic coding model — 400K context, reasoning, vision, and structured outputs.",
-            sort_order: 10,
-            recommended: false,
-            is_legacy: true,
-            is_deprecated: false,
-            deprecation_date: None,
-            knowledge_cutoff: Some("2025-08-31"),
-        },
+        model(
+            "gpt-5.3-codex",
+            "GPT-5.3 Codex",
+            "GPT-5.3",
+            "GPT-5.3",
+            "flagship",
+            "Agentic coding model for complex software engineering.",
+            &[],
+            vec![
+                legacy_codex_profile(
+                    128_000,
+                    true,
+                    REASONING_LOW_TO_XHIGH,
+                    "medium",
+                    1.75,
+                    14.0,
+                    0.175,
+                    true,
+                ),
+                gpt_53_codex_platform(),
+            ],
+            6,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2025-08-31"),
+        ),
     );
 
     m.insert(
         "gpt-5.3-codex-spark",
-        OpenAIModelInfo {
-            name: "GPT-5.3 Codex Spark",
-            short_name: "GPT-5.3 Spark",
-            family: "GPT-5.3",
-            tier: "standard",
-            api_endpoint: ApiEndpoint::Codex,
-            context_window: 128_000,
-            max_output: 32_000,
-            supports_tools: true,
-            supports_images: false,
-            supports_reasoning: true,
-            supports_tool_search: false,
-            supports_computer_use: false,
-            reasoning_levels: &["low", "medium", "high"],
-            default_reasoning_level: "low",
-            input_cost_per_million: 1.75,
-            output_cost_per_million: 14.0,
-            cache_read_cost_per_million: 0.175,
-            description: "Fast distilled coding model optimized for ultra-fast inference.",
-            sort_order: 11,
-            recommended: false,
-            is_legacy: true,
-            is_deprecated: false,
-            deprecation_date: None,
-            knowledge_cutoff: None,
-        },
+        model(
+            "gpt-5.3-codex-spark",
+            "GPT-5.3 Codex Spark",
+            "GPT-5.3 Spark",
+            "GPT-5.3",
+            "standard",
+            "Text-only research preview optimized for near-instant coding iteration.",
+            &[],
+            vec![legacy_codex_profile(
+                32_000,
+                false,
+                REASONING_LOW_TO_HIGH,
+                "low",
+                1.75,
+                14.0,
+                0.175,
+                false,
+            )],
+            7,
+            false,
+            true,
+            false,
+            None,
+            None,
+            true,
+            true,
+            None,
+        ),
+    );
+
+    m.insert(
+        "gpt-5.2",
+        model(
+            "gpt-5.2",
+            "GPT-5.2",
+            "GPT-5.2",
+            "GPT-5.2",
+            "flagship",
+            "Previous OpenAI frontier model for professional coding and agentic tasks.",
+            &["gpt-5.2-2025-12-11"],
+            vec![gpt_52_codex(), gpt_52_platform()],
+            10,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2025-08-31"),
+        ),
     );
 
     m.insert(
         "gpt-5.2-codex",
-        OpenAIModelInfo {
-            name: "GPT-5.2 Codex",
-            short_name: "GPT-5.2",
-            family: "GPT-5.2",
-            tier: "flagship",
-            api_endpoint: ApiEndpoint::Codex,
-            context_window: 400_000,
-            max_output: 128_000,
-            supports_tools: true,
-            supports_images: true,
-            supports_reasoning: true,
-            supports_tool_search: false,
-            supports_computer_use: false,
-            reasoning_levels: &["low", "medium", "high", "xhigh"],
-            default_reasoning_level: "medium",
-            input_cost_per_million: 1.75,
-            output_cost_per_million: 14.0,
-            cache_read_cost_per_million: 0.175,
-            description: "GPT-5.2 Codex — proven agentic coding model with 400K context.",
-            sort_order: 20,
-            recommended: false,
-            is_legacy: true,
-            is_deprecated: true,
-            deprecation_date: Some("2026-04-14"),
-            knowledge_cutoff: None,
-        },
+        model(
+            "gpt-5.2-codex",
+            "GPT-5.2 Codex",
+            "GPT-5.2",
+            "GPT-5.2",
+            "flagship",
+            "Deprecated GPT-5.2 Codex alias; use gpt-5.2.",
+            &[],
+            vec![gpt_52_codex()],
+            20,
+            false,
+            true,
+            true,
+            Some("2026-04-14"),
+            Some("gpt-5.2"),
+            true,
+            false,
+            None,
+        ),
     );
 
     m.insert(
         "gpt-5.1-codex-max",
-        OpenAIModelInfo {
-            name: "GPT-5.1 Codex Max",
-            short_name: "GPT-5.1 Max",
-            family: "GPT-5.1",
-            tier: "flagship",
-            api_endpoint: ApiEndpoint::Codex,
-            context_window: 400_000,
-            max_output: 128_000,
-            supports_tools: true,
-            supports_images: true,
-            supports_reasoning: true,
-            supports_tool_search: false,
-            supports_computer_use: false,
-            reasoning_levels: &["low", "medium", "high", "xhigh"],
-            default_reasoning_level: "high",
-            input_cost_per_million: 1.25,
-            output_cost_per_million: 10.0,
-            cache_read_cost_per_million: 0.125,
-            description: "GPT-5.1 Codex Max — deep reasoning capabilities with 400K context.",
-            sort_order: 30,
-            recommended: false,
-            is_legacy: true,
-            is_deprecated: true,
-            deprecation_date: Some("2026-04-14"),
-            knowledge_cutoff: None,
-        },
+        model(
+            "gpt-5.1-codex-max",
+            "GPT-5.1 Codex Max",
+            "GPT-5.1 Max",
+            "GPT-5.1",
+            "flagship",
+            "Deprecated deep-reasoning Codex model; use gpt-5.2 or newer.",
+            &[],
+            vec![legacy_codex_profile(
+                128_000,
+                true,
+                REASONING_LOW_TO_XHIGH,
+                "high",
+                1.25,
+                10.0,
+                0.125,
+                true,
+            )],
+            30,
+            false,
+            true,
+            true,
+            Some("2026-04-14"),
+            Some("gpt-5.2"),
+            true,
+            false,
+            None,
+        ),
     );
 
     m.insert(
         "gpt-5.1-codex-mini",
-        OpenAIModelInfo {
-            name: "GPT-5.1 Codex Mini",
-            short_name: "GPT-5.1 Mini",
-            family: "GPT-5.1",
-            tier: "standard",
-            api_endpoint: ApiEndpoint::Codex,
-            context_window: 400_000,
-            max_output: 128_000,
-            supports_tools: true,
-            supports_images: true,
-            supports_reasoning: true,
-            supports_tool_search: false,
-            supports_computer_use: false,
-            reasoning_levels: &["low", "medium", "high"],
-            default_reasoning_level: "low",
-            input_cost_per_million: 0.25,
-            output_cost_per_million: 2.0,
-            cache_read_cost_per_million: 0.025,
-            description: "GPT-5.1 Codex Mini — fast and cost-efficient coding model.",
-            sort_order: 31,
-            recommended: false,
-            is_legacy: true,
-            is_deprecated: true,
-            deprecation_date: Some("2026-04-14"),
-            knowledge_cutoff: None,
-        },
+        model(
+            "gpt-5.1-codex-mini",
+            "GPT-5.1 Codex Mini",
+            "GPT-5.1 Mini",
+            "GPT-5.1",
+            "standard",
+            "Deprecated fast Codex model; use gpt-5.4-mini or newer.",
+            &[],
+            vec![legacy_codex_profile(
+                128_000,
+                true,
+                REASONING_LOW_TO_HIGH,
+                "low",
+                0.25,
+                2.0,
+                0.025,
+                true,
+            )],
+            31,
+            false,
+            true,
+            true,
+            Some("2026-04-14"),
+            Some("gpt-5.4-mini"),
+            true,
+            false,
+            None,
+        ),
     );
 
     m
@@ -463,47 +908,151 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
 /// Look up model info by ID.
 #[must_use]
 pub fn get_openai_model(model_id: &str) -> Option<&'static OpenAIModelInfo> {
-    OPENAI_MODELS.get(model_id)
+    let bare = strip_openai_provider_prefix(model_id);
+    OPENAI_MODELS.get(bare).or_else(|| {
+        OPENAI_MODELS
+            .values()
+            .find(|info| info.aliases.contains(&bare))
+    })
 }
 
 /// Get all model IDs.
 #[must_use]
 pub fn all_openai_model_ids() -> Vec<&'static str> {
-    OPENAI_MODELS.keys().copied().collect()
+    let mut ids: Vec<&'static str> = OPENAI_MODELS.keys().copied().collect();
+    for info in OPENAI_MODELS.values() {
+        ids.extend(info.aliases.iter().copied());
+    }
+    ids.sort_unstable();
+    ids
+}
+
+/// Strip a provider prefix accepted by the shared registry.
+#[must_use]
+pub fn strip_openai_provider_prefix(model_id: &str) -> &str {
+    model_id
+        .split_once('/')
+        .map_or(model_id, |(_, model)| model)
+}
+
+/// Resolve a model ID to its canonical registry ID.
+#[must_use]
+pub fn canonical_openai_model_id(model_id: &str) -> Option<&'static str> {
+    get_openai_model(model_id).map(|info| info.replacement_model.unwrap_or(info.id))
+}
+
+/// Resolve the request model ID sent to OpenAI.
+///
+/// Snapshot aliases are preserved so callers can intentionally pin behavior.
+/// Deprecated compatibility IDs with a known replacement are upgraded before
+/// the request hits the provider.
+#[must_use]
+pub fn openai_request_model_id(model_id: &str) -> String {
+    let bare = strip_openai_provider_prefix(model_id);
+    if let Some(info) = OPENAI_MODELS.get(bare)
+        && let Some(replacement) = info.replacement_model
+    {
+        return replacement.to_string();
+    }
+    bare.to_string()
+}
+
+/// Look up the auth-path-specific profile for a model.
+#[must_use]
+pub fn get_openai_model_profile(
+    model_id: &str,
+    auth_path: OpenAIAuthPath,
+) -> Option<(&'static OpenAIModelInfo, &'static OpenAIModelProfile)> {
+    let info = get_openai_model(model_id)?;
+    info.profile_for_auth_path(auth_path)
+        .map(|profile| (info, profile))
+}
+
+/// Whether a model can be used with the active auth path.
+#[must_use]
+pub fn openai_model_available_for_auth_path(model_id: &str, auth_path: OpenAIAuthPath) -> bool {
+    get_openai_model_profile(model_id, auth_path).is_some()
 }
 
 impl OpenAIModelInfo {
+    /// Best profile when the caller has no auth-path context.
+    ///
+    /// Prefer the Codex profile because it is the smaller, subscription-safe
+    /// context window. Platform-only models naturally fall back to Platform.
+    #[must_use]
+    pub fn default_profile(&self) -> &OpenAIModelProfile {
+        self.profile_for_auth_path(OpenAIAuthPath::ChatGptCodex)
+            .or_else(|| self.profile_for_auth_path(OpenAIAuthPath::PlatformApiKey))
+            .or_else(|| self.profiles.first())
+            .expect("OpenAI registry entries must have at least one profile")
+    }
+
+    /// Profile for an auth path.
+    #[must_use]
+    pub fn profile_for_auth_path(&self, auth_path: OpenAIAuthPath) -> Option<&OpenAIModelProfile> {
+        self.profiles
+            .iter()
+            .find(|profile| profile.auth_path == auth_path)
+    }
+
     /// Serialize this model to JSON for the `model.list` API response.
-    pub fn to_api_json(&self, id: &str) -> serde_json::Value {
+    pub fn to_api_json(&self, profile: &OpenAIModelProfile) -> serde_json::Value {
         let mut obj = serde_json::json!({
-            "id": id,
+            "id": self.id,
+            "canonicalModelId": self.id,
             "name": self.name,
             "provider": "openai-codex",
             "providerDisplayName": "OpenAI",
             "providerSortOrder": 1,
-            "contextWindow": self.context_window,
-            "maxOutput": self.max_output,
+            "contextWindow": profile.context_window,
+            "maxOutput": profile.max_output,
             "supportsThinking": false,
-            "supportsImages": self.supports_images,
+            "supportsImages": profile.supports_images,
             "supportsDocuments": false,
-            "inputCostPerMillion": self.input_cost_per_million,
-            "outputCostPerMillion": self.output_cost_per_million,
-            "cacheReadCostPerMillion": self.cache_read_cost_per_million,
+            "inputCostPerMillion": profile.input_cost_per_million,
+            "outputCostPerMillion": profile.output_cost_per_million,
             "tier": self.tier,
             "family": self.family,
             "description": self.description,
-            "supportsReasoning": self.supports_reasoning,
-            "reasoningLevels": self.reasoning_levels,
-            "defaultReasoningLevel": self.default_reasoning_level,
+            "supportsReasoning": profile.supports_reasoning,
+            "reasoningLevels": profile.reasoning_levels,
+            "defaultReasoningLevel": profile.default_reasoning_level,
             "recommended": self.recommended,
             "isLegacy": self.is_legacy,
             "sortOrder": self.sort_order,
+            "apiEndpoint": profile.api_endpoint,
+            "authPaths": [profile.auth_path.as_str()],
+            "supportsVerbosity": profile.supports_verbosity,
         });
+        if let Some(cache_read) = profile.cache_read_cost_per_million {
+            let _ = obj.as_object_mut().unwrap().insert(
+                "cacheReadCostPerMillion".into(),
+                serde_json::json!(cache_read),
+            );
+        }
+        if let Some(max_context) = profile.max_context_window {
+            let _ = obj
+                .as_object_mut()
+                .unwrap()
+                .insert("maxContextWindow".into(), serde_json::json!(max_context));
+        }
+        if let Some(verbosity) = profile.default_verbosity {
+            let _ = obj
+                .as_object_mut()
+                .unwrap()
+                .insert("defaultVerbosity".into(), serde_json::json!(verbosity));
+        }
         if let Some(cutoff) = self.knowledge_cutoff {
             let _ = obj
                 .as_object_mut()
                 .unwrap()
                 .insert("knowledgeCutoff".into(), serde_json::json!(cutoff));
+        }
+        if !self.aliases.is_empty() {
+            let _ = obj
+                .as_object_mut()
+                .unwrap()
+                .insert("aliasIds".into(), serde_json::json!(self.aliases));
         }
         if self.is_deprecated {
             let _ = obj
@@ -517,18 +1066,52 @@ impl OpenAIModelInfo {
                 .unwrap()
                 .insert("deprecationDate".into(), serde_json::json!(date));
         }
+        if let Some(replacement) = self.replacement_model {
+            let _ = obj
+                .as_object_mut()
+                .unwrap()
+                .insert("replacementModel".into(), serde_json::json!(replacement));
+        }
+        if self.is_hidden {
+            let _ = obj
+                .as_object_mut()
+                .unwrap()
+                .insert("isHidden".into(), serde_json::json!(true));
+        }
+        if self.is_preview {
+            let _ = obj
+                .as_object_mut()
+                .unwrap()
+                .insert("preview".into(), serde_json::json!(true));
+        }
         obj
     }
 }
 
-/// All `OpenAI` models serialized for the `model.list` API, sorted by `sort_order`.
-pub fn all_openai_models_api_json() -> Vec<serde_json::Value> {
-    let mut entries: Vec<_> = OPENAI_MODELS.iter().collect();
-    entries.sort_by_key(|(_, info)| info.sort_order);
+/// All `OpenAI` models serialized for the active auth path, sorted by `sort_order`.
+pub fn all_openai_models_api_json_for_auth_path(
+    auth_path: OpenAIAuthPath,
+) -> Vec<serde_json::Value> {
+    let mut entries: Vec<_> = OPENAI_MODELS
+        .values()
+        .filter_map(|info| {
+            let profile = info.profile_for_auth_path(auth_path)?;
+            if info.is_hidden || !profile.visible {
+                return None;
+            }
+            Some((info, profile))
+        })
+        .collect();
+    entries.sort_by_key(|(info, _)| info.sort_order);
     entries
         .into_iter()
-        .map(|(id, info)| info.to_api_json(id))
+        .map(|(info, profile)| info.to_api_json(profile))
         .collect()
+}
+
+/// All `OpenAI` models serialized with the conservative Codex default.
+pub fn all_openai_models_api_json() -> Vec<serde_json::Value> {
+    all_openai_models_api_json_for_auth_path(OpenAIAuthPath::ChatGptCodex)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -668,6 +1251,9 @@ pub struct ResponsesRequest {
     /// Reasoning configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningConfig>,
+    /// Text output configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<ResponseTextConfig>,
 }
 
 /// Reasoning configuration for the Responses API.
@@ -677,6 +1263,13 @@ pub struct ReasoningConfig {
     pub effort: String,
     /// Summary format (always "detailed").
     pub summary: String,
+}
+
+/// Text output configuration for the Responses API.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResponseTextConfig {
+    /// Verbosity level.
+    pub verbosity: String,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -861,119 +1454,189 @@ mod tests {
     }
 
     #[test]
-    fn model_gpt_54() {
-        let m = get_openai_model("gpt-5.4").unwrap();
-        assert_eq!(m.context_window, 272_000);
-        assert_eq!(m.max_output, 128_000);
-        assert!(m.supports_reasoning);
-        assert!(m.supports_tools);
-        assert!(m.supports_tool_search);
-        assert!(m.supports_computer_use);
+    fn gpt_55_has_distinct_platform_and_codex_profiles() {
+        let platform = get_openai_model_profile("gpt-5.5", OpenAIAuthPath::PlatformApiKey)
+            .unwrap()
+            .1;
+        let codex = get_openai_model_profile("gpt-5.5", OpenAIAuthPath::ChatGptCodex)
+            .unwrap()
+            .1;
+        assert_eq!(platform.context_window, 1_050_000);
+        assert_eq!(codex.context_window, 272_000);
+        assert_eq!(platform.max_output, 128_000);
+        assert_eq!(codex.max_output, 128_000);
         assert_eq!(
-            m.reasoning_levels,
+            platform.reasoning_levels,
             &["none", "low", "medium", "high", "xhigh"]
         );
-        assert_eq!(m.default_reasoning_level, "medium");
+        assert_eq!(codex.reasoning_levels, &["low", "medium", "high", "xhigh"]);
+        assert_eq!(platform.default_reasoning_level, "medium");
+        assert_eq!(codex.default_reasoning_level, "medium");
+        assert_eq!(platform.api_endpoint, ApiEndpoint::Platform);
+        assert_eq!(codex.api_endpoint, ApiEndpoint::Codex);
+        assert_float_eq(platform.input_cost_per_million, 5.0);
+        assert_float_eq(platform.output_cost_per_million, 30.0);
+        assert_eq!(platform.cache_read_cost_per_million, Some(0.50));
     }
 
     #[test]
-    fn model_gpt_54_pro() {
-        let m = get_openai_model("gpt-5.4-pro").unwrap();
-        assert_eq!(m.context_window, 272_000);
-        assert_eq!(m.max_output, 128_000);
-        assert!(m.supports_tool_search);
-        assert!(m.supports_computer_use);
-        assert_eq!(m.default_reasoning_level, "high");
-        assert_float_eq(m.input_cost_per_million, 4.0);
-        assert_float_eq(m.output_cost_per_million, 32.0);
-    }
-
-    #[test]
-    fn model_gpt_54_mini() {
-        let m = get_openai_model("gpt-5.4-mini").unwrap();
-        assert_eq!(m.context_window, 400_000);
-        assert_eq!(m.max_output, 128_000);
-        assert!(m.supports_tools);
-        assert!(m.supports_images);
-        assert!(m.supports_reasoning);
-        assert!(m.supports_tool_search);
-        assert!(m.supports_computer_use);
+    fn gpt_55_snapshot_alias_resolves_to_canonical() {
+        let m = get_openai_model("openai/gpt-5.5-2026-04-23").unwrap();
+        assert_eq!(m.id, "gpt-5.5");
         assert_eq!(
-            m.reasoning_levels,
-            &["none", "low", "medium", "high", "xhigh"]
+            canonical_openai_model_id("gpt-5.5-2026-04-23"),
+            Some("gpt-5.5")
         );
-        assert_eq!(m.default_reasoning_level, "low");
-        assert_eq!(m.api_endpoint, ApiEndpoint::Platform);
-        assert_float_eq(m.input_cost_per_million, 0.75);
-        assert_float_eq(m.output_cost_per_million, 4.5);
-        assert_float_eq(m.cache_read_cost_per_million, 0.075);
+        assert_eq!(
+            openai_request_model_id("gpt-5.5-2026-04-23"),
+            "gpt-5.5-2026-04-23"
+        );
     }
 
     #[test]
-    fn model_gpt_54_nano_not_registered() {
-        // Nano requires Platform API — not available via ChatGPT OAuth (Codex only).
-        assert!(get_openai_model("gpt-5.4-nano").is_none());
+    fn gpt_54_codex_default_differs_from_platform() {
+        let platform = get_openai_model_profile("gpt-5.4", OpenAIAuthPath::PlatformApiKey)
+            .unwrap()
+            .1;
+        let codex = get_openai_model_profile("gpt-5.4", OpenAIAuthPath::ChatGptCodex)
+            .unwrap()
+            .1;
+        assert_eq!(platform.context_window, 1_050_000);
+        assert_eq!(codex.context_window, 272_000);
+        assert_eq!(codex.max_context_window, Some(1_000_000));
+        assert_eq!(platform.default_reasoning_level, "none");
+        assert_eq!(codex.default_reasoning_level, "xhigh");
+        assert!(platform.reasoning_levels.contains(&"none"));
+        assert!(!codex.reasoning_levels.contains(&"none"));
     }
 
     #[test]
-    fn model_gpt_53_no_tool_search() {
-        let m = get_openai_model("gpt-5.3-codex").unwrap();
-        assert!(!m.supports_tool_search);
-        assert!(!m.supports_computer_use);
+    fn gpt_53_codex_has_distinct_platform_and_codex_profiles() {
+        let platform = get_openai_model_profile("gpt-5.3-codex", OpenAIAuthPath::PlatformApiKey)
+            .unwrap()
+            .1;
+        let codex = get_openai_model_profile("gpt-5.3-codex", OpenAIAuthPath::ChatGptCodex)
+            .unwrap()
+            .1;
+        assert_eq!(platform.context_window, 400_000);
+        assert_eq!(codex.context_window, 272_000);
+        assert_eq!(platform.max_output, 128_000);
+        assert_eq!(codex.max_output, 128_000);
+        assert_eq!(platform.api_endpoint, ApiEndpoint::Platform);
+        assert_eq!(codex.api_endpoint, ApiEndpoint::Codex);
     }
 
     #[test]
-    fn model_gpt_53_codex() {
-        let m = get_openai_model("gpt-5.3-codex").unwrap();
-        assert_eq!(m.context_window, 400_000);
-        assert_eq!(m.max_output, 128_000);
-        assert!(m.supports_reasoning);
-        assert!(m.supports_tools);
-        assert_eq!(m.default_reasoning_level, "medium");
+    fn platform_only_models_are_unavailable_on_codex_path() {
+        assert!(get_openai_model("gpt-5.4-nano").is_some());
+        assert!(openai_model_available_for_auth_path(
+            "gpt-5.4-nano",
+            OpenAIAuthPath::PlatformApiKey
+        ));
+        assert!(!openai_model_available_for_auth_path(
+            "gpt-5.4-nano",
+            OpenAIAuthPath::ChatGptCodex
+        ));
+        assert!(openai_model_available_for_auth_path(
+            "gpt-5.4-pro",
+            OpenAIAuthPath::PlatformApiKey
+        ));
+        assert!(!openai_model_available_for_auth_path(
+            "gpt-5.4-pro",
+            OpenAIAuthPath::ChatGptCodex
+        ));
     }
 
     #[test]
-    fn model_gpt_51_codex_mini() {
+    fn codex_catalog_models_use_272k_context() {
+        for id in [
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.3-codex",
+            "gpt-5.2",
+        ] {
+            let profile = get_openai_model_profile(id, OpenAIAuthPath::ChatGptCodex)
+                .unwrap_or_else(|| panic!("{id} should have a Codex profile"))
+                .1;
+            assert_eq!(profile.context_window, 272_000, "{id}");
+            assert_eq!(profile.max_output, 128_000, "{id}");
+            assert_eq!(
+                profile.reasoning_levels,
+                &["low", "medium", "high", "xhigh"],
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn gpt_54_mini_profiles_match_official_contexts() {
+        let platform = get_openai_model_profile("gpt-5.4-mini", OpenAIAuthPath::PlatformApiKey)
+            .unwrap()
+            .1;
+        let codex = get_openai_model_profile("gpt-5.4-mini", OpenAIAuthPath::ChatGptCodex)
+            .unwrap()
+            .1;
+        assert_eq!(platform.context_window, 400_000);
+        assert_eq!(codex.context_window, 272_000);
+        assert_eq!(platform.default_reasoning_level, "medium");
+        assert_eq!(codex.default_reasoning_level, "medium");
+        assert_float_eq(platform.input_cost_per_million, 0.75);
+        assert_float_eq(platform.output_cost_per_million, 4.5);
+        assert_eq!(platform.cache_read_cost_per_million, Some(0.075));
+    }
+
+    #[test]
+    fn model_gpt_51_codex_mini_compatibility_profile() {
         let m = get_openai_model("gpt-5.1-codex-mini").unwrap();
+        let profile = m.default_profile();
         assert_eq!(m.tier, "standard");
-        assert_eq!(m.context_window, 400_000);
-        assert_eq!(m.max_output, 128_000);
-        assert_eq!(m.reasoning_levels, &["low", "medium", "high"]);
-        assert_eq!(m.default_reasoning_level, "low");
-        assert_float_eq(m.input_cost_per_million, 0.25);
-        assert_float_eq(m.output_cost_per_million, 2.0);
-        assert_float_eq(m.cache_read_cost_per_million, 0.025);
+        assert_eq!(profile.context_window, 272_000);
+        assert_eq!(profile.max_output, 128_000);
+        assert_eq!(profile.reasoning_levels, &["low", "medium", "high"]);
+        assert_eq!(profile.default_reasoning_level, "low");
+        assert_float_eq(profile.input_cost_per_million, 0.25);
+        assert_float_eq(profile.output_cost_per_million, 2.0);
+        assert_eq!(profile.cache_read_cost_per_million, Some(0.025));
     }
 
     #[test]
     fn model_gpt_53_codex_spark() {
         let m = get_openai_model("gpt-5.3-codex-spark").unwrap();
-        assert_eq!(m.context_window, 128_000);
-        assert_eq!(m.max_output, 32_000);
+        let profile = m.default_profile();
+        assert_eq!(profile.context_window, 272_000);
+        assert_eq!(profile.max_output, 32_000);
         assert_eq!(m.tier, "standard");
-        assert!(m.supports_reasoning);
-        assert!(m.supports_tools);
-        assert_eq!(m.reasoning_levels, &["low", "medium", "high"]);
-        assert_eq!(m.default_reasoning_level, "low");
-        assert_float_eq(m.input_cost_per_million, 1.75);
-        assert_float_eq(m.output_cost_per_million, 14.0);
-        assert_float_eq(m.cache_read_cost_per_million, 0.175);
+        assert!(m.is_hidden);
+        assert!(m.is_preview);
+        assert!(!profile.visible);
+        assert_eq!(profile.reasoning_levels, &["low", "medium", "high"]);
+        assert_eq!(profile.default_reasoning_level, "low");
     }
 
     #[test]
-    fn model_gpt_52_codex_pricing() {
-        let m = get_openai_model("gpt-5.2-codex").unwrap();
-        assert_float_eq(m.input_cost_per_million, 1.75);
-        assert_float_eq(m.output_cost_per_million, 14.0);
-        assert_float_eq(m.cache_read_cost_per_million, 0.175);
+    fn model_gpt_52_pricing_and_deprecated_alias_mapping() {
+        let m = get_openai_model("gpt-5.2").unwrap();
+        let profile = m.default_profile();
+        assert_float_eq(profile.input_cost_per_million, 1.75);
+        assert_float_eq(profile.output_cost_per_million, 14.0);
+        assert_eq!(profile.cache_read_cost_per_million, Some(0.175));
+
+        let alias = get_openai_model("gpt-5.2-codex").unwrap();
+        assert!(alias.is_deprecated);
+        assert!(alias.is_hidden);
+        assert_eq!(alias.replacement_model, Some("gpt-5.2"));
+        assert_eq!(canonical_openai_model_id("gpt-5.2-codex"), Some("gpt-5.2"));
+        assert_eq!(openai_request_model_id("gpt-5.2-codex"), "gpt-5.2");
     }
 
     #[test]
     fn model_gpt_51_codex_max_pricing() {
         let m = get_openai_model("gpt-5.1-codex-max").unwrap();
-        assert_float_eq(m.input_cost_per_million, 1.25);
-        assert_float_eq(m.output_cost_per_million, 10.0);
-        assert_float_eq(m.cache_read_cost_per_million, 0.125);
+        let profile = m.default_profile();
+        assert_float_eq(profile.input_cost_per_million, 1.25);
+        assert_float_eq(profile.output_cost_per_million, 10.0);
+        assert_eq!(profile.cache_read_cost_per_million, Some(0.125));
     }
 
     // ── to_api_json ───────────────────────────────────────────────────
@@ -981,8 +1644,12 @@ mod tests {
     #[test]
     fn to_api_json_has_required_fields() {
         let m = get_openai_model("gpt-5.4").unwrap();
-        let j = m.to_api_json("gpt-5.4");
+        let j = m.to_api_json(
+            m.profile_for_auth_path(OpenAIAuthPath::ChatGptCodex)
+                .unwrap(),
+        );
         assert_eq!(j["id"], "gpt-5.4");
+        assert_eq!(j["canonicalModelId"], "gpt-5.4");
         assert_eq!(j["name"], "GPT-5.4");
         assert_eq!(j["provider"], "openai-codex");
         assert_eq!(j["contextWindow"], 272_000);
@@ -998,22 +1665,27 @@ mod tests {
         assert_eq!(j["supportsReasoning"], true);
         assert!(j["reasoningLevels"].is_array());
         assert!(j["defaultReasoningLevel"].is_string());
-        assert_eq!(j["recommended"], true);
+        assert_eq!(j["recommended"], false);
         assert_eq!(j["isLegacy"], false);
         assert!(j["sortOrder"].is_number());
+        assert_eq!(j["apiEndpoint"], "codex");
+        assert_eq!(j["authPaths"], json!(["chatgpt-codex"]));
+        assert_eq!(j["supportsVerbosity"], true);
+        assert_eq!(j["defaultVerbosity"], "low");
+        assert_eq!(j["maxContextWindow"], 1_000_000);
     }
 
     #[test]
     fn to_api_json_knowledge_cutoff_present() {
         let m = get_openai_model("gpt-5.3-codex").unwrap();
-        let j = m.to_api_json("gpt-5.3-codex");
+        let j = m.to_api_json(m.default_profile());
         assert_eq!(j["knowledgeCutoff"], "2025-08-31");
     }
 
     #[test]
     fn to_api_json_knowledge_cutoff_absent() {
-        let m = get_openai_model("gpt-5.4").unwrap();
-        let j = m.to_api_json("gpt-5.4");
+        let m = get_openai_model("gpt-5.3-codex-spark").unwrap();
+        let j = m.to_api_json(m.default_profile());
         assert!(j.get("knowledgeCutoff").is_none());
     }
 
@@ -1023,7 +1695,7 @@ mod tests {
         // the iOS client's default behavior (isDeprecatedModel == false)
         // remains a no-op.
         let m = get_openai_model("gpt-5.4").unwrap();
-        let j = m.to_api_json("gpt-5.4");
+        let j = m.to_api_json(m.default_profile());
         assert!(j.get("isDeprecated").is_none());
         assert!(j.get("deprecationDate").is_none());
     }
@@ -1033,9 +1705,10 @@ mod tests {
         let m = get_openai_model("gpt-5.2-codex").unwrap();
         assert!(m.is_deprecated);
         assert_eq!(m.deprecation_date, Some("2026-04-14"));
-        let j = m.to_api_json("gpt-5.2-codex");
+        let j = m.to_api_json(m.default_profile());
         assert_eq!(j["isDeprecated"], true);
         assert_eq!(j["deprecationDate"], "2026-04-14");
+        assert_eq!(j["replacementModel"], "gpt-5.2");
     }
 
     #[test]
@@ -1063,16 +1736,38 @@ mod tests {
     #[test]
     fn all_openai_models_api_json_sorted() {
         let models = all_openai_models_api_json();
-        assert_eq!(models.len(), OPENAI_MODELS.len());
+        assert_eq!(models.len(), 5);
         // First model in each family should have lowest sort_order
-        assert_eq!(models[0]["id"], "gpt-5.4");
+        assert_eq!(models[0]["id"], "gpt-5.5");
         assert_eq!(models[0]["sortOrder"], 0);
+        assert!(models.iter().all(|m| m["apiEndpoint"] == "codex"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.4-nano"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.3-codex-spark"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.2-codex"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.1-codex-max"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.1-codex-mini"));
+    }
+
+    #[test]
+    fn platform_model_list_uses_platform_profile() {
+        let models = all_openai_models_api_json_for_auth_path(OpenAIAuthPath::PlatformApiKey);
+        assert_eq!(models.len(), 7);
+        let gpt55 = models.iter().find(|m| m["id"] == "gpt-5.5").unwrap();
+        assert_eq!(gpt55["contextWindow"], 1_050_000);
+        assert_eq!(gpt55["apiEndpoint"], "platform");
+        assert_eq!(gpt55["authPaths"], json!(["platform-api-key"]));
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.4-nano"));
+        let gpt53 = models.iter().find(|m| m["id"] == "gpt-5.3-codex").unwrap();
+        assert_eq!(gpt53["contextWindow"], 400_000);
+        assert_eq!(gpt53["apiEndpoint"], "platform");
     }
 
     #[test]
     fn to_api_json_legacy_model() {
         let m = get_openai_model("gpt-5.3-codex").unwrap();
-        let j = m.to_api_json("gpt-5.3-codex");
+        let j = m.to_api_json(m.default_profile());
         assert_eq!(j["isLegacy"], true);
     }
 
@@ -1084,6 +1779,10 @@ mod tests {
     #[test]
     fn all_model_ids_contains_expected() {
         let ids = all_openai_model_ids();
+        assert!(ids.contains(&"gpt-5.5"));
+        assert!(ids.contains(&"gpt-5.5-2026-04-23"));
+        assert!(ids.contains(&"gpt-5.4-nano"));
+        assert!(ids.contains(&"gpt-5.2"));
         assert!(ids.contains(&"gpt-5.3-codex"));
         assert!(ids.contains(&"gpt-5.2-codex"));
         assert!(ids.contains(&"gpt-5.1-codex-max"));
@@ -1155,28 +1854,35 @@ mod tests {
 
     #[test]
     fn gpt_54_uses_platform_endpoint() {
-        let m = get_openai_model("gpt-5.4").unwrap();
-        assert_eq!(m.api_endpoint, ApiEndpoint::Platform);
+        let (_, profile) =
+            get_openai_model_profile("gpt-5.4", OpenAIAuthPath::PlatformApiKey).unwrap();
+        assert_eq!(profile.api_endpoint, ApiEndpoint::Platform);
     }
 
     #[test]
     fn gpt_54_pro_uses_platform_endpoint() {
-        let m = get_openai_model("gpt-5.4-pro").unwrap();
-        assert_eq!(m.api_endpoint, ApiEndpoint::Platform);
+        let (_, profile) =
+            get_openai_model_profile("gpt-5.4-pro", OpenAIAuthPath::PlatformApiKey).unwrap();
+        assert_eq!(profile.api_endpoint, ApiEndpoint::Platform);
     }
 
     #[test]
     fn codex_models_use_codex_endpoint() {
-        for id in &[
+        for id in [
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
             "gpt-5.3-codex",
             "gpt-5.3-codex-spark",
+            "gpt-5.2",
             "gpt-5.2-codex",
             "gpt-5.1-codex-max",
             "gpt-5.1-codex-mini",
         ] {
-            let m = get_openai_model(id).unwrap();
+            let (_, profile) = get_openai_model_profile(id, OpenAIAuthPath::ChatGptCodex)
+                .unwrap_or_else(|| panic!("expected Codex for {id}"));
             assert_eq!(
-                m.api_endpoint,
+                profile.api_endpoint,
                 ApiEndpoint::Codex,
                 "expected Codex for {id}"
             );
@@ -1426,6 +2132,9 @@ mod tests {
                 effort: "medium".into(),
                 summary: "detailed".into(),
             }),
+            text: Some(ResponseTextConfig {
+                verbosity: "low".into(),
+            }),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["model"], "gpt-5.3-codex");
@@ -1433,6 +2142,7 @@ mod tests {
         assert!(!json["store"].as_bool().unwrap());
         assert_eq!(json["reasoning"]["effort"], "medium");
         assert_eq!(json["reasoning"]["summary"], "detailed");
+        assert_eq!(json["text"]["verbosity"], "low");
     }
 
     // ── SSE event types ────────────────────────────────────────────────

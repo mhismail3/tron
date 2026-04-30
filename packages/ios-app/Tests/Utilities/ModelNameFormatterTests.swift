@@ -62,10 +62,14 @@ final class ModelNameFormatterTests: XCTestCase {
     }
 
     func testFallback_gptModels() {
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.5", style: .short), "GPT-5.5")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.5-2026-04-23", style: .short), "GPT-5.5")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.4", style: .short), "GPT-5.4")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.4-pro", style: .short), "GPT-5.4 Pro")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.4-mini", style: .short), "GPT-5.4 Mini")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.4-nano", style: .short), "GPT-5.4 Nano")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.3-codex", style: .short), "GPT-5.3")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.2", style: .short), "GPT-5.2")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.3-codex-spark", style: .short), "GPT-5.3 Spark")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.1-codex-max", style: .short), "GPT-5.1 Max")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.1-codex-mini", style: .short), "GPT-5.1 Mini")

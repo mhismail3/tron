@@ -14,9 +14,23 @@ struct ModelSwitchResult: Decodable {
 
 struct ModelInfo: Decodable, Identifiable, Hashable {
     let id: String
+    /// Canonical model ID when `id` may be an alias or snapshot.
+    let canonicalModelId: String?
     let name: String
     let provider: String
+    /// Active OpenAI endpoint profile (`codex` or `platform`) when provided.
+    let apiEndpoint: String?
+    /// Auth paths that this emitted model metadata applies to.
+    let authPaths: [String]?
+    /// Hidden aliases and snapshots accepted by the server.
+    let aliasIds: [String]?
+    /// Replacement model for deprecated aliases.
+    let replacementModel: String?
+    /// Whether the server hides this model from the default picker.
+    let isHidden: Bool?
     let contextWindow: Int
+    /// Maximum context window available through explicit opt-in, if different.
+    let maxContextWindow: Int?
     let maxOutputTokens: Int?
     /// Whether the model emits thinking blocks. Required on the wire —
     /// every provider registry (Anthropic, OpenAI, Google, MiniMax, Kimi,
@@ -38,12 +52,16 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let isDeprecated: Bool?
     /// Deprecation date (YYYY-MM-DD) for display
     let deprecationDate: String?
-    /// For models with reasoning capability (e.g., OpenAI Codex)
+    /// For models with reasoning capability (e.g., OpenAI)
     let supportsReasoning: Bool?
     /// Available reasoning effort levels (low, medium, high, xhigh)
     let reasoningLevels: [String]?
     /// Default reasoning level
     let defaultReasoningLevel: String?
+    /// Whether OpenAI text verbosity controls are supported.
+    let supportsVerbosity: Bool?
+    /// Default OpenAI text verbosity for the active auth path.
+    let defaultVerbosity: String?
     /// For Gemini models: default thinking level
     let thinkingLevel: String?
     /// For Gemini models: available thinking levels
@@ -80,10 +98,12 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let unavailableReason: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, provider, contextWindow, maxOutputTokens
+        case id, canonicalModelId, name, provider, apiEndpoint, authPaths, aliasIds
+        case replacementModel, isHidden, contextWindow, maxContextWindow, maxOutputTokens
         case supportsThinking, supportsImages, supportsDocuments, tier, isLegacy
         case isDeprecated, deprecationDate
         case supportsReasoning, reasoningLevels, defaultReasoningLevel
+        case supportsVerbosity, defaultVerbosity
         case thinkingLevel, supportedThinkingLevels
         case family, maxOutput, recommended, releaseDate, sortOrder
         case providerDisplayName, providerSortOrder
@@ -100,9 +120,16 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     /// stay lean.
     init(
         id: String,
+        canonicalModelId: String? = nil,
         name: String,
         provider: String,
+        apiEndpoint: String? = nil,
+        authPaths: [String]? = nil,
+        aliasIds: [String]? = nil,
+        replacementModel: String? = nil,
+        isHidden: Bool? = nil,
         contextWindow: Int,
+        maxContextWindow: Int? = nil,
         supportsThinking: Bool,
         supportsImages: Bool,
         supportsDocuments: Bool,
@@ -114,6 +141,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         supportsReasoning: Bool? = nil,
         reasoningLevels: [String]? = nil,
         defaultReasoningLevel: String? = nil,
+        supportsVerbosity: Bool? = nil,
+        defaultVerbosity: String? = nil,
         thinkingLevel: String? = nil,
         supportedThinkingLevels: [String]? = nil,
         family: String? = nil,
@@ -130,9 +159,16 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         unavailableReason: String? = nil
     ) {
         self.id = id
+        self.canonicalModelId = canonicalModelId
         self.name = name
         self.provider = provider
+        self.apiEndpoint = apiEndpoint
+        self.authPaths = authPaths
+        self.aliasIds = aliasIds
+        self.replacementModel = replacementModel
+        self.isHidden = isHidden
         self.contextWindow = contextWindow
+        self.maxContextWindow = maxContextWindow
         self.maxOutputTokens = maxOutputTokens
         self.supportsThinking = supportsThinking
         self.supportsImages = supportsImages
@@ -144,6 +180,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.supportsReasoning = supportsReasoning
         self.reasoningLevels = reasoningLevels
         self.defaultReasoningLevel = defaultReasoningLevel
+        self.supportsVerbosity = supportsVerbosity
+        self.defaultVerbosity = defaultVerbosity
         self.thinkingLevel = thinkingLevel
         self.supportedThinkingLevels = supportedThinkingLevels
         self.family = family
@@ -229,7 +267,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         provider == "anthropic"
     }
 
-    /// Whether this is an OpenAI Codex model
+    /// Whether this is an OpenAI model exposed through Tron's OpenAI provider.
     var isCodex: Bool {
         provider == "openai-codex"
     }
