@@ -189,7 +189,7 @@ Two release lanes:
 
 | What | How | Cadence |
 |---|---|---|
-| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, exports an App Store Connect IPA with automatic signing, uploads to App ID `6761511764`, waits for processing, and assigns the build to the internal + public TestFlight groups. | Same tag as server release. |
+| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, exports an App Store Connect IPA with automatic cloud signing or configured manual signing secrets, uploads to App ID `6761511764`, waits for processing, and assigns the build to the internal + public TestFlight groups. | Same tag as server release. |
 | Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds + notarizes + attaches the macOS DMG as a draft `Tron Server ...` pre-release with generated changelog notes. | Same tag as iOS release. |
 
 Versioning sources:
@@ -220,7 +220,7 @@ git push && git push --tags
 # 4. Tag push starts both release workflows:
 #    - release-mac.yml: build → codesign → app notarize/staple → DMG
 #      build/sign/notarize/staple → GitHub Release draft.
-#    - release-ios.yml: archive Prod iOS app → manually package/sign IPA →
+#    - release-ios.yml: archive Prod iOS app → export/sign App Store IPA →
 #      upload to App Store Connect → wait for processing → assign to
 #      internal + public TestFlight groups.
 #    Verify the generated GitHub release notes, DMG artifact, SHA256 manifest,
@@ -244,6 +244,10 @@ git push && git push --tags
 | `ASC_KEY_ID` | App Store Connect API key id for iOS upload/distribution |
 | `ASC_ISSUER_ID` | App Store Connect API issuer id from Users and Access -> Integrations -> App Store Connect API -> Team Keys |
 | `ASC_KEY_P8_BASE64` | base64-encoded App Store Connect API private key; locally, `asc auth doctor` shows the active `.p8` path when `asc` is already configured |
+| `IOS_DISTRIBUTION_CERT_P12_BASE64` | Optional but recommended for iOS CI signing: base64-encoded Apple Distribution `.p12` |
+| `IOS_DISTRIBUTION_CERT_PASSWORD` | Password for `IOS_DISTRIBUTION_CERT_P12_BASE64` |
+| `IOS_APPSTORE_PROFILE_BASE64` | App Store Connect distribution profile for `com.tron.mobile` |
+| `IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64` | App Store Connect distribution profile for `com.tron.mobile.ShareExtension` |
 
 **Required GitHub Actions variables** for iOS TestFlight distribution:
 
@@ -252,9 +256,12 @@ git push && git push --tags
 | `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Existing internal TestFlight group id |
 | `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Existing public TestFlight group id behind the onboarding QR link |
 
-Rotate by regenerating the `.p12`, re-encoding (`base64 -i Tron.p12 | pbcopy`),
-or by creating a new App Store Connect API key and updating the corresponding
-secret in GitHub → Settings → Secrets and variables → Actions.
+Rotate by regenerating the relevant `.p12` or profile, re-encoding
+(`base64 -i Tron.p12 | pbcopy`), or by creating a new App Store Connect API key
+and updating the corresponding secret in GitHub -> Settings -> Secrets and
+variables -> Actions. If the iOS signing secrets are absent, CI falls back to
+automatic Xcode cloud signing, which requires the ASC key/account to have
+permission to manage App Store signing assets.
 
 **Rollback a bad server release**: `gh release delete server-v0.1.0-beta.1` pulls the DMG.
 Existing installs are unaffected (they don't auto-pull deletions). Cut a fixed

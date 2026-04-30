@@ -24,13 +24,40 @@ Manage the full TestFlight lifecycle for TronMobile: build, upload, version mana
 - **Archive Configuration**: `Prod`
 - **Project root**: `packages/ios-app/`
 - **Build output**: `packages/ios-app/.build/` (gitignored)
-- **Version source of truth**: `packages/ios-app/project.yml` (lines with `CURRENT_PROJECT_VERSION` and `MARKETING_VERSION`)
+- **Version source of truth**: root `VERSION.env`; `packages/ios-app/project.yml` and the generated Xcode project are mirrors
 
 ## Subcommands
 
+### Preferred CI release path
+
+Use GitHub Actions for beta uploads whenever possible. A `server-v*` tag starts
+`.github/workflows/release-ios.yml`, which:
+
+1. Regenerates `TronMobile.xcodeproj` from XcodeGen.
+2. Verifies `VERSION.env` mirrors.
+3. Runs simulator tests.
+4. Archives the `Tron` scheme with the `Prod` configuration.
+5. Exports an App Store Connect IPA with `xcodebuild -exportArchive`.
+6. Uploads with `asc builds upload`.
+7. Waits for processing and assigns the build to the configured internal and
+   public TestFlight groups.
+
+CI exports with manual App Store signing when these GitHub secrets are present:
+`IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`,
+`IOS_APPSTORE_PROFILE_BASE64`, and
+`IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64`. If they are absent, CI falls back
+to automatic Xcode cloud signing through `ASC_KEY_ID`, `ASC_ISSUER_ID`, and
+`ASC_KEY_P8_BASE64`; that path requires Apple to allow the API key/account to
+manage App Store signing assets.
+
+Manual `/publish build` is a local fallback for interactive diagnosis or
+one-off uploads. It requires an installed Apple Distribution identity and App
+Store Connect distribution profiles for both bundle IDs.
+
 ### `/publish build` — Archive, Export, Upload
 
-**IMPORTANT: Always run `/publish bump` first to increment the build number.**
+**IMPORTANT: Always run `/publish bump` first to increment the centralized
+Apple build number.**
 
 Run from `packages/ios-app/`:
 
@@ -175,20 +202,24 @@ asc testflight testers list --app 6761511764 --output table
 
 ### `/publish bump` — Increment Version Numbers
 
-Version numbers live in `project.yml` (NOT Base.xcconfig — pbxproj overrides xcconfig).
+Version numbers live in root `VERSION.env`; `project.yml` is a generated mirror.
 
 ```bash
-grep -E 'CURRENT_PROJECT_VERSION|MARKETING_VERSION' project.yml
+scripts/tron version print
 ```
 
 **Bump build number** (required before each upload):
-1. Use the Edit tool to increment `CURRENT_PROJECT_VERSION` in `project.yml` (appears twice — main app and share extension, both must match)
-2. Run `xcodegen generate` to regenerate the pbxproj
+1. From the repo root, run `scripts/tron version bump beta` for the next beta or
+   edit `VERSION.env` intentionally.
+2. Run `scripts/tron version sync`.
+3. Run `scripts/tron version check`.
+4. Run `cd packages/ios-app && xcodegen generate` only when you need to inspect
+   the generated project locally.
 
 **Bump marketing version** (new release like 1.0.0 → 1.1.0):
 1. Ask the user for the new version string
-2. Update `MARKETING_VERSION` in `project.yml` (appears twice)
-3. Run `xcodegen generate`
+2. Update root `VERSION.env`
+3. Run `scripts/tron version sync && scripts/tron version check`
 
 ### `/publish submit` — Submit for Review
 
@@ -217,6 +248,6 @@ These files must include `application-identifier` (`MYGKXH6TY4.<bundle-id>`) and
 
 ## Known Issues
 
-- **Xcode 26 exportArchive bug**: `xcodebuild -exportArchive` fails with `rsync: --extended-attributes: unknown option` because macOS ships `openrsync` at `/usr/bin/rsync` which doesn't support the flag. Workaround: manually create the IPA as shown above.
+- **Xcode 26 exportArchive bug**: if local `xcodebuild -exportArchive` fails with `rsync: --extended-attributes: unknown option`, manually create the IPA as shown above. The CI lane uses `exportArchive` first because it lets Xcode produce a standard App Store Connect export.
 - **Share extension bundle ID**: Uses capital S (`ShareExtension`), not lowercase. Profile searches must match exactly.
-- **Build number lives in project.yml**: Not in `Base.xcconfig`. The pbxproj settings override xcconfig. Always bump in `project.yml` then run `xcodegen generate`.
+- **Build number mirrors**: `VERSION.env` is authoritative. If `project.yml` or `TronMobile.xcodeproj` drifts, run `scripts/tron version sync` and `xcodegen generate`.

@@ -111,11 +111,20 @@ the App Store Connect bundle (`com.tron.mobile`, App ID `6761511764`); the
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
 CI creates or selects an available iPhone simulator, runs the simulator tests,
 archives for `generic/platform=iOS`, exports an App Store Connect IPA with
-Xcode's `app-store-connect` export method and automatic signing, validates the
-exported app/extension bundle IDs and entitlements, uploads with `asc builds
-upload`, waits for the build to become valid, and assigns it to the configured
-internal and public TestFlight groups. Reruns use `asc builds list` to reuse an
-existing Apple build number instead of uploading a duplicate binary.
+Xcode's `app-store-connect` export method, validates the exported app/extension
+bundle IDs and entitlements, uploads with `asc builds upload`, waits for the
+build to become valid, and assigns it to the configured internal and public
+TestFlight groups. Reruns use `asc builds list` to reuse an existing Apple build
+number instead of uploading a duplicate binary.
+
+The export step supports two signing modes. If all manual signing secrets are
+present, CI imports an Apple Distribution `.p12` into a temporary keychain,
+installs App Store Connect provisioning profiles for the app and share
+extension, and exports with `signingStyle=manual`. If those secrets are absent,
+CI falls back to automatic Xcode cloud signing with the ASC API key. Automatic
+signing requires Apple to allow that key/account to manage App Store signing; a
+cloud signing permission error means either grant that access or use the manual
+signing secrets.
 
 Required GitHub Actions secrets:
 
@@ -124,6 +133,15 @@ Required GitHub Actions secrets:
 | `ASC_KEY_ID` | App Store Connect API key id |
 | `ASC_ISSUER_ID` | App Store Connect issuer id |
 | `ASC_KEY_P8_BASE64` | base64-encoded `.p8` private key contents |
+
+Optional manual signing secrets:
+
+| Secret | Purpose |
+|---|---|
+| `IOS_DISTRIBUTION_CERT_P12_BASE64` | base64-encoded Apple Distribution `.p12` for team `MYGKXH6TY4` |
+| `IOS_DISTRIBUTION_CERT_PASSWORD` | Password used when exporting the `.p12` |
+| `IOS_APPSTORE_PROFILE_BASE64` | base64-encoded App Store Connect provisioning profile for `com.tron.mobile` |
+| `IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64` | base64-encoded App Store Connect provisioning profile for `com.tron.mobile.ShareExtension` |
 
 Required repository variables:
 
@@ -140,8 +158,33 @@ generate a replacement team key there, download it once, and update all three
 GitHub secrets together. Store the private key in GitHub as base64 text:
 `base64 -i /path/to/AuthKey_<KEY_ID>.p8 | gh secret set ASC_KEY_P8_BASE64`.
 
+To create the manual signing secrets:
+
+1. In Keychain Access, create a certificate signing request for the signing Mac.
+2. In Apple Developer -> Certificates, Identifiers & Profiles -> Certificates,
+   create an Apple Distribution certificate from that CSR, download it, and
+   import it into Keychain Access.
+3. Export the Apple Distribution certificate plus private key from Keychain
+   Access as a password-protected `.p12`, then set
+   `IOS_DISTRIBUTION_CERT_PASSWORD` and
+   `base64 -i /path/to/ios_distribution.p12 | gh secret set IOS_DISTRIBUTION_CERT_P12_BASE64`.
+4. In Profiles, create two Distribution -> App Store Connect profiles: one for
+   `com.tron.mobile` and one for `com.tron.mobile.ShareExtension`. Select the
+   same Apple Distribution certificate, generate, and download both profiles.
+5. Set the profile secrets with
+   `base64 -i /path/to/AppStore.mobileprovision | gh secret set IOS_APPSTORE_PROFILE_BASE64`
+   and
+   `base64 -i /path/to/ShareExtension.mobileprovision | gh secret set IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64`.
+
+The workflow decodes each profile before export and fails early if the
+`application-identifier` does not match the expected team/bundle ID or if the
+profile is an Ad Hoc/development profile with devices.
+
 Manual workflow runs default to `dry_run=true`, which builds and tests but skips
-App Store Connect upload and TestFlight distribution.
+App Store Connect upload and TestFlight distribution. A manual run with
+`dry_run=false` exercises the full upload/distribution path without creating a
+new tag, but it must use a unique Apple build number or an existing build that
+is safe to redistribute.
 
 ## Common Tasks
 
