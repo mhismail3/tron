@@ -1,42 +1,78 @@
 # Migration strategy
 
 The migration should move Tron from a traditional server plus agent harness to
-a Tron-native engine without forcing a risky all-at-once rewrite.
+a live capability fabric without forcing a risky all-at-once rewrite.
 
 ## Phase 0: documentation and source reconciliation
 
 Deliverables:
 
 - Keep this design directory updated as the architecture evolves.
-- Reconcile known README/module-doc drift before touching the affected
-  source-of-truth areas.
-- Add a living capability matrix that tracks each migrated subsystem.
+- Reconcile README/module-doc drift before touching affected source-of-truth
+  areas.
+- Keep a living capability matrix for each migrated subsystem.
 
 Acceptance:
 
-- Docs identify current behavior, target primitive, migration state, tests, and
-  rollback path for every subsystem touched.
+- Docs identify current behavior, target primitive, visibility, effect class,
+  idempotency, authority, causality, tests, and rollback path for every
+  subsystem touched.
 - `git diff --check` passes for docs-only changes.
 
-## Phase 1: in-process engine skeleton
+## Phase 0.5: agent-native primitive checkpoint
+
+Before writing the engine skeleton, lock the primitive semantics in docs and
+tests.
+
+Deliverables:
+
+- Live catalog doctrine: no frozen catalog snapshot as the default.
+- Session-live default visibility for agent-created capabilities.
+- Catalog-change subscription classes for agents.
+- Required idempotency contracts for mutating agent-visible functions.
+- Causal context fields for invocations and catalog mutations.
+- Authority/delegation model for spawned workers and subagents.
+- Effect classes and risk levels.
+- Promotion workflow from session to workspace/system visibility.
+- Non-negotiable invariants and assumptions the engine refuses to rely on.
+
+Acceptance:
+
+- Phase 1 tests can be derived directly from this document.
+- Phase 1 type names and metadata fields are decision-complete.
+- Every planned primitive can answer actor, authority, visibility, effect,
+  idempotency, causality, revision, failure, and cleanup questions.
+
+## Phase 1: in-process live catalog skeleton
 
 Build the smallest non-disruptive engine inside the Rust agent process.
 
 Deliverables:
 
 - Engine registry types for workers, functions, trigger types, and triggers.
+- Catalog revision counter and catalog-change records.
 - In-process worker trait.
-- Function registration with owner tracking and metadata.
-- Sync invocation path for in-process functions.
-- Discovery functions for functions/workers/triggers.
-- Unit tests for registration, overwrite rules, unregister, discovery, and
-  sync invocation.
+- Function registration with owner tracking, function revision, visibility,
+  effect class, risk, authority metadata, health, provenance, and idempotency
+  metadata.
+- Trigger registration with delivery mode, authority, idempotency, and loop
+  policy metadata.
+- Causal context types for invocation and catalog mutation records.
+- Async sync-call invocation path for in-process functions.
+- Discovery/search/inspect functions over the live catalog.
+- Unit tests for registration, overwrite rules, unregister, cleanup,
+  discovery, catalog revisions, catalog-change events, causality metadata,
+  idempotency enforcement, and sync invocation.
 
 Acceptance:
 
 - No current RPC behavior changes.
 - No external worker protocol yet.
+- No queue/void execution yet beyond metadata.
 - Engine can be created in tests without starting the server.
+- Mutating agent-visible functions without idempotency metadata are rejected.
+- Tests encode first-principles invariants, not just happy-path registry
+  behavior.
 
 ## Phase 2: RPC compatibility mirror
 
@@ -46,16 +82,17 @@ WebSocket RPC transport.
 Deliverables:
 
 - `rpc_compat` worker that registers one function per current RPC method.
-- Metadata links each function to its legacy method name.
+- Metadata links each function to its legacy method name, policy, visibility,
+  effect class, risk, and idempotency contract.
 - Compatibility invocation can call the existing handler path.
-- Discovery can list current RPC-compatible functions.
+- Discovery can list current RPC-compatible functions filtered by actor.
 
 Acceptance:
 
 - Existing client tests pass unchanged.
-- New tests prove a selected RPC method works through both legacy dispatch and
+- New tests prove selected RPC methods work through both legacy dispatch and
   engine invocation.
-- README RPC counts are reconciled with `server/rpc/handlers/mod.rs`.
+- README RPC counts remain reconciled with `server/rpc/handlers/mod.rs`.
 
 ## Phase 3: low-risk read functions
 
@@ -76,27 +113,28 @@ Candidate functions:
 
 Acceptance:
 
-- Each migrated read has schema metadata.
+- Each migrated read has schema metadata, authority metadata, visibility, and
+  causal records.
 - Legacy RPC adapters call the engine implementation, not duplicate logic.
 - Focused tests cover direct engine invocation and legacy RPC compatibility.
 
-## Phase 4: stream and event unification
+## Phase 4: catalog watch, streams, and event unification
 
 Introduce engine streams while preserving WebSocket clients.
 
 Deliverables:
 
+- Catalog watch stream with subscription classes.
 - Stream worker abstraction with cursor/subscription model.
 - Session event stream backed by event ids.
 - Job/tool-output stream adapter.
-- Topology stream for function/worker changes.
 - Compatibility bridge from stream events to current WebSocket broadcasts.
 
 Acceptance:
 
 - Existing event broadcast tests pass.
-- Stream tests cover subscribe, resume from cursor, disconnect, and multiple
-  subscribers.
+- Stream tests cover subscribe, resume from cursor, disconnect, multiple
+  subscribers, and catalog-change filtering.
 - Agent turn lifecycle ordering remains unchanged.
 
 ## Phase 5: queue primitive
@@ -106,14 +144,16 @@ Create durable queue semantics before migrating agent/background workflows.
 Deliverables:
 
 - Queue worker with enqueue, receipt, status, cancellation, retry, and DLQ.
-- Queue events/logs include invocation id and trace id.
+- Queue events/logs include invocation id, trace id, idempotency key, and
+  effect metadata.
 - Existing job manager can be adapted to queue-backed execution.
 
 Acceptance:
 
-- Unit tests for enqueue/dequeue, retry, cancellation, concurrency, and DLQ.
+- Unit tests for enqueue/dequeue, retry, cancellation, concurrency, DLQ, and
+  duplicate idempotency keys.
 - Integration tests for a queued background job and a queued no-op function.
-- No change to public client behavior until compatibility path is proven.
+- No public client behavior changes until compatibility path is proven.
 
 ## Phase 6: cron as triggers
 
@@ -132,65 +172,68 @@ Acceptance:
 - Existing cron tests pass.
 - Tests cover shell/webhook/agent/system-event payloads through the trigger
   path.
-- Misfire, overlap, retry, and corrupt-row invariants remain documented and
-  tested.
+- Misfire, overlap, retry, corrupt-row, idempotency, and causality invariants
+  remain documented and tested.
 
-## Phase 7: tools, MCP, and approvals
+## Phase 7: tools, MCP, approvals, and effects
 
 Move tool invocation behind engine functions.
 
 Deliverables:
 
-- Tool worker registers built-in tool functions.
+- Tool worker registers built-in tool functions with effect class, risk,
+  authority, and idempotency metadata.
 - MCP worker preserves `mcp::search` and `mcp::call` meta-tool behavior.
 - Approval/question/device flows become functions plus stream/device triggers.
-- Tool executor invokes engine functions instead of a private registry where
-  migrated.
+- Tool executor invokes engine functions where migrated.
 
 Acceptance:
 
 - Existing tool unit tests pass.
 - Agent can call migrated tools through the engine path.
 - Approval-required tools preserve current client/device behavior.
+- High-risk or non-idempotent functions are not autonomously agent-visible.
 
-## Phase 8: agent worker
+## Phase 8: agent worker and live self-modification
 
 Make the agent loop itself an engine worker.
 
 Deliverables:
 
 - `agent::run_turn` function.
+- Stable agent meta-capabilities: discover/search, inspect, invoke, watch,
+  spawn, promote.
 - Prompt queue trigger for user prompts.
-- Subagent spawn/handoff through queue functions.
-- Context, memory, hooks, and guardrails represented as functions/triggers
-  where useful.
-- Agent discovery consumes engine function catalog.
+- Subagent spawn/handoff through delegated authority.
+- Session-scoped worker/function creation.
+- Promotion workflow for wider capability visibility.
 
 Acceptance:
 
 - Existing session and orchestrator tests pass.
 - Agent turn persistence ordering is unchanged.
-- Crash recovery and streaming journal behavior are preserved or replaced by
-  stronger engine-backed tests.
-- Trace id connects prompt, LLM stream, tool calls, queued work, events, and
-  final client broadcast.
+- Agents can see session-created capabilities live through subscriptions.
+- Trace id connects prompt, catalog changes, LLM stream, tool calls, queued
+  work, events, and final client broadcast.
 
-## Phase 9: external workers
+## Phase 9: external and sandbox workers
 
-Add external worker protocol only after the in-process model is proven.
+Add external worker protocol only after the in-process live catalog is proven.
 
 Deliverables:
 
 - Tron-owned JSON-over-WebSocket worker protocol.
-- Scoped worker tokens and namespace registration policy.
+- Scoped worker tokens represented as authority grants.
+- Namespace registration policy.
 - Reconnect and re-registration behavior.
-- External worker SDK prototype only if needed for validation.
+- Sandbox worker creation under session-scoped visibility.
 
 Acceptance:
 
 - External worker cannot register outside its namespace.
 - Disconnect cleanup removes only owned volatile registrations.
 - Reconnect is idempotent.
+- Spawned workers inherit narrowed authority.
 - Invocation timeout/cancellation behavior is tested.
 
 ## Phase 10: client cutover and legacy removal
@@ -223,3 +266,16 @@ Docs-only exploration commits can use `git diff --check` as verification.
 Implementation commits should run the smallest high-signal command set first
 and escalate to full CI when shared contracts, runtime behavior, or client
 protocols change.
+
+## Phase gate
+
+No implementation phase should start until its design can answer this checklist:
+
+- What durable truth or invariant requires this primitive/change?
+- Which assumptions does the design avoid?
+- Which assumptions remain, and where are they encoded?
+- What actor and authority can perform the action?
+- What visibility scope is the default?
+- What effect class and idempotency contract apply?
+- What causal records make the action reconstructable?
+- What failure modes are expected, and which tests prove them?

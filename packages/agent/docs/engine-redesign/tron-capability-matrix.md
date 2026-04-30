@@ -1,7 +1,7 @@
 # Tron capability matrix
 
-This inventory maps the current server to future engine primitives. It is based
-on source inspection on 2026-04-30.
+This inventory maps the current server to the live capability fabric. It is
+based on source inspection on 2026-04-30.
 
 ## Current server shape
 
@@ -14,59 +14,59 @@ The Rust agent is a single crate with these top-level modules:
 | Orchestration | `runtime` | Agent loop, context, hooks, memory, subagents, session orchestration. |
 | Interface | `server` | Axum HTTP/WS, bearer auth, RPC dispatch, event broadcasting, APNS. |
 
-`main.rs` currently wires all core service instances up front: event store,
-session manager, orchestrator, skill registry, memory registry, provider
-factory, process manager, tool config, subagent manager, job manager, tool
-factory, transcription sidecar, cron scheduler, worktree services, RPC context,
-method registry, WebSocket server, event bridge, cron broadcaster, and startup
-jobs.
+`main.rs` wires all core service instances up front: event store, session
+manager, orchestrator, skill registry, memory registry, provider factory,
+process manager, tool config, subagent manager, job manager, tool factory,
+transcription sidecar, cron scheduler, worktree services, RPC context, method
+registry, WebSocket server, event bridge, cron broadcaster, and startup jobs.
 
 ## RPC surface
 
 The current source-of-truth registry in `server/rpc/handlers/mod.rs` registers
-165 methods.
+165 methods. These should migrate through a compatibility worker before the
+client API changes.
 
-| Prefix | Count | Engine mapping |
-|--------|------:|----------------|
-| `worktree` | 23 | Worktree worker functions; some mutations use queue actions. |
-| `session` | 13 | Session/event-store worker functions; session streams for live updates. |
-| `agent` | 10 | Agent worker functions and queue-backed triggers. |
-| `auth` | 9 | Auth worker functions; privileged settings/state operations. |
-| `mcp` | 8 | MCP worker with discovery and tool-call functions. |
-| `cron` | 8 | Cron trigger worker plus job management functions. |
-| `context` | 8 | Agent context worker functions. |
-| `system` | 6 | Engine/system worker functions. |
-| `skill` | 6 | Skill registry worker plus session-skill state functions. |
-| `tree` | 5 | Event graph query functions. |
-| `sandbox` | 5 | Later sandbox/job worker functions. |
-| `promptSnippet` | 5 | Prompt library state functions. |
-| `job` | 5 | Queue/process worker functions and streams. |
-| `git` | 5 | Git worker functions. |
-| `events` | 5 | Event-store worker functions and subscriptions. |
-| `import` | 4 | Import worker functions. |
-| `voiceNotes` | 3 | Client/data worker functions. |
-| `transcribe` | 3 | Transcription worker functions and streams. |
-| `settings` | 3 | Settings state worker functions. |
-| `promptHistory` | 3 | Prompt library state functions. |
-| `plan` | 3 | Session-mode state functions. |
-| `notifications` | 3 | Notification state/stream functions. |
-| `filesystem` | 3 | Filesystem worker functions. |
-| `device` | 3 | Device request/response worker functions. |
-| `browser` | 3 | Stream worker functions. |
-| `repo` | 2 | Repository query functions. |
-| `model` | 2 | Model registry/provider functions. |
-| `logs` | 2 | Logging/observability functions. |
-| Singletons | 7 | `tool`, `message`, `memory`, `file`, `display`, `config`, `blob` worker functions. |
+The table is intentionally not just a method inventory. Each row maps current
+behavior to first-principles engine concerns: visibility, effect, idempotency,
+authority, and causality. A subsystem is not ready to migrate until those
+answers are explicit enough to test.
 
-The current RPC registry should be mirrored into engine discovery before it is
-replaced. The first compatibility worker can expose each RPC handler as a
-function with ids such as `rpc::session.create` or normalized ids such as
-`session::create`. The final architecture should prefer normalized `::`
-function ids and keep legacy JSON-RPC names only as compatibility metadata.
+| Prefix | Count | Future mapping | Default visibility | Effect/idempotency | Authority and causality |
+|--------|------:|----------------|--------------------|--------------------|-------------------------|
+| `system` | 6 | `system::*` and `engine::*` functions. | Client/admin/system. | Mostly reads; shutdown/update checks need explicit risk metadata. | Trace client/system actor and server lifecycle effects. |
+| `blob` | 1 | `blob::get`. | Session/workspace by blob ownership. | Pure read. | Include blob provenance and session/workspace scope. |
+| `session` | 13 | `session::*` functions over event store. | Client/session/workspace. | Reads plus idempotent mutations for create/archive/delete/export. | Every mutation writes event-store causal records. |
+| `agent` | 10 | `agent::*` functions and queue triggers. | Session by default. | Prompt/run/abort are mutating and require idempotency. | Turn id, parent invocation, catalog revision, and authority grant are mandatory. |
+| `model` / `config` | 3 | `model::*` and `config::*`. | Client/agent where safe. | List is read; switch/reasoning changes are idempotent writes. | Changes must record session/config scope and actor. |
+| `context` | 8 | `context::*` functions. | Session. | Reads plus compaction/context mutations. | Compaction ordering and event writes must remain deterministic. |
+| `events` | 5 | `event::*` worker functions and streams. | Session/workspace/admin. | Reads plus append-only event writes with dedupe. | Event append is the durable causal ledger path. |
+| `settings` | 3 | `settings::*` state functions. | Admin/client. | Idempotent system write. | Must preserve iOS settings parity and strict validation. |
+| `auth` | 9 | `auth::*` privileged functions. | Admin only. | External/account side effects; high risk. | Never agent-visible without explicit approval and authority. |
+| `tool` | 1 | Tool-result compatibility function. | Session. | Append/update tool result; idempotent by tool call id. | Link to parent tool invocation and turn. |
+| `message` | 1 | `message::delete`. | Session/client. | Idempotent write. | Event-sourced deletion marker. |
+| `logs` | 2 | `observability::logs::*`. | Admin/client filtered. | Ingest append-only; recent read. | Trace/log correlation mandatory. |
+| `memory` | 1 | `memory::retain`. | Session/workspace with policy. | Idempotent/append memory update. | User memory files remain governed; no hardcoded personal data. |
+| `mcp` | 8 | `mcp::*` worker functions. | Agent/client/admin filtered. | Lifecycle writes require idempotency; search/list are reads. | MCP tool calls inherit caller authority and trace. |
+| `skill` | 6 | `skill::*` registry and session state functions. | Session/workspace. | Activate/deactivate idempotent by session+skill. | Skill provenance and denied/allowed tools affect capability views. |
+| `filesystem` / `file` | 4 | `filesystem::*`. | Session/workspace by path policy. | Reads plus idempotent create/write wrappers later. | Path guards, workspace scope, and file effect metadata required. |
+| `tree` | 5 | `event_graph::*`. | Session/workspace. | Pure reads. | Include source event revision/cursor in result metadata. |
+| `import` | 4 | `import::*`. | Admin/workspace. | Preview/list reads; execute append-only/idempotent by import source. | Import provenance and dedupe tags mandatory. |
+| `browser` / `display` | 4 | `browser::*`, `display::*`, stream functions. | Session/client. | Stream lifecycle idempotent by stream id. | Link stream writes to session and actor. |
+| `job` | 5 | `job::*` and queue functions. | Session/client/agent filtered. | Queue/job mutations idempotent by receipt/job id. | Retry, cancel, output, and status records enter causal ledger. |
+| `worktree` | 23 | `worktree::*` functions and triggers. | Workspace/session. | Git mutations require idempotency, locks, and compensation where possible. | Branch/worktree state machine must stay auditable. |
+| `transcribe` | 3 | `transcription::*`. | Client/session. | Audio processing idempotent by input hash/request id. | Sidecar lifecycle and stream progress trace to request. |
+| `device` | 3 | `device::*` and approval triggers. | Client/session/admin. | Register/unregister/respond idempotent by token/request id. | Approval responses must link to pending invocation. |
+| `plan` | 3 | `plan::*` session-mode state. | Session. | Idempotent session state writes. | Plan transitions record actor and session. |
+| `voiceNotes` | 3 | `voice_note::*`. | Client/session. | Save/delete idempotent by note id. | Link audio/transcription/provenance. |
+| `git` / `repo` | 7 | `git::*`, `repo::*`. | Workspace/admin. | Mutations require idempotency and locks. | Remote side effects need risk and approval policy. |
+| `sandbox` | 5 | `sandbox::*` worker lifecycle. | Session by default. | Lifecycle idempotent by sandbox id; high-risk execution gated. | Created workers inherit narrowed delegated authority. |
+| `notifications` | 3 | `notification::*`. | Client/session. | Mark read idempotent; list read. | Notification effects link to source invocation/event. |
+| `promptHistory` / `promptSnippet` | 8 | `prompt_library::*`. | Workspace/client. | Snippet/history writes idempotent by id/hash. | Prompt provenance and retention policy recorded. |
+| `cron` | 8 | `cron::*` trigger worker. | Admin/workspace. | Job definitions idempotent by job id; runs append-only. | Trigger fires record schedule, misfire/overlap policy, and target invocation. |
 
 ## Runtime and agent loop
 
-Current runtime data path:
+Current runtime path:
 
 1. Client sends WebSocket RPC.
 2. RPC handler calls orchestrator/session/runtime services.
@@ -74,136 +74,111 @@ Current runtime data path:
    executes tools, records events, and loops.
 4. Orchestrator broadcasts events back to clients.
 
-Engine mapping:
+Live fabric mapping:
 
-| Current concept | Future primitive |
-|-----------------|------------------|
-| `agent.prompt` | Trigger that enqueues `agent::run_turn`. |
-| `agent.queuePrompt` / dequeue / clear | Queue worker functions for session prompt queues. |
-| `AgentRunner` / turn runner | Agent worker function implementation. |
-| Tool executor | Function invoker over tool functions, with guardrail/confirmation middleware. |
-| Hooks | Trigger conditions or post-invocation triggers. |
-| Subagents | Agent worker invocations on queue-backed child sessions. |
-| Context manager | Context worker functions plus state/event dependencies. |
-| Memory registry | Memory worker functions backed by workspace memory files. |
-| Stream processor | Stream worker producer for tokens, thinking, tool calls, and lifecycle. |
+| Current concept | Future primitive | Agent-native requirement |
+|-----------------|------------------|--------------------------|
+| `agent.prompt` | Trigger that invokes or enqueues `agent::run_turn`. | Record actor, session, catalog revision, idempotency key, and prompt causality. |
+| Turn runner | `agent::run_turn` function. | Uses stable meta-capabilities over live catalog. |
+| Tool executor | `engine::capabilities::invoke` over tool functions. | Enforce visibility, authority, effect, idempotency, and approvals before each tool. |
+| Context manager | `context::*` functions. | Context can include live discovery instructions, not static full catalog dumps. |
+| Hooks | Trigger conditions or post-invocation triggers. | Loop/depth and idempotency policy prevents runaway cascades. |
+| Subagents | Agent worker invocations with delegated authority. | Child agents inherit narrowed grants, not full parent authority. |
+| Memory registry | `memory::*` functions backed by workspace files. | Memory writes are governed and idempotent; no personal literals in code/docs. |
+| Stream processor | `stream::*` producer for tokens, thinking, tool calls, lifecycle. | Stream records carry trace and parent invocation ids. |
 
-Agent behavior must remain deterministic around persistence ordering. Existing
-invariants like `agent.complete` before `agent.ready`, compaction before ledger
-writing, and per-session serialized writes should become engine-level
-acceptance tests before the agent loop is migrated.
+The agent loop should be redesigned around a small stable meta-tool surface:
+search/inspect/invoke/watch/spawn/promote. The live catalog provides the actual
+capabilities.
 
 ## Tools and MCP
 
-The base tool factory registers filesystem, shell, search/find, UI,
+The base tool factory currently registers filesystem, shell, search/find, UI,
 notification, web, display, computer-use, and MCP meta-tools. The runtime tool
 factory adds subagent spawning, job management, waiting, and an LLM-backed
 `WebFetch` override.
 
-Engine mapping:
+Live fabric mapping:
 
-| Current tool area | Function namespace |
-|-------------------|--------------------|
-| Read/write/edit/search/find | `filesystem::*` and `workspace::*` functions. |
-| Bash and background processes | `process::*`, queue-backed for long runs. |
-| UI confirmation/questions | `approval::*` or `device::*` functions with stream/device triggers. |
-| Notify app/display/computer-use | `client::*`, `display::*`, `computer::*` functions. |
-| Web fetch/search | `web::*` functions, discoverable and separately auth-scoped. |
-| SpawnSubagent | `agent::spawn` / `agent::run_turn` queue handoff. |
-| ManageJob/Wait | `job::*` functions and job streams. |
-| MCP meta-tools | `mcp::search` and `mcp::call`, later direct MCP tool discovery as engine functions if schema/token cost permits. |
+| Current tool area | Function namespace | Effect and policy |
+|-------------------|--------------------|-------------------|
+| Read/search/find | `filesystem::*`, `workspace::*`. | Pure reads with path scope policy. |
+| Write/edit | `filesystem::*`. | Idempotent/reversible writes with file revision and diff provenance. |
+| Bash/process | `process::*`, `job::*`, later `sandbox::*`. | High risk; queue-backed, audited, and approval-gated by policy. |
+| UI confirmation/questions | `approval::*`, `device::*`. | Approval trigger resolves pending invocation. |
+| Notify/display/computer-use | `client::*`, `display::*`, `computer::*`. | Client/device effects with explicit visibility and risk. |
+| Web fetch/search | `web::*`. | External reads; auth and network policy recorded. |
+| SpawnSubagent | `agent::spawn`, `agent::run_turn`. | Delegated authority and session-scoped visibility. |
+| ManageJob/Wait | `job::*`. | Queue/job idempotency and causal status streams. |
+| MCP meta-tools | `mcp::search`, `mcp::call`. | Preserve compressed catalog for large MCP tool sets; calls inherit authority. |
 
-MCP already has the right shape: external servers are discovered dynamically,
-but compressed behind stable meta-tools. The engine should preserve that option
-for large catalogs instead of forcing every MCP tool into the agent context.
+MCP already resembles a live capability bridge. Tron should keep the searchable
+meta-tool pattern for large catalogs while allowing selected MCP functions to
+be promoted into the live catalog when safe.
 
-## Event store, streams, and state
+## Event store, state, streams, and queues
 
-Current durable database tables are:
+Current durable database tables:
 
 `sessions`, `events`, `blobs`, `branches`, `logs`, `device_tokens`,
 `notification_read_state`, `cron_jobs`, `cron_runs`, `prompt_history`,
 `prompt_snippets`, `workspaces`, and `schema_version`.
 
-Engine mapping:
+| Persistence area | Future primitive | Rule |
+|------------------|------------------|------|
+| `events` table | `event` worker and causal ledger. | Session truth remains append-only and reconstructable. |
+| WebSocket broadcasts | `stream` worker. | Transport-independent streams with cursors and trace metadata. |
+| `logs` table | `observability` worker. | Logs correlate to trace/invocation ids. |
+| `cron_jobs` / `cron_runs` | `cron` trigger worker. | Definitions become triggers; run history remains durable. |
+| Prompt snippets/history | `prompt_library` functions. | Idempotent by id/hash with provenance. |
+| Device/read state | `device` and `notification` functions. | Approval responses link to pending invocations. |
+| Blobs | `blob` functions. | Blob ids and provenance flow through causality. |
+| Branches/workspaces | `worktree` and `repo` functions. | Worktree lifecycle remains auditable. |
 
-| Current persistence | Future primitive |
-|---------------------|------------------|
-| `events` table | Event-store worker; durable source of truth for session history. |
-| WebSocket event broadcast | Stream worker subscriptions backed by event ids. |
-| `logs` table | Observability worker with trace/span correlation. |
-| `cron_jobs` / `cron_runs` | Cron trigger registrations plus run history. |
-| Prompt snippets/history | State functions backed by current tables. |
-| Device tokens/read state | Notification/device state functions. |
-| Blobs | Blob worker functions. |
-| Branches/workspaces | Worktree/repo state functions. |
-
-The new state primitive should not replace the event store. It should cover
-shared key/value or document state where event sourcing is not already the
-source of truth. Session events stay append-only and reconstructable.
-
-## Cron and automations
-
-Current cron has a strong separation:
-
-- Canonical definitions in `~/.tron/workspace/automations/automations.json`.
-- Runtime state and run records in SQLite.
-- Scheduler loop fires due jobs.
-- Executor supports shell, webhook, agent, and system-event payloads.
-- Delivery supports silent, WebSocket, APNS, and webhook outcomes.
-
-Engine mapping:
-
-| Current cron piece | Future primitive |
-|--------------------|------------------|
-| Job definition | Trigger registration with cron config and payload metadata. |
-| Scheduler | Cron trigger worker. |
-| Shell/webhook/agent/system event payloads | Functions invoked by the trigger. |
-| Overlap/misfire/retry policy | Trigger metadata plus queue policy. |
-| Run records | Observability/job history functions. |
-| Delivery | Stream/pubsub/notification functions. |
-
-The migration should keep the automations JSON file as the authoring source
-until the engine state model has proven it can round-trip edits safely.
+State is useful for shared mutable values, but it must not replace the event
+store. Queues are at-least-once by default, so queue-backed mutating functions
+must have idempotency contracts.
 
 ## Settings and auth
 
-Settings are currently a single typed `TronSettings` tree loaded from
-`~/.tron/system/settings.json` with defaults, strict validation, and iOS parity
-requirements. Auth uses provider credentials plus a server WebSocket bearer
-token for clients.
+Settings remain a typed `TronSettings` tree loaded from
+`~/.tron/system/settings.json`, with defaults, strict validation, and iOS parity
+requirements.
 
 Engine mapping:
 
-- `settings::get`, `settings::update`, and `settings::reset` become settings
-  worker functions.
-- Every server setting added to engine configuration still needs iOS settings
-  parity.
-- Client bearer auth remains distinct from future worker auth.
-- External worker tokens should be scoped to namespace registration and
-  invocation permissions.
-- Auth provider operations remain privileged functions that are never exposed
-  to untrusted workers.
+- `settings::get`, `settings::update`, and `settings::reset` become privileged
+  settings functions.
+- New engine settings still need iOS settings parity.
+- Client bearer auth remains separate from worker auth.
+- Future worker tokens are authority grants with namespace, visibility,
+  invocation, trigger, and delegation rights.
+- Auth provider operations are high-risk admin functions, never broadly
+  agent-visible.
 
 ## Client-facing surfaces
 
-The first redesign branch is server-first. Current clients still depend on:
+Current clients depend on:
 
-- WebSocket RPC framing at `/ws`.
-- Event broadcasts over the same connection.
-- `/health`, `/health/deep`, and `/metrics`.
-- Pairing/onboarding bearer-token behavior.
-- Device request/response events for approvals.
+- WebSocket RPC framing at `/ws`;
+- event broadcasts over the same connection;
+- `/health`, `/health/deep`, and `/metrics`;
+- pairing/onboarding bearer-token behavior;
+- device request/response events for approvals;
 - APNS and notification read state.
 
-During migration, a compatibility worker should keep these paths working while
-new engine discovery and stream APIs are introduced. The final client API can
-break, but it should break once into a clean engine-native surface rather than
-through several intermediate public shapes.
+During migration, a compatibility worker keeps these paths working while live
+catalog and stream APIs are introduced. The final client API can break once
+into the engine-native surface.
 
-## Documentation drift handled during inventory
+## Migration readiness checklist
 
-One drift item was found while building this matrix: `events/mod.rs` said the
-event enum had 60 variants, while `events/types/generated.rs` asserts 80. This
-pass updates the module documentation to match the source of truth. The root
-README RPC count matches the handler registry at 165 methods.
+Before migrating any row above, define:
+
+- actor kinds allowed to discover and invoke it;
+- default visibility and promotion path;
+- effect class and risk level;
+- idempotency key source and dedupe scope;
+- causal records written on success, failure, retry, and cancellation;
+- behavior when the owner worker disconnects or the function revision changes;
+- tests proving the legacy RPC path and engine path agree during migration.

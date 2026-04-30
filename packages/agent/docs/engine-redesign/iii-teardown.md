@@ -1,199 +1,214 @@
-# iii teardown
+# iii comparison and Tron specialization
 
-This document records the reference architecture analysis for iii. It is a
-design input, not an implementation dependency.
+This document records how iii informs the Tron redesign and where Tron should
+specialize the model for agent-native local autonomy.
 
-## Licensing boundary
+## License boundary
 
 The iii repository separates licenses by area. The engine is under Elastic
 License 2.0, while SDKs, console, and docs are Apache-2.0. Tron should treat
 iii engine code as reference material only and should not copy implementation
 code, tests, protocol structs, or worker internals without separate approval.
 
-The useful artifact is the model: a small set of primitives that collapse many
-backend categories into one runtime. Tron should implement those primitives in
-its own style, against its own persistence, auth, settings, event, and agent
-runtime constraints.
+The useful artifact is the primitive model: a small set of runtime concepts
+that collapse backend categories into one live system. Tron should implement
+the model natively, with its own local-first persistence, settings, auth,
+clients, event store, agent runtime, and guardrails.
 
-## Core model
+## Comparison method
 
-iii centers the system on three primitives:
+iii is evidence that a small worker/function/trigger model can collapse many
+backend categories. It is not proof that Tron should inherit every behavior
+unchanged.
 
-| Primitive | Role | Tron lesson |
-|-----------|------|-------------|
-| Function | Stable unit of work, usually named `domain::operation`, with optional request/response schema metadata. | Tron tools, RPC handlers, cron payloads, MCP meta-tools, worktree operations, and agent turns can all become callable functions. |
-| Trigger | Declarative binding that causes a function to run: HTTP, cron, queue, state change, stream event, pub/sub topic, or a custom source. | Current Tron RPC routing, cron schedules, event broadcasts, notification actions, and agent queue prompts are all trigger shapes. |
-| Worker | Any process or in-process module that registers functions/triggers and can handle invocations. | Tron can start with in-process Rust workers, then add external workers over a Tron-owned protocol. |
+Tron evaluates each iii idea against first principles:
 
-The important shift is that "agent harness" and "backend" stop being separate
-layers. Agent tools become functions. Memory and state become state functions.
-Handoffs become queue triggers. Client updates become stream or pub/sub
-triggers. The model does not require every operation to be autonomous; thick
-and thin harnesses are both compositions of the same primitives.
+- Does it help agents discover and use live capabilities?
+- Does it preserve actor identity, authority, and causality?
+- Does it make side effects idempotent or guarded?
+- Does it keep visibility scoped until promotion is justified?
+- Does it reduce special-case backend code instead of adding another layer?
+- Does it work in Tron's local-first daemon with SQLite events, paired clients,
+  skills, MCP, worktrees, and user-controlled settings?
 
-## Engine responsibilities
+If an iii mechanism is useful but too general, Tron should specialize it rather
+than copy it.
 
-The iii engine owns:
+## What iii gets right
 
-- Worker connection lifecycle.
-- Function registry and function owner tracking.
-- Trigger type registry and trigger instance registry.
-- Invocation routing across local and external workers.
-- Deferred invocation results for external calls.
-- Discovery functions for functions, workers, triggers, and trigger types.
-- Topology notifications when functions or workers appear/disappear.
-- Built-in worker initialization from config.
-- External worker spawning and reload.
-- Trace propagation across nested calls and queue handoffs.
+iii's most important idea is that backend components and agent harness
+components can share the same primitives:
 
-The biggest implementation lesson for Tron is owner tracking. iii records which
-worker registered each function/trigger so a reconnecting worker can overwrite
-its own stale registrations without deleting another worker's newer version.
-Tron needs the same invariant before external or hot-reloadable workers are
-allowed.
+| iii primitive | Reference behavior | Tron interpretation |
+|---------------|--------------------|---------------------|
+| Worker | Any process that connects to the engine and registers functions/triggers. | Any live actor: daemon module, agent, sandbox, browser, client, MCP bridge, cron scheduler, queue, stream, or temporary worker created by another agent. |
+| Function | Stable callable unit with optional schema metadata. | Capability contract with schema, revision, authority, effect class, idempotency, risk, health, provenance, and visibility. |
+| Trigger | Declarative entrypoint that causes a function to run. | Causal rule with delivery policy, authority, trace context, loop controls, and idempotency controls. |
 
-## Protocol shape
+iii also demonstrates several mechanics Tron should preserve:
 
-iii's worker protocol is JSON over WebSocket. The notable messages are:
+- live discovery through engine functions such as function/worker/trigger
+  listings;
+- topology-change notifications when functions or workers appear/disappear;
+- explicit trigger actions: sync, void, and enqueue;
+- schema metadata as a machine-readable contract for agents, CLIs, and other
+  workers;
+- RBAC and registration prefixing at worker connection boundaries;
+- sandbox workers that participate in the same worker/function/trigger model
+  as ordinary services;
+- trace propagation across worker and queue boundaries.
 
-- `registerfunction`: worker registers a callable function with id,
-  description, request/response formats, metadata, and optional HTTP
-  invocation reference.
-- `unregisterfunction`: worker removes a function it owns.
-- `invokefunction`: worker or engine asks for a function call by function id,
-  payload, invocation id, trace context, baggage, and optional trigger action.
-- `invocationresult`: worker replies with result or error.
-- `registertrigger`: worker registers a trigger instance with id, trigger
-  type, function id, config, and metadata.
-- `unregistertrigger`: worker removes a trigger.
-- `registertriggertype`: worker adds a new trigger type and its config schema.
-- `registerservice`: worker advertises a service namespace.
-- `functionsavailable`: topology notification for function catalog changes.
-- `ping` / `pong`: liveness.
+## Where Tron diverges
 
-Tron should not aim for wire compatibility in v1. It should use the same
-conceptual envelope: stable ids, typed JSON payloads, schema metadata, trace
-context, invocation ids, and explicit ownership.
+iii is general-purpose backend infrastructure. Tron should be purpose-built for
+agent autonomy.
 
-## Invocation actions
+| Area | iii baseline | Tron specialization |
+|------|--------------|---------------------|
+| Discovery | Every worker can read the live registry and receive topology notifications. | The live catalog is the agent's primary substrate. Agents get stable meta-capabilities for discover/search/inspect/invoke/watch/spawn, and the underlying catalog changes while the agent runs. |
+| Visibility | Registry availability is mostly a worker/RBAC concern. | Visibility is scoped: session, workspace, system, client, worker, admin. Agent-created capabilities default to session visibility. |
+| Self-modification | Sandboxes and workers can be added live. | Agents can create session-scoped workers/functions, test them immediately, then request explicit promotion to wider visibility. |
+| Idempotency | Queue retries make delivery concerns visible. | Every mutating agent-visible function must declare an idempotency contract before invocation is allowed. |
+| Causality | Trace context propagates through invocations. | Every catalog mutation, trigger fire, invocation, retry, approval, state write, and worker spawn belongs to a durable causal graph. |
+| Guardrails | RBAC and middleware can filter access. | Guardrails are native invocation policy: schema validation, authority checks, approval triggers, budgets, causal-depth limits, loop detection, namespace ownership, provenance, and health checks. |
+| Agent context | Discovery can inform agents. | Discovery is a live action surface, not a static prompt dump. Catalog search/ranking/views prevent context explosion. |
 
-iii distinguishes three call modes:
+## Live discovery
 
-| Mode | Behavior | Tron use |
-|------|----------|----------|
-| Sync/default | Caller waits for a result or error. | Reads, validations, direct tool calls, most RPC compatibility calls. |
-| Void | Fire-and-forget, no result and no durable retry. | Best-effort broadcasts, non-critical telemetry, UI notifications where loss is acceptable. |
-| Enqueue | Durable queue handoff to a named queue, with receipt id, retry, concurrency, FIFO, and DLQ policy. | Agent prompt queues, background jobs, cron fanout, subagent handoff, delayed worktree operations, long tool runs. |
+iii treats discovery as part of the engine rather than a sidecar service. The
+same registry powers read APIs and topology notifications. Tron should adopt
+that model but make it richer for agents.
 
-Tron should make this mode explicit in the invocation API instead of hiding it
-inside each subsystem. A caller should be able to see whether it is doing a
-blocking call, a best-effort notification, or a durable handoff.
+Tron discovery should expose:
 
-## Built-in workers
+- current catalog revision;
+- function id, description, schema, revision, visibility, owner, health, risk,
+  effect class, idempotency contract, and authority requirements;
+- worker lifecycle state and provenance;
+- trigger definitions and delivery semantics;
+- catalog-change streams with change classes agents can subscribe to.
 
-iii ships many capabilities as workers. The table below maps the useful design
-pattern to Tron.
+The live catalog should not be frozen for an agent turn. Instead, agents should
+use stable meta-capabilities:
 
-| iii worker | Reference behavior | Tron-native interpretation |
-|------------|--------------------|----------------------------|
-| `iii-worker-manager` | Mandatory WebSocket bridge for SDK workers, optional RBAC/middleware, registration prefixing, multiple listeners. | Add a worker gateway after in-process engine primitives exist; default deny external registration until scoped tokens/RBAC exist. |
-| `iii-http` | HTTP trigger type that maps HTTP routes to functions. | Replace direct Axum route proliferation with HTTP/WS/client triggers where useful; keep `/health` and bootstrap endpoints ordinary until engine is ready. |
-| `iii-queue` | Named queues plus topic subscribers, retries, concurrency, FIFO, DLQ, redrive/discard functions. | Unify agent prompt queues, process jobs, subagent completion queues, cron execution, and long-running tool handoff. |
-| `iii-state` | Scoped key-value state with functions and reactive state triggers. | Add a state primitive, but do not flatten event-sourced sessions into KV. Session history remains event-sourced. |
-| `iii-stream` | Durable real-time stream API and stream triggers. | Replace ad hoc WebSocket subscriptions with discoverable streams for session events, tool output, jobs, browser/display streams, and transcription progress. |
-| `iii-pubsub` | Topic publish/subscribe worker. | Use for best-effort fanout and UI notifications where durable event sourcing is unnecessary. |
-| `iii-cron` | Cron trigger type backed by adapter locks. | Convert Tron cron definitions into trigger registrations while retaining current automations file and SQLite runtime state during migration. |
-| `iii-observability` | OpenTelemetry traces, metrics, structured logs, alerts, sampling. | Attach invocation trace ids to Tron logs/events/jobs/tool calls first; external OTEL export can follow. |
-| `iii-bridge` | Connects two iii instances and exposes/forwards functions. | Later candidate for connecting local Tron daemon, sandbox workers, and remote/edge workers. |
-| `iii-exec` | Startup shell pipelines/watch behavior. | Not a core primitive for Tron v1; background `Bash` jobs should go through queue/process worker semantics instead. |
+- `engine::capabilities::search`
+- `engine::capabilities::inspect`
+- `engine::capabilities::invoke`
+- `engine::catalog::watch`
+- `engine::workers::spawn`
+- `engine::capabilities::promote`
 
-## Discovery
+Those stable calls keep the LLM provider interface small while allowing the
+underlying capability set to change at runtime.
 
-iii exposes live catalog functions such as:
+## Trigger actions and delivery
 
-- `engine::functions::list`
-- `engine::workers::list`
-- `engine::triggers::list`
-- `engine::trigger-types::list`
-- `engine::functions-available`
-- `engine::workers-available`
+iii distinguishes sync, void, and enqueue actions. Tron should preserve the
+three modes but attach stricter causal and idempotency semantics.
 
-This is one of the most important pieces to adopt. Tron agents should receive
-the current live capability catalog instead of a hand-maintained tool list or
-server/client assumptions. Discovery needs schema metadata, ownership,
-visibility, auth scope, stability labels, and human-readable descriptions.
+| Action | Tron contract |
+|--------|---------------|
+| Sync | Caller waits for result or structured error. Used for reads, validation, discovery, and short deterministic operations. |
+| Void | Best-effort dispatch with no retry. Allowed only for explicitly loss-tolerant effects such as non-critical telemetry. Still records causality. |
+| Enqueue | Durable at-least-once delivery. Requires idempotency for mutating functions and records receipt, retry, and DLQ history in the causal ledger. |
 
-## Schema metadata
+For agents, the key policy is simple: durable or mutating work cannot be
+agent-visible without an idempotency contract.
 
-iii SDKs attach JSON Schema request and response formats. Node can use explicit
-schemas such as Zod; Python can infer from Pydantic/type hints; Rust uses
-`schemars`.
+## Schemas and capability contracts
 
-Tron should treat schemas as required for externally visible functions and
-optional only for internal bootstrap functions. Schemas are useful for:
+iii stores request/response formats so callers can construct payloads without
+guessing. Tron should go further for agent-visible functions.
 
-- Agent tool planning and validation.
-- Client UI generation and compatibility checks.
-- Testing payload drift.
-- Runtime guardrails before dispatch.
-- Documentation generation.
+An agent-visible function needs:
 
-## SDK behavior
+- request schema;
+- response schema or explicit opaque response marker;
+- effect class;
+- idempotency contract;
+- authority requirements;
+- risk level;
+- revision;
+- owner;
+- visibility scope;
+- health state;
+- provenance metadata.
 
-The iii SDKs do three things Tron should copy conceptually:
+Schemas are not sufficient as guardrails. They describe shape. The engine must
+also enforce authority, idempotency, risk, visibility, and loop policy before
+invocation.
 
-- Reconnect with backoff.
-- Re-register owned functions/triggers after reconnect.
-- Maintain an invocation map for in-flight requests and results.
+## RBAC, namespace ownership, and delegation
 
-Tron should add these behaviors only after the in-process engine is stable.
-External SDKs before ownership, auth, schema, and queue semantics are settled
-would make the system harder to debug.
+iii's worker RBAC can authenticate workers, restrict exposed functions, restrict
+trigger registration, and prefix function registration. Tron should use the
+same idea but model it as authority delegation.
 
-## RBAC and middleware
+Authority should answer:
 
-iii's worker manager can authenticate workers through an auth function, apply
-middleware, filter exposed functions, restrict registration, restrict trigger
-types, and prefix function registrations.
+- Who is the actor?
+- Which grant is being used?
+- Who delegated the grant?
+- Which namespaces can be registered?
+- Which functions can be invoked?
+- Which trigger types can be registered?
+- Which visibility scopes can be requested?
+- Which effects require approval?
 
-Tron should adapt this as:
+Agent-created workers should inherit narrowed authority, not the full authority
+of the parent. Delegation should be explicit, revocable, and visible in the
+causal graph.
 
-- External workers require a scoped worker token, never the iOS bearer token.
-- Tokens grant explicit namespace registration rights and invocation rights.
-- Workers cannot override core/system namespaces by default.
-- Registration hooks validate schemas, namespace ownership, and metadata.
-- Middleware is just function composition: auth, rate limits, audit, and
-  confirmation gates should be functions or trigger conditions.
+## Sandbox workers and self-modification
 
-## Sandbox model
+iii's sandbox model shows why "anything is a worker" matters: a worker can
+create another isolated worker, and that worker can register capabilities into
+the same live system.
 
-iii's sandbox support is a worker that can create microVM workers, run commands,
-perform filesystem operations, and register new functions from isolated
-environments. The recursive property matters more than the exact microVM stack:
-a worker can create another worker, which registers capabilities into the same
-catalog.
+Tron should use this pattern for self-modification, but with stricter defaults:
 
-For Tron, sandbox workers should be a late phase. Current Bash/container
-capabilities should first be normalized as engine functions and durable jobs.
-Only then should sandbox-created workers be allowed to register new functions.
+1. Agent requests a worker under a session-scoped namespace.
+2. Engine creates the worker with a narrowed authority grant.
+3. Worker registers session-visible functions.
+4. Engine emits catalog-change events.
+5. Agent receives relevant catalog changes through its subscription.
+6. Agent inspects schemas, runs tests, invokes functions, and records evidence.
+7. Promotion to workspace/system visibility is an explicit governed function
+   call.
+
+This preserves the recursive power of the iii model while keeping blast radius
+small.
 
 ## What Tron should adopt
 
-- The three primitive model: worker, function, trigger.
-- Live discovery with schema metadata and topology change events.
-- Explicit invocation modes: sync, void, enqueue.
-- Owner-tracked function and trigger registration.
-- State, queue, stream, cron, pub/sub, and HTTP as workers/triggers, not
-  special framework categories.
-- Trace propagation across every function call and durable handoff.
-- Reconnect and re-registration semantics for external workers.
-- Scoped RBAC before external worker registration.
+- Worker/function/trigger as the universal primitives.
+- Live discovery and topology notifications.
+- Sync, void, and enqueue delivery modes.
+- Schema metadata in discovery.
+- Owner-tracked registration and cleanup.
+- RBAC-like worker authorization and namespace prefixing.
+- Sandboxed workers as ordinary live workers.
+- Trace propagation across calls, queues, and worker boundaries.
 
-## What Tron should avoid initially
+## What Tron should add
+
+- Agent-native stable meta-capabilities over the live catalog.
+- Session-live default visibility for agent-created capabilities.
+- Explicit promotion workflow for wider visibility.
+- Required idempotency contracts for mutating agent-visible functions.
+- Effect classes and risk levels as first-class function metadata.
+- Catalog revisions and catalog-change classes.
+- Causal ledger records for every action and catalog mutation.
+- Delegated authority grants for spawned workers and subagents.
+- Loop detection and budget policy for trigger cascades.
+
+## What Tron should avoid
 
 - Direct iii engine dependency or copied engine code.
-- Public external worker protocol before in-process primitives prove out.
-- Treating key-value state as a replacement for the session event store.
-- Allowing agents to create sandbox workers before registration policy,
-  namespace ownership, and audit trails are mature.
-- Rebuilding every client surface before the server contract stabilizes.
+- Treating discovery as a static prompt expansion.
+- Making all new functions globally visible by default.
+- Letting schema metadata stand in for authority or safety policy.
+- Exposing mutating functions to agents without idempotency.
+- Allowing agent-created workers before authority, namespace, provenance, and
+  audit policy exist.
+- Depending on exactly-once delivery, stable topology, or worker honesty.
