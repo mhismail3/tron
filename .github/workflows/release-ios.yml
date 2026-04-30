@@ -161,6 +161,67 @@ jobs:
           grep -q "CURRENT_PROJECT_VERSION = ${{ steps.ver.outputs.apple_build }}" "$settings"
           grep -q "TRON_CANONICAL_VERSION = ${{ steps.ver.outputs.version }}" "$settings"
 
+      - name: Prepare iOS simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtimes_json="$RUNNER_TEMP/sim-runtimes.json"
+          devices_json="$RUNNER_TEMP/sim-devices.json"
+          xcrun simctl list runtimes available --json > "$runtimes_json"
+          runtime_id="$(
+            jq -r '
+              [.runtimes[]
+                | select(.platform == "iOS" and .isAvailable == true)
+                | select((.supportedDeviceTypes // []) | map(select(.productFamily == "iPhone")) | length > 0)]
+              | sort_by(.version | split(".") | map(tonumber))
+              | last.identifier // empty
+            ' "$runtimes_json"
+          )"
+          if [[ -z "$runtime_id" ]]; then
+            echo "::error::no available iOS simulator runtime with iPhone device types"
+            exit 1
+          fi
+          device_type="$(
+            jq -r --arg runtime_id "$runtime_id" '
+              [.runtimes[] | select(.identifier == $runtime_id)][0]
+              | (.supportedDeviceTypes // []) as $types
+              | (($types | map(select(.name == "iPhone 17 Pro")))
+                + ($types | map(select(.name == "iPhone 16 Pro")))
+                + ($types | map(select(.productFamily == "iPhone"))))
+              | .[0].identifier // empty
+            ' "$runtimes_json"
+          )"
+          device_name="$(
+            jq -r --arg runtime_id "$runtime_id" --arg device_type "$device_type" '
+              [.runtimes[] | select(.identifier == $runtime_id)][0]
+              | (.supportedDeviceTypes // [])
+              | map(select(.identifier == $device_type))
+              | .[0].name // empty
+            ' "$runtimes_json"
+          )"
+          if [[ -z "$device_type" || -z "$device_name" ]]; then
+            echo "::error::could not resolve an iPhone simulator device type for $runtime_id"
+            exit 1
+          fi
+
+          xcrun simctl list devices available --json > "$devices_json"
+          udid="$(
+            jq -r --arg runtime_id "$runtime_id" --arg device_name "$device_name" '
+              (.devices[$runtime_id] // [])
+              | map(select(.isAvailable == true and .name == $device_name))
+              | .[0].udid // empty
+            ' "$devices_json"
+          )"
+          if [[ -z "$udid" ]]; then
+            udid="$(xcrun simctl create "Tron CI $device_name" "$device_type" "$runtime_id")"
+            echo "::notice::created $device_name simulator $udid on $runtime_id"
+          else
+            echo "::notice::using existing $device_name simulator $udid on $runtime_id"
+          fi
+          xcrun simctl boot "$udid" >/dev/null 2>&1 || true
+          xcrun simctl bootstatus "$udid" -b
+          echo "IOS_TEST_DESTINATION=platform=iOS Simulator,id=$udid" >> "$GITHUB_ENV"
+
       - name: xcodebuild test
         working-directory: ${{ env.IOS_APP_DIR }}
         shell: bash
@@ -170,7 +231,7 @@ jobs:
             -project TronMobile.xcodeproj \
             -scheme "$IOS_SCHEME" \
             -configuration Beta \
-            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17 Pro' \
+            -destination "$IOS_TEST_DESTINATION" \
             -derivedDataPath build/TestDerivedData \
             -resultBundlePath TestResults.xcresult \
             -quiet
