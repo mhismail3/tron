@@ -48,7 +48,6 @@ xcodebuild archive \
   -destination "generic/platform=iOS" \
   -allowProvisioningUpdates \
   CODE_SIGN_STYLE=Automatic \
-  CODE_SIGN_IDENTITY="Apple Distribution" \
   | tail -1
 
 # 3. Create IPA manually (bypasses Xcode 26 exportArchive rsync bug)

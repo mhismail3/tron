@@ -109,15 +109,13 @@ are the release sources of truth.
 The upload lane uses the `Tron` scheme with the `Prod` configuration. That is
 the App Store Connect bundle (`com.tron.mobile`, App ID `6761511764`); the
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
-CI runs the simulator tests, archives for `generic/platform=iOS`, manually
-packages the IPA to avoid the local Xcode 26 `exportArchive` rsync failure,
-forces the `Apple Distribution` signing identity, re-signs with checked-in Prod
-entitlements, reuses archive-embedded App Store provisioning profiles when
-Xcode provides them, falls back to Xcode's standard profile caches, uploads
-with `asc builds upload`, waits for the build to become valid, and assigns it
-to the configured internal and public TestFlight groups. Reruns use `asc builds
-list` to reuse an existing Apple build number instead of uploading a duplicate
-binary.
+CI runs the simulator tests, archives for `generic/platform=iOS`, exports an
+App Store Connect IPA with Xcode's `app-store-connect` export method and
+automatic signing, validates the exported app/extension bundle IDs and
+entitlements, uploads with `asc builds upload`, waits for the build to become
+valid, and assigns it to the configured internal and public TestFlight groups.
+Reruns use `asc builds list` to reuse an existing Apple build number instead of
+uploading a duplicate binary.
 
 Required GitHub Actions secrets:
 

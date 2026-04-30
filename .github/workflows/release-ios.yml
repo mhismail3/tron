@@ -14,10 +14,11 @@
 #   ASC_TESTFLIGHT_INTERNAL_GROUP_ID existing internal TestFlight group id
 #   ASC_TESTFLIGHT_PUBLIC_GROUP_ID   existing public TestFlight group id
 #
-# Xcode 26's App Store export path has been flaky locally, so this workflow
-# mirrors `.claude/skills/publish`: archive with automatic signing, manually
-# package the IPA, re-sign with checked-in release entitlements, then upload
-# with `asc builds upload`.
+# Real releases archive with automatic signing, export with Apple's
+# app-store-connect export method so Xcode/cloud signing resolves App Store
+# distribution profiles, then upload with `asc builds upload`. Dry-runs still
+# create an unsigned IPA from the archive to validate package layout without
+# requiring Apple signing credentials.
 
 name: Release (iOS TestFlight)
 
@@ -154,10 +155,8 @@ jobs:
             -project TronMobile.xcodeproj \
             -scheme "$IOS_SCHEME" \
             -configuration "$IOS_CONFIGURATION" \
-            -destination 'generic/platform=iOS' \
-            CODE_SIGN_IDENTITY="$IOS_DISTRIBUTION_IDENTITY" > "$settings"
+            -destination 'generic/platform=iOS' > "$settings"
           grep -q "PRODUCT_BUNDLE_IDENTIFIER = $IOS_BUNDLE_ID" "$settings"
-          grep -q "CODE_SIGN_IDENTITY = $IOS_DISTRIBUTION_IDENTITY" "$settings"
           grep -q "MARKETING_VERSION = ${{ steps.ver.outputs.marketing_version }}" "$settings"
           grep -q "CURRENT_PROJECT_VERSION = ${{ steps.ver.outputs.apple_build }}" "$settings"
           grep -q "TRON_CANONICAL_VERSION = ${{ steps.ver.outputs.version }}" "$settings"
@@ -276,7 +275,6 @@ jobs:
               -authenticationKeyID "$APPLE_API_KEY_ID" \
               -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
               DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-              CODE_SIGN_IDENTITY="$IOS_DISTRIBUTION_IDENTITY" \
               -quiet
           fi
           echo "ARCHIVE_PATH=$archive_path" >> "$GITHUB_ENV"
@@ -303,9 +301,82 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-      - name: Package IPA
-        id: ipa
-        if: steps.drymode.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
+      - name: Export App Store IPA
+        if: steps.drymode.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
+        working-directory: ${{ env.IOS_APP_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export_dir="$(pwd)/build/export"
+          ipa_path="$(pwd)/build/TronMobile.ipa"
+          export_options="$RUNNER_TEMP/ios-export-options.plist"
+          rm -rf "$export_dir" "$ipa_path"
+          mkdir -p "$export_dir"
+          cat > "$export_options" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>destination</key>
+            <string>export</string>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>teamID</key>
+            <string>$APPLE_TEAM_ID</string>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+          plutil -lint "$export_options"
+
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$export_dir" \
+            -exportOptionsPlist "$export_options" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$APPLE_API_KEY_PATH" \
+            -authenticationKeyID "$APPLE_API_KEY_ID" \
+            -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
+            -quiet
+
+          exported_ipa="$(find "$export_dir" -maxdepth 1 -name '*.ipa' -print -quit)"
+          test -f "$exported_ipa" || { echo "::error::xcodebuild export did not produce an IPA"; exit 1; }
+          /bin/cp -f "$exported_ipa" "$ipa_path"
+          unzip -tq "$ipa_path"
+
+          validation_dir="$RUNNER_TEMP/ios-ipa-validation"
+          rm -rf "$validation_dir"
+          mkdir -p "$validation_dir"
+          unzip -q "$ipa_path" -d "$validation_dir"
+          app_payload="$validation_dir/Payload/TronMobile.app"
+          appex_payload="$app_payload/PlugIns/TronShareExtension.appex"
+          test -d "$app_payload" || { echo "::error::exported IPA missing TronMobile.app"; exit 1; }
+          test -d "$appex_payload" || { echo "::error::exported IPA missing TronShareExtension.appex"; exit 1; }
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_payload/Info.plist")" = "$IOS_BUNDLE_ID"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$appex_payload/Info.plist")" = "$IOS_SHARE_EXTENSION_BUNDLE_ID"
+          /usr/bin/codesign --verify --strict "$appex_payload"
+          /usr/bin/codesign --verify --deep --strict "$app_payload"
+
+          main_entitlements="$RUNNER_TEMP/main-entitlements.plist"
+          share_entitlements="$RUNNER_TEMP/share-entitlements.plist"
+          /usr/bin/codesign -d --entitlements :- "$app_payload" > "$main_entitlements" 2>/dev/null
+          /usr/bin/codesign -d --entitlements :- "$appex_payload" > "$share_entitlements" 2>/dev/null
+          test "$(/usr/libexec/PlistBuddy -c 'Print :application-identifier' "$main_entitlements")" = "$APPLE_TEAM_ID.$IOS_BUNDLE_ID"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :application-identifier' "$share_entitlements")" = "$APPLE_TEAM_ID.$IOS_SHARE_EXTENSION_BUNDLE_ID"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.team-identifier' "$main_entitlements")" = "$APPLE_TEAM_ID"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.team-identifier' "$share_entitlements")" = "$APPLE_TEAM_ID"
+
+          echo "IPA_PATH=$ipa_path" >> "$GITHUB_ENV"
+
+      - name: Package dry-run IPA
+        if: steps.drymode.outputs.dry_run == 'true'
         working-directory: ${{ env.IOS_APP_DIR }}
         shell: bash
         run: |
@@ -313,135 +384,13 @@ jobs:
           ipa_path="$(pwd)/build/TronMobile.ipa"
           work_dir="$(pwd)/build/ipa_work"
           app_source="$ARCHIVE_PATH/Products/Applications/TronMobile.app"
-          app_payload="$work_dir/Payload/TronMobile.app"
-          appex_payload="$app_payload/PlugIns/TronShareExtension.appex"
           rm -rf "$work_dir" "$ipa_path"
           mkdir -p "$work_dir/Payload"
           /bin/cp -Rf "$app_source" "$work_dir/Payload/"
-
-          if [[ "${{ steps.drymode.outputs.dry_run }}" != "true" ]]; then
-            profile_dirs=(
-              "$HOME/Library/MobileDevice/Provisioning Profiles"
-              "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
-            )
-            profile_matches_store_bundle() {
-              local bundle_id="$1"
-              local profile="$2"
-              local decoded application_id provisions_all
-              decoded="$(mktemp)"
-              if ! security cms -D -i "$profile" -o "$decoded" 2>/dev/null; then
-                rm -f "$decoded"
-                return 1
-              fi
-              application_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded" 2>/dev/null || true)"
-              provisions_all="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$decoded" 2>/dev/null || true)"
-              if [[ "$application_id" == "$APPLE_TEAM_ID.$bundle_id" ]] \
-                && [[ "$provisions_all" != "true" ]] \
-                && ! /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$decoded" >/dev/null 2>&1; then
-                rm -f "$decoded"
-                return 0
-              fi
-              rm -f "$decoded"
-              return 1
-            }
-
-            find_store_profile() {
-              local bundle_id="$1"
-              local profile_dir profile
-              shopt -s nullglob
-              for profile_dir in "${profile_dirs[@]}"; do
-                for profile in "$profile_dir"/*.mobileprovision; do
-                  if profile_matches_store_bundle "$bundle_id" "$profile"; then
-                    echo "::notice::using cached App Store profile for $bundle_id from $profile_dir" >&2
-                    echo "$profile"
-                    return 0
-                  fi
-                done
-              done
-              return 1
-            }
-
-            resolve_store_profile() {
-              local bundle_id="$1"
-              local embedded_profile="$2"
-              if [[ -f "$embedded_profile" ]] && profile_matches_store_bundle "$bundle_id" "$embedded_profile"; then
-                echo "::notice::using archive-embedded App Store profile for $bundle_id" >&2
-                echo "$embedded_profile"
-                return 0
-              fi
-              find_store_profile "$bundle_id"
-            }
-
-            install_profile() {
-              local source="$1"
-              local destination="$2"
-              if [[ "$source" != "$destination" ]]; then
-                /bin/cp -f "$source" "$destination"
-              fi
-            }
-
-            debug_profile_search() {
-              local profile_dir count embedded_count
-              for profile_dir in "${profile_dirs[@]}"; do
-                if [[ -d "$profile_dir" ]]; then
-                  count="$(find "$profile_dir" -maxdepth 1 -name '*.mobileprovision' | wc -l | tr -d ' ')"
-                else
-                  count=0
-                fi
-                echo "::notice::searched $profile_dir ($count profiles)"
-              done
-              embedded_count="$(find "$app_payload" -name embedded.mobileprovision | wc -l | tr -d ' ')"
-              echo "::notice::payload embedded.mobileprovision count: $embedded_count"
-            }
-
-            app_profile="$(resolve_store_profile "$IOS_BUNDLE_ID" "$app_payload/embedded.mobileprovision")" || {
-              debug_profile_search
-              echo "::error::missing App Store provisioning profile for $IOS_BUNDLE_ID"
-              exit 1
-            }
-            share_profile="$(resolve_store_profile "$IOS_SHARE_EXTENSION_BUNDLE_ID" "$appex_payload/embedded.mobileprovision")" || {
-              debug_profile_search
-              echo "::error::missing App Store provisioning profile for $IOS_SHARE_EXTENSION_BUNDLE_ID"
-              exit 1
-            }
-
-            install_profile "$app_profile" "$app_payload/embedded.mobileprovision"
-            install_profile "$share_profile" "$appex_payload/embedded.mobileprovision"
-
-            sign_identity="$(
-              security find-identity -v -p codesigning \
-                | awk -v team="$APPLE_TEAM_ID" '/Apple Distribution/ && index($0, team) { print $2; exit }'
-            )"
-            [[ -n "$sign_identity" ]] || sign_identity="$IOS_DISTRIBUTION_IDENTITY"
-
-            /usr/bin/codesign --force --sign "$sign_identity" \
-              --entitlements ShareExtension/ShareExtensionProd.entitlements \
-              --timestamp=none \
-              "$appex_payload"
-            /usr/bin/codesign --force --sign "$sign_identity" \
-              --entitlements TronMobileProd.entitlements \
-              --timestamp=none \
-              "$app_payload"
-
-            /usr/bin/codesign --verify --strict "$appex_payload"
-            /usr/bin/codesign --verify --deep --strict "$app_payload"
-
-            main_entitlements="$RUNNER_TEMP/main-entitlements.plist"
-            share_entitlements="$RUNNER_TEMP/share-entitlements.plist"
-            /usr/bin/codesign -d --entitlements :- "$app_payload" > "$main_entitlements" 2>/dev/null
-            /usr/bin/codesign -d --entitlements :- "$appex_payload" > "$share_entitlements" 2>/dev/null
-            test "$(/usr/libexec/PlistBuddy -c 'Print :application-identifier' "$main_entitlements")" = "$APPLE_TEAM_ID.$IOS_BUNDLE_ID"
-            test "$(/usr/libexec/PlistBuddy -c 'Print :application-identifier' "$share_entitlements")" = "$APPLE_TEAM_ID.$IOS_SHARE_EXTENSION_BUNDLE_ID"
-            test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.team-identifier' "$main_entitlements")" = "$APPLE_TEAM_ID"
-            test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.team-identifier' "$share_entitlements")" = "$APPLE_TEAM_ID"
-          else
-            echo "::notice::dry-run IPA is unsigned and is only used to validate package layout"
-          fi
-
+          echo "::notice::dry-run IPA is unsigned and is only used to validate package layout"
           (cd "$work_dir" && /usr/bin/zip -qry "$ipa_path" Payload)
           unzip -tq "$ipa_path"
           echo "IPA_PATH=$ipa_path" >> "$GITHUB_ENV"
-          echo "ipa_path=$ipa_path" >> "$GITHUB_OUTPUT"
 
       - name: Upload dry-run IPA artifact
         if: steps.drymode.outputs.dry_run == 'true'
