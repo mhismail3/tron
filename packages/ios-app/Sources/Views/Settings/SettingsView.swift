@@ -58,6 +58,17 @@ struct SettingsView: View {
     }
 
     var body: some View {
+        settingsView
+    }
+
+    private var settingsView: some View {
+        settingsWithAlerts
+            .adaptivePresentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .tint(.tronEmerald)
+    }
+
+    private var settingsBaseView: some View {
         SettingsPageContainer(title: "Settings") {
             #if DEBUG || BETA
             Button { showLogViewer = true } label: {
@@ -75,119 +86,133 @@ struct SettingsView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             pinnedFooterView
         }
+    }
+
+    private var settingsWithSheets: some View {
+        settingsBaseView
         #if DEBUG || BETA
-        .sheet(isPresented: $showLogViewer) {
-            LogViewer()
-                .adaptivePresentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-        }
+            .sheet(isPresented: $showLogViewer) {
+                LogViewer()
+                    .adaptivePresentationDetents([.large])
+                    .presentationDragIndicator(.hidden)
+            }
         #endif
-        .sheet(item: $activePage) { page in
-            Group {
-                switch page {
-                case .server:
-                    ConnectionSettingsPage(
-                        settingsState: settingsState,
-                        updateServerSetting: updateServerSetting,
-                        startServerOnboarding: { startOnboarding(prefill: $0) }
-                    )
-                case .agent:
-                    AgentSettingsPage(
-                        settingsState: settingsState,
-                        selectedModelDisplayName: selectedModelDisplayName,
-                        updateServerSetting: updateServerSetting
-                    )
-                case .context:
-                    ContextSettingsPage(
-                        settingsState: settingsState,
-                        updateServerSetting: updateServerSetting
-                    )
-                case .providers:
-                    ProvidersSettingsPage()
-                case .app:
-                    AppearanceSettingsPage(
-                        confirmArchive: $confirmArchive,
-                        autoMarkRead: $autoMarkRead
-                    )
-                case .mcpServers:
-                    MCPServersPage(
-                        settingsState: settingsState,
-                        updateServerSetting: updateServerSetting
-                    )
+            .sheet(item: $activePage) { page in
+                settingsPageSheet(for: page)
+                    .adaptivePresentationDetents([.medium, .large])
+                    .presentationDragIndicator(.hidden)
+            }
+            .sheet(item: $feedbackMailDraft) { draft in
+                FeedbackMailView(
+                    subject: draft.subject,
+                    body: draft.body,
+                    recipient: draft.recipient,
+                    attachments: draft.attachments
+                ) {
+                    feedbackMailDraft = nil
                 }
             }
-            .adaptivePresentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-        }
-        .sheet(item: $feedbackMailDraft) { draft in
-            FeedbackMailView(
-                subject: draft.subject,
-                body: draft.body,
-                recipient: draft.recipient,
-                attachments: draft.attachments
+            .sheet(item: $feedbackShareDraft) { draft in
+                FeedbackShareView(activityItems: [draft.fileURL]) {
+                    try? FileManager.default.removeItem(at: draft.fileURL)
+                    feedbackShareDraft = nil
+                }
+            }
+    }
+
+    private var settingsWithLifecycle: some View {
+        settingsWithSheets
+            .task {
+                cardsVisible = true
+                await loadServerSettingsIfAvailable()
+            }
+            .onChange(of: dependencies.activeServerSelectionVersion) {
+                settingsState.clearServerSnapshot()
+                Task { await loadServerSettingsIfAvailable() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { _ in
+                dismiss()
+            }
+    }
+
+    private var settingsWithAlerts: some View {
+        settingsWithLifecycle
+            .alert("Reset Settings?", isPresented: $showingResetAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("Reset", role: .destructive) { resetToDefaults() }
+            } message: {
+                Text("This will reset app settings on this iPhone and reset server settings when the current server is connected.")
+            }
+            .alert("Archive All Sessions?", isPresented: $showArchiveAllConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Archive All", role: .destructive) { archiveAllSessions() }
+            } message: {
+                Text(archiveAllSessionsMessage)
+            }
+            .alert("Clear Prompt History?", isPresented: $showClearPromptHistoryConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Clear", role: .destructive) { clearPromptHistory() }
+            } message: {
+                Text("This permanently removes every prompt-history entry on the active server.")
+            }
+            .alert(
+                clearPromptHistoryResultMessage ?? "",
+                isPresented: Binding(
+                    get: { clearPromptHistoryResultMessage != nil },
+                    set: { if !$0 { clearPromptHistoryResultMessage = nil } }
+                )
             ) {
-                feedbackMailDraft = nil
+                Button("OK", role: .cancel) { clearPromptHistoryResultMessage = nil }
             }
-        }
-        .sheet(item: $feedbackShareDraft) { draft in
-            FeedbackShareView(activityItems: [draft.fileURL]) {
-                try? FileManager.default.removeItem(at: draft.fileURL)
-                feedbackShareDraft = nil
+            .alert(
+                feedbackResultMessage ?? "",
+                isPresented: Binding(
+                    get: { feedbackResultMessage != nil },
+                    set: { if !$0 { feedbackResultMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { feedbackResultMessage = nil }
             }
-        }
-        .task {
-            cardsVisible = true
-            await loadServerSettingsIfAvailable()
-        }
-        .onChange(of: dependencies.activeServerSelectionVersion) {
-            settingsState.clearServerSnapshot()
-            Task { await loadServerSettingsIfAvailable() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { _ in
-            dismiss()
-        }
-        .alert("Reset Settings?", isPresented: $showingResetAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Reset", role: .destructive) { resetToDefaults() }
-        } message: {
-            Text("This will reset app settings on this iPhone and reset server settings when the current server is connected.")
-        }
-        .alert("Archive All Sessions?", isPresented: $showArchiveAllConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Archive All", role: .destructive) { archiveAllSessions() }
-        } message: {
-            Text({
-                let count = eventStoreManager.sessions.count
-                return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
-            }())
-        }
-        .alert("Clear Prompt History?", isPresented: $showClearPromptHistoryConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Clear", role: .destructive) { clearPromptHistory() }
-        } message: {
-            Text("This permanently removes every prompt-history entry on the active server.")
-        }
-        .alert(
-            clearPromptHistoryResultMessage ?? "",
-            isPresented: Binding(
-                get: { clearPromptHistoryResultMessage != nil },
-                set: { if !$0 { clearPromptHistoryResultMessage = nil } }
+    }
+
+    @ViewBuilder
+    private func settingsPageSheet(for page: SettingsPage) -> some View {
+        switch page {
+        case .server:
+            ConnectionSettingsPage(
+                settingsState: settingsState,
+                updateServerSetting: updateServerSetting,
+                startServerOnboarding: { startOnboarding(prefill: $0) }
             )
-        ) {
-            Button("OK", role: .cancel) { clearPromptHistoryResultMessage = nil }
-        }
-        .alert(
-            feedbackResultMessage ?? "",
-            isPresented: Binding(
-                get: { feedbackResultMessage != nil },
-                set: { if !$0 { feedbackResultMessage = nil } }
+        case .agent:
+            AgentSettingsPage(
+                settingsState: settingsState,
+                selectedModelDisplayName: selectedModelDisplayName,
+                updateServerSetting: updateServerSetting
             )
-        ) {
-            Button("OK", role: .cancel) { feedbackResultMessage = nil }
+        case .context:
+            ContextSettingsPage(
+                settingsState: settingsState,
+                updateServerSetting: updateServerSetting
+            )
+        case .providers:
+            ProvidersSettingsPage()
+        case .app:
+            AppearanceSettingsPage(
+                confirmArchive: $confirmArchive,
+                autoMarkRead: $autoMarkRead
+            )
+        case .mcpServers:
+            MCPServersPage(
+                settingsState: settingsState,
+                updateServerSetting: updateServerSetting
+            )
         }
-        .adaptivePresentationDetents([.large])
-        .presentationDragIndicator(.hidden)
-        .tint(.tronEmerald)
+    }
+
+    private var archiveAllSessionsMessage: String {
+        let count = eventStoreManager.sessions.count
+        return "This will remove \(count) session\(count == 1 ? "" : "s") from your device. Session data on the server will remain."
     }
 
     // MARK: - Main Sections

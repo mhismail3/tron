@@ -83,6 +83,7 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.beta.ShareExtension
         Prod:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
+          CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
 
   TronMobileTests:
     type: bundle.unit-test

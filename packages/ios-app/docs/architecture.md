@@ -212,11 +212,14 @@ tools. Low-level hook `add_context` budgeting stays an internal server fuse,
 not an end-user Agent setting. Source-control action sheets expose merge, push,
 branch, and upstream choices at the moment of action rather than through a
 separate source-control settings destination. Destructive cross-cutting actions
-such as clearing prompt history stay in the main Settings Danger Zone. Sheets
-that summarize server-backed behavior start with `SettingsInfoCard` and derive the
-mostly-static title plus dynamic description through small helpers in
-`SettingsSupport.swift` so copy and grouping rules are covered by focused tests.
-Main-sheet icon strings live in the same support file, and server-backed
+such as clearing prompt history stay in the main Settings Danger Zone. The main
+settings sheet keeps its container, sheet presenters, lifecycle hooks, and alert
+presenters in separate computed view sections so SwiftUI's type checker remains
+stable under Xcode 26 while the UI stays declarative. Sheets that summarize
+server-backed behavior start with `SettingsInfoCard` and derive the mostly-static
+title plus dynamic description through small helpers in `SettingsSupport.swift`
+so copy and grouping rules are covered by focused tests. Main-sheet icon strings
+live in the same support file, and server-backed
 destination summary cards reuse their `ServerSettingsCategory` icons so the
 launcher row and destination stay visually aligned. The main settings feedback
 footer is pinned with a bottom safe-area inset rather than placed inside the

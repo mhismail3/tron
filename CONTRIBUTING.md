@@ -189,7 +189,7 @@ Two release lanes:
 
 | What | How | Cadence |
 |---|---|---|
-| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, uploads to App ID `6761511764`, waits for processing, and assigns the build to the internal + public TestFlight groups. | Same tag as server release. |
+| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, manually packages and re-signs the IPA, uploads to App ID `6761511764`, waits for processing, and assigns the build to the internal + public TestFlight groups. | Same tag as server release. |
 | Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds + notarizes + attaches the macOS DMG as a draft `Tron Server ...` pre-release with generated changelog notes. | Same tag as iOS release. |
 
 Versioning sources:
@@ -220,8 +220,9 @@ git push && git push --tags
 # 4. Tag push starts both release workflows:
 #    - release-mac.yml: build → codesign → app notarize/staple → DMG
 #      build/sign/notarize/staple → GitHub Release draft.
-#    - release-ios.yml: archive Prod iOS app → upload to App Store Connect →
-#      wait for processing → assign to internal + public TestFlight groups.
+#    - release-ios.yml: archive Prod iOS app → manually package/sign IPA →
+#      upload to App Store Connect → wait for processing → assign to
+#      internal + public TestFlight groups.
 #    Verify the generated GitHub release notes, DMG artifact, SHA256 manifest,
 #    and TestFlight build before announcing the release.
 
@@ -241,8 +242,8 @@ git push && git push --tags
 | `NOTARIZE_TEAM_ID` | Apple Developer team ID |
 | `NOTARIZE_APP_PASSWORD` | app-specific password for the Apple ID |
 | `ASC_KEY_ID` | App Store Connect API key id for iOS upload/distribution |
-| `ASC_ISSUER_ID` | App Store Connect API issuer id |
-| `ASC_KEY_P8_BASE64` | base64-encoded App Store Connect API private key |
+| `ASC_ISSUER_ID` | App Store Connect API issuer id from Users and Access -> Integrations -> App Store Connect API -> Team Keys |
+| `ASC_KEY_P8_BASE64` | base64-encoded App Store Connect API private key; locally, `asc auth doctor` shows the active `.p8` path when `asc` is already configured |
 
 **Required GitHub Actions variables** for iOS TestFlight distribution:
 

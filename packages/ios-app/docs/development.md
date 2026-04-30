@@ -109,10 +109,12 @@ are the release sources of truth.
 The upload lane uses the `Tron` scheme with the `Prod` configuration. That is
 the App Store Connect bundle (`com.tron.mobile`, App ID `6761511764`); the
 `Tron Beta` scheme remains a local/dev variant with `com.tron.mobile.beta`.
-CI runs the simulator tests, archives for `generic/platform=iOS`, uploads via
-Xcode's App Store Connect export flow, waits for the build to become valid, and
-assigns it to the configured internal and public TestFlight groups. Reruns reuse
-an existing Apple build number instead of uploading a duplicate binary.
+CI runs the simulator tests, archives for `generic/platform=iOS`, manually
+packages the IPA to avoid the local Xcode 26 `exportArchive` rsync failure,
+re-signs with checked-in Prod entitlements, uploads with `asc builds upload`,
+waits for the build to become valid, and assigns it to the configured internal
+and public TestFlight groups. Reruns reuse an existing Apple build number
+instead of uploading a duplicate binary.
 
 Required GitHub Actions secrets:
 
@@ -128,6 +130,14 @@ Required repository variables:
 |---|---|
 | `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Internal TestFlight group id |
 | `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Public TestFlight group id used by the Mac onboarding QR link |
+
+To reuse the local App Store Connect API key, `asc auth status --verbose` shows
+the current profile and key id, and `asc auth doctor` shows the `.p8` path. The
+issuer id is shown in App Store Connect under Users and Access -> Integrations
+-> App Store Connect API -> Team Keys. If the original `.p8` is unavailable,
+generate a replacement team key there, download it once, and update all three
+GitHub secrets together. Store the private key in GitHub as base64 text:
+`base64 -i /path/to/AuthKey_<KEY_ID>.p8 | gh secret set ASC_KEY_P8_BASE64`.
 
 Manual workflow runs default to `dry_run=true`, which builds and tests but skips
 App Store Connect upload and TestFlight distribution.

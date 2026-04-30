@@ -13,6 +13,11 @@
 # Required repository variables:
 #   ASC_TESTFLIGHT_INTERNAL_GROUP_ID existing internal TestFlight group id
 #   ASC_TESTFLIGHT_PUBLIC_GROUP_ID   existing public TestFlight group id
+#
+# Xcode 26's App Store export path has been flaky locally, so this workflow
+# mirrors `.claude/skills/publish`: archive with automatic signing, manually
+# package the IPA, re-sign with checked-in release entitlements, then upload
+# with `asc builds upload`.
 
 name: Release (iOS TestFlight)
 
@@ -47,7 +52,9 @@ jobs:
       IOS_SCHEME: Tron
       IOS_CONFIGURATION: Prod
       IOS_BUNDLE_ID: com.tron.mobile
+      IOS_SHARE_EXTENSION_BUNDLE_ID: com.tron.mobile.ShareExtension
       APPLE_TEAM_ID: MYGKXH6TY4
+      IOS_DISTRIBUTION_IDENTITY: Apple Distribution
 
     steps:
       - name: Checkout
@@ -161,7 +168,9 @@ jobs:
           xcodebuild test \
             -project TronMobile.xcodeproj \
             -scheme "$IOS_SCHEME" \
+            -configuration Beta \
             -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17 Pro' \
+            -derivedDataPath build/TestDerivedData \
             -resultBundlePath TestResults.xcresult \
             -quiet
 
@@ -286,44 +295,118 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Package IPA
+        id: ipa
+        if: steps.drymode.outputs.dry_run == 'true' || steps.existing.outputs.exists != 'true'
+        working-directory: ${{ env.IOS_APP_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ipa_path="$(pwd)/build/TronMobile.ipa"
+          work_dir="$(pwd)/build/ipa_work"
+          app_source="$ARCHIVE_PATH/Products/Applications/TronMobile.app"
+          app_payload="$work_dir/Payload/TronMobile.app"
+          appex_payload="$app_payload/PlugIns/TronShareExtension.appex"
+          rm -rf "$work_dir" "$ipa_path"
+          mkdir -p "$work_dir/Payload"
+          /bin/cp -Rf "$app_source" "$work_dir/Payload/"
+
+          if [[ "${{ steps.drymode.outputs.dry_run }}" != "true" ]]; then
+            profile_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+            find_store_profile() {
+              local bundle_id="$1"
+              local profile decoded application_id provisions_all
+              shopt -s nullglob
+              for profile in "$profile_dir"/*.mobileprovision; do
+                decoded="$(mktemp)"
+                if ! security cms -D -i "$profile" -o "$decoded" 2>/dev/null; then
+                  rm -f "$decoded"
+                  continue
+                fi
+                application_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded" 2>/dev/null || true)"
+                provisions_all="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$decoded" 2>/dev/null || true)"
+                if [[ "$application_id" == "$APPLE_TEAM_ID.$bundle_id" ]] \
+                  && [[ "$provisions_all" != "true" ]] \
+                  && ! /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$decoded" >/dev/null 2>&1; then
+                  rm -f "$decoded"
+                  echo "$profile"
+                  return 0
+                fi
+                rm -f "$decoded"
+              done
+              return 1
+            }
+
+            app_profile="$(find_store_profile "$IOS_BUNDLE_ID")" || {
+              echo "::error::missing App Store provisioning profile for $IOS_BUNDLE_ID"
+              exit 1
+            }
+            share_profile="$(find_store_profile "$IOS_SHARE_EXTENSION_BUNDLE_ID")" || {
+              echo "::error::missing App Store provisioning profile for $IOS_SHARE_EXTENSION_BUNDLE_ID"
+              exit 1
+            }
+
+            /bin/cp -f "$app_profile" "$app_payload/embedded.mobileprovision"
+            /bin/cp -f "$share_profile" "$appex_payload/embedded.mobileprovision"
+
+            sign_identity="$(
+              security find-identity -v -p codesigning \
+                | awk -v team="$APPLE_TEAM_ID" '/Apple Distribution/ && index($0, team) { print $2; exit }'
+            )"
+            [[ -n "$sign_identity" ]] || sign_identity="$IOS_DISTRIBUTION_IDENTITY"
+
+            /usr/bin/codesign --force --sign "$sign_identity" \
+              --entitlements ShareExtension/ShareExtensionProd.entitlements \
+              --timestamp=none \
+              "$appex_payload"
+            /usr/bin/codesign --force --sign "$sign_identity" \
+              --entitlements TronMobileProd.entitlements \
+              --timestamp=none \
+              "$app_payload"
+
+            /usr/bin/codesign --verify --strict "$appex_payload"
+            /usr/bin/codesign --verify --deep --strict "$app_payload"
+
+            main_entitlements="$RUNNER_TEMP/main-entitlements.plist"
+            share_entitlements="$RUNNER_TEMP/share-entitlements.plist"
+            /usr/bin/codesign -d --entitlements :- "$app_payload" > "$main_entitlements" 2>/dev/null
+            /usr/bin/codesign -d --entitlements :- "$appex_payload" > "$share_entitlements" 2>/dev/null
+            test "$(/usr/libexec/PlistBuddy -c 'Print :application-identifier' "$main_entitlements")" = "$APPLE_TEAM_ID.$IOS_BUNDLE_ID"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :application-identifier' "$share_entitlements")" = "$APPLE_TEAM_ID.$IOS_SHARE_EXTENSION_BUNDLE_ID"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.team-identifier' "$main_entitlements")" = "$APPLE_TEAM_ID"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.team-identifier' "$share_entitlements")" = "$APPLE_TEAM_ID"
+          else
+            echo "::notice::dry-run IPA is unsigned and is only used to validate package layout"
+          fi
+
+          (cd "$work_dir" && /usr/bin/zip -qry "$ipa_path" Payload)
+          unzip -tq "$ipa_path"
+          echo "IPA_PATH=$ipa_path" >> "$GITHUB_ENV"
+          echo "ipa_path=$ipa_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload dry-run IPA artifact
+        if: steps.drymode.outputs.dry_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-dry-run-ipa-${{ steps.ver.outputs.version }}
+          path: packages/ios-app/build/TronMobile.ipa
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Upload to App Store Connect
         if: steps.drymode.outputs.dry_run != 'true' && steps.existing.outputs.exists != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          export_options="$RUNNER_TEMP/ExportOptions.plist"
-          export_path="$RUNNER_TEMP/ios-export"
-          cat > "$export_options" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>destination</key>
-            <string>upload</string>
-            <key>method</key>
-            <string>app-store-connect</string>
-            <key>signingStyle</key>
-            <string>automatic</string>
-            <key>stripSwiftSymbols</key>
-            <true/>
-            <key>teamID</key>
-            <string>$APPLE_TEAM_ID</string>
-            <key>uploadSymbols</key>
-            <true/>
-            <key>manageAppVersionAndBuildNumber</key>
-            <false/>
-          </dict>
-          </plist>
-          EOF
-          xcodebuild -exportArchive \
-            -archivePath "$ARCHIVE_PATH" \
-            -exportPath "$export_path" \
-            -exportOptionsPlist "$export_options" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$APPLE_API_KEY_PATH" \
-            -authenticationKeyID "$APPLE_API_KEY_ID" \
-            -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
-            -quiet
+          asc builds upload \
+            --app "$ASC_APP_ID" \
+            --ipa "$IPA_PATH" \
+            --version "${{ steps.ver.outputs.marketing_version }}" \
+            --build-number "${{ steps.ver.outputs.apple_build }}" \
+            --platform IOS \
+            --checksum \
+            --output json \
+            --pretty
 
       - name: Wait for ASC processing
         if: steps.drymode.outputs.dry_run != 'true'

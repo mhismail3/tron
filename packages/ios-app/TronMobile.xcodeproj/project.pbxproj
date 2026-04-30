@@ -1241,6 +1241,7 @@
 		6E4B32B05D2AE93114B9534B /* APNsEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APNsEnvironment.swift; sourceTree = "<group>"; };
 		6E76F13136B67A1A1C0A409F /* LibreBaskerville-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "LibreBaskerville-Variable.ttf"; sourceTree = "<group>"; };
 		6F1C9A2BCF89A42D355F6C52 /* MentionDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionDetector.swift; sourceTree = "<group>"; };
+		6F295DE8BB2E1E4691F93FC7 /* ShareExtensionProd.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtensionProd.entitlements; sourceTree = "<group>"; };
 		6FC0057862FE79F977119A90 /* SessionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRepository.swift; sourceTree = "<group>"; };
 		6FC072C501FC047217D62537 /* BlobClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlobClient.swift; sourceTree = "<group>"; };
 		6FF70E627268406FDA7DAC41 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -2933,6 +2934,7 @@
 			children = (
 				664F906DD1A14B7C4B0FDD58 /* Info.plist */,
 				9F6B3C2F1E6DFEDA77D252C1 /* ShareExtension.entitlements */,
+				6F295DE8BB2E1E4691F93FC7 /* ShareExtensionProd.entitlements */,
 				7DE22EED97900699A9FF75DF /* ShareViewController.swift */,
 			);
 			path = ShareExtension;
@@ -4830,7 +4832,7 @@
 		44143C8FD6722C3A75689379 /* Prod */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtensionProd.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = MYGKXH6TY4;

@@ -19,7 +19,7 @@ Manage the full TestFlight lifecycle for TronMobile: build, upload, version mana
 - **Bundle ID**: `com.tron.mobile`
 - **Share Extension Bundle ID**: `com.tron.mobile.ShareExtension` (capital S)
 - **Team ID**: `MYGKXH6TY4`
-- **Distribution Identity**: `Apple Distribution: MOHSIN H ISMAIL (MYGKXH6TY4)`
+- **Distribution Identity**: the installed `Apple Distribution` certificate for team `MYGKXH6TY4`
 - **Scheme**: `Tron` (prod), `Tron Beta` (beta)
 - **Archive Configuration**: `Prod`
 - **Project root**: `packages/ios-app/`
@@ -75,11 +75,11 @@ mkdir -p "$WORK_DIR/Payload"
 
 # 6. Re-sign using the CHECKED-IN entitlements files (NOT profile entitlements)
 #    Profile entitlements contain every granted capability and cause ITMS rejections.
-DIST_IDENTITY="Apple Distribution: MOHSIN H ISMAIL (MYGKXH6TY4)"
+DIST_IDENTITY="Apple Distribution"
 
 # Extension first, then main app
 /usr/bin/codesign --force --sign "$DIST_IDENTITY" \
-  --entitlements ShareExtension/ShareExtension.entitlements \
+  --entitlements ShareExtension/ShareExtensionProd.entitlements \
   --timestamp=none \
   "$WORK_DIR/Payload/TronMobile.app/PlugIns/TronShareExtension.appex"
 
@@ -162,7 +162,7 @@ The project has checked-in entitlements files per configuration:
 
 | Config | Main App | Share Extension |
 |---|---|---|
-| Prod | `TronMobileProd.entitlements` | `ShareExtension/ShareExtension.entitlements` |
+| Prod | `TronMobileProd.entitlements` | `ShareExtension/ShareExtensionProd.entitlements` |
 | Beta | `TronMobileBeta.entitlements` | `ShareExtension/ShareExtension.entitlements` |
 
 **CRITICAL**: Always re-sign using these files. Never extract entitlements from provisioning profiles — profiles contain every capability Apple has granted (NFC, HealthKit, push-to-talk, etc.) which causes ITMS rejections for capabilities the app doesn't use.
