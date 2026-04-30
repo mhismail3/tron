@@ -4,7 +4,7 @@
 //!
 //! This is the largest subsystem, responsible for:
 //!
-//! - **Event types**: 60-variant [`EventType`] enum matching the TypeScript wire format exactly
+//! - **Event types**: 80-variant [`EventType`] enum matching the TypeScript wire format exactly
 //! - **Session events**: [`SessionEvent`] flat struct with typed payload access
 //! - **Event store**: High-level API for session creation, event append, ancestor walk, fork
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
