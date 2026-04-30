@@ -388,7 +388,7 @@ jobs:
 
           install_profile() {
             local label="$1" bundle_id="$2" base64_value="$3"
-            local profile_path decoded_plist uuid name application_id provisions_all
+            local profile_path decoded_plist uuid name application_id provisions_all xcode_managed
             profile_path="$RUNNER_TEMP/$label.mobileprovision"
             decoded_plist="$RUNNER_TEMP/$label-profile.plist"
             printf '%s' "$base64_value" | base64 -d > "$profile_path"
@@ -398,6 +398,8 @@ jobs:
             name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$decoded_plist")"
             application_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded_plist" 2>/dev/null || true)"
             provisions_all="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$decoded_plist" 2>/dev/null || true)"
+            xcode_managed="$(/usr/libexec/PlistBuddy -c 'Print :IsXcodeManaged' "$decoded_plist" 2>/dev/null || true)"
+            [[ "$xcode_managed" == "true" ]] || xcode_managed="false"
 
             if [[ -z "$uuid" ]]; then
               echo "::error::$label provisioning profile is missing a UUID" >&2
@@ -414,14 +416,32 @@ jobs:
 
             /bin/cp -f "$profile_path" "$profiles_dir/$uuid.mobileprovision"
             echo "::notice::installed App Store profile '$name' for $bundle_id" >&2
-            printf '%s' "$uuid"
+            printf '%s\t%s' "$uuid" "$xcode_managed"
           }
 
-          app_profile_uuid="$(install_profile app "$IOS_BUNDLE_ID" "$IOS_APPSTORE_PROFILE_BASE64")"
-          share_profile_uuid="$(install_profile share-extension "$IOS_SHARE_EXTENSION_BUNDLE_ID" "$IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64")"
+          app_profile_info="$(install_profile app "$IOS_BUNDLE_ID" "$IOS_APPSTORE_PROFILE_BASE64")"
+          share_profile_info="$(install_profile share-extension "$IOS_SHARE_EXTENSION_BUNDLE_ID" "$IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64")"
+          app_profile_uuid="${app_profile_info%%$'\t'*}"
+          app_profile_xcode_managed="${app_profile_info##*$'\t'}"
+          share_profile_uuid="${share_profile_info%%$'\t'*}"
+          share_profile_xcode_managed="${share_profile_info##*$'\t'}"
+
+          if [[ "$app_profile_xcode_managed" != "$share_profile_xcode_managed" ]]; then
+            echo "::error::iOS App Store profiles must both be Xcode-managed or both be manually managed"
+            exit 1
+          fi
+
+          if [[ "$app_profile_xcode_managed" == "true" ]]; then
+            export_signing_style="automatic-local"
+            echo "::notice::using automatic export style because the App Store profiles are Xcode-managed"
+          else
+            export_signing_style="manual"
+          fi
+
           {
             echo "IOS_APP_PROFILE_UUID=$app_profile_uuid"
             echo "IOS_SHARE_PROFILE_UUID=$share_profile_uuid"
+            echo "IOS_EXPORT_SIGNING_STYLE=$export_signing_style"
           } >> "$GITHUB_ENV"
 
       - name: xcodebuild archive
@@ -493,8 +513,9 @@ jobs:
           rm -rf "$export_dir" "$ipa_path"
           mkdir -p "$export_dir"
 
-          export_args=()
-          if [[ "${IOS_SIGNING_MODE:-automatic}" == "manual" ]]; then
+          export_command_mode="automatic-cloud"
+          if [[ "${IOS_SIGNING_MODE:-automatic}" == "manual" && "${IOS_EXPORT_SIGNING_STYLE:-manual}" == "manual" ]]; then
+            export_command_mode="manual"
             cat > "$export_options" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -527,12 +548,9 @@ jobs:
           </plist>
           PLIST
           else
-            export_args=(
-              -allowProvisioningUpdates
-              -authenticationKeyPath "$APPLE_API_KEY_PATH"
-              -authenticationKeyID "$APPLE_API_KEY_ID"
-              -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID"
-            )
+            if [[ "${IOS_SIGNING_MODE:-automatic}" == "manual" ]]; then
+              export_command_mode="automatic-local"
+            fi
             cat > "$export_options" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -558,13 +576,13 @@ jobs:
           fi
           plutil -lint "$export_options"
 
-          if [[ "${IOS_SIGNING_MODE:-automatic}" == "manual" ]]; then
+          if [[ "$export_command_mode" == "manual" || "$export_command_mode" == "automatic-local" ]]; then
             if ! xcodebuild -exportArchive \
                 -archivePath "$ARCHIVE_PATH" \
                 -exportPath "$export_dir" \
                 -exportOptionsPlist "$export_options" \
                 -quiet; then
-              echo "::error::manual App Store export failed. Confirm the .p12 matches the selected App Store provisioning profiles for $IOS_BUNDLE_ID and $IOS_SHARE_EXTENSION_BUNDLE_ID."
+              echo "::error::local App Store export failed. Confirm the .p12 matches the selected App Store provisioning profiles for $IOS_BUNDLE_ID and $IOS_SHARE_EXTENSION_BUNDLE_ID."
               exit 1
             fi
           else
@@ -572,7 +590,10 @@ jobs:
                 -archivePath "$ARCHIVE_PATH" \
                 -exportPath "$export_dir" \
                 -exportOptionsPlist "$export_options" \
-                "${export_args[@]}" \
+                -allowProvisioningUpdates \
+                -authenticationKeyPath "$APPLE_API_KEY_PATH" \
+                -authenticationKeyID "$APPLE_API_KEY_ID" \
+                -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
                 -quiet; then
               echo "::error::automatic Xcode cloud signing failed. Grant the ASC API key/account permission to manage App Store signing, or configure the manual iOS signing secrets documented in packages/ios-app/docs/development.md."
               exit 1
