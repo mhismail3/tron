@@ -446,7 +446,7 @@ extension Color {
     private static let reasoningLowRGB: (CGFloat, CGFloat, CGFloat) = (31.0 / 255.0, 94.0 / 255.0, 63.0 / 255.0)
     private static let reasoningHighRGB: (CGFloat, CGFloat, CGFloat) = (0.0 / 255.0, 166.0 / 255.0, 155.0 / 255.0)
 
-    static func reasoningLevel(_ level: String, levels: [String] = ["low", "medium", "high", "xhigh"]) -> Color {
+    static func reasoningLevel(_ level: String, levels: [String] = ["minimal", "low", "medium", "high", "xhigh"]) -> Color {
         let index = levels.firstIndex(of: level.lowercased()) ?? 0
         let progress = Double(index) / Double(max(levels.count - 1, 1))
         let (lr, lg, lb) = reasoningLowRGB
@@ -460,6 +460,7 @@ extension Color {
 
     static func reasoningLevelIcon(_ level: String) -> String {
         switch level.lowercased() {
+        case "minimal": return "leaf"
         case "low": return "hare"
         case "medium": return "brain"
         case "high": return "brain.fill"

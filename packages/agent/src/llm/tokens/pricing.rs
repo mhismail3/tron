@@ -166,17 +166,6 @@ fn google_tier(input: f64, output: f64) -> PricingTier {
     }
 }
 
-/// Create an `OpenAI` pricing tier (no separate cache write cost).
-fn openai_tier(input: f64, output: f64) -> PricingTier {
-    PricingTier {
-        input_per_million: input,
-        output_per_million: output,
-        cache_write_5m_multiplier: 1.0,
-        cache_write_1h_multiplier: 1.0,
-        cache_read_multiplier: 0.5,
-    }
-}
-
 /// Create an `OpenAI` pricing tier with an explicit cached-input price.
 fn openai_cached_tier(input: f64, output: f64, cached_input: f64) -> PricingTier {
     PricingTier {
@@ -237,21 +226,53 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         }
 
         // OpenAI
-        "o3" | "o3-2025-04-16" => openai_tier(10.0, 40.0),
-        "o4-mini" | "o4-mini-2025-04-16" => openai_tier(1.10, 4.40),
-        "gpt-4.1" | "gpt-4.1-2025-04-14" => openai_tier(2.0, 8.0),
-        "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => openai_tier(0.40, 1.60),
-        "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => openai_tier(0.10, 0.40),
+        "o3" | "o3-2025-04-16" => openai_cached_tier(2.0, 8.0, 0.50),
+        "o3-pro" | "o3-pro-2025-06-10" => openai_uncached_tier(20.0, 80.0),
+        "o4-mini" | "o4-mini-2025-04-16" => openai_cached_tier(1.10, 4.40, 0.275),
+        "o3-mini" | "o3-mini-2025-01-31" => openai_cached_tier(1.10, 4.40, 0.55),
+        "o1" | "o1-2024-12-17" => openai_cached_tier(15.0, 60.0, 7.50),
+        "o1-mini" | "o1-mini-2024-09-12" => openai_cached_tier(1.10, 4.40, 0.55),
+        "o1-preview" | "o1-preview-2024-09-12" => openai_cached_tier(15.0, 60.0, 7.50),
+        "o1-pro" | "o1-pro-2025-03-19" => openai_uncached_tier(150.0, 600.0),
+        "gpt-4.1" | "gpt-4.1-2025-04-14" => openai_cached_tier(2.0, 8.0, 0.50),
+        "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => openai_cached_tier(0.40, 1.60, 0.10),
+        "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => openai_cached_tier(0.10, 0.40, 0.025),
+        "gpt-4o" | "gpt-4o-2024-11-20" | "gpt-4o-2024-08-06" | "gpt-4o-2024-05-13" => {
+            openai_cached_tier(2.50, 10.0, 1.25)
+        }
+        "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => openai_cached_tier(0.15, 0.60, 0.075),
+        "gpt-4.5-preview" | "gpt-4.5-preview-2025-02-27" => openai_cached_tier(75.0, 150.0, 37.50),
+        "gpt-4-turbo" | "gpt-4-turbo-2024-04-09" => openai_uncached_tier(10.0, 30.0),
+        "gpt-4-turbo-preview" | "gpt-4-0125-preview" | "gpt-4-1106-preview" => {
+            openai_uncached_tier(10.0, 30.0)
+        }
+        "gpt-4" | "gpt-4-0613" | "gpt-4-0314" => openai_uncached_tier(30.0, 60.0),
+        "gpt-3.5-turbo" | "gpt-3.5-turbo-0125" | "gpt-3.5-turbo-1106" => {
+            openai_uncached_tier(0.50, 1.50)
+        }
         "gpt-5.5" | "gpt-5.5-2026-04-23" => openai_cached_tier(5.0, 30.0, 0.50),
         "gpt-5.5-pro" | "gpt-5.5-pro-2026-04-23" => openai_uncached_tier(30.0, 180.0),
         "gpt-5.4" | "gpt-5.4-2026-03-05" => openai_cached_tier(2.50, 15.0, 0.25),
         "gpt-5.4-pro" | "gpt-5.4-pro-2026-03-05" => openai_uncached_tier(30.0, 180.0),
         "gpt-5.4-mini" | "gpt-5.4-mini-2026-03-17" => openai_cached_tier(0.75, 4.50, 0.075),
         "gpt-5.4-nano" | "gpt-5.4-nano-2026-03-17" => openai_cached_tier(0.20, 1.25, 0.020),
+        "gpt-5.2-pro" | "gpt-5.2-pro-2025-12-11" => openai_uncached_tier(21.0, 168.0),
         "gpt-5.3-codex" | "gpt-5.3-codex-spark" => openai_cached_tier(1.75, 14.0, 0.175),
         "gpt-5.2" | "gpt-5.2-2025-12-11" | "gpt-5.2-codex" => openai_cached_tier(1.75, 14.0, 0.175),
+        "gpt-5.1" | "gpt-5.1-2025-11-13" => openai_cached_tier(1.25, 10.0, 0.125),
+        "gpt-5" | "gpt-5-2025-08-07" => openai_cached_tier(1.25, 10.0, 0.125),
+        "gpt-5-mini" | "gpt-5-mini-2025-08-07" => openai_cached_tier(0.25, 2.0, 0.025),
+        "gpt-5-nano" | "gpt-5-nano-2025-08-07" => openai_cached_tier(0.05, 0.40, 0.005),
+        "gpt-5-pro" | "gpt-5-pro-2025-10-06" => openai_uncached_tier(15.0, 120.0),
+        "gpt-5-codex" | "gpt-5.1-codex" => openai_cached_tier(1.25, 10.0, 0.125),
         "gpt-5.1-codex-max" => openai_cached_tier(1.25, 10.0, 0.125),
         "gpt-5.1-codex-mini" => openai_cached_tier(0.25, 2.0, 0.025),
+        "codex-mini-latest" => openai_cached_tier(1.50, 6.0, 0.375),
+        "gpt-5.3-chat-latest" => openai_cached_tier(1.75, 14.0, 0.175),
+        "gpt-5.2-chat-latest" => openai_cached_tier(1.75, 14.0, 0.175),
+        "gpt-5.1-chat-latest" | "gpt-5-chat-latest" => openai_cached_tier(1.25, 10.0, 0.125),
+        "chatgpt-4o-latest" => openai_uncached_tier(5.0, 15.0),
+        "gpt-oss-120b" | "gpt-oss-20b" => openai_uncached_tier(0.0, 0.0),
 
         // MiniMax — $0.3/M input, $1.2/M output (no cache)
         "MiniMax-M2.5"
@@ -364,29 +385,89 @@ fn pattern_match(model: &str) -> Option<PricingTier> {
     if m.contains("gpt-5.4") {
         return Some(openai_cached_tier(2.50, 15.0, 0.25));
     }
+    if m.contains("gpt-5.2-pro") {
+        return Some(openai_uncached_tier(21.0, 168.0));
+    }
     if m.contains("gpt-5.3-codex") || m.contains("gpt-5.2") {
         return Some(openai_cached_tier(1.75, 14.0, 0.175));
-    }
-    if m.contains("gpt-5.1-codex-max") {
-        return Some(openai_cached_tier(1.25, 10.0, 0.125));
     }
     if m.contains("gpt-5.1-codex-mini") {
         return Some(openai_cached_tier(0.25, 2.0, 0.025));
     }
+    if m.contains("gpt-5.1-codex-max") {
+        return Some(openai_cached_tier(1.25, 10.0, 0.125));
+    }
+    if m.contains("gpt-5.1") || m.contains("gpt-5-codex") || m.contains("gpt-5-chat") {
+        return Some(openai_cached_tier(1.25, 10.0, 0.125));
+    }
+    if m.contains("gpt-5-mini") {
+        return Some(openai_cached_tier(0.25, 2.0, 0.025));
+    }
+    if m.contains("gpt-5-nano") {
+        return Some(openai_cached_tier(0.05, 0.40, 0.005));
+    }
+    if m.contains("gpt-5-pro") {
+        return Some(openai_uncached_tier(15.0, 120.0));
+    }
+    if m.contains("gpt-5") {
+        return Some(openai_cached_tier(1.25, 10.0, 0.125));
+    }
+    if m.contains("codex-mini-latest") {
+        return Some(openai_cached_tier(1.50, 6.0, 0.375));
+    }
+    if m.starts_with("o3-pro") {
+        return Some(openai_uncached_tier(20.0, 80.0));
+    }
+    if m.starts_with("o3-mini") {
+        return Some(openai_cached_tier(1.10, 4.40, 0.55));
+    }
     if m.starts_with("o3") {
-        return Some(openai_tier(10.0, 40.0));
+        return Some(openai_cached_tier(2.0, 8.0, 0.50));
     }
     if m.starts_with("o4") {
-        return Some(openai_tier(1.10, 4.40));
+        return Some(openai_cached_tier(1.10, 4.40, 0.275));
+    }
+    if m.starts_with("o1-pro") {
+        return Some(openai_uncached_tier(150.0, 600.0));
+    }
+    if m.starts_with("o1-mini") {
+        return Some(openai_cached_tier(1.10, 4.40, 0.55));
+    }
+    if m.starts_with("o1") {
+        return Some(openai_cached_tier(15.0, 60.0, 7.50));
+    }
+    if m.contains("gpt-4.5") {
+        return Some(openai_cached_tier(75.0, 150.0, 37.50));
+    }
+    if m.contains("gpt-4-turbo") || m.contains("gpt-4-0125") || m.contains("gpt-4-1106") {
+        return Some(openai_uncached_tier(10.0, 30.0));
     }
     if m.contains("gpt-4.1-nano") {
-        return Some(openai_tier(0.10, 0.40));
+        return Some(openai_cached_tier(0.10, 0.40, 0.025));
     }
     if m.contains("gpt-4.1-mini") {
-        return Some(openai_tier(0.40, 1.60));
+        return Some(openai_cached_tier(0.40, 1.60, 0.10));
     }
     if m.contains("gpt-4.1") {
-        return Some(openai_tier(2.0, 8.0));
+        return Some(openai_cached_tier(2.0, 8.0, 0.50));
+    }
+    if m.contains("gpt-4o-mini") {
+        return Some(openai_cached_tier(0.15, 0.60, 0.075));
+    }
+    if m.contains("chatgpt-4o-latest") {
+        return Some(openai_uncached_tier(5.0, 15.0));
+    }
+    if m.contains("gpt-4o") {
+        return Some(openai_cached_tier(2.50, 10.0, 1.25));
+    }
+    if m.contains("gpt-4") {
+        return Some(openai_uncached_tier(30.0, 60.0));
+    }
+    if m.contains("gpt-3.5") {
+        return Some(openai_uncached_tier(0.50, 1.50));
+    }
+    if m.contains("gpt-oss") {
+        return Some(openai_uncached_tier(0.0, 0.0));
     }
 
     // MiniMax family patterns
@@ -490,8 +571,9 @@ mod tests {
     #[test]
     fn pricing_o3() {
         let tier = get_pricing_tier("o3").unwrap();
-        assert_float_eq(tier.input_per_million, 10.0);
-        assert_float_eq(tier.output_per_million, 40.0);
+        assert_float_eq(tier.input_per_million, 2.0);
+        assert_float_eq(tier.output_per_million, 8.0);
+        assert_float_eq(tier.cache_read_multiplier, 0.25);
     }
 
     #[test]
@@ -526,6 +608,29 @@ mod tests {
         let alias_tier = get_pricing_tier("gpt-5.2-codex").unwrap();
         assert_float_eq(alias_tier.input_per_million, 1.75);
         assert_float_eq(alias_tier.output_per_million, 14.0);
+    }
+
+    #[test]
+    fn pricing_expanded_openai_models() {
+        let tier = get_pricing_tier("gpt-5-pro").unwrap();
+        assert_float_eq(tier.input_per_million, 15.0);
+        assert_float_eq(tier.output_per_million, 120.0);
+
+        let tier = get_pricing_tier("gpt-5-mini").unwrap();
+        assert_float_eq(tier.input_per_million, 0.25);
+        assert_float_eq(tier.output_per_million, 2.0);
+
+        let tier = get_pricing_tier("gpt-4.1-mini").unwrap();
+        assert_float_eq(tier.input_per_million, 0.40);
+        assert_float_eq(tier.output_per_million, 1.60);
+
+        let tier = get_pricing_tier("codex-mini-latest").unwrap();
+        assert_float_eq(tier.input_per_million, 1.50);
+        assert_float_eq(tier.output_per_million, 6.0);
+
+        let tier = get_pricing_tier("o1-pro").unwrap();
+        assert_float_eq(tier.input_per_million, 150.0);
+        assert_float_eq(tier.output_per_million, 600.0);
     }
 
     #[test]

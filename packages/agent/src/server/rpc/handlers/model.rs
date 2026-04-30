@@ -340,12 +340,12 @@ mod tests {
         assert!(!models.iter().any(|m| m["id"] == "gpt-5.1-codex-mini"));
         assert!(!models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
         assert!(!models.iter().any(|m| m["id"] == "gpt-5.4-nano"));
-        assert!(!models.iter().any(|m| m["id"] == "gpt-5.3-codex-spark"));
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.3-codex-spark"));
         let openai_count = models
             .iter()
             .filter(|m| m["provider"] == "openai-codex")
             .count();
-        assert_eq!(openai_count, 5);
+        assert_eq!(openai_count, 6);
         let gpt55 = models.iter().find(|m| m["id"] == "gpt-5.5").unwrap();
         assert_eq!(gpt55["contextWindow"], 272_000);
         assert_eq!(gpt55["apiEndpoint"], "codex");
@@ -373,6 +373,13 @@ mod tests {
         assert_eq!(gpt55["authPaths"], json!(["platform-api-key"]));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.4-nano"));
+        assert!(
+            models
+                .iter()
+                .any(|m| m["id"] == "gpt-5.2-codex" && m["isDeprecated"] == true)
+        );
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.5-pro"));
+        assert!(!models.iter().any(|m| m["id"] == "o3-pro"));
         let gpt53 = models.iter().find(|m| m["id"] == "gpt-5.3-codex").unwrap();
         assert_eq!(gpt53["contextWindow"], 400_000);
         assert_eq!(gpt53["apiEndpoint"], "platform");

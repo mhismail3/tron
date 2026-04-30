@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::tools::{Tool, ToolParameterSchema};
 use crate::llm::openai::types::{
     ApiEndpoint, DEFAULT_BASE_URL, DEFAULT_PLATFORM_BASE_URL, OpenAIApiSettings, OpenAIAuth,
     ReasoningEffort,
@@ -51,6 +52,20 @@ fn api_key_config(model: &str) -> OpenAIConfig {
         base_url: None,
         reasoning_effort: None,
         provider_settings: OpenAIApiSettings::default(),
+    }
+}
+
+fn test_tool() -> Tool {
+    Tool {
+        name: "echo".into(),
+        description: "Echo input".into(),
+        parameters: ToolParameterSchema {
+            schema_type: "object".into(),
+            properties: Some(serde_json::Map::new()),
+            required: None,
+            description: None,
+            extra: serde_json::Map::new(),
+        },
     }
 }
 
@@ -577,6 +592,16 @@ fn reasoning_effort_none_clamped_on_53() {
     assert_eq!(provider.resolve_reasoning_effort(&options), "low");
 }
 
+#[test]
+fn reasoning_effort_minimal_passthrough_on_gpt5_platform() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-5"));
+    let options = ProviderStreamOptions {
+        reasoning_effort: Some(ReasoningEffort::Minimal),
+        ..Default::default()
+    };
+    assert_eq!(provider.resolve_reasoning_effort(&options), "minimal");
+}
+
 // ── Request shaping ─────────────────────────────────────────────
 
 #[test]
@@ -616,10 +641,10 @@ fn build_request_gpt55_platform_preserves_none_and_platform_verbosity() {
 }
 
 #[test]
-fn build_request_deprecated_openai_alias_uses_replacement_model() {
-    let provider = OpenAIProvider::new(oauth_config("gpt-5.2-codex"));
+fn build_request_deprecated_openai_model_preserves_exact_id() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-5.2-codex"));
     let request = provider.build_request(&Context::default(), &ProviderStreamOptions::default());
-    assert_eq!(request.model, "gpt-5.2");
+    assert_eq!(request.model, "gpt-5.2-codex");
 }
 
 #[test]
@@ -627,6 +652,48 @@ fn build_request_snapshot_alias_preserves_snapshot_model() {
     let provider = OpenAIProvider::new(api_key_config("gpt-5.5-2026-04-23"));
     let request = provider.build_request(&Context::default(), &ProviderStreamOptions::default());
     assert_eq!(request.model, "gpt-5.5-2026-04-23");
+}
+
+#[test]
+fn build_request_gpt5_platform_sends_minimal_reasoning() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-5"));
+    let request = provider.build_request(
+        &Context::default(),
+        &ProviderStreamOptions {
+            reasoning_effort: Some(ReasoningEffort::Minimal),
+            ..Default::default()
+        },
+    );
+    assert_eq!(request.reasoning.unwrap().effort, "minimal");
+}
+
+#[test]
+fn build_request_text_only_model_omits_reasoning_and_tools() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-4"));
+    let context = Context {
+        tools: Some(vec![test_tool()]),
+        ..Default::default()
+    };
+    let request = provider.build_request(&context, &ProviderStreamOptions::default());
+    assert_eq!(request.model, "gpt-4");
+    assert!(request.reasoning.is_none());
+    assert!(request.tools.is_none());
+}
+
+#[tokio::test]
+async fn stream_rejects_non_streaming_platform_model_before_request() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-5.5-pro"));
+    let err = match provider
+        .stream_internal(&Context::default(), &ProviderStreamOptions::default())
+        .await
+    {
+        Ok(_) => panic!("expected non-streaming model rejection"),
+        Err(err) => err,
+    };
+    assert!(
+        err.to_string().contains("streaming Responses provider"),
+        "{err}"
+    );
 }
 
 // ── is_first_turn ────────────────────────────────────────────────

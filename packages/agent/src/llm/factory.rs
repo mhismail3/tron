@@ -235,8 +235,10 @@ impl DefaultProviderFactory {
             ),
         };
         let request_model = crate::llm::openai::types::openai_request_model_id(model);
-        if crate::llm::openai::types::get_openai_model_profile(&request_model, auth_path).is_none()
-        {
+        if !crate::llm::openai::types::openai_model_available_for_auth_path(
+            &request_model,
+            auth_path,
+        ) {
             return Err(ProviderError::Other {
                 message: format!(
                     "OpenAI model '{model}' is not available for the active auth path ({})",

@@ -206,6 +206,8 @@ pub struct OpenAIModelProfile {
     pub max_context_window: Option<u64>,
     /// Maximum output tokens.
     pub max_output: u64,
+    /// Whether this profile supports streaming Responses requests.
+    pub supports_streaming: bool,
     /// Whether the model supports tool use.
     pub supports_tools: bool,
     /// Whether the model supports image inputs.
@@ -277,9 +279,13 @@ pub struct OpenAIModelInfo {
 }
 
 const REASONING_NONE_TO_XHIGH: &[&str] = &["none", "low", "medium", "high", "xhigh"];
+const REASONING_NONE_TO_HIGH: &[&str] = &["none", "low", "medium", "high"];
+const REASONING_MINIMAL_TO_HIGH: &[&str] = &["minimal", "low", "medium", "high"];
 const REASONING_LOW_TO_XHIGH: &[&str] = &["low", "medium", "high", "xhigh"];
 const REASONING_MEDIUM_TO_XHIGH: &[&str] = &["medium", "high", "xhigh"];
 const REASONING_LOW_TO_HIGH: &[&str] = &["low", "medium", "high"];
+const REASONING_HIGH_ONLY: &[&str] = &["high"];
+const NO_REASONING: &[&str] = &[];
 
 #[allow(clippy::too_many_arguments)]
 fn profile(
@@ -287,6 +293,8 @@ fn profile(
     context_window: u64,
     max_context_window: Option<u64>,
     max_output: u64,
+    supports_streaming: bool,
+    supports_tools: bool,
     supports_images: bool,
     supports_tool_search: bool,
     supports_computer_use: bool,
@@ -305,9 +313,10 @@ fn profile(
         context_window,
         max_context_window,
         max_output,
-        supports_tools: true,
+        supports_streaming,
+        supports_tools,
         supports_images,
-        supports_reasoning: true,
+        supports_reasoning: !reasoning_levels.is_empty(),
         supports_tool_search,
         supports_computer_use,
         supports_verbosity,
@@ -362,187 +371,164 @@ fn model(
     }
 }
 
-fn gpt_55_platform() -> OpenAIModelProfile {
+#[allow(clippy::too_many_arguments)]
+fn platform_profile(
+    context_window: u64,
+    max_context_window: Option<u64>,
+    max_output: u64,
+    supports_streaming: bool,
+    supports_tools: bool,
+    supports_images: bool,
+    supports_tool_search: bool,
+    supports_computer_use: bool,
+    supports_verbosity: bool,
+    reasoning_levels: &'static [&'static str],
+    default_reasoning_level: &'static str,
+    input_cost_per_million: f64,
+    output_cost_per_million: f64,
+    cache_read_cost_per_million: Option<f64>,
+    visible: bool,
+) -> OpenAIModelProfile {
     profile(
         OpenAIAuthPath::PlatformApiKey,
-        1_050_000,
-        Some(1_050_000),
-        128_000,
+        context_window,
+        max_context_window,
+        max_output,
+        supports_streaming,
+        supports_tools,
+        supports_images,
+        supports_tool_search,
+        supports_computer_use,
+        supports_verbosity,
+        supports_verbosity.then_some("medium"),
+        reasoning_levels,
+        default_reasoning_level,
+        input_cost_per_million,
+        output_cost_per_million,
+        cache_read_cost_per_million,
+        visible,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn platform_reasoning_profile(
+    context_window: u64,
+    max_output: u64,
+    supports_tools: bool,
+    supports_images: bool,
+    supports_tool_search: bool,
+    supports_computer_use: bool,
+    reasoning_levels: &'static [&'static str],
+    default_reasoning_level: &'static str,
+    input_cost_per_million: f64,
+    output_cost_per_million: f64,
+    cache_read_cost_per_million: Option<f64>,
+) -> OpenAIModelProfile {
+    platform_profile(
+        context_window,
+        Some(context_window),
+        max_output,
         true,
+        supports_tools,
+        supports_images,
+        supports_tool_search,
+        supports_computer_use,
         true,
-        true,
-        true,
-        Some("medium"),
-        REASONING_NONE_TO_XHIGH,
-        "medium",
-        5.0,
-        30.0,
-        Some(0.50),
+        reasoning_levels,
+        default_reasoning_level,
+        input_cost_per_million,
+        output_cost_per_million,
+        cache_read_cost_per_million,
         true,
     )
 }
 
-fn gpt_55_codex() -> OpenAIModelProfile {
-    profile(
-        OpenAIAuthPath::ChatGptCodex,
-        272_000,
-        Some(272_000),
-        128_000,
+#[allow(clippy::too_many_arguments)]
+fn platform_text_profile(
+    context_window: u64,
+    max_output: u64,
+    supports_tools: bool,
+    supports_images: bool,
+    input_cost_per_million: f64,
+    output_cost_per_million: f64,
+    cache_read_cost_per_million: Option<f64>,
+) -> OpenAIModelProfile {
+    platform_profile(
+        context_window,
+        Some(context_window),
+        max_output,
         true,
+        supports_tools,
+        supports_images,
         false,
-        true,
-        true,
-        Some("low"),
-        REASONING_LOW_TO_XHIGH,
-        "medium",
-        5.0,
-        30.0,
-        Some(0.50),
-        true,
-    )
-}
-
-fn gpt_54_platform() -> OpenAIModelProfile {
-    profile(
-        OpenAIAuthPath::PlatformApiKey,
-        1_050_000,
-        Some(1_050_000),
-        128_000,
-        true,
-        true,
-        true,
-        true,
-        Some("medium"),
-        REASONING_NONE_TO_XHIGH,
+        false,
+        false,
+        NO_REASONING,
         "none",
-        2.50,
-        15.0,
-        Some(0.25),
+        input_cost_per_million,
+        output_cost_per_million,
+        cache_read_cost_per_million,
         true,
     )
 }
 
-fn gpt_54_codex() -> OpenAIModelProfile {
-    profile(
-        OpenAIAuthPath::ChatGptCodex,
-        272_000,
-        Some(1_000_000),
-        128_000,
-        true,
+#[allow(clippy::too_many_arguments)]
+fn platform_non_streaming_profile(
+    context_window: u64,
+    max_output: u64,
+    supports_tools: bool,
+    supports_images: bool,
+    reasoning_levels: &'static [&'static str],
+    default_reasoning_level: &'static str,
+    input_cost_per_million: f64,
+    output_cost_per_million: f64,
+) -> OpenAIModelProfile {
+    platform_profile(
+        context_window,
+        Some(context_window),
+        max_output,
         false,
-        true,
-        true,
-        Some("low"),
-        REASONING_LOW_TO_XHIGH,
-        "xhigh",
-        2.50,
-        15.0,
-        Some(0.25),
-        true,
+        supports_tools,
+        supports_images,
+        false,
+        false,
+        false,
+        reasoning_levels,
+        default_reasoning_level,
+        input_cost_per_million,
+        output_cost_per_million,
+        None,
+        false,
     )
 }
 
-fn gpt_54_mini_platform() -> OpenAIModelProfile {
-    profile(
-        OpenAIAuthPath::PlatformApiKey,
-        400_000,
-        Some(400_000),
-        128_000,
-        true,
-        true,
-        true,
-        true,
-        Some("medium"),
-        REASONING_NONE_TO_XHIGH,
-        "medium",
-        0.75,
-        4.50,
-        Some(0.075),
-        true,
-    )
-}
-
-fn gpt_54_mini_codex() -> OpenAIModelProfile {
-    profile(
-        OpenAIAuthPath::ChatGptCodex,
-        272_000,
+#[allow(clippy::too_many_arguments)]
+fn codex_profile(
+    max_output: u64,
+    supports_images: bool,
+    reasoning_levels: &'static [&'static str],
+    default_reasoning_level: &'static str,
+    input_cost_per_million: f64,
+    output_cost_per_million: f64,
+    cache_read_cost_per_million: f64,
+    visible: bool,
+) -> OpenAIModelProfile {
+    codex_profile_with_max_context(
         Some(272_000),
-        128_000,
-        true,
-        false,
-        true,
-        true,
-        Some("medium"),
-        REASONING_LOW_TO_XHIGH,
-        "medium",
-        0.75,
-        4.50,
-        Some(0.075),
-        true,
+        max_output,
+        supports_images,
+        reasoning_levels,
+        default_reasoning_level,
+        input_cost_per_million,
+        output_cost_per_million,
+        cache_read_cost_per_million,
+        visible,
     )
 }
 
-fn gpt_52_platform() -> OpenAIModelProfile {
-    profile(
-        OpenAIAuthPath::PlatformApiKey,
-        400_000,
-        Some(400_000),
-        128_000,
-        true,
-        false,
-        false,
-        true,
-        Some("medium"),
-        REASONING_NONE_TO_XHIGH,
-        "none",
-        1.75,
-        14.0,
-        Some(0.175),
-        true,
-    )
-}
-
-fn gpt_53_codex_platform() -> OpenAIModelProfile {
-    profile(
-        OpenAIAuthPath::PlatformApiKey,
-        400_000,
-        Some(400_000),
-        128_000,
-        true,
-        false,
-        false,
-        true,
-        Some("medium"),
-        REASONING_LOW_TO_XHIGH,
-        "medium",
-        1.75,
-        14.0,
-        Some(0.175),
-        true,
-    )
-}
-
-fn gpt_52_codex() -> OpenAIModelProfile {
-    profile(
-        OpenAIAuthPath::ChatGptCodex,
-        272_000,
-        Some(272_000),
-        128_000,
-        true,
-        false,
-        false,
-        true,
-        Some("low"),
-        REASONING_LOW_TO_XHIGH,
-        "medium",
-        1.75,
-        14.0,
-        Some(0.175),
-        true,
-    )
-}
-
-fn legacy_codex_profile(
+#[allow(clippy::too_many_arguments)]
+fn codex_profile_with_max_context(
+    max_context_window: Option<u64>,
     max_output: u64,
     supports_images: bool,
     reasoning_levels: &'static [&'static str],
@@ -555,8 +541,10 @@ fn legacy_codex_profile(
     profile(
         OpenAIAuthPath::ChatGptCodex,
         272_000,
-        Some(272_000),
+        max_context_window,
         max_output,
+        true,
+        true,
         supports_images,
         false,
         false,
@@ -588,7 +576,31 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "flagship",
             "Newest OpenAI frontier model for complex coding, computer use, knowledge work, and research workflows.",
             &["gpt-5.5-2026-04-23"],
-            vec![gpt_55_codex(), gpt_55_platform()],
+            vec![
+                codex_profile(
+                    128_000,
+                    true,
+                    REASONING_LOW_TO_XHIGH,
+                    "medium",
+                    5.0,
+                    30.0,
+                    0.50,
+                    true,
+                ),
+                platform_reasoning_profile(
+                    1_050_000,
+                    128_000,
+                    true,
+                    true,
+                    true,
+                    true,
+                    REASONING_NONE_TO_XHIGH,
+                    "medium",
+                    5.0,
+                    30.0,
+                    Some(0.50),
+                ),
+            ],
             0,
             true,
             false,
@@ -611,7 +623,32 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "flagship",
             "OpenAI frontier model for professional coding and agentic workflows.",
             &["gpt-5.4-2026-03-05"],
-            vec![gpt_54_codex(), gpt_54_platform()],
+            vec![
+                codex_profile_with_max_context(
+                    Some(1_000_000),
+                    128_000,
+                    true,
+                    REASONING_LOW_TO_XHIGH,
+                    "xhigh",
+                    2.50,
+                    15.0,
+                    0.25,
+                    true,
+                ),
+                platform_reasoning_profile(
+                    1_050_000,
+                    128_000,
+                    true,
+                    true,
+                    true,
+                    true,
+                    REASONING_NONE_TO_XHIGH,
+                    "none",
+                    2.50,
+                    15.0,
+                    Some(0.25),
+                ),
+            ],
             2,
             false,
             false,
@@ -639,6 +676,8 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
                 1_050_000,
                 Some(1_050_000),
                 128_000,
+                true,
+                true,
                 true,
                 true,
                 true,
@@ -673,7 +712,31 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "standard",
             "Fast GPT-5.4-class model for responsive coding tasks and subagents.",
             &["gpt-5.4-mini-2026-03-17"],
-            vec![gpt_54_mini_codex(), gpt_54_mini_platform()],
+            vec![
+                codex_profile(
+                    128_000,
+                    true,
+                    REASONING_LOW_TO_XHIGH,
+                    "medium",
+                    0.75,
+                    4.50,
+                    0.075,
+                    true,
+                ),
+                platform_reasoning_profile(
+                    400_000,
+                    128_000,
+                    true,
+                    true,
+                    true,
+                    true,
+                    REASONING_NONE_TO_XHIGH,
+                    "medium",
+                    0.75,
+                    4.50,
+                    Some(0.075),
+                ),
+            ],
             4,
             false,
             false,
@@ -702,6 +765,8 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
                 Some(400_000),
                 128_000,
                 true,
+                true,
+                true,
                 false,
                 false,
                 true,
@@ -726,6 +791,77 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
     );
 
     m.insert(
+        "gpt-5.5-pro",
+        model(
+            "gpt-5.5-pro",
+            "GPT-5.5 Pro",
+            "GPT-5.5 Pro",
+            "GPT-5.5",
+            "flagship",
+            "Higher-compute GPT-5.5 variant; hidden because it does not support streaming Responses.",
+            &["gpt-5.5-pro-2026-04-23"],
+            vec![platform_non_streaming_profile(
+                1_050_000,
+                128_000,
+                true,
+                true,
+                REASONING_MEDIUM_TO_XHIGH,
+                "high",
+                30.0,
+                180.0,
+            )],
+            1,
+            false,
+            false,
+            false,
+            None,
+            None,
+            true,
+            false,
+            Some("2025-12-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-5.2-pro",
+        model(
+            "gpt-5.2-pro",
+            "GPT-5.2 Pro",
+            "GPT-5.2 Pro",
+            "GPT-5.2",
+            "flagship",
+            "Previous higher-compute GPT-5.2 variant for difficult professional work on the Platform API.",
+            &["gpt-5.2-pro-2025-12-11"],
+            vec![platform_profile(
+                400_000,
+                Some(400_000),
+                128_000,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                REASONING_MEDIUM_TO_XHIGH,
+                "medium",
+                21.0,
+                168.0,
+                None,
+                true,
+            )],
+            8,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2025-08-31"),
+        ),
+    );
+
+    m.insert(
         "gpt-5.3-codex",
         model(
             "gpt-5.3-codex",
@@ -736,7 +872,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "Agentic coding model for complex software engineering.",
             &[],
             vec![
-                legacy_codex_profile(
+                codex_profile(
                     128_000,
                     true,
                     REASONING_LOW_TO_XHIGH,
@@ -746,7 +882,19 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
                     0.175,
                     true,
                 ),
-                gpt_53_codex_platform(),
+                platform_reasoning_profile(
+                    400_000,
+                    128_000,
+                    true,
+                    true,
+                    false,
+                    false,
+                    REASONING_LOW_TO_XHIGH,
+                    "medium",
+                    1.75,
+                    14.0,
+                    Some(0.175),
+                ),
             ],
             6,
             false,
@@ -770,7 +918,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "standard",
             "Text-only research preview optimized for near-instant coding iteration.",
             &[],
-            vec![legacy_codex_profile(
+            vec![codex_profile(
                 32_000,
                 false,
                 REASONING_LOW_TO_HIGH,
@@ -778,7 +926,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
                 1.75,
                 14.0,
                 0.175,
-                false,
+                true,
             )],
             7,
             false,
@@ -786,7 +934,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             false,
             None,
             None,
-            true,
+            false,
             true,
             None,
         ),
@@ -802,7 +950,31 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "flagship",
             "Previous OpenAI frontier model for professional coding and agentic tasks.",
             &["gpt-5.2-2025-12-11"],
-            vec![gpt_52_codex(), gpt_52_platform()],
+            vec![
+                codex_profile(
+                    128_000,
+                    true,
+                    REASONING_LOW_TO_XHIGH,
+                    "medium",
+                    1.75,
+                    14.0,
+                    0.175,
+                    true,
+                ),
+                platform_reasoning_profile(
+                    400_000,
+                    128_000,
+                    true,
+                    true,
+                    false,
+                    false,
+                    REASONING_NONE_TO_XHIGH,
+                    "none",
+                    1.75,
+                    14.0,
+                    Some(0.175),
+                ),
+            ],
             10,
             false,
             true,
@@ -816,6 +988,220 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
     );
 
     m.insert(
+        "gpt-5.1",
+        model(
+            "gpt-5.1",
+            "GPT-5.1",
+            "GPT-5.1",
+            "GPT-5.1",
+            "flagship",
+            "Previous GPT-5 model for coding and agentic tasks with configurable reasoning.",
+            &["gpt-5.1-2025-11-13"],
+            vec![platform_reasoning_profile(
+                400_000,
+                128_000,
+                true,
+                true,
+                false,
+                false,
+                REASONING_NONE_TO_HIGH,
+                "none",
+                1.25,
+                10.0,
+                Some(0.125),
+            )],
+            11,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2024-09-30"),
+        ),
+    );
+
+    m.insert(
+        "gpt-5",
+        model(
+            "gpt-5",
+            "GPT-5",
+            "GPT-5",
+            "GPT-5",
+            "flagship",
+            "Previous GPT-5 model for coding and agentic tasks with minimal-to-high reasoning.",
+            &["gpt-5-2025-08-07"],
+            vec![platform_reasoning_profile(
+                400_000,
+                128_000,
+                true,
+                true,
+                false,
+                false,
+                REASONING_MINIMAL_TO_HIGH,
+                "medium",
+                1.25,
+                10.0,
+                Some(0.125),
+            )],
+            12,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2024-09-30"),
+        ),
+    );
+
+    m.insert(
+        "gpt-5-mini",
+        model(
+            "gpt-5-mini",
+            "GPT-5 Mini",
+            "GPT-5 Mini",
+            "GPT-5",
+            "standard",
+            "Cost-efficient GPT-5 model for well-defined low-latency workloads.",
+            &["gpt-5-mini-2025-08-07"],
+            vec![platform_reasoning_profile(
+                400_000,
+                128_000,
+                true,
+                true,
+                false,
+                false,
+                REASONING_MINIMAL_TO_HIGH,
+                "medium",
+                0.25,
+                2.0,
+                Some(0.025),
+            )],
+            13,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2024-05-31"),
+        ),
+    );
+
+    m.insert(
+        "gpt-5-nano",
+        model(
+            "gpt-5-nano",
+            "GPT-5 Nano",
+            "GPT-5 Nano",
+            "GPT-5",
+            "standard",
+            "Fastest, lowest-cost GPT-5 model for simple classification and extraction tasks.",
+            &["gpt-5-nano-2025-08-07"],
+            vec![platform_reasoning_profile(
+                400_000,
+                128_000,
+                true,
+                true,
+                false,
+                false,
+                REASONING_MINIMAL_TO_HIGH,
+                "medium",
+                0.05,
+                0.40,
+                Some(0.005),
+            )],
+            14,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2024-05-31"),
+        ),
+    );
+
+    m.insert(
+        "gpt-5-pro",
+        model(
+            "gpt-5-pro",
+            "GPT-5 Pro",
+            "GPT-5 Pro",
+            "GPT-5",
+            "flagship",
+            "Higher-compute GPT-5 variant that streams on the Platform Responses API.",
+            &["gpt-5-pro-2025-10-06"],
+            vec![platform_profile(
+                400_000,
+                Some(400_000),
+                272_000,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                REASONING_HIGH_ONLY,
+                "high",
+                15.0,
+                120.0,
+                None,
+                true,
+            )],
+            15,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2024-09-30"),
+        ),
+    );
+
+    m.insert(
+        "gpt-5-codex",
+        model(
+            "gpt-5-codex",
+            "GPT-5 Codex",
+            "GPT-5 Codex",
+            "GPT-5",
+            "flagship",
+            "Deprecated GPT-5 coding model optimized for agentic coding on the Platform API.",
+            &[],
+            vec![platform_reasoning_profile(
+                400_000,
+                128_000,
+                true,
+                true,
+                false,
+                false,
+                REASONING_LOW_TO_HIGH,
+                "medium",
+                1.25,
+                10.0,
+                Some(0.125),
+            )],
+            16,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-5.3-codex"),
+            false,
+            false,
+            Some("2024-09-30"),
+        ),
+    );
+
+    m.insert(
         "gpt-5.2-codex",
         model(
             "gpt-5.2-codex",
@@ -823,18 +1209,65 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "GPT-5.2",
             "GPT-5.2",
             "flagship",
-            "Deprecated GPT-5.2 Codex alias; use gpt-5.2.",
+            "Deprecated GPT-5.2 Codex model; use gpt-5.2 for new work.",
             &[],
-            vec![gpt_52_codex()],
+            vec![platform_reasoning_profile(
+                400_000,
+                128_000,
+                true,
+                true,
+                false,
+                false,
+                REASONING_LOW_TO_XHIGH,
+                "medium",
+                1.75,
+                14.0,
+                Some(0.175),
+            )],
             20,
             false,
             true,
             true,
             Some("2026-04-14"),
             Some("gpt-5.2"),
-            true,
+            false,
             false,
             None,
+        ),
+    );
+
+    m.insert(
+        "gpt-5.1-codex",
+        model(
+            "gpt-5.1-codex",
+            "GPT-5.1 Codex",
+            "GPT-5.1 Codex",
+            "GPT-5.1",
+            "flagship",
+            "Deprecated GPT-5.1 coding model optimized for agentic coding.",
+            &[],
+            vec![platform_reasoning_profile(
+                400_000,
+                128_000,
+                true,
+                true,
+                false,
+                false,
+                REASONING_LOW_TO_HIGH,
+                "medium",
+                1.25,
+                10.0,
+                Some(0.125),
+            )],
+            21,
+            false,
+            true,
+            true,
+            Some("2026-04-14"),
+            Some("gpt-5.3-codex"),
+            false,
+            false,
+            Some("2024-09-30"),
         ),
     );
 
@@ -848,15 +1281,18 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "flagship",
             "Deprecated deep-reasoning Codex model; use gpt-5.2 or newer.",
             &[],
-            vec![legacy_codex_profile(
+            vec![platform_reasoning_profile(
+                400_000,
                 128_000,
                 true,
+                true,
+                false,
+                false,
                 REASONING_LOW_TO_XHIGH,
                 "high",
                 1.25,
                 10.0,
-                0.125,
-                true,
+                Some(0.125),
             )],
             30,
             false,
@@ -864,7 +1300,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             true,
             Some("2026-04-14"),
             Some("gpt-5.2"),
-            true,
+            false,
             false,
             None,
         ),
@@ -880,15 +1316,18 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             "standard",
             "Deprecated fast Codex model; use gpt-5.4-mini or newer.",
             &[],
-            vec![legacy_codex_profile(
+            vec![platform_reasoning_profile(
+                400_000,
                 128_000,
                 true,
+                true,
+                false,
+                false,
                 REASONING_LOW_TO_HIGH,
                 "low",
                 0.25,
                 2.0,
-                0.025,
-                true,
+                Some(0.025),
             )],
             31,
             false,
@@ -896,7 +1335,839 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             true,
             Some("2026-04-14"),
             Some("gpt-5.4-mini"),
+            false,
+            false,
+            None,
+        ),
+    );
+
+    m.insert(
+        "codex-mini-latest",
+        model(
+            "codex-mini-latest",
+            "Codex Mini Latest",
+            "Codex Mini",
+            "Codex",
+            "standard",
+            "Deprecated fast reasoning model optimized for the Codex CLI.",
+            &[],
+            vec![platform_reasoning_profile(
+                200_000,
+                100_000,
+                true,
+                true,
+                false,
+                false,
+                REASONING_LOW_TO_HIGH,
+                "medium",
+                1.50,
+                6.0,
+                Some(0.375),
+            )],
+            32,
+            false,
             true,
+            true,
+            None,
+            Some("gpt-4.1"),
+            false,
+            false,
+            Some("2024-06-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-5.3-chat-latest",
+        model(
+            "gpt-5.3-chat-latest",
+            "GPT-5.3 Chat",
+            "GPT-5.3 Chat",
+            "GPT-5.3",
+            "standard",
+            "GPT-5.3 instant model used in ChatGPT, exposed on the Platform API for chat testing.",
+            &[],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                true,
+                true,
+                1.75,
+                14.0,
+                Some(0.175),
+            )],
+            40,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2025-08-31"),
+        ),
+    );
+
+    m.insert(
+        "gpt-5.2-chat-latest",
+        model(
+            "gpt-5.2-chat-latest",
+            "GPT-5.2 Chat",
+            "GPT-5.2 Chat",
+            "GPT-5.2",
+            "standard",
+            "GPT-5.2 model used in ChatGPT, exposed on the Platform API for chat testing.",
+            &[],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                true,
+                true,
+                1.75,
+                14.0,
+                Some(0.175),
+            )],
+            41,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2025-08-31"),
+        ),
+    );
+
+    m.insert(
+        "gpt-5.1-chat-latest",
+        model(
+            "gpt-5.1-chat-latest",
+            "GPT-5.1 Chat",
+            "GPT-5.1 Chat",
+            "GPT-5.1",
+            "standard",
+            "Deprecated GPT-5.1 model used in ChatGPT, exposed for chat testing.",
+            &[],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                true,
+                true,
+                1.25,
+                10.0,
+                Some(0.125),
+            )],
+            42,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-5.1"),
+            false,
+            false,
+            Some("2024-09-30"),
+        ),
+    );
+
+    m.insert(
+        "gpt-5-chat-latest",
+        model(
+            "gpt-5-chat-latest",
+            "GPT-5 Chat",
+            "GPT-5 Chat",
+            "GPT-5",
+            "standard",
+            "Deprecated GPT-5 model used in ChatGPT, exposed for chat testing.",
+            &[],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                true,
+                true,
+                1.25,
+                10.0,
+                Some(0.125),
+            )],
+            43,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-5.1"),
+            false,
+            false,
+            Some("2024-09-30"),
+        ),
+    );
+
+    m.insert(
+        "o3",
+        model(
+            "o3",
+            "o3",
+            "o3",
+            "o-series",
+            "flagship",
+            "Reasoning model for complex tasks, succeeded by GPT-5.",
+            &["o3-2025-04-16"],
+            vec![platform_profile(
+                200_000,
+                Some(200_000),
+                100_000,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                REASONING_LOW_TO_HIGH,
+                "medium",
+                2.0,
+                8.0,
+                Some(0.50),
+                true,
+            )],
+            50,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2024-06-01"),
+        ),
+    );
+
+    m.insert(
+        "o3-pro",
+        model(
+            "o3-pro",
+            "o3 Pro",
+            "o3 Pro",
+            "o-series",
+            "flagship",
+            "Higher-compute o3 variant; hidden because it does not support streaming Responses.",
+            &["o3-pro-2025-06-10"],
+            vec![platform_non_streaming_profile(
+                200_000,
+                100_000,
+                true,
+                true,
+                REASONING_LOW_TO_HIGH,
+                "high",
+                20.0,
+                80.0,
+            )],
+            51,
+            false,
+            true,
+            false,
+            None,
+            None,
+            true,
+            false,
+            Some("2024-06-01"),
+        ),
+    );
+
+    m.insert(
+        "o4-mini",
+        model(
+            "o4-mini",
+            "o4 Mini",
+            "o4 Mini",
+            "o-series",
+            "standard",
+            "Fast, cost-efficient reasoning model, succeeded by GPT-5 mini.",
+            &["o4-mini-2025-04-16"],
+            vec![platform_profile(
+                200_000,
+                Some(200_000),
+                100_000,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                REASONING_LOW_TO_HIGH,
+                "medium",
+                1.10,
+                4.40,
+                Some(0.275),
+                true,
+            )],
+            52,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2024-06-01"),
+        ),
+    );
+
+    m.insert(
+        "o3-mini",
+        model(
+            "o3-mini",
+            "o3 Mini",
+            "o3 Mini",
+            "o-series",
+            "standard",
+            "Small reasoning model for technical domains.",
+            &["o3-mini-2025-01-31"],
+            vec![platform_profile(
+                200_000,
+                Some(200_000),
+                100_000,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                REASONING_LOW_TO_HIGH,
+                "medium",
+                1.10,
+                4.40,
+                Some(0.55),
+                true,
+            )],
+            53,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "o1",
+        model(
+            "o1",
+            "o1",
+            "o1",
+            "o-series",
+            "flagship",
+            "Previous full o-series reasoning model.",
+            &["o1-2024-12-17"],
+            vec![platform_profile(
+                200_000,
+                Some(200_000),
+                100_000,
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                REASONING_LOW_TO_HIGH,
+                "medium",
+                15.0,
+                60.0,
+                Some(7.50),
+                true,
+            )],
+            54,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "o1-mini",
+        model(
+            "o1-mini",
+            "o1 Mini",
+            "o1 Mini",
+            "o-series",
+            "standard",
+            "Deprecated small o1 reasoning model.",
+            &["o1-mini-2024-09-12"],
+            vec![platform_text_profile(
+                128_000,
+                65_536,
+                false,
+                false,
+                1.10,
+                4.40,
+                Some(0.55),
+            )],
+            55,
+            false,
+            true,
+            true,
+            None,
+            Some("o3-mini"),
+            false,
+            false,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "o1-preview",
+        model(
+            "o1-preview",
+            "o1 Preview",
+            "o1 Preview",
+            "o-series",
+            "flagship",
+            "Deprecated research preview of the first o-series reasoning model.",
+            &["o1-preview-2024-09-12"],
+            vec![platform_text_profile(
+                128_000,
+                32_768,
+                false,
+                false,
+                15.0,
+                60.0,
+                Some(7.50),
+            )],
+            56,
+            false,
+            true,
+            true,
+            None,
+            Some("o1"),
+            false,
+            true,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "o1-pro",
+        model(
+            "o1-pro",
+            "o1 Pro",
+            "o1 Pro",
+            "o-series",
+            "flagship",
+            "Higher-compute o1 variant; hidden because it does not support streaming Responses.",
+            &["o1-pro-2025-03-19"],
+            vec![platform_non_streaming_profile(
+                200_000,
+                100_000,
+                true,
+                true,
+                REASONING_LOW_TO_HIGH,
+                "high",
+                150.0,
+                600.0,
+            )],
+            57,
+            false,
+            true,
+            false,
+            None,
+            None,
+            true,
+            false,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4.1",
+        model(
+            "gpt-4.1",
+            "GPT-4.1",
+            "GPT-4.1",
+            "GPT-4.1",
+            "standard",
+            "GPT-4.1 text and vision model with a long Platform Responses context window.",
+            &["gpt-4.1-2025-04-14"],
+            vec![platform_text_profile(
+                1_047_576,
+                32_768,
+                true,
+                true,
+                2.0,
+                8.0,
+                Some(0.50),
+            )],
+            60,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2024-06-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4.1-mini",
+        model(
+            "gpt-4.1-mini",
+            "GPT-4.1 Mini",
+            "GPT-4.1 Mini",
+            "GPT-4.1",
+            "standard",
+            "Smaller GPT-4.1 model for fast, low-cost Platform Responses workloads.",
+            &["gpt-4.1-mini-2025-04-14"],
+            vec![platform_text_profile(
+                1_047_576,
+                32_768,
+                true,
+                true,
+                0.40,
+                1.60,
+                Some(0.10),
+            )],
+            61,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2024-06-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4.1-nano",
+        model(
+            "gpt-4.1-nano",
+            "GPT-4.1 Nano",
+            "GPT-4.1 Nano",
+            "GPT-4.1",
+            "standard",
+            "Lowest-cost GPT-4.1 model for lightweight Platform Responses workloads.",
+            &["gpt-4.1-nano-2025-04-14"],
+            vec![platform_text_profile(
+                1_047_576,
+                32_768,
+                true,
+                true,
+                0.10,
+                0.40,
+                Some(0.025),
+            )],
+            62,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            Some("2024-06-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4o",
+        model(
+            "gpt-4o",
+            "GPT-4o",
+            "GPT-4o",
+            "GPT-4o",
+            "standard",
+            "Legacy GPT-4o multimodal model for Platform Responses compatibility.",
+            &[
+                "gpt-4o-2024-11-20",
+                "gpt-4o-2024-08-06",
+                "gpt-4o-2024-05-13",
+            ],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                true,
+                true,
+                2.50,
+                10.0,
+                Some(1.25),
+            )],
+            70,
+            false,
+            true,
+            false,
+            None,
+            Some("gpt-4.1"),
+            false,
+            false,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4o-mini",
+        model(
+            "gpt-4o-mini",
+            "GPT-4o Mini",
+            "GPT-4o Mini",
+            "GPT-4o",
+            "standard",
+            "Small GPT-4o multimodal model for Platform Responses compatibility.",
+            &["gpt-4o-mini-2024-07-18"],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                true,
+                true,
+                0.15,
+                0.60,
+                Some(0.075),
+            )],
+            71,
+            false,
+            true,
+            false,
+            None,
+            Some("gpt-4.1-mini"),
+            false,
+            false,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4.5-preview",
+        model(
+            "gpt-4.5-preview",
+            "GPT-4.5 Preview",
+            "GPT-4.5 Preview",
+            "GPT-4.5",
+            "flagship",
+            "Deprecated GPT-4.5 preview model kept selectable while the Platform API still serves it.",
+            &["gpt-4.5-preview-2025-02-27"],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                true,
+                true,
+                75.0,
+                150.0,
+                Some(37.50),
+            )],
+            72,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-4.1"),
+            false,
+            true,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4-turbo",
+        model(
+            "gpt-4-turbo",
+            "GPT-4 Turbo",
+            "GPT-4 Turbo",
+            "GPT-4",
+            "standard",
+            "Legacy GPT-4 Turbo vision model that still fits the streaming Platform Responses path.",
+            &["gpt-4-turbo-2024-04-09"],
+            vec![platform_text_profile(
+                128_000,
+                4_096,
+                true,
+                true,
+                10.0,
+                30.0,
+                None,
+            )],
+            73,
+            false,
+            true,
+            false,
+            None,
+            Some("gpt-4.1"),
+            false,
+            false,
+            Some("2023-12-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4-turbo-preview",
+        model(
+            "gpt-4-turbo-preview",
+            "GPT-4 Turbo Preview",
+            "GPT-4 Turbo Preview",
+            "GPT-4",
+            "standard",
+            "Deprecated GPT-4 Turbo preview; hidden because it does not support streaming Responses.",
+            &["gpt-4-0125-preview", "gpt-4-1106-preview"],
+            vec![platform_non_streaming_profile(
+                128_000,
+                4_096,
+                true,
+                false,
+                NO_REASONING,
+                "none",
+                10.0,
+                30.0,
+            )],
+            74,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-4-turbo"),
+            true,
+            true,
+            Some("2023-12-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4",
+        model(
+            "gpt-4",
+            "GPT-4",
+            "GPT-4",
+            "GPT-4",
+            "standard",
+            "Legacy GPT-4 text model for compatibility with existing Platform sessions.",
+            &["gpt-4-0613", "gpt-4-0314"],
+            vec![platform_text_profile(
+                8_192, 8_192, false, false, 30.0, 60.0, None,
+            )],
+            75,
+            false,
+            true,
+            false,
+            None,
+            Some("gpt-4.1"),
+            false,
+            false,
+            Some("2021-09-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-3.5-turbo",
+        model(
+            "gpt-3.5-turbo",
+            "GPT-3.5 Turbo",
+            "GPT-3.5 Turbo",
+            "GPT-3.5",
+            "standard",
+            "Legacy GPT-3.5 chat model; hidden because it does not support streaming Responses.",
+            &["gpt-3.5-turbo-0125", "gpt-3.5-turbo-1106"],
+            vec![platform_non_streaming_profile(
+                16_385,
+                4_096,
+                false,
+                false,
+                NO_REASONING,
+                "none",
+                0.50,
+                1.50,
+            )],
+            76,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-4.1-mini"),
+            true,
+            false,
+            Some("2021-09-01"),
+        ),
+    );
+
+    m.insert(
+        "chatgpt-4o-latest",
+        model(
+            "chatgpt-4o-latest",
+            "ChatGPT-4o Latest",
+            "ChatGPT-4o",
+            "GPT-4o",
+            "standard",
+            "Deprecated ChatGPT-4o model snapshot exposed on the Platform API for compatibility testing.",
+            &[],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                false,
+                true,
+                5.0,
+                15.0,
+                None,
+            )],
+            77,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-4.1"),
+            false,
+            false,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-oss-120b",
+        model(
+            "gpt-oss-120b",
+            "GPT-OSS 120B",
+            "GPT-OSS 120B",
+            "GPT-OSS",
+            "standard",
+            "Open-weight text model exposed through the Platform Responses API.",
+            &[],
+            vec![platform_text_profile(
+                131_072, 131_072, true, false, 0.0, 0.0, None,
+            )],
+            80,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            None,
+        ),
+    );
+
+    m.insert(
+        "gpt-oss-20b",
+        model(
+            "gpt-oss-20b",
+            "GPT-OSS 20B",
+            "GPT-OSS 20B",
+            "GPT-OSS",
+            "standard",
+            "Smaller open-weight text model exposed through the Platform Responses API.",
+            &[],
+            vec![platform_text_profile(
+                131_072, 131_072, true, false, 0.0, 0.0, None,
+            )],
+            81,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
             false,
             None,
         ),
@@ -938,23 +2209,17 @@ pub fn strip_openai_provider_prefix(model_id: &str) -> &str {
 /// Resolve a model ID to its canonical registry ID.
 #[must_use]
 pub fn canonical_openai_model_id(model_id: &str) -> Option<&'static str> {
-    get_openai_model(model_id).map(|info| info.replacement_model.unwrap_or(info.id))
+    get_openai_model(model_id).map(|info| info.id)
 }
 
 /// Resolve the request model ID sent to OpenAI.
 ///
 /// Snapshot aliases are preserved so callers can intentionally pin behavior.
-/// Deprecated compatibility IDs with a known replacement are upgraded before
-/// the request hits the provider.
+/// Live deprecated model IDs are also preserved: entitlement, availability, and
+/// deprecation state are reported explicitly instead of silently downgrading.
 #[must_use]
 pub fn openai_request_model_id(model_id: &str) -> String {
-    let bare = strip_openai_provider_prefix(model_id);
-    if let Some(info) = OPENAI_MODELS.get(bare)
-        && let Some(replacement) = info.replacement_model
-    {
-        return replacement.to_string();
-    }
-    bare.to_string()
+    strip_openai_provider_prefix(model_id).to_string()
 }
 
 /// Look up the auth-path-specific profile for a model.
@@ -971,7 +2236,9 @@ pub fn get_openai_model_profile(
 /// Whether a model can be used with the active auth path.
 #[must_use]
 pub fn openai_model_available_for_auth_path(model_id: &str, auth_path: OpenAIAuthPath) -> bool {
-    get_openai_model_profile(model_id, auth_path).is_some()
+    get_openai_model_profile(model_id, auth_path).is_some_and(|(info, profile)| {
+        !info.is_hidden && profile.visible && profile.supports_streaming
+    })
 }
 
 impl OpenAIModelInfo {
@@ -1022,6 +2289,10 @@ impl OpenAIModelInfo {
             "sortOrder": self.sort_order,
             "apiEndpoint": profile.api_endpoint,
             "authPaths": [profile.auth_path.as_str()],
+            "supportsStreaming": profile.supports_streaming,
+            "supportsTools": profile.supports_tools,
+            "supportsToolSearch": profile.supports_tool_search,
+            "supportsComputerUse": profile.supports_computer_use,
             "supportsVerbosity": profile.supports_verbosity,
         });
         if let Some(cache_read) = profile.cache_read_cost_per_million {
@@ -1096,7 +2367,7 @@ pub fn all_openai_models_api_json_for_auth_path(
         .values()
         .filter_map(|info| {
             let profile = info.profile_for_auth_path(auth_path)?;
-            if info.is_hidden || !profile.visible {
+            if info.is_hidden || !profile.visible || !profile.supports_streaming {
                 return None;
             }
             Some((info, profile))
@@ -1591,7 +2862,7 @@ mod tests {
         let m = get_openai_model("gpt-5.1-codex-mini").unwrap();
         let profile = m.default_profile();
         assert_eq!(m.tier, "standard");
-        assert_eq!(profile.context_window, 272_000);
+        assert_eq!(profile.context_window, 400_000);
         assert_eq!(profile.max_output, 128_000);
         assert_eq!(profile.reasoning_levels, &["low", "medium", "high"]);
         assert_eq!(profile.default_reasoning_level, "low");
@@ -1607,9 +2878,9 @@ mod tests {
         assert_eq!(profile.context_window, 272_000);
         assert_eq!(profile.max_output, 32_000);
         assert_eq!(m.tier, "standard");
-        assert!(m.is_hidden);
+        assert!(!m.is_hidden);
         assert!(m.is_preview);
-        assert!(!profile.visible);
+        assert!(profile.visible);
         assert_eq!(profile.reasoning_levels, &["low", "medium", "high"]);
         assert_eq!(profile.default_reasoning_level, "low");
     }
@@ -1624,10 +2895,13 @@ mod tests {
 
         let alias = get_openai_model("gpt-5.2-codex").unwrap();
         assert!(alias.is_deprecated);
-        assert!(alias.is_hidden);
+        assert!(!alias.is_hidden);
         assert_eq!(alias.replacement_model, Some("gpt-5.2"));
-        assert_eq!(canonical_openai_model_id("gpt-5.2-codex"), Some("gpt-5.2"));
-        assert_eq!(openai_request_model_id("gpt-5.2-codex"), "gpt-5.2");
+        assert_eq!(
+            canonical_openai_model_id("gpt-5.2-codex"),
+            Some("gpt-5.2-codex")
+        );
+        assert_eq!(openai_request_model_id("gpt-5.2-codex"), "gpt-5.2-codex");
     }
 
     #[test]
@@ -1736,14 +3010,14 @@ mod tests {
     #[test]
     fn all_openai_models_api_json_sorted() {
         let models = all_openai_models_api_json();
-        assert_eq!(models.len(), 5);
+        assert_eq!(models.len(), 6);
         // First model in each family should have lowest sort_order
         assert_eq!(models[0]["id"], "gpt-5.5");
         assert_eq!(models[0]["sortOrder"], 0);
         assert!(models.iter().all(|m| m["apiEndpoint"] == "codex"));
         assert!(!models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
         assert!(!models.iter().any(|m| m["id"] == "gpt-5.4-nano"));
-        assert!(!models.iter().any(|m| m["id"] == "gpt-5.3-codex-spark"));
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.3-codex-spark"));
         assert!(!models.iter().any(|m| m["id"] == "gpt-5.2-codex"));
         assert!(!models.iter().any(|m| m["id"] == "gpt-5.1-codex-max"));
         assert!(!models.iter().any(|m| m["id"] == "gpt-5.1-codex-mini"));
@@ -1752,13 +3026,23 @@ mod tests {
     #[test]
     fn platform_model_list_uses_platform_profile() {
         let models = all_openai_models_api_json_for_auth_path(OpenAIAuthPath::PlatformApiKey);
-        assert_eq!(models.len(), 7);
+        assert_eq!(models.len(), 40);
         let gpt55 = models.iter().find(|m| m["id"] == "gpt-5.5").unwrap();
         assert_eq!(gpt55["contextWindow"], 1_050_000);
         assert_eq!(gpt55["apiEndpoint"], "platform");
         assert_eq!(gpt55["authPaths"], json!(["platform-api-key"]));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.4-nano"));
+        assert!(
+            models
+                .iter()
+                .any(|m| m["id"] == "gpt-5.2-codex" && m["isDeprecated"] == true)
+        );
+        assert!(models.iter().any(|m| m["id"] == "gpt-4.1"));
+        assert!(models.iter().any(|m| m["id"] == "o3"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-5.5-pro"));
+        assert!(!models.iter().any(|m| m["id"] == "o3-pro"));
+        assert!(!models.iter().any(|m| m["id"] == "gpt-3.5-turbo"));
         let gpt53 = models.iter().find(|m| m["id"] == "gpt-5.3-codex").unwrap();
         assert_eq!(gpt53["contextWindow"], 400_000);
         assert_eq!(gpt53["apiEndpoint"], "platform");
@@ -1804,6 +3088,7 @@ mod tests {
     fn reasoning_effort_all_variants() {
         for (variant, expected) in [
             (ReasoningEffort::None, "none"),
+            (ReasoningEffort::Minimal, "minimal"),
             (ReasoningEffort::Low, "low"),
             (ReasoningEffort::Medium, "medium"),
             (ReasoningEffort::High, "high"),
@@ -1875,9 +3160,6 @@ mod tests {
             "gpt-5.3-codex",
             "gpt-5.3-codex-spark",
             "gpt-5.2",
-            "gpt-5.2-codex",
-            "gpt-5.1-codex-max",
-            "gpt-5.1-codex-mini",
         ] {
             let (_, profile) = get_openai_model_profile(id, OpenAIAuthPath::ChatGptCodex)
                 .unwrap_or_else(|| panic!("expected Codex for {id}"));

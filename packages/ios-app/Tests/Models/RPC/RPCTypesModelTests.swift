@@ -249,6 +249,11 @@ struct ModelInfoComputedTests {
     @Test("isDeprecatedModel true returns true")
     func testDeprecatedTrue() { #expect(makeModel(isDeprecated: true).isDeprecatedModel == true) }
 
+    @Test("deprecated models are disabled")
+    func testDeprecatedDisabled() {
+        #expect(makeModel(isDeprecated: true).isDisabled == true)
+    }
+
     @Test("isPreview")
     func testIsPreview() {
         #expect(makeModel(id: "claude-preview-2026").isPreview == true)
@@ -312,8 +317,12 @@ struct ModelInfoStrictDecodeTests {
         payload["authPaths"] = ["chatgpt-codex"]
         payload["aliasIds"] = ["gpt-5.5-2026-04-23"]
         payload["supportsReasoning"] = true
-        payload["reasoningLevels"] = ["low", "medium", "high", "xhigh"]
+        payload["reasoningLevels"] = ["minimal", "low", "medium", "high", "xhigh"]
         payload["defaultReasoningLevel"] = "medium"
+        payload["supportsStreaming"] = true
+        payload["supportsTools"] = true
+        payload["supportsToolSearch"] = false
+        payload["supportsComputerUse"] = false
         payload["supportsVerbosity"] = true
         payload["defaultVerbosity"] = "low"
         payload["replacementModel"] = "gpt-5.5"
@@ -326,6 +335,11 @@ struct ModelInfoStrictDecodeTests {
         #expect(m.authPaths == ["chatgpt-codex"])
         #expect(m.aliasIds == ["gpt-5.5-2026-04-23"])
         #expect(m.maxContextWindow == 272_000)
+        #expect(m.reasoningLevels == ["minimal", "low", "medium", "high", "xhigh"])
+        #expect(m.supportsStreaming == true)
+        #expect(m.supportsTools == true)
+        #expect(m.supportsToolSearch == false)
+        #expect(m.supportsComputerUse == false)
         #expect(m.supportsVerbosity == true)
         #expect(m.defaultVerbosity == "low")
         #expect(m.isHidden == false)

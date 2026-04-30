@@ -48,13 +48,13 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     /// Whether this model is a previous-generation release that the UI
     /// should de-prioritize. Required on the wire.
     let isLegacy: Bool
-    /// Whether this model is deprecated and should not be selectable
+    /// Whether this model is deprecated and should not be selectable.
     let isDeprecated: Bool?
     /// Deprecation date (YYYY-MM-DD) for display
     let deprecationDate: String?
     /// For models with reasoning capability (e.g., OpenAI)
     let supportsReasoning: Bool?
-    /// Available reasoning effort levels (low, medium, high, xhigh)
+    /// Available reasoning effort levels (minimal, low, medium, high, xhigh)
     let reasoningLevels: [String]?
     /// Default reasoning level
     let defaultReasoningLevel: String?
@@ -62,6 +62,14 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let supportsVerbosity: Bool?
     /// Default OpenAI text verbosity for the active auth path.
     let defaultVerbosity: String?
+    /// Whether the active OpenAI profile supports streaming Responses.
+    let supportsStreaming: Bool?
+    /// Whether the active OpenAI profile supports function tools.
+    let supportsTools: Bool?
+    /// Whether the active OpenAI profile supports hosted tool search.
+    let supportsToolSearch: Bool?
+    /// Whether the active OpenAI profile supports computer use.
+    let supportsComputerUse: Bool?
     /// For Gemini models: default thinking level
     let thinkingLevel: String?
     /// For Gemini models: available thinking levels
@@ -104,6 +112,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         case isDeprecated, deprecationDate
         case supportsReasoning, reasoningLevels, defaultReasoningLevel
         case supportsVerbosity, defaultVerbosity
+        case supportsStreaming, supportsTools, supportsToolSearch, supportsComputerUse
         case thinkingLevel, supportedThinkingLevels
         case family, maxOutput, recommended, releaseDate, sortOrder
         case providerDisplayName, providerSortOrder
@@ -143,6 +152,10 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         defaultReasoningLevel: String? = nil,
         supportsVerbosity: Bool? = nil,
         defaultVerbosity: String? = nil,
+        supportsStreaming: Bool? = nil,
+        supportsTools: Bool? = nil,
+        supportsToolSearch: Bool? = nil,
+        supportsComputerUse: Bool? = nil,
         thinkingLevel: String? = nil,
         supportedThinkingLevels: [String]? = nil,
         family: String? = nil,
@@ -182,6 +195,10 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.defaultReasoningLevel = defaultReasoningLevel
         self.supportsVerbosity = supportsVerbosity
         self.defaultVerbosity = defaultVerbosity
+        self.supportsStreaming = supportsStreaming
+        self.supportsTools = supportsTools
+        self.supportsToolSearch = supportsToolSearch
+        self.supportsComputerUse = supportsComputerUse
         self.thinkingLevel = thinkingLevel
         self.supportedThinkingLevels = supportedThinkingLevels
         self.family = family
@@ -247,7 +264,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         !isLegacy
     }
 
-    /// Whether this model is deprecated and should not be selectable
+    /// Whether this model is deprecated.
     var isDeprecatedModel: Bool {
         isDeprecated ?? false
     }
@@ -257,7 +274,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         available == false
     }
 
-    /// Whether this model should be disabled in the picker (deprecated OR unavailable)
+    /// Whether this model should be disabled in the picker.
     var isDisabled: Bool {
         isDeprecatedModel || isUnavailable
     }

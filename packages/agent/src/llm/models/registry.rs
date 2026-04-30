@@ -681,11 +681,14 @@ mod tests {
         assert!(ids.contains(&CLAUDE_OPUS_4_6));
         assert!(ids.contains(&GPT_5_5));
         assert!(ids.contains(&GPT_5_3_CODEX));
+        assert!(ids.contains(&GPT_4_1));
+        assert!(ids.contains(&O3));
+        assert!(ids.contains(&GPT_OSS_120B));
         assert!(ids.contains(&GEMINI_2_5_FLASH));
         assert!(ids.contains(&MINIMAX_M2_7));
         assert!(ids.contains(&MINIMAX_M2_5));
         assert!(ids.contains(&GEMMA4_E4B));
-        // Total = 11 Anthropic + 17 OpenAI ids/aliases + 7 Google + 7 MiniMax + 9 Kimi + 2 Ollama = 53
-        assert_eq!(ids.len(), 53);
+        // Total = 11 Anthropic + 82 OpenAI ids/aliases + 7 Google + 7 MiniMax + 9 Kimi + 2 Ollama = 118
+        assert_eq!(ids.len(), 118);
     }
 }

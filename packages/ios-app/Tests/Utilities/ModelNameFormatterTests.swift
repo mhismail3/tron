@@ -73,6 +73,19 @@ final class ModelNameFormatterTests: XCTestCase {
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.3-codex-spark", style: .short), "GPT-5.3 Spark")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.1-codex-max", style: .short), "GPT-5.1 Max")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.1-codex-mini", style: .short), "GPT-5.1 Mini")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5.3-chat-latest", style: .short), "GPT-5.3 Chat")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-5-pro", style: .short), "GPT-5 Pro")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-4.1", style: .short), "GPT-4.1")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-4.1-mini", style: .short), "GPT-4.1 Mini")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-4o", style: .short), "GPT-4o")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-4.5-preview", style: .short), "GPT-4.5 Preview")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-4-turbo", style: .short), "GPT-4 Turbo")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-3.5-turbo", style: .short), "GPT-3.5 Turbo")
+        XCTAssertEqual(ModelNameFormatter.format("gpt-oss-120b", style: .short), "GPT-OSS 120B")
+        XCTAssertEqual(ModelNameFormatter.format("chatgpt-4o-latest", style: .short), "ChatGPT-4o")
+        XCTAssertEqual(ModelNameFormatter.format("o3", style: .short), "o3")
+        XCTAssertEqual(ModelNameFormatter.format("o4-mini", style: .short), "o4 Mini")
+        XCTAssertEqual(ModelNameFormatter.format("o1-preview", style: .short), "o1 Preview")
     }
 
     func testFallback_geminiModel() {

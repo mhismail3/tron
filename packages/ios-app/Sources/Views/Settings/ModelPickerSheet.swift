@@ -35,7 +35,7 @@ struct ModelPickerSheet: View {
     }
 
     private var availableReasoningLevels: [String] {
-        selectedModelInfo?.reasoningLevels ?? ["low", "medium", "high", "xhigh"]
+        selectedModelInfo?.reasoningLevels ?? ["minimal", "low", "medium", "high", "xhigh"]
     }
 
     /// Provider color for the currently selected model
@@ -165,6 +165,7 @@ struct ModelPickerSheet: View {
 
     private func reasoningLevelLabel(_ level: String) -> String {
         switch level.lowercased() {
+        case "minimal": return "Minimal"
         case "low": return "Low"
         case "medium": return "Medium"
         case "high": return "High"
@@ -575,6 +576,7 @@ private struct ReasoningLevelPopover: View {
 
     private func reasoningLabel(_ level: String) -> String {
         switch level.lowercased() {
+        case "minimal": return "Minimal"
         case "low": return "Low"
         case "medium": return "Medium"
         case "high": return "High"

@@ -66,9 +66,15 @@ enum ModelNameFormatter {
         // Fallback: heuristic ID parsing for models not in cache
         let lowered = modelId.lowercased()
 
-        // Check for OpenAI GPT models
+        // Check for OpenAI models
         if lowered.hasPrefix("gpt-") {
             return formatGptModel(modelId, style: style)
+        }
+        if lowered.hasPrefix("chatgpt-") {
+            return formatChatGptModel(modelId, style: style)
+        }
+        if lowered.hasPrefix("o1") || lowered.hasPrefix("o3") || lowered.hasPrefix("o4") {
+            return formatOSeriesModel(modelId, style: style)
         }
 
         // Check for Gemini models
@@ -147,7 +153,14 @@ enum ModelNameFormatter {
     private static func formatGptModel(_ modelId: String, style: Style) -> String {
         let lowered = modelId.lowercased()
 
-        // Extract version (5.5, 5.4, 5.3, 5.2, 5.1, etc.)
+        if lowered.hasPrefix("gpt-oss-") {
+            let size = lowered
+                .replacingOccurrences(of: "gpt-oss-", with: "")
+                .uppercased()
+            return style == .compact ? "gpt-oss-\(size.lowercased())" : "GPT-OSS \(size)"
+        }
+
+        // Extract version (5.5, 5.4, 4.1, 4o, etc.)
         var version = ""
         if lowered.contains("5.5") {
             version = "5.5"
@@ -161,12 +174,26 @@ enum ModelNameFormatter {
             version = "5.1"
         } else if lowered.contains("5.0") || lowered.contains("-5-") {
             version = "5"
+        } else if lowered.contains("4.5") {
+            version = "4.5"
+        } else if lowered.contains("4.1") {
+            version = "4.1"
+        } else if lowered.contains("4o") {
+            version = "4o"
+        } else if lowered.contains("4.0") || lowered == "gpt-4" || lowered.contains("-4-") {
+            version = "4"
+        } else if lowered.contains("3.5") {
+            version = "3.5"
         }
 
         // Extract suffix (pro, mini, max, spark, etc.)
         var suffix = ""
         if lowered.hasSuffix("-pro") {
             suffix = " Pro"
+        } else if lowered.contains("-chat-latest") {
+            suffix = " Chat"
+        } else if lowered.contains("-turbo") {
+            suffix = " Turbo"
         } else if lowered.contains("-nano") {
             suffix = " Nano"
         } else if lowered.contains("-mini") {
@@ -175,6 +202,8 @@ enum ModelNameFormatter {
             suffix = " Max"
         } else if lowered.contains("-spark") {
             suffix = " Spark"
+        } else if lowered.contains("-preview") {
+            suffix = " Preview"
         }
 
         switch style {
@@ -192,6 +221,47 @@ enum ModelNameFormatter {
                 return "GPT\(suffix)"
             }
             return "GPT-\(version)\(suffix)"
+        }
+    }
+
+    /// Format ChatGPT-latest compatibility model IDs.
+    private static func formatChatGptModel(_ modelId: String, style: Style) -> String {
+        let lowered = modelId.lowercased()
+        let name = lowered.contains("4o") ? "ChatGPT-4o" : "ChatGPT"
+        switch style {
+        case .compact:
+            return name.lowercased()
+        default:
+            return name
+        }
+    }
+
+    /// Format o-series model IDs.
+    private static func formatOSeriesModel(_ modelId: String, style: Style) -> String {
+        let lowered = modelId.lowercased()
+        let base: String
+        if lowered.hasPrefix("o4") {
+            base = "o4"
+        } else if lowered.hasPrefix("o3") {
+            base = "o3"
+        } else {
+            base = "o1"
+        }
+
+        var suffix = ""
+        if lowered.contains("-pro") {
+            suffix = " Pro"
+        } else if lowered.contains("-mini") {
+            suffix = " Mini"
+        } else if lowered.contains("-preview") {
+            suffix = " Preview"
+        }
+
+        switch style {
+        case .compact:
+            return "\(base)\(suffix.lowercased().replacingOccurrences(of: " ", with: "-"))"
+        default:
+            return "\(base)\(suffix)"
         }
     }
 

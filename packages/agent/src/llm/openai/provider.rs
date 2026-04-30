@@ -1,21 +1,22 @@
 //! `OpenAI` provider implementing the [`Provider`] trait.
 //!
 //! Builds and sends streaming requests to the `OpenAI` Responses API.
-//! Routes to either the Codex backend or the Platform API based on the model's
-//! [`ApiEndpoint`] declaration. Supports OAuth and API key authentication,
+//! Routes to either the Codex backend or the Platform API based on the active
+//! OpenAI auth path and model profile. Supports OAuth and API key authentication,
 //! automatic JWT account ID extraction (Codex only), token refresh before
 //! expiry, and reasoning effort levels.
 //!
 //! # Authentication
 //!
 //! - **Codex endpoint**: OAuth Bearer tokens with automatic refresh.
-//! - **Platform endpoint**: API key or OAuth Bearer tokens (no Codex-specific headers).
+//! - **Platform endpoint**: API keys only (no Codex-specific headers).
 //!
 //! # Context Injection
 //!
 //! Context parts (rules, memory, skills, tasks) are injected as a `developer`
 //! message prepended to the input. On the first turn (no assistant messages yet),
-//! a tool clarification message is also prepended.
+//! a tool clarification message is also prepended when the active profile
+//! supports function tools.
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -186,7 +187,19 @@ async fn refresh_tokens(
 
 /// Global reasoning hierarchy from lowest to highest.
 /// "max" is a Tron-internal alias that maps to the highest available level.
-const REASONING_HIERARCHY: &[&str] = &["none", "low", "medium", "high", "xhigh", "max"];
+const REASONING_HIERARCHY: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+fn reasoning_rank(effort: &str) -> usize {
+    REASONING_HIERARCHY
+        .iter()
+        .position(|&h| h == effort)
+        .unwrap_or_else(|| {
+            REASONING_HIERARCHY
+                .iter()
+                .position(|&h| h == "medium")
+                .expect("reasoning hierarchy includes medium")
+        })
+}
 
 /// Clamp a reasoning effort to the closest supported level.
 ///
@@ -197,18 +210,12 @@ fn clamp_reasoning_effort(effort: &str, levels: &[&str]) -> String {
     if levels.contains(&effort) {
         return effort.to_string();
     }
-    let effort_rank = REASONING_HIERARCHY
-        .iter()
-        .position(|&h| h == effort)
-        .unwrap_or(2); // default to "medium" rank if unknown
+    let effort_rank = reasoning_rank(effort);
 
     levels
         .iter()
         .min_by_key(|&&l| {
-            let rank = REASONING_HIERARCHY
-                .iter()
-                .position(|&h| h == l)
-                .unwrap_or(2);
+            let rank = reasoning_rank(l);
             let dist = (rank as i64 - effort_rank as i64).unsigned_abs();
             (dist, rank)
         })
@@ -396,11 +403,12 @@ impl OpenAIProvider {
     ///
     /// Converts messages, prepends a tool clarification on the first turn,
     /// and injects context parts (rules, memory, skills, tasks) as a developer message.
-    fn build_input(context: &Context) -> Vec<ResponsesInputItem> {
+    fn build_input(context: &Context, include_tool_clarification: bool) -> Vec<ResponsesInputItem> {
         let mut input = convert_to_responses_input(&context.messages);
 
         // Prepend tool clarification on first turn (before any assistant messages)
         if let Some(ref ctx_tools) = context.tools
+            && include_tool_clarification
             && !ctx_tools.is_empty()
             && Self::is_first_turn(&context.messages)
         {
@@ -479,11 +487,14 @@ impl OpenAIProvider {
         options: &ProviderStreamOptions,
     ) -> ResponsesRequest {
         let reasoning_effort = self.resolve_reasoning_effort(options);
-        let input = Self::build_input(context);
+        let active_profile = self.active_profile();
+        let supports_tools = active_profile.is_none_or(|profile| profile.supports_tools);
+        let input = Self::build_input(context, supports_tools);
         let enable_tool_search = self.model_supports_tool_search();
         let tools = context
             .tools
             .as_ref()
+            .filter(|_| supports_tools)
             .map(|t| convert_tools_v2(t, enable_tool_search));
         let reasoning = self
             .active_profile()
@@ -514,6 +525,17 @@ impl OpenAIProvider {
         context: &Context,
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
+        if let Some(profile) = self.active_profile()
+            && !profile.supports_streaming
+        {
+            return Err(ProviderError::Other {
+                message: format!(
+                    "OpenAI model '{}' is not supported by Tron's streaming Responses provider",
+                    self.config.model
+                ),
+            });
+        }
+
         debug!(
             model = %self.config.model,
             message_count = context.messages.len(),

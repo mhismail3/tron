@@ -66,6 +66,12 @@ pub const GPT_5_4_MINI: &str = "gpt-5.4-mini";
 /// GPT 5.4 Nano — smallest GPT-5.4 variant on the Platform API.
 pub const GPT_5_4_NANO: &str = "gpt-5.4-nano";
 
+/// GPT 5.5 Pro — non-streaming Platform model, hidden from the picker.
+pub const GPT_5_5_PRO: &str = "gpt-5.5-pro";
+
+/// GPT 5.2 Pro — higher-compute GPT-5.2 variant on the Platform API.
+pub const GPT_5_2_PRO: &str = "gpt-5.2-pro";
+
 /// GPT 5.3 Codex — `OpenAI` flagship.
 pub const GPT_5_3_CODEX: &str = "gpt-5.3-codex";
 
@@ -75,14 +81,113 @@ pub const GPT_5_3_CODEX_SPARK: &str = "gpt-5.3-codex-spark";
 /// GPT 5.2 — current canonical ID for GPT-5.2.
 pub const GPT_5_2: &str = "gpt-5.2";
 
+/// GPT 5.1 — previous GPT-5 model on the Platform API.
+pub const GPT_5_1: &str = "gpt-5.1";
+
+/// GPT 5 — previous GPT-5 model on the Platform API.
+pub const GPT_5: &str = "gpt-5";
+
+/// GPT 5 Mini.
+pub const GPT_5_MINI: &str = "gpt-5-mini";
+
+/// GPT 5 Nano.
+pub const GPT_5_NANO: &str = "gpt-5-nano";
+
+/// GPT 5 Pro.
+pub const GPT_5_PRO: &str = "gpt-5-pro";
+
+/// GPT 5 Codex.
+pub const GPT_5_CODEX: &str = "gpt-5-codex";
+
 /// GPT 5.2 Codex — deprecated compatibility alias for GPT-5.2.
 pub const GPT_5_2_CODEX: &str = "gpt-5.2-codex";
+
+/// GPT 5.1 Codex.
+pub const GPT_5_1_CODEX: &str = "gpt-5.1-codex";
 
 /// GPT 5.1 Codex Max.
 pub const GPT_5_1_CODEX_MAX: &str = "gpt-5.1-codex-max";
 
 /// GPT 5.1 Codex Mini.
 pub const GPT_5_1_CODEX_MINI: &str = "gpt-5.1-codex-mini";
+
+/// Codex Mini Latest.
+pub const CODEX_MINI_LATEST: &str = "codex-mini-latest";
+
+/// GPT 5.3 Chat Latest.
+pub const GPT_5_3_CHAT_LATEST: &str = "gpt-5.3-chat-latest";
+
+/// GPT 5.2 Chat Latest.
+pub const GPT_5_2_CHAT_LATEST: &str = "gpt-5.2-chat-latest";
+
+/// GPT 5.1 Chat Latest.
+pub const GPT_5_1_CHAT_LATEST: &str = "gpt-5.1-chat-latest";
+
+/// GPT 5 Chat Latest.
+pub const GPT_5_CHAT_LATEST: &str = "gpt-5-chat-latest";
+
+/// o3 reasoning model.
+pub const O3: &str = "o3";
+
+/// o3 Pro — non-streaming Platform model, hidden from the picker.
+pub const O3_PRO: &str = "o3-pro";
+
+/// o4 Mini reasoning model.
+pub const O4_MINI: &str = "o4-mini";
+
+/// o3 Mini reasoning model.
+pub const O3_MINI: &str = "o3-mini";
+
+/// o1 reasoning model.
+pub const O1: &str = "o1";
+
+/// o1 Mini reasoning model.
+pub const O1_MINI: &str = "o1-mini";
+
+/// o1 Preview reasoning model.
+pub const O1_PREVIEW: &str = "o1-preview";
+
+/// o1 Pro — non-streaming Platform model, hidden from the picker.
+pub const O1_PRO: &str = "o1-pro";
+
+/// GPT 4.1.
+pub const GPT_4_1: &str = "gpt-4.1";
+
+/// GPT 4.1 Mini.
+pub const GPT_4_1_MINI: &str = "gpt-4.1-mini";
+
+/// GPT 4.1 Nano.
+pub const GPT_4_1_NANO: &str = "gpt-4.1-nano";
+
+/// GPT 4o.
+pub const GPT_4O: &str = "gpt-4o";
+
+/// GPT 4o Mini.
+pub const GPT_4O_MINI: &str = "gpt-4o-mini";
+
+/// GPT 4.5 Preview.
+pub const GPT_4_5_PREVIEW: &str = "gpt-4.5-preview";
+
+/// GPT 4 Turbo.
+pub const GPT_4_TURBO: &str = "gpt-4-turbo";
+
+/// GPT 4 Turbo Preview — non-streaming Platform model, hidden from the picker.
+pub const GPT_4_TURBO_PREVIEW: &str = "gpt-4-turbo-preview";
+
+/// GPT 4.
+pub const GPT_4: &str = "gpt-4";
+
+/// GPT 3.5 Turbo — non-streaming Platform model, hidden from the picker.
+pub const GPT_3_5_TURBO: &str = "gpt-3.5-turbo";
+
+/// ChatGPT 4o Latest.
+pub const CHATGPT_4O_LATEST: &str = "chatgpt-4o-latest";
+
+/// GPT-OSS 120B.
+pub const GPT_OSS_120B: &str = "gpt-oss-120b";
+
+/// GPT-OSS 20B.
+pub const GPT_OSS_20B: &str = "gpt-oss-20b";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Google / Gemini
@@ -326,8 +431,11 @@ mod tests {
     fn openai_id_format() {
         for id in all_openai_model_ids() {
             assert!(
-                id.starts_with("gpt-"),
-                "OpenAI model ID should start with 'gpt-': {id}"
+                id.starts_with("gpt-")
+                    || id.starts_with("o")
+                    || id.starts_with("codex-")
+                    || id.starts_with("chatgpt-"),
+                "OpenAI model ID should use a known OpenAI family prefix: {id}"
             );
         }
     }
