@@ -189,11 +189,11 @@ See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac
 
 ### Add a new wizard step
 
-1. Add a case to `WizardStep` enum in `Sources/Wizard/WizardState.swift`.
+1. Add a case to `WizardStep` enum in `Sources/Services/Models.swift`.
 2. Create a new view file under `Sources/Wizard/Steps/`.
 3. Add a case to the `switch state.step` dispatcher in `WizardView.swift`.
 4. Add tests to `Tests/Wizard/WizardStepTests.swift` — at minimum, verify the step renders and the back/next buttons behave correctly.
-5. Update [`.claude/rules/wizard-steps.md`](../.claude/rules/wizard-steps.md) with the step's role.
+5. Update `packages/mac-app/docs/architecture.md` with the step's role.
 
 ### Add a new menu-bar item
 

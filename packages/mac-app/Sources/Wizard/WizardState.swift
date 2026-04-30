@@ -122,12 +122,15 @@ final class WizardState {
             let raw = defaults.string(forKey: Self.stepStorageKey)
             let persisted = raw.flatMap(WizardStep.init(rawValue:)) ?? .welcome
             // Only resume at steps that are safe to cold-start on.
-            // Post-install steps (.permissions, .transcription,
-            // .pairingInfo, .done) depend on transient state
+            // State-dependent post-install steps (.permissions,
+            // .transcription, .pairingInfo, .done) depend on transient state
             // (installOutcome, permissionStatuses, transcriptionOutcome,
-            // pairingPayload, …) that doesn't survive a relaunch. If
-            // we honour those on cold boot, the user lands mid-wizard
-            // with greyed-out Continue buttons and nothing to click.
+            // pairingPayload, …) that doesn't survive a relaunch. The
+            // informational .iosBeta handoff is safe to resume because
+            // it owns only a static TestFlight QR code. If we honour the
+            // state-dependent steps on cold boot, the user lands
+            // mid-wizard with greyed-out Continue buttons and nothing
+            // to click.
             // Clamp them back to welcome so onboarding always has a
             // coherent entry point.
             self.step = Self.isSafeToResume(persisted) ? persisted : .welcome
@@ -138,14 +141,15 @@ final class WizardState {
     }
 
     /// Steps the wizard can cold-resume at without transient runtime
-    /// state. Pre-permissions steps are always safe; post-install steps
-    /// assume `installOutcome` / `permissionStatuses` /
+    /// state. Pre-permissions steps are always safe, and the iOS beta
+    /// handoff owns only static TestFlight data; the other post-install
+    /// steps assume `installOutcome` / `permissionStatuses` /
     /// `transcriptionOutcome` / `pairingPayload`
     /// from an earlier navigation, so cold-booting into them strands the
     /// user behind a disabled Continue button.
     private static func isSafeToResume(_ step: WizardStep) -> Bool {
         switch step {
-        case .welcome, .tailscale, .install:
+        case .welcome, .tailscale, .install, .iosBeta:
             return true
         case .permissions, .transcription, .pairingInfo, .done:
             return false

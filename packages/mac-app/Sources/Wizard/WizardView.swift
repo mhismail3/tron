@@ -24,12 +24,14 @@ struct WizardView: View {
                 WelcomeStep()
             case .tailscale:
                 TailscaleStep(state: state)
+            case .install:
+                InstallStep(state: state)
             case .permissions:
                 PermissionsStep(state: state)
             case .transcription:
                 TranscriptionStep(state: state)
-            case .install:
-                InstallStep(state: state)
+            case .iosBeta:
+                IOSBetaStep()
             case .pairingInfo:
                 PairingInfoStep(state: state)
             case .done:
@@ -394,6 +396,14 @@ struct WizardShell<Content: View>: View {
             .buttonStyle(.wizardPrimary)
             .keyboardShortcut(.defaultAction)
             .disabled(state.installIsRunning)
+        case .iosBeta:
+            Button {
+                state.advance()
+            } label: {
+                Text("I installed Tron")
+            }
+            .buttonStyle(.wizardPrimary)
+            .keyboardShortcut(.defaultAction)
         case .pairingInfo:
             Button {
                 state.complete()

@@ -6,19 +6,21 @@ import Testing
 /// failing test instead of a confused user.
 @Suite("WizardStep ordering")
 struct WizardStepOrderingTests {
-    @Test("allCases is in canonical order (install precedes permissions and transcription)")
+    @Test("allCases is in canonical order (iOS beta precedes pairing)")
     func canonicalOrder() {
         // Install runs BEFORE permissions on purpose: the wrapper first
         // registers the LaunchAgent with its associated bundle IDs, then
         // probes/prompts the wrapper-owned TCC rows that macOS shows in
         // System Settings. Transcription comes after permissions so its
         // optional helper restart is the final first-run server restart.
+        // The iOS beta handoff must then run before the pairing QR.
         #expect(WizardStep.allCases == [
             .welcome,
             .tailscale,
             .install,
             .permissions,
             .transcription,
+            .iosBeta,
             .pairingInfo,
             .done,
         ])
@@ -31,6 +33,7 @@ struct WizardStepOrderingTests {
         #expect(WizardStep.permissions.rawValue == "permissions")
         #expect(WizardStep.transcription.rawValue == "transcription")
         #expect(WizardStep.install.rawValue == "install")
+        #expect(WizardStep.iosBeta.rawValue == "iosBeta")
         #expect(WizardStep.pairingInfo.rawValue == "pairingInfo")
         #expect(WizardStep.done.rawValue == "done")
     }
@@ -391,6 +394,43 @@ struct WizardVisualLayoutTests {
         #expect(shell.contains("setup.applyTranscriptionPreference"))
         #expect(shell.contains("case .transcription:"))
         #expect(shell.contains("transcriptionPrimaryLabel"))
+    }
+
+    @Test("iOS beta page owns the public TestFlight QR handoff")
+    func iosBetaPageOwnsPublicTestFlightQRHandoff() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let step = packageRoot.appending(path: "Sources/Wizard/Steps/IOSBetaStep.swift")
+        let source = try String(contentsOf: step, encoding: .utf8)
+        let shell = try String(contentsOf: packageRoot.appending(path: "Sources/Wizard/WizardView.swift"), encoding: .utf8)
+
+        #expect(IOSBetaStepContent.testFlightURL.absoluteString == "https://testflight.apple.com/join/xbuX1Grx")
+        #expect(IOSBetaStepContent.testFlightURL.host == "testflight.apple.com")
+        #expect(IOSBetaStepContent.testFlightURL.path == "/join/xbuX1Grx")
+        #expect(IOSBetaStepContent.displayLink == "testflight.apple.com/join/xbuX1Grx")
+        #expect(source.contains("QRCodeGenerator.makeImage("))
+        #expect(source.contains("IOSBetaStepContent.testFlightURL.absoluteString"))
+        #expect(source.contains("Link(destination: IOSBetaStepContent.testFlightURL)"))
+        #expect(source.contains("NSPasteboard.general"))
+        #expect(source.contains("WizardInfoCard"))
+        #expect(source.contains("private var scanCard"))
+        #expect(source.contains("HStack(alignment: .center, spacing: IOSBetaStepLayout.headerSpacing)"))
+        #expect(source.contains("horizontalPadding: IOSBetaStepLayout.cardHorizontalPadding"))
+        #expect(source.contains("verticalPadding: 0"))
+        #expect(source.contains(".padding(.top, IOSBetaStepLayout.linkTextTopPadding)"))
+        #expect(source.contains(".padding(.bottom, IOSBetaStepLayout.linkTextBottomPadding)"))
+        #expect(source.contains("width: IOSBetaStepLayout.iconFrameSize"))
+        #expect(!source.contains("scanIconReservedWidth"))
+        #expect(!source.contains("linkCardHorizontalPadding"))
+        #expect(!source.contains("linkCardVerticalPadding"))
+        #expect(!source.contains("Label(\"Open TestFlight page\""))
+        #expect(!source.contains("NSWorkspace.shared.open(IOSBetaStepContent.testFlightURL)"))
+        #expect(source.contains("TestFlight finishes installing Tron"))
+        #expect(shell.contains("case .iosBeta:"))
+        #expect(shell.contains("IOSBetaStep()"))
+        #expect(shell.contains("I installed Tron"))
     }
 
     @Test("low-density install and Tailscale pages use top-biased breathing room")

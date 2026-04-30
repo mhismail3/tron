@@ -40,7 +40,7 @@ struct WizardStateTests {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
         let state = WizardState(defaults: defaults)
-        let expected: [WizardStep] = [.tailscale, .install, .permissions, .transcription, .pairingInfo, .done]
+        let expected: [WizardStep] = [.tailscale, .install, .permissions, .transcription, .iosBeta, .pairingInfo, .done]
         for step in expected {
             state.advance()
             #expect(state.step == step, "after advance, expected \(step) got \(state.step)")
@@ -177,14 +177,12 @@ struct WizardStateTests {
 
     // MARK: - Cold-resume clamp
     //
-    // Post-install steps depend on transient state (`installOutcome`,
+    // State-dependent post-install steps depend on transient state (`installOutcome`,
     // `pairingPayload`, per-permission probes) that doesn't survive a
     // relaunch. If we honoured those on cold boot the user would land
-    // mid-wizard behind a disabled Continue button with no way to
-    // recover. `WizardState.init` clamps persisted post-install steps
-    // back to `.welcome`; these tests pin that contract — without them
-    // a future contributor could silently re-introduce the stranded-
-    // user regression that ordering changes in this branch shook out.
+    // mid-wizard behind a disabled Continue button with no way to recover.
+    // The iOS beta handoff is static and safe to resume; these tests pin
+    // both halves of that contract.
 
     @Test("persisted .permissions clamps back to welcome on cold start")
     func persistedPermissionsClamped() {
@@ -224,9 +222,9 @@ struct WizardStateTests {
         #expect(state.step == .welcome)
     }
 
-    @Test("safe-to-resume steps (welcome/tailscale/install) do NOT clamp")
+    @Test("safe-to-resume steps (welcome/tailscale/install/iOS beta) do NOT clamp")
     func safeToResumeNotClamped() {
-        for step in [WizardStep.welcome, .tailscale, .install] {
+        for step in [WizardStep.welcome, .tailscale, .install, .iosBeta] {
             let (defaults, cleanup) = Self.isolatedDefaults()
             defer { cleanup() }
             defaults.set(step.rawValue, forKey: WizardState.stepStorageKey)

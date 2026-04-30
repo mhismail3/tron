@@ -139,7 +139,7 @@ TronMacApp.main()
                 └─ WizardState.step = .welcome
                     → .tailscale → .install
                     → .permissions → .transcription
-                    → .pairingInfo → .done
+                    → .iosBeta → .pairingInfo → .done
                 └─ DoneStep taps "Finish"
                     ├─ setup.touchOnboardedSentinel()  ← atomic tempfile+rename
                     └─ post .tronWizardDidComplete
@@ -185,6 +185,13 @@ If the user enables the toggle, the wrapper writes
 `com.tron.server`, and waits for `system.ping`. The helper then owns the
 Python venv and HuggingFace cache under that same directory. If the user skips
 the step, the wrapper writes `enabled = false` and does not restart the helper.
+
+The iOS Beta step is a static handoff before pairing. It renders
+`https://testflight.apple.com/join/xbuX1Grx` as a QR code so the user's iPhone
+opens the public Tron TestFlight invite and installs the latest beta available
+to that tester group. The page also exposes copy/open fallbacks for the same
+URL, but it does not call the server or mutate onboarding state beyond normal
+step persistence.
 
 The Pairing step does not require a pre-existing `settings.json`. It
 reads the agent-issued `auth.json` bearer token, confirms the server is answering

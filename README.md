@@ -166,8 +166,8 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 
 1. Install [Tailscale](https://tailscale.com) and sign in on the Mac that will host the agent.
 2. Download the latest `tron-v*.dmg` from [GitHub Releases](https://github.com/mhismail3/tron/releases) and drag `Tron.app` into `/Applications`.
-3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, and displays pairing info (Tailscale IP + port + bearer token + server name + QR code).
-4. On iPhone, install the Tron TestFlight build. The app opens to the dashboard and presents a compact onboarding sheet; install/sign in to Tailscale on the phone, then scan the Mac pairing QR or enter the pairing fields manually.
+3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, local transcription preference, and the iOS handoff.
+4. On iPhone, scan the wizard's Tron iOS Beta QR code to open the public TestFlight invite, install the latest available Tron beta, then scan the Mac pairing QR or enter the pairing fields manually.
 
 The wizard and menu bar surface everything else (`Check for updates`, `Send feedback`, `Restart server`, etc.) — you never need the CLI unless you want to.
 
@@ -747,7 +747,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
 
 ```
 packages/mac-app/Sources/
@@ -756,7 +756,7 @@ packages/mac-app/Sources/
 +-- Wizard/                    First-run flow
 |   +-- WizardState.swift      @Observable state machine + `WizardStep` enum
 |   +-- WizardView.swift       NavigationStack shell
-|   +-- Steps/                 Welcome, Tailscale, Install, Permissions, Transcription, Pairing, Done
+|   +-- Steps/                 Welcome, Tailscale, Install, Permissions, Transcription, iOS Beta, Pairing, Done
 +-- MenuBar/                   NSStatusItem controller, status polling, copy actions, update submenu
 +-- Services/
 |   +-- Server/                Bearer-token reader, `system.ping` client, status poller
@@ -781,8 +781,9 @@ packages/mac-app/Sources/
 3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system.ping` answers. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles `requiresApproval` by opening Login Items settings, and polls `system.ping` while ignoring initial `connection.established` frames.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, labels the exact app entry to enable for each permission, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after wizard-opened Settings panes, and keeps Re-check as a non-restarting probe.
 5. **Transcription** — opt-in step for local voice transcription. The step copies `worker.py` and `requirements.txt` from the signed app bundle into `~/.tron/system/transcription/` so the setting can be enabled later. Enabling writes `server.transcription.enabled = true`, restarts the helper once, and lets the Parakeet model download into `~/.tron/system/transcription/models/hf/` when the sidecar starts. Skipping writes `enabled = false` and does not restart the server.
-6. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
-7. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
+6. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open fallbacks. TestFlight then owns beta availability and update selection.
+7. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
+8. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
 
 ### Menu-bar Actions
 

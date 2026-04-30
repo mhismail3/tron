@@ -8,6 +8,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     case install
     case permissions
     case transcription
+    case iosBeta
     case pairingInfo
     case done
 
@@ -23,6 +24,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .tailscale: return "Tailscale"
         case .permissions: return "Permissions"
         case .transcription: return "Transcription"
+        case .iosBeta: return "Install iOS Beta"
         case .install: return "Install Tron"
         case .pairingInfo: return "Pair your iPhone"
         case .done: return "You're all set"
@@ -39,6 +41,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .tailscale: return .symbol("network")
         case .permissions: return .symbol("lock.shield.fill")
         case .transcription: return .symbol("waveform")
+        case .iosBeta: return .symbol("iphone")
         case .install: return .symbol("arrow.down.circle.fill")
         case .pairingInfo: return .symbol("qrcode")
         case .done: return .symbol("checkmark.seal.fill")
@@ -60,6 +63,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .tailscale: return 360
         case .permissions: return 480
         case .transcription: return 400
+        case .iosBeta: return 420
         case .install: return 440
         case .pairingInfo: return 420
         case .done: return 320
