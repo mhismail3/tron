@@ -444,24 +444,17 @@ jobs:
               CODE_SIGNING_ALLOWED=NO \
               -quiet
           else
-            archive_args=(DEVELOPMENT_TEAM="$APPLE_TEAM_ID")
-            if [[ "${IOS_SIGNING_MODE:-automatic}" == "manual" ]]; then
-              archive_args+=(CODE_SIGN_IDENTITY="$IOS_DISTRIBUTION_IDENTITY")
-            else
-              archive_args+=(
-                -allowProvisioningUpdates
-                -authenticationKeyPath "$APPLE_API_KEY_PATH"
-                -authenticationKeyID "$APPLE_API_KEY_ID"
-                -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID"
-              )
-            fi
             xcodebuild archive \
               -project TronMobile.xcodeproj \
               -scheme "$IOS_SCHEME" \
               -configuration "$IOS_CONFIGURATION" \
               -archivePath "$archive_path" \
               -destination 'generic/platform=iOS' \
-              "${archive_args[@]}" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$APPLE_API_KEY_PATH" \
+              -authenticationKeyID "$APPLE_API_KEY_ID" \
+              -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
+              DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
               -quiet
           fi
           echo "ARCHIVE_PATH=$archive_path" >> "$GITHUB_ENV"
