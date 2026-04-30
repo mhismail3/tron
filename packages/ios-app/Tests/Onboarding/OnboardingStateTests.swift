@@ -55,6 +55,38 @@ struct OnboardingStateTests {
         #expect(OnboardingState.Step.model.toolbarTitle == "Default model")
     }
 
+    @Test("Preparation page copy matches the sheet flow")
+    func preparationPageCopyMatchesFlow() {
+        #expect(OnboardingCopy.welcomeSubtitle == "Tron is a local, private AI agent that runs on your machine. Unlike other agents, you talk to Tron from your iPhone.")
+        #expect(OnboardingCopy.welcomeRows.map(\.title) == [
+            "Install the Mac server",
+            "Connect privately",
+            "Pair seamlessly",
+        ])
+        #expect(OnboardingCopy.welcomeRows.map(\.subtitle) == [
+            "Tron runs in the background on your Mac device",
+            "Tron uses your Tailscale account to securely and privately link your devices",
+            "Use the QR code provided during Mac installation to quickly pair your iPhone",
+        ])
+
+        #expect(OnboardingCopy.tailscaleSubtitle == "Tron uses your Tailscale account to link your devices on your private tailnet. This requires the Tailscale VPN to be set up on this iPhone.")
+        #expect(OnboardingCopy.tailscaleRows.map(\.title) == [
+            "Download the Tailscale app",
+            "Sign in to your account",
+            "Come back here when connected",
+        ])
+        #expect(OnboardingCopy.tailscaleRows.map(\.subtitle) == [
+            "Use the link below to download Tailscale from the App Store",
+            "Use the same account you use to sign in on your Mac",
+            "Tron verifies reachability when you connect to the Mac server",
+        ])
+
+        #expect(OnboardingCopy.installMacSubtitle == "Tron runs on your own Mac device in the background. Install the Tron server on your Mac, then come back here when the installer shows the QR code pairing screen.")
+        #expect(OnboardingCopy.installMacCopyButtonTitle == "Copy Link")
+        #expect(OnboardingCopy.installMacCopiedButtonTitle == "Copied")
+        #expect(OnboardingCopy.installMacReleasesButtonTitle == "Open Releases page")
+    }
+
     @Test("complete() flips the AppStorage flag")
     func completeFlipsFlag() {
         let defaults = ephemeralDefaults()

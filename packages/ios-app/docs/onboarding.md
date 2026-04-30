@@ -14,6 +14,16 @@ the Mac connection succeeds. The sheet follows the app's
 standard Liquid Glass chrome: hidden drag handle, principal toolbar
 title, and a floating progress-dot indicator at the bottom.
 
+The three preparation pages set expectations before pairing. Welcome
+introduces Tron as a local, private AI agent controlled from iPhone, then
+shows rows for installing the Mac server, connecting privately with
+Tailscale, and pairing with the Mac installation QR code. The Tailscale page
+explains that the iPhone must have Tailscale VPN set up on the user's private
+tailnet, then points the user to download Tailscale, sign into the same
+account used on the Mac, and return once connected. The Mac installer page
+explains that Tron runs in the background on the user's Mac, then shows
+full-width actions with `Copy Link` above `Open Releases page`.
+
 When Settings launches onboarding for a new server, the same sheet opens
 directly on the connect step with a top-left dismiss button and still requires
 a QR scan, pasted pairing link, or manual token before Connect is enabled. When
@@ -235,7 +245,7 @@ phone reaches it.
 iOS does not expose a reliable public API for this app to inspect the
 state of a third-party Tailscale VPN profile. The onboarding Tailscale
 page therefore links to the App Store and asks the user to return once
-Tailscale says Connected; the real validation happens during the
+Tailscale is connected; the real validation happens during the
 pairing probe.
 
 ## QR Scanning
@@ -245,7 +255,7 @@ and returns only the raw code string. `PairingStep` is responsible for
 parsing with `PairingURLParser`, so scanning, paste, manual links, and
 deep links all converge on one parser and one `OnboardingState` mutation.
 The visible pairing page is QR-first: manual entry stays hidden behind
-the centered "Enter Manually" action until the user asks for it. A valid
+the larger centered "Enter Manually" action until the user asks for it. A valid
 QR scan dismisses the camera sheet, flips the toolbar Connect action into
 its loading state, and automatically runs the normal probe/persist path.
 Invalid scans or failed probes stay on the sheet and show the inline error

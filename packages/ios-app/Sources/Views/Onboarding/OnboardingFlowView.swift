@@ -158,6 +158,57 @@ struct OnboardingFlowView: View {
     }
 }
 
+internal struct OnboardingInfoCopy: Equatable {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+}
+
+internal enum OnboardingCopy {
+    static let welcomeSubtitle = "Tron is a local, private AI agent that runs on your machine. Unlike other agents, you talk to Tron from your iPhone."
+    static let welcomeRows = [
+        OnboardingInfoCopy(
+            systemImage: "desktopcomputer",
+            title: "Install the Mac server",
+            subtitle: "Tron runs in the background on your Mac device"
+        ),
+        OnboardingInfoCopy(
+            systemImage: "network",
+            title: "Connect privately",
+            subtitle: "Tron uses your Tailscale account to securely and privately link your devices"
+        ),
+        OnboardingInfoCopy(
+            systemImage: "qrcode.viewfinder",
+            title: "Pair seamlessly",
+            subtitle: "Use the QR code provided during Mac installation to quickly pair your iPhone"
+        ),
+    ]
+
+    static let tailscaleSubtitle = "Tron uses your Tailscale account to link your devices on your private tailnet. This requires the Tailscale VPN to be set up on this iPhone."
+    static let tailscaleRows = [
+        OnboardingInfoCopy(
+            systemImage: "app.badge",
+            title: "Download the Tailscale app",
+            subtitle: "Use the link below to download Tailscale from the App Store"
+        ),
+        OnboardingInfoCopy(
+            systemImage: "person.crop.circle",
+            title: "Sign in to your account",
+            subtitle: "Use the same account you use to sign in on your Mac"
+        ),
+        OnboardingInfoCopy(
+            systemImage: "checkmark.shield",
+            title: "Come back here when connected",
+            subtitle: "Tron verifies reachability when you connect to the Mac server"
+        ),
+    ]
+
+    static let installMacSubtitle = "Tron runs on your own Mac device in the background. Install the Tron server on your Mac, then come back here when the installer shows the QR code pairing screen."
+    static let installMacCopyButtonTitle = "Copy Link"
+    static let installMacCopiedButtonTitle = "Copied"
+    static let installMacReleasesButtonTitle = "Open Releases page"
+}
+
 @available(iOS 26.0, *)
 private struct OnboardingPageDots: View {
     let currentStep: OnboardingState.Step
@@ -188,32 +239,34 @@ private struct OnboardingPageDots: View {
 }
 
 @available(iOS 26.0, *)
+private struct OnboardingInfoRows: View {
+    let rows: [OnboardingInfoCopy]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: TronSpacing.md) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                OnboardingInfoRow(
+                    systemImage: row.systemImage,
+                    title: row.title,
+                    subtitle: row.subtitle
+                )
+                if index < rows.count - 1 {
+                    Divider().overlay(Color.tronBorder.opacity(0.4))
+                }
+            }
+        }
+    }
+}
+
+@available(iOS 26.0, *)
 private struct WelcomeOnboardingPage: View {
     var body: some View {
         OnboardingPage(
-            subtitle: "Set up the pieces once, then use this iPhone as the remote for your Mac."
+            subtitle: OnboardingCopy.welcomeSubtitle
         ) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
                 OnboardingGlassCard {
-                    VStack(alignment: .leading, spacing: TronSpacing.md) {
-                        OnboardingInfoRow(
-                            systemImage: "network",
-                            title: "Connect privately",
-                            subtitle: "Tailscale links this iPhone to your Mac over your tailnet."
-                        )
-                        Divider().overlay(Color.tronBorder.opacity(0.4))
-                        OnboardingInfoRow(
-                            systemImage: "desktopcomputer",
-                            title: "Install the Mac server",
-                            subtitle: "Tron Server runs quietly in the background on your Mac."
-                        )
-                        Divider().overlay(Color.tronBorder.opacity(0.4))
-                        OnboardingInfoRow(
-                            systemImage: "qrcode.viewfinder",
-                            title: "Pair with a QR code",
-                            subtitle: "The Mac app shows the code after the server is ready."
-                        )
-                    }
+                    OnboardingInfoRows(rows: OnboardingCopy.welcomeRows)
                 }
             }
         }
@@ -226,23 +279,11 @@ private struct InstallTailscaleOnboardingPage: View {
 
     var body: some View {
         OnboardingPage(
-            subtitle: "Install Tailscale on this iPhone, sign in, and come back when it says Connected."
+            subtitle: OnboardingCopy.tailscaleSubtitle
         ) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
                 OnboardingGlassCard {
-                    VStack(alignment: .leading, spacing: TronSpacing.md) {
-                        OnboardingInfoRow(
-                            systemImage: "network",
-                            title: "Tailscale for iPhone",
-                            subtitle: "Use the same Tailscale account you use on the Mac."
-                        )
-                        Divider().overlay(Color.tronBorder.opacity(0.4))
-                        OnboardingInfoRow(
-                            systemImage: "checkmark.shield",
-                            title: "Come back when connected",
-                            subtitle: "Tron verifies reachability when you connect to the Mac server."
-                        )
-                    }
+                    OnboardingInfoRows(rows: OnboardingCopy.tailscaleRows)
                 }
 
                 OnboardingLinkButton(
@@ -263,7 +304,7 @@ private struct InstallMacOnboardingPage: View {
 
     var body: some View {
         OnboardingPage(
-            subtitle: "Install Tron Server on your Mac, then come back here when the Mac installer shows the pairing screen."
+            subtitle: OnboardingCopy.installMacSubtitle
         ) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
                 OnboardingGlassCard {
@@ -287,21 +328,22 @@ private struct InstallMacOnboardingPage: View {
                     }
                 }
 
-                HStack(spacing: TronSpacing.sm) {
+                VStack(spacing: TronSpacing.sm) {
                     OnboardingLinkButton(
-                        title: "Open releases",
+                        title: didCopy
+                            ? OnboardingCopy.installMacCopiedButtonTitle
+                            : OnboardingCopy.installMacCopyButtonTitle,
+                        systemImage: didCopy ? "checkmark" : "doc.on.doc",
+                        tintOpacity: didCopy ? 0.28 : 0.16,
+                        action: copyDownloadURL
+                    )
+
+                    OnboardingLinkButton(
+                        title: OnboardingCopy.installMacReleasesButtonTitle,
                         systemImage: "safari"
                     ) {
                         openURL(AppConstants.dmgDownloadPage)
                     }
-
-                    OnboardingLinkButton(
-                        title: didCopy ? "Copied" : "Copy",
-                        systemImage: didCopy ? "checkmark" : "doc.on.doc",
-                        width: 128,
-                        tintOpacity: didCopy ? 0.28 : 0.16,
-                        action: copyDownloadURL
-                    )
                 }
             }
         }

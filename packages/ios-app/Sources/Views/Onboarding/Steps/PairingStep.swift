@@ -79,7 +79,7 @@ struct PairingStep: View {
 
                 Button(action: openScanner) {
                     Image(systemName: "camera.viewfinder")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeHero, weight: .semibold))
                         .frame(width: 76, height: 76)
                         .foregroundStyle(Color.tronEmerald)
                         .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
@@ -102,12 +102,13 @@ struct PairingStep: View {
             }
         } label: {
             Text(showsManualEntry ? "Hide Manual Entry" : "Enter Manually")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
+        .padding(.top, TronSpacing.sm)
     }
 
     private var manualEntrySection: some View {
