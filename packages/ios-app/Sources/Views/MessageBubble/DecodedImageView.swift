@@ -9,6 +9,7 @@ struct DecodedImageView: View {
     let data: Data
     let size: CGSize
 
+    @Environment(\.displayScale) private var displayScale
     @State private var uiImage: UIImage?
 
     private nonisolated(unsafe) static let cache: NSCache<NSData, UIImage> = {
@@ -29,8 +30,7 @@ struct DecodedImageView: View {
         }
         .frame(width: size.width, height: size.height)
         .task(id: data) {
-            let scale = UIScreen.main.scale
-            uiImage = await Self.decodeImage(data, fitting: size, scale: scale)
+            uiImage = await Self.decodeImage(data, fitting: size, scale: displayScale)
         }
     }
 

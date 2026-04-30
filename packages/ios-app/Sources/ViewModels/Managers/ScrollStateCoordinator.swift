@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Coordinates scroll state for chat views using `onScrollPhaseChange` (iOS 18+)
+/// Coordinates scroll state for chat views using `onScrollPhaseChange`
 /// for definitive user-vs-programmatic scroll detection.
 ///
 /// ## Architecture
@@ -24,7 +24,6 @@ import SwiftUI
 /// geometry update arriving after phase → idle still correctly attributes the scroll to
 /// the user.
 @Observable
-@available(iOS 18.0, *)
 @MainActor
 final class ScrollStateCoordinator {
 

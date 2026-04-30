@@ -92,13 +92,19 @@ extension ButtonStyle where Self == NoFeedbackButtonStyle {
 @MainActor
 struct LargeFormSizing: PresentationSizing {
     nonisolated func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
-        // Get screen bounds for sizing reference (using nonisolated unsafe access)
-        let screenBounds = MainActor.assumeIsolated { UIScreen.main.bounds }
+        let screenBounds = MainActor.assumeIsolated {
+            UIApplication.shared.connectedScenes
+                .compactMap { ($0 as? UIWindowScene)?.screen.bounds }
+                .first ?? .zero
+        }
+        let fallbackSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
+        let referenceWidth = screenBounds.width > 0 ? screenBounds.width : fallbackSize.width
+        let referenceHeight = screenBounds.height > 0 ? screenBounds.height : fallbackSize.height
 
         // Use 60% of screen width and 80% of height for a "large form" look
         // This is smaller than .page but larger than .form
-        let width = screenBounds.width * 0.60
-        let height = screenBounds.height * 0.80
+        let width = referenceWidth * 0.60
+        let height = referenceHeight * 0.80
 
         return ProposedViewSize(width: width, height: height)
     }

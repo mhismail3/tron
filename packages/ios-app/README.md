@@ -5,8 +5,8 @@ Native iOS client for the Tron AI assistant, connecting via WebSocket to your Tr
 ## Requirements
 
 - macOS 15+ (Sequoia)
-- Xcode 16+
-- iOS 18.0+ device or simulator
+- Xcode 26+
+- iOS 26.0+ device or simulator
 - An Apple ID (free account works for sideloading)
 
 ## Quick Start
@@ -137,13 +137,13 @@ packages/ios-app/
 # Build for simulator (production)
 xcodebuild -project TronMobile.xcodeproj \
   -scheme Tron \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   build
 
 # Build for simulator (beta)
 xcodebuild -project TronMobile.xcodeproj \
   -scheme 'Tron Beta' \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   build
 ```
 

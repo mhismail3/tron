@@ -1,7 +1,7 @@
 // Base.xcconfig - Shared settings for all configurations
 
 // Deployment
-IPHONEOS_DEPLOYMENT_TARGET = 18.0
+IPHONEOS_DEPLOYMENT_TARGET = 26.0
 SWIFT_VERSION = 6.0
 TRON_FEEDBACK_EMAIL =
 

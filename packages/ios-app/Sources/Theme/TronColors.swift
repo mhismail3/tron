@@ -268,7 +268,7 @@ private struct SectionFillModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        if #available(iOS 26.0, *), compact {
+        if compact {
             if interactive {
                 content
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -302,10 +302,6 @@ extension View {
         self.modifier(SectionFillModifier(color: color, cornerRadius: cornerRadius, subtle: subtle, compact: compact, interactive: interactive))
     }
 
-    /// Adaptive chip fill + stroke for capsule-shaped tool chips.
-    func chipFill(_ color: Color, strokeOpacity: Double = 0.4) -> some View {
-        self.modifier(ChipFillModifier(color: color, strokeOpacity: strokeOpacity))
-    }
 }
 
 // MARK: - Adaptive Count Badge
@@ -339,22 +335,17 @@ extension View {
     }
 }
 
-// MARK: - Chip Style (iOS 26 Glass / Fallback)
+// MARK: - Chip Style
 
 private struct ChipStyleModifier: ViewModifier {
     let tintColor: Color
     let tintOpacity: Double
-    let strokeOpacity: Double
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(
-                .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
-                in: .capsule
-            )
-        } else {
-            content.chipFill(tintColor, strokeOpacity: strokeOpacity)
-        }
+        content.glassEffect(
+            .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
+            in: .capsule
+        )
     }
 }
 
@@ -363,47 +354,22 @@ private struct ChipStyleMaterialModifier: ViewModifier {
     let tintOpacity: Double
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(
-                .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
-                in: .capsule
-            )
-        } else {
-            content
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(Color.tronOverlay(0.2), lineWidth: 0.5)
-                )
-        }
+        content.glassEffect(
+            .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
+            in: .capsule
+        )
     }
 }
 
 extension View {
-    /// Applies glass effect on iOS 26+, chipFill on older iOS.
-    func chipStyle(_ tintColor: Color, tintOpacity: Double = 0.35, strokeOpacity: Double = 0.4) -> some View {
-        modifier(ChipStyleModifier(tintColor: tintColor, tintOpacity: tintOpacity, strokeOpacity: strokeOpacity))
+    /// Applies the standard capsule glass effect.
+    func chipStyle(_ tintColor: Color, tintOpacity: Double = 0.35) -> some View {
+        modifier(ChipStyleModifier(tintColor: tintColor, tintOpacity: tintOpacity))
     }
 
-    /// Applies glass effect on iOS 26+, ultraThinMaterial on older iOS.
+    /// Applies the standard capsule material glass effect.
     func chipStyleMaterial(_ tintColor: Color, tintOpacity: Double = 0.35) -> some View {
         modifier(ChipStyleMaterialModifier(tintColor: tintColor, tintOpacity: tintOpacity))
-    }
-}
-
-private struct ChipFillModifier: ViewModifier {
-    let color: Color
-    let strokeOpacity: Double
-    @Environment(\.colorScheme) var colorScheme
-
-    private var fillOpacity: Double {
-        colorScheme == .dark ? 0.15 : 0.14
-    }
-
-    func body(content: Content) -> some View {
-        content
-            .background(Capsule().fill(color.opacity(fillOpacity)))
-            .overlay(Capsule().strokeBorder(color.opacity(strokeOpacity), lineWidth: 0.5))
     }
 }
 

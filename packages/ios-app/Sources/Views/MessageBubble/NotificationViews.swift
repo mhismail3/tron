@@ -40,15 +40,11 @@ private struct PillBackground: ViewModifier {
 
     func body(content: Content) -> some View {
         if interactive {
-            if #available(iOS 26.0, *) {
-                content
-                    .glassEffect(
-                        .regular.tint(tint.opacity(0.35)).interactive(),
-                        in: .capsule
-                    )
-            } else {
-                solidBackground(content)
-            }
+            content
+                .glassEffect(
+                    .regular.tint(tint.opacity(0.35)).interactive(),
+                    in: .capsule
+                )
         } else {
             solidBackground(content)
         }
@@ -827,4 +823,3 @@ struct SkillsClearedNotificationView: View {
         .animation(.smooth(duration: 0.25), value: isActivated)
     }
 }
-

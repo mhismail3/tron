@@ -23,11 +23,7 @@ struct LogViewer: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if #available(iOS 26.0, *) {
-                        Button(role: .close) { dismiss() }
-                    } else {
-                        Button("Close", systemImage: "xmark") { dismiss() }
-                    }
+                    Button(role: .close) { dismiss() }
                 }
 
                 ToolbarItem(placement: .principal) {
@@ -267,25 +263,34 @@ struct LogRow: View {
     private var message: String { entry.3 }
 
     var body: some View {
-        (Text(formatTime(date))
-            .font(.system(.caption2, design: .monospaced))
-            .foregroundColor(.gray)
-        + Text(" \u{25CF} ")
-            .font(.system(size: 6, design: .monospaced))
-            .foregroundColor(levelColor)
-        + Text("[\(category.rawValue)] ")
-            .font(.system(.caption, design: .monospaced))
-            .foregroundColor(categoryColor)
-        + Text(message)
-            .font(.system(.caption, design: .monospaced))
-            .foregroundColor(levelColor))
+        Text(Self.attributedString(date: date, category: category, level: level, message: message))
         .lineLimit(nil)
         .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, 2)
     }
 
-    private var levelColor: Color {
-        switch level {
+    @MainActor
+    static func attributedString(date: Date, category: LogCategory, level: LogLevel, message: String) -> AttributedString {
+        var result = AttributedString()
+        result.append(segment(DateParser.formatLogTimestamp(date), font: .system(.caption2, design: .monospaced), color: .gray))
+        result.append(segment(" \u{25CF} ", font: .system(size: 6, design: .monospaced), color: level.color))
+        result.append(segment("[\(category.rawValue)] ", font: .system(.caption, design: .monospaced), color: category.color))
+        result.append(segment(message, font: .system(.caption, design: .monospaced), color: level.color))
+        return result
+    }
+
+    private static func segment(_ text: String, font: Font, color: Color) -> AttributedString {
+        var segment = AttributedString(text)
+        segment.font = font
+        segment.foregroundColor = color
+        return segment
+    }
+
+}
+
+private extension LogLevel {
+    var color: Color {
+        switch self {
         case .verbose: return .gray
         case .debug: return .cyan
         case .info: return .green
@@ -294,9 +299,11 @@ struct LogRow: View {
         case .none: return .gray
         }
     }
+}
 
-    private var categoryColor: Color {
-        switch category {
+private extension LogCategory {
+    var color: Color {
+        switch self {
         case .websocket: return .blue
         case .rpc: return .purple
         case .session: return .orange
@@ -309,10 +316,6 @@ struct LogRow: View {
         case .database: return .indigo
         case .audio: return .mint
         }
-    }
-
-    private func formatTime(_ date: Date) -> String {
-        DateParser.formatLogTimestamp(date)
     }
 }
 

@@ -57,7 +57,7 @@ struct CommandToolChip: View {
             .animation(.smooth(duration: 0.3), value: data.formattedDuration)
         }
         .buttonStyle(.plain)
-        .chipStyle(statusColor, tintOpacity: 0.25, strokeOpacity: 0.3)
+        .chipStyle(statusColor, tintOpacity: 0.25)
         .chipAccessibility(tool: data.displayName, status: data.status.label, summary: data.summary)
     }
 

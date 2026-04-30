@@ -7,9 +7,11 @@ import Foundation
 /// Redactions applied:
 /// - `Authorization: Bearer <token>` and bare `Bearer <token>` →
 ///   `Bearer [redacted:len=N]`.
-/// - JSON-shaped `"token":"..."`, `"authorization":"Bearer ..."`,
-///   `"access_token":"..."`, `"api_key":"..."` → value replaced with
-///   `[redacted:len=N]`.
+/// - JSON-shaped auth keys such as `"token":"..."`, `"apiKey":"..."`,
+///   `"accessToken":"..."`, and `"clientSecret":"..."` → value
+///   replaced with `[redacted:len=N]`.
+/// - Swift `String(describing:)` auth fields such as
+///   `apiKey: "..."` → value replaced with `[redacted:len=N]`.
 /// - Local filesystem paths such as `/Users/<username>/...`,
 ///   `/private/var/...`, `/tmp/...`, and `~/...` →
 ///   `[redacted:path]`.
@@ -36,6 +38,7 @@ struct DiagnosticsRedactor {
         var out = input
         out = Self.redactBearerRuns(out)
         out = Self.redactJSONTokenValues(out)
+        out = Self.redactSwiftDescriptionTokenValues(out)
         out = Self.redactLocalPaths(out)
         return out
     }
@@ -100,12 +103,20 @@ struct DiagnosticsRedactor {
         )
     }()
 
-    /// Matches `"key":"<value>"` for a small allowlist of keys known
-    /// to carry tokens.
+    /// Matches `"key":"<value>"` for keys known to carry tokens.
     private static let jsonTokenRegex: NSRegularExpression = {
         // swiftlint:disable:next force_try — static pattern
         try! NSRegularExpression(
-            pattern: #""(token|authorization|bearer|access_token|api_key)"\s*:\s*"([^"]{8,})""#,
+            pattern: #""(token|authorization|bearer|access_token|api_key|apiKey|accessToken|refreshToken|clientSecret|authorizationCode|authCode|oauthCode|code)"\s*:\s*"([^"]{8,})""#,
+            options: [.caseInsensitive]
+        )
+    }()
+
+    /// Matches Swift debug-description fields like `apiKey: "value"`.
+    private static let swiftDescriptionTokenRegex: NSRegularExpression = {
+        // swiftlint:disable:next force_try — static pattern
+        try! NSRegularExpression(
+            pattern: #"\b(token|authorization|bearer|apiKey|accessToken|refreshToken|clientSecret|authorizationCode|authCode|oauthCode|code)\s*:\s*"([^"]{8,})""#,
             options: [.caseInsensitive]
         )
     }()
@@ -144,6 +155,24 @@ struct DiagnosticsRedactor {
     private static func redactJSONTokenValues(_ input: String) -> String {
         let ns = input as NSString
         let matches = jsonTokenRegex.matches(in: input, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return input }
+
+        var out = input
+        for match in matches.reversed() where match.numberOfRanges >= 3 {
+            let valueRange = match.range(at: 2)
+            guard let swiftRange = Range(valueRange, in: out) else { continue }
+            let original = String(out[swiftRange])
+            let replacement = "[redacted:len=\(original.count)]"
+            out.replaceSubrange(swiftRange, with: replacement)
+        }
+        return out
+    }
+
+    /// Redacts Swift debug-description token values. Keeps the field
+    /// label, replaces the quoted value with `[redacted:len=N]`.
+    private static func redactSwiftDescriptionTokenValues(_ input: String) -> String {
+        let ns = input as NSString
+        let matches = swiftDescriptionTokenRegex.matches(in: input, range: NSRange(location: 0, length: ns.length))
         guard !matches.isEmpty else { return input }
 
         var out = input

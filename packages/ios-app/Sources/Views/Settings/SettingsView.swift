@@ -105,12 +105,10 @@ struct SettingsView: View {
                 case .providers:
                     ProvidersSettingsPage()
                 case .app:
-                    if #available(iOS 26.0, *) {
-                        AppearanceSettingsPage(
-                            confirmArchive: $confirmArchive,
-                            autoMarkRead: $autoMarkRead
-                        )
-                    }
+                    AppearanceSettingsPage(
+                        confirmArchive: $confirmArchive,
+                        autoMarkRead: $autoMarkRead
+                    )
                 case .mcpServers:
                     MCPServersPage(
                         settingsState: settingsState,
@@ -203,16 +201,14 @@ struct SettingsView: View {
 
     private var appSettingsSection: some View {
         VStack(alignment: .leading, spacing: MainSettingsListLayout.categorySpacing) {
-            if #available(iOS 26.0, *) {
-                SettingsCard(accent: MainSettingsLocalCategoryStyle.accent, interactive: true) {
-                    categoryRow(
-                        icon: MainSettingsLocalCategoryStyle.appIcon,
-                        label: "App",
-                        subtitle: "Appearance, notifications, and local behavior",
-                        accent: MainSettingsLocalCategoryStyle.accent
-                    ) {
-                        activePage = .app
-                    }
+            SettingsCard(accent: MainSettingsLocalCategoryStyle.accent, interactive: true) {
+                categoryRow(
+                    icon: MainSettingsLocalCategoryStyle.appIcon,
+                    label: "App",
+                    subtitle: "Appearance, notifications, and local behavior",
+                    accent: MainSettingsLocalCategoryStyle.accent
+                ) {
+                    activePage = .app
                 }
             }
         }
@@ -703,27 +699,12 @@ private struct FooterFeedbackButtonChromeModifier: ViewModifier {
     )
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(
-                .regular
-                    .tint(Color.tronTextMuted.opacity(MainSettingsFooterLayout.feedbackButtonGlassTintOpacity))
-                    .interactive(),
-                in: shape
-            )
-        } else {
-            content
-                .background(.ultraThinMaterial, in: shape)
-                .background(
-                    Color.tronTextMuted.opacity(MainSettingsFooterLayout.feedbackButtonFallbackTintOpacity),
-                    in: shape
-                )
-                .overlay {
-                    shape.stroke(
-                        .gray.opacity(MainSettingsFooterLayout.feedbackButtonFallbackStrokeOpacity),
-                        lineWidth: 1
-                    )
-                }
-        }
+        content.glassEffect(
+            .regular
+                .tint(Color.tronTextMuted.opacity(MainSettingsFooterLayout.feedbackButtonGlassTintOpacity))
+                .interactive(),
+            in: shape
+        )
     }
 }
 

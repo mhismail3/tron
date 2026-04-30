@@ -24,9 +24,7 @@ struct AgentSettingsPage: View {
     var body: some View {
         SettingsPageContainer(title: "Agent") {
             summaryCard
-            if #available(iOS 26.0, *) {
-                quickSessionCard
-            }
+            quickSessionCard
             hooksSection
             promptLibrarySection
             messageQueueCard
@@ -48,32 +46,28 @@ struct AgentSettingsPage: View {
             )
         }
         .sheet(isPresented: $showDefaultModelPicker) {
-            if #available(iOS 26.0, *) {
-                ModelPickerSheet(
-                    models: settingsState.availableModels,
-                    currentModelId: defaultModelValue,
-                    onSelect: { model in
-                        defaultModelBinding.wrappedValue = model.id
-                        updateServerSetting {
-                            ServerSettingsUpdate(server: .init(defaultModel: model.id))
-                        }
+            ModelPickerSheet(
+                models: settingsState.availableModels,
+                currentModelId: defaultModelValue,
+                onSelect: { model in
+                    defaultModelBinding.wrappedValue = model.id
+                    updateServerSetting {
+                        ServerSettingsUpdate(server: .init(defaultModel: model.id))
                     }
-                )
-            }
+                }
+            )
         }
         .sheet(isPresented: $showHooksModelPicker) {
-            if #available(iOS 26.0, *) {
-                ModelPickerSheet(
-                    models: settingsState.availableModels,
-                    currentModelId: settingsState.hooksLlmModel,
-                    onSelect: { model in
-                        settingsState.hooksLlmModel = model.id
-                        updateServerSetting {
-                            ServerSettingsUpdate(hooks: .init(llmModel: model.id))
-                        }
+            ModelPickerSheet(
+                models: settingsState.availableModels,
+                currentModelId: settingsState.hooksLlmModel,
+                onSelect: { model in
+                    settingsState.hooksLlmModel = model.id
+                    updateServerSetting {
+                        ServerSettingsUpdate(hooks: .init(llmModel: model.id))
                     }
-                )
-            }
+                }
+            )
         }
     }
 

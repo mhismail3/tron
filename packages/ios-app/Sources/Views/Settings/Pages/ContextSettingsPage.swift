@@ -14,18 +14,16 @@ struct ContextSettingsPage: View {
             rulesCard
         }
         .sheet(isPresented: $showRetainModelPicker) {
-            if #available(iOS 26.0, *) {
-                ModelPickerSheet(
-                    models: settingsState.availableModels,
-                    currentModelId: settingsState.retainModel,
-                    onSelect: { model in
-                        settingsState.retainModel = model.id
-                        updateServerSetting {
-                            ServerSettingsUpdate(memory: .init(retainModel: model.id))
-                        }
+            ModelPickerSheet(
+                models: settingsState.availableModels,
+                currentModelId: settingsState.retainModel,
+                onSelect: { model in
+                    settingsState.retainModel = model.id
+                    updateServerSetting {
+                        ServerSettingsUpdate(memory: .init(retainModel: model.id))
                     }
-                )
-            }
+                }
+            )
         }
     }
 

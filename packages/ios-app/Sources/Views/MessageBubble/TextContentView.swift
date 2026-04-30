@@ -82,7 +82,6 @@ struct TextContentView: View {
             if isUser {
                 StyledSkillMentionText(text: text)
                     .font(TronTypography.messageBody)
-                    .foregroundStyle(.userMessageText)
                     .selectableText(!textSelectionDisabled)
                     .lineSpacing(4)
             } else {
@@ -112,14 +111,20 @@ struct StyledSkillMentionText: View {
     }()
 
     var body: some View {
-        buildStyledText()
+        Text(Self.attributedString(from: text))
     }
 
-    /// Build a Text view with @mentions styled differently
-    private func buildStyledText() -> Text {
-        // If regex failed to compile (should never happen), return plain text
+    /// Builds styled user-message text with @mentions highlighted.
+    @MainActor
+    static func attributedString(from text: String) -> AttributedString {
+        let baseFont = Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .regular))
+        let mentionFont = Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .medium))
+
         guard let pattern = Self.skillMentionPattern else {
-            return Text(text)
+            var plain = AttributedString(text)
+            plain.font = baseFont
+            plain.foregroundColor = .userMessageText
+            return plain
         }
 
         let nsText = text as NSString
@@ -127,34 +132,38 @@ struct StyledSkillMentionText: View {
         let matches = pattern.matches(in: text, options: [], range: range)
 
         if matches.isEmpty {
-            return Text(text)
+            var plain = AttributedString(text)
+            plain.font = baseFont
+            plain.foregroundColor = .userMessageText
+            return plain
         }
 
-        var result = Text("")
+        var result = AttributedString()
         var lastEnd = 0
 
         for match in matches {
-            // Add text before the match
             if match.range.location > lastEnd {
                 let beforeRange = NSRange(location: lastEnd, length: match.range.location - lastEnd)
-                let beforeText = nsText.substring(with: beforeRange)
-                result = result + Text(beforeText)
+                var beforeText = AttributedString(nsText.substring(with: beforeRange))
+                beforeText.font = baseFont
+                beforeText.foregroundColor = .userMessageText
+                result.append(beforeText)
             }
 
-            // Add the @mention with special styling
-            let mentionText = nsText.substring(with: match.range)
-            result = result + Text(mentionText)
-                .foregroundColor(.tronCyan)
-                .fontWeight(.medium)
+            var mentionText = AttributedString(nsText.substring(with: match.range))
+            mentionText.font = mentionFont
+            mentionText.foregroundColor = .tronCyan
+            result.append(mentionText)
 
             lastEnd = match.range.location + match.range.length
         }
 
-        // Add remaining text after last match
         if lastEnd < nsText.length {
             let afterRange = NSRange(location: lastEnd, length: nsText.length - lastEnd)
-            let afterText = nsText.substring(with: afterRange)
-            result = result + Text(afterText)
+            var afterText = AttributedString(nsText.substring(with: afterRange))
+            afterText.font = baseFont
+            afterText.foregroundColor = .userMessageText
+            result.append(afterText)
         }
 
         return result

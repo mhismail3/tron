@@ -163,3 +163,62 @@ struct TronLoggerLevelFilteringTests {
         #expect(evaluated, "Message closure should be evaluated when level passes")
     }
 }
+
+@Suite("TronLogger Sensitive Data Guards")
+@MainActor
+struct TronLoggerSensitiveDataTests {
+
+    @Test("RPC request logging never buffers raw params")
+    func rpcRequestLoggingOmitsRawParams() {
+        let logger = TronLogger.shared
+        let originalLevel = logger.minimumLevel
+        defer {
+            logger.minimumLevel = originalLevel
+            logger.clearBufferForCategory(.rpc)
+        }
+
+        logger.minimumLevel = .verbose
+        logger.clearBufferForCategory(.rpc)
+
+        logger.logRPCRequest(
+            method: "auth.addApiKey",
+            params: #"{"apiKey":"sk-test-abcdefghijklmnopqrstuvwxyz","apiKeyLabel":"Work"}"#,
+            id: 42
+        )
+
+        let message = logger.getRecentLogs(category: .rpc).last?.3 ?? ""
+        #expect(message.contains("auth.addApiKey"))
+        #expect(message.contains("[42]"))
+        #expect(!message.contains("sk-test-abcdefghijklmnopqrstuvwxyz"))
+        #expect(!message.contains("apiKeyLabel"))
+        #expect(!message.contains("Work"))
+    }
+
+    @Test("WebSocket message logging never buffers JSON previews")
+    func websocketMessageLoggingOmitsPreview() {
+        let logger = TronLogger.shared
+        let originalLevel = logger.minimumLevel
+        defer {
+            logger.minimumLevel = originalLevel
+            logger.clearBufferForCategory(.websocket)
+        }
+
+        logger.minimumLevel = .verbose
+        logger.clearBufferForCategory(.websocket)
+
+        logger.logWebSocketMessage(
+            direction: "→ SEND",
+            type: "auth.addApiKey",
+            size: 123,
+            preview: #"{"apiKey":"sk-test-abcdefghijklmnopqrstuvwxyz","apiKeyLabel":"Work"}"#
+        )
+
+        let message = logger.getRecentLogs(category: .websocket).last?.3 ?? ""
+        #expect(message.contains("→ SEND"))
+        #expect(message.contains("auth.addApiKey"))
+        #expect(message.contains("123 bytes"))
+        #expect(!message.contains("sk-test-abcdefghijklmnopqrstuvwxyz"))
+        #expect(!message.contains("apiKeyLabel"))
+        #expect(!message.contains("Work"))
+    }
+}

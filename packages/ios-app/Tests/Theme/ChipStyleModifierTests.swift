@@ -14,15 +14,15 @@ struct ChipStyleModifierTests {
         #expect(type(of: view) != Never.self)
     }
 
-    @Test("chipStyle creates view with custom tintOpacity and strokeOpacity")
+    @Test("chipStyle creates view with custom tintOpacity")
     func chipStyleCustomParams() {
-        let view = Text("Test").chipStyle(.tronAmber, tintOpacity: 0.25, strokeOpacity: 0.3)
+        let view = Text("Test").chipStyle(.tronAmber, tintOpacity: 0.25)
         #expect(type(of: view) != Never.self)
     }
 
     @Test("chipStyle with zero opacity does not crash")
     func chipStyleZeroOpacity() {
-        let view = Text("Test").chipStyle(.red, tintOpacity: 0.0, strokeOpacity: 0.0)
+        let view = Text("Test").chipStyle(.red, tintOpacity: 0.0)
         #expect(type(of: view) != Never.self)
     }
 

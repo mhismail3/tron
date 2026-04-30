@@ -109,13 +109,11 @@ struct SineWaveView: View {
 
 #if DEBUG
 #Preview {
-    if #available(iOS 26.0, *) {
-        ZStack {
-            Color.black
-            SineWaveView(audioLevel: 0.5, color: .green)
-                .frame(height: 80)
-                .padding(.horizontal, 20)
-        }
+    ZStack {
+        Color.black
+        SineWaveView(audioLevel: 0.5, color: .green)
+            .frame(height: 80)
+            .padding(.horizontal, 20)
     }
 }
 #endif

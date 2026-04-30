@@ -30,7 +30,7 @@ struct PullUpPanelView: View {
                             .padding(.vertical, 6)
                     }
                     .buttonStyle(.plain)
-                    .chipStyle(.tronEmerald, tintOpacity: 0.25, strokeOpacity: 0.3)
+                    .chipStyle(.tronEmerald, tintOpacity: 0.25)
                     .opacity(isVisible ? 1 : 0)
                     .scaleEffect(isVisible ? 1 : 0.8)
                 }

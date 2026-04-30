@@ -31,8 +31,6 @@ struct AgentContextSettingsPageTests {
         #expect(MainSettingsFooterLayout.bottomPadding == 10)
         #expect(MainSettingsFooterLayout.feedbackButtonCornerRadius == 13)
         #expect(MainSettingsFooterLayout.feedbackButtonGlassTintOpacity == 0.14)
-        #expect(MainSettingsFooterLayout.feedbackButtonFallbackTintOpacity == 0.08)
-        #expect(MainSettingsFooterLayout.feedbackButtonFallbackStrokeOpacity == 0.16)
         #expect(MainSettingsLocalCategoryStyle.accent == .tronEmerald)
         #expect(MainSettingsLocalCategoryStyle.appIcon == "paintbrush")
         #expect(!ServerSettingsCategory.serverBackedOrder.map(\.title).contains("Hooks"))

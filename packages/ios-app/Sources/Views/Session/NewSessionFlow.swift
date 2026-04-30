@@ -89,8 +89,7 @@ struct NewSessionFlow: View {
                                     }
                                     .chipStyle(
                                         .tronEmerald,
-                                        tintOpacity: isSelected ? 0.3 : 0.15,
-                                        strokeOpacity: isSelected ? 0.4 : 0.2
+                                        tintOpacity: isSelected ? 0.3 : 0.15
                                     )
                                 }
                             }

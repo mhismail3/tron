@@ -124,32 +124,16 @@ struct MessageBubble: View {
             AttachedFileThumbnails(attachments: attachments)
 
         case .systemEvent(let event):
-            if #available(iOS 26.0, *) {
-                SystemEventView(event: event, onTap: onTap)
-            } else {
-                // Fallback without subagent result notification for older iOS
-                Text(event.textContent)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-            }
+            SystemEventView(event: event, onTap: onTap)
 
         case .askUserQuestion(let data):
-            if #available(iOS 26.0, *) {
-                AskUserQuestionToolViewer(data: data) {
-                    onTap?(.askUserQuestion(data))
-                }
-            } else {
-                // Fallback for older iOS
-                AskUserQuestionFallbackView(questionCount: data.params.questions.count)
+            AskUserQuestionToolViewer(data: data) {
+                onTap?(.askUserQuestion(data))
             }
 
         case .getConfirmation(let data):
-            if #available(iOS 26.0, *) {
-                GetConfirmationToolViewer(data: data) {
-                    onTap?(.getConfirmation(data))
-                }
-            } else {
-                GetConfirmationFallbackView(action: data.params.action)
+            GetConfirmationToolViewer(data: data) {
+                onTap?(.getConfirmation(data))
             }
 
         case .answeredQuestions(let count):

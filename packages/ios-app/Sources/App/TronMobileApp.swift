@@ -46,15 +46,7 @@ struct TronMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if #available(iOS 26.0, *) {
-                    rootContent()
-                } else {
-                    Text("This app requires iOS 26 or later")
-                        .foregroundStyle(.tronTextPrimary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
+            rootContent()
             .preferredColorScheme(appearanceSettings.mode.colorScheme)
             .task {
                 await initializeApp()
@@ -178,7 +170,6 @@ struct TronMobileApp: App {
 
     // MARK: - Content builder
 
-    @available(iOS 26.0, *)
     @ViewBuilder
     private func rootContent() -> some View {
         switch initializer.state {
@@ -197,7 +188,6 @@ struct TronMobileApp: App {
         }
     }
 
-    @available(iOS 26.0, *)
     @ViewBuilder
     private func readyContent() -> some View {
         dashboardContent
@@ -233,7 +223,6 @@ struct TronMobileApp: App {
             }
     }
 
-    @available(iOS 26.0, *)
     private var dashboardContent: some View {
         ContentView(
             deepLinkSessionId: $deepLinkSessionId,

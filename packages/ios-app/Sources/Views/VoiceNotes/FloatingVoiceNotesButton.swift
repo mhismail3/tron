@@ -29,11 +29,9 @@ struct FloatingVoiceNotesButton: View {
 
 #if DEBUG
 #Preview {
-    if #available(iOS 26.0, *) {
-        ZStack {
-            Color.black
-            FloatingVoiceNotesButton(action: {})
-        }
+    ZStack {
+        Color.black
+        FloatingVoiceNotesButton(action: {})
     }
 }
 #endif

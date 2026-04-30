@@ -107,4 +107,96 @@ struct SourceGuardTests {
             }
         }
     }
+
+    @Test("iOS runtime contract is iOS 26 only")
+    func testIOSRuntimeContractIsIOS26Only() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let projectYML = try String(
+            contentsOf: iosRoot.appendingPathComponent("project.yml"),
+            encoding: .utf8
+        )
+        let baseConfig = try String(
+            contentsOf: iosRoot.appendingPathComponent("Configuration/Base.xcconfig"),
+            encoding: .utf8
+        )
+        let appEntry = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/App/TronMobileApp.swift"),
+            encoding: .utf8
+        )
+        let architectureDoc = try String(
+            contentsOf: iosRoot.appendingPathComponent("docs/architecture.md"),
+            encoding: .utf8
+        )
+        let rootReadme = try String(
+            contentsOf: iosRoot
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("README.md"),
+            encoding: .utf8
+        )
+
+        #expect(projectYML.contains(#"iOS: "26.0""#))
+        #expect(baseConfig.contains("IPHONEOS_DEPLOYMENT_TARGET = 26.0"))
+        #expect(architectureDoc.contains("**Minimum iOS**: 26.0"))
+        #expect(!architectureDoc.contains("**Minimum iOS**: 18.0"))
+        #expect(rootReadme.contains("**Minimum iOS:** 26.0"))
+        #expect(!rootReadme.contains("**Minimum iOS:** 18.0"))
+        #expect(!appEntry.contains("This app requires iOS 26 or later"))
+        #expect(!appEntry.contains("if #available(iOS 26.0, *)"))
+    }
+
+    @Test("iOS 26 cleanup hooks stay removed")
+    func testIOS26CleanupHooksStayRemoved() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourcesRoot = iosRoot.appendingPathComponent("Sources")
+        let forbiddenNeedles: [(String, String)] = [
+            ("if #available(iOS 26.0, *)", "runtime iOS 26 compatibility gate"),
+            ("ASPresentationAnchor(frame:", "deprecated presentation-anchor fallback"),
+            ("+ Text(", "deprecated Text concatenation"),
+        ]
+        let chipStyleStrokeRegex = try NSRegularExpression(
+            pattern: #"(?s)\.chipStyle\s*\([^)]*strokeOpacity\s*:"#,
+            options: []
+        )
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: sourcesRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            Issue.record("Could not enumerate \(sourcesRoot.path)")
+            return
+        }
+
+        while let any = enumerator.nextObject() {
+            guard let url = any as? URL else { continue }
+            guard url.pathExtension == "swift" else { continue }
+
+            let content = try String(contentsOf: url, encoding: .utf8)
+            for (needle, reason) in forbiddenNeedles {
+                #expect(
+                    !content.contains(needle),
+                    "\(url.lastPathComponent) contains removed \(reason)"
+                )
+            }
+
+            let chipStyleStrokeMatches = chipStyleStrokeRegex.matches(
+                in: content,
+                range: NSRange(location: 0, length: (content as NSString).length)
+            )
+            #expect(
+                chipStyleStrokeMatches.isEmpty,
+                "\(url.lastPathComponent) routes removed chipStyle strokeOpacity compatibility through the glass-only API"
+            )
+        }
+    }
 }

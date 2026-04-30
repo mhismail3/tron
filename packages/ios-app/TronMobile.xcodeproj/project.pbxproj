@@ -813,7 +813,6 @@
 		F38EE3D720AC7819F7FBD315 /* SettingsCycleToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81090A6D21D4AFE36C248BB4 /* SettingsCycleToggle.swift */; };
 		F3B6159BF4010FD405F92B38 /* SettingsRowDivider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FF07B8517B41A41C07D2428 /* SettingsRowDivider.swift */; };
 		F411DBD8006B17526E595100 /* SharedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28AEA78013019C077A98F1D0 /* SharedContent.swift */; };
-		F4547551BE1A88208BB5A7E1 /* FallbackViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88293D1A0C4FA7A91F04D7F5 /* FallbackViews.swift */; };
 		F4B2C18D7025C011AB0A0D0C /* SystemPromptSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97B933892FDC37296600BDA3 /* SystemPromptSection.swift */; };
 		F6062D19739F6D7E3C342A74 /* PairingStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72D345493C0AF7FD9A2CD0B0 /* PairingStep.swift */; };
 		F64A78C00CD41D8D7FC1C614 /* ChatView+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ADF737E62F3FEA0A18CBAA5 /* ChatView+Helpers.swift */; };
@@ -1335,7 +1334,6 @@
 		876D3BCA467E57145E1062AC /* SystemEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemEvent.swift; sourceTree = "<group>"; };
 		879251B0CFAE32083926A18E /* foreground-emerald.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "foreground-emerald.png"; sourceTree = "<group>"; };
 		87F0FEAA3F9664F7CA3D73C7 /* GitErrorMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitErrorMessage.swift; sourceTree = "<group>"; };
-		88293D1A0C4FA7A91F04D7F5 /* FallbackViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallbackViews.swift; sourceTree = "<group>"; };
 		88756EFFE19EE26ED65B3283 /* BlobClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlobClientTests.swift; sourceTree = "<group>"; };
 		8878C9A16390B62C79B0C2A3 /* TypewriterAnimationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypewriterAnimationState.swift; sourceTree = "<group>"; };
 		887FAA60E6696C5099018531 /* EventDatabaseProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabaseProtocol.swift; sourceTree = "<group>"; };
@@ -2897,7 +2895,6 @@
 			isa = PBXGroup;
 			children = (
 				807975221F0E551E74F21B8D /* DecodedImageView.swift */,
-				88293D1A0C4FA7A91F04D7F5 /* FallbackViews.swift */,
 				DB5B1021E648395FEC832679 /* ImagesContentView.swift */,
 				4A6C7DE4E24E7749673B343F /* MarkdownBlockParser.swift */,
 				1EB42A678D783DF00F87C9A2 /* MarkdownBlockView.swift */,
@@ -4124,7 +4121,6 @@
 				4EEFF2555FCED42D52D53F69 /* EventTypeRegistry.swift in Sources */,
 				C0629A9C0BD76E3873E8C114 /* EventTypes.swift in Sources */,
 				3253A783FA5635BB0B0B787A /* ExtendedPayloads.swift in Sources */,
-				F4547551BE1A88208BB5A7E1 /* FallbackViews.swift in Sources */,
 				34CD98D623F22BC392E97303 /* FeedbackComposer.swift in Sources */,
 				9B25D6A477AA9E9003D3501A /* FeedbackMailView.swift in Sources */,
 				AED982B671C2C03CF5DC27C5 /* FileDetailSheet.swift in Sources */,

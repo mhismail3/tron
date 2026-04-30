@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- Xcode 16+ with iOS 18 SDK
+- Xcode 26+ with iOS 26 SDK
 - XcodeGen (`brew install xcodegen`)
 - Tron server running locally
 
@@ -36,7 +36,7 @@ The app connects to the Tron server:
 ```bash
 xcodebuild test \
   -scheme Tron \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
 ### Xcode

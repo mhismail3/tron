@@ -13,7 +13,6 @@ struct SafariView: UIViewControllerRepresentable {
         config.entersReaderIfAvailable = entersReaderIfAvailable
 
         let safari = SFSafariViewController(url: url, configuration: config)
-        safari.preferredControlTintColor = UIColor(named: "TronEmerald") ?? .systemGreen
 
         return safari
     }

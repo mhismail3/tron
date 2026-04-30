@@ -67,4 +67,28 @@ final class TextContentLayoutTests: XCTestCase {
         let finalText = manager.finalizeStreamingMessage()
         XCTAssertTrue(finalText.hasSuffix("end."), "Should end with content, not whitespace. Got: '\(finalText.suffix(20))'")
     }
+
+    // MARK: - Attributed Text Rendering
+
+    func testStyledSkillMentionAttributedStringPreservesText() {
+        let text = "Use @typescript-rules before @api-design today"
+        let attributed = StyledSkillMentionText.attributedString(from: text)
+
+        XCTAssertEqual(String(attributed.characters), text)
+    }
+
+    func testLogRowAttributedStringPreservesRenderedText() {
+        let date = Date(timeIntervalSince1970: 0)
+        let attributed = LogRow.attributedString(
+            date: date,
+            category: .rpc,
+            level: .warning,
+            message: "params=redacted"
+        )
+        let rendered = String(attributed.characters)
+
+        XCTAssertTrue(rendered.contains(DateParser.formatLogTimestamp(date)))
+        XCTAssertTrue(rendered.contains("[RPC]"))
+        XCTAssertTrue(rendered.contains("params=redacted"))
+    }
 }

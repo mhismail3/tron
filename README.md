@@ -176,7 +176,7 @@ The wizard and menu bar surface everything else (`Check for updates`, `Send feed
 Prerequisites:
 
 - **Rust**: `rustup` + `cargo` (stable toolchain)
-- **Xcode 16+** (for iOS + Mac apps)
+- **Xcode 26+** for the iOS app; **Xcode 16+** for the Mac app
 - **XcodeGen**: `brew install xcodegen`
 
 First-time setup:
@@ -677,7 +677,7 @@ The events table enforces correctness with `UNIQUE(session_id, sequence)` and a 
 
 ## iOS App
 
-**Minimum iOS:** 18.0 | **Swift:** 6.0 | **Build system:** XcodeGen
+**Minimum iOS:** 26.0 | **Swift:** 6.0 | **Build system:** XcodeGen
 
 ### Architecture
 

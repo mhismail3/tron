@@ -146,7 +146,7 @@ final class TronLogger: @unchecked Sendable {
         guard isEnabled else { return }
         guard level >= effectiveLevel else { return }
 
-        let msg = message()
+        let msg = DiagnosticsRedactor().redactMessage(message())
         let fileName = file.filename
         let timestamp = Self.isoFormatter.string(from: Date())
         let formattedMessage = "[\(timestamp)] \(level.prefix) [\(category.rawValue)] \(fileName):\(line) \(function) - \(msg)"
@@ -191,18 +191,8 @@ final class TronLogger: @unchecked Sendable {
 
     func logRPCRequest(method: String, params: Any?, id: Int) {
         #if DEBUG || BETA
-        let paramsStr: String
-        if let p = params {
-            let full = String(describing: p)
-            if full.count > 500 {
-                paramsStr = String(full.prefix(500)) + " [TRUNCATED:\(full.count) chars]"
-            } else {
-                paramsStr = full
-            }
-        } else {
-            paramsStr = "nil"
-        }
-        verbose("→ RPC Request [\(id)] \(method): \(paramsStr)", category: .rpc)
+        let paramsState = params == nil ? "none" : "redacted"
+        verbose("→ RPC Request [\(id)] \(method) params=\(paramsState)", category: .rpc)
         #endif
     }
 
@@ -210,18 +200,8 @@ final class TronLogger: @unchecked Sendable {
         let durationMs = String(format: "%.1fms", duration * 1000)
         if success {
             #if DEBUG || BETA
-            let resultStr: String
-            if let r = result {
-                let full = String(describing: r)
-                if full.count > 500 {
-                    resultStr = String(full.prefix(500)) + " [TRUNCATED:\(full.count) chars]"
-                } else {
-                    resultStr = full
-                }
-            } else {
-                resultStr = "nil"
-            }
-            debug("← RPC Response [\(id)] \(method) ✓ (\(durationMs)): \(resultStr)", category: .rpc)
+            let resultState = result == nil ? "none" : "redacted"
+            debug("← RPC Response [\(id)] \(method) ✓ (\(durationMs)) result=\(resultState)", category: .rpc)
             #endif
         } else {
             self.error("← RPC Response [\(id)] \(method) ✗ (\(durationMs)): \(error ?? "unknown error")", category: .rpc)
@@ -236,8 +216,8 @@ final class TronLogger: @unchecked Sendable {
     func logWebSocketMessage(direction: String, type: String, size: Int, preview: String? = nil) {
         #if DEBUG || BETA
         var msg = "\(direction) [\(type)] \(size) bytes"
-        if let preview = preview {
-            msg += " - \(preview.prefix(200))"
+        if preview != nil {
+            msg += " preview=redacted"
         }
         verbose(msg, category: .websocket)
         #endif
@@ -250,7 +230,7 @@ final class TronLogger: @unchecked Sendable {
             msg += " [session: \(sid.prefix(8))...]"
         }
         if let data = data {
-            msg += " - \(data.prefix(300))"
+            msg += " dataBytes=\(data.utf8.count)"
         }
         debug(msg, category: .events)
         #endif

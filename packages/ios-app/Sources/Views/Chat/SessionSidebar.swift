@@ -392,7 +392,6 @@ struct MiniMessageRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .frame(maxWidth: UIScreen.main.bounds.width * 0.55)
                 accentBar(color: .tronEmerald.opacity(0.3))
                     .padding(.leading, 8)
             }
@@ -487,7 +486,7 @@ struct MiniToolChip: View {
         .truncationMode(.tail)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .chipStyle(statusColor, tintOpacity: 0.2, strokeOpacity: 0.25)
+        .chipStyle(statusColor, tintOpacity: 0.2)
         .animation(.smooth(duration: 0.3), value: summary)
         .animation(.smooth(duration: 0.3), value: duration)
         .animation(.smooth(duration: 0.3), value: status)

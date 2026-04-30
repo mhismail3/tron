@@ -221,9 +221,9 @@ destination summary cards reuse their `ServerSettingsCategory` icons so the
 launcher row and destination stay visually aligned. The main settings feedback
 footer is pinned with a bottom safe-area inset rather than placed inside the
 scroll content, so app/version copy and the diagnostics action remain reachable
-while the cards scroll independently. On iOS 26 the feedback button lets native
+while the cards scroll independently. The feedback button lets native
 interactive glass own the pressed border, matching chips and avoiding a nested
-manual stroke; older iOS keeps an explicit material fallback stroke.
+manual stroke.
 Static status rows such as the user hook directory keep their path/value in the
 trailing position and show a small empty-state placeholder when the server has
 no listable detail to return.
@@ -233,7 +233,7 @@ no listable detail to return.
 Uses XcodeGen with `project.yml`:
 
 - **Configs**: Beta (debug), Prod (release)
-- **Minimum iOS**: 18.0
+- **Minimum iOS**: 26.0
 - **Swift**: 6.0
 - **Versioning**: `VERSION.env` is the only hand-edited release identity file.
   `scripts/tron version sync` mirrors `TRON_VERSION` into the app and share

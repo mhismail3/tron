@@ -263,17 +263,12 @@ struct OAuthLoginSheet: View {
     @ViewBuilder
     private var glassFieldBackground: some View {
         let shape = RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
-        if #available(iOS 26.0, *) {
-            shape
-                .fill(.clear)
-                .glassEffect(
-                    .regular.tint(provider.accentColor.opacity(0.12)),
-                    in: shape
-                )
-        } else {
-            shape
-                .fill(provider.accentColor.opacity(0.12))
-        }
+        shape
+            .fill(.clear)
+            .glassEffect(
+                .regular.tint(provider.accentColor.opacity(0.12)),
+                in: shape
+            )
     }
 
     // MARK: - Flow Logic
@@ -332,6 +327,11 @@ struct OAuthLoginSheet: View {
     private static let loopbackScheme = "tron-oauth"
 
     private func startSystemBrowserAuth(flowId: String, url: URL) {
+        guard SystemBrowserContextProvider.activeWindowScene() != nil else {
+            flowState = .error("Sign in requires an active app window")
+            return
+        }
+
         // Start a loopback HTTP server so Google's redirect to localhost:45289
         // is caught and bounced to a custom URL scheme that
         // ASWebAuthenticationSession can intercept.
@@ -413,12 +413,15 @@ private enum OAuthFlowState {
 private final class SystemBrowserContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
     static let shared = SystemBrowserContextProvider()
 
+    static func activeWindowScene() -> UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+    }
+
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        guard let scene = UIApplication.shared.connectedScenes
-            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
-              let window = scene.windows.first(where: { $0.isKeyWindow }) else {
-            return ASPresentationAnchor()
+        guard let scene = Self.activeWindowScene() else {
+            preconditionFailure("ASWebAuthenticationSession requires an active UIWindowScene")
         }
-        return window
+        return scene.windows.first(where: { $0.isKeyWindow }) ?? ASPresentationAnchor(windowScene: scene)
     }
 }
