@@ -20,6 +20,21 @@ struct ManagedSkillInstallerTests {
         #expect(FileManager.default.fileExists(atPath: destination.appendingPathComponent("plan/.managed").path))
     }
 
+    @Test("sync skips unchanged managed skills")
+    func syncSkipsUnchangedManagedSkill() throws {
+        let tmp = try temporaryDirectory()
+        let source = tmp.appendingPathComponent("bundle/Skills", isDirectory: true)
+        let destination = tmp.appendingPathComponent("home/.tron/skills", isDirectory: true)
+        try writeSkill(named: "plan", text: "same", in: source, managed: true)
+        try writeSkill(named: "plan", text: "same", in: destination, managed: true)
+
+        let summary = try ManagedSkillInstaller.sync(from: source, to: destination)
+
+        #expect(summary == ManagedSkillSyncSummary(synced: 0, skippedUserOwned: 0, removedStale: 0))
+        let copied = try String(contentsOf: destination.appendingPathComponent("plan/SKILL.md"), encoding: .utf8)
+        #expect(copied == "same")
+    }
+
     @Test("sync preserves user-owned collisions")
     func syncPreservesUserOwnedCollision() throws {
         let tmp = try temporaryDirectory()

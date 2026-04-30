@@ -35,8 +35,12 @@ enum ManagedSkillInstaller {
     }
 
     private static let excludedNames: Set<String> = ["node_modules", ".DS_Store"]
+    private static let syncLock = NSLock()
 
     static func sync(from source: URL, to destination: URL) throws -> ManagedSkillSyncSummary {
+        syncLock.lock()
+        defer { syncLock.unlock() }
+
         let fileManager = FileManager.default
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: source.path, isDirectory: &isDirectory), isDirectory.boolValue else {
@@ -70,6 +74,10 @@ enum ManagedSkillInstaller {
                 summary.skippedUserOwned += 1
                 continue
             }
+            if fileManager.fileExists(atPath: skillDestination.path),
+               try directoriesMatch(skillSource, skillDestination) {
+                continue
+            }
 
             try replaceManagedSkill(from: skillSource, to: skillDestination)
             summary.synced += 1
@@ -94,6 +102,56 @@ enum ManagedSkillInstaller {
 
     private static func isManagedSkill(_ directory: URL) -> Bool {
         FileManager.default.fileExists(atPath: directory.appendingPathComponent(".managed").path)
+    }
+
+    private static func directoriesMatch(_ source: URL, _ destination: URL) throws -> Bool {
+        let fileManager = FileManager.default
+        var sourceIsDirectory: ObjCBool = false
+        var destinationIsDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: source.path, isDirectory: &sourceIsDirectory),
+              fileManager.fileExists(atPath: destination.path, isDirectory: &destinationIsDirectory),
+              sourceIsDirectory.boolValue == destinationIsDirectory.boolValue else {
+            return false
+        }
+        guard sourceIsDirectory.boolValue else {
+            return try filesMatch(source, destination)
+        }
+
+        let sourceChildren = try comparableChildren(of: source)
+        let destinationChildren = try comparableChildren(of: destination)
+        guard sourceChildren.map(\.lastPathComponent) == destinationChildren.map(\.lastPathComponent) else {
+            return false
+        }
+
+        for (sourceChild, destinationChild) in zip(sourceChildren, destinationChildren) {
+            if !(try directoriesMatch(sourceChild, destinationChild)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func comparableChildren(of directory: URL) throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        )
+        .filter { !excludedNames.contains($0.lastPathComponent) }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private static func filesMatch(_ source: URL, _ destination: URL) throws -> Bool {
+        let sourceValues = try source.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        let destinationValues = try destination.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        guard sourceValues.isRegularFile == destinationValues.isRegularFile,
+              sourceValues.fileSize == destinationValues.fileSize else {
+            return false
+        }
+        guard sourceValues.isRegularFile == true else {
+            return false
+        }
+        return try Data(contentsOf: source) == Data(contentsOf: destination)
     }
 
     private static func copyDirectory(_ source: URL, to destination: URL) throws {
