@@ -40,9 +40,10 @@ Use GitHub Actions for beta uploads whenever possible. A `server-v*` tag starts
 5. Exports an App Store Connect IPA with `xcodebuild -exportArchive`.
 6. Uploads with `asc builds upload`.
 7. Waits for processing, resolves export compliance, updates What to Test notes,
-   submits/waits for TestFlight beta review when external testing requires it,
-   verifies the internal TestFlight group has access to all builds, and assigns
-   the build to the public external TestFlight group.
+   submits TestFlight beta review when external testing requires it, and branches
+   on the ASC state. `WAITING_FOR_BETA_REVIEW` / `WAITING_FOR_REVIEW` is a
+   successful pending-review checkpoint for first-build/new-version review waits;
+   externally-ready builds proceed to public TestFlight group assignment.
 
 CI exports with local App Store signing when these GitHub secrets are present:
 `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`,
@@ -239,8 +240,10 @@ asc appstore submissions create --app 6761511764
 ```
 
 The CI release path handles TestFlight beta review when a build reaches
-`READY_FOR_BETA_SUBMISSION`. A local `/publish submit` should be a diagnostic
-fallback only. CI does not submit to App Store review.
+`READY_FOR_BETA_SUBMISSION`. If Apple moves the build to waiting/in-review, CI
+should pass as pending review; rerun after approval to assign the public group.
+A local `/publish submit` should be a diagnostic fallback only. CI does not
+submit to App Store review.
 
 ## Entitlements Files
 

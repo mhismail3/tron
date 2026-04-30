@@ -114,14 +114,17 @@ archives for `generic/platform=iOS`, exports an App Store Connect IPA with
 Xcode's `app-store-connect` export method, validates the exported app/extension
 bundle IDs, entitlements, and export-compliance plist keys, uploads with
 `asc builds upload`, waits for the build to become valid, resolves TestFlight
-export compliance, updates the What to Test notes, submits/waits for TestFlight
-beta review when Apple marks the build `READY_FOR_BETA_SUBMISSION`, and assigns
-it to the configured internal and public TestFlight groups. App Store Connect
-does not allow direct API assignment to an internal group, so CI verifies the
-configured internal group has access to all builds and assigns the processed
-build to the public external group. The group validation step supports both
-`asc testflight beta-groups list` and older `asc testflight groups list` CLI
-shapes. Reruns use `asc builds list` to reuse an existing Apple build number
+export compliance, updates the What to Test notes, submits TestFlight beta
+review when Apple marks the build `READY_FOR_BETA_SUBMISSION`, and then branches
+on the returned App Store Connect state. If Apple reports `WAITING_FOR_BETA_REVIEW`
+or `WAITING_FOR_REVIEW`, CI exits successfully as a pending-review checkpoint
+instead of waiting for the 1-2 day first-build review window. If the build is
+already externally testable, CI verifies the configured internal group has access
+to all builds and assigns the processed build to the public external group. App
+Store Connect does not allow direct API assignment to an internal group, so the
+internal group must have all-build access. The group validation step supports
+both `asc testflight beta-groups list` and older `asc testflight groups list`
+CLI shapes. Reruns use `asc builds list` to reuse an existing Apple build number
 instead of uploading a duplicate binary.
 
 The app and share extension Info.plists set
@@ -205,10 +208,12 @@ Manual workflow runs default to `dry_run=true`, which builds and tests but skips
 App Store Connect upload and TestFlight distribution. A manual run with
 `dry_run=false` exercises the full upload/distribution path without creating a
 new tag, but it must use a unique Apple build number or an existing build that
-is safe to redistribute. If Apple beta review does not approve an external build
-before the workflow timeout, rerun the same workflow after App Store Connect
-shows the build as externally testable; duplicate-build detection will reuse the
-existing upload and continue distribution.
+is safe to redistribute. For the first external build of a new marketing version,
+the expected successful outcome is a workflow summary that says distribution is
+pending Apple Beta App Review. Rerun the same workflow after App Store Connect
+shows the build as approved; duplicate-build detection will reuse the existing
+upload and continue distribution. Later builds in the same approved marketing
+version normally skip that review wait and move straight to group assignment.
 
 ## Common Tasks
 

@@ -189,7 +189,7 @@ Two release lanes:
 
 | What | How | Cadence |
 |---|---|---|
-| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, exports an App Store Connect IPA with automatic cloud signing or configured local signing secrets, uploads to App ID `6761511764`, waits for processing, resolves export compliance, submits/waits for TestFlight beta review when external testing requires it, verifies the internal group has all-build access, and assigns the build to the public TestFlight group. | Same tag as server release. |
+| iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, exports an App Store Connect IPA with automatic cloud signing or configured local signing secrets, uploads to App ID `6761511764`, waits for processing, resolves export compliance, submits TestFlight beta review when external testing requires it, exits successfully as pending review for first-build/new-version review waits, or assigns externally-ready builds to the public TestFlight group. | Same tag as server release. |
 | Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds + notarizes + attaches the macOS DMG as a draft `Tron Server ...` pre-release with generated changelog notes. | Same tag as iOS release. |
 
 Versioning sources:
@@ -222,7 +222,8 @@ git push && git push --tags
 #      build/sign/notarize/staple → GitHub Release draft.
 #    - release-ios.yml: archive Prod iOS app → export/sign App Store IPA →
 #      upload to App Store Connect → wait for processing → resolve export
-#      compliance / beta review → assign to internal + public TestFlight groups.
+#      compliance / beta review → either stop as pending Apple review or assign
+#      to internal + public TestFlight groups.
 #    Verify the generated GitHub release notes, DMG artifact, SHA256 manifest,
 #    and TestFlight build before announcing the release.
 

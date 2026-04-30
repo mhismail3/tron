@@ -851,6 +851,7 @@ jobs:
           exit 1
 
       - name: Submit TestFlight beta review when required
+        id: beta_review
         if: steps.drymode.outputs.dry_run != 'true'
         shell: bash
         env:
@@ -935,6 +936,58 @@ jobs:
             fi
           }
 
+          write_outputs() {
+            local external_ready="$1" review_pending="$2" disposition="$3"
+            {
+              echo "external_state=$external_state"
+              echo "review_state=$review_state"
+              echo "external_ready=$external_ready"
+              echo "review_pending=$review_pending"
+              echo "disposition=$disposition"
+            } >> "$GITHUB_OUTPUT"
+          }
+
+          handle_terminal_state() {
+            fetch_external_state
+            fetch_review_state
+            echo "::notice::external TestFlight state: $external_state; review=$review_state"
+
+            case "$review_state" in
+              REJECTED)
+                echo "::error::TestFlight beta review rejected ASC build $BUILD_ID"
+                exit 1
+                ;;
+              APPROVED)
+                write_outputs true false approved
+                exit 0
+                ;;
+            esac
+
+            case "$external_state" in
+              READY_FOR_BETA_TESTING|IN_BETA_TESTING|BETA_APPROVED|BETA_TESTING|AVAILABLE_FOR_EXTERNAL_TESTING)
+                write_outputs true false externally-ready
+                exit 0
+                ;;
+              WAITING_FOR_BETA_REVIEW|IN_BETA_REVIEW)
+                echo "::notice::ASC build $BUILD_ID is waiting for Apple Beta App Review; treating this as a successful pending-review release checkpoint"
+                write_outputs false true waiting-for-beta-review
+                exit 0
+                ;;
+              BETA_REJECTED|EXPIRED|PROCESSING_EXCEPTION)
+                echo "::error::external TestFlight state is $external_state for ASC build $BUILD_ID"
+                exit 1
+                ;;
+            esac
+
+            case "$review_state" in
+              WAITING_FOR_REVIEW|IN_REVIEW)
+                echo "::notice::ASC build $BUILD_ID is waiting for Apple Beta App Review; treating this as a successful pending-review release checkpoint"
+                write_outputs false true waiting-for-beta-review
+                exit 0
+                ;;
+            esac
+          }
+
           fetch_external_state
           fetch_review_state
           echo "::notice::external TestFlight state before beta-review check: $external_state; review=$review_state"
@@ -948,43 +1001,20 @@ jobs:
             submit_beta_review
           fi
 
-          for _ in {1..90}; do
-            fetch_external_state
-            fetch_review_state
-            echo "::notice::external TestFlight state: $external_state; review=$review_state"
-            case "$review_state" in
-              REJECTED)
-                echo "::error::TestFlight beta review rejected ASC build $BUILD_ID"
-                exit 1
-                ;;
-              APPROVED)
-                exit 0
-                ;;
-            esac
+          handle_terminal_state
 
-            case "$external_state" in
-              READY_FOR_BETA_TESTING|IN_BETA_TESTING|BETA_APPROVED|BETA_TESTING|AVAILABLE_FOR_EXTERNAL_TESTING)
-                exit 0
-                ;;
-              BETA_REJECTED|EXPIRED|PROCESSING_EXCEPTION)
-                echo "::error::external TestFlight state is $external_state for ASC build $BUILD_ID"
-                exit 1
-                ;;
-              READY_FOR_BETA_SUBMISSION)
-                if [[ -z "$review_state" ]]; then
-                  submit_beta_review
-                fi
-                ;;
-            esac
-            sleep 30
-          done
+          if [[ "$external_state" == "READY_FOR_BETA_SUBMISSION" ]]; then
+            echo "::notice::ASC build $BUILD_ID is ready for beta submission but no review submission was visible yet; retry this workflow after App Store Connect settles"
+            write_outputs false true ready-for-beta-submission
+            exit 0
+          fi
 
-          echo "::error::TestFlight beta review did not reach an externally assignable state within 45 minutes"
+          echo "::error::unexpected external TestFlight state '$external_state' with review state '$review_state'"
           exit 1
 
       - name: Validate TestFlight groups
         id: testflight_groups
-        if: steps.drymode.outputs.dry_run != 'true'
+        if: steps.drymode.outputs.dry_run != 'true' && steps.beta_review.outputs.external_ready == 'true'
         shell: bash
         env:
           INTERNAL_GROUP_ID: ${{ vars.ASC_TESTFLIGHT_INTERNAL_GROUP_ID }}
@@ -1057,7 +1087,7 @@ jobs:
           echo "external_group_ids=$PUBLIC_GROUP_ID" >> "$GITHUB_OUTPUT"
 
       - name: Distribute to TestFlight groups
-        if: steps.drymode.outputs.dry_run != 'true'
+        if: steps.drymode.outputs.dry_run != 'true' && steps.beta_review.outputs.external_ready == 'true'
         shell: bash
         env:
           BUILD_ID: ${{ steps.asc_build.outputs.build_id }}
@@ -1093,5 +1123,13 @@ jobs:
             if [[ "${{ steps.drymode.outputs.dry_run }}" != "true" ]]; then
               echo "- ASC app: \`$ASC_APP_ID\`"
               echo "- Existing build reused: \`${{ steps.existing.outputs.exists || 'false' }}\`"
+              echo "- External TestFlight state: \`${{ steps.beta_review.outputs.external_state || 'unknown' }}\`"
+              echo "- Beta review state: \`${{ steps.beta_review.outputs.review_state || 'unknown' }}\`"
+              echo "- Beta review disposition: \`${{ steps.beta_review.outputs.disposition || 'not-run' }}\`"
+              if [[ "${{ steps.beta_review.outputs.review_pending || 'false' }}" == "true" ]]; then
+                echo "- Distribution: pending Apple Beta App Review; rerun after approval to assign the public TestFlight group."
+              elif [[ "${{ steps.beta_review.outputs.external_ready || 'false' }}" == "true" ]]; then
+                echo "- Distribution: public TestFlight group assignment attempted."
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
