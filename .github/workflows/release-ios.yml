@@ -558,18 +558,25 @@ jobs:
           fi
           plutil -lint "$export_options"
 
-          if ! xcodebuild -exportArchive \
-              -archivePath "$ARCHIVE_PATH" \
-              -exportPath "$export_dir" \
-              -exportOptionsPlist "$export_options" \
-              "${export_args[@]}" \
-              -quiet; then
-            if [[ "${IOS_SIGNING_MODE:-automatic}" == "automatic" ]]; then
-              echo "::error::automatic Xcode cloud signing failed. Grant the ASC API key/account permission to manage App Store signing, or configure the manual iOS signing secrets documented in packages/ios-app/docs/development.md."
-            else
+          if [[ "${IOS_SIGNING_MODE:-automatic}" == "manual" ]]; then
+            if ! xcodebuild -exportArchive \
+                -archivePath "$ARCHIVE_PATH" \
+                -exportPath "$export_dir" \
+                -exportOptionsPlist "$export_options" \
+                -quiet; then
               echo "::error::manual App Store export failed. Confirm the .p12 matches the selected App Store provisioning profiles for $IOS_BUNDLE_ID and $IOS_SHARE_EXTENSION_BUNDLE_ID."
+              exit 1
             fi
-            exit 1
+          else
+            if ! xcodebuild -exportArchive \
+                -archivePath "$ARCHIVE_PATH" \
+                -exportPath "$export_dir" \
+                -exportOptionsPlist "$export_options" \
+                "${export_args[@]}" \
+                -quiet; then
+              echo "::error::automatic Xcode cloud signing failed. Grant the ASC API key/account permission to manage App Store signing, or configure the manual iOS signing secrets documented in packages/ios-app/docs/development.md."
+              exit 1
+            fi
           fi
 
           exported_ipa="$(find "$export_dir" -maxdepth 1 -name '*.ipa' -print -quit)"
