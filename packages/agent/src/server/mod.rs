@@ -16,22 +16,24 @@
 //! | Module        | Purpose                                                                            |
 //! |---------------|------------------------------------------------------------------------------------|
 //! | `config`      | `ServerConfig` (host/port + heartbeat/buffer tuning)                               |
+//! | `cron_adapters` | Server transport adapters for cron WebSocket/APNS callbacks                      |
 //! | `device`      | iOS push-device registry; APNs token storage                                       |
 //! | `disk`        | Disk-space probes for health diagnostics                                           |
 //! | `health`      | `/health` JSON producer (DB ok, RPC count, version)                                |
 //! | `metrics`     | Prometheus recorder install + `/metrics` exporter                                  |
-//! | `onboarding`  | Per-server bearer-token lifecycle + first-run sentinel ([Phase 2])                 |
+//! | `onboarding`  | Per-server bearer-token lifecycle + first-run sentinel                             |
 //! | `platform`    | OS-specific surfaces (APNs, launchd, codesign helpers)                             |
 //! | `rpc`         | JSON-RPC method registry, handler tree, request/response types                     |
 //! | `server`      | `TronServer::new` wiring (registry + context + bind)                               |
 //! | `shutdown`    | Phased graceful shutdown coordinator (MCP → tasks → IO)                            |
 //! | `updater`     | User-mode GitHub Releases checks/downloads — channel + action + state           |
-//! | `websocket`   | WS upgrade, framing, heartbeat, bearer-auth middleware (when `auth.enforced=true`) |
+//! | `websocket`   | WS upgrade, framing, heartbeat, mandatory bearer-auth middleware                   |
 
 #![deny(unsafe_code)]
 
 #[path = "app/config.rs"]
 pub mod config;
+pub mod cron_adapters;
 pub mod device;
 #[path = "ops/disk.rs"]
 pub mod disk;

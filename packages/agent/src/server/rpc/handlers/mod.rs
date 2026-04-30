@@ -13,8 +13,8 @@
 //!
 //! `skills` (list, get, refresh), `skill_session` (activate, deactivate,
 //! active — session-scoped skill state), `filesystem` (list, read, mkdir),
-//! `task`/`projects`/`areas` (CRUD), `tree` (visualization, branches),
-//! `import` (listSources, listSessions, previewSession, execute)
+//! `tree` (visualization, branches), `import` (listSources, listSessions,
+//! previewSession, execute), `mcp`, `prompt_library`, and `cron`
 //!
 //! ## `register_platform` — Platform-specific
 //!

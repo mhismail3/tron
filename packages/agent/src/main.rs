@@ -23,7 +23,7 @@
 //! 1. Client sends JSON-RPC over WebSocket
 //! 2. `server` dispatches to RPC handlers
 //! 3. Handlers call runtime/orchestrator/event store
-//! 4. iOS compatibility adapted at boundary (`rpc/adapters.rs`)
+//! 4. Client compatibility is serialized at the RPC/WebSocket boundary
 //! 5. Events broadcast back through WebSocket channels
 //!
 //! ## Core Invariants
@@ -52,7 +52,7 @@ use tron::runtime::orchestrator::orchestrator::Orchestrator;
 use tron::runtime::orchestrator::session_manager::SessionManager;
 use tron::runtime::orchestrator::subagent_manager::SubagentManager;
 use tron::server::config::ServerConfig;
-use tron::server::rpc::context::{AgentDeps, RpcContext};
+use tron::server::rpc::context::{AgentDeps, RpcContext, register_blocking_supervisor_shutdown};
 use tron::server::rpc::registry::MethodRegistry;
 use tron::server::server::TronServer;
 use tron::server::websocket::event_bridge::EventBridge;
@@ -173,7 +173,7 @@ fn rotate_bearer_token_cli() -> Result<()> {
     Ok(())
 }
 
-fn ensure_bearer_token_at(path: &Path) -> Result<String> {
+fn initialize_bearer_token_at(path: &Path) -> Result<String> {
     tron::server::onboarding::load_or_create_bearer_token(path)
         .with_context(|| format!("Failed to initialize bearer token at {}", path.display()))
 }
@@ -543,7 +543,7 @@ async fn init_services(
     let shared_subagent_manager = Some(subagent_manager) as Option<Arc<SubagentManager>>;
     let hook_abort_tracker = Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new());
 
-    let transcription_engine = spawn_transcription_sidecar(settings.server.transcription.enabled);
+    let transcription_engine = Arc::new(std::sync::OnceLock::new());
 
     Ok(ServiceState {
         event_store,
@@ -638,29 +638,37 @@ fn build_tool_factory(
     })
 }
 
-/// Spawn the transcription sidecar (parakeet-mlx via Python worker) when enabled.
-fn spawn_transcription_sidecar(
+/// Register transcription sidecar startup with graceful shutdown tracking.
+fn register_transcription_sidecar(
     enabled: bool,
-) -> Arc<std::sync::OnceLock<Arc<tron::transcription::MlxEngine>>> {
-    let transcription_engine = Arc::new(std::sync::OnceLock::new());
+    shutdown: &Arc<tron::server::shutdown::ShutdownCoordinator>,
+    transcription_engine: Arc<std::sync::OnceLock<Arc<tron::transcription::MlxEngine>>>,
+) {
     if !enabled {
         tracing::info!("transcription sidecar disabled");
-        return transcription_engine;
+        return;
     }
     let cell = Arc::clone(&transcription_engine);
-    #[allow(clippy::let_underscore_future)]
-    let _ = tokio::spawn(async move {
-        match tron::transcription::MlxEngine::new().await {
-            Ok(engine) => {
-                let _ = cell.set(engine);
-                tracing::info!("transcription sidecar ready (parakeet-mlx)");
+    let shutdown_token = shutdown.token();
+    let handle = tokio::spawn(async move {
+        tokio::select! {
+            engine = tron::transcription::MlxEngine::new() => {
+                match engine {
+                    Ok(engine) => {
+                        let _ = cell.set(engine);
+                        tracing::info!("transcription sidecar ready (parakeet-mlx)");
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "transcription sidecar setup failed");
+                    }
+                }
             }
-            Err(e) => {
-                tracing::warn!(error = %e, "transcription sidecar setup failed");
+            () = shutdown_token.cancelled() => {
+                tracing::debug!("transcription sidecar startup cancelled");
             }
         }
     });
-    transcription_engine
+    shutdown.register_task(handle);
 }
 
 /// Cron initialization result.
@@ -692,7 +700,7 @@ fn init_cron(services: &ServiceState, origin: &str) -> CronState {
             #[cfg(feature = "apns")]
             {
                 services.tool_config.push_service.as_ref().map(|ps| {
-                    Arc::new(tron::cron::impls::CronPushNotifier::new(
+                    Arc::new(tron::server::cron_adapters::CronPushNotifier::new(
                         ps.as_sender(),
                         services.event_store.pool().clone(),
                     )) as _
@@ -722,7 +730,7 @@ fn init_cron(services: &ServiceState, origin: &str) -> CronState {
 }
 
 /// Initialize the worktree coordinator, rebuild state, and wire into session/subagent managers.
-fn init_worktree(
+async fn init_worktree(
     services: &ServiceState,
     settings: &tron::settings::TronSettings,
 ) -> Option<Arc<tron::worktree::WorktreeCoordinator>> {
@@ -735,25 +743,17 @@ fn init_worktree(
     ));
     // Rebuild active worktrees from persisted events, then recover orphans.
     coord.rebuild_from_events();
-    let coord_for_recovery = coord.clone();
-    #[allow(clippy::let_underscore_future)]
-    let _ = tokio::spawn(async move {
-        let count = coord_for_recovery.recover_orphans().await;
-        if count > 0 {
-            tracing::info!(count, "recovered orphaned worktrees");
-        }
-    });
+    let count = coord.recover_orphans().await;
+    if count > 0 {
+        tracing::info!(count, "recovered orphaned worktrees");
+    }
     // Rebuild pending-merge state from `.git/MERGE_HEAD` / `.git/rebase-merge/`
     // left behind by a crashed server. Surfaces a banner in iOS and arms
     // the auto-abort timer so half-merged sessions can't linger forever.
-    let coord_for_pending = coord.clone();
-    #[allow(clippy::let_underscore_future)]
-    let _ = tokio::spawn(async move {
-        let count = coord_for_pending.rebuild_pending_merges().await;
-        if count > 0 {
-            tracing::info!(count, "reconstructed pending merges after crash");
-        }
-    });
+    let count = coord.rebuild_pending_merges().await;
+    if count > 0 {
+        tracing::info!(count, "reconstructed pending merges after crash");
+    }
     // Wire coordinator into SessionManager (for end_session release)
     services
         .session_manager
@@ -806,7 +806,7 @@ fn build_rpc_context(
         // Provisional defaults; `TronServer::new` overwrites both with the
         // actual `ServerConfig::port` and the canonical onboarded marker path
         // so handlers see the live values from the start of the first request.
-        ws_port: 0,
+        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
         onboarded_marker_path: tron::server::onboarding::onboarded_marker_path(),
         // User-mode updater wiring (Plan §H.2). Production uses the live
         // GitHub Releases fetcher; `main_tests.rs` and `tests/integration.rs`
@@ -831,14 +831,15 @@ const IDLE_SESSION_CACHE_TTL: std::time::Duration = std::time::Duration::from_se
 /// still on the install step.
 fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronServer) {
     // Clean up stale sandbox directories from previous sessions (>24h old)
-    let _sandbox_cleanup =
+    let sandbox_cleanup =
         tokio::spawn(async { tron::tools::system::sandbox::cleanup_stale_sandboxes().await });
+    server.shutdown().register_task(sandbox_cleanup);
 
     // Periodic session cache eviction (prevents unbounded memory growth)
     let eviction_mgr = session_manager.clone();
     let eviction_shutdown = server.shutdown().token();
     let cache_ttl = IDLE_SESSION_CACHE_TTL;
-    let _eviction_task = tokio::spawn(async move {
+    let eviction_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         let _ = interval.tick().await; // first tick is immediate, skip it
         loop {
@@ -853,6 +854,7 @@ fn spawn_background_tasks(session_manager: &Arc<SessionManager>, server: &TronSe
             }
         }
     });
+    server.shutdown().register_task(eviction_task);
 }
 
 #[tokio::main]
@@ -872,7 +874,7 @@ async fn main() -> Result<()> {
     // Phase 1: Pre-database filesystem operations
     init_directories();
     let bearer_token_path = tron::server::onboarding::bearer_token_path();
-    let _bearer_token = ensure_bearer_token_at(&bearer_token_path)?;
+    let _bearer_token = initialize_bearer_token_at(&bearer_token_path)?;
 
     // Phase 2: Database and logging
     // _db_lock is bound for the lifetime of main(); dropping it releases the
@@ -880,8 +882,8 @@ async fn main() -> Result<()> {
     // compilation fails if it's ever moved out without an equivalent guard.
     let (pool, db_path, _db_lock) = init_database(args.db_path)?;
     let settings_path = tron::settings::loader::settings_path();
-    let settings =
-        tron::settings::loader::load_settings_from_path(&settings_path).unwrap_or_default();
+    let settings = tron::settings::loader::load_settings_from_path(&settings_path)
+        .context("Failed to load settings")?;
     let origin = format!("localhost:{}", args.port);
     let (log_handle, flush_task) = init_logging(
         &db_path,
@@ -898,7 +900,7 @@ async fn main() -> Result<()> {
         let pl = settings.prompt_library.clone();
         if pl.history_auto_prune && (pl.history_max_entries > 0 || pl.history_max_age_days > 0) {
             let pool = event_store.pool().clone();
-            let _handle = tokio::task::spawn_blocking(move || {
+            tokio::task::spawn_blocking(move || {
                 let age = (pl.history_max_age_days > 0).then_some(pl.history_max_age_days);
                 let cap = (pl.history_max_entries > 0).then_some(pl.history_max_entries);
                 match tron::prompt_library::store::prune_history(&pool, age, cap) {
@@ -910,7 +912,9 @@ async fn main() -> Result<()> {
                         tracing::warn!(error = %e, "failed to prune prompt history on startup");
                     }
                 }
-            });
+            })
+            .await
+            .context("Prompt history prune task panicked")?;
         }
     }
 
@@ -923,7 +927,7 @@ async fn main() -> Result<()> {
 
     // Phase 4: Cron, worktree, RPC context
     let cron = init_cron(&services, &origin);
-    let worktree_coordinator = init_worktree(&services, &settings);
+    let worktree_coordinator = init_worktree(&services, &settings).await;
     let session_manager_for_startup = services.session_manager.clone();
     let orchestrator_for_bridge = services.orchestrator.clone();
     let process_manager_for_shutdown = services.process_manager.clone();
@@ -941,13 +945,15 @@ async fn main() -> Result<()> {
     tron::server::rpc::handlers::register_all(&mut registry);
     let method_count = registry.methods().len();
     let bind_host_label = args.host.clone();
-    let config = ServerConfig {
-        host: args.host,
-        port: args.port,
-        ..ServerConfig::default()
-    };
+    let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
     let metrics_handle = tron::server::metrics::install_recorder();
     let server = TronServer::new(config, registry, rpc_context, metrics_handle);
+    register_blocking_supervisor_shutdown(server.shutdown());
+    register_transcription_sidecar(
+        settings.server.transcription.enabled,
+        server.shutdown(),
+        server.rpc_context().transcription_engine.clone(),
+    );
 
     // Register MCP shutdown as an ordered phase hook. Replaces the earlier
     // standalone `ctrl_c` watcher in `init_mcp`, which raced with main's
@@ -970,18 +976,17 @@ async fn main() -> Result<()> {
     let bridge_handle = tokio::spawn(bridge.run());
 
     // Wire cron broadcaster and shutdown forwarding
-    cron.scheduler
-        .set_broadcaster(Arc::new(tron::cron::impls::CronEventBroadcaster::new(
-            server.broadcast().clone(),
-        )));
+    cron.scheduler.set_broadcaster(Arc::new(
+        tron::server::cron_adapters::CronEventBroadcaster::new(server.broadcast().clone()),
+    ));
     {
         let cron_cancel = cron.cancel.clone();
         let shutdown_token = server.shutdown().token();
-        #[allow(clippy::let_underscore_future)]
-        let _ = tokio::spawn(async move {
+        let cron_cancel_forwarder = tokio::spawn(async move {
             shutdown_token.cancelled().await;
             cron_cancel.cancel();
         });
+        server.shutdown().register_task(cron_cancel_forwarder);
     }
 
     // Phase 6: Background tasks and bind

@@ -1,8 +1,9 @@
 //! RPC dependency-injection context.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::events::EventStore;
 use crate::llm::ProviderHealthTracker;
@@ -21,8 +22,153 @@ use parking_lot::{Mutex, RwLock};
 use crate::server::device::DeviceRequestBroker;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::session_context::ContextArtifactsService;
-use crate::server::shutdown::ShutdownCoordinator;
+use crate::server::shutdown::{ShutdownCoordinator, ShutdownPhase};
 use crate::server::websocket::broadcast::BroadcastManager;
+
+const DEFAULT_BLOCKING_CONCURRENCY: usize = 16;
+const BLOCKING_SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+static GLOBAL_BLOCKING_SUPERVISOR: OnceLock<Arc<BlockingTaskSupervisor>> = OnceLock::new();
+
+/// Bounded owner for RPC blocking work.
+///
+/// Blocking closures cannot be force-aborted once the OS thread is running, so
+/// the production contract is: limit concurrency before side effects begin,
+/// track active work independently of the awaiting request future, and drain
+/// with a fixed budget during shutdown.
+pub struct BlockingTaskSupervisor {
+    semaphore: Arc<tokio::sync::Semaphore>,
+    active: Arc<AtomicUsize>,
+    drained: Arc<tokio::sync::Notify>,
+}
+
+impl BlockingTaskSupervisor {
+    /// Build a supervisor with a fixed maximum number of concurrent blocking
+    /// closures.
+    pub fn new(max_concurrency: usize) -> Self {
+        assert!(
+            max_concurrency > 0,
+            "blocking task concurrency limit must be positive"
+        );
+        Self {
+            semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrency)),
+            active: Arc::new(AtomicUsize::new(0)),
+            drained: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    /// Number of closures currently executing on blocking threads.
+    pub fn active_count(&self) -> usize {
+        self.active.load(Ordering::SeqCst)
+    }
+
+    /// Run one blocking closure after acquiring a supervisor permit.
+    pub async fn run<T, F>(&self, task_name: &'static str, f: F) -> Result<T, RpcError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, RpcError> + Send + 'static,
+    {
+        let start = Instant::now();
+        counter!("rpc_blocking_tasks_started_total", "task" => task_name.to_owned()).increment(1);
+
+        let permit =
+            self.semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| RpcError::Internal {
+                    message: format!(
+                        "Blocking task supervisor closed before '{task_name}' started"
+                    ),
+                })?;
+
+        let active = Arc::clone(&self.active);
+        let drained = Arc::clone(&self.drained);
+        let running = active.fetch_add(1, Ordering::SeqCst) + 1;
+        metrics::gauge!("rpc_blocking_tasks_active").set(running as f64);
+
+        match tokio::task::spawn_blocking(move || {
+            let _guard = BlockingTaskGuard {
+                _permit: permit,
+                active,
+                drained,
+            };
+            f()
+        })
+        .await
+        {
+            Ok(Ok(value)) => {
+                record_blocking_outcome(task_name, start.elapsed(), "success");
+                Ok(value)
+            }
+            Ok(Err(error)) => {
+                record_blocking_outcome(task_name, start.elapsed(), "error");
+                Err(error)
+            }
+            Err(error) => {
+                counter!("rpc_blocking_failures_total", "task" => task_name.to_owned())
+                    .increment(1);
+                record_blocking_outcome(task_name, start.elapsed(), "panic");
+                Err(RpcError::Internal {
+                    message: format!("Blocking task '{task_name}' failed: {error}"),
+                })
+            }
+        }
+    }
+
+    /// Wait for active blocking closures to finish within `timeout`.
+    pub async fn drain(&self, timeout: Duration) -> bool {
+        tokio::time::timeout(timeout, async {
+            while self.active_count() > 0 {
+                self.drained.notified().await;
+            }
+        })
+        .await
+        .is_ok()
+    }
+}
+
+impl Default for BlockingTaskSupervisor {
+    fn default() -> Self {
+        Self::new(DEFAULT_BLOCKING_CONCURRENCY)
+    }
+}
+
+struct BlockingTaskGuard {
+    _permit: tokio::sync::OwnedSemaphorePermit,
+    active: Arc<AtomicUsize>,
+    drained: Arc<tokio::sync::Notify>,
+}
+
+impl Drop for BlockingTaskGuard {
+    fn drop(&mut self) {
+        let remaining = self.active.fetch_sub(1, Ordering::SeqCst) - 1;
+        metrics::gauge!("rpc_blocking_tasks_active").set(remaining as f64);
+        if remaining == 0 {
+            self.drained.notify_waiters();
+        }
+    }
+}
+
+fn global_blocking_supervisor() -> Arc<BlockingTaskSupervisor> {
+    GLOBAL_BLOCKING_SUPERVISOR
+        .get_or_init(|| Arc::new(BlockingTaskSupervisor::default()))
+        .clone()
+}
+
+/// Register a bounded drain for RPC blocking work during server shutdown.
+pub fn register_blocking_supervisor_shutdown(shutdown: &Arc<ShutdownCoordinator>) {
+    let supervisor = global_blocking_supervisor();
+    shutdown.register_phase_hook(ShutdownPhase::Tools, "rpc-blocking", move || async move {
+        if !supervisor.drain(BLOCKING_SHUTDOWN_DRAIN_TIMEOUT).await {
+            tracing::warn!(
+                active = supervisor.active_count(),
+                timeout_ms = BLOCKING_SHUTDOWN_DRAIN_TIMEOUT.as_millis(),
+                "timed out draining RPC blocking tasks"
+            );
+        }
+    });
+}
 
 /// Dependencies needed to create and run agents.
 pub struct AgentDeps {
@@ -99,8 +245,8 @@ pub struct RpcContext {
     pub hook_abort_tracker: Arc<crate::runtime::hooks::abort_tracker::HookAbortTracker>,
     /// WebSocket listening port. Surfaced via `system.getInfo` so iOS clients
     /// can render the connection display ("Tailscale 100.x:9847") without
-    /// re-parsing user input. Set by `TronServer::new` from `ServerConfig::port`.
-    pub ws_port: u16,
+    /// re-parsing user input. Initialized from config and updated after bind.
+    pub ws_port: Arc<AtomicU16>,
     /// Path to the first-run sentinel (`~/.tron/system/run/.onboarded`). Stored on
     /// the context so tests can inject a temp path; production sets it to
     /// [`crate::server::onboarding::onboarded_marker_path`]. Drives the `paired`
@@ -130,6 +276,35 @@ impl RpcContext {
     {
         run_blocking_task(task_name, f).await
     }
+
+    /// Spawn blocking work whose result is intentionally not part of the RPC
+    /// response, while still registering the async owner with shutdown.
+    pub fn spawn_blocking_detached<F>(&self, task_name: &'static str, f: F)
+    where
+        F: FnOnce() -> Result<(), RpcError> + Send + 'static,
+    {
+        let handle = tokio::spawn(async move {
+            if let Err(error) = run_blocking_task(task_name, f).await {
+                tracing::warn!(task = task_name, error = %error, "detached blocking RPC task failed");
+            }
+        });
+
+        if let Some(shutdown) = &self.shutdown_coordinator {
+            shutdown.register_task(handle);
+        } else {
+            drop(handle);
+        }
+    }
+
+    /// Current WebSocket listening port.
+    pub fn ws_port(&self) -> u16 {
+        self.ws_port.load(Ordering::SeqCst)
+    }
+
+    /// Update the current WebSocket listening port after bind.
+    pub fn set_ws_port(&self, port: u16) {
+        self.ws_port.store(port, Ordering::SeqCst);
+    }
 }
 
 pub(crate) async fn run_blocking_task<T, F>(task_name: &'static str, f: F) -> Result<T, RpcError>
@@ -137,26 +312,7 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, RpcError> + Send + 'static,
 {
-    let start = Instant::now();
-    counter!("rpc_blocking_tasks_started_total", "task" => task_name.to_owned()).increment(1);
-
-    match tokio::task::spawn_blocking(f).await {
-        Ok(Ok(value)) => {
-            record_blocking_outcome(task_name, start.elapsed(), "success");
-            Ok(value)
-        }
-        Ok(Err(error)) => {
-            record_blocking_outcome(task_name, start.elapsed(), "error");
-            Err(error)
-        }
-        Err(error) => {
-            counter!("rpc_blocking_failures_total", "task" => task_name.to_owned()).increment(1);
-            record_blocking_outcome(task_name, start.elapsed(), "panic");
-            Err(RpcError::Internal {
-                message: format!("Blocking task '{task_name}' failed: {error}"),
-            })
-        }
-    }
+    global_blocking_supervisor().run(task_name, f).await
 }
 
 fn record_blocking_outcome(
@@ -319,6 +475,84 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn blocking_supervisor_limits_concurrency() {
+        use std::sync::atomic::AtomicUsize;
+
+        let supervisor = Arc::new(BlockingTaskSupervisor::new(1));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_seen = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let supervisor = Arc::clone(&supervisor);
+            let active = Arc::clone(&active);
+            let max_seen = Arc::clone(&max_seen);
+            handles.push(tokio::spawn(async move {
+                supervisor
+                    .run("test.blocking_limit", move || {
+                        let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_seen.fetch_max(now, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(30));
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        Ok::<_, RpcError>(())
+                    })
+                    .await
+                    .unwrap();
+            }));
+        }
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+        assert_eq!(max_seen.load(Ordering::SeqCst), 1);
+        assert_eq!(supervisor.active_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn blocking_supervisor_drain_waits_for_active_work() {
+        let supervisor = Arc::new(BlockingTaskSupervisor::new(1));
+        let running = Arc::clone(&supervisor);
+        let handle = tokio::spawn(async move {
+            running
+                .run("test.blocking_drain", || {
+                    std::thread::sleep(Duration::from_millis(30));
+                    Ok::<_, RpcError>(())
+                })
+                .await
+                .unwrap();
+        });
+
+        while supervisor.active_count() == 0 {
+            tokio::task::yield_now().await;
+        }
+        assert!(supervisor.drain(Duration::from_secs(1)).await);
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn blocking_supervisor_drain_times_out_without_losing_tracking() {
+        let supervisor = Arc::new(BlockingTaskSupervisor::new(1));
+        let running = Arc::clone(&supervisor);
+        let handle = tokio::spawn(async move {
+            running
+                .run("test.blocking_drain_timeout", || {
+                    std::thread::sleep(Duration::from_millis(120));
+                    Ok::<_, RpcError>(())
+                })
+                .await
+                .unwrap();
+        });
+
+        while supervisor.active_count() == 0 {
+            tokio::task::yield_now().await;
+        }
+        assert!(!supervisor.drain(Duration::from_millis(5)).await);
+        assert_eq!(supervisor.active_count(), 1);
+        handle.await.unwrap();
+        assert_eq!(supervisor.active_count(), 0);
+    }
+
     #[test]
     fn make_test_context_populates_all_fields() {
         let ctx = make_test_context();
@@ -332,7 +566,7 @@ mod tests {
     // ── AgentDeps tests ──
 
     #[test]
-    fn context_without_agent_deps_backward_compat() {
+    fn context_without_agent_deps_returns_not_available_in_handlers() {
         let ctx = make_test_context();
         assert!(ctx.agent_deps.is_none());
     }

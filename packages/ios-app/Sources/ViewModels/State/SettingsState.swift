@@ -78,12 +78,6 @@ final class SettingsState {
     /// Whether the Mac server loads the local MLX transcription sidecar.
     var transcriptionEnabled: Bool = false
 
-    // MARK: - Server Auth
-
-    /// Whether the server requires a bearer token on `/ws` upgrades. Default
-    /// `false` matches the Phase 2 "ship-but-not-enforced" rollout. iOS sends
-    /// the header unconditionally so flipping this is instantly safe.
-    var authEnforced: Bool = false
     // MARK: - Update Checks
 
     /// Master switch for user-mode update checks. Default `false` (opt-in).
@@ -231,8 +225,6 @@ final class SettingsState {
 
         mcpSchemaRefreshTtlMs = settings.mcpSchemaRefreshTtlMs
         transcriptionEnabled = settings.transcriptionEnabled
-
-        authEnforced = settings.authEnforced
 
         updateEnabled = settings.updateEnabled
         updateChannel = settings.updateChannel

@@ -140,7 +140,10 @@ impl MethodHandler for McpRemoveServerHandler {
         let name = require_string_param(params.as_ref(), "name")?;
 
         let mut guard = router.write().await;
-        guard.remove_server(&name).await;
+        guard
+            .remove_server(&name)
+            .await
+            .map_err(|message| RpcError::Internal { message })?;
         drop(guard);
 
         broadcast_status_changed(ctx).await;

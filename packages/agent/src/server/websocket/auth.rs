@@ -1,10 +1,10 @@
 //! WebSocket bearer-token authentication middleware.
 //!
-//! Phase 2 of the onboarding plan: gates `/ws` upgrades behind a bearer
-//! token stored as `bearerToken` in `~/.tron/system/auth.json`. The token is created
-//! lazily by [`crate::server::onboarding::load_or_create_bearer_token`]
-//! at server startup; the WS upgrade handler asks this module to verify
-//! the `Authorization: Bearer <token>` header before passing control to
+//! Gates every `/ws` upgrade behind a bearer token stored as `bearerToken`
+//! in `~/.tron/system/auth.json`. The token is created lazily by
+//! [`crate::server::onboarding::load_or_create_bearer_token`] at server
+//! startup; the WS upgrade handler asks this module to verify the
+//! `Authorization: Bearer <token>` header before passing control to
 //! [`crate::server::websocket::session::run_ws_session`].
 //!
 //! ## Why a small cache
@@ -125,17 +125,11 @@ impl BearerTokenStore {
     }
 }
 
-/// Verify the `Authorization` header against `store` according to the
-/// `enforced` flag.
+/// Verify the `Authorization` header against `store`.
 ///
-/// - `enforced = false` → always `Ok(())`. The bearer is silently
-///   ignored; iOS clients that send one before the server requires it
-///   are still accepted. This is the default during Phase 2 so the
-///   server can ship the token-issuing infrastructure ahead of iOS
-///   support without breaking any existing client.
-/// - `enforced = true` → require a header of the form
-///   `Authorization: Bearer <token>` where `<token>` matches the file
-///   on disk. Any deviation returns `401 UNAUTHORIZED`.
+/// Requires a header of the form `Authorization: Bearer <token>` where
+/// `<token>` matches the file on disk. Any deviation returns
+/// `401 UNAUTHORIZED`.
 ///
 /// The 401 response intentionally carries no body — the iOS client
 /// distinguishes 401-vs-network-error from the upgrade response status
@@ -143,12 +137,7 @@ impl BearerTokenStore {
 pub fn verify_bearer_header(
     headers: &HeaderMap,
     store: &BearerTokenStore,
-    enforced: bool,
 ) -> Result<(), StatusCode> {
-    if !enforced {
-        return Ok(());
-    }
-
     let Some(value) = headers.get(header::AUTHORIZATION) else {
         return Err(StatusCode::UNAUTHORIZED);
     };
@@ -300,90 +289,66 @@ mod tests {
         assert!(store.current_token().is_none());
     }
 
-    // ── verify_bearer_header (enforced=false) ─────────────────────────
+    // ── verify_bearer_header ─────────────────────────────────────────
 
     #[test]
-    fn unenforced_accepts_with_no_header() {
-        let (_dir, store) = temp_store();
-        let headers = HeaderMap::new();
-        assert!(verify_bearer_header(&headers, &store, false).is_ok());
-    }
-
-    #[test]
-    fn unenforced_accepts_with_wrong_header() {
-        let (_dir, store) = temp_store();
-        let headers = header_with_bearer("Bearer wrong-token-value");
-        assert!(verify_bearer_header(&headers, &store, false).is_ok());
-    }
-
-    #[test]
-    fn unenforced_accepts_with_correct_header() {
-        let (_dir, store) = temp_store();
-        let token = store.current_token().expect("seed");
-        let headers = header_with_bearer(&format!("Bearer {token}"));
-        assert!(verify_bearer_header(&headers, &store, false).is_ok());
-    }
-
-    // ── verify_bearer_header (enforced=true) ──────────────────────────
-
-    #[test]
-    fn enforced_rejects_missing_header() {
+    fn mandatory_rejects_missing_header() {
         let (_dir, store) = temp_store();
         let _ = store.current_token().expect("seed");
         let headers = HeaderMap::new();
-        let err = verify_bearer_header(&headers, &store, true).unwrap_err();
+        let err = verify_bearer_header(&headers, &store).unwrap_err();
         assert_eq!(err, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn enforced_rejects_non_bearer_scheme() {
+    fn mandatory_rejects_non_bearer_scheme() {
         let (_dir, store) = temp_store();
         let _ = store.current_token().expect("seed");
         let headers = header_with_bearer("Basic dXNlcjpwYXNz");
-        let err = verify_bearer_header(&headers, &store, true).unwrap_err();
+        let err = verify_bearer_header(&headers, &store).unwrap_err();
         assert_eq!(err, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn enforced_rejects_empty_bearer() {
+    fn mandatory_rejects_empty_bearer() {
         let (_dir, store) = temp_store();
         let _ = store.current_token().expect("seed");
         let headers = header_with_bearer("Bearer ");
-        let err = verify_bearer_header(&headers, &store, true).unwrap_err();
+        let err = verify_bearer_header(&headers, &store).unwrap_err();
         assert_eq!(err, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn enforced_rejects_wrong_bearer() {
+    fn mandatory_rejects_wrong_bearer() {
         let (_dir, store) = temp_store();
         let _ = store.current_token().expect("seed");
         let headers = header_with_bearer("Bearer not-the-right-token");
-        let err = verify_bearer_header(&headers, &store, true).unwrap_err();
+        let err = verify_bearer_header(&headers, &store).unwrap_err();
         assert_eq!(err, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn enforced_rejects_bearer_with_leading_whitespace() {
+    fn mandatory_rejects_bearer_with_leading_whitespace() {
         let (_dir, store) = temp_store();
         let token = store.current_token().expect("seed");
         // "Bearer  <token>" has a double space; the second space gets
         // included in `presented` after stripping "Bearer ", producing
         // " <token>". That doesn't match the canonical and must 401.
         let headers = header_with_bearer(&format!("Bearer  {token}"));
-        let err = verify_bearer_header(&headers, &store, true).unwrap_err();
+        let err = verify_bearer_header(&headers, &store).unwrap_err();
         assert_eq!(err, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn enforced_accepts_correct_bearer() {
+    fn mandatory_accepts_correct_bearer() {
         let (_dir, store) = temp_store();
         let token = store.current_token().expect("seed");
         let headers = header_with_bearer(&format!("Bearer {token}"));
-        assert!(verify_bearer_header(&headers, &store, true).is_ok());
+        assert!(verify_bearer_header(&headers, &store).is_ok());
     }
 
     #[test]
-    fn enforced_tolerates_trailing_whitespace_in_bearer() {
+    fn mandatory_tolerates_trailing_whitespace_in_bearer() {
         // Some HTTP clients append a trailing CR/LF or space; the
         // header was already validated by axum so we won't see CR/LF,
         // but we do trim trailing spaces because that's a common iOS
@@ -391,23 +356,23 @@ mod tests {
         let (_dir, store) = temp_store();
         let token = store.current_token().expect("seed");
         let headers = header_with_bearer(&format!("Bearer {token}   "));
-        assert!(verify_bearer_header(&headers, &store, true).is_ok());
+        assert!(verify_bearer_header(&headers, &store).is_ok());
     }
 
     #[test]
-    fn enforced_rejects_when_token_file_unreachable() {
-        // No file, unwritable parent. Even with `enforced=true` and a
-        // header present, 401 is the right answer because there's no
+    fn mandatory_rejects_when_token_file_unreachable() {
+        // No file, unwritable parent. Even with a header present, 401 is
+        // the right answer because there's no
         // canonical token to compare against. This is the
         // "server-not-initialized" path the Mac wizard polls past.
         let store = BearerTokenStore::new(PathBuf::from("/dev/null/auth.json"));
         let headers = header_with_bearer("Bearer some-value");
-        let err = verify_bearer_header(&headers, &store, true).unwrap_err();
+        let err = verify_bearer_header(&headers, &store).unwrap_err();
         assert_eq!(err, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn enforced_rejects_after_rotation_with_old_token() {
+    fn mandatory_rejects_after_rotation_with_old_token() {
         let (_dir, store) = temp_store();
         let original = store.current_token().expect("seed");
 
@@ -416,12 +381,12 @@ mod tests {
 
         // Same store; old token should now be rejected.
         let headers = header_with_bearer(&format!("Bearer {original}"));
-        let err = verify_bearer_header(&headers, &store, true).unwrap_err();
+        let err = verify_bearer_header(&headers, &store).unwrap_err();
         assert_eq!(err, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn enforced_accepts_new_token_after_rotation() {
+    fn mandatory_accepts_new_token_after_rotation() {
         let (_dir, store) = temp_store();
         let _ = store.current_token().expect("seed");
 
@@ -429,11 +394,11 @@ mod tests {
         let rotated = crate::server::onboarding::rotate_bearer_token(store.path()).expect("rotate");
 
         let headers = header_with_bearer(&format!("Bearer {rotated}"));
-        assert!(verify_bearer_header(&headers, &store, true).is_ok());
+        assert!(verify_bearer_header(&headers, &store).is_ok());
     }
 
     #[test]
-    fn enforced_rejects_non_ascii_header() {
+    fn mandatory_rejects_non_ascii_header() {
         // Token can never contain non-ASCII (URL-safe base64), so a
         // non-ASCII Authorization value is by definition wrong. This
         // also exercises the `to_str()` failure branch.
@@ -443,7 +408,7 @@ mod tests {
         // Bytes for "Bearer \u{FFFD}" — invalid UTF-8 in HeaderValue
         let value = HeaderValue::from_bytes(b"Bearer \xFF\xFE").expect("non-ascii header");
         headers.insert(header::AUTHORIZATION, value);
-        let err = verify_bearer_header(&headers, &store, true).unwrap_err();
+        let err = verify_bearer_header(&headers, &store).unwrap_err();
         assert_eq!(err, StatusCode::UNAUTHORIZED);
     }
 
@@ -469,7 +434,7 @@ mod tests {
                     // Pull a token, build a header from it, verify.
                     if let Some(t) = s.current_token() {
                         let h = header_with_bearer(&format!("Bearer {t}"));
-                        let _ = verify_bearer_header(&h, &s, true);
+                        let _ = verify_bearer_header(&h, &s);
                     }
                 }
             }));

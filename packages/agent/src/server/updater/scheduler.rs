@@ -297,7 +297,7 @@ pub fn spawn(
     shutdown: tokio_util::sync::CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        use crate::server::updater::UpdateFrequency;
+        use crate::settings::types::UpdateFrequency;
 
         // First look at settings to decide whether to even arm the
         // loop. The default config is disabled so this usually logs
@@ -382,7 +382,8 @@ pub fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::updater::{MockReleaseFetcher, ReleaseInfo, UpdateChannel, UpdateFrequency};
+    use crate::server::updater::{MockReleaseFetcher, ReleaseInfo};
+    use crate::settings::types::{UpdateChannel, UpdateFrequency};
 
     fn release(version: &str, prerelease: bool) -> ReleaseInfo {
         ReleaseInfo {

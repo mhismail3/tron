@@ -51,10 +51,6 @@ final class MenuBarActionHandler {
         observe(.tronMenuBarStopDevServer, on: center) { [weak self] in
             await self?.stopDevServer()
         }
-        observe(.tronMenuBarToggleDeveloperOptions, on: center) { [weak self] in
-            self?.menuBarController?.toggleDeveloperOptions()
-        }
-        observeDevCommand(on: center)
         observe(.tronMenuBarShowPairingInfo, on: center) { [weak self] in
             self?.showPairingInfo()
         }
@@ -93,19 +89,6 @@ final class MenuBarActionHandler {
         let token = center.addObserver(forName: name, object: nil, queue: nil) { _ in
             Task { @MainActor in
                 await handler()
-            }
-        }
-        observers.append(token)
-    }
-
-    private func observeDevCommand(on center: NotificationCenter) {
-        let token = center.addObserver(forName: .tronMenuBarRunDevCommand, object: nil, queue: nil) { [weak self] notification in
-            let rawValue = notification.userInfo?[TronDevCommand.notificationUserInfoKey] as? String
-            Task { @MainActor in
-                guard let rawValue, let command = TronDevCommand(rawValue: rawValue) else {
-                    return
-                }
-                await self?.runDevCommand(command)
             }
         }
         observers.append(token)
@@ -233,32 +216,6 @@ final class MenuBarActionHandler {
             await refreshStatus()
             await MenuBarNotifier.post(title: "Stop dev server failed", body: message)
             await presentNonBlockingError(title: "Stop dev server failed", message: message)
-        }
-    }
-
-    func runDevCommand(_ command: TronDevCommand) async {
-        if command.startsDevServer {
-            let current = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
-            let port = current.port ?? setup.serverPort
-            if let process = await setup.probeServerProcess(port), process.isDevServer {
-                await refreshStatus()
-                await MenuBarNotifier.post(
-                    title: "Dev server already active",
-                    body: "Use Stop dev server before starting a new dev takeover."
-                )
-                return
-            }
-        }
-
-        applyBusy(.startingDevServer)
-        let result = await setup.runDevCommand(command)
-        await refreshStatus()
-        switch result {
-        case .succeeded(let message):
-            await MenuBarNotifier.post(title: command.successTitle, body: message)
-        case .failed(let message):
-            await MenuBarNotifier.post(title: "Dev command failed", body: message)
-            await presentNonBlockingError(title: "Dev command failed", message: message)
         }
     }
 

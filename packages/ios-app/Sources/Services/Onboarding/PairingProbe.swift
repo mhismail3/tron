@@ -297,8 +297,7 @@ enum PairingProbeFrame: Equatable {
 /// and writes to a single bool through atomic operations.
 final class ProbeSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     /// Set true if any task in this session received a 401 HTTP response
-    /// (which is what a `auth.enforced=true` server emits when the
-    /// `Authorization` header is missing or wrong).
+    /// because the `Authorization` header is missing or wrong.
     var observedUnauthorized: Bool {
         lock.lock()
         defer { lock.unlock() }

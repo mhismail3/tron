@@ -116,7 +116,7 @@ pub enum McpContentBlock {
 }
 
 /// MCP server configuration.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerConfig {
     /// Server name (used as tool name prefix).
     pub name: String,

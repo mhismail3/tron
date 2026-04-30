@@ -8,7 +8,12 @@ use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::handlers::{mcp, require_param};
 use crate::server::rpc::registry::MethodHandler;
-use crate::server::rpc::settings_service;
+
+fn settings_error(error: crate::settings::SettingsError) -> RpcError {
+    RpcError::Internal {
+        message: error.to_string(),
+    }
+}
 
 /// Get current settings.
 pub struct GetSettingsHandler;
@@ -19,7 +24,9 @@ impl MethodHandler for GetSettingsHandler {
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let settings_path = ctx.settings_path.clone();
         ctx.run_blocking("settings.get", move || {
-            settings_service::load_settings_value(&settings_path)
+            crate::settings::SettingsStore::new(settings_path)
+                .load_value()
+                .map_err(settings_error)
         })
         .await
     }
@@ -32,9 +39,12 @@ pub struct ResetSettingsHandler;
 impl MethodHandler for ResetSettingsHandler {
     #[instrument(skip(self, ctx), fields(method = "settings.resetToDefaults"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
         let settings_path = ctx.settings_path.clone();
         ctx.run_blocking("settings.resetToDefaults", move || {
-            settings_service::reset_settings(&settings_path)
+            crate::settings::SettingsStore::new(settings_path)
+                .reset()
+                .map_err(settings_error)
         })
         .await
     }
@@ -50,18 +60,48 @@ impl MethodHandler for UpdateSettingsHandler {
         let updates = require_param(params.as_ref(), "settings")?.clone();
         let has_mcp_changes = updates.get("mcp").is_some();
         let settings_path = ctx.settings_path.clone();
+
+        if has_mcp_changes && let Some(ref router) = ctx.mcp_router {
+            let mut router_guard = router.write().await;
+            let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
+            let previous_sparse = {
+                let path = settings_path.clone();
+                ctx.run_blocking("settings.readSparseBeforeMcpUpdate", move || {
+                    crate::settings::SettingsStore::new(path)
+                        .read_sparse_value()
+                        .map_err(settings_error)
+                })
+                .await?
+            };
+            ctx.run_blocking("settings.update", move || {
+                crate::settings::SettingsStore::new(settings_path)
+                    .update(updates)
+                    .map_err(settings_error)
+            })
+            .await?;
+
+            if let Err(message) = router_guard.reload_from_settings().await {
+                let path = ctx.settings_path.clone();
+                ctx.run_blocking("settings.rollbackMcpUpdate", move || {
+                    crate::settings::SettingsStore::new(path)
+                        .replace_sparse_value(previous_sparse)
+                        .map_err(settings_error)
+                })
+                .await?;
+                return Err(RpcError::Internal { message });
+            }
+            drop(router_guard);
+            mcp::broadcast_status_changed(ctx).await;
+            return Ok(serde_json::json!({ "success": true }));
+        }
+
+        let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
         ctx.run_blocking("settings.update", move || {
-            settings_service::update_settings(&settings_path, updates)
+            crate::settings::SettingsStore::new(settings_path)
+                .update(updates)
+                .map_err(settings_error)
         })
         .await?;
-
-        // Hot-reload MCP servers when the mcp section changes
-        if has_mcp_changes && let Some(ref router) = ctx.mcp_router {
-            let mut guard = router.write().await;
-            let _ = guard.reload_from_settings().await;
-            drop(guard);
-            mcp::broadcast_status_changed(ctx).await;
-        }
 
         Ok(serde_json::json!({ "success": true }))
     }
@@ -173,7 +213,10 @@ mod tests {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = UpdateSettingsHandler
-            .handle(Some(json!({"settings": {"theme": "dark"}})), &ctx)
+            .handle(
+                Some(json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}})),
+                &ctx,
+            )
             .await
             .unwrap();
         assert_eq!(result["success"], true);
@@ -186,7 +229,10 @@ mod tests {
         assert!(!ctx.settings_path.exists());
 
         let _ = UpdateSettingsHandler
-            .handle(Some(json!({"settings": {"theme": "dark"}})), &ctx)
+            .handle(
+                Some(json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}})),
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -200,21 +246,109 @@ mod tests {
 
         let _ = UpdateSettingsHandler
             .handle(
-                Some(json!({"settings": {"server": {"wsPort": 9999}, "theme": "light"}})),
+                Some(json!({"settings": {"server": {"defaultModel": "model-a", "defaultProvider": "anthropic"}}})),
                 &ctx,
             )
             .await
             .unwrap();
 
         let _ = UpdateSettingsHandler
-            .handle(Some(json!({"settings": {"theme": "dark"}})), &ctx)
+            .handle(
+                Some(json!({"settings": {"server": {"defaultProvider": "openai"}}})),
+                &ctx,
+            )
             .await
             .unwrap();
 
         let content = std::fs::read_to_string(&ctx.settings_path).unwrap();
         let saved: Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(saved["theme"], "dark");
-        assert_eq!(saved["server"]["wsPort"], 9999);
+        assert_eq!(saved["server"]["defaultProvider"], "openai");
+        assert_eq!(saved["server"]["defaultModel"], "model-a");
+    }
+
+    #[tokio::test]
+    async fn update_settings_rejects_malformed_existing_json() {
+        let _guard = settings_test_guard().await;
+        let (ctx, _dir) = make_ctx_with_temp_settings();
+        std::fs::write(&ctx.settings_path, "{broken").unwrap();
+
+        let err = UpdateSettingsHandler
+            .handle(
+                Some(json!({"settings": {"server": {"heartbeatIntervalMs": 99_000}}})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("parse settings JSON"));
+        assert_eq!(
+            std::fs::read_to_string(&ctx.settings_path).unwrap(),
+            "{broken"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_settings_rejects_removed_auth_setting() {
+        let _guard = settings_test_guard().await;
+        let (ctx, _dir) = make_ctx_with_temp_settings();
+
+        let err = UpdateSettingsHandler
+            .handle(
+                Some(json!({"settings": {"server": {"auth": {"enforced": true}}}})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("unknown field"));
+        assert!(!ctx.settings_path.exists());
+    }
+
+    #[tokio::test]
+    async fn update_settings_rolls_back_when_mcp_apply_fails() {
+        let _guard = settings_test_guard().await;
+        let (mut ctx, _dir) = make_ctx_with_temp_settings();
+        crate::settings::SettingsStore::new(&ctx.settings_path)
+            .reset()
+            .unwrap();
+        ctx.mcp_router = Some(std::sync::Arc::new(tokio::sync::RwLock::new(
+            crate::mcp::router::McpRouter::new(Vec::new(), ctx.settings_path.clone(), 0).await,
+        )));
+
+        let err = UpdateSettingsHandler
+            .handle(
+                Some(json!({
+                    "settings": {
+                        "mcp": {
+                            "servers": [{
+                                "name": "broken",
+                                "command": "nonexistent-mcp-binary-12345",
+                                "args": [],
+                                "env": {},
+                                "toolTimeoutMs": 30000,
+                                "enabled": true
+                            }]
+                        }
+                    }
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("broken"));
+        let saved: Value =
+            serde_json::from_str(&std::fs::read_to_string(&ctx.settings_path).unwrap()).unwrap();
+        assert_eq!(saved, json!({}));
+        assert!(
+            ctx.mcp_router
+                .as_ref()
+                .unwrap()
+                .read()
+                .await
+                .status()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -223,19 +357,25 @@ mod tests {
         let (ctx, _dir) = make_ctx_with_temp_settings();
 
         let _ = UpdateSettingsHandler
-            .handle(Some(json!({"settings": {"a": 1, "b": 2}})), &ctx)
+            .handle(
+                Some(json!({"settings": {"server": {"defaultModel": "model-a", "defaultProvider": "anthropic"}}})),
+                &ctx,
+            )
             .await
             .unwrap();
 
         let _ = UpdateSettingsHandler
-            .handle(Some(json!({"settings": {"a": 10}})), &ctx)
+            .handle(
+                Some(json!({"settings": {"server": {"defaultProvider": "openai"}}})),
+                &ctx,
+            )
             .await
             .unwrap();
 
         let content = std::fs::read_to_string(&ctx.settings_path).unwrap();
         let saved: Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(saved["a"], 10);
-        assert_eq!(saved["b"], 2);
+        assert_eq!(saved["server"]["defaultProvider"], "openai");
+        assert_eq!(saved["server"]["defaultModel"], "model-a");
     }
 
     #[tokio::test]
@@ -260,7 +400,10 @@ mod tests {
         ctx.settings_path = nested_path.clone();
 
         let _ = UpdateSettingsHandler
-            .handle(Some(json!({"settings": {"x": 1}})), &ctx)
+            .handle(
+                Some(json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}})),
+                &ctx,
+            )
             .await
             .unwrap();
         assert!(nested_path.exists());
@@ -294,7 +437,10 @@ mod tests {
 
         // Write some customizations
         let _ = UpdateSettingsHandler
-            .handle(Some(json!({"settings": {"theme": "dark"}})), &ctx)
+            .handle(
+                Some(json!({"settings": {"server": {"heartbeatIntervalMs": 40_000}}})),
+                &ctx,
+            )
             .await
             .unwrap();
         assert!(ctx.settings_path.exists());
@@ -314,7 +460,7 @@ mod tests {
         let (ctx, _dir) = make_ctx_with_temp_settings();
 
         // Prime the cache with defaults pointing at temp path
-        crate::settings::reload_settings_from_path(&ctx.settings_path);
+        crate::settings::reload_settings_from_path(&ctx.settings_path).unwrap();
         assert!(
             crate::settings::get_settings()
                 .context

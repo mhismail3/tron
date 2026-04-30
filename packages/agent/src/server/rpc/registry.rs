@@ -13,6 +13,28 @@ use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::types::{RpcRequest, RpcResponse};
 
+/// Execution contract for an RPC handler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandlerExecutionPolicy {
+    /// Cheap async work. A timeout may cancel the future before side effects.
+    Quick,
+    /// Potentially blocking read-only work. A timeout may leave the read
+    /// finishing in the background, but it must not mutate durable state.
+    BlockingRead,
+    /// Mutating work. The registry does not apply the generic handler timeout
+    /// because blocking side effects cannot be aborted once started.
+    Mutating,
+}
+
+impl HandlerExecutionPolicy {
+    fn timeout(self, default: Duration) -> Option<Duration> {
+        match self {
+            Self::Quick | Self::BlockingRead => Some(default),
+            Self::Mutating => None,
+        }
+    }
+}
+
 /// Trait implemented by every RPC method handler.
 #[async_trait]
 pub trait MethodHandler: Send + Sync {
@@ -20,9 +42,15 @@ pub trait MethodHandler: Send + Sync {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError>;
 }
 
+struct HandlerEntry {
+    handler: Arc<dyn MethodHandler>,
+    policy: HandlerExecutionPolicy,
+}
+
 /// Registry mapping method names to handlers.
 pub struct MethodRegistry {
-    handlers: HashMap<String, Arc<dyn MethodHandler>>,
+    handlers: HashMap<String, HandlerEntry>,
+    handler_timeout: Duration,
 }
 
 impl MethodRegistry {
@@ -30,23 +58,48 @@ impl MethodRegistry {
     pub fn new() -> Self {
         Self {
             handlers: HashMap::new(),
+            handler_timeout: Self::HANDLER_TIMEOUT,
         }
     }
 
     /// Register a handler for a method name.
     pub fn register(&mut self, method: &str, handler: impl MethodHandler + 'static) {
-        let _ = self.handlers.insert(method.to_owned(), Arc::new(handler));
+        self.register_with_policy(method, Self::policy_for_method(method), handler);
+    }
+
+    /// Register a handler with an explicit execution policy.
+    pub fn register_with_policy(
+        &mut self,
+        method: &str,
+        policy: HandlerExecutionPolicy,
+        handler: impl MethodHandler + 'static,
+    ) {
+        let _ = self.handlers.insert(
+            method.to_owned(),
+            HandlerEntry {
+                handler: Arc::new(handler),
+                policy,
+            },
+        );
     }
 
     /// Maximum time a single RPC handler is allowed to run.
     const HANDLER_TIMEOUT: Duration = Duration::from_secs(60);
+
+    #[cfg(test)]
+    fn with_handler_timeout(timeout: Duration) -> Self {
+        Self {
+            handlers: HashMap::new(),
+            handler_timeout: timeout,
+        }
+    }
 
     /// Dispatch a request to the appropriate handler.
     pub async fn dispatch(&self, request: RpcRequest, ctx: &RpcContext) -> RpcResponse {
         let method = request.method.clone();
         counter!("rpc_requests_total", "method" => method.clone()).increment(1);
 
-        let Some(handler) = self.handlers.get(&method) else {
+        let Some(entry) = self.handlers.get(&method) else {
             counter!("rpc_errors_total", "method" => method.clone(), "error_type" => "method_not_found").increment(1);
             return RpcResponse::error(
                 &request.id,
@@ -73,8 +126,14 @@ impl MethodRegistry {
         }
 
         let start = std::time::Instant::now();
-        let result =
-            tokio::time::timeout(Self::HANDLER_TIMEOUT, handler.handle(request.params, ctx)).await;
+        let result = match entry.policy.timeout(self.handler_timeout) {
+            Some(timeout) => {
+                tokio::time::timeout(timeout, entry.handler.handle(request.params, ctx))
+                    .await
+                    .map_err(|_| ())
+            }
+            None => Ok(entry.handler.handle(request.params, ctx).await),
+        };
 
         let response = match result {
             Ok(Ok(result)) => RpcResponse::success(&request.id, result),
@@ -98,7 +157,7 @@ impl MethodRegistry {
                 tracing::error!(
                     method,
                     "RPC handler timed out after {:?}",
-                    Self::HANDLER_TIMEOUT
+                    self.handler_timeout
                 );
                 RpcResponse::error(
                     &request.id,
@@ -133,6 +192,74 @@ impl MethodRegistry {
     /// Check whether a method is registered.
     pub fn has_method(&self, method: &str) -> bool {
         self.handlers.contains_key(method)
+    }
+
+    /// Return the configured execution policy for a registered method.
+    pub fn method_policy(&self, method: &str) -> Option<HandlerExecutionPolicy> {
+        self.handlers.get(method).map(|entry| entry.policy)
+    }
+
+    fn policy_for_method(method: &str) -> HandlerExecutionPolicy {
+        if matches!(
+            method,
+            "system.ping"
+                | "system.getInfo"
+                | "system.getDiagnostics"
+                | "agent.status"
+                | "browser.getStatus"
+                | "cron.status"
+                | "context.shouldCompact"
+                | "context.canAcceptTurn"
+                | "mcp.status"
+        ) {
+            return HandlerExecutionPolicy::Quick;
+        }
+
+        if method.starts_with("settings.get")
+            || method.starts_with("session.list")
+            || method.starts_with("session.get")
+            || method.starts_with("session.reconstruct")
+            || method.starts_with("session.resume")
+            || method.starts_with("session.export")
+            || method.starts_with("events.get")
+            || method.starts_with("model.list")
+            || method.starts_with("blob.get")
+            || method.starts_with("context.get")
+            || method.starts_with("context.preview")
+            || method.starts_with("logs.recent")
+            || method.starts_with("mcp.list")
+            || method.starts_with("skill.list")
+            || method.starts_with("skill.get")
+            || method.starts_with("skill.active")
+            || method.starts_with("filesystem.list")
+            || method.starts_with("filesystem.get")
+            || method.starts_with("file.read")
+            || method.starts_with("tree.")
+            || method.starts_with("import.list")
+            || method.starts_with("import.preview")
+            || method.starts_with("worktree.get")
+            || method.starts_with("worktree.is")
+            || method.starts_with("worktree.list")
+            || method.starts_with("repo.list")
+            || method.starts_with("repo.get")
+            || method.starts_with("transcribe.list")
+            || method.starts_with("plan.get")
+            || method.starts_with("voiceNotes.list")
+            || method.starts_with("notifications.list")
+            || method.starts_with("promptHistory.list")
+            || method.starts_with("promptSnippet.list")
+            || method.starts_with("promptSnippet.get")
+            || method.starts_with("cron.list")
+            || method.starts_with("cron.get")
+            || method.starts_with("cron.getRuns")
+            || method.starts_with("job.list")
+            || method.starts_with("auth.get")
+            || method.starts_with("system.getUpdateStatus")
+        {
+            return HandlerExecutionPolicy::BlockingRead;
+        }
+
+        HandlerExecutionPolicy::Mutating
     }
 }
 
@@ -223,6 +350,27 @@ mod tests {
         assert!(resp.success);
         assert_eq!(resp.id, "r1");
         assert_eq!(resp.result.unwrap()["x"], 1);
+    }
+
+    #[test]
+    fn registry_classifies_core_execution_policies() {
+        let mut reg = MethodRegistry::new();
+        reg.register("system.ping", EchoHandler);
+        reg.register("settings.get", EchoHandler);
+        reg.register("settings.update", EchoHandler);
+
+        assert_eq!(
+            reg.method_policy("system.ping"),
+            Some(HandlerExecutionPolicy::Quick)
+        );
+        assert_eq!(
+            reg.method_policy("settings.get"),
+            Some(HandlerExecutionPolicy::BlockingRead)
+        );
+        assert_eq!(
+            reg.method_policy("settings.update"),
+            Some(HandlerExecutionPolicy::Mutating)
+        );
     }
 
     #[tokio::test]
@@ -402,17 +550,13 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_timeout_returns_error() {
-        // Use a custom registry with a very short timeout to test the timeout path
-        // without actually waiting 60 seconds. We'll test indirectly by verifying
-        // the timeout machinery works with tokio's pause feature.
-        tokio::time::pause();
-
         let ctx = make_test_context();
-        let mut reg = MethodRegistry::new();
-        reg.register(
+        let mut reg = MethodRegistry::with_handler_timeout(std::time::Duration::from_millis(1));
+        reg.register_with_policy(
             "slow",
+            HandlerExecutionPolicy::Quick,
             SlowHandler {
-                delay: std::time::Duration::from_secs(120),
+                delay: std::time::Duration::from_millis(30),
             },
         );
 
@@ -425,5 +569,45 @@ mod tests {
         let err = resp.error.unwrap();
         assert_eq!(err.code, "INTERNAL_ERROR");
         assert!(err.message.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_mutating_policy_waits_instead_of_timing_out() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct MutatingHandler {
+            changed: Arc<AtomicBool>,
+        }
+
+        #[async_trait]
+        impl MethodHandler for MutatingHandler {
+            async fn handle(
+                &self,
+                _params: Option<Value>,
+                _ctx: &RpcContext,
+            ) -> Result<Value, RpcError> {
+                tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                self.changed.store(true, Ordering::SeqCst);
+                Ok(json!({"changed": true}))
+            }
+        }
+
+        let ctx = make_test_context();
+        let changed = Arc::new(AtomicBool::new(false));
+        let mut reg = MethodRegistry::with_handler_timeout(std::time::Duration::from_millis(1));
+        reg.register_with_policy(
+            "test.mutate",
+            HandlerExecutionPolicy::Mutating,
+            MutatingHandler {
+                changed: Arc::clone(&changed),
+            },
+        );
+
+        let resp = reg
+            .dispatch(make_request("r-mutating", "test.mutate", None), &ctx)
+            .await;
+
+        assert!(resp.success, "mutating handler must not timeout early");
+        assert!(changed.load(Ordering::SeqCst));
     }
 }

@@ -6,8 +6,8 @@
 //!
 //! - **`auth.json.bearerToken`** at [`crate::core::paths::auth_path()`].
 //!   A single 32-byte URL-safe-base64 token that gates WebSocket upgrade
-//!   requests when `server.auth.enforced` is true. Generated during
-//!   first server startup; rotated via `tron auth rotate` (CLI) or the
+//!   requests. Generated during first server startup; rotated via
+//!   `tron auth rotate` (CLI) or the
 //!   menu-bar action in the Mac wrapper. File mode is `0o600` and writes
 //!   are owned by `llm::auth::storage` so provider credentials and the
 //!   pairing bearer share one secure auth document.

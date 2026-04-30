@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -25,6 +26,16 @@ use crate::server::rpc::context::{AgentDeps, RpcContext};
 use crate::server::rpc::session_context::ContextArtifactsService;
 use crate::skills::registry::SkillRegistry;
 use crate::tools::registry::ToolRegistry;
+
+static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn unique_test_path(name: &str, extension: &str) -> PathBuf {
+    let id = TEST_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "tron-test-{name}-{}-{id}.{extension}",
+        std::process::id()
+    ))
+}
 
 /// A no-op mock provider for tests.
 pub struct MockProvider;
@@ -136,7 +147,7 @@ pub fn make_test_context() -> RpcContext {
         event_store: store,
         skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
         memory_registry: Arc::new(Mutex::new(MemoryRegistry::new())),
-        settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
+        settings_path: unique_test_path("settings", "json"),
         agent_deps: None,
         server_start_time: Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
@@ -148,7 +159,7 @@ pub fn make_test_context() -> RpcContext {
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(ContextArtifactsService::new()),
-        auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
+        auth_path: unique_test_path("auth", "json"),
         broadcast_manager: None,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         mcp_router: None,
@@ -157,9 +168,9 @@ pub fn make_test_context() -> RpcContext {
         job_manager: None,
         output_buffer_registry: None,
         hook_abort_tracker: Arc::new(crate::runtime::hooks::abort_tracker::HookAbortTracker::new()),
-        ws_port: 9847,
-        onboarded_marker_path: PathBuf::from("/tmp/tron-test-onboarded.marker"),
+        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
+        onboarded_marker_path: unique_test_path("onboarded", "marker"),
         release_fetcher: None,
-        updater_state_path: PathBuf::from("/tmp/tron-test-updater-state.json"),
+        updater_state_path: unique_test_path("updater-state", "json"),
     }
 }

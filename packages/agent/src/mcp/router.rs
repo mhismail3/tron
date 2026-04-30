@@ -2,7 +2,9 @@
 //!
 //! Wraps [`McpServerManager`] and [`ToolIndex`] into a single struct shared
 //! via `Arc<tokio::sync::RwLock<McpRouter>>`. Provides search, call routing,
-//! server lifecycle management, and settings persistence.
+//! server lifecycle management, and settings persistence. Settings writes go
+//! through `settings::SettingsStore`; this module deliberately has no
+//! dependency on the server/RPC layer.
 //!
 //! ## Schema-drift refresh (C8)
 //!
@@ -22,7 +24,7 @@ use tracing::{debug, info, warn};
 use crate::mcp::client::McpError;
 use crate::mcp::server_manager::McpServerManager;
 use crate::mcp::tool_index::{ToolIndex, ToolMatch};
-use crate::mcp::types::{McpServerConfig, McpServerStatus, McpToolResult};
+use crate::mcp::types::{McpServerConfig, McpServerHealth, McpServerStatus, McpToolResult};
 
 /// Central coordinator for MCP servers and tool discovery.
 pub struct McpRouter {
@@ -179,59 +181,131 @@ impl McpRouter {
     /// Add a new server, connect, discover tools, persist to settings.
     pub async fn add_server(&mut self, config: McpServerConfig) -> Result<usize, McpError> {
         let name = config.name.clone();
+        let enabled = config.enabled;
         self.manager.add_config(config);
 
-        let defs = self.manager.manual_restart(&name).await?;
-        let tool_count = defs.len();
-        self.index.add_server_tools(&name, &defs);
+        let tool_count = if enabled {
+            let defs = match self.manager.manual_restart(&name).await {
+                Ok(defs) => defs,
+                Err(error) => {
+                    self.manager.remove_config(&name).await;
+                    return Err(error);
+                }
+            };
+            let tool_count = defs.len();
+            self.index.add_server_tools(&name, &defs);
+            tool_count
+        } else {
+            0
+        };
 
-        self.persist_configs();
+        if let Err(error) = self.persist_configs().await {
+            self.index.remove_server(&name);
+            self.manager.remove_config(&name).await;
+            return Err(McpError {
+                server: name,
+                kind: crate::mcp::client::McpErrorKind::Protocol("settings persist failed".into()),
+                message: error,
+            });
+        };
 
         info!(server = %name, tool_count, "MCP server added");
         Ok(tool_count)
     }
 
     /// Remove a server, shut it down, remove from index, persist.
-    pub async fn remove_server(&mut self, name: &str) {
+    pub async fn remove_server(&mut self, name: &str) -> Result<(), String> {
+        let configs: Vec<McpServerConfig> = self
+            .manager
+            .configs()
+            .iter()
+            .filter(|config| config.name != name)
+            .cloned()
+            .collect();
+        self.persist_configs_slice(&configs).await?;
         self.index.remove_server(name);
         self.manager.remove_config(name).await;
-        self.persist_configs();
         info!(server = %name, "MCP server removed");
+        Ok(())
     }
 
     /// Enable a disabled server: toggle config, connect, index tools.
     pub async fn enable_server(&mut self, name: &str) -> Result<(), McpError> {
-        if let Some(config) = self.manager.config_mut(name) {
+        let old_config = if let Some(config) = self.manager.config_mut(name) {
+            let old = config.clone();
             config.enabled = true;
+            old
         } else {
             return Err(McpError {
                 server: name.to_string(),
                 kind: crate::mcp::client::McpErrorKind::Protocol("unknown server".into()),
                 message: format!("No MCP server configured with name: {name}"),
             });
-        }
+        };
 
-        let defs = self.manager.manual_restart(name).await?;
+        let defs = match self.manager.manual_restart(name).await {
+            Ok(defs) => defs,
+            Err(error) => {
+                self.manager.disconnect_server(name).await;
+                if let Some(config) = self.manager.config_mut(name) {
+                    *config = old_config;
+                }
+                return Err(error);
+            }
+        };
         self.index.add_server_tools(name, &defs);
-        self.persist_configs();
+        if let Err(message) = self.persist_configs().await {
+            self.index.remove_server(name);
+            self.manager.disconnect_server(name).await;
+            if let Some(config) = self.manager.config_mut(name) {
+                *config = old_config;
+            }
+            return Err(McpError {
+                server: name.to_string(),
+                kind: crate::mcp::client::McpErrorKind::Protocol("settings persist failed".into()),
+                message,
+            });
+        }
         Ok(())
     }
 
     /// Disable a server: disconnect, remove from index, toggle config.
     pub async fn disable_server(&mut self, name: &str) -> Result<(), McpError> {
-        if let Some(config) = self.manager.config_mut(name) {
-            config.enabled = false;
-        } else {
+        let Some(existing) = self.manager.configs().iter().find(|c| c.name == name) else {
             return Err(McpError {
                 server: name.to_string(),
                 kind: crate::mcp::client::McpErrorKind::Protocol("unknown server".into()),
                 message: format!("No MCP server configured with name: {name}"),
             });
-        }
+        };
+        let mut next = existing.clone();
+        next.enabled = false;
+        let configs: Vec<McpServerConfig> = self
+            .manager
+            .configs()
+            .iter()
+            .map(|config| {
+                if config.name == name {
+                    next.clone()
+                } else {
+                    config.clone()
+                }
+            })
+            .collect();
+
+        self.persist_configs_slice(&configs)
+            .await
+            .map_err(|message| McpError {
+                server: name.to_string(),
+                kind: crate::mcp::client::McpErrorKind::Protocol("settings persist failed".into()),
+                message,
+            })?;
 
         self.index.remove_server(name);
         self.manager.disconnect_server(name).await;
-        self.persist_configs();
+        if let Some(config) = self.manager.config_mut(name) {
+            config.enabled = false;
+        }
         Ok(())
     }
 
@@ -249,38 +323,34 @@ impl McpRouter {
 
     /// Reload configs from settings file, diff against current state.
     pub async fn reload_from_settings(&mut self) -> Result<usize, String> {
-        let settings =
-            crate::settings::load_settings_from_path(&self.settings_path).unwrap_or_default();
+        let settings = crate::settings::load_settings_from_path(&self.settings_path)
+            .map_err(|error| error.to_string())?;
         let new_configs = settings.mcp.servers;
         let new_ttl_ms = settings.mcp.schema_refresh_ttl_ms;
 
-        let current_names: Vec<String> = self
-            .manager
-            .configs()
-            .iter()
-            .map(|c| c.name.clone())
-            .collect();
-        let new_names: Vec<String> = new_configs.iter().map(|c| c.name.clone()).collect();
-
-        // Remove servers no longer in config
-        for name in &current_names {
-            if !new_names.contains(name) {
-                self.remove_server(name).await;
-            }
-        }
-
-        // Add new servers
+        let mut staged_manager = McpServerManager::new(new_configs.clone());
+        let discovered = staged_manager.start_all().await;
         for config in &new_configs {
-            if !current_names.contains(&config.name)
-                && let Err(e) = self.add_server(config.clone()).await
+            if config.enabled
+                && staged_manager.health(&config.name) != Some(McpServerHealth::Healthy)
             {
-                warn!(server = %config.name, error = %e, "failed to add server during reload");
+                staged_manager.shutdown_all().await;
+                return Err(format!("failed to connect MCP server '{}'", config.name));
             }
         }
+
+        let mut staged_index = ToolIndex::new();
+        for (server, defs) in &discovered {
+            staged_index.add_server_tools(server, defs);
+        }
+
+        let mut old_manager = std::mem::replace(&mut self.manager, staged_manager);
+        self.index = staged_index;
 
         // Pick up any change to the refresh TTL without requiring a daemon
         // restart. Setting it to 0 disables proactive refresh.
         self.set_schema_refresh_ttl_ms(new_ttl_ms);
+        old_manager.shutdown_all().await;
 
         Ok(self.manager.configs().len())
     }
@@ -296,24 +366,54 @@ impl McpRouter {
     }
 
     /// Persist current configs to settings file.
-    fn persist_configs(&self) {
+    async fn persist_configs(&self) -> Result<(), String> {
         let configs = self.manager.configs();
+        self.persist_configs_slice(configs).await
+    }
+
+    async fn persist_configs_slice(&self, configs: &[McpServerConfig]) -> Result<(), String> {
         let update = serde_json::json!({
             "mcp": {
                 "servers": configs
             }
         });
-        if let Err(e) =
-            crate::server::rpc::settings_service::update_settings(&self.settings_path, update)
-        {
-            warn!(error = %e, "failed to persist MCP server configs");
-        }
+        let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
+        crate::settings::SettingsStore::new(&self.settings_path)
+            .update(update)
+            .map_err(|error| {
+                warn!(error = %error, "failed to persist MCP server configs");
+                error.to_string()
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn disabled_config(name: &str) -> McpServerConfig {
+        McpServerConfig {
+            name: name.into(),
+            command: Some("sh".into()),
+            args: vec!["-c".into(), "exit 0".into()],
+            env: Default::default(),
+            url: None,
+            tool_timeout_ms: 30_000,
+            enabled: false,
+        }
+    }
+
+    fn bad_enabled_config(name: &str) -> McpServerConfig {
+        McpServerConfig {
+            name: name.into(),
+            command: Some("nonexistent-mcp-binary-12345".into()),
+            args: Vec::new(),
+            env: Default::default(),
+            url: None,
+            tool_timeout_ms: 30_000,
+            enabled: true,
+        }
+    }
 
     #[tokio::test]
     async fn new_with_empty_configs() {
@@ -361,5 +461,123 @@ mod tests {
         let settings_path = dir.path().join("settings.json");
         let router = McpRouter::new(Vec::new(), settings_path, 0).await;
         assert!(router.status().is_empty());
+    }
+
+    #[tokio::test]
+    async fn reload_from_malformed_settings_returns_error_without_mutating_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("settings.json");
+        let mut router =
+            McpRouter::new(vec![disabled_config("disabled")], settings_path.clone(), 0).await;
+        std::fs::write(&settings_path, "{broken").unwrap();
+
+        let err = router.reload_from_settings().await.unwrap_err();
+
+        assert!(err.contains("parse settings JSON"));
+        assert_eq!(router.status().len(), 1);
+        assert_eq!(router.status()[0].name, "disabled");
+    }
+
+    #[tokio::test]
+    async fn reload_from_failed_server_add_preserves_existing_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("settings.json");
+        let existing = disabled_config("existing");
+        let mut router = McpRouter::new(vec![existing.clone()], settings_path.clone(), 0).await;
+        std::fs::write(
+            &settings_path,
+            serde_json::json!({
+                "mcp": {
+                    "servers": [
+                        existing,
+                        bad_enabled_config("broken")
+                    ]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let err = router.reload_from_settings().await.unwrap_err();
+
+        assert!(err.contains("broken"));
+        let statuses = router.status();
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].name, "existing");
+    }
+
+    #[tokio::test]
+    async fn add_disabled_server_persists_without_starting_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("settings.json");
+        let mut router = McpRouter::new(Vec::new(), settings_path.clone(), 0).await;
+
+        let count = router
+            .add_server(disabled_config("disabled"))
+            .await
+            .unwrap();
+
+        assert_eq!(count, 0);
+        let settings = crate::settings::load_settings_from_path(&settings_path).unwrap();
+        assert_eq!(settings.mcp.servers.len(), 1);
+        assert_eq!(settings.mcp.servers[0].name, "disabled");
+        assert!(!settings.mcp.servers[0].enabled);
+    }
+
+    #[tokio::test]
+    async fn failed_enabled_add_preserves_existing_settings_and_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("settings.json");
+        let mut router = McpRouter::new(Vec::new(), settings_path.clone(), 0).await;
+        router
+            .add_server(disabled_config("existing"))
+            .await
+            .unwrap();
+
+        let err = router
+            .add_server(bad_enabled_config("broken"))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.server, "broken");
+        let statuses = router.status();
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].name, "existing");
+        let settings = crate::settings::load_settings_from_path(&settings_path).unwrap();
+        assert_eq!(settings.mcp.servers.len(), 1);
+        assert_eq!(settings.mcp.servers[0].name, "existing");
+    }
+
+    #[tokio::test]
+    async fn failed_enable_preserves_disabled_config_and_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("settings.json");
+        let mut router = McpRouter::new(Vec::new(), settings_path.clone(), 0).await;
+        router.add_server(disabled_config("broken")).await.unwrap();
+
+        let err = router.enable_server("broken").await.unwrap_err();
+
+        assert_eq!(err.server, "broken");
+        assert!(!router.manager.configs()[0].enabled);
+        let settings = crate::settings::load_settings_from_path(&settings_path).unwrap();
+        assert_eq!(settings.mcp.servers.len(), 1);
+        assert!(!settings.mcp.servers[0].enabled);
+    }
+
+    #[tokio::test]
+    async fn remove_server_persists_before_runtime_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("settings.json");
+        let mut router = McpRouter::new(Vec::new(), settings_path.clone(), 0).await;
+        router
+            .add_server(disabled_config("remove-me"))
+            .await
+            .unwrap();
+
+        router.remove_server("remove-me").await.unwrap();
+
+        assert!(router.status().is_empty());
+        let settings = crate::settings::load_settings_from_path(&settings_path).unwrap();
+        assert!(settings.mcp.servers.is_empty());
     }
 }

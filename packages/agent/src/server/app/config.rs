@@ -11,10 +11,10 @@ pub struct ServerConfig {
     pub port: u16,
     /// Maximum concurrent WebSocket connections.
     pub max_connections: usize,
-    /// Heartbeat interval in seconds.
-    pub heartbeat_interval_secs: u64,
-    /// Heartbeat timeout in seconds (close after this many missed pongs).
-    pub heartbeat_timeout_secs: u64,
+    /// Heartbeat interval in milliseconds.
+    pub heartbeat_interval_ms: u64,
+    /// Heartbeat timeout in milliseconds (close after this many missed pongs).
+    pub heartbeat_timeout_ms: u64,
     /// Max WebSocket message size in bytes (default 150 MB).
     pub max_message_size: usize,
     /// Rate limit: max requests per second per connection. 0 = disabled (default).
@@ -29,11 +29,33 @@ impl Default for ServerConfig {
             host: "0.0.0.0".into(),
             port: 0,
             max_connections: 50,
-            heartbeat_interval_secs: 30,
-            heartbeat_timeout_secs: 90,
+            heartbeat_interval_ms: 30_000,
+            heartbeat_timeout_ms: 90_000,
             max_message_size: 150 * 1024 * 1024, // 150 MB — accommodates 15-min voice notes at 48kHz (~115 MB base64)
             rate_limit_rps: 0,                   // disabled by default
             cors_enabled: false,                 // disabled by default
+        }
+    }
+}
+
+impl ServerConfig {
+    /// Build runtime server config from CLI-owned bind values and settings-owned
+    /// heartbeat tuning.
+    pub fn from_settings(
+        host: String,
+        port: u16,
+        settings: &crate::settings::types::ServerSettings,
+    ) -> Self {
+        let heartbeat_interval_ms = settings.heartbeat_interval_ms;
+        let heartbeat_timeout_ms = heartbeat_interval_ms
+            .saturating_mul(3)
+            .max(heartbeat_interval_ms);
+        Self {
+            host,
+            port,
+            heartbeat_interval_ms,
+            heartbeat_timeout_ms,
+            ..Self::default()
         }
     }
 }
@@ -63,13 +85,13 @@ mod tests {
     #[test]
     fn default_heartbeat_interval() {
         let cfg = ServerConfig::default();
-        assert_eq!(cfg.heartbeat_interval_secs, 30);
+        assert_eq!(cfg.heartbeat_interval_ms, 30_000);
     }
 
     #[test]
     fn default_heartbeat_timeout() {
         let cfg = ServerConfig::default();
-        assert_eq!(cfg.heartbeat_timeout_secs, 90);
+        assert_eq!(cfg.heartbeat_timeout_ms, 90_000);
     }
 
     #[test]
@@ -98,8 +120,8 @@ mod tests {
         assert_eq!(back.host, cfg.host);
         assert_eq!(back.port, cfg.port);
         assert_eq!(back.max_connections, cfg.max_connections);
-        assert_eq!(back.heartbeat_interval_secs, cfg.heartbeat_interval_secs);
-        assert_eq!(back.heartbeat_timeout_secs, cfg.heartbeat_timeout_secs);
+        assert_eq!(back.heartbeat_interval_ms, cfg.heartbeat_interval_ms);
+        assert_eq!(back.heartbeat_timeout_ms, cfg.heartbeat_timeout_ms);
         assert_eq!(back.max_message_size, cfg.max_message_size);
         assert_eq!(back.rate_limit_rps, cfg.rate_limit_rps);
         assert_eq!(back.cors_enabled, cfg.cors_enabled);
@@ -111,8 +133,8 @@ mod tests {
             host: "0.0.0.0".into(),
             port: 8080,
             max_connections: 100,
-            heartbeat_interval_secs: 15,
-            heartbeat_timeout_secs: 45,
+            heartbeat_interval_ms: 15_000,
+            heartbeat_timeout_ms: 45_000,
             max_message_size: 1024,
             rate_limit_rps: 100,
             cors_enabled: true,
@@ -120,8 +142,8 @@ mod tests {
         assert_eq!(cfg.host, "0.0.0.0");
         assert_eq!(cfg.port, 8080);
         assert_eq!(cfg.max_connections, 100);
-        assert_eq!(cfg.heartbeat_interval_secs, 15);
-        assert_eq!(cfg.heartbeat_timeout_secs, 45);
+        assert_eq!(cfg.heartbeat_interval_ms, 15_000);
+        assert_eq!(cfg.heartbeat_timeout_ms, 45_000);
         assert_eq!(cfg.max_message_size, 1024);
         assert_eq!(cfg.rate_limit_rps, 100);
         assert!(cfg.cors_enabled);
@@ -129,10 +151,23 @@ mod tests {
 
     #[test]
     fn deserialize_from_json_string() {
-        let json = r#"{"host":"10.0.0.1","port":3000,"max_connections":5,"heartbeat_interval_secs":10,"heartbeat_timeout_secs":30,"max_message_size":512,"rate_limit_rps":0,"cors_enabled":false}"#;
+        let json = r#"{"host":"10.0.0.1","port":3000,"max_connections":5,"heartbeat_interval_ms":10000,"heartbeat_timeout_ms":30000,"max_message_size":512,"rate_limit_rps":0,"cors_enabled":false}"#;
         let cfg: ServerConfig = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.host, "10.0.0.1");
         assert_eq!(cfg.port, 3000);
         assert_eq!(cfg.max_connections, 5);
+        assert_eq!(cfg.heartbeat_interval_ms, 10_000);
+        assert_eq!(cfg.heartbeat_timeout_ms, 30_000);
+    }
+
+    #[test]
+    fn from_settings_uses_settings_heartbeat_and_cli_bind_values() {
+        let mut settings = crate::settings::types::ServerSettings::default();
+        settings.heartbeat_interval_ms = 12_345;
+        let cfg = ServerConfig::from_settings("127.0.0.1".to_string(), 9847, &settings);
+        assert_eq!(cfg.host, "127.0.0.1");
+        assert_eq!(cfg.port, 9847);
+        assert_eq!(cfg.heartbeat_interval_ms, 12_345);
+        assert_eq!(cfg.heartbeat_timeout_ms, 37_035);
     }
 }

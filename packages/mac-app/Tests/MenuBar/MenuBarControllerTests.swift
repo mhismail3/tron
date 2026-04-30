@@ -11,10 +11,10 @@ struct MenuBarControllerTests {
         defer { TestTempDir.cleanup(tmp) }
         let controller = MenuBarController(setup: MenuBarItemBuilderTests.makeSetup(in: tmp))
 
-        controller.applySnapshot(ServerStatusSnapshot(state: .busy(.startingDevServer)))
+        controller.applySnapshot(ServerStatusSnapshot(state: .busy(.restarting)))
         controller.applyPolledSnapshot(ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847)))
 
-        #expect(controller.snapshot.state == .busy(.startingDevServer))
+        #expect(controller.snapshot.state == .busy(.restarting))
 
         controller.applySnapshot(ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847)))
         #expect(controller.snapshot.state == .running(version: "0.5.0", port: 9847))

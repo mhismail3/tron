@@ -60,7 +60,7 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
     var subtitle: String {
         switch self {
         case .server:
-            return "Paired servers, security, transcription, and updates"
+            return "Paired servers, transcription, and updates"
         case .providers:
             return "Login with OAuth and configure API keys"
         case .agent:
@@ -506,12 +506,10 @@ enum ServerOnboardingLauncher {
 
 enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
     case transcriptionSidecar
-    case advancedSecurity
     case updates
 
     static let loadedOrder: [Self] = [
         .transcriptionSidecar,
-        .advancedSecurity,
         .updates,
     ]
 
@@ -519,8 +517,6 @@ enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
         switch self {
         case .transcriptionSidecar:
             return SettingsLabels.transcriptionSidecar
-        case .advancedSecurity:
-            return "Advanced Security"
         case .updates:
             return SettingsLabels.updates
         }
@@ -582,7 +578,6 @@ enum ServerSettingsSummary {
         let isLoaded: Bool
         let loadError: String?
         let transcriptionEnabled: Bool
-        let authEnforced: Bool
         let updateEnabled: Bool
         let updateChannel: String
         let updateFrequency: String
@@ -597,7 +592,7 @@ enum ServerSettingsSummary {
 
     static func description(for context: Context) -> String {
         guard context.pairedServerCount > 0 else {
-            return "Pair a Mac to manage server-backed security, transcription, and update settings from this iPhone."
+            return "Pair a Mac to manage server-backed transcription and update settings from this iPhone."
         }
 
         guard let label = cleaned(context.activeServerLabel), !label.isEmpty else {
@@ -610,25 +605,24 @@ enum ServerSettingsSummary {
             if let error = cleaned(context.loadError), !error.isEmpty {
                 return "\(label) is paired, but settings are unavailable: \(error)"
             }
-            return "\(label) is paired. Connect to load security, transcription, and update settings."
+            return "\(label) is paired. Connect to load transcription and update settings."
         }
 
         let transcription = "Local transcription is \(context.transcriptionEnabled ? "on" : "off")"
-        let auth = context.authEnforced ? "paired-device tokens are required" : "paired-device tokens are optional"
         let updates = updateDescription(
             enabled: context.updateEnabled,
             channel: context.updateChannel,
             frequency: context.updateFrequency
         )
-        return "\(label) is connected. \(transcription), \(auth), and \(updates)."
+        return "\(label) is connected. \(transcription). \(updates)."
     }
 
     private static func updateDescription(enabled: Bool, channel: String, frequency: String) -> String {
         guard enabled else {
-            return "automatic update checks are off"
+            return "Automatic update checks are off"
         }
 
-        return "update checks run \(displayFrequency(frequency)) on the \(displayChannel(channel)) channel"
+        return "Update checks run \(displayFrequency(frequency)) on the \(displayChannel(channel)) channel"
     }
 
     private static func displayChannel(_ rawValue: String) -> String {

@@ -582,8 +582,7 @@ mod tests {
     #[tokio::test]
     async fn append_missing_session() {
         // Appending to a session that doesn't exist surfaces the typed
-        // SESSION_NOT_FOUND code via map_event_store_error. Pre-rollout
-        // this fell through to INTERNAL_ERROR; after C1, clients can
+        // SESSION_NOT_FOUND code via map_event_store_error. Clients can
         // disambiguate "wrong id" from "server bug" without parsing
         // the message string.
         let ctx = make_test_context();

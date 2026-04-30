@@ -72,7 +72,11 @@ pub fn deep_health_check(
         // 1. Database
         check_database(pool),
         // 2. Settings
-        check_settings(&tron_home.join(crate::core::paths::files::SETTINGS_JSON)),
+        check_settings(
+            &tron_home
+                .join(crate::core::paths::dirs::SYSTEM)
+                .join(crate::core::paths::files::SETTINGS_JSON),
+        ),
         // 3. Auth
         check_auth(
             &tron_home
@@ -131,25 +135,11 @@ fn check_database(pool: &crate::events::ConnectionPool) -> DeepHealthCheck {
 }
 
 fn check_settings(path: &Path) -> DeepHealthCheck {
-    if !path.exists() {
-        return DeepHealthCheck {
+    match crate::settings::load_settings_from_path(path) {
+        Ok(_) => DeepHealthCheck {
             name: "settings".into(),
             status: "ok".into(),
-            detail: Some(json!("using defaults")),
-        };
-    }
-    match std::fs::read_to_string(path) {
-        Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
-            Ok(_) => DeepHealthCheck {
-                name: "settings".into(),
-                status: "ok".into(),
-                detail: None,
-            },
-            Err(e) => DeepHealthCheck {
-                name: "settings".into(),
-                status: "fail".into(),
-                detail: Some(json!({ "error": e.to_string() })),
-            },
+            detail: (!path.exists()).then(|| json!("using defaults")),
         },
         Err(e) => DeepHealthCheck {
             name: "settings".into(),
@@ -417,6 +407,63 @@ mod tests {
                 .and_then(|detail| detail.get("error"))
                 .is_some()
         );
+    }
+
+    #[test]
+    fn deep_health_checks_canonical_system_settings_path() {
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            crate::events::run_migrations(&conn).unwrap();
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("settings.json"), "{}").unwrap();
+        let system_dir = dir.path().join(crate::core::paths::dirs::SYSTEM);
+        std::fs::create_dir_all(&system_dir).unwrap();
+        std::fs::write(
+            system_dir.join(crate::core::paths::files::SETTINGS_JSON),
+            "{broken",
+        )
+        .unwrap();
+
+        let resp = deep_health_check(Instant::now(), 0, 0, &pool, dir.path());
+        let settings = resp
+            .checks
+            .iter()
+            .find(|check| check.name == "settings")
+            .unwrap();
+
+        assert_eq!(settings.status, "fail");
+        assert_eq!(resp.status, "unhealthy");
+    }
+
+    #[test]
+    fn deep_health_uses_strict_settings_schema() {
+        let pool =
+            crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            crate::events::run_migrations(&conn).unwrap();
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let system_dir = dir.path().join(crate::core::paths::dirs::SYSTEM);
+        std::fs::create_dir_all(&system_dir).unwrap();
+        std::fs::write(
+            system_dir.join(crate::core::paths::files::SETTINGS_JSON),
+            serde_json::json!({"server": {"auth": {"enforced": true}}}).to_string(),
+        )
+        .unwrap();
+
+        let resp = deep_health_check(Instant::now(), 0, 0, &pool, dir.path());
+        let settings = resp
+            .checks
+            .iter()
+            .find(|check| check.name == "settings")
+            .unwrap();
+
+        assert_eq!(settings.status, "fail");
+        assert_eq!(resp.status, "unhealthy");
     }
 
     #[test]

@@ -15,12 +15,6 @@ struct ServerSettings: Decodable {
     /// Fresh installs default this off; Mac onboarding can enable it after
     /// seeding the sidecar files and restarting the helper.
     let transcriptionEnabled: Bool
-    /// Whether the server enforces bearer-token WebSocket auth.
-    /// `false` (default) means iOS may connect without an `Authorization`
-    /// header. `true` means a header must be present and match
-    /// `~/.tron/system/auth.json` (`bearerToken`). iOS reads this purely so the
-    /// Settings UI can display the current state and let the user toggle it.
-    let authEnforced: Bool
     /// Cached Tailscale IP (e.g. `100.x.y.z`) the server reported. Populated by
     /// the Mac wrapper / install scripts. Optional — older servers don't set it.
     let tailscaleIp: String?
@@ -124,15 +118,11 @@ struct ServerSettings: Decodable {
     }
 
     private enum ServerKeys: String, CodingKey {
-        case defaultModel, defaultWorkspace, transcription, auth, tailscaleIp, update
+        case defaultModel, defaultWorkspace, transcription, tailscaleIp, update
     }
 
     private enum TranscriptionKeys: String, CodingKey {
         case enabled
-    }
-
-    private enum AuthKeys: String, CodingKey {
-        case enforced
     }
 
     private enum UpdateKeys: String, CodingKey {
@@ -158,13 +148,6 @@ struct ServerSettings: Decodable {
             } else {
                 transcriptionEnabled = false
             }
-            // server.auth.enforced — defaults to false (Phase 2 default-off
-            // rollout). Older servers don't send the `auth` block at all.
-            if let authContainer = try? serverContainer.nestedContainer(keyedBy: AuthKeys.self, forKey: .auth) {
-                authEnforced = (try? authContainer.decodeIfPresent(Bool.self, forKey: .enforced)) ?? false
-            } else {
-                authEnforced = false
-            }
             // server.update.* — user-mode update checks/downloads. The whole
             // block is optional; missing entries fall through to the same
             // defaults as the Rust `UpdateSettings::default()`.
@@ -182,7 +165,6 @@ struct ServerSettings: Decodable {
         } else {
             defaultWorkspace = nil
             transcriptionEnabled = false
-            authEnforced = false
             tailscaleIp = nil
             updateEnabled = false
             updateChannel = "stable"
@@ -450,9 +432,6 @@ struct ServerSettingsUpdate: Encodable {
     struct ServerUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
-        /// Optional bearer-auth block — present only when the user toggles
-        /// "Require paired-device token". Encoded as `{ "auth": { "enforced": true } }`.
-        var auth: AuthUpdate?
         /// Updated Tailscale IP. The Mac wrapper writes this after live pairing
         /// resolution; iOS decodes it but does not expose it as a user setting.
         var tailscaleIp: String?
@@ -462,10 +441,6 @@ struct ServerSettingsUpdate: Encodable {
         /// Only the fields the user actually changed are set; the encoder
         /// drops `nil` so the server's deep-merge preserves everything else.
         var update: UpdateUpdate?
-
-        struct AuthUpdate: Encodable {
-            var enforced: Bool?
-        }
 
         struct TranscriptionUpdate: Encodable {
             var enabled: Bool?

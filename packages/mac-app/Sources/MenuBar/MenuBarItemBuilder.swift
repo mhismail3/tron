@@ -40,8 +40,7 @@ enum MenuBarItemBuilder {
     /// `Tests/MenuBar/MenuBarItemBuilderTests.swift` pin the ordering.
     static func build(
         snapshot: ServerStatusSnapshot,
-        paths: EnvironmentSetup,
-        developerOptionsVisible: Bool = false
+        paths: EnvironmentSetup
     ) -> [MenuItemDescriptor] {
         var items: [MenuItemDescriptor] = []
 
@@ -82,50 +81,17 @@ enum MenuBarItemBuilder {
         items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, handler: { @MainActor in
             NotificationCenter.default.post(name: .tronMenuBarRestartServer, object: nil)
         }))
-        items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarUninstall, object: nil)
-        }))
-        items.append(.quit(title: "Quit Tron"))
-        items.append(.separator)
-        if snapshot.state.isStartingDevServer || snapshot.isDevServerActive {
-            items.append(.openLink(title: "Open dev command log", url: devCommandLogURL(paths: paths)))
-        }
         if snapshot.isDevServerActive {
             items.append(.action(title: "Stop dev server", isEnabled: controlsEnabled, handler: { @MainActor in
                 NotificationCenter.default.post(name: .tronMenuBarStopDevServer, object: nil)
             }))
         }
-        if developerOptionsVisible {
-            for command in TronDevCommand.menuCommands {
-                items.append(.action(
-                    title: command.title,
-                    isEnabled: command.isEnabled(snapshot: snapshot, controlsEnabled: controlsEnabled),
-                    handler: { @MainActor in
-                        NotificationCenter.default.post(
-                            name: .tronMenuBarRunDevCommand,
-                            object: nil,
-                            userInfo: command.userInfo()
-                        )
-                    }
-                ))
-            }
-        }
-        items.append(.action(
-            title: developerOptionsVisible ? "Hide Developer Options" : "Show Developer Options",
-            isEnabled: true,
-            handler: { @MainActor in
-                NotificationCenter.default.post(name: .tronMenuBarToggleDeveloperOptions, object: nil)
-            }
-        ))
+        items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, handler: { @MainActor in
+            NotificationCenter.default.post(name: .tronMenuBarUninstall, object: nil)
+        }))
+        items.append(.quit(title: "Quit Tron"))
 
         return items
-    }
-
-    static func devCommandLogURL(paths: EnvironmentSetup) -> URL {
-        paths.tronHome
-            .appendingPathComponent("system", isDirectory: true)
-            .appendingPathComponent("run", isDirectory: true)
-            .appendingPathComponent("dev-menu-command.log", isDirectory: false)
     }
 
     static func statusLabel(snapshot: ServerStatusSnapshot) -> String {
@@ -170,9 +136,6 @@ enum MenuBarItemBuilder {
     }
 
     private static func modeDetail(snapshot: ServerStatusSnapshot) -> String? {
-        if snapshot.state.isStartingDevServer {
-            return "Dev command running"
-        }
         if snapshot.isDevServerActive {
             return "Dev Server active"
         }
@@ -203,7 +166,6 @@ enum ServerBusyAction: String, Equatable, Sendable {
     case pausing = "Pausing"
     case resuming = "Resuming"
     case stoppingDevServer = "Stopping dev"
-    case startingDevServer = "Starting dev"
 }
 
 enum ServerStatusState: Equatable, Sendable {
@@ -234,11 +196,6 @@ enum ServerStatusState: Equatable, Sendable {
 
     var isRunning: Bool {
         if case .running = self { return true }
-        return false
-    }
-
-    var isStartingDevServer: Bool {
-        if case .busy(.startingDevServer) = self { return true }
         return false
     }
 
@@ -323,8 +280,6 @@ extension Notification.Name {
     static let tronMenuBarPauseServer = Notification.Name("com.tron.mac.menu.pause")
     static let tronMenuBarResumeServer = Notification.Name("com.tron.mac.menu.resume")
     static let tronMenuBarStopDevServer = Notification.Name("com.tron.mac.menu.stopDevServer")
-    static let tronMenuBarToggleDeveloperOptions = Notification.Name("com.tron.mac.menu.toggleDeveloperOptions")
-    static let tronMenuBarRunDevCommand = Notification.Name("com.tron.mac.menu.runDevCommand")
     static let tronMenuBarViewLogs = Notification.Name("com.tron.mac.menu.viewLogs")
     static let tronMenuBarSendFeedback = Notification.Name("com.tron.mac.menu.feedback")
     static let tronMenuBarCheckForUpdates = Notification.Name("com.tron.mac.menu.update")

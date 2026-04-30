@@ -13,15 +13,13 @@ struct ServerSettingsPageTests {
         #expect(SettingsLabels.updates == "Updates")
     }
 
-    @Test("server-backed settings show transcription, security, then updates")
+    @Test("server-backed settings show transcription then updates")
     func serverBackedSettingsOrder() {
         #expect(ConnectionSettingsServerBackedSection.loadedOrder == [
             .transcriptionSidecar,
-            .advancedSecurity,
             .updates,
         ])
         #expect(ConnectionSettingsServerBackedSection.transcriptionSidecar.title == "Transcription Sidecar")
-        #expect(ConnectionSettingsServerBackedSection.advancedSecurity.title == "Advanced Security")
         #expect(ConnectionSettingsServerBackedSection.updates.title == "Updates")
     }
 
@@ -83,14 +81,13 @@ struct ServerSettingsPageTests {
             isLoaded: false,
             loadError: nil,
             transcriptionEnabled: false,
-            authEnforced: false,
             updateEnabled: false,
             updateChannel: "stable",
             updateFrequency: "daily"
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Connect a Mac")
-        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to manage server-backed security, transcription, and update settings from this iPhone.")
+        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to manage server-backed transcription and update settings from this iPhone.")
     }
 
     @Test("server summary explains unavailable active server settings")
@@ -101,7 +98,6 @@ struct ServerSettingsPageTests {
             isLoaded: false,
             loadError: "Connection timed out",
             transcriptionEnabled: false,
-            authEnforced: false,
             updateEnabled: false,
             updateChannel: "stable",
             updateFrequency: "daily"
@@ -119,14 +115,13 @@ struct ServerSettingsPageTests {
             isLoaded: true,
             loadError: nil,
             transcriptionEnabled: true,
-            authEnforced: true,
             updateEnabled: true,
             updateChannel: "beta",
             updateFrequency: "daily"
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Local transcription is on, paired-device tokens are required, and update checks run daily on the beta channel.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Local transcription is on. Update checks run daily on the beta channel.")
     }
 
     @Test("server summary reflects disabled automatic update checks")
@@ -137,13 +132,12 @@ struct ServerSettingsPageTests {
             isLoaded: true,
             loadError: nil,
             transcriptionEnabled: false,
-            authEnforced: false,
             updateEnabled: false,
             updateChannel: "stable",
             updateFrequency: "weekly"
         )
 
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Local transcription is off, paired-device tokens are optional, and automatic update checks are off.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Local transcription is off. Automatic update checks are off.")
     }
 
     @Test("loaded server settings put update controls at the bottom")

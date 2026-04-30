@@ -62,7 +62,6 @@ struct ConnectionSettingsPage: View {
             isLoaded: settingsState.isLoaded,
             loadError: settingsState.loadError,
             transcriptionEnabled: settingsState.transcriptionEnabled,
-            authEnforced: settingsState.authEnforced,
             updateEnabled: settingsState.updateEnabled,
             updateChannel: settingsState.updateChannel,
             updateFrequency: settingsState.updateFrequency
@@ -218,41 +217,8 @@ struct ConnectionSettingsPage: View {
         switch section {
         case .transcriptionSidecar:
             transcriptionSection
-        case .advancedSecurity:
-            advancedSecuritySection
         case .updates:
             updatesSection
-        }
-    }
-
-    private var advancedSecuritySection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: ConnectionSettingsServerBackedSection.advancedSecurity.title)
-
-            SettingsCard {
-                SettingsRow(icon: "lock.shield", label: "Require paired-device token") {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { settingsState.authEnforced },
-                            set: { newValue in
-                                settingsState.authEnforced = newValue
-                                updateServerSetting {
-                                    var update = ServerSettingsUpdate()
-                                    update.server = ServerSettingsUpdate.ServerUpdate(
-                                        auth: ServerSettingsUpdate.ServerUpdate.AuthUpdate(enforced: newValue)
-                                    )
-                                    return update
-                                }
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .tint(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(text: "Rejects WebSocket connections that do not present the paired token. Tokens are stored in the iOS Keychain and verified against the active server.")
         }
     }
 
@@ -271,7 +237,7 @@ struct ConnectionSettingsPage: View {
                         Text("Server settings unavailable")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
-                        Text(settingsState.loadError ?? "Connect to the active server before editing security, transcription, or update settings.")
+                        Text(settingsState.loadError ?? "Connect to the active server before editing transcription or update settings.")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)

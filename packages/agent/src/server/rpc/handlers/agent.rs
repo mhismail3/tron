@@ -117,9 +117,10 @@ impl MethodHandler for PromptHandler {
             let max_age_days = auto_prune
                 .then_some(prompt_library_settings.history_max_age_days)
                 .filter(|n| *n > 0);
-            // Fire-and-forget: the user's prompt must never fail because history
-            // couldn't be written. Errors are logged and dropped.
-            let _handle = tokio::task::spawn_blocking(move || {
+            // Fire-and-forget: the user's prompt must never fail because
+            // history couldn't be written. The detached task is still routed
+            // through the RPC blocking supervisor so shutdown can drain it.
+            ctx.spawn_blocking_detached("agent.prompt.history", move || {
                 match crate::prompt_library::store::record_prompt_and_prune(
                     &pool,
                     &text_for_history,
@@ -134,6 +135,7 @@ impl MethodHandler for PromptHandler {
                         tracing::warn!(error = %e, "failed to record prompt history");
                     }
                 }
+                Ok(())
             });
         }
 

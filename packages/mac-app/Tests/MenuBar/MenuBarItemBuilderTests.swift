@@ -136,12 +136,9 @@ struct MenuBarItemBuilderTests {
             "—",
             "Pause server",
             "Restart server",
+            "Stop dev server",
             "Uninstall Tron",
             "Quit Tron",
-            "—",
-            "Open dev command log",
-            "Stop dev server",
-            "Show Developer Options",
         ])
 
         for item in items {
@@ -156,8 +153,8 @@ struct MenuBarItemBuilderTests {
         }
     }
 
-    @Test("dev snapshot: collapsed developer section still shows stop dev")
-    func collapsedDeveloperSectionShowsStopDevDuringTakeover() throws {
+    @Test("dev snapshot: stop dev appears with server controls")
+    func stopDevAppearsWithServerControlsDuringTakeover() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
@@ -167,11 +164,12 @@ struct MenuBarItemBuilderTests {
         )
         let titles = MenuBarItemBuilder.build(snapshot: snap, paths: setup).map(\.title)
 
-        #expect(Array(titles.suffix(4)) == [
-            "—",
-            "Open dev command log",
+        #expect(Array(titles.suffix(5)) == [
+            "Pause server",
+            "Restart server",
             "Stop dev server",
-            "Show Developer Options",
+            "Uninstall Tron",
+            "Quit Tron",
         ])
     }
 
@@ -219,10 +217,11 @@ struct MenuBarItemBuilderTests {
             "Check for updates",
             "Uninstall Tron",
             "Quit Tron",
-            "Show Developer Options",
         ] {
             #expect(titles.contains(required), "missing \(required) in menu")
         }
+        #expect(!titles.contains("Show Developer Options"))
+        #expect(!titles.contains("Start dev server"))
     }
 
     @Test("menu sections use the canonical order")
@@ -246,8 +245,6 @@ struct MenuBarItemBuilderTests {
             "Restart server",
             "Uninstall Tron",
             "Quit Tron",
-            "—",
-            "Show Developer Options",
         ])
     }
 
@@ -267,114 +264,22 @@ struct MenuBarItemBuilderTests {
         }
     }
 
-    @Test("developer options are collapsed by default at the bottom")
-    func developerOptionsCollapsedByDefault() throws {
+    @Test("menu omits developer start commands")
+    func menuOmitsDeveloperStartCommands() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let setup = Self.makeSetup(in: tmp)
         let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
-        let titles = MenuBarItemBuilder.build(snapshot: snap, paths: setup).map(\.title)
-
-        #expect(Array(titles.suffix(2)) == ["—", "Show Developer Options"])
-        #expect(!titles.contains("Start dev server"))
-        #expect(!titles.contains("Hide Developer Options"))
-    }
-
-    @Test("expanded developer options show dev commands above hide toggle")
-    func developerOptionsExpanded() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
-        let items = MenuBarItemBuilder.build(
-            snapshot: snap,
-            paths: setup,
-            developerOptionsVisible: true
-        )
-        let titles = items.map(\.title)
-
-        #expect(Array(titles.suffix(5)) == [
-            "—",
-            "Start dev server",
-            "Start dev server after tests",
-            "Build, test, and start dev server",
-            "Hide Developer Options",
-        ])
-
-        for item in items {
-            if case .action(let title, let isEnabled, _) = item,
-               TronDevCommand.menuCommands.map(\.title).contains(title) {
-                #expect(isEnabled)
-            }
-        }
-    }
-
-    @Test("expanded developer options disable start commands while dev is active")
-    func developerOptionsDisableStartCommandsDuringTakeover() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot(
-            state: .running(version: "0.5.0", port: 9847),
-            isDevServerActive: true
-        )
-        let items = MenuBarItemBuilder.build(
-            snapshot: snap,
-            paths: setup,
-            developerOptionsVisible: true
-        )
-        let titles = items.map(\.title)
-
-        #expect(Array(titles.suffix(7)) == [
-            "—",
-            "Open dev command log",
-            "Stop dev server",
-            "Start dev server",
-            "Start dev server after tests",
-            "Build, test, and start dev server",
-            "Hide Developer Options",
-        ])
-
-        for item in items {
-            if case .action(let title, let isEnabled, _) = item,
-               TronDevCommand.menuCommands.map(\.title).contains(title) {
-                #expect(!isEnabled, "\(title) should be disabled while dev owns port 9847")
-            }
-        }
-        #expect(titles.last == "Hide Developer Options")
-    }
-
-    @Test("starting dev snapshot keeps busy status and exposes command log")
-    func startingDevSnapshotShowsLog() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let setup = Self.makeSetup(in: tmp)
-        let snap = ServerStatusSnapshot(state: .busy(.startingDevServer))
         let items = MenuBarItemBuilder.build(snapshot: snap, paths: setup)
         let titles = items.map(\.title)
 
-        if case .header(let content) = items[0] {
-            #expect(content.status == "Starting dev")
-            #expect(content.health == .attention)
-            #expect(content.modeDetail == "Dev command running")
-        } else {
-            Issue.record("first item should be header")
-        }
-
-        #expect(titles.contains("Open dev command log"))
+        #expect(!titles.contains("Show Developer Options"))
+        #expect(!titles.contains("Hide Developer Options"))
+        #expect(!titles.contains("Start dev server"))
+        #expect(!titles.contains("Start dev server after tests"))
+        #expect(!titles.contains("Build, test, and start dev server"))
+        #expect(!titles.contains("Open dev command log"))
         #expect(!titles.contains("Stop dev server"))
-
-        let logItem = items.first { item in
-            if case .openLink(let title, _) = item, title == "Open dev command log" {
-                return true
-            }
-            return false
-        }
-        guard case .openLink(_, let url) = logItem else {
-            Issue.record("expected Open dev command log link")
-            return
-        }
-        #expect(url == tmp.appendingPathComponent("system/run/dev-menu-command.log", isDirectory: false))
     }
 
     @Test("busy snapshot disables server controls and shows transient action title")

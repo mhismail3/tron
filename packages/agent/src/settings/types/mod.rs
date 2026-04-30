@@ -15,6 +15,7 @@ mod server;
 mod skills;
 mod tools;
 mod ui;
+mod update;
 
 pub use api::*;
 pub use context::*;
@@ -26,6 +27,7 @@ pub use server::*;
 pub use skills::*;
 pub use tools::*;
 pub use ui::*;
+pub use update::*;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,11 +45,11 @@ use serde::{Deserialize, Serialize};
 /// {
 ///   "version": "0.1.0",
 ///   "name": "tron",
-///   "server": { "wsPort": 9090 }
+///   "server": { "heartbeatIntervalMs": 30000 }
 /// }
 /// ```
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct TronSettings {
     /// Settings schema version.
     pub version: String,
@@ -118,6 +120,11 @@ impl Default for TronSettings {
 }
 
 impl TronSettings {
+    /// Validate invariants that cannot be repaired safely.
+    pub fn validate_strict(&self) -> crate::settings::Result<()> {
+        self.server.validate_strict()
+    }
+
     /// Clamp ratio fields to [0.0, 1.0] and correct invalid invariants.
     ///
     /// Called automatically during loading. Out-of-range values are clamped

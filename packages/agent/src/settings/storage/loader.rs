@@ -55,8 +55,10 @@ pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
         TronSettings::default()
     };
 
+    settings.validate_strict()?;
     apply_env_overrides(&mut settings);
     settings.validate();
+    settings.validate_strict()?;
     Ok(settings)
 }
 
@@ -376,6 +378,18 @@ mod tests {
         let result = load_settings_from_path(&path);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SettingsError::Json(_)));
+    }
+
+    #[test]
+    fn load_zero_heartbeat_interval_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"server": {"heartbeatIntervalMs": 0}}"#).unwrap();
+
+        let err = load_settings_from_path(&path).unwrap_err();
+
+        assert!(matches!(err, SettingsError::InvalidValue(_)));
+        assert!(err.to_string().contains("heartbeatIntervalMs"));
     }
 
     #[test]

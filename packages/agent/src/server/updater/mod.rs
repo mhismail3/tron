@@ -22,8 +22,7 @@
 //!   [`crate::core::paths::auto_update_pause_path()`]. Mirrors the
 //!   contributor `auto-deploy.pause` convention: the file's presence
 //!   blocks update actions without mutating settings.
-//! - **Pure-value primitives** — `UpdateChannel`, `UpdateAction`,
-//!   `UpdateFrequency` enums; `UpdaterState` (and its serde layout);
+//! - **Updater state primitives** — `UpdaterState` (and its serde layout);
 //!   `compare_versions` (semver-lite for the CARGO_PKG_VERSION
 //!   convention used by the project, including `-beta.N` pre-releases);
 //!   `select_latest_release` (resolves the best release for a channel
@@ -76,6 +75,8 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
+use crate::settings::types::UpdateChannel;
+
 pub mod scheduler;
 
 pub use scheduler::{SchedulerDeps, TickReport, perform_tick};
@@ -127,104 +128,6 @@ pub fn resume(path: &Path) -> io::Result<()> {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Enumerations
-// ─────────────────────────────────────────────────────────────────────────
-
-/// Release channel the user subscribes to. Determines which GitHub
-/// releases the updater considers when resolving "latest".
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum UpdateChannel {
-    /// Only releases without a pre-release suffix (e.g. `server-v0.1.0`,
-    /// not `server-v0.1.0-beta.1`). The safe default.
-    #[default]
-    Stable,
-    /// All releases, including pre-releases. Used by early adopters
-    /// and by dogfood Macs that want to catch regressions before the
-    /// stable channel sees them.
-    Beta,
-}
-
-impl UpdateChannel {
-    /// Wire-format string used in RPC responses and the state file.
-    /// Mirrors the `#[serde(rename_all = "lowercase")]` casing so a
-    /// consumer can compare against `"stable"` / `"beta"` without
-    /// re-serializing.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Stable => "stable",
-            Self::Beta => "beta",
-        }
-    }
-}
-
-/// Cadence at which the in-process scheduler fires an update check.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum UpdateFrequency {
-    /// No automatic checks. Only fired by an explicit
-    /// `system.checkForUpdates` RPC. Useful for iOS-only operators
-    /// who don't want their Mac to do background work.
-    Manual,
-    /// One check at server startup.
-    Startup,
-    /// One check every hour.
-    Hourly,
-    /// One check every day (the safe default — balances timeliness
-    /// against GitHub API rate-limit headroom).
-    #[default]
-    Daily,
-    /// One check every week.
-    Weekly,
-}
-
-impl UpdateFrequency {
-    /// Wire-format string used in RPC responses.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Manual => "manual",
-            Self::Startup => "startup",
-            Self::Hourly => "hourly",
-            Self::Daily => "daily",
-            Self::Weekly => "weekly",
-        }
-    }
-
-    /// Scheduler interval for a non-manual / non-startup cadence.
-    /// `Manual` and `Startup` have no recurring interval and return
-    /// `None` — the scheduler uses this to decide whether to arm a
-    /// Tokio interval at all.
-    pub fn interval(&self) -> Option<std::time::Duration> {
-        use std::time::Duration;
-        match self {
-            Self::Manual | Self::Startup => None,
-            Self::Hourly => Some(Duration::from_secs(60 * 60)),
-            Self::Daily => Some(Duration::from_secs(24 * 60 * 60)),
-            Self::Weekly => Some(Duration::from_secs(7 * 24 * 60 * 60)),
-        }
-    }
-}
-
-/// What the updater does when it observes a newer release.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum UpdateAction {
-    /// Emit an `update_available` event with release notes + download
-    /// URL; leave the install to the user. The conservative default.
-    #[default]
-    Notify,
-}
-
-impl UpdateAction {
-    /// Wire-format string used in RPC responses.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Notify => "notify",
-        }
     }
 }
 
@@ -709,7 +612,7 @@ pub async fn check_for_update(
 /// Live `ReleaseFetcher` backed by the public GitHub REST API.
 ///
 /// Targets the `mhismail3/tron` repository by default — the configured
-/// release home for the project. Uses an unauthenticated client, which
+/// release home for the project. Uses GitHub's anonymous release API, which
 /// caps requests at 60/hour/IP; for the expected cadence (daily check
 /// per user) this is well under the limit. If rate-limit pressure ever
 /// becomes real, we'll ship a read-only PAT in release builds to raise
@@ -847,6 +750,7 @@ fn release_info_from_github(raw: GitHubRelease) -> Option<ReleaseInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::types::{UpdateAction, UpdateFrequency};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::thread;

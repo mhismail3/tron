@@ -91,9 +91,9 @@ enum WebSocketError: Error, LocalizedError, Sendable, Equatable {
 // MARK: - Bearer Token Provider
 
 /// Strategy for resolving a bearer token to attach to the WebSocket upgrade
-/// request. Returns `nil` if no token is available — the request goes out
-/// without an Authorization header, the server returns 401 in enforced mode,
-/// and `WebSocketService` transitions to `ConnectionState.unauthorized`.
+/// request. Returns `nil` if no token is available; the request goes out
+/// without an Authorization header, the server returns 401, and
+/// `WebSocketService` transitions to `ConnectionState.unauthorized`.
 typealias BearerTokenProvider = @MainActor () -> String?
 
 // MARK: - WebSocket Service

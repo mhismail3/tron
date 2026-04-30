@@ -12,6 +12,14 @@
 //! - Skills: list, get, refresh, remove
 //! - Plus: browser, device, task, transcription, worktree, tree
 //!
+//! Handler registration carries an execution policy. Quick and
+//! blocking-read calls run under bounded timeouts, while mutating calls
+//! do not use the generic timeout wrapper because a timed-out response
+//! must never leave a write continuing in the background. Production
+//! blocking work is owned by [`context::BlockingTaskSupervisor`] via
+//! [`context::RpcContext::run_blocking`], which enforces concurrency
+//! limits and drains through server shutdown.
+//!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!
 //! The RPC layer does NOT rate-limit inbound calls per client,
@@ -46,7 +54,6 @@ pub(crate) mod session_commands;
 pub mod session_context;
 pub(crate) mod session_queries;
 pub(crate) mod session_reconstruct;
-pub(crate) mod settings_service;
 pub mod types;
 pub mod validation;
 pub(crate) mod voice_notes_service;

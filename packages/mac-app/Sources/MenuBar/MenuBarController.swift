@@ -13,7 +13,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var pollerTask: Task<Void, Never>?
     private var pairingInfoWindowController: NSWindowController?
     private var logsWindowController: NSWindowController?
-    private var developerOptionsVisible = false
 
     /// Most-recent status snapshot, written by the poller and read by
     /// `rebuildMenu()`.
@@ -71,7 +70,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     /// Applies a snapshot produced by passive polling. Poll/menu refreshes
-    /// must not overwrite an explicit in-flight action such as "Starting dev";
+    /// must not overwrite an explicit in-flight action such as "Restarting";
     /// the action handler applies its own final snapshot when the command
     /// exits.
     func applyPolledSnapshot(_ snapshot: ServerStatusSnapshot) {
@@ -138,19 +137,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func toggleDeveloperOptions() {
-        developerOptionsVisible.toggle()
-        rebuildMenu()
-    }
-
     // MARK: - Menu
 
     private func rebuildMenu() {
         guard let menu = statusItem?.menu else { return }
         let items = MenuBarItemBuilder.build(
             snapshot: snapshot,
-            paths: setup,
-            developerOptionsVisible: developerOptionsVisible
+            paths: setup
         )
         menu.removeAllItems()
         for descriptor in items {

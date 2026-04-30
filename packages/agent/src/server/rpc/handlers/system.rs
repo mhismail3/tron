@@ -16,6 +16,14 @@ use crate::server::rpc::errors::{CLIENT_VERSION_UNSUPPORTED, RpcError};
 use crate::server::rpc::registry::{MethodHandler, MethodRegistry};
 use crate::server::updater::{UpdateDecision, UpdaterState, check_for_update, read_update_state};
 
+fn load_settings(ctx: &RpcContext) -> Result<crate::settings::TronSettings, RpcError> {
+    crate::settings::load_settings_from_path(&ctx.settings_path).map_err(|error| {
+        RpcError::Internal {
+            message: format!("load settings: {error}"),
+        }
+    })
+}
+
 /// Current RPC wire-protocol version.
 ///
 /// Bumped only on breaking changes — fields that old clients can
@@ -119,7 +127,7 @@ impl MethodHandler for GetInfoHandler {
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let uptime = ctx.server_start_time.elapsed().as_secs();
         let active_sessions = ctx.orchestrator.active_session_count();
-        let tailscale_ip = crate::settings::get_settings().server.tailscale_ip.clone();
+        let tailscale_ip = load_settings(ctx)?.server.tailscale_ip;
         let paired = crate::server::onboarding::is_onboarded(&ctx.onboarded_marker_path);
 
         Ok(serde_json::json!({
@@ -130,7 +138,7 @@ impl MethodHandler for GetInfoHandler {
             "arch": std::env::consts::ARCH,
             "runtime": "agent",
             // ── Phase 2.6 additive fields (see struct docs) ──
-            "port": ctx.ws_port,
+            "port": ctx.ws_port(),
             "tailscaleIp": tailscale_ip,
             "paired": paired,
         }))
@@ -280,7 +288,7 @@ pub struct CheckForUpdatesHandler;
 impl MethodHandler for CheckForUpdatesHandler {
     #[instrument(skip(self, ctx), fields(method = "system.checkForUpdates"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let settings = crate::settings::get_settings();
+        let settings = load_settings(ctx)?;
         let update_cfg = &settings.server.update;
 
         // Disabled → tell iOS so it can render the disabled banner without
@@ -341,7 +349,7 @@ impl MethodHandler for CheckForUpdatesHandler {
 /// updater submenu.
 ///
 /// Deliberately does NOT call the fetcher — this is a cheap read of
-/// (a) current settings via `get_settings()` (ArcSwap atomic load) and
+/// (a) current settings via `RpcContext::settings_path` (strict disk load) and
 /// (b) the updater state file via `read_update_state`. Safe to poll
 /// every 2s from the iOS page without any rate-limit risk.
 ///
@@ -353,7 +361,7 @@ pub struct GetUpdateStatusHandler;
 impl MethodHandler for GetUpdateStatusHandler {
     #[instrument(skip(self, ctx), fields(method = "system.getUpdateStatus"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let settings = crate::settings::get_settings();
+        let settings = load_settings(ctx)?;
         let state_path = ctx.updater_state_path.clone();
         // read_update_state does blocking filesystem I/O; keep the
         // reactor snappy by bouncing off the blocking pool.
@@ -439,11 +447,11 @@ mod tests {
     /// `port` mirrors whatever the WebSocket listener bound. iOS uses this
     /// to render `host:port` together so the user never has to type the
     /// port — this test pins the contract: `port` is a number, present,
-    /// and reflects whatever was wired into `RpcContext::ws_port`.
+    /// and reflects the live `RpcContext` port value.
     #[tokio::test]
     async fn get_info_returns_port() {
-        let mut ctx = make_test_context();
-        ctx.ws_port = 19_847;
+        let ctx = make_test_context();
+        ctx.set_ws_port(19_847);
         let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(
             result["port"].as_u64(),
@@ -459,25 +467,13 @@ mod tests {
     /// test pins that nullable contract so a future refactor that
     /// accidentally substitutes `""` for `None` fails fast.
     ///
-    /// Serializes against the process-global settings singleton via
-    /// `test_settings_lock`. The pattern follows
-    /// `server::rpc::handlers::settings`'s `SettingsTestGuard` — never
-    /// call `reset_settings` mid-test (a parallel test calling
-    /// `get_settings` would slow-load the *user's* real
-    /// `settings.json`, contaminating the cache with whatever
-    /// `tailscale_ip` is configured on the dev machine). Instead we
-    /// hold the lock for the whole body and call `init_settings`
-    /// directly so the slot is never `None`.
+    /// The handler strictly reads `ctx.settings_path`, so the test writes
+    /// that exact file instead of mutating the process-global settings cache.
     #[tokio::test]
     async fn get_info_tailscale_ip_reflects_settings() {
-        let _lock = crate::settings::test_settings_lock()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-
         let ctx = make_test_context();
 
         // Case 1: setting absent → null (Option::None serializes to JSON null).
-        crate::settings::init_settings(crate::settings::TronSettings::default());
         let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
         assert!(
             result.get("tailscaleIp").is_some(),
@@ -492,17 +488,13 @@ mod tests {
         // Case 2: setting populated → string value echoed verbatim.
         let mut populated = crate::settings::TronSettings::default();
         populated.server.tailscale_ip = Some("100.64.213.113".into());
-        crate::settings::init_settings(populated);
+        write_settings_file(&ctx, &populated);
         let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(
             result["tailscaleIp"].as_str(),
             Some("100.64.213.113"),
             "populated setting must round-trip verbatim"
         );
-
-        // Restore defaults so any subsequent test inheriting the cache
-        // sees a clean baseline (mirrors `SettingsTestGuard::drop`).
-        crate::settings::init_settings(crate::settings::TronSettings::default());
     }
 
     /// `paired` is `true` exactly when the `.onboarded` sentinel exists at
@@ -777,10 +769,10 @@ mod tests {
     // ── User-mode update check/download RPCs ───────────────────────
 
     use crate::server::updater::{
-        MockReleaseFetcher, ReleaseInfo, UpdateAction, UpdateChannel, UpdateFrequency,
-        UpdaterState, write_update_state,
+        MockReleaseFetcher, ReleaseInfo, UpdaterState, write_update_state,
     };
-    use crate::settings::{TronSettings, init_settings, test_settings_lock};
+    use crate::settings::TronSettings;
+    use crate::settings::types::{UpdateAction, UpdateChannel, UpdateFrequency};
     use std::sync::Arc;
 
     /// Build an `UpdateSettings` with the given field overrides.
@@ -808,6 +800,13 @@ mod tests {
         }
     }
 
+    fn write_settings_file(ctx: &RpcContext, settings: &TronSettings) {
+        let parent = ctx.settings_path.parent().expect("settings parent");
+        std::fs::create_dir_all(parent).expect("create settings parent");
+        let json = serde_json::to_string(settings).expect("serialize settings");
+        std::fs::write(&ctx.settings_path, json).expect("write settings");
+    }
+
     /// When `server.update.enabled = false` the handler must NOT call
     /// the fetcher and must reply with a shape iOS can decode as
     /// "no-op" (`available=false, disabled=true`). Proves the opt-in
@@ -815,18 +814,18 @@ mod tests {
     /// github.com.
     #[tokio::test]
     async fn check_for_updates_disabled_short_circuits_fetcher() {
-        let _lock = test_settings_lock()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        init_settings(cfg(
-            false,
-            UpdateChannel::Stable,
-            UpdateFrequency::Daily,
-            UpdateAction::Notify,
-        ));
+        let mut ctx = make_test_context();
+        write_settings_file(
+            &ctx,
+            &cfg(
+                false,
+                UpdateChannel::Stable,
+                UpdateFrequency::Daily,
+                UpdateAction::Notify,
+            ),
+        );
 
         // Fetcher that would explode if called — proves we don't call it.
-        let mut ctx = make_test_context();
         ctx.release_fetcher = Some(Arc::new(MockReleaseFetcher::failing(
             "test must not call fetcher",
         )));
@@ -836,25 +835,23 @@ mod tests {
         assert_eq!(result["available"], false);
         assert_eq!(result["disabled"], true);
         assert_eq!(result["channel"], "stable");
-
-        init_settings(TronSettings::default());
     }
 
     /// Enabled + fetcher wired to only the *current* version → no
     /// update available. Exercises the semver-compare happy path.
     #[tokio::test]
     async fn check_for_updates_enabled_up_to_date() {
-        let _lock = test_settings_lock()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        init_settings(cfg(
-            true,
-            UpdateChannel::Stable,
-            UpdateFrequency::Daily,
-            UpdateAction::Notify,
-        ));
-
         let mut ctx = make_test_context();
+        write_settings_file(
+            &ctx,
+            &cfg(
+                true,
+                UpdateChannel::Stable,
+                UpdateFrequency::Daily,
+                UpdateAction::Notify,
+            ),
+        );
+
         ctx.release_fetcher = Some(Arc::new(MockReleaseFetcher::new(vec![rel(
             env!("CARGO_PKG_VERSION"),
             false,
@@ -869,8 +866,6 @@ mod tests {
             result["currentVersion"].as_str().unwrap(),
             env!("CARGO_PKG_VERSION"),
         );
-
-        init_settings(TronSettings::default());
     }
 
     /// Enabled + fetcher returning a strictly-higher version → the
@@ -879,15 +874,16 @@ mod tests {
     /// without another round-trip.
     #[tokio::test]
     async fn check_for_updates_enabled_update_available() {
-        let _lock = test_settings_lock()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        init_settings(cfg(
-            true,
-            UpdateChannel::Stable,
-            UpdateFrequency::Daily,
-            UpdateAction::Notify,
-        ));
+        let mut ctx = make_test_context();
+        write_settings_file(
+            &ctx,
+            &cfg(
+                true,
+                UpdateChannel::Stable,
+                UpdateFrequency::Daily,
+                UpdateAction::Notify,
+            ),
+        );
 
         // Build "CARGO + 1 major" so we're strictly higher regardless
         // of what patch rev we're on today.
@@ -898,7 +894,6 @@ mod tests {
             format!("{}.0.0", major + 99)
         };
 
-        let mut ctx = make_test_context();
         ctx.release_fetcher = Some(Arc::new(MockReleaseFetcher::new(vec![rel(
             &bumped,
             false,
@@ -916,8 +911,6 @@ mod tests {
         );
         assert!(result["releaseNotes"].as_str().unwrap().contains("Notes"));
         assert_eq!(result["isPrerelease"], false);
-
-        init_settings(TronSettings::default());
     }
 
     /// Enabled but `release_fetcher = None` (embedded build / misconfig).
@@ -926,17 +919,17 @@ mod tests {
     /// a disabled button silently.
     #[tokio::test]
     async fn check_for_updates_enabled_but_fetcher_missing_degrades() {
-        let _lock = test_settings_lock()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        init_settings(cfg(
-            true,
-            UpdateChannel::Beta,
-            UpdateFrequency::Hourly,
-            UpdateAction::Notify,
-        ));
-
         let mut ctx = make_test_context();
+        write_settings_file(
+            &ctx,
+            &cfg(
+                true,
+                UpdateChannel::Beta,
+                UpdateFrequency::Hourly,
+                UpdateAction::Notify,
+            ),
+        );
+
         ctx.release_fetcher = None;
 
         let result = CheckForUpdatesHandler.handle(None, &ctx).await.unwrap();
@@ -945,32 +938,28 @@ mod tests {
         assert_eq!(result["disabled"], false);
         assert_eq!(result["channel"], "beta");
         assert_eq!(result["unavailableReason"], "fetcher-unwired");
-
-        init_settings(TronSettings::default());
     }
 
     /// Fetcher returning a transport error is mapped to `RpcError::Internal`
     /// so the client sees a structured error rather than a hang.
     #[tokio::test]
     async fn check_for_updates_fetch_error_surfaces_as_internal_error() {
-        let _lock = test_settings_lock()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        init_settings(cfg(
-            true,
-            UpdateChannel::Stable,
-            UpdateFrequency::Daily,
-            UpdateAction::Notify,
-        ));
-
         let mut ctx = make_test_context();
+        write_settings_file(
+            &ctx,
+            &cfg(
+                true,
+                UpdateChannel::Stable,
+                UpdateFrequency::Daily,
+                UpdateAction::Notify,
+            ),
+        );
+
         ctx.release_fetcher = Some(Arc::new(MockReleaseFetcher::failing("boom")));
 
         let err = CheckForUpdatesHandler.handle(None, &ctx).await.unwrap_err();
         assert_eq!(err.code(), "INTERNAL_ERROR");
         assert!(err.to_string().contains("release check failed"));
-
-        init_settings(TronSettings::default());
     }
 
     /// Status reflects the current settings AND the state file
@@ -979,15 +968,16 @@ mod tests {
     /// (all nullable fields null).
     #[tokio::test]
     async fn get_update_status_merges_settings_and_state() {
-        let _lock = test_settings_lock()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        init_settings(cfg(
-            true,
-            UpdateChannel::Beta,
-            UpdateFrequency::Weekly,
-            UpdateAction::Notify,
-        ));
+        let mut ctx = make_test_context();
+        write_settings_file(
+            &ctx,
+            &cfg(
+                true,
+                UpdateChannel::Beta,
+                UpdateFrequency::Weekly,
+                UpdateAction::Notify,
+            ),
+        );
 
         let dir = tempfile::tempdir().expect("tempdir");
         let state_path = dir.path().join("updater-state.json");
@@ -1000,7 +990,6 @@ mod tests {
         state.latest_download_url = Some("https://example.test/Tron-0.5.1.dmg".to_string());
         write_update_state(&state_path, &state).expect("write state");
 
-        let mut ctx = make_test_context();
         ctx.updater_state_path = state_path;
 
         let result = GetUpdateStatusHandler.handle(None, &ctx).await.unwrap();
@@ -1022,18 +1011,12 @@ mod tests {
 
         // Contract fields iOS needs regardless of state.
         assert!(result["currentVersion"].is_string());
-        init_settings(TronSettings::default());
     }
 
     /// Missing state file must NOT error — first-run case. All nullable
     /// fields serialize as JSON null.
     #[tokio::test]
     async fn get_update_status_missing_state_file_is_fresh_defaults() {
-        let _lock = test_settings_lock()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        init_settings(TronSettings::default());
-
         let dir = tempfile::tempdir().expect("tempdir");
         let state_path = dir.path().join("definitely-does-not-exist.json");
 

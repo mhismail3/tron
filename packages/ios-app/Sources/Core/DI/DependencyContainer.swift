@@ -412,10 +412,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// upgrade. Reads the iOS-local active server id and server list, then
     /// looks up the per-server token in Keychain.
     ///
-    /// Returns `nil` when no active paired server has a token. The server in
-    /// `auth.enforced=false` mode still accepts; in `enforced=true` mode
-    /// the server returns 401 → `WebSocketService` parks in `.unauthorized`
-    /// → user re-pairs via `ConnectionStatusPill` CTA.
+    /// Returns `nil` when no active paired server has a token. The server
+    /// returns 401, `WebSocketService` parks in `.unauthorized`, and the user
+    /// re-pairs via the connection status CTA.
     @MainActor
     private static func resolveBearerToken(tokenStore: PairedServerTokenStore) -> String? {
         guard let activeId = UserDefaults.standard.string(forKey: PairedServerStore.activeIdKey),

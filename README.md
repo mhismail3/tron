@@ -60,7 +60,7 @@ This README is the single, canonical reference for the project and is expected t
 |                         Event Store (SQLite)                                |
 |   - Immutable event log with tree structure (fork/rewind)                   |
 |   - Session state reconstruction via ancestor traversal                     |
-|   - Full-text search (FTS5), task management (PARA)                         |
+|   - SQLite-backed sessions, events, branches, cron, prompts, and devices    |
 +-----------------------------------------------------------------------------+
 ```
 
@@ -69,7 +69,7 @@ This README is the single, canonical reference for the project and is expected t
 1. Client sends JSON-RPC 2.0 over WebSocket
 2. The `server` module dispatches to the appropriate RPC handler
 3. Handlers call into runtime, orchestrator, and event store
-4. Domain output is adapted at the boundary (`rpc/adapters.rs`) when iOS compatibility is required
+4. Domain output is serialized at the RPC/WebSocket boundary when clients need wire-compatible shapes
 5. Events and responses broadcast back through WebSocket channels
 
 ---
@@ -132,8 +132,8 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   |
   +-- server           Axum HTTP/WS, RPC handlers, event bridge, APNS
   |                    +-- onboarding      Bearer token + `.onboarded` sentinel lifecycle
-  |                    +-- websocket       WS upgrade handler + bearer-auth middleware
-  |                    +-- updater         GitHub Releases poller + atomic self-update + rollback
+  |                    +-- websocket       WS upgrade handler + mandatory bearer-auth middleware
+  |                    +-- updater         GitHub Releases poller + notify-only update state
   |
   +-- main.rs          Binary entry point: DB policy, CLI subcommands, startup
 ```
@@ -154,9 +154,9 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
 | `server` | HTTP/WS + RPC dispatch | `TronServer`, `MethodRegistry`, `RpcContext`, `EventBridge` |
-| `server::onboarding` | Bearer token + first-run sentinel | `ensure_bearer_token()`, `touch_onboarded_sentinel()` |
-| `server::websocket` | WS upgrade + bearer-auth middleware | `BearerAuth`, gated by `server.auth.enforced` |
-| `server::updater` | Auto-update scheduler + installer | `Scheduler`, `UpdateAction`, `UpdateChannel`, `UpdateFrequency` |
+| `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
+| `server::websocket` | WS upgrade + bearer-auth middleware | `BearerTokenStore`, `verify_bearer_header()` |
+| `server::updater` | GitHub Releases checks + update notifications | `SchedulerDeps`, `UpdaterState`, `UpdateDecision` |
 
 ---
 
@@ -321,7 +321,7 @@ Metrics:   GET  http://<host>:<port>/metrics
 Messages use the server's WebSocket RPC framing. Request IDs are strings and are echoed on responses:
 
 ```json
-{"id":"ping-1","method":"system.ping"}
+{"id":"ping-1","method":"system.ping","params":{"protocolVersion":1,"clientVersion":"ios"}}
 {"id":"ping-1","success":true,"result":{"pong":true,"timestamp":"…","serverVersion":"0.1.0","serverProtocolVersion":1,"minClientProtocolVersion":1,"compatible":true}}
 ```
 
@@ -451,7 +451,7 @@ Settings are loaded from three layers (highest priority last):
 2. **User file** (`~/.tron/system/settings.json`, deep-merged over defaults)
 3. **Environment variables** (`TRON_*` overrides)
 
-Settings are server-authoritative. The iOS app reads the effective merged values via `settings.get` and writes sparse user overrides via `settings.update` / `settings.resetToDefaults`. When settings are updated, the server atomically swaps its cached `Arc<TronSettings>`.
+Settings are server-authoritative. The iOS app reads the effective merged values via `settings.get` and writes sparse user overrides via `settings.update` / `settings.resetToDefaults`. Missing files use defaults, but malformed or non-object JSON returns an RPC error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then swapped into the cached `Arc<TronSettings>`.
 
 `settings.json` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed. Built-in defaults stay in `TronSettings::default()` and appear in `settings.get` after the user file is deep-merged over them. iOS device-only preferences live in iOS storage/Keychain, not in the server settings file.
 
@@ -465,15 +465,12 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
   "name": "tron",
 
   "server": {
-    "heartbeatIntervalMs": 30000,
+    "heartbeatIntervalMs": 30000,   // WebSocket heartbeat; 1000-600000 ms
     "defaultProvider": "anthropic",
     "defaultModel": "claude-sonnet-4-6",
     "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
     "transcription": { "enabled": false },
     "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
-    "auth": {
-      "enforced": false             // When true, every WS upgrade requires a paired-device bearer token
-    },
     "update": {                     // User-mode update checks. All fields off / safest by default.
       "enabled": false,             // Master switch — false means the scheduler never runs + no GitHub API traffic
       "channel": "stable",          // "stable" ignores pre-release tags; "beta" includes them
@@ -587,7 +584,7 @@ OpenAI uses the `openai-codex` provider key for both auth modes. ChatGPT OAuth c
 
 **Storage:** `~/.tron/system/auth.json` top-level `bearerToken` (mode 600, atomic writes)
 
-Stored beside provider auth in the same secure file. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request when `server.auth.enforced` is `true`. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
+Stored beside provider auth in the same secure file. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
 
 The token is generated during first server startup and written as `bearerToken` inside `~/.tron/system/auth.json`. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS pairing step.
 
@@ -674,7 +671,7 @@ All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mo
 | `prompt_history` | Deduplicated interactive-prompt history keyed by normalized text hash (use_count, first/last_used_at, char_count) |
 | `prompt_snippets` | User-authored reusable prompt snippets (`name`, `text`, timestamps) |
 
-The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. There are no FTS5 virtual tables, and there is no PARA-style task table — task management is overlaid on the event log via tools.
+The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. Prompt history and cron state live in their dedicated tables; session/task views are reconstructed from the canonical event log.
 
 ---
 
@@ -795,9 +792,7 @@ packages/mac-app/Sources/
 | Show pairing info | Opens a pairing-only window that shows one emerald resolving spinner directly on the window background until the QR + manual copy buttons for host, port, token, and server name crossfade in; copy actions quickly show a checkmark for two seconds on success |
 | Restart / Pause / Resume server | `SMAppService.register` repair/load before restart or resume, then `launchctl kickstart` when the label was already loaded; shows busy state and posts success/failure notifications |
 | Update finalization | On the first menu-bar launch for a new app build, syncs managed skills, refreshes stale SMAppService metadata, and restarts the bundled server once; `tron dev` takeover defers this until the production server is active again |
-| Open dev command log | Appears while a menu-launched dev command is still starting or while `Tron-Dev.app` owns port 9847; opens `~/.tron/system/run/dev-menu-command.log` so build/test/start output is visible before the server is reachable |
-| Stop dev server | Appears in the bottom developer section whenever `Tron-Dev.app` owns port 9847, even while developer options are collapsed; stops the dev process and resumes the installed Login Item. Pause, restart, and uninstall are disabled while dev takeover is active. |
-| Developer options | A collapsed bottom section exposes `Show Developer Options`; when expanded it runs background-safe `scripts/tron dev -d`, `scripts/tron dev -td`, and `scripts/tron dev -btd` commands from the checkout resolved by `TRON_PROJECT_ROOT` or a nearby source tree |
+| Stop dev server | Appears with the server controls whenever `Tron-Dev.app` owns port 9847; stops the dev process and resumes the installed Login Item. Pause, restart, and uninstall are disabled while dev takeover is active. |
 | Show logs | Opens the native logs window backed by the read-only `logs.recent` RPC |
 | Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
 | Check for updates | Opens the latest GitHub Release |
@@ -1016,7 +1011,7 @@ style/pedantic suggestions stay advisory so the signal is not buried.
 
 These constraints are enforced in code with `// INVARIANT:` markers at the enforcement site.
 
-1. **Canonical internal model**: Handlers and runtime use canonical shapes. iOS wire-format adaptation is boundary-only (`rpc/adapters.rs`).
+1. **Canonical internal model**: Handlers and runtime use canonical shapes. Client-specific wire compatibility belongs at the RPC/WebSocket boundary.
 
 2. **Fail-fast on unknown models**: Unknown model or provider returns a typed `UnsupportedModel` error immediately. No silent fallback or default provider substitution.
 

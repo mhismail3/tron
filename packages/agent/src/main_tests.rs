@@ -402,7 +402,7 @@ async fn server_boots_and_responds() {
         job_manager: None,
         output_buffer_registry: None,
         hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
-        ws_port: 9847,
+        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
         onboarded_marker_path: dir.path().join(".onboarded"),
         release_fetcher: None,
         updater_state_path: dir.path().join("updater-state.json"),
@@ -647,7 +647,7 @@ async fn server_graceful_shutdown() {
         job_manager: None,
         output_buffer_registry: None,
         hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
-        ws_port: 9847,
+        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
         onboarded_marker_path: dir.path().join(".onboarded"),
         release_fetcher: None,
         updater_state_path: dir.path().join("updater-state.json"),
@@ -748,7 +748,7 @@ fn startup_ensures_bearer_token_exists() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("auth.json");
 
-    let token = ensure_bearer_token_at(&path).expect("startup should create bearer token");
+    let token = initialize_bearer_token_at(&path).expect("startup should create bearer token");
 
     assert_eq!(token.len(), 43);
     assert!(path.exists(), "startup must persist auth.json for pairing");

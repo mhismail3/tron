@@ -54,8 +54,6 @@ final class SettingsParityTests: XCTestCase {
         "mcpSchemaRefreshTtlMs",
         // Transcription (ConnectionSettingsPage.swift)
         "transcriptionEnabled",
-        // Server auth (ConnectionSettingsPage.swift)
-        "authEnforced",
         // Update checks (ConnectionSettingsPage.swift)
         "updateEnabled",
         "updateChannel",

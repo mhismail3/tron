@@ -7,10 +7,12 @@ use std::time::{Duration, Instant};
 use crate::server::rpc::context::RpcContext;
 use crate::server::rpc::registry::MethodRegistry;
 use axum::Router;
+use axum::extract::Request as AxumRequest;
 use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Json};
+use axum::http::{HeaderMap, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
 use tokio::net::TcpListener;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -28,6 +30,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use crate::server::config::ServerConfig;
 use crate::server::health::{self, HealthResponse};
 use crate::server::shutdown::ShutdownCoordinator;
+use crate::server::websocket::auth::{BearerTokenStore, verify_bearer_header};
 use crate::server::websocket::broadcast::BroadcastManager;
 use crate::server::websocket::session::run_ws_session;
 
@@ -61,6 +64,8 @@ pub struct AppState {
     pub config: ServerConfig,
     /// Prometheus metrics handle for rendering.
     pub metrics_handle: Arc<PrometheusHandle>,
+    /// Bearer-token verifier for `/ws` upgrades.
+    pub auth_store: Arc<BearerTokenStore>,
 }
 
 /// The main Tron server.
@@ -71,6 +76,7 @@ pub struct TronServer {
     shutdown: Arc<ShutdownCoordinator>,
     rpc_context: Arc<RpcContext>,
     metrics_handle: Arc<PrometheusHandle>,
+    auth_store: Arc<BearerTokenStore>,
     start_time: Instant,
 }
 
@@ -92,6 +98,8 @@ impl TronServer {
         rpc_context.device_request_broker = Some(Arc::new(
             crate::server::device::DeviceRequestBroker::new(broadcast.clone(), shutdown.token()),
         ));
+        rpc_context.set_ws_port(config.port);
+        let auth_store = Arc::new(BearerTokenStore::new(rpc_context.auth_path.clone()));
         Self {
             config,
             registry: Arc::new(registry),
@@ -99,6 +107,7 @@ impl TronServer {
             shutdown,
             rpc_context: Arc::new(rpc_context),
             metrics_handle: Arc::new(metrics_handle),
+            auth_store,
             start_time: Instant::now(),
         }
     }
@@ -113,12 +122,17 @@ impl TronServer {
             rpc_context: self.rpc_context.clone(),
             config: self.config.clone(),
             metrics_handle: self.metrics_handle.clone(),
+            auth_store: self.auth_store.clone(),
         };
 
         Router::new()
             .route("/health", get(health_handler))
             .route("/metrics", get(metrics_handler))
-            .route("/ws", get(ws_upgrade_handler))
+            .route(
+                "/ws",
+                get(ws_upgrade_handler)
+                    .route_layer(middleware::from_fn_with_state(state.clone(), ws_auth_gate)),
+            )
             .route("/health/deep", get(deep_health_handler))
             .with_state(state)
             // Outermost layers execute first on request, last on response.
@@ -142,6 +156,7 @@ impl TronServer {
         let addr = format!("{}:{}", self.config.host, self.config.port);
         let listener = TcpListener::bind(&addr).await?;
         let bound_addr = listener.local_addr()?;
+        self.rpc_context.set_ws_port(bound_addr.port());
 
         let methods = self.registry.methods().len();
         info!(addr = %bound_addr, methods, "server started");
@@ -236,6 +251,16 @@ async fn metrics_handler(State(state): State<AppState>) -> String {
     state.metrics_handle.render()
 }
 
+async fn ws_auth_gate(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    request: AxumRequest,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    verify_bearer_header(&headers, &state.auth_store)?;
+    Ok(next.run(request).await)
+}
+
 /// GET /ws — WebSocket upgrade handler.
 async fn ws_upgrade_handler(
     ws: WebSocketUpgrade,
@@ -257,12 +282,16 @@ async fn ws_upgrade_handler(
     let ctx = state.rpc_context;
     let broadcast = state.broadcast;
     let max_message_size = state.config.max_message_size;
-    let ping_interval = Duration::from_secs(state.config.heartbeat_interval_secs);
-    let pong_timeout = Duration::from_secs(state.config.heartbeat_timeout_secs);
+    let ping_interval = Duration::from_millis(state.config.heartbeat_interval_ms);
+    let pong_timeout = Duration::from_millis(state.config.heartbeat_timeout_ms);
+    let onboarded_marker_path = ctx.onboarded_marker_path.clone();
 
     Ok(ws
         .max_message_size(max_message_size)
-        .on_upgrade(move |socket| {
+        .on_upgrade(move |socket| async move {
+            if let Err(error) = crate::server::onboarding::mark_onboarded(&onboarded_marker_path) {
+                tracing::warn!(%error, "failed to mark server onboarded after WebSocket auth");
+            }
             run_ws_session(
                 socket,
                 client_id,
@@ -272,6 +301,7 @@ async fn ws_upgrade_handler(
                 ping_interval,
                 pong_timeout,
             )
+            .await;
         }))
 }
 
@@ -297,6 +327,35 @@ mod tests {
             ctx,
             make_metrics_handle(),
         )
+    }
+
+    fn make_server_with_auth() -> (TronServer, tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let auth_path = dir.path().join("auth.json");
+        let token = crate::server::onboarding::load_or_create_bearer_token(&auth_path).unwrap();
+        let mut ctx = make_test_context();
+        ctx.auth_path = auth_path;
+        let server = TronServer::new(
+            ServerConfig::default(),
+            MethodRegistry::new(),
+            ctx,
+            make_metrics_handle(),
+        );
+        (server, dir, token)
+    }
+
+    fn ws_upgrade_request(auth: Option<String>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("GET")
+            .uri("/ws")
+            .header("connection", "upgrade")
+            .header("upgrade", "websocket")
+            .header("sec-websocket-version", "13")
+            .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==");
+        if let Some(auth) = auth {
+            builder = builder.header("authorization", auth);
+        }
+        builder.body(Body::empty()).unwrap()
     }
 
     #[tokio::test]
@@ -355,15 +414,72 @@ mod tests {
 
     #[tokio::test]
     async fn ws_endpoint_requires_upgrade() {
-        let server = make_server();
+        let (server, _dir, token) = make_server_with_auth();
+        let marker = server.rpc_context().onboarded_marker_path.clone();
         let app = server.router();
 
         // GET /ws without WebSocket upgrade headers → should return an error
-        let req = Request::builder().uri("/ws").body(Body::empty()).unwrap();
+        let req = Request::builder()
+            .uri("/ws")
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
 
         let resp = app.oneshot(req).await.unwrap();
         // Without upgrade headers, axum returns a non-success status
         assert_ne!(resp.status(), StatusCode::OK);
+        assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(!marker.exists(), "invalid upgrades must not mark paired");
+    }
+
+    #[tokio::test]
+    async fn ws_endpoint_rejects_missing_bearer() {
+        let (server, _dir, _token) = make_server_with_auth();
+        let app = server.router();
+
+        let req = ws_upgrade_request(None);
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn ws_endpoint_rejects_wrong_bearer() {
+        let (server, _dir, _token) = make_server_with_auth();
+        let app = server.router();
+
+        let req = ws_upgrade_request(Some("Bearer wrong".into()));
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn ws_endpoint_rejects_wrong_auth_scheme() {
+        let (server, _dir, token) = make_server_with_auth();
+        let app = server.router();
+
+        let req = ws_upgrade_request(Some(format!("Basic {token}")));
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn ws_endpoint_reloads_rotated_bearer() {
+        let (server, dir, token) = make_server_with_auth();
+        let app = server.router();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let rotated =
+            crate::server::onboarding::rotate_bearer_token(&dir.path().join("auth.json")).unwrap();
+
+        let old_req = ws_upgrade_request(Some(format!("Bearer {token}")));
+        let old_resp = app.clone().oneshot(old_req).await.unwrap();
+        assert_eq!(old_resp.status(), StatusCode::UNAUTHORIZED);
+
+        let new_req = ws_upgrade_request(Some(format!("Bearer {rotated}")));
+        let new_resp = app.oneshot(new_req).await.unwrap();
+        assert_ne!(new_resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -476,6 +592,7 @@ mod tests {
         let (addr, handle) = server.listen().await.unwrap();
 
         assert_ne!(addr.port(), 0); // auto-assigned
+        assert_eq!(server.rpc_context().ws_port(), addr.port());
         assert_eq!(addr.ip().to_string(), "0.0.0.0");
 
         // Shutdown

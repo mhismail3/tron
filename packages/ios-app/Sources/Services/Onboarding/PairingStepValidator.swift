@@ -21,7 +21,7 @@ enum PairingStepValidator {
         /// Network error reaching the server (connection refused, timeout, DNS).
         case unreachable(String)
         /// Server reachable but returned 401 / WebSocket close 4001 — bad
-        /// token or `auth.enforced=true` rejecting our bearer.
+        /// or missing bearer token.
         case unauthorized
         /// Server replied to `system.ping` with `CLIENT_VERSION_UNSUPPORTED`.
         case incompatibleServer(String)

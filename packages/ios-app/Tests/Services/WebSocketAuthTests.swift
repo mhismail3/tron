@@ -9,9 +9,9 @@ import Testing
 ///
 /// These tests exercise the upgrade-request shape and the state-machine
 /// transitions without doing real network I/O. End-to-end "real 401 from
-/// real server" is verified manually during Phase 3.7 dogfood (flipping
-/// `server.auth.enforced=true` on the local dev server and watching iOS
-/// land in `.unauthorized` with the re-pair CTA).
+/// real server" is verified by the Rust integration test that rejects
+/// missing or stale bearer tokens and by the iOS `.unauthorized` state
+/// transition tests below.
 @Suite("WebSocketService bearer auth")
 @MainActor
 struct WebSocketAuthTests {
@@ -47,9 +47,8 @@ struct WebSocketAuthTests {
 
     @Test("upgrade request omits Authorization when no provider is supplied")
     func upgradeRequestOmitsHeaderWithoutProvider() {
-        // Backwards-compatibility safety net: existing call sites that don't
-        // pass a provider must continue to send no header (server with
-        // `auth.enforced=false` accepts; with `enforced=true` returns 401).
+        // Call sites without a paired-server token send no header; the server
+        // responds 401 and the UI moves into the re-pair flow.
         let ws = WebSocketService(serverURL: makeURL())
 
         let request = ws.makeUpgradeRequest()

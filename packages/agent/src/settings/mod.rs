@@ -11,6 +11,7 @@
 //! sparse user overrides. iOS reads/writes the effective server settings via
 //! `settings.get`, `settings.update`, and `settings.resetToDefaults`.
 //! Device-only iOS preferences stay in the app's local storage, not here.
+//! [`SettingsStore`] owns strict, atomic, serialized sparse-file writes.
 //!
 //! The global singleton is reloadable: when `settings.update` writes new
 //! values to disk, [`reload_settings_from_path`] swaps the cached value
@@ -36,12 +37,14 @@ pub mod db_path_policy;
 pub mod errors;
 #[path = "storage/loader.rs"]
 pub mod loader;
+pub mod store;
 pub mod types;
 
 pub use errors::{Result, SettingsError};
 pub use loader::{
     deep_merge, load_settings, load_settings_from_path, settings_path, tron_home_dir,
 };
+pub use store::SettingsStore;
 pub use types::*;
 
 use std::path::Path;
@@ -70,8 +73,8 @@ fn settings_slot() -> &'static ArcSwapOption<TronSettings> {
 /// Get the global settings instance.
 ///
 /// On first call, loads settings from `~/.tron/system/settings.json` with env var
-/// overrides. On subsequent calls, returns the cached value. If loading
-/// fails, returns compiled defaults.
+/// overrides. On subsequent calls, returns the cached value. Missing settings
+/// files use compiled defaults; malformed settings fail fast.
 ///
 /// Returns an `Arc` so callers hold a consistent snapshot even if another
 /// thread reloads settings concurrently. The underlying read is lock-free
@@ -88,13 +91,7 @@ pub fn get_settings() -> Arc<TronSettings> {
     // race here, both will produce a valid Arc from the same deterministic
     // source (file or defaults) and one's store overwrites the other; both
     // return a valid snapshot. The loser's Arc is dropped. No lock involved.
-    let fresh = Arc::new(match load_settings() {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to load settings, using defaults");
-            TronSettings::default()
-        }
-    });
+    let fresh = Arc::new(load_settings().expect("failed to load settings"));
     slot.store(Some(Arc::clone(&fresh)));
     fresh
 }
@@ -114,16 +111,11 @@ pub fn init_settings(settings: TronSettings) {
 /// calls return the new values.
 ///
 /// Called by settings RPC handlers after writing to `settings.json`.
-pub fn reload_settings_from_path(path: &Path) {
-    let new = Arc::new(match load_settings_from_path(path) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(error = %e, ?path, "failed to reload settings, falling back to defaults");
-            TronSettings::default()
-        }
-    });
+pub fn reload_settings_from_path(path: &Path) -> Result<()> {
+    let new = Arc::new(load_settings_from_path(path)?);
     settings_slot().store(Some(new));
     tracing::debug!(?path, "settings reloaded from disk");
+    Ok(())
 }
 
 /// Reset the global settings cache (test-only).
@@ -250,7 +242,7 @@ mod tests {
         .unwrap();
 
         // Reload — should pick up the change
-        reload_settings_from_path(&path);
+        reload_settings_from_path(&path).unwrap();
 
         let updated = get_settings();
         assert!(
@@ -274,7 +266,7 @@ mod tests {
         assert_eq!(get_settings().server.heartbeat_interval_ms, 77_000);
 
         // Reload from a path that doesn't exist — should get defaults (not keep 77_000)
-        reload_settings_from_path(Path::new("/nonexistent/settings.json"));
+        reload_settings_from_path(Path::new("/nonexistent/settings.json")).unwrap();
 
         let s = get_settings();
         assert_eq!(
@@ -310,7 +302,7 @@ mod tests {
         .unwrap();
 
         // Reload (what UpdateSettingsHandler should do)
-        reload_settings_from_path(&settings_path);
+        reload_settings_from_path(&settings_path).unwrap();
 
         // Now get_settings should reflect the iOS toggle
         assert!(

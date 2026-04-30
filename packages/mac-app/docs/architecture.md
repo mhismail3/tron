@@ -1,13 +1,13 @@
 # Mac App Architecture
 
-> Last verified: 2026-04-29 (menu uptime normalization + dev command status)
+> Last verified: 2026-04-30 (menu dev takeover controls)
 
 ## Overview
 
 `Tron.app` is the macOS SwiftUI wrapper around the headless Rust agent. It has two runtime modes:
 
 - **Wizard mode** — shown on first launch, before `~/.tron/system/run/.onboarded` exists. Walks the user through Tailscale, Login Item registration, permissions, optional local transcription setup, and pairing-info display.
-- **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system.ping` and exposes status + copy actions + diagnostics. Passive poll/menu-open refreshes never overwrite an explicit busy action such as "Starting dev"; the action handler owns the final status refresh when the command exits.
+- **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system.ping` and exposes status + copy actions + diagnostics. Passive poll/menu-open refreshes never overwrite an explicit busy action such as "Restarting"; the action handler owns the final status refresh when the command exits.
 
 The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side.
 
@@ -101,10 +101,10 @@ Long-running operations (install, pairing, menu construction) are split into:
 
 Example: `InstallPlanner.plan(paths:) -> Result<InstallPlan, Failure>` is entirely pure and tested with `InstallPlannerTests`. `InstallStep` validates the bundled helper/plist/signature, then asks `LaunchAgentManaging` to register or refresh the service.
 
-Developer menu commands run through `TronDevCommandRunner`, which appends
-output to `~/.tron/system/run/dev-menu-command.log`. While a dev server command
-is starting, the menu-bar snapshot stays busy and the menu exposes that log so
-build/test progress is inspectable even before a server is reachable.
+The menu bar observes `tron dev` takeover but does not start it. Contributors
+start dev servers from the checkout-owned `scripts/tron` CLI; the app only
+detects when `Tron-Dev.app` owns port 9847 and exposes the bounded stop/resume
+action for that live process.
 
 ### Protocol-bounded subprocess surface
 
@@ -241,20 +241,12 @@ the read-only `logs.recent` RPC, with refresh and copy controls.
 The uptime row normalizes raw `ps` elapsed-time strings such as `10:48` to the
 same `HH:MM:SS` format used by the live one-second ticker, so opening the menu
 does not briefly switch display styles.
-While `Tron-Dev.app` owns port 9847, the bottom developer section shows a
-`Stop dev server` action even when developer options are collapsed. Pause,
-restart, and uninstall remain disabled during dev takeover. The stop action
-re-probes the port owner before signaling anything, sends TERM then KILL only to
-the verified dev PID if needed, and then resumes the installed Login Item through
-the same `SMAppService` load path as the normal Resume action.
-The bottom developer section is collapsed by default. Expanding it shows
-background-safe `scripts/tron dev` commands for starting dev takeover from the
-menu bar; the command runner resolves `scripts/tron` from `TRON_PROJECT_ROOT` or
-by walking up from the app/current directory, writes output to
-`~/.tron/system/run/dev-menu-command.log`, and disables start commands while a
-dev server already owns the port. The Debug Xcode scheme sets
-`TRON_PROJECT_ROOT` to the checkout root so local menu actions work without
-extra shell setup.
+While `Tron-Dev.app` owns port 9847, the server-control section shows `Stop dev
+server`. Pause, restart, and uninstall remain disabled during dev takeover. The
+stop action re-probes the port owner before signaling anything, sends TERM then
+KILL only to the verified dev PID if needed, and then resumes the installed
+Login Item through the same `SMAppService` load path as the normal Resume
+action.
 Menu rows use native `NSMenuItem` rendering with no item images, so the popup
 keeps the standard macOS menu spacing used by apps like 1Password.
 "Send feedback" builds a prefilled GitHub issue with app/server context and a

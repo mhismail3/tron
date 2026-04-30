@@ -139,3 +139,120 @@ fn installed_pre_commit_hook_enforces_rustfmt_and_personal_info_guard() {
         "pre-commit hook must keep the staged personal-info guard"
     );
 }
+
+#[test]
+fn lower_layers_do_not_depend_on_server_transport_modules() {
+    let crate_root = crate_root();
+    for dir in ["src/settings", "src/cron", "src/mcp"] {
+        let root = crate_root.join(dir);
+        for path in rust_files_under(&root) {
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            assert!(
+                !content.contains("crate::server::"),
+                "{} must not import server transport/RPC modules",
+                path.strip_prefix(&crate_root).unwrap().display()
+            );
+        }
+    }
+}
+
+#[test]
+fn readme_does_not_advertise_removed_or_fictional_contracts() {
+    let readme_path = repo_root().join("README.md");
+    let readme = std::fs::read_to_string(&readme_path)
+        .unwrap_or_else(|e| panic!("failed to read {readme_path:?}: {e}"));
+    for removed in [
+        concat!("server.", "auth.", "enforced"),
+        concat!("Bearer", "Auth"),
+        concat!("rpc/", "adapters.rs"),
+        concat!(
+            "Full-text",
+            " search (",
+            "FT",
+            "S5), task management (",
+            "PA",
+            "RA)"
+        ),
+        concat!("ensure_", "bearer_token()"),
+        concat!("touch_", "onboarded_sentinel()"),
+        concat!("atomic self", "-update + rollback"),
+    ] {
+        assert!(
+            !readme.contains(removed),
+            "README must not advertise removed/stale contract `{removed}`"
+        );
+    }
+}
+
+#[test]
+fn rpc_blocking_work_uses_the_supervisor_entrypoint() {
+    let crate_root = crate_root();
+    let rpc_root = crate_root.join("src/server/rpc");
+    for path in rust_files_under(&rpc_root) {
+        let rel = path.strip_prefix(&crate_root).unwrap();
+        if rel == Path::new("src/server/rpc/context.rs") {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+        assert!(
+            !content.contains("tokio::task::spawn_blocking")
+                && !content.contains("spawn_blocking("),
+            "{} must route blocking work through RpcContext::run_blocking or run_blocking_task",
+            rel.display()
+        );
+    }
+}
+
+#[test]
+fn removed_server_owned_settings_store_stays_deleted() {
+    let crate_root = crate_root();
+    let file_name = ["settings", "_service.rs"].concat();
+    assert!(
+        !crate_root.join("src/server/rpc").join(file_name).exists(),
+        "settings persistence belongs to settings::SettingsStore, not server::rpc"
+    );
+}
+
+#[test]
+fn main_background_work_is_registered_with_shutdown() {
+    let main_path = crate_root().join("src/main.rs");
+    let content = std::fs::read_to_string(&main_path)
+        .unwrap_or_else(|e| panic!("failed to read {main_path:?}: {e}"));
+    for required in [
+        "register_blocking_supervisor_shutdown(server.shutdown())",
+        "shutdown.register_task(handle)",
+        "server.shutdown().register_task(sandbox_cleanup)",
+        "server.shutdown().register_task(eviction_task)",
+        "server.shutdown().register_task(cron_cancel_forwarder)",
+        "shutdown_handles.push(h)",
+    ] {
+        assert!(
+            content.contains(required),
+            "main.rs must keep shutdown ownership marker `{required}`"
+        );
+    }
+}
+
+fn rust_files_under(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    visit_rust_files(root, &mut files);
+    files
+}
+
+fn visit_rust_files(path: &Path, files: &mut Vec<PathBuf>) {
+    if path.is_file() {
+        if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            files.push(path.to_path_buf());
+        }
+        return;
+    }
+
+    let entries = std::fs::read_dir(path)
+        .unwrap_or_else(|e| panic!("failed to read directory {path:?}: {e}"));
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|e| panic!("failed to read directory entry: {e}"));
+        visit_rust_files(&entry.path(), files);
+    }
+}

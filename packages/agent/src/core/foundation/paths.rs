@@ -358,7 +358,7 @@ pub fn auth_path() -> PathBuf {
 /// `~/.tron/system/auth.json` — WebSocket bearer-token storage and provider auth.
 ///
 /// The bearer token is stored as top-level `bearerToken`. Read by the WS
-/// upgrade handler when `server.auth.enforced` is true; written by
+/// upgrade handler; written by
 /// `server::onboarding::load_or_create_bearer_token` and
 /// `server::onboarding::rotate_bearer_token`.
 pub fn bearer_token_path() -> PathBuf {

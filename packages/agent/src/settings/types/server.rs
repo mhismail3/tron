@@ -7,11 +7,16 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::{UpdateAction, UpdateChannel, UpdateFrequency};
+
 /// Server network and runtime settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ServerSettings {
     /// WebSocket heartbeat interval in milliseconds.
+    ///
+    /// Must be non-zero before it reaches the runtime because
+    /// `tokio::time::interval(Duration::ZERO)` panics.
     pub heartbeat_interval_ms: u64,
     /// Path to the memory database (relative to `~/.tron`).
     pub memory_db_path: String,
@@ -24,9 +29,6 @@ pub struct ServerSettings {
     pub default_workspace: Option<String>,
     /// Audio transcription settings.
     pub transcription: TranscriptionSettings,
-    /// Bearer-token authentication settings.
-    #[serde(default)]
-    pub auth: AuthSettings,
     /// User-mode update-check configuration.
     #[serde(default)]
     pub update: UpdateSettings,
@@ -46,35 +48,37 @@ impl Default for ServerSettings {
             default_provider: "anthropic".to_string(),
             default_workspace: None,
             transcription: TranscriptionSettings::default(),
-            auth: AuthSettings::default(),
             update: UpdateSettings::default(),
             tailscale_ip: None,
         }
     }
 }
 
-/// Bearer-token authentication settings.
-///
-/// When `enforced` is `false` (the default during the Phase 2 rollout),
-/// the WebSocket gate ignores the `Authorization` header entirely; clients
-/// may send a bearer or omit it freely. This is the safe default while iOS
-/// clients catch up to the new model.
-///
-/// When `enforced` is `true`, every WS upgrade must present a matching
-/// `Authorization: Bearer <token>` header or get a `401`. The token lives
-/// in `~/.tron/system/auth.json` as `bearerToken` and is rotatable via
-/// `tron auth rotate`.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct AuthSettings {
-    /// Whether the WebSocket bearer-token check is enforced.
-    pub enforced: bool,
+impl ServerSettings {
+    /// Minimum allowed WebSocket heartbeat interval in milliseconds.
+    pub const MIN_HEARTBEAT_INTERVAL_MS: u64 = 1_000;
+    /// Maximum allowed WebSocket heartbeat interval in milliseconds.
+    pub const MAX_HEARTBEAT_INTERVAL_MS: u64 = 600_000;
+
+    /// Validate invariants that cannot be safely corrected at runtime.
+    pub fn validate_strict(&self) -> crate::settings::Result<()> {
+        if !(Self::MIN_HEARTBEAT_INTERVAL_MS..=Self::MAX_HEARTBEAT_INTERVAL_MS)
+            .contains(&self.heartbeat_interval_ms)
+        {
+            return Err(crate::settings::SettingsError::InvalidValue(format!(
+                "server.heartbeatIntervalMs must be between {} and {} milliseconds",
+                Self::MIN_HEARTBEAT_INTERVAL_MS,
+                Self::MAX_HEARTBEAT_INTERVAL_MS
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// User-mode update-check configuration.
 ///
-/// Drives the `server::updater` module's behavior. Default is the
-/// safest possible combination — `enabled = false` means the
+/// Drives the updater module's behavior. Default is the safest possible
+/// combination — `enabled = false` means the
 /// updater is entirely dormant. Flipping `enabled = true` with the
 /// other fields at their defaults gives the gentlest behavior:
 /// daily checks on the `stable` channel, `notify`-only when a
@@ -91,25 +95,25 @@ pub struct UpdateSettings {
     pub enabled: bool,
     /// Release channel. `stable` ignores pre-release tags; `beta`
     /// includes them.
-    pub channel: crate::server::updater::UpdateChannel,
+    pub channel: UpdateChannel,
     /// How often the in-process scheduler fires an automatic check.
     /// `manual` disables the scheduler entirely; checks only fire
     /// on explicit RPC.
-    pub frequency: crate::server::updater::UpdateFrequency,
+    pub frequency: UpdateFrequency,
     /// What to do when a newer release is found. `notify` reports
     /// availability; `download` also stages and verifies the DMG.
     /// Installing still means replacing `/Applications/Tron.app`
     /// from the notarized DMG.
-    pub action: crate::server::updater::UpdateAction,
+    pub action: UpdateAction,
 }
 
 impl Default for UpdateSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            channel: crate::server::updater::UpdateChannel::default(),
-            frequency: crate::server::updater::UpdateFrequency::default(),
-            action: crate::server::updater::UpdateAction::default(),
+            channel: UpdateChannel::default(),
+            frequency: UpdateFrequency::default(),
+            action: UpdateAction::default(),
         }
     }
 }
@@ -403,39 +407,8 @@ mod tests {
         assert_eq!(s.default_provider, "anthropic");
         assert_eq!(s.default_model, "claude-sonnet-4-6");
         assert!(s.default_workspace.is_none());
-        // Phase 2: bearer auth defaults OFF so existing clients keep working.
-        assert!(!s.auth.enforced);
-        // Phase 2: tailscaleIp defaults absent (populated by installer scripts).
+        // tailscaleIp defaults absent (populated by installer scripts).
         assert!(s.tailscale_ip.is_none());
-    }
-
-    #[test]
-    fn auth_settings_serde_camel_case() {
-        let s = ServerSettings::default();
-        let json = serde_json::to_value(&s).unwrap();
-        // `auth` key always present (camelCase, nested struct serialized).
-        assert!(json.get("auth").is_some());
-        assert_eq!(json["auth"]["enforced"], false);
-    }
-
-    #[test]
-    fn auth_settings_roundtrip_when_enforced() {
-        let json = serde_json::json!({
-            "auth": { "enforced": true }
-        });
-        let s: ServerSettings = serde_json::from_value(json).unwrap();
-        assert!(s.auth.enforced);
-        let back = serde_json::to_value(&s).unwrap();
-        assert_eq!(back["auth"]["enforced"], true);
-    }
-
-    #[test]
-    fn auth_settings_default_when_section_missing() {
-        // Existing settings.json files don't have an `auth` block; they
-        // must continue to deserialize without error and end up with the
-        // safe (off) default.
-        let s: ServerSettings = serde_json::from_str("{}").unwrap();
-        assert!(!s.auth.enforced);
     }
 
     #[test]
@@ -448,17 +421,17 @@ mod tests {
         assert!(!s.enabled);
         assert_eq!(
             s.channel,
-            crate::server::updater::UpdateChannel::Stable,
+            UpdateChannel::Stable,
             "default channel must be stable"
         );
         assert_eq!(
             s.frequency,
-            crate::server::updater::UpdateFrequency::Daily,
+            UpdateFrequency::Daily,
             "default frequency must be daily"
         );
         assert_eq!(
             s.action,
-            crate::server::updater::UpdateAction::Notify,
+            UpdateAction::Notify,
             "default action must be notify"
         );
     }
@@ -482,18 +455,9 @@ mod tests {
         });
         let s: ServerSettings = serde_json::from_value(json).unwrap();
         assert!(s.update.enabled);
-        assert_eq!(
-            s.update.channel,
-            crate::server::updater::UpdateChannel::Beta
-        );
-        assert_eq!(
-            s.update.frequency,
-            crate::server::updater::UpdateFrequency::Hourly
-        );
-        assert_eq!(
-            s.update.action,
-            crate::server::updater::UpdateAction::Notify
-        );
+        assert_eq!(s.update.channel, UpdateChannel::Beta);
+        assert_eq!(s.update.frequency, UpdateFrequency::Hourly);
+        assert_eq!(s.update.action, UpdateAction::Notify);
 
         // Roundtrip.
         let back = serde_json::to_value(&s).unwrap();
@@ -512,14 +476,8 @@ mod tests {
         });
         let s: ServerSettings = serde_json::from_value(json).unwrap();
         assert!(s.update.enabled);
-        assert_eq!(
-            s.update.channel,
-            crate::server::updater::UpdateChannel::Stable
-        );
-        assert_eq!(
-            s.update.action,
-            crate::server::updater::UpdateAction::Notify
-        );
+        assert_eq!(s.update.channel, UpdateChannel::Stable);
+        assert_eq!(s.update.action, UpdateAction::Notify);
     }
 
     #[test]
@@ -557,30 +515,22 @@ mod tests {
     }
 
     #[test]
-    fn stale_fields_ignored_during_deserialization() {
-        // Users upgrading from older releases may have these keys in their
-        // settings.json. Deserialization must ignore them cleanly (serde's
-        // default behavior) rather than fail the load.
-        //   wsPort / healthPort / host / sessionTimeoutMs /
-        //   anthropicAccount: never existed in ServerSettings as a real field.
-        //   maxSessions / cacheTtl: removed in 754cbc6d (settings consolidation).
-        //   maxConcurrentSessions: bogus default written by old tron-lib.sh
-        //     (never decoded, purged from install template in this release).
-        // `tailscaleIp` is now a real field (Phase 2); covered separately
-        // in `tailscale_ip_roundtrip_when_present`.
+    fn stale_server_fields_are_rejected() {
         let json = serde_json::json!({
             "wsPort": 8082,
-            "healthPort": 8083,
-            "host": "0.0.0.0",
-            "sessionTimeoutMs": 3_600_000,
-            "anthropicAccount": "personal",
-            "maxSessions": 20,
-            "cacheTtl": 7200,
-            "maxConcurrentSessions": 10,
             "defaultModel": "claude-sonnet-4-6"
         });
-        let s: ServerSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(s.default_model, "claude-sonnet-4-6");
+        let err = serde_json::from_value::<ServerSettings>(json).unwrap_err();
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn removed_auth_setting_is_rejected() {
+        let json = serde_json::json!({
+            "auth": { "enforced": true }
+        });
+        let err = serde_json::from_value::<ServerSettings>(json).unwrap_err();
+        assert!(err.to_string().contains("unknown field"));
     }
 
     #[test]
