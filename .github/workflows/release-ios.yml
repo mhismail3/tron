@@ -225,15 +225,20 @@ jobs:
         run: |
           set -euo pipefail
           build_json="$RUNNER_TEMP/existing-build.json"
-          if asc builds find \
+          if asc builds list \
               --app "$ASC_APP_ID" \
+              --version "${{ steps.ver.outputs.marketing_version }}" \
               --build-number "${{ steps.ver.outputs.apple_build }}" \
-              --platform IOS \
+              --limit 10 \
               --output json > "$build_json"; then
-            build_id="$(jq -r '.data.id' "$build_json")"
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
-            echo "::notice::ASC build ${{ steps.ver.outputs.apple_build }} already exists ($build_id); upload will be skipped"
+            build_id="$(jq -r '(.data // []) | if type == "array" then .[0].id // empty else .id // empty end' "$build_json")"
+            if [[ -n "$build_id" ]]; then
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+              echo "::notice::ASC build ${{ steps.ver.outputs.apple_build }} already exists ($build_id); upload will be skipped"
+            else
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
@@ -313,41 +318,70 @@ jobs:
 
           if [[ "${{ steps.drymode.outputs.dry_run }}" != "true" ]]; then
             profile_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+            profile_matches_store_bundle() {
+              local bundle_id="$1"
+              local profile="$2"
+              local decoded application_id provisions_all
+              decoded="$(mktemp)"
+              if ! security cms -D -i "$profile" -o "$decoded" 2>/dev/null; then
+                rm -f "$decoded"
+                return 1
+              fi
+              application_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded" 2>/dev/null || true)"
+              provisions_all="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$decoded" 2>/dev/null || true)"
+              if [[ "$application_id" == "$APPLE_TEAM_ID.$bundle_id" ]] \
+                && [[ "$provisions_all" != "true" ]] \
+                && ! /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$decoded" >/dev/null 2>&1; then
+                rm -f "$decoded"
+                return 0
+              fi
+              rm -f "$decoded"
+              return 1
+            }
+
             find_store_profile() {
               local bundle_id="$1"
-              local profile decoded application_id provisions_all
+              local profile
               shopt -s nullglob
               for profile in "$profile_dir"/*.mobileprovision; do
-                decoded="$(mktemp)"
-                if ! security cms -D -i "$profile" -o "$decoded" 2>/dev/null; then
-                  rm -f "$decoded"
-                  continue
-                fi
-                application_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$decoded" 2>/dev/null || true)"
-                provisions_all="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$decoded" 2>/dev/null || true)"
-                if [[ "$application_id" == "$APPLE_TEAM_ID.$bundle_id" ]] \
-                  && [[ "$provisions_all" != "true" ]] \
-                  && ! /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$decoded" >/dev/null 2>&1; then
-                  rm -f "$decoded"
+                if profile_matches_store_bundle "$bundle_id" "$profile"; then
                   echo "$profile"
                   return 0
                 fi
-                rm -f "$decoded"
               done
               return 1
             }
 
-            app_profile="$(find_store_profile "$IOS_BUNDLE_ID")" || {
+            resolve_store_profile() {
+              local bundle_id="$1"
+              local embedded_profile="$2"
+              if [[ -f "$embedded_profile" ]] && profile_matches_store_bundle "$bundle_id" "$embedded_profile"; then
+                echo "::notice::using archive-embedded App Store profile for $bundle_id" >&2
+                echo "$embedded_profile"
+                return 0
+              fi
+              find_store_profile "$bundle_id"
+            }
+
+            install_profile() {
+              local source="$1"
+              local destination="$2"
+              if [[ "$source" != "$destination" ]]; then
+                /bin/cp -f "$source" "$destination"
+              fi
+            }
+
+            app_profile="$(resolve_store_profile "$IOS_BUNDLE_ID" "$app_payload/embedded.mobileprovision")" || {
               echo "::error::missing App Store provisioning profile for $IOS_BUNDLE_ID"
               exit 1
             }
-            share_profile="$(find_store_profile "$IOS_SHARE_EXTENSION_BUNDLE_ID")" || {
+            share_profile="$(resolve_store_profile "$IOS_SHARE_EXTENSION_BUNDLE_ID" "$appex_payload/embedded.mobileprovision")" || {
               echo "::error::missing App Store provisioning profile for $IOS_SHARE_EXTENSION_BUNDLE_ID"
               exit 1
             }
 
-            /bin/cp -f "$app_profile" "$app_payload/embedded.mobileprovision"
-            /bin/cp -f "$share_profile" "$appex_payload/embedded.mobileprovision"
+            install_profile "$app_profile" "$app_payload/embedded.mobileprovision"
+            install_profile "$share_profile" "$appex_payload/embedded.mobileprovision"
 
             sign_identity="$(
               security find-identity -v -p codesigning \

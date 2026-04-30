@@ -50,30 +50,71 @@ xcodebuild archive \
   CODE_SIGN_STYLE=Automatic \
   | tail -1
 
-# 3. Find distribution provisioning profiles
-PROFILE_DIR="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
-APP_PROFILE="" SHARE_PROFILE=""
-for p in "$PROFILE_DIR"/*.mobileprovision; do
-  tmpfile=$(mktemp)
-  security cms -D -i "$p" -o "$tmpfile" 2>/dev/null
-  if grep -q "Store Provisioning Profile" "$tmpfile"; then
-    if grep -q "com.tron.mobile<" "$tmpfile"; then APP_PROFILE="$p"; fi
-    if grep -q "com.tron.mobile.ShareExtension<" "$tmpfile"; then SHARE_PROFILE="$p"; fi
-  fi
-  rm -f "$tmpfile" 2>/dev/null
-done
-# Verify both were found before continuing
-
-# 4. Create IPA manually (bypasses Xcode 26 exportArchive rsync bug)
+# 3. Create IPA manually (bypasses Xcode 26 exportArchive rsync bug)
 WORK_DIR=".build/ipa_work"
 mkdir -p "$WORK_DIR/Payload"
 /bin/cp -Rf .build/TronMobile.xcarchive/Products/Applications/TronMobile.app "$WORK_DIR/Payload/"
 
-# 5. Embed distribution profiles
-/bin/cp -f "$APP_PROFILE" "$WORK_DIR/Payload/TronMobile.app/embedded.mobileprovision"
-/bin/cp -f "$SHARE_PROFILE" "$WORK_DIR/Payload/TronMobile.app/PlugIns/TronShareExtension.appex/embedded.mobileprovision"
+# 4. Embed App Store distribution profiles.
+# Prefer profiles Xcode embedded into the archive; fall back to Xcode's profile cache.
+TEAM_ID="MYGKXH6TY4"
+PROFILE_DIR="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+APP_PAYLOAD="$WORK_DIR/Payload/TronMobile.app"
+APPEX_PAYLOAD="$APP_PAYLOAD/PlugIns/TronShareExtension.appex"
 
-# 6. Re-sign using the CHECKED-IN entitlements files (NOT profile entitlements)
+profile_matches_store_bundle() {
+  local bundle_id="$1" profile="$2"
+  local tmpfile application_id provisions_all
+  tmpfile="$(mktemp)"
+  if ! security cms -D -i "$profile" -o "$tmpfile" 2>/dev/null; then
+    rm -f "$tmpfile"
+    return 1
+  fi
+  application_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$tmpfile" 2>/dev/null || true)"
+  provisions_all="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$tmpfile" 2>/dev/null || true)"
+  if [[ "$application_id" == "$TEAM_ID.$bundle_id" ]] \
+    && [[ "$provisions_all" != "true" ]] \
+    && ! /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$tmpfile" >/dev/null 2>&1; then
+    rm -f "$tmpfile"
+    return 0
+  fi
+  rm -f "$tmpfile"
+  return 1
+}
+
+find_store_profile() {
+  local bundle_id="$1" profile
+  shopt -s nullglob
+  for profile in "$PROFILE_DIR"/*.mobileprovision; do
+    if profile_matches_store_bundle "$bundle_id" "$profile"; then
+      echo "$profile"
+      return 0
+    fi
+  done
+  return 1
+}
+
+resolve_store_profile() {
+  local bundle_id="$1" embedded_profile="$2"
+  if [[ -f "$embedded_profile" ]] && profile_matches_store_bundle "$bundle_id" "$embedded_profile"; then
+    echo "$embedded_profile"
+    return 0
+  fi
+  find_store_profile "$bundle_id"
+}
+
+APP_PROFILE="$(resolve_store_profile "com.tron.mobile" "$APP_PAYLOAD/embedded.mobileprovision")"
+SHARE_PROFILE="$(resolve_store_profile "com.tron.mobile.ShareExtension" "$APPEX_PAYLOAD/embedded.mobileprovision")"
+test -n "$APP_PROFILE" && test -n "$SHARE_PROFILE"
+
+if [[ "$APP_PROFILE" != "$APP_PAYLOAD/embedded.mobileprovision" ]]; then
+  /bin/cp -f "$APP_PROFILE" "$APP_PAYLOAD/embedded.mobileprovision"
+fi
+if [[ "$SHARE_PROFILE" != "$APPEX_PAYLOAD/embedded.mobileprovision" ]]; then
+  /bin/cp -f "$SHARE_PROFILE" "$APPEX_PAYLOAD/embedded.mobileprovision"
+fi
+
+# 5. Re-sign using the CHECKED-IN entitlements files (NOT profile entitlements)
 #    Profile entitlements contain every granted capability and cause ITMS rejections.
 DIST_IDENTITY="Apple Distribution"
 
@@ -81,16 +122,16 @@ DIST_IDENTITY="Apple Distribution"
 /usr/bin/codesign --force --sign "$DIST_IDENTITY" \
   --entitlements ShareExtension/ShareExtensionProd.entitlements \
   --timestamp=none \
-  "$WORK_DIR/Payload/TronMobile.app/PlugIns/TronShareExtension.appex"
+  "$APPEX_PAYLOAD"
 
 /usr/bin/codesign --force --sign "$DIST_IDENTITY" \
   --entitlements TronMobileProd.entitlements \
   --timestamp=none \
-  "$WORK_DIR/Payload/TronMobile.app"
+  "$APP_PAYLOAD"
 
-/usr/bin/codesign -vvv "$WORK_DIR/Payload/TronMobile.app" 2>&1 | tail -2
+/usr/bin/codesign -vvv "$APP_PAYLOAD" 2>&1 | tail -2
 
-# 7. Zip and upload
+# 6. Zip and upload
 (cd "$WORK_DIR" && zip -qr "../TronMobile.ipa" Payload/)
 asc builds upload --app 6761511764 --ipa .build/TronMobile.ipa
 ```
