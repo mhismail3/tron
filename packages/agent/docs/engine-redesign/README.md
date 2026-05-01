@@ -150,3 +150,30 @@ in-process expression of the live capability fabric:
 
 That keeps Phase 1 small while encoding the invariants that make later
 self-modifying agent workflows safe and debuggable.
+
+## Phase 1 source map
+
+The first in-repo implementation lives in `packages/agent/src/engine/` and is
+deliberately isolated from production RPC, tools, runtime orchestration, and
+client traffic. The module proves the live fabric contracts before any existing
+workflow is migrated:
+
+- `ids.rs` defines validated IDs for workers, functions, triggers, invocations,
+  actors, authority grants, and traces.
+- `types.rs` defines worker/function/trigger metadata, revisions, visibility,
+  effect classes, idempotency, authority, provenance, health, and catalog-change
+  records.
+- `registry.rs` owns the in-memory `LiveCatalog`, deterministic discovery,
+  owner-checked registration, volatile cleanup, catalog revisions, and
+  in-process sync invocation. Discovery stays live but scope-gated: session and
+  workspace capabilities require matching actor context, and internal entries
+  require an admin/system query.
+- `policy.rs` holds non-bypassable checks for mutating function idempotency,
+  irreversible effects, trigger target revisions, delivery modes, authority
+  scopes, health, and invocation idempotency keys. Invocation also re-checks
+  visibility so a hidden function cannot be called just because its id is known.
+- `invocation.rs` carries actor, authority grant, trace, parent invocation,
+  trigger, catalog revision, delivery mode, and idempotency context across each
+  call.
+- `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
+  behavior from a tested core instead of replacing assumptions.

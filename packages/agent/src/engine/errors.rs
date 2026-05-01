@@ -1,0 +1,97 @@
+//! Error types for the live capability engine.
+
+/// Result alias for engine operations.
+pub type Result<T> = std::result::Result<T, EngineError>;
+
+/// Structured failures returned by engine registration, discovery, and
+/// invocation operations.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum EngineError {
+    /// A typed id failed validation.
+    #[error("invalid {kind} id: {value:?}")]
+    InvalidId {
+        /// ID kind.
+        kind: &'static str,
+        /// Rejected value.
+        value: String,
+    },
+
+    /// A function id was not in namespace::operation form.
+    #[error("function id must be in namespace::operation form: {0:?}")]
+    InvalidFunctionId(String),
+
+    /// A referenced catalog item does not exist.
+    #[error("{kind} not found: {id}")]
+    NotFound {
+        /// Item kind.
+        kind: &'static str,
+        /// Missing id.
+        id: String,
+    },
+
+    /// A registration/update/remove was attempted by the wrong owner.
+    #[error("{kind} {id} is owned by {owner}, not {attempted_owner}")]
+    OwnerMismatch {
+        /// Item kind.
+        kind: &'static str,
+        /// Item id.
+        id: String,
+        /// Current owner id.
+        owner: String,
+        /// Attempted owner id.
+        attempted_owner: String,
+    },
+
+    /// A worker tried to register outside its namespace claims.
+    #[error("worker {worker_id} cannot register function {function_id}; namespace is not claimed")]
+    NamespaceDenied {
+        /// Worker id.
+        worker_id: String,
+        /// Function id.
+        function_id: String,
+    },
+
+    /// A function revision expectation was stale.
+    #[error("function {function_id} revision mismatch: expected {expected}, actual {actual}")]
+    StaleFunctionRevision {
+        /// Function id.
+        function_id: String,
+        /// Expected revision.
+        expected: u64,
+        /// Actual revision.
+        actual: u64,
+    },
+
+    /// A delivery mode is not implemented for execution in Phase 1.
+    #[error("delivery mode {mode} is not executable in phase 1")]
+    UnsupportedDeliveryMode {
+        /// Requested delivery mode.
+        mode: &'static str,
+    },
+
+    /// A delivery mode is not allowed by a definition.
+    #[error("delivery mode {mode} is not allowed for {function_id}")]
+    DeliveryModeNotAllowed {
+        /// Function id.
+        function_id: String,
+        /// Requested delivery mode.
+        mode: &'static str,
+    },
+
+    /// A registration or invocation violates engine policy.
+    #[error("policy violation: {0}")]
+    PolicyViolation(String),
+
+    /// A function is present but cannot currently be routed.
+    #[error("function {function_id} is not routable: {reason}")]
+    NotRoutable {
+        /// Function id.
+        function_id: String,
+        /// Reason it cannot be called.
+        reason: String,
+    },
+
+    /// The handler returned an application failure.
+    #[error("handler failed: {0}")]
+    HandlerFailed(String),
+}

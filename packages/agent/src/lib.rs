@@ -14,6 +14,7 @@ pub mod transcription;
 
 // Services (depend on core/settings)
 pub mod cron;
+pub mod engine;
 pub mod events;
 pub mod import;
 pub mod llm;
