@@ -11,15 +11,17 @@
 //! - workers own the functions and triggers they register;
 //! - mutating capabilities require idempotency metadata;
 //! - invocations carry actor, authority, catalog revision, trace, idempotency,
-//!   and optional parent/trigger context into an in-memory ledger;
+//!   and optional parent/trigger context into a pluggable engine ledger;
 //! - declared request/response schemas are enforced before/after handlers;
 //! - session capabilities can be explicitly promoted to workspace/system scope;
+//! - `EngineHost` exposes privileged `engine::*` meta-capabilities for live
+//!   discovery, inspection, cursor watch, delegated invocation, and promotion;
 //! - Phase 1 executes only in-process synchronous calls.
 //!
 //! ## Module Position
 //!
 //! Depends on: `serde`, `serde_json`, `async_trait`, `thiserror`, `chrono`,
-//! `sha2`, and `hex`.
+//! `sha2`, `hex`, and `rusqlite` for the isolated durable ledger adapter.
 //! Does not depend on runtime, server, events, tools, or settings. Future
 //! modules will adapt those subsystems into engine workers.
 
@@ -27,8 +29,10 @@
 
 pub mod discovery;
 pub mod errors;
+pub mod host;
 pub mod ids;
 pub mod invocation;
+pub mod ledger;
 pub mod policy;
 pub mod registry;
 pub mod schema;
@@ -36,6 +40,7 @@ pub mod types;
 
 pub use discovery::{ActorContext, ActorKind, FunctionQuery};
 pub use errors::{EngineError, Result};
+pub use host::{EngineHost, EngineWatchRequest, EngineWatchResponse};
 pub use ids::{
     ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
     WorkerId,
@@ -43,13 +48,19 @@ pub use ids::{
 pub use invocation::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
 };
+pub use ledger::{
+    EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
+    IdempotencyReservationOutcome, IdempotencyStatus, InMemoryEngineLedgerStore,
+    SqliteEngineLedgerStore, StoredEngineError, StoredInvocationOutcome,
+};
 pub use registry::LiveCatalog;
 pub use types::{
-    AuthorityRequirement, CatalogChange, CatalogChangeKind, CatalogRevision, DeliveryMode,
-    EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
-    IdempotencyKeySource, LedgerKind, Provenance, ReplayBehavior, RiskLevel, TriggerDefinition,
-    TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition, WorkerKind,
-    WorkerLifecycleState, WorkerRevision,
+    AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
+    CatalogSubjectKind, DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth,
+    FunctionRevision, IdempotencyContract, IdempotencyKeySource, IdempotencyScope, LedgerKind,
+    Provenance, ReplayBehavior, RiskLevel, TriggerDefinition, TriggerRevision,
+    TriggerTypeDefinition, VisibilityScope, WorkerDefinition, WorkerKind, WorkerLifecycleState,
+    WorkerRevision,
 };
 
 #[cfg(test)]

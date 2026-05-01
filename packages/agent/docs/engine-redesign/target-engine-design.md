@@ -199,6 +199,14 @@ The underlying catalog is live. If a worker appears halfway through an agent
 run, the agent can discover it on the next action step or receive a subscribed
 catalog-change event and replan.
 
+The first implementation surface is `EngineHost`. It registers the stable
+`engine::*` meta-capabilities as normal catalog functions so agents can discover
+them, while executing those functions through privileged host code that cannot
+be overwritten by ordinary workers. `engine::invoke` is a delegated invocation:
+the meta-function is stable, but the target function's current revision,
+visibility, health, schema, authority, and idempotency policy are checked at
+the child invocation.
+
 Agents choose catalog-change subscriptions by task/session:
 
 - worker spawned by this session became ready;
@@ -210,6 +218,21 @@ Agents choose catalog-change subscriptions by task/session:
 
 Catalog changes should not automatically interrupt every run. The catalog is
 live, and agents decide which change classes matter.
+
+The initial watch model is cursor pull, not push streams. Catalog-change records
+carry subject kind, change class, visibility, session id, and workspace id so a
+watch request can resume from a revision and still avoid leaking hidden
+session/internal entries. Push streams and backpressure belong in the later
+stream worker.
+
+Initial change-class meanings are intentionally agent-facing:
+
+- `availability`: workers or functions appear, disappear, or otherwise become
+  callable/non-callable;
+- `contract`: a function contract changes without being newly added or removed;
+- `trigger`: trigger types or trigger bindings change;
+- `visibility`: a capability is promoted, demoted, or otherwise rescoped;
+- `health`: routability changes without a contract change.
 
 ## Visibility and promotion
 
@@ -229,11 +252,13 @@ Promotion is explicit and auditable:
 
 1. Session-visible capability is created.
 2. Agent or user tests it and records evidence.
-3. Promotion function evaluates schema, provenance, idempotency, authority,
-   tests, risk, and docs.
+3. Promotion function reserves the caller idempotency key, then evaluates
+   schema, provenance, authority, tests, risk, and docs.
 4. Engine changes visibility to workspace or system and emits a catalog event.
 
 Promotion is a function call, not a side channel.
+Duplicate promotion attempts with the same scoped idempotency key replay the
+stored promotion result or fail as conflicts before a second target can mutate.
 
 ## Causality
 

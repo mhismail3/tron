@@ -6,14 +6,17 @@ specialize the model for agent-native local autonomy.
 ## License boundary
 
 The iii repository separates licenses by area. The engine is under Elastic
-License 2.0, while SDKs, console, and docs are Apache-2.0. Tron should treat
-iii engine code as reference material only and should not copy implementation
-code, tests, protocol structs, or worker internals without separate approval.
+License 2.0, while SDKs, console, and docs are Apache-2.0. Tron is local-only,
+so this exploration may copy or adapt iii implementation where doing so
+materially improves the design. Any substantial adaptation should preserve
+license/provenance notes: source path, iii commit, license, what changed for
+Tron, and why the result is still local-agent-safe.
 
 The useful artifact is the primitive model: a small set of runtime concepts
-that collapse backend categories into one live system. Tron should implement
-the model natively, with its own local-first persistence, settings, auth,
-clients, event store, agent runtime, and guardrails.
+that collapse backend categories into one live system. Even when code is copied
+or closely adapted, Tron should specialize the model with its own local-first
+persistence, settings, auth, clients, event store, agent runtime, authority
+model, idempotency rules, and guardrails.
 
 ## Comparison method
 

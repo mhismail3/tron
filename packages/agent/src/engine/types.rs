@@ -128,6 +128,9 @@ pub enum EffectClass {
     PureRead,
     /// Deterministic computation from payload only.
     DeterministicCompute,
+    /// Privileged meta-capability that delegates to another function whose
+    /// effect/idempotency policy is checked at runtime.
+    DelegatedInvocation,
     /// Mutates state with an idempotency key.
     IdempotentWrite,
     /// Appends immutable ledger/event data.
@@ -144,7 +147,10 @@ impl EffectClass {
     /// Whether this effect mutates durable state or the outside world.
     #[must_use]
     pub fn is_mutating(self) -> bool {
-        !matches!(self, Self::PureRead | Self::DeterministicCompute)
+        !matches!(
+            self,
+            Self::PureRead | Self::DeterministicCompute | Self::DelegatedInvocation
+        )
     }
 
     /// Whether this effect requires an idempotency contract.
@@ -267,6 +273,8 @@ impl ReplayBehavior {
 pub enum LedgerKind {
     /// In-memory ledger for Phase 1 tests.
     InMemory,
+    /// Tron-native durable engine ledger.
+    EngineLedger,
     /// Future durable event ledger.
     EventStore,
     /// External service ledger.
@@ -295,6 +303,37 @@ impl IdempotencyContract {
             dedupe_scope: VisibilityScope::Session,
             replay_behavior: ReplayBehavior::ReturnPrevious,
             ledger_kind: LedgerKind::InMemory,
+        }
+    }
+
+    /// Caller-supplied session-scoped idempotency using the durable engine ledger.
+    #[must_use]
+    pub fn caller_session_engine_ledger() -> Self {
+        Self {
+            key_source: IdempotencyKeySource::Caller,
+            dedupe_scope: VisibilityScope::Session,
+            replay_behavior: ReplayBehavior::ReturnPrevious,
+            ledger_kind: LedgerKind::EngineLedger,
+        }
+    }
+}
+
+/// Concrete dedupe scope attached to an invocation's idempotency key.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct IdempotencyScope {
+    /// Scope kind, such as `session`, `workspace`, or `system`.
+    pub kind: String,
+    /// Concrete scope value.
+    pub value: String,
+}
+
+impl IdempotencyScope {
+    /// Create a scope.
+    #[must_use]
+    pub fn new(kind: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            value: value.into(),
         }
     }
 }
@@ -670,6 +709,61 @@ impl TriggerDefinition {
     }
 }
 
+/// Catalog subject type.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CatalogSubjectKind {
+    /// Worker catalog entry.
+    Worker,
+    /// Function catalog entry.
+    Function,
+    /// Trigger type catalog entry.
+    TriggerType,
+    /// Trigger catalog entry.
+    Trigger,
+}
+
+impl CatalogSubjectKind {
+    /// Static display string.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Worker => "worker",
+            Self::Function => "function",
+            Self::TriggerType => "trigger_type",
+            Self::Trigger => "trigger",
+        }
+    }
+}
+
+/// Coarse class for catalog-change subscriptions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CatalogChangeClass {
+    /// Worker or capability availability changed.
+    Availability,
+    /// Function contract changed.
+    Contract,
+    /// Trigger or trigger-type topology changed.
+    Trigger,
+    /// Visibility/promotion changed.
+    Visibility,
+    /// Health changed.
+    Health,
+}
+
+impl CatalogChangeClass {
+    /// Static display string.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Availability => "availability",
+            Self::Contract => "contract",
+            Self::Trigger => "trigger",
+            Self::Visibility => "visibility",
+            Self::Health => "health",
+        }
+    }
+}
+
 /// Catalog change event.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CatalogChange {
@@ -683,6 +777,16 @@ pub struct CatalogChange {
     pub kind: CatalogChangeKind,
     /// Subject id.
     pub subject_id: String,
+    /// Subject kind.
+    pub subject_kind: CatalogSubjectKind,
+    /// Coarse change class.
+    pub class: CatalogChangeClass,
+    /// Subject visibility at the time of the change.
+    pub visibility: VisibilityScope,
+    /// Subject session scope at the time of the change.
+    pub session_id: Option<String>,
+    /// Subject workspace scope at the time of the change.
+    pub workspace_id: Option<String>,
     /// Owner worker, when applicable.
     pub owner_worker: Option<WorkerId>,
     /// Timestamp.

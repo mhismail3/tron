@@ -11,13 +11,22 @@ use super::discovery::{ActorContext, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{FunctionId, TriggerId, TriggerTypeId, WorkerId};
 use super::invocation::{InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult};
+use super::ledger::{
+    EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
+    IdempotencyReservationOutcome, IdempotencyStatus, InMemoryEngineLedgerStore,
+    StoredInvocationOutcome,
+};
 use super::policy;
 use super::schema;
 use super::types::{
-    CatalogChange, CatalogChangeKind, CatalogRevision, FunctionDefinition, FunctionRevision,
-    LedgerKind, ReplayBehavior, TriggerDefinition, TriggerRevision, TriggerTypeDefinition,
-    VisibilityScope, WorkerDefinition, WorkerRevision,
+    CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, CatalogSubjectKind,
+    FunctionDefinition, FunctionRevision, IdempotencyScope, LedgerKind, Provenance, ReplayBehavior,
+    TriggerDefinition, TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
+    WorkerKind, WorkerRevision,
 };
+
+const RESERVED_ENGINE_NAMESPACE: &str = "engine";
+const RESERVED_ENGINE_WORKER_ID: &str = "engine";
 
 struct WorkerEntry {
     definition: WorkerDefinition,
@@ -40,19 +49,29 @@ struct TriggerEntry {
     volatile: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct IdempotencyScopeKey {
-    function_id: FunctionId,
-    scope: &'static str,
-    scope_value: String,
-    key: String,
+#[derive(Clone)]
+struct CatalogChangeSubject {
+    id: String,
+    kind: CatalogSubjectKind,
+    visibility: VisibilityScope,
+    session_id: Option<String>,
+    workspace_id: Option<String>,
+    owner_worker: Option<WorkerId>,
 }
 
-#[derive(Clone, Debug)]
-struct IdempotencyEntry {
-    payload_fingerprint: String,
-    function_revision: FunctionRevision,
-    result: InvocationResult,
+/// Idempotency decision for an invocation before the handler or built-in runs.
+pub(in crate::engine) enum InvocationIdempotencyDecision {
+    /// No idempotency reservation is required.
+    None,
+    /// This invocation owns a fresh reservation and may execute.
+    Reserved(IdempotencyReservation),
+    /// A replay/conflict/error result has already been determined.
+    Finished {
+        /// Result to record and return.
+        result: InvocationResult,
+        /// Concrete idempotency scope, if one was resolved.
+        scope: Option<IdempotencyScope>,
+    },
 }
 
 /// In-memory live catalog.
@@ -64,13 +83,19 @@ pub struct LiveCatalog {
     triggers: BTreeMap<TriggerId, TriggerEntry>,
     changes: Vec<CatalogChange>,
     invocations: Vec<InvocationRecord>,
-    idempotency: BTreeMap<IdempotencyScopeKey, IdempotencyEntry>,
+    ledger: Box<dyn EngineLedgerStore>,
 }
 
 impl LiveCatalog {
     /// Create an empty live catalog.
     #[must_use]
     pub fn new() -> Self {
+        Self::with_ledger_store(Box::new(InMemoryEngineLedgerStore::new()))
+    }
+
+    /// Create an empty live catalog using a caller-supplied ledger store.
+    #[must_use]
+    pub fn with_ledger_store(ledger: Box<dyn EngineLedgerStore>) -> Self {
         Self {
             revision: CatalogRevision(0),
             workers: BTreeMap::new(),
@@ -79,7 +104,7 @@ impl LiveCatalog {
             triggers: BTreeMap::new(),
             changes: Vec::new(),
             invocations: Vec::new(),
-            idempotency: BTreeMap::new(),
+            ledger,
         }
     }
 
@@ -101,12 +126,27 @@ impl LiveCatalog {
         &self.invocations
     }
 
+    /// Durable catalog changes recorded by the engine ledger.
+    pub fn catalog_changes_after(
+        &self,
+        revision: CatalogRevision,
+        limit: usize,
+    ) -> Result<Vec<CatalogChange>> {
+        self.ledger.catalog_changes_after(revision, limit)
+    }
+
+    /// All durable catalog changes recorded by the engine ledger.
+    pub fn ledger_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
+        self.ledger.list_catalog_changes()
+    }
+
     /// Register or update a worker.
     pub fn register_worker(
         &mut self,
         mut definition: WorkerDefinition,
         volatile: bool,
     ) -> Result<WorkerRevision> {
+        validate_worker_namespace_claims(&definition)?;
         let kind = if let Some(existing) = self.workers.get(&definition.id) {
             if existing.definition.owner_actor != definition.owner_actor {
                 return Err(EngineError::OwnerMismatch {
@@ -124,7 +164,8 @@ impl LiveCatalog {
         };
 
         let revision = definition.revision;
-        let subject_id = definition.id.to_string();
+        let subject = worker_change_subject(&definition);
+        self.record_change(kind, subject)?;
         let _ = self.workers.insert(
             definition.id.clone(),
             WorkerEntry {
@@ -132,7 +173,6 @@ impl LiveCatalog {
                 volatile,
             },
         );
-        self.record_change(kind, subject_id, None);
         Ok(revision)
     }
 
@@ -183,9 +223,10 @@ impl LiveCatalog {
                 attempted_owner: owner_actor.to_owned(),
             });
         }
+        let subject = worker_change_subject(&entry.definition);
+        self.cleanup_owned_volatile(id)?;
+        self.record_change(CatalogChangeKind::WorkerUnregistered, subject)?;
         let _ = self.workers.remove(id);
-        self.cleanup_owned_volatile(id);
-        self.record_change(CatalogChangeKind::WorkerUnregistered, id.to_string(), None);
         Ok(())
     }
 
@@ -196,6 +237,7 @@ impl LiveCatalog {
         handler: Option<Arc<dyn InProcessFunctionHandler>>,
         volatile: bool,
     ) -> Result<FunctionRevision> {
+        validate_reserved_function_namespace(&definition)?;
         let owner = self
             .worker(&definition.owner_worker)
             .ok_or_else(|| EngineError::NotFound {
@@ -231,8 +273,8 @@ impl LiveCatalog {
         };
 
         let revision = definition.revision;
-        let subject_id = definition.id.to_string();
-        let owner_worker = definition.owner_worker.clone();
+        let subject = function_change_subject(&definition);
+        self.record_change(kind, subject)?;
         let _ = self.functions.insert(
             definition.id.clone(),
             FunctionEntry {
@@ -241,7 +283,6 @@ impl LiveCatalog {
                 volatile,
             },
         );
-        self.record_change(kind, subject_id, Some(owner_worker));
         Ok(revision)
     }
 
@@ -285,13 +326,10 @@ impl LiveCatalog {
                 attempted_owner: owner.to_string(),
             });
         }
-        self.cleanup_triggers_targeting(id);
-        let removed = self.functions.remove(id).expect("entry exists");
-        self.record_change(
-            CatalogChangeKind::FunctionUnregistered,
-            id.to_string(),
-            Some(removed.definition.owner_worker),
-        );
+        let subject = function_change_subject(&entry.definition);
+        self.cleanup_triggers_targeting(id)?;
+        self.record_change(CatalogChangeKind::FunctionUnregistered, subject)?;
+        let _ = self.functions.remove(id).expect("entry exists");
         Ok(())
     }
 
@@ -303,7 +341,7 @@ impl LiveCatalog {
         target: VisibilityScope,
         workspace_id: Option<String>,
     ) -> Result<FunctionRevision> {
-        let Some(entry) = self.functions.get_mut(id) else {
+        let Some(entry) = self.functions.get(id) else {
             return Err(EngineError::NotFound {
                 kind: "function",
                 id: id.to_string(),
@@ -318,16 +356,17 @@ impl LiveCatalog {
             });
         }
 
+        let mut updated = entry.definition.clone();
         match target {
             VisibilityScope::Workspace if workspace_id.is_some() => {
-                entry.definition.visibility = VisibilityScope::Workspace;
-                entry.definition.provenance.session_id = None;
-                entry.definition.provenance.workspace_id = workspace_id;
+                updated.visibility = VisibilityScope::Workspace;
+                updated.provenance.session_id = None;
+                updated.provenance.workspace_id = workspace_id;
             }
             VisibilityScope::System => {
-                entry.definition.visibility = VisibilityScope::System;
-                entry.definition.provenance.session_id = None;
-                entry.definition.provenance.workspace_id = None;
+                updated.visibility = VisibilityScope::System;
+                updated.provenance.session_id = None;
+                updated.provenance.workspace_id = None;
             }
             VisibilityScope::Workspace => {
                 return Err(EngineError::InvalidVisibilityPromotion {
@@ -345,14 +384,14 @@ impl LiveCatalog {
             }
         }
 
-        entry.definition.revision = entry.definition.revision.next();
-        let revision = entry.definition.revision;
-        let owner_worker = entry.definition.owner_worker.clone();
-        self.record_change(
-            CatalogChangeKind::VisibilityChanged,
-            id.to_string(),
-            Some(owner_worker),
-        );
+        updated.revision = updated.revision.next();
+        let revision = updated.revision;
+        let subject = function_change_subject(&updated);
+        self.record_change(CatalogChangeKind::VisibilityChanged, subject)?;
+        self.functions
+            .get_mut(id)
+            .expect("function exists after immutable lookup")
+            .definition = updated;
         Ok(revision)
     }
 
@@ -382,8 +421,8 @@ impl LiveCatalog {
         } else {
             CatalogChangeKind::TriggerTypeRegistered
         };
-        let subject_id = definition.id.to_string();
-        let owner_worker = definition.owner_worker.clone();
+        let subject = trigger_type_change_subject(&definition);
+        self.record_change(kind, subject)?;
         let _ = self.trigger_types.insert(
             definition.id.clone(),
             TriggerTypeEntry {
@@ -391,7 +430,6 @@ impl LiveCatalog {
                 volatile,
             },
         );
-        self.record_change(kind, subject_id, Some(owner_worker));
         Ok(())
     }
 
@@ -454,8 +492,8 @@ impl LiveCatalog {
             CatalogChangeKind::TriggerRegistered
         };
         let revision = definition.revision;
-        let subject_id = definition.id.to_string();
-        let owner_worker = definition.owner_worker.clone();
+        let subject = trigger_change_subject(&definition);
+        self.record_change(kind, subject)?;
         let _ = self.triggers.insert(
             definition.id.clone(),
             TriggerEntry {
@@ -463,7 +501,6 @@ impl LiveCatalog {
                 volatile,
             },
         );
-        self.record_change(kind, subject_id, Some(owner_worker));
         Ok(revision)
     }
 
@@ -561,7 +598,7 @@ impl LiveCatalog {
                     id: invocation.function_id.to_string(),
                 },
             );
-            return self.finish_invocation(&invocation, result);
+            return self.finish_invocation(&invocation, result, None);
         };
         let function = entry.definition.clone();
         let handler = entry.handler.clone();
@@ -581,7 +618,7 @@ impl LiveCatalog {
                         actual: function.revision.0,
                     },
                 );
-                return self.finish_invocation(&invocation, result);
+                return self.finish_invocation(&invocation, result, None);
             }
         }
 
@@ -593,7 +630,7 @@ impl LiveCatalog {
                 self.revision,
                 err,
             );
-            return self.finish_invocation(&invocation, result);
+            return self.finish_invocation(&invocation, result, None);
         }
 
         if let Some(schema) = &function.request_schema {
@@ -607,7 +644,7 @@ impl LiveCatalog {
                     self.revision,
                     err,
                 );
-                return self.finish_invocation(&invocation, result);
+                return self.finish_invocation(&invocation, result, None);
             }
         }
 
@@ -621,73 +658,40 @@ impl LiveCatalog {
                     self.revision,
                     err,
                 );
-                return self.finish_invocation(&invocation, result);
+                return self.finish_invocation(&invocation, result, None);
             }
         };
-        if let Some((key, payload_fingerprint, replay_behavior)) = &idempotency {
-            if let Some(existing) = self.idempotency.get(key) {
-                let result = if existing.payload_fingerprint != *payload_fingerprint {
-                    InvocationResult::error(
+
+        if let Some(reservation) = &idempotency {
+            match self.ledger.reserve_idempotency(reservation.clone()) {
+                Ok(IdempotencyReservationOutcome::Reserved(_)) => {}
+                Ok(IdempotencyReservationOutcome::Existing(existing)) => {
+                    let result = self.result_for_existing_idempotency(
+                        &function,
+                        &invocation,
+                        &existing,
+                        &reservation.payload_fingerprint,
+                    );
+                    return self.finish_invocation(
+                        &invocation,
+                        result,
+                        Some(existing.key.scope.clone()),
+                    );
+                }
+                Err(err) => {
+                    let result = InvocationResult::error(
                         &invocation,
                         function.owner_worker.clone(),
                         function.revision,
                         self.revision,
-                        EngineError::IdempotencyConflict {
-                            function_id: function.id.to_string(),
-                            key: key.key.clone(),
-                            reason: "same key was used with a different payload".to_owned(),
-                        },
-                    )
-                } else if existing.function_revision != function.revision {
-                    InvocationResult::error(
+                        err,
+                    );
+                    return self.finish_invocation(
                         &invocation,
-                        function.owner_worker.clone(),
-                        function.revision,
-                        self.revision,
-                        EngineError::IdempotencyConflict {
-                            function_id: function.id.to_string(),
-                            key: key.key.clone(),
-                            reason: "same key was used across function revisions".to_owned(),
-                        },
-                    )
-                } else {
-                    match replay_behavior {
-                        ReplayBehavior::ReturnPrevious => {
-                            InvocationResult::replay_previous(&invocation, &existing.result)
-                        }
-                        ReplayBehavior::NoOp => InvocationResult::noop_replay(
-                            &invocation,
-                            function.owner_worker.clone(),
-                            function.revision,
-                            self.revision,
-                            existing.result.invocation_id.clone(),
-                        ),
-                        ReplayBehavior::Reject => InvocationResult::error(
-                            &invocation,
-                            function.owner_worker.clone(),
-                            function.revision,
-                            self.revision,
-                            EngineError::IdempotencyConflict {
-                                function_id: function.id.to_string(),
-                                key: key.key.clone(),
-                                reason: "duplicate key is configured to reject".to_owned(),
-                            },
-                        ),
-                        ReplayBehavior::Compensate => InvocationResult::error(
-                            &invocation,
-                            function.owner_worker.clone(),
-                            function.revision,
-                            self.revision,
-                            EngineError::IdempotencyConflict {
-                                function_id: function.id.to_string(),
-                                key: key.key.clone(),
-                                reason: "compensation replay is not executable in phase 1"
-                                    .to_owned(),
-                            },
-                        ),
-                    }
-                };
-                return self.finish_invocation(&invocation, result);
+                        result,
+                        Some(reservation.key.scope.clone()),
+                    );
+                }
             }
         }
 
@@ -702,7 +706,7 @@ impl LiveCatalog {
                     reason: "no in-process handler".to_owned(),
                 },
             );
-            return self.finish_invocation(&invocation, result);
+            return self.finish_invocation(&invocation, result, None);
         };
 
         let result = match handler.invoke(invocation.clone()).await {
@@ -746,33 +750,249 @@ impl LiveCatalog {
             ),
         };
 
-        if let Some((key, payload_fingerprint, _)) = idempotency {
-            if function
-                .idempotency
-                .as_ref()
-                .map(|contract| contract.ledger_kind == LedgerKind::InMemory)
-                .unwrap_or(false)
-            {
-                let _ = self.idempotency.insert(
-                    key,
-                    IdempotencyEntry {
-                        payload_fingerprint,
-                        function_revision: function.revision,
-                        result: result.clone(),
-                    },
+        if let Some(reservation) = &idempotency {
+            if let Err(err) = self.ledger.complete_idempotency(
+                &reservation.key,
+                &invocation.id,
+                StoredInvocationOutcome::from_result(&result),
+            ) {
+                let result = InvocationResult::error(
+                    &invocation,
+                    function.owner_worker.clone(),
+                    function.revision,
+                    self.revision,
+                    err,
+                );
+                return self.finish_invocation(
+                    &invocation,
+                    result,
+                    Some(reservation.key.scope.clone()),
                 );
             }
         }
-        self.finish_invocation(&invocation, result)
+        let idempotency_scope = idempotency.map(|reservation| reservation.key.scope);
+        self.finish_invocation(&invocation, result, idempotency_scope)
+    }
+
+    fn result_for_existing_idempotency(
+        &self,
+        function: &FunctionDefinition,
+        invocation: &Invocation,
+        existing: &IdempotencyEntry,
+        payload_fingerprint: &str,
+    ) -> InvocationResult {
+        if existing.payload_fingerprint != payload_fingerprint {
+            return InvocationResult::error(
+                invocation,
+                function.owner_worker.clone(),
+                function.revision,
+                self.revision,
+                EngineError::IdempotencyConflict {
+                    function_id: function.id.to_string(),
+                    key: existing.key.key.clone(),
+                    reason: "same key was used with a different payload".to_owned(),
+                },
+            );
+        }
+        if existing.function_revision != function.revision {
+            return InvocationResult::error(
+                invocation,
+                function.owner_worker.clone(),
+                function.revision,
+                self.revision,
+                EngineError::IdempotencyConflict {
+                    function_id: function.id.to_string(),
+                    key: existing.key.key.clone(),
+                    reason: "same key was used across function revisions".to_owned(),
+                },
+            );
+        }
+
+        match existing.status {
+            IdempotencyStatus::InProgress => InvocationResult::error(
+                invocation,
+                function.owner_worker.clone(),
+                function.revision,
+                self.revision,
+                EngineError::IdempotencyConflict {
+                    function_id: function.id.to_string(),
+                    key: existing.key.key.clone(),
+                    reason: "previous attempt is still in progress".to_owned(),
+                },
+            ),
+            IdempotencyStatus::Unknown => InvocationResult::error(
+                invocation,
+                function.owner_worker.clone(),
+                function.revision,
+                self.revision,
+                EngineError::IdempotencyConflict {
+                    function_id: function.id.to_string(),
+                    key: existing.key.key.clone(),
+                    reason: "previous attempt has unknown outcome".to_owned(),
+                },
+            ),
+            IdempotencyStatus::Completed => match existing.replay_behavior {
+                ReplayBehavior::ReturnPrevious => existing.outcome.as_ref().map_or_else(
+                    || {
+                        InvocationResult::error(
+                            invocation,
+                            function.owner_worker.clone(),
+                            function.revision,
+                            self.revision,
+                            EngineError::IdempotencyConflict {
+                                function_id: function.id.to_string(),
+                                key: existing.key.key.clone(),
+                                reason: "completed reservation is missing outcome".to_owned(),
+                            },
+                        )
+                    },
+                    |outcome| {
+                        outcome.to_replay_result(
+                            invocation,
+                            function.owner_worker.clone(),
+                            function.revision,
+                            self.revision,
+                            existing.first_invocation_id.clone(),
+                        )
+                    },
+                ),
+                ReplayBehavior::NoOp => InvocationResult::noop_replay(
+                    invocation,
+                    function.owner_worker.clone(),
+                    function.revision,
+                    self.revision,
+                    existing.first_invocation_id.clone(),
+                ),
+                ReplayBehavior::Reject => InvocationResult::error(
+                    invocation,
+                    function.owner_worker.clone(),
+                    function.revision,
+                    self.revision,
+                    EngineError::IdempotencyConflict {
+                        function_id: function.id.to_string(),
+                        key: existing.key.key.clone(),
+                        reason: "duplicate key is configured to reject".to_owned(),
+                    },
+                ),
+                ReplayBehavior::Compensate => InvocationResult::error(
+                    invocation,
+                    function.owner_worker.clone(),
+                    function.revision,
+                    self.revision,
+                    EngineError::IdempotencyConflict {
+                        function_id: function.id.to_string(),
+                        key: existing.key.key.clone(),
+                        reason: "compensation replay is not executable in phase 1".to_owned(),
+                    },
+                ),
+            },
+        }
+    }
+
+    /// Reserve or replay an invocation idempotency key before executing work.
+    pub(in crate::engine) fn begin_invocation_idempotency(
+        &mut self,
+        function: &FunctionDefinition,
+        invocation: &Invocation,
+    ) -> InvocationIdempotencyDecision {
+        let reservation = match self.idempotency_lookup(function, invocation) {
+            Ok(Some(reservation)) => reservation,
+            Ok(None) => return InvocationIdempotencyDecision::None,
+            Err(err) => {
+                return InvocationIdempotencyDecision::Finished {
+                    result: InvocationResult::error(
+                        invocation,
+                        function.owner_worker.clone(),
+                        function.revision,
+                        self.revision,
+                        err,
+                    ),
+                    scope: None,
+                };
+            }
+        };
+
+        match self.ledger.reserve_idempotency(reservation.clone()) {
+            Ok(IdempotencyReservationOutcome::Reserved(_)) => {
+                InvocationIdempotencyDecision::Reserved(reservation)
+            }
+            Ok(IdempotencyReservationOutcome::Existing(existing)) => {
+                InvocationIdempotencyDecision::Finished {
+                    result: self.result_for_existing_idempotency(
+                        function,
+                        invocation,
+                        &existing,
+                        &reservation.payload_fingerprint,
+                    ),
+                    scope: Some(existing.key.scope.clone()),
+                }
+            }
+            Err(err) => InvocationIdempotencyDecision::Finished {
+                result: InvocationResult::error(
+                    invocation,
+                    function.owner_worker.clone(),
+                    function.revision,
+                    self.revision,
+                    err,
+                ),
+                scope: Some(reservation.key.scope),
+            },
+        }
+    }
+
+    /// Complete a reservation after executing work.
+    pub(in crate::engine) fn complete_invocation_idempotency(
+        &mut self,
+        reservation: &IdempotencyReservation,
+        invocation: &Invocation,
+        function: &FunctionDefinition,
+        result: &InvocationResult,
+    ) -> Option<InvocationResult> {
+        self.ledger
+            .complete_idempotency(
+                &reservation.key,
+                &invocation.id,
+                StoredInvocationOutcome::from_result(result),
+            )
+            .err()
+            .map(|err| {
+                InvocationResult::error(
+                    invocation,
+                    function.owner_worker.clone(),
+                    function.revision,
+                    self.revision,
+                    err,
+                )
+            })
     }
 
     fn finish_invocation(
         &mut self,
         invocation: &Invocation,
         result: InvocationResult,
+        idempotency_scope: Option<IdempotencyScope>,
     ) -> InvocationResult {
-        self.invocations
-            .push(InvocationRecord::from_result(invocation, &result));
+        self.record_invocation_result(invocation, result, idempotency_scope)
+    }
+
+    /// Record an invocation result produced by a privileged host path.
+    pub fn record_invocation_result(
+        &mut self,
+        invocation: &Invocation,
+        result: InvocationResult,
+        idempotency_scope: Option<IdempotencyScope>,
+    ) -> InvocationResult {
+        let record = InvocationRecord::from_result(invocation, &result, idempotency_scope);
+        if let Err(err) = self.ledger.append_invocation(&record) {
+            return InvocationResult::error(
+                invocation,
+                result.worker_id,
+                result.function_revision,
+                self.revision,
+                err,
+            );
+        }
+        self.invocations.push(record);
         result
     }
 
@@ -780,34 +1000,38 @@ impl LiveCatalog {
         &self,
         function: &FunctionDefinition,
         invocation: &Invocation,
-    ) -> Result<Option<(IdempotencyScopeKey, String, ReplayBehavior)>> {
+    ) -> Result<Option<IdempotencyReservation>> {
         let Some(contract) = &function.idempotency else {
             return Ok(None);
         };
         let Some(key) = &invocation.causal_context.idempotency_key else {
             return Ok(None);
         };
-        if contract.ledger_kind != LedgerKind::InMemory {
+        if !matches!(
+            contract.ledger_kind,
+            LedgerKind::InMemory | LedgerKind::EngineLedger
+        ) {
             return Err(EngineError::PolicyViolation(format!(
                 "idempotency ledger {:?} is not executable in phase 1",
                 contract.ledger_kind
             )));
         }
 
-        let (scope, scope_value) = idempotency_scope_value(&contract.dedupe_scope, invocation)?;
-        Ok(Some((
-            IdempotencyScopeKey {
+        let scope = idempotency_scope_value(&contract.dedupe_scope, invocation)?;
+        Ok(Some(IdempotencyReservation {
+            key: IdempotencyKey {
                 function_id: function.id.clone(),
                 scope,
-                scope_value,
                 key: key.clone(),
             },
-            payload_fingerprint(&invocation.payload),
-            contract.replay_behavior.clone(),
-        )))
+            payload_fingerprint: payload_fingerprint(&invocation.payload),
+            function_revision: function.revision,
+            replay_behavior: contract.replay_behavior.clone(),
+            invocation_id: invocation.id.clone(),
+        }))
     }
 
-    fn cleanup_owned_volatile(&mut self, worker_id: &WorkerId) {
+    fn cleanup_owned_volatile(&mut self, worker_id: &WorkerId) -> Result<()> {
         let function_ids: Vec<FunctionId> = self
             .functions
             .iter()
@@ -815,12 +1039,11 @@ impl LiveCatalog {
             .map(|(id, _)| id.clone())
             .collect();
         for id in function_ids {
-            let _ = self.functions.remove(&id);
-            self.record_change(
-                CatalogChangeKind::FunctionUnregistered,
-                id.to_string(),
-                Some(worker_id.clone()),
-            );
+            if let Some(entry) = self.functions.get(&id) {
+                let subject = function_change_subject(&entry.definition);
+                self.record_change(CatalogChangeKind::FunctionUnregistered, subject)?;
+                let _ = self.functions.remove(&id);
+            }
         }
 
         let trigger_ids: Vec<TriggerId> = self
@@ -830,12 +1053,11 @@ impl LiveCatalog {
             .map(|(id, _)| id.clone())
             .collect();
         for id in trigger_ids {
-            let _ = self.triggers.remove(&id);
-            self.record_change(
-                CatalogChangeKind::TriggerUnregistered,
-                id.to_string(),
-                Some(worker_id.clone()),
-            );
+            if let Some(entry) = self.triggers.get(&id) {
+                let subject = trigger_change_subject(&entry.definition);
+                self.record_change(CatalogChangeKind::TriggerUnregistered, subject)?;
+                let _ = self.triggers.remove(&id);
+            }
         }
 
         let trigger_type_ids: Vec<TriggerTypeId> = self
@@ -845,16 +1067,16 @@ impl LiveCatalog {
             .map(|(id, _)| id.clone())
             .collect();
         for id in trigger_type_ids {
-            let _ = self.trigger_types.remove(&id);
-            self.record_change(
-                CatalogChangeKind::TriggerTypeUnregistered,
-                id.to_string(),
-                Some(worker_id.clone()),
-            );
+            if let Some(entry) = self.trigger_types.get(&id) {
+                let subject = trigger_type_change_subject(&entry.definition);
+                self.record_change(CatalogChangeKind::TriggerTypeUnregistered, subject)?;
+                let _ = self.trigger_types.remove(&id);
+            }
         }
+        Ok(())
     }
 
-    fn cleanup_triggers_targeting(&mut self, function_id: &FunctionId) {
+    fn cleanup_triggers_targeting(&mut self, function_id: &FunctionId) -> Result<()> {
         let trigger_ids: Vec<TriggerId> = self
             .triggers
             .iter()
@@ -862,34 +1084,146 @@ impl LiveCatalog {
             .map(|(id, _)| id.clone())
             .collect();
         for id in trigger_ids {
-            if let Some(removed) = self.triggers.remove(&id) {
-                self.record_change(
-                    CatalogChangeKind::TriggerUnregistered,
-                    id.to_string(),
-                    Some(removed.definition.owner_worker),
-                );
+            if let Some(removed) = self.triggers.get(&id) {
+                let subject = trigger_change_subject(&removed.definition);
+                self.record_change(CatalogChangeKind::TriggerUnregistered, subject)?;
+                let _ = self.triggers.remove(&id);
             }
         }
+        Ok(())
     }
 
     fn record_change(
         &mut self,
         kind: CatalogChangeKind,
-        subject_id: String,
-        owner_worker: Option<WorkerId>,
-    ) {
+        subject: CatalogChangeSubject,
+    ) -> Result<()> {
         let before = self.revision;
-        self.revision = self.revision.next();
-        let after = self.revision;
-        self.changes.push(CatalogChange {
-            id: format!("catalog_change_{}", after.0),
+        let after = self.revision.next();
+        let change = CatalogChange {
+            id: format!("catalog_change_{}_{}", after.0, uuid::Uuid::now_v7()),
             before,
             after,
+            class: catalog_change_class(&kind),
             kind,
-            subject_id,
-            owner_worker,
+            subject_id: subject.id,
+            subject_kind: subject.kind,
+            visibility: subject.visibility,
+            session_id: subject.session_id,
+            workspace_id: subject.workspace_id,
+            owner_worker: subject.owner_worker,
             timestamp: Utc::now(),
-        });
+        };
+        self.ledger.append_catalog_change(&change)?;
+        self.revision = after;
+        self.changes.push(change);
+        Ok(())
+    }
+}
+
+fn validate_worker_namespace_claims(definition: &WorkerDefinition) -> Result<()> {
+    let claims_engine = definition
+        .namespace_claims
+        .iter()
+        .any(|claim| claim == RESERVED_ENGINE_NAMESPACE);
+    if !claims_engine {
+        return Ok(());
+    }
+    if definition.id.as_str() == RESERVED_ENGINE_WORKER_ID
+        && matches!(definition.kind, WorkerKind::System)
+    {
+        return Ok(());
+    }
+    Err(EngineError::PolicyViolation(
+        "reserved engine namespace can only be claimed by the system engine worker".to_owned(),
+    ))
+}
+
+fn validate_reserved_function_namespace(definition: &FunctionDefinition) -> Result<()> {
+    if definition.id.namespace() != RESERVED_ENGINE_NAMESPACE {
+        return Ok(());
+    }
+    if definition.owner_worker.as_str() == RESERVED_ENGINE_WORKER_ID {
+        return Ok(());
+    }
+    Err(EngineError::PolicyViolation(
+        "reserved engine namespace can only be registered by the system engine worker".to_owned(),
+    ))
+}
+
+fn worker_change_subject(definition: &WorkerDefinition) -> CatalogChangeSubject {
+    provenance_subject(
+        definition.id.to_string(),
+        CatalogSubjectKind::Worker,
+        definition.visibility.clone(),
+        &definition.provenance,
+        None,
+    )
+}
+
+fn function_change_subject(definition: &FunctionDefinition) -> CatalogChangeSubject {
+    provenance_subject(
+        definition.id.to_string(),
+        CatalogSubjectKind::Function,
+        definition.visibility.clone(),
+        &definition.provenance,
+        Some(definition.owner_worker.clone()),
+    )
+}
+
+fn trigger_type_change_subject(definition: &TriggerTypeDefinition) -> CatalogChangeSubject {
+    provenance_subject(
+        definition.id.to_string(),
+        CatalogSubjectKind::TriggerType,
+        definition.visibility.clone(),
+        &definition.provenance,
+        Some(definition.owner_worker.clone()),
+    )
+}
+
+fn trigger_change_subject(definition: &TriggerDefinition) -> CatalogChangeSubject {
+    provenance_subject(
+        definition.id.to_string(),
+        CatalogSubjectKind::Trigger,
+        definition.visibility.clone(),
+        &definition.provenance,
+        Some(definition.owner_worker.clone()),
+    )
+}
+
+fn provenance_subject(
+    id: String,
+    kind: CatalogSubjectKind,
+    visibility: VisibilityScope,
+    provenance: &Provenance,
+    owner_worker: Option<WorkerId>,
+) -> CatalogChangeSubject {
+    CatalogChangeSubject {
+        id,
+        kind,
+        visibility,
+        session_id: provenance.session_id.clone(),
+        workspace_id: provenance.workspace_id.clone(),
+        owner_worker,
+    }
+}
+
+fn catalog_change_class(kind: &CatalogChangeKind) -> CatalogChangeClass {
+    match kind {
+        CatalogChangeKind::WorkerRegistered
+        | CatalogChangeKind::WorkerUpdated
+        | CatalogChangeKind::WorkerUnregistered
+        | CatalogChangeKind::FunctionRegistered
+        | CatalogChangeKind::FunctionUnregistered => CatalogChangeClass::Availability,
+        CatalogChangeKind::FunctionUpdated => CatalogChangeClass::Contract,
+        CatalogChangeKind::TriggerTypeRegistered
+        | CatalogChangeKind::TriggerTypeUpdated
+        | CatalogChangeKind::TriggerTypeUnregistered
+        | CatalogChangeKind::TriggerRegistered
+        | CatalogChangeKind::TriggerUpdated
+        | CatalogChangeKind::TriggerUnregistered => CatalogChangeClass::Trigger,
+        CatalogChangeKind::VisibilityChanged => CatalogChangeClass::Visibility,
+        CatalogChangeKind::HealthChanged => CatalogChangeClass::Health,
     }
 }
 
@@ -902,13 +1236,13 @@ impl Default for LiveCatalog {
 fn idempotency_scope_value(
     scope: &VisibilityScope,
     invocation: &Invocation,
-) -> Result<(&'static str, String)> {
+) -> Result<IdempotencyScope> {
     match scope {
         VisibilityScope::Session => invocation
             .causal_context
             .session_id
             .clone()
-            .map(|session| ("session", session))
+            .map(|session| IdempotencyScope::new("session", session))
             .ok_or_else(|| {
                 EngineError::PolicyViolation(
                     "session-scoped idempotency requires a session id".to_owned(),
@@ -918,18 +1252,30 @@ fn idempotency_scope_value(
             .causal_context
             .workspace_id
             .clone()
-            .map(|workspace| ("workspace", workspace))
+            .map(|workspace| IdempotencyScope::new("workspace", workspace))
             .ok_or_else(|| {
                 EngineError::PolicyViolation(
                     "workspace-scoped idempotency requires a workspace id".to_owned(),
                 )
             }),
-        VisibilityScope::System => Ok(("system", "system".to_owned())),
-        VisibilityScope::Agent => Ok(("agent", invocation.causal_context.actor_id.to_string())),
-        VisibilityScope::Client => Ok(("client", invocation.causal_context.actor_id.to_string())),
-        VisibilityScope::Worker => Ok(("worker", invocation.causal_context.actor_id.to_string())),
-        VisibilityScope::Admin => Ok(("admin", invocation.causal_context.actor_id.to_string())),
-        VisibilityScope::Internal => Ok((
+        VisibilityScope::System => Ok(IdempotencyScope::new("system", "system")),
+        VisibilityScope::Agent => Ok(IdempotencyScope::new(
+            "agent",
+            invocation.causal_context.actor_id.to_string(),
+        )),
+        VisibilityScope::Client => Ok(IdempotencyScope::new(
+            "client",
+            invocation.causal_context.actor_id.to_string(),
+        )),
+        VisibilityScope::Worker => Ok(IdempotencyScope::new(
+            "worker",
+            invocation.causal_context.actor_id.to_string(),
+        )),
+        VisibilityScope::Admin => Ok(IdempotencyScope::new(
+            "admin",
+            invocation.causal_context.actor_id.to_string(),
+        )),
+        VisibilityScope::Internal => Ok(IdempotencyScope::new(
             "internal",
             invocation.causal_context.authority_grant_id.to_string(),
         )),

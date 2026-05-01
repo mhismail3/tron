@@ -6,18 +6,24 @@ use std::sync::{
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+use super::EngineHost;
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
     ActorId, AuthorityGrantId, FunctionId, TraceId, TriggerId, TriggerTypeId, WorkerId,
 };
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation};
+use super::ledger::{
+    EngineLedgerStore, IdempotencyKey, IdempotencyReservation, IdempotencyReservationOutcome,
+    IdempotencyStatus, InMemoryEngineLedgerStore, SqliteEngineLedgerStore, StoredInvocationOutcome,
+};
 use super::registry::LiveCatalog;
 use super::types::{
-    AuthorityRequirement, CatalogChangeKind, CatalogRevision, DeliveryMode, EffectClass,
-    FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
-    IdempotencyKeySource, LedgerKind, Provenance, ReplayBehavior, RiskLevel, TriggerDefinition,
-    TriggerTypeDefinition, VisibilityScope, WorkerDefinition, WorkerKind,
+    AuthorityRequirement, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
+    CatalogSubjectKind, DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth,
+    FunctionRevision, IdempotencyContract, IdempotencyKeySource, IdempotencyScope, LedgerKind,
+    Provenance, ReplayBehavior, RiskLevel, TriggerDefinition, TriggerTypeDefinition,
+    VisibilityScope, WorkerDefinition, WorkerKind,
 };
 
 fn wid(value: &str) -> WorkerId {
@@ -112,6 +118,19 @@ impl InProcessFunctionHandler for FailHandler {
 }
 
 #[derive(Clone)]
+struct CountingFailHandler {
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl InProcessFunctionHandler for CountingFailHandler {
+    async fn invoke(&self, _invocation: Invocation) -> Result<Value> {
+        let _ = self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(EngineError::HandlerFailed("boom".to_owned()))
+    }
+}
+
+#[derive(Clone)]
 struct CountingHandler {
     calls: Arc<AtomicUsize>,
 }
@@ -124,6 +143,103 @@ impl InProcessFunctionHandler for CountingHandler {
             "call": call,
             "payload": invocation.payload,
         }))
+    }
+}
+
+struct ReserveFailingLedger;
+
+impl EngineLedgerStore for ReserveFailingLedger {
+    fn append_catalog_change(&mut self, _change: &super::types::CatalogChange) -> Result<()> {
+        Ok(())
+    }
+
+    fn list_catalog_changes(&self) -> Result<Vec<super::types::CatalogChange>> {
+        Ok(Vec::new())
+    }
+
+    fn catalog_changes_after(
+        &self,
+        _revision: CatalogRevision,
+        _limit: usize,
+    ) -> Result<Vec<super::types::CatalogChange>> {
+        Ok(Vec::new())
+    }
+
+    fn append_invocation(&mut self, _record: &super::invocation::InvocationRecord) -> Result<()> {
+        Ok(())
+    }
+
+    fn list_invocations(&self) -> Result<Vec<super::invocation::InvocationRecord>> {
+        Ok(Vec::new())
+    }
+
+    fn reserve_idempotency(
+        &mut self,
+        _reservation: IdempotencyReservation,
+    ) -> Result<IdempotencyReservationOutcome> {
+        Err(EngineError::LedgerFailure {
+            operation: "reserve_idempotency",
+            message: "injected failure".to_owned(),
+        })
+    }
+
+    fn complete_idempotency(
+        &mut self,
+        _key: &IdempotencyKey,
+        _invocation_id: &super::ids::InvocationId,
+        _outcome: StoredInvocationOutcome,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
+struct CatalogChangeFailingLedger;
+
+impl EngineLedgerStore for CatalogChangeFailingLedger {
+    fn append_catalog_change(&mut self, _change: &super::types::CatalogChange) -> Result<()> {
+        Err(EngineError::LedgerFailure {
+            operation: "append_catalog_change",
+            message: "injected failure".to_owned(),
+        })
+    }
+
+    fn list_catalog_changes(&self) -> Result<Vec<super::types::CatalogChange>> {
+        Ok(Vec::new())
+    }
+
+    fn catalog_changes_after(
+        &self,
+        _revision: CatalogRevision,
+        _limit: usize,
+    ) -> Result<Vec<super::types::CatalogChange>> {
+        Ok(Vec::new())
+    }
+
+    fn append_invocation(&mut self, _record: &super::invocation::InvocationRecord) -> Result<()> {
+        Ok(())
+    }
+
+    fn list_invocations(&self) -> Result<Vec<super::invocation::InvocationRecord>> {
+        Ok(Vec::new())
+    }
+
+    fn reserve_idempotency(
+        &mut self,
+        _reservation: IdempotencyReservation,
+    ) -> Result<IdempotencyReservationOutcome> {
+        Err(EngineError::LedgerFailure {
+            operation: "reserve_idempotency",
+            message: "unexpected reservation".to_owned(),
+        })
+    }
+
+    fn complete_idempotency(
+        &mut self,
+        _key: &IdempotencyKey,
+        _invocation_id: &super::ids::InvocationId,
+        _outcome: StoredInvocationOutcome,
+    ) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -147,6 +263,83 @@ fn mutating_causal(key: &str) -> CausalContext {
         .with_idempotency_key(key)
 }
 
+fn host_invocation(function_id: &str, payload: Value, context: CausalContext) -> Invocation {
+    Invocation::new_sync(fid(function_id), payload, context)
+}
+
+fn engine_ledger_contract(store: &mut dyn EngineLedgerStore) {
+    let change = super::types::CatalogChange {
+        id: "catalog_change_test".to_owned(),
+        before: CatalogRevision(0),
+        after: CatalogRevision(1),
+        kind: CatalogChangeKind::FunctionRegistered,
+        subject_id: "alpha::read".to_owned(),
+        subject_kind: CatalogSubjectKind::Function,
+        class: CatalogChangeClass::Availability,
+        visibility: VisibilityScope::Agent,
+        session_id: None,
+        workspace_id: None,
+        owner_worker: Some(wid("w1")),
+        timestamp: chrono::Utc::now(),
+    };
+    store.append_catalog_change(&change).unwrap();
+    assert_eq!(store.list_catalog_changes().unwrap(), vec![change.clone()]);
+    assert_eq!(
+        store.catalog_changes_after(CatalogRevision(0), 10).unwrap(),
+        vec![change]
+    );
+
+    let invocation = Invocation::new_sync(fid("alpha::read"), json!({"x": 1}), causal());
+    let result = super::invocation::InvocationResult::success(
+        &invocation,
+        wid("w1"),
+        FunctionRevision(1),
+        CatalogRevision(1),
+        json!({"ok": true}),
+    );
+    let record = super::invocation::InvocationRecord::from_result(&invocation, &result, None);
+    store.append_invocation(&record).unwrap();
+    let records = store.list_invocations().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].invocation_id, invocation.id);
+    assert_eq!(records[0].result_value, Some(json!({"ok": true})));
+
+    let key = IdempotencyKey {
+        function_id: fid("alpha::write"),
+        scope: IdempotencyScope::new("session", "session-a"),
+        key: "dedupe-key".to_owned(),
+    };
+    let reservation = IdempotencyReservation {
+        key: key.clone(),
+        payload_fingerprint: "fingerprint-a".to_owned(),
+        function_revision: FunctionRevision(1),
+        replay_behavior: ReplayBehavior::ReturnPrevious,
+        invocation_id: super::ids::InvocationId::new("reservation-one").unwrap(),
+    };
+    let first = store.reserve_idempotency(reservation.clone()).unwrap();
+    assert!(matches!(first, IdempotencyReservationOutcome::Reserved(_)));
+    let second = store.reserve_idempotency(reservation.clone()).unwrap();
+    let IdempotencyReservationOutcome::Existing(existing) = second else {
+        panic!("second reservation should see existing in-progress entry");
+    };
+    assert_eq!(existing.status, IdempotencyStatus::InProgress);
+    assert_eq!(existing.payload_fingerprint, "fingerprint-a");
+
+    store
+        .complete_idempotency(
+            &key,
+            &reservation.invocation_id,
+            StoredInvocationOutcome::from_result(&result),
+        )
+        .unwrap();
+    let completed = store.reserve_idempotency(reservation).unwrap();
+    let IdempotencyReservationOutcome::Existing(existing) = completed else {
+        panic!("completed reservation should be returned as existing");
+    };
+    assert_eq!(existing.status, IdempotencyStatus::Completed);
+    assert_eq!(existing.outcome.unwrap().value, Some(json!({"ok": true})));
+}
+
 #[test]
 fn ids_reject_empty_and_invalid_function_ids() {
     assert!(WorkerId::new("").is_err());
@@ -161,6 +354,7 @@ fn ids_reject_empty_and_invalid_function_ids() {
 fn effect_class_helpers_classify_mutation() {
     assert!(!EffectClass::PureRead.is_mutating());
     assert!(!EffectClass::DeterministicCompute.is_mutating());
+    assert!(!EffectClass::DelegatedInvocation.is_mutating());
     assert!(EffectClass::IdempotentWrite.is_mutating());
     assert!(EffectClass::IrreversibleSideEffect.requires_approval_for_agent_visibility());
 }
@@ -171,6 +365,57 @@ fn empty_catalog_starts_at_revision_zero() {
     assert_eq!(catalog.revision(), CatalogRevision(0));
     assert!(catalog.workers().is_empty());
     assert!(catalog.changes().is_empty());
+}
+
+#[test]
+fn in_memory_and_sqlite_ledgers_share_storage_contract() {
+    let mut memory = InMemoryEngineLedgerStore::new();
+    engine_ledger_contract(&mut memory);
+
+    let mut sqlite = SqliteEngineLedgerStore::open_in_memory().unwrap();
+    engine_ledger_contract(&mut sqlite);
+}
+
+#[test]
+fn sqlite_engine_ledger_persists_records_across_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("engine-ledger.sqlite");
+
+    {
+        let mut store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+        engine_ledger_contract(&mut store);
+    }
+
+    let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+    assert_eq!(store.list_catalog_changes().unwrap().len(), 1);
+    assert_eq!(store.list_invocations().unwrap().len(), 1);
+
+    let reservation = IdempotencyReservation {
+        key: IdempotencyKey {
+            function_id: fid("alpha::write"),
+            scope: IdempotencyScope::new("session", "session-a"),
+            key: "dedupe-key".to_owned(),
+        },
+        payload_fingerprint: "fingerprint-a".to_owned(),
+        function_revision: FunctionRevision(1),
+        replay_behavior: ReplayBehavior::ReturnPrevious,
+        invocation_id: super::ids::InvocationId::new("reservation-two").unwrap(),
+    };
+    let existing = store
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM engine_idempotency_entries WHERE idempotency_key = 'dedupe-key'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(existing, 1);
+    let mut reopened = SqliteEngineLedgerStore::open(&db_path).unwrap();
+    assert!(matches!(
+        reopened.reserve_idempotency(reservation).unwrap(),
+        IdempotencyReservationOutcome::Existing(entry)
+            if entry.status == IdempotencyStatus::Completed
+    ));
 }
 
 #[test]
@@ -388,6 +633,9 @@ fn catalog_changes_increment_by_one_and_record_subjects() {
     assert_eq!(changes[1].after.0, 2);
     assert_eq!(changes[1].kind, CatalogChangeKind::FunctionRegistered);
     assert_eq!(changes[1].subject_id, "alpha::read");
+    assert_eq!(changes[1].subject_kind, CatalogSubjectKind::Function);
+    assert_eq!(changes[1].class, CatalogChangeClass::Availability);
+    assert_eq!(changes[1].visibility, VisibilityScope::Agent);
 }
 
 #[test]
@@ -740,6 +988,147 @@ async fn idempotency_reject_and_noop_policies_are_enforced() {
     assert_eq!(duplicate_noop.value, Some(Value::Null));
     assert_eq!(duplicate_noop.replayed_from, Some(first_noop.invocation_id));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn sqlite_idempotency_replays_after_catalog_recreation_without_reinvoking_handler() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("engine-ledger.sqlite");
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    {
+        let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+        let mut catalog = LiveCatalog::with_ledger_store(Box::new(store));
+        catalog
+            .register_worker(worker("w1", "alpha"), true)
+            .unwrap();
+        catalog
+            .register_function(
+                write_function("alpha::write", "w1")
+                    .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
+                Some(Arc::new(CountingHandler {
+                    calls: calls.clone(),
+                })),
+                true,
+            )
+            .unwrap();
+
+        let first = catalog
+            .invoke_sync(Invocation::new_sync(
+                fid("alpha::write"),
+                json!({"x": 1}),
+                mutating_causal("same-key"),
+            ))
+            .await;
+        assert_eq!(first.error, None);
+        assert_eq!(first.value.as_ref().unwrap()["call"], 1);
+    }
+
+    let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+    let mut restarted = LiveCatalog::with_ledger_store(Box::new(store));
+    restarted
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    restarted
+        .register_function(
+            write_function("alpha::write", "w1")
+                .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
+            Some(Arc::new(CountingHandler {
+                calls: calls.clone(),
+            })),
+            true,
+        )
+        .unwrap();
+
+    let replay = restarted
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::write"),
+            json!({"x": 1}),
+            mutating_causal("same-key"),
+        ))
+        .await;
+    assert_eq!(replay.error, None);
+    assert_eq!(replay.value.as_ref().unwrap()["call"], 1);
+    assert!(replay.replayed_from.is_some());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn duplicate_after_handler_failure_replays_stored_error_without_reinvoking() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    catalog
+        .register_function(
+            write_function("alpha::write", "w1"),
+            Some(Arc::new(CountingFailHandler {
+                calls: calls.clone(),
+            })),
+            true,
+        )
+        .unwrap();
+
+    let first = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::write"),
+            json!({"x": 1}),
+            mutating_causal("error-key"),
+        ))
+        .await;
+    assert!(matches!(
+        first.error,
+        Some(EngineError::HandlerFailed(message)) if message == "boom"
+    ));
+
+    let duplicate = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::write"),
+            json!({"x": 1}),
+            mutating_causal("error-key"),
+        ))
+        .await;
+    assert!(matches!(
+        duplicate.error,
+        Some(EngineError::StoredInvocationError { kind, .. }) if kind == "handler_failed"
+    ));
+    assert_eq!(duplicate.replayed_from, Some(first.invocation_id));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn idempotency_reservation_failure_prevents_handler_execution() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut catalog = LiveCatalog::with_ledger_store(Box::new(ReserveFailingLedger));
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    catalog
+        .register_function(
+            write_function("alpha::write", "w1"),
+            Some(Arc::new(CountingHandler {
+                calls: calls.clone(),
+            })),
+            true,
+        )
+        .unwrap();
+
+    let result = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::write"),
+            json!({"x": 1}),
+            mutating_causal("reserve-fails"),
+        ))
+        .await;
+    assert!(matches!(
+        result.error,
+        Some(EngineError::LedgerFailure {
+            operation: "reserve_idempotency",
+            ..
+        })
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -1123,4 +1512,630 @@ async fn invocation_enforces_visibility_scope() {
         ))
         .await;
     assert!(visible.error.is_none());
+}
+
+#[test]
+fn engine_host_bootstrap_registers_reserved_meta_capabilities_once() {
+    let mut host = EngineHost::new().unwrap();
+    let initial_revision = host.catalog().revision();
+    let engine_worker = host.catalog().worker(&wid("engine")).unwrap();
+    assert_eq!(engine_worker.kind, WorkerKind::System);
+    assert_eq!(engine_worker.namespace_claims, vec!["engine".to_owned()]);
+
+    for id in [
+        "engine::discover",
+        "engine::inspect",
+        "engine::watch",
+        "engine::invoke",
+        "engine::promote",
+    ] {
+        let function = host.catalog().function(&fid(id)).unwrap();
+        assert_eq!(function.owner_worker, wid("engine"));
+        assert_eq!(function.visibility, VisibilityScope::Agent);
+    }
+
+    host.bootstrap_meta_capabilities().unwrap();
+    assert_eq!(host.catalog().revision(), initial_revision);
+}
+
+#[test]
+fn engine_host_bootstrap_repairs_stale_system_meta_contracts() {
+    let mut catalog = LiveCatalog::new();
+    let engine_worker = WorkerDefinition::new(
+        wid("engine"),
+        WorkerKind::System,
+        actor("system"),
+        grant("engine-system"),
+    )
+    .with_namespace_claim("engine");
+    catalog.register_worker(engine_worker, false).unwrap();
+    catalog
+        .register_function(
+            FunctionDefinition::new(
+                fid("engine::discover"),
+                wid("engine"),
+                "stale discover",
+                VisibilityScope::Internal,
+                EffectClass::IdempotentWrite,
+            )
+            .with_idempotency(IdempotencyContract::caller_session()),
+            None,
+            false,
+        )
+        .unwrap();
+
+    let host = EngineHost::from_catalog(catalog).unwrap();
+    let discover = host.catalog().function(&fid("engine::discover")).unwrap();
+    assert_eq!(discover.description, "discover live engine capabilities");
+    assert_eq!(discover.visibility, VisibilityScope::Agent);
+    assert_eq!(discover.effect_class, EffectClass::PureRead);
+    assert_eq!(discover.idempotency, None);
+    assert_eq!(discover.revision, FunctionRevision(2));
+}
+
+#[test]
+fn engine_namespace_is_reserved_for_the_system_engine_worker() {
+    let mut catalog = LiveCatalog::new();
+    let denied = catalog.register_worker(worker("w1", "engine"), true);
+    assert!(matches!(
+        denied,
+        Err(EngineError::PolicyViolation(message))
+            if message.contains("reserved engine namespace")
+    ));
+
+    let mut host = EngineHost::new().unwrap();
+    host.catalog_mut()
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    let denied_function = host.catalog_mut().register_function(
+        read_function("engine::spoof", "w1"),
+        Some(handler()),
+        true,
+    );
+    assert!(matches!(
+        denied_function,
+        Err(EngineError::PolicyViolation(message))
+            if message.contains("reserved engine namespace")
+    ));
+}
+
+#[test]
+fn catalog_change_ledger_failure_does_not_mutate_registered_catalog_entries() {
+    let mut catalog = LiveCatalog::with_ledger_store(Box::new(CatalogChangeFailingLedger));
+
+    let result = catalog.register_worker(worker("w1", "alpha"), true);
+    assert!(matches!(
+        result,
+        Err(EngineError::LedgerFailure {
+            operation: "append_catalog_change",
+            ..
+        })
+    ));
+    assert_eq!(catalog.revision(), CatalogRevision(0));
+    assert!(catalog.worker(&wid("w1")).is_none());
+    assert!(catalog.changes().is_empty());
+}
+
+#[tokio::test]
+async fn engine_meta_discover_and_inspect_are_live_and_scope_checked() {
+    let mut host = EngineHost::new().unwrap();
+    host.catalog_mut()
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    host.catalog_mut()
+        .register_function(
+            read_function("alpha::public", "w1").with_tags(vec!["visible".to_owned()]),
+            Some(handler()),
+            true,
+        )
+        .unwrap();
+    host.catalog_mut()
+        .register_function(
+            FunctionDefinition::new(
+                fid("alpha::session"),
+                wid("w1"),
+                "session function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )
+            .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a")),
+            Some(handler()),
+            true,
+        )
+        .unwrap();
+
+    let session_a = causal().with_session_id("session-a");
+    let discovered = host
+        .invoke(host_invocation(
+            "engine::discover",
+            json!({"namespacePrefix": "alpha"}),
+            session_a.clone(),
+        ))
+        .await;
+    assert_eq!(discovered.error, None);
+    let functions = discovered.value.unwrap()["functions"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let ids: Vec<&str> = functions
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&"alpha::public"));
+    assert!(ids.contains(&"alpha::session"));
+
+    let hidden = host
+        .invoke(host_invocation(
+            "engine::inspect",
+            json!({"kind": "function", "id": "alpha::session"}),
+            causal().with_session_id("session-b"),
+        ))
+        .await;
+    assert!(matches!(
+        hidden.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("not visible")
+    ));
+
+    let malformed = host
+        .invoke(host_invocation(
+            "engine::inspect",
+            json!({"kind": "function"}),
+            session_a,
+        ))
+        .await;
+    assert!(matches!(
+        malformed.error,
+        Some(EngineError::SchemaViolation { .. })
+    ));
+}
+
+#[tokio::test]
+async fn engine_watch_filters_catalog_changes_without_leaking_hidden_scopes() {
+    let mut host = EngineHost::new().unwrap();
+    host.catalog_mut()
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    host.catalog_mut()
+        .register_function(read_function("alpha::public", "w1"), Some(handler()), true)
+        .unwrap();
+    host.catalog_mut()
+        .register_function(
+            FunctionDefinition::new(
+                fid("alpha::session"),
+                wid("w1"),
+                "session function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )
+            .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a")),
+            Some(handler()),
+            true,
+        )
+        .unwrap();
+    let future_revision = host.catalog().revision().0 + 10;
+
+    let visible = host
+        .invoke(host_invocation(
+            "engine::watch",
+            json!({
+                "afterRevision": 0,
+                "classes": ["availability"],
+                "subjectPrefix": "alpha::",
+                "limit": 10
+            }),
+            causal().with_session_id("session-a"),
+        ))
+        .await;
+    assert_eq!(visible.error, None);
+    let changes = visible.value.unwrap()["changes"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert!(changes.iter().any(|change| {
+        change["subjectId"] == "alpha::public"
+            && change["subjectKind"] == "function"
+            && change["class"] == "availability"
+    }));
+    assert!(changes.iter().any(|change| {
+        change["subjectId"] == "alpha::session" && change["sessionId"] == "session-a"
+    }));
+
+    let hidden = host
+        .invoke(host_invocation(
+            "engine::watch",
+            json!({"afterRevision": 0, "subjectPrefix": "alpha::", "limit": 10}),
+            causal().with_session_id("session-b"),
+        ))
+        .await;
+    assert_eq!(hidden.error, None);
+    let hidden_changes = hidden.value.unwrap()["changes"].as_array().unwrap().clone();
+    assert!(
+        hidden_changes
+            .iter()
+            .all(|change| change["subjectId"] != "alpha::session")
+    );
+
+    host.catalog_mut()
+        .unregister_function(&fid("alpha::session"), &wid("w1"))
+        .unwrap();
+    let removal = host
+        .invoke(host_invocation(
+            "engine::watch",
+            json!({"afterRevision": 0, "kinds": ["function_unregistered"]}),
+            causal().with_session_id("session-a"),
+        ))
+        .await;
+    assert_eq!(removal.error, None);
+    assert!(
+        removal.value.unwrap()["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|change| change["subjectId"] == "alpha::session")
+    );
+
+    let future = host
+        .invoke(host_invocation(
+            "engine::watch",
+            json!({"afterRevision": future_revision}),
+            causal().with_session_id("session-a"),
+        ))
+        .await;
+    assert_eq!(future.error, None);
+    let future_value = future.value.unwrap();
+    assert_eq!(future_value["changes"].as_array().unwrap().len(), 0);
+    assert_eq!(future_value["currentRevision"], host.catalog().revision().0);
+
+    let zero_limit = host
+        .invoke(host_invocation(
+            "engine::watch",
+            json!({"afterRevision": 0, "limit": 0}),
+            causal().with_session_id("session-a"),
+        ))
+        .await;
+    assert!(matches!(
+        zero_limit.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("limit")
+    ));
+}
+
+#[test]
+fn sqlite_ledger_reopen_preserves_watch_scope_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("engine-ledger.sqlite");
+    {
+        let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+        let mut host = EngineHost::with_ledger_store(Box::new(store)).unwrap();
+        host.catalog_mut()
+            .register_worker(worker("w1", "alpha"), true)
+            .unwrap();
+        host.catalog_mut()
+            .register_function(
+                FunctionDefinition::new(
+                    fid("alpha::session"),
+                    wid("w1"),
+                    "session function",
+                    VisibilityScope::Session,
+                    EffectClass::PureRead,
+                )
+                .with_provenance(
+                    Provenance::new(actor("agent"), "test").with_session_id("session-a"),
+                ),
+                Some(handler()),
+                true,
+            )
+            .unwrap();
+    }
+
+    let store = SqliteEngineLedgerStore::open(&db_path).unwrap();
+    let changes = store
+        .catalog_changes_after(CatalogRevision(0), 100)
+        .unwrap();
+    assert!(changes.iter().any(|change| {
+        change.subject_kind == CatalogSubjectKind::Function
+            && change.class == CatalogChangeClass::Availability
+            && change.visibility == VisibilityScope::Session
+            && change.session_id.as_deref() == Some("session-a")
+    }));
+}
+
+#[tokio::test]
+async fn engine_invoke_delegates_with_parent_causality_and_target_policy() {
+    let mut host = EngineHost::new().unwrap();
+    host.catalog_mut()
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    host.catalog_mut()
+        .register_function(
+            write_function("alpha::write", "w1"),
+            Some(Arc::new(CountingHandler {
+                calls: calls.clone(),
+            })),
+            true,
+        )
+        .unwrap();
+
+    let missing_key = host
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({"functionId": "alpha::write", "payload": {"x": 1}}),
+            causal().with_session_id("session-a"),
+        ))
+        .await;
+    assert_eq!(missing_key.error, None);
+    assert!(
+        missing_key.value.unwrap()["child"]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("idempotency key")
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    let first = host
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({
+                "functionId": "alpha::write",
+                "payload": {"x": 1},
+                "idempotencyKey": "child-key"
+            }),
+            causal()
+                .with_session_id("session-a")
+                .with_workspace_id("workspace-a"),
+        ))
+        .await;
+    assert_eq!(first.error, None);
+    assert_eq!(first.value.as_ref().unwrap()["child"]["value"]["call"], 1);
+
+    let replay = host
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({
+                "functionId": "alpha::write",
+                "payload": {"x": 1},
+                "idempotencyKey": "child-key"
+            }),
+            causal()
+                .with_session_id("session-a")
+                .with_workspace_id("workspace-a"),
+        ))
+        .await;
+    assert_eq!(replay.error, None);
+    assert_eq!(replay.value.as_ref().unwrap()["child"]["value"]["call"], 1);
+    assert!(replay.value.unwrap()["child"]["replayedFrom"].is_string());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let child_records: Vec<_> = host
+        .catalog()
+        .invocations()
+        .iter()
+        .filter(|record| record.function_id == fid("alpha::write"))
+        .collect();
+    assert!(
+        child_records
+            .iter()
+            .all(|record| record.parent_invocation_id.is_some())
+    );
+}
+
+#[tokio::test]
+async fn engine_invoke_reports_target_errors_in_child_envelope() {
+    let mut host = EngineHost::new().unwrap();
+    host.catalog_mut()
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    host.catalog_mut()
+        .register_function(
+            read_function("alpha::fail", "w1"),
+            Some(Arc::new(FailHandler)),
+            true,
+        )
+        .unwrap();
+
+    let result = host
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({"functionId": "alpha::fail", "payload": {}}),
+            causal(),
+        ))
+        .await;
+    assert_eq!(result.error, None);
+    assert_eq!(
+        result.value.unwrap()["child"]["error"]["kind"],
+        "handler_failed"
+    );
+}
+
+#[tokio::test]
+async fn engine_promote_requires_authority_revision_and_session_ownership() {
+    let mut host = EngineHost::new().unwrap();
+    host.catalog_mut()
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    host.catalog_mut()
+        .register_function(
+            FunctionDefinition::new(
+                fid("alpha::session"),
+                wid("w1"),
+                "session function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )
+            .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a")),
+            Some(handler()),
+            true,
+        )
+        .unwrap();
+
+    let no_scope = host
+        .invoke(host_invocation(
+            "engine::promote",
+            json!({
+                "functionId": "alpha::session",
+                "ownerWorker": "w1",
+                "targetVisibility": "workspace",
+                "workspaceId": "workspace-a",
+                "expectedFunctionRevision": 1
+            }),
+            mutating_causal("promote-no-scope"),
+        ))
+        .await;
+    assert!(matches!(
+        no_scope.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("missing required authority")
+    ));
+
+    let stale = host
+        .invoke(host_invocation(
+            "engine::promote",
+            json!({
+                "functionId": "alpha::session",
+                "ownerWorker": "w1",
+                "targetVisibility": "workspace",
+                "workspaceId": "workspace-a",
+                "expectedFunctionRevision": 2
+            }),
+            mutating_causal("promote-stale").with_scope("engine.promote.workspace"),
+        ))
+        .await;
+    assert!(matches!(
+        stale.error,
+        Some(EngineError::StaleFunctionRevision { .. })
+    ));
+
+    let cross_session = host
+        .invoke(host_invocation(
+            "engine::promote",
+            json!({
+                "functionId": "alpha::session",
+                "ownerWorker": "w1",
+                "targetVisibility": "workspace",
+                "workspaceId": "workspace-a",
+                "expectedFunctionRevision": 1
+            }),
+            causal()
+                .with_session_id("session-b")
+                .with_workspace_id("workspace-a")
+                .with_idempotency_key("promote-cross")
+                .with_scope("engine.promote.workspace"),
+        ))
+        .await;
+    assert!(matches!(
+        cross_session.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("session")
+    ));
+
+    let promoted = host
+        .invoke(host_invocation(
+            "engine::promote",
+            json!({
+                "functionId": "alpha::session",
+                "ownerWorker": "w1",
+                "targetVisibility": "workspace",
+                "workspaceId": "workspace-a",
+                "expectedFunctionRevision": 1
+            }),
+            mutating_causal("promote-ok").with_scope("engine.promote.workspace"),
+        ))
+        .await;
+    assert_eq!(promoted.error, None);
+    assert_eq!(promoted.value.as_ref().unwrap()["revision"], 2);
+    let function = host.catalog().function(&fid("alpha::session")).unwrap();
+    assert_eq!(function.visibility, VisibilityScope::Workspace);
+    assert_eq!(function.provenance.session_id, None);
+    assert_eq!(
+        function.provenance.workspace_id.as_deref(),
+        Some("workspace-a")
+    );
+
+    let replay = host
+        .invoke(host_invocation(
+            "engine::promote",
+            json!({
+                "functionId": "alpha::session",
+                "ownerWorker": "w1",
+                "targetVisibility": "workspace",
+                "workspaceId": "workspace-a",
+                "expectedFunctionRevision": 1
+            }),
+            mutating_causal("promote-ok").with_scope("engine.promote.workspace"),
+        ))
+        .await;
+    assert_eq!(replay.error, None);
+    assert_eq!(replay.replayed_from, Some(promoted.invocation_id));
+    assert_eq!(replay.value.as_ref().unwrap()["revision"], 2);
+    assert_eq!(
+        host.catalog()
+            .function(&fid("alpha::session"))
+            .unwrap()
+            .revision,
+        FunctionRevision(2)
+    );
+}
+
+#[tokio::test]
+async fn engine_promote_conflicting_duplicate_key_does_not_mutate_new_target() {
+    let mut host = EngineHost::new().unwrap();
+    host.catalog_mut()
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    for id in ["alpha::one", "alpha::two"] {
+        host.catalog_mut()
+            .register_function(
+                FunctionDefinition::new(
+                    fid(id),
+                    wid("w1"),
+                    "session function",
+                    VisibilityScope::Session,
+                    EffectClass::PureRead,
+                )
+                .with_provenance(
+                    Provenance::new(actor("agent"), "test").with_session_id("session-a"),
+                ),
+                Some(handler()),
+                true,
+            )
+            .unwrap();
+    }
+
+    let first = host
+        .invoke(host_invocation(
+            "engine::promote",
+            json!({
+                "functionId": "alpha::one",
+                "ownerWorker": "w1",
+                "targetVisibility": "workspace",
+                "workspaceId": "workspace-a",
+                "expectedFunctionRevision": 1
+            }),
+            mutating_causal("promote-shared-key").with_scope("engine.promote.workspace"),
+        ))
+        .await;
+    assert_eq!(first.error, None);
+
+    let conflict = host
+        .invoke(host_invocation(
+            "engine::promote",
+            json!({
+                "functionId": "alpha::two",
+                "ownerWorker": "w1",
+                "targetVisibility": "workspace",
+                "workspaceId": "workspace-a",
+                "expectedFunctionRevision": 1
+            }),
+            mutating_causal("promote-shared-key").with_scope("engine.promote.workspace"),
+        ))
+        .await;
+    assert!(matches!(
+        conflict.error,
+        Some(EngineError::IdempotencyConflict { .. })
+    ));
+    assert_eq!(
+        host.catalog()
+            .function(&fid("alpha::two"))
+            .unwrap()
+            .visibility,
+        VisibilityScope::Session
+    );
 }

@@ -89,6 +89,24 @@ pub enum EngineError {
         reason: String,
     },
 
+    /// Durable ledger operation failed.
+    #[error("engine ledger operation {operation} failed: {message}")]
+    LedgerFailure {
+        /// Ledger operation.
+        operation: &'static str,
+        /// Failure detail.
+        message: String,
+    },
+
+    /// A historical stored invocation error was replayed from the ledger.
+    #[error("stored invocation error {kind}: {message}")]
+    StoredInvocationError {
+        /// Stable stored error kind.
+        kind: String,
+        /// Stable stored message.
+        message: String,
+    },
+
     /// A declared schema is unsupported or malformed.
     #[error("invalid {direction} schema for {function_id}: {message}")]
     InvalidSchema {

@@ -10,7 +10,7 @@ use super::errors::{EngineError, Result};
 use super::ids::{
     ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
 };
-use super::types::{CatalogRevision, DeliveryMode, FunctionRevision};
+use super::types::{CatalogRevision, DeliveryMode, FunctionRevision, IdempotencyScope};
 
 /// Causal context carried by every invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -292,6 +292,8 @@ pub struct InvocationRecord {
     pub actor_kind: ActorKind,
     /// Authority grant id.
     pub authority_grant_id: AuthorityGrantId,
+    /// Granted authority scopes.
+    pub authority_scopes: Vec<String>,
     /// Trace id.
     pub trace_id: TraceId,
     /// Parent invocation.
@@ -302,10 +304,14 @@ pub struct InvocationRecord {
     pub delivery_mode: DeliveryMode,
     /// Idempotency key.
     pub idempotency_key: Option<String>,
+    /// Concrete idempotency scope.
+    pub idempotency_scope: Option<IdempotencyScope>,
     /// Replayed invocation, when this was an idempotency replay/no-op.
     pub replayed_from: Option<InvocationId>,
     /// Whether the result was successful.
     pub succeeded: bool,
+    /// Successful result value.
+    pub result_value: Option<Value>,
     /// Structured error.
     pub error: Option<EngineError>,
     /// Completion timestamp.
@@ -315,7 +321,11 @@ pub struct InvocationRecord {
 impl InvocationRecord {
     /// Create a record from the invocation and result.
     #[must_use]
-    pub fn from_result(invocation: &Invocation, result: &InvocationResult) -> Self {
+    pub fn from_result(
+        invocation: &Invocation,
+        result: &InvocationResult,
+        idempotency_scope: Option<IdempotencyScope>,
+    ) -> Self {
         Self {
             invocation_id: invocation.id.clone(),
             function_id: invocation.function_id.clone(),
@@ -325,13 +335,16 @@ impl InvocationRecord {
             actor_id: invocation.causal_context.actor_id.clone(),
             actor_kind: invocation.causal_context.actor_kind.clone(),
             authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
+            authority_scopes: invocation.causal_context.authority_scopes.clone(),
             trace_id: invocation.causal_context.trace_id.clone(),
             parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
             trigger_id: invocation.causal_context.trigger_id.clone(),
             delivery_mode: invocation.delivery_mode,
             idempotency_key: invocation.causal_context.idempotency_key.clone(),
+            idempotency_scope,
             replayed_from: result.replayed_from.clone(),
             succeeded: result.error.is_none(),
+            result_value: result.value.clone(),
             error: result.error.clone(),
             timestamp: Utc::now(),
         }

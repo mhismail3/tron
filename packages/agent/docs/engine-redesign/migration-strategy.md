@@ -61,7 +61,8 @@ Deliverables:
 - Async sync-call invocation path for in-process functions.
 - Discovery/search/inspect functions over the live catalog.
 - Invocation ledger records for every attempt.
-- In-memory idempotency replay for mutating functions.
+- Pluggable in-memory engine ledger for invocation records, catalog-change
+  records, and idempotency replay for mutating functions.
 - Request/response schema validation for declared schemas.
 - Explicit visibility promotion from session scope to workspace/system scope.
 - Unit tests for registration, overwrite rules, unregister, cleanup,
@@ -84,6 +85,78 @@ Acceptance:
   mode, idempotency key, outcome, and replay source.
 - Tests encode first-principles invariants, not just happy-path registry
   behavior.
+
+## Phase 1.5: durable engine ledger adapter
+
+Make the Phase 1 causal/idempotency ledger durable without wiring it into
+production server startup yet.
+
+Deliverables:
+
+- `EngineLedgerStore` boundary with in-memory and SQLite implementations.
+- Stable stored error projection `{ kind, message, details }` instead of raw
+  `EngineError` persistence.
+- SQLite tables for `engine_invocations`, `engine_idempotency_entries`, and
+  `engine_catalog_changes`, initialized only by the engine-ledger adapter.
+- Fail-closed idempotency reservation before handler execution.
+- Completion records for successful and failed handler outcomes.
+- Catalog-change audit persistence without restart reconstruction of catalog
+  definitions.
+- Shared storage-contract tests for in-memory and SQLite stores.
+- Restart test proving a duplicate idempotency key replays after a fresh
+  `LiveCatalog` is created with the same SQLite ledger.
+
+Acceptance:
+
+- No production `v001_schema.sql` changes.
+- No current RPC, runtime, tool, or client behavior changes.
+- A ledger write failure before handler execution prevents the handler from
+  running.
+- Duplicate keys with different payloads, stale function revisions, in-flight
+  reservations, unknown outcomes, and reject/no-op policies all fail or replay
+  without re-running side effects.
+- SQLite persistence survives reopen for invocation records, catalog changes,
+  and idempotency entries.
+
+## Phase 1.75: engine host and live meta-capabilities
+
+Expose the first agent-facing engine surface without changing production RPC,
+runtime, tools, or clients.
+
+Deliverables:
+
+- `EngineHost` owns `LiveCatalog` and becomes the preferred boundary for
+  future server/runtime adapters.
+- Reserved system `engine` worker and namespace policy.
+- Privileged `engine::discover`, `engine::inspect`, `engine::watch`,
+  `engine::invoke`, and `engine::promote` functions registered in the live
+  catalog.
+- Cursor pull watch over durable catalog changes with class/kind/prefix/owner
+  filters, bounded limits, and visibility-safe historical scope metadata.
+- Delegated invocation through `engine::invoke`, with target policy,
+  idempotency, schema, expected revision, health, visibility, and authority
+  enforced at the child invocation.
+- Promotion through `engine::promote`, with expected revision, idempotency key,
+  owner, workspace/system authority scope, and session ownership checks.
+- Built-in mutating meta-capabilities use the same pre-effect idempotency
+  reservation/replay path as normal catalog functions.
+- Catalog registration records durable change metadata before mutating the live
+  catalog, so ledger write failures fail closed instead of creating unaudited
+  capabilities.
+
+Acceptance:
+
+- No production server startup, RPC, runtime, tool, or client behavior changes.
+- Meta-capabilities appear in discovery as real functions but cannot be
+  overwritten by ordinary workers.
+- Watch does not leak hidden session/internal changes and survives SQLite
+  ledger reopen.
+- Child invocations carry parent invocation, trace, actor, authority, catalog
+  revision, and idempotency context.
+- Repeated `engine::promote` calls with the same scoped idempotency key replay
+  without re-promoting or mutating a second target.
+- Focused engine tests cover host bootstrap, discovery/inspect, watch,
+  delegated invocation, and promotion edge cases.
 
 ## Phase 2: RPC compatibility mirror
 

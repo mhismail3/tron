@@ -2,7 +2,7 @@
 
 Status: exploration branch artifact.
 
-Date: 2026-04-30.
+Date: 2026-05-01.
 
 Branch: `codex/iii-engine-redesign-exploration`.
 
@@ -106,8 +106,12 @@ iii sources analyzed:
   discovery, trigger-action, schema, RBAC, sandbox, and worker pages listed in
   <https://iii.dev/docs/llms.txt>.
 - Repository: <https://github.com/iii-hq/iii> at commit
-  `9eaf3737e8a5e86d12039d067f76bc208eb39def`
-  (`fix(website): restore cleanUrls so /manifesto resolves to manifesto.html (#1579)`).
+  `3db657386a21a2b48b44a3f959c2b7e3fe7adf7a`.
+- Local implementation comparison focused on iii `engine/src/protocol.rs`,
+  `engine/src/function.rs`, `engine/src/trigger.rs`,
+  `engine/src/engine/mod.rs`, `engine/src/invocation/mod.rs`,
+  `engine/src/workers/worker/rbac_config.rs`, `engine/src/builtins/queue.rs`,
+  and `engine/src/builtins/kv.rs`.
 
 Tron sources analyzed:
 
@@ -162,20 +166,33 @@ workflow is migrated:
   actors, authority grants, and traces.
 - `types.rs` defines worker/function/trigger metadata, revisions, visibility,
   effect classes, idempotency, authority, provenance, health, schemas, and
-  catalog-change records.
+  catalog-change records. Catalog changes now carry subject kind, change
+  class, visibility, and scope metadata so cursor watch can filter historical
+  changes without leaking session/internal capabilities.
+- `host.rs` owns the first agent-facing `EngineHost` boundary. It bootstraps
+  the reserved system `engine` worker, registers privileged `engine::*`
+  meta-capabilities as real catalog functions, and executes live discovery,
+  scoped inspection, cursor watch, delegated invocation, and promotion without
+  exposing those built-ins to ordinary worker replacement.
+- `ledger.rs` defines the pluggable engine-ledger boundary plus in-memory and
+  isolated SQLite implementations for catalog-change audit records,
+  invocation records, and idempotency reservations/results. Its SQLite schema
+  is initialized by the adapter and is not wired into the production
+  event-store migration yet.
 - `registry.rs` owns the in-memory `LiveCatalog`, deterministic discovery,
   owner-checked registration, volatile cleanup, catalog revisions, and
-  in-process sync invocation. It also maintains the Phase 1 invocation ledger
-  and in-memory idempotency cache. Discovery stays live but scope-gated:
-  session and workspace capabilities require matching actor context, and
-  internal entries require an admin/system query.
+  in-process sync invocation. It writes catalog changes, invocation attempts,
+  and idempotency reservations/results through the ledger store while keeping
+  catalog definitions volatile. Discovery stays live but scope-gated: session
+  and workspace capabilities require matching actor context, and internal
+  entries require an admin/system query.
 - `policy.rs` holds non-bypassable checks for mutating function idempotency,
   irreversible effects, trigger target revisions, delivery modes, authority
   scopes, health, and invocation idempotency keys. Invocation also re-checks
   visibility so a hidden function cannot be called just because its id is known.
 - `invocation.rs` carries actor, authority grant, trace, parent invocation,
   trigger, catalog revision, delivery mode, and idempotency context across each
-  call, plus the in-memory invocation record shape.
+  call, plus the invocation record shape stored by the engine ledger.
 - `schema.rs` enforces a deliberately small JSON-schema subset for request and
   response payloads: `type`, `required`, `properties`, `additionalProperties`,
   `items`, and `enum`.
@@ -190,23 +207,56 @@ Implemented:
   registration, cleanup, and visibility promotion;
 - owner-checked worker, function, trigger type, and trigger registration;
 - deterministic live discovery plus scoped inspect APIs;
+- `EngineHost` and privileged `engine::discover`, `engine::inspect`,
+  `engine::watch`, `engine::invoke`, and `engine::promote` meta-capabilities;
+- reserved `engine` namespace enforcement so ordinary workers cannot spoof or
+  overwrite engine built-ins;
 - function visibility enforcement at both discovery and invocation time;
 - in-process sync invocation with structured success/error results;
 - invocation ledger records for every attempt, including missing functions,
   policy failures, schema failures, handler failures, idempotency replays, and
   successes;
+- pluggable engine-ledger storage for invocation records, catalog-change audit
+  records, and idempotency reservations/results;
 - idempotency contracts for mutating functions, including session/workspace
-  scope validation, canonical payload fingerprinting, `ReturnPrevious`,
-  `Reject`, and `NoOp` replay behavior;
+  scope validation, canonical payload fingerprinting, fail-closed pre-handler
+  reservation, replay after catalog recreation, handler-error replay without
+  reinvocation, `ReturnPrevious`, `Reject`, and `NoOp` replay behavior;
 - request/response schema validation for the supported Phase 1 subset;
 - explicit session-to-workspace/system promotion with owner checks and audit
-  catalog changes;
+  catalog changes, including scoped idempotency replay for duplicate promotion
+  attempts;
+- cursor-based catalog watch with class/kind/prefix/owner filters, scope-aware
+  historical visibility, bounded limits, and SQLite reopen coverage;
+- delegated invocation through `engine::invoke`, preserving parent invocation,
+  trace, actor, authority, target revision, schema, visibility, health, and
+  target idempotency checks;
+- fail-closed catalog registration/promotion paths that write durable
+  catalog-change records before mutating live definitions;
 - cleanup of triggers that target an unregistered function.
 
 Still deferred:
 
-- durable event-store persistence for the invocation/idempotency ledger;
+- production event-store migration and server startup wiring for the engine
+  host/ledger;
 - queue and void delivery execution;
 - external worker protocol, sandbox workers, and worker reconnect semantics;
 - trigger firing/runtime loop detection;
 - RPC/tool/runtime/client adapters.
+
+## iii reuse note
+
+The current Work Package 2 implementation is heavily informed by iii but does
+not copy substantial iii source verbatim. Useful patterns retained from iii
+include explicit protocol/result shapes, live registry ownership, trigger
+action vocabulary, registration cleanup, RBAC-as-policy inspiration, and trace
+context as an invocation concern. Tron intentionally diverges by making
+idempotency metadata mandatory for mutating functions, reserving idempotency
+keys before handler execution, storing stable error projections instead of raw
+Rust enum internals, and keeping agent-created capability visibility scoped
+until explicit promotion.
+
+If a later package copies iii engine code directly, keep the source path,
+commit, license, and Tron modification note beside the adapted code or in this
+directory. iii `engine/` is Elastic License 2.0; SDK/docs/console material is
+Apache-2.0.
