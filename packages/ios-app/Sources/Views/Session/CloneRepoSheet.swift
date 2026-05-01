@@ -6,6 +6,9 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct CloneRepoSheet: View {
     let rpcClient: RPCClient
+    /// Optional parent folder where the repository should be cloned.
+    /// When provided, the destination is locked to this workspace.
+    var initialDestinationPath: String?
     /// Callback when clone completes with the cloned path
     let onCloned: (String) -> Void
 
@@ -44,6 +47,16 @@ struct CloneRepoSheet: View {
     /// Display-friendly destination path (truncates home dir)
     private var displayDestinationPath: String {
         fullDestinationPath.abbreviatingHomeDirectory
+    }
+
+    private var lockedDestinationPath: String? {
+        guard let initialDestinationPath else { return nil }
+        let trimmed = initialDestinationPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private var isDestinationLocked: Bool {
+        lockedDestinationPath != nil
     }
 
     var body: some View {
@@ -139,11 +152,10 @@ struct CloneRepoSheet: View {
                             )
                     }
                     .onChange(of: repoURL) { _, newValue in
-                        // Auto-update destination when URL changes
-                        if GitHubURLParser.parse(newValue) != nil, destinationPath.isEmpty || destinationPath == defaultProjectsPath {
-                            destinationPath = defaultProjectsPath
+                        // Auto-update destination when URL changes.
+                        if GitHubURLParser.parse(newValue) != nil, destinationPath.isEmpty {
+                            destinationPath = lockedDestinationPath ?? defaultProjectsPath
                         }
-                        // Clear previous error
                         cloneError = nil
                     }
 
@@ -184,6 +196,7 @@ struct CloneRepoSheet: View {
                 .foregroundStyle(.tronTextSecondary)
 
             Button {
+                guard !isDestinationLocked else { return }
                 showDestinationPicker = true
             } label: {
                 HStack {
@@ -193,9 +206,15 @@ struct CloneRepoSheet: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
-                    Text("Change")
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronEmerald.opacity(0.6))
+                    if isDestinationLocked {
+                        Text("Selected")
+                            .font(TronTypography.codeCaption)
+                            .foregroundStyle(.tronEmerald.opacity(0.6))
+                    } else {
+                        Text("Change")
+                            .font(TronTypography.codeCaption)
+                            .foregroundStyle(.tronEmerald.opacity(0.6))
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
@@ -204,7 +223,7 @@ struct CloneRepoSheet: View {
             .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .disabled(isCloning)
 
-            Text("The repository will be cloned to this folder")
+            Text(isDestinationLocked ? "The repository will be cloned inside the selected workspace" : "The repository will be cloned to this folder")
                 .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronTextMuted)
         }
@@ -284,15 +303,14 @@ struct CloneRepoSheet: View {
             let home = try await rpcClient.filesystem.getHome()
             await MainActor.run {
                 homePath = home.homePath
-                // Set default destination to ~/Downloads/projects
-                destinationPath = defaultProjectsPath
+                destinationPath = lockedDestinationPath ?? defaultProjectsPath
                 isLoadingHome = false
             }
         } catch {
             await MainActor.run {
-                // Fallback to a reasonable default
-                homePath = "/Users"
-                destinationPath = "/Users"
+                let fallback = "/Users"
+                homePath = fallback
+                destinationPath = lockedDestinationPath ?? fallback
                 isLoadingHome = false
             }
         }

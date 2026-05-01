@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-04-29 (local diagnostics, MetricKit retention, feedback bundle, settings revamp, local paired servers, server-owned settings, provider status cards, and onboarding handoff)
+> Last verified: 2026-05-01 (new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings revamp, local paired servers, server-owned settings, provider status cards, and onboarding handoff)
 
 ## Overview
 
@@ -11,6 +11,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Push notifications for background alerts
 - Voice transcription input
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
+- A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
 
 ## Directory Structure
 
@@ -169,6 +170,22 @@ ChatView renders
 Pagination: older history is loaded on demand via `beforeSequence`, passing the
 `oldestSequence` from the previous page. `hasMoreEvents` controls whether the
 "load more" UI is shown.
+
+### Session Creation
+
+The New Session sheet keeps shortcut paths separate from the standard workspace
+setup. Quick Chat and Claude Code import sit in a compact shortcut row at the
+top. Quick Chat creates `source: "chat"` sessions with the same workspace
+resolution used by the floating button long-press path: explicit quick-session
+workspace, current session, most recent session, then the server default. The
+main setup section is separated by a thin divider and contains recent workspace
+pills, the workspace picker, model picker, git worktree isolation when the
+selected folder is a repo, and optional GitHub cloning. The toolbar Create
+button starts a normal workspace session without cloning; Clone GitHub clones
+into the selected workspace and starts in the cloned repository. Imports
+preserve the imported model and do not force the sheet's selected model. While
+switching workspaces, the worktree card keeps its previous visibility until the
+new git-repo probe resolves, then animates any actual appear/disappear change.
 
 ## Dependency Injection
 

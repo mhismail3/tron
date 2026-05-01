@@ -321,20 +321,22 @@ struct ContentView: View {
             rpcClient: rpcClient,
             defaultModel: defaultModel,
             eventStoreManager: eventStoreManager,
-            onSessionCreated: { sessionId, workspaceId, model, workingDirectory in
+            selectedSessionId: selectedSessionId,
+            onSessionCreated: { created in
                 Task {
                     do {
                         try await eventStoreManager.cacheNewSession(
-                            sessionId: sessionId,
-                            workspaceId: workspaceId,
-                            model: model,
-                            workingDirectory: workingDirectory
+                            sessionId: created.sessionId,
+                            workspaceId: created.workspaceId,
+                            model: created.model,
+                            workingDirectory: created.workingDirectory,
+                            source: created.source
                         )
                     } catch {
                         logger.error("cacheNewSession failed: \(error)", category: .session)
                     }
                 }
-                selectedSessionId = sessionId
+                selectedSessionId = created.sessionId
                 showNewSessionSheet = false
             }
         )
