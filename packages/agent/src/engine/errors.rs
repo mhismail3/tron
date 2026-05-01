@@ -78,6 +78,52 @@ pub enum EngineError {
         mode: &'static str,
     },
 
+    /// A duplicate idempotency key cannot be replayed safely.
+    #[error("idempotency conflict for {function_id} key {key:?}: {reason}")]
+    IdempotencyConflict {
+        /// Function id.
+        function_id: String,
+        /// Idempotency key.
+        key: String,
+        /// Conflict reason.
+        reason: String,
+    },
+
+    /// A declared schema is unsupported or malformed.
+    #[error("invalid {direction} schema for {function_id}: {message}")]
+    InvalidSchema {
+        /// Function id.
+        function_id: String,
+        /// Schema direction.
+        direction: &'static str,
+        /// Validation failure.
+        message: String,
+    },
+
+    /// A payload did not match a declared schema.
+    #[error("{direction} schema violation for {function_id} at {path}: {message}")]
+    SchemaViolation {
+        /// Function id.
+        function_id: String,
+        /// Schema direction.
+        direction: &'static str,
+        /// JSON path.
+        path: String,
+        /// Validation failure.
+        message: String,
+    },
+
+    /// A visibility promotion is not allowed.
+    #[error("invalid visibility promotion for {function_id} to {target}: {reason}")]
+    InvalidVisibilityPromotion {
+        /// Function id.
+        function_id: String,
+        /// Requested visibility target.
+        target: String,
+        /// Rejection reason.
+        reason: String,
+    },
+
     /// A registration or invocation violates engine policy.
     #[error("policy violation: {0}")]
     PolicyViolation(String),

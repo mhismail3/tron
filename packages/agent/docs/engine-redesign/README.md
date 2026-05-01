@@ -161,19 +161,52 @@ workflow is migrated:
 - `ids.rs` defines validated IDs for workers, functions, triggers, invocations,
   actors, authority grants, and traces.
 - `types.rs` defines worker/function/trigger metadata, revisions, visibility,
-  effect classes, idempotency, authority, provenance, health, and catalog-change
-  records.
+  effect classes, idempotency, authority, provenance, health, schemas, and
+  catalog-change records.
 - `registry.rs` owns the in-memory `LiveCatalog`, deterministic discovery,
   owner-checked registration, volatile cleanup, catalog revisions, and
-  in-process sync invocation. Discovery stays live but scope-gated: session and
-  workspace capabilities require matching actor context, and internal entries
-  require an admin/system query.
+  in-process sync invocation. It also maintains the Phase 1 invocation ledger
+  and in-memory idempotency cache. Discovery stays live but scope-gated:
+  session and workspace capabilities require matching actor context, and
+  internal entries require an admin/system query.
 - `policy.rs` holds non-bypassable checks for mutating function idempotency,
   irreversible effects, trigger target revisions, delivery modes, authority
   scopes, health, and invocation idempotency keys. Invocation also re-checks
   visibility so a hidden function cannot be called just because its id is known.
 - `invocation.rs` carries actor, authority grant, trace, parent invocation,
   trigger, catalog revision, delivery mode, and idempotency context across each
-  call.
+  call, plus the in-memory invocation record shape.
+- `schema.rs` enforces a deliberately small JSON-schema subset for request and
+  response payloads: `type`, `required`, `properties`, `additionalProperties`,
+  `items`, and `enum`.
 - `tests.rs` encodes the Phase 1 invariants directly so later migrations extend
   behavior from a tested core instead of replacing assumptions.
+
+## Phase 1 acceptance checklist
+
+Implemented:
+
+- live catalog revisions and catalog-change records for worker/function/trigger
+  registration, cleanup, and visibility promotion;
+- owner-checked worker, function, trigger type, and trigger registration;
+- deterministic live discovery plus scoped inspect APIs;
+- function visibility enforcement at both discovery and invocation time;
+- in-process sync invocation with structured success/error results;
+- invocation ledger records for every attempt, including missing functions,
+  policy failures, schema failures, handler failures, idempotency replays, and
+  successes;
+- idempotency contracts for mutating functions, including session/workspace
+  scope validation, canonical payload fingerprinting, `ReturnPrevious`,
+  `Reject`, and `NoOp` replay behavior;
+- request/response schema validation for the supported Phase 1 subset;
+- explicit session-to-workspace/system promotion with owner checks and audit
+  catalog changes;
+- cleanup of triggers that target an unregistered function.
+
+Still deferred:
+
+- durable event-store persistence for the invocation/idempotency ledger;
+- queue and void delivery execution;
+- external worker protocol, sandbox workers, and worker reconnect semantics;
+- trigger firing/runtime loop detection;
+- RPC/tool/runtime/client adapters.

@@ -3,6 +3,7 @@
 use super::discovery::{ActorContext, ActorKind};
 use super::errors::{EngineError, Result};
 use super::invocation::{CausalContext, Invocation};
+use super::schema;
 use super::types::{
     DeliveryMode, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition, VisibilityScope,
 };
@@ -34,6 +35,13 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
             "function {} must allow at least one delivery mode",
             function.id
         )));
+    }
+
+    if let Some(schema) = &function.request_schema {
+        schema::validate_schema_definition(&function.id, "request", schema)?;
+    }
+    if let Some(schema) = &function.response_schema {
+        schema::validate_schema_definition(&function.id, "response", schema)?;
     }
 
     Ok(())

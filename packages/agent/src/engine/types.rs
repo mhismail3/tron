@@ -96,6 +96,21 @@ pub enum VisibilityScope {
 }
 
 impl VisibilityScope {
+    /// Static display string.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Internal => "internal",
+            Self::Session => "session",
+            Self::Workspace => "workspace",
+            Self::System => "system",
+            Self::Client => "client",
+            Self::Worker => "worker",
+            Self::Agent => "agent",
+            Self::Admin => "admin",
+        }
+    }
+
     /// Whether this scope may be shown to an autonomous agent.
     #[must_use]
     pub fn is_agent_visible(&self) -> bool {
@@ -232,6 +247,19 @@ pub enum ReplayBehavior {
     Reject,
     /// Run compensation.
     Compensate,
+}
+
+impl ReplayBehavior {
+    /// Static display string.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ReturnPrevious => "return_previous",
+            Self::NoOp => "no_op",
+            Self::Reject => "reject",
+            Self::Compensate => "compensate",
+        }
+    }
 }
 
 /// Ledger location for idempotency/effect tracking.
@@ -516,6 +544,20 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_tags(mut self, tags: Vec<String>) -> Self {
         self.tags = tags;
+        self
+    }
+
+    /// Attach a request schema.
+    #[must_use]
+    pub fn with_request_schema(mut self, schema: Value) -> Self {
+        self.request_schema = Some(schema);
+        self
+    }
+
+    /// Attach a response schema.
+    #[must_use]
+    pub fn with_response_schema(mut self, schema: Value) -> Self {
+        self.response_schema = Some(schema);
         self
     }
 

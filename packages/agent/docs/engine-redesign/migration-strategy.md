@@ -60,9 +60,14 @@ Deliverables:
 - Causal context types for invocation and catalog mutation records.
 - Async sync-call invocation path for in-process functions.
 - Discovery/search/inspect functions over the live catalog.
+- Invocation ledger records for every attempt.
+- In-memory idempotency replay for mutating functions.
+- Request/response schema validation for declared schemas.
+- Explicit visibility promotion from session scope to workspace/system scope.
 - Unit tests for registration, overwrite rules, unregister, cleanup,
   discovery, catalog revisions, catalog-change events, causality metadata,
-  idempotency enforcement, and sync invocation.
+  idempotency enforcement/replay, schema validation, promotion, inspection, and
+  sync invocation.
 
 Acceptance:
 
@@ -70,7 +75,13 @@ Acceptance:
 - No external worker protocol yet.
 - No queue/void execution yet beyond metadata.
 - Engine can be created in tests without starting the server.
-- Mutating agent-visible functions without idempotency metadata are rejected.
+- Mutating functions without idempotency metadata are rejected.
+- Mutating invocations without a valid scoped idempotency key are rejected.
+- Duplicate idempotency keys cannot re-run a handler unless their replay policy
+  explicitly permits a non-executing replay.
+- Every invocation attempt is recorded with actor, authority grant, trace,
+  parent invocation, trigger id, catalog revision, function revision, delivery
+  mode, idempotency key, outcome, and replay source.
 - Tests encode first-principles invariants, not just happy-path registry
   behavior.
 

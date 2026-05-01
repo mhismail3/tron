@@ -1,6 +1,7 @@
 //! In-process invocation contracts.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -83,6 +84,20 @@ impl CausalContext {
     #[must_use]
     pub fn with_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
         self.workspace_id = Some(workspace_id.into());
+        self
+    }
+
+    /// Set the parent invocation id.
+    #[must_use]
+    pub fn with_parent_invocation(mut self, parent: InvocationId) -> Self {
+        self.parent_invocation_id = Some(parent);
+        self
+    }
+
+    /// Set the trigger id.
+    #[must_use]
+    pub fn with_trigger_id(mut self, trigger_id: TriggerId) -> Self {
+        self.trigger_id = Some(trigger_id);
         self
     }
 
@@ -170,6 +185,8 @@ pub struct InvocationResult {
     pub value: Option<Value>,
     /// Structured error.
     pub error: Option<EngineError>,
+    /// Invocation whose idempotent result was reused.
+    pub replayed_from: Option<InvocationId>,
 }
 
 impl InvocationResult {
@@ -191,6 +208,7 @@ impl InvocationResult {
             trace_id: invocation.causal_context.trace_id.clone(),
             value: Some(value),
             error: None,
+            replayed_from: None,
         }
     }
 
@@ -212,6 +230,110 @@ impl InvocationResult {
             trace_id: invocation.causal_context.trace_id.clone(),
             value: None,
             error: Some(error),
+            replayed_from: None,
+        }
+    }
+
+    /// Build a result by replaying a previous idempotent result.
+    #[must_use]
+    pub fn replay_previous(invocation: &Invocation, previous: &Self) -> Self {
+        Self {
+            invocation_id: invocation.id.clone(),
+            function_id: invocation.function_id.clone(),
+            worker_id: previous.worker_id.clone(),
+            function_revision: previous.function_revision,
+            catalog_revision: previous.catalog_revision,
+            trace_id: invocation.causal_context.trace_id.clone(),
+            value: previous.value.clone(),
+            error: previous.error.clone(),
+            replayed_from: Some(previous.invocation_id.clone()),
+        }
+    }
+
+    /// Build a duplicate no-op result.
+    #[must_use]
+    pub fn noop_replay(
+        invocation: &Invocation,
+        worker_id: WorkerId,
+        function_revision: FunctionRevision,
+        catalog_revision: CatalogRevision,
+        replayed_from: InvocationId,
+    ) -> Self {
+        Self {
+            invocation_id: invocation.id.clone(),
+            function_id: invocation.function_id.clone(),
+            worker_id,
+            function_revision,
+            catalog_revision,
+            trace_id: invocation.causal_context.trace_id.clone(),
+            value: Some(Value::Null),
+            error: None,
+            replayed_from: Some(replayed_from),
+        }
+    }
+}
+
+/// Durable shape of an invocation attempt in the Phase 1 in-memory ledger.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InvocationRecord {
+    /// Invocation id.
+    pub invocation_id: InvocationId,
+    /// Function id.
+    pub function_id: FunctionId,
+    /// Worker that handled or owned the function.
+    pub worker_id: WorkerId,
+    /// Function revision used.
+    pub function_revision: FunctionRevision,
+    /// Catalog revision observed.
+    pub catalog_revision: CatalogRevision,
+    /// Actor id.
+    pub actor_id: ActorId,
+    /// Actor kind.
+    pub actor_kind: ActorKind,
+    /// Authority grant id.
+    pub authority_grant_id: AuthorityGrantId,
+    /// Trace id.
+    pub trace_id: TraceId,
+    /// Parent invocation.
+    pub parent_invocation_id: Option<InvocationId>,
+    /// Trigger id.
+    pub trigger_id: Option<TriggerId>,
+    /// Delivery mode.
+    pub delivery_mode: DeliveryMode,
+    /// Idempotency key.
+    pub idempotency_key: Option<String>,
+    /// Replayed invocation, when this was an idempotency replay/no-op.
+    pub replayed_from: Option<InvocationId>,
+    /// Whether the result was successful.
+    pub succeeded: bool,
+    /// Structured error.
+    pub error: Option<EngineError>,
+    /// Completion timestamp.
+    pub timestamp: DateTime<Utc>,
+}
+
+impl InvocationRecord {
+    /// Create a record from the invocation and result.
+    #[must_use]
+    pub fn from_result(invocation: &Invocation, result: &InvocationResult) -> Self {
+        Self {
+            invocation_id: invocation.id.clone(),
+            function_id: invocation.function_id.clone(),
+            worker_id: result.worker_id.clone(),
+            function_revision: result.function_revision,
+            catalog_revision: result.catalog_revision,
+            actor_id: invocation.causal_context.actor_id.clone(),
+            actor_kind: invocation.causal_context.actor_kind.clone(),
+            authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
+            trigger_id: invocation.causal_context.trigger_id.clone(),
+            delivery_mode: invocation.delivery_mode,
+            idempotency_key: invocation.causal_context.idempotency_key.clone(),
+            replayed_from: result.replayed_from.clone(),
+            succeeded: result.error.is_none(),
+            error: result.error.clone(),
+            timestamp: Utc::now(),
         }
     }
 }

@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -12,9 +15,9 @@ use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation};
 use super::registry::LiveCatalog;
 use super::types::{
     AuthorityRequirement, CatalogChangeKind, CatalogRevision, DeliveryMode, EffectClass,
-    FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract, Provenance,
-    RiskLevel, TriggerDefinition, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
-    WorkerKind,
+    FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
+    IdempotencyKeySource, LedgerKind, Provenance, ReplayBehavior, RiskLevel, TriggerDefinition,
+    TriggerTypeDefinition, VisibilityScope, WorkerDefinition, WorkerKind,
 };
 
 fn wid(value: &str) -> WorkerId {
@@ -68,6 +71,24 @@ fn write_function(id: &str, owner: &str) -> FunctionDefinition {
     .with_idempotency(IdempotencyContract::caller_session())
 }
 
+fn reject_idempotency() -> IdempotencyContract {
+    IdempotencyContract {
+        key_source: IdempotencyKeySource::Caller,
+        dedupe_scope: VisibilityScope::Session,
+        replay_behavior: ReplayBehavior::Reject,
+        ledger_kind: LedgerKind::InMemory,
+    }
+}
+
+fn noop_idempotency() -> IdempotencyContract {
+    IdempotencyContract {
+        key_source: IdempotencyKeySource::Caller,
+        dedupe_scope: VisibilityScope::Session,
+        replay_behavior: ReplayBehavior::NoOp,
+        ledger_kind: LedgerKind::InMemory,
+    }
+}
+
 #[derive(Clone)]
 struct EchoHandler;
 
@@ -90,6 +111,22 @@ impl InProcessFunctionHandler for FailHandler {
     }
 }
 
+#[derive(Clone)]
+struct CountingHandler {
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl InProcessFunctionHandler for CountingHandler {
+    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(json!({
+            "call": call,
+            "payload": invocation.payload,
+        }))
+    }
+}
+
 fn handler() -> Arc<dyn InProcessFunctionHandler> {
     Arc::new(EchoHandler)
 }
@@ -101,6 +138,13 @@ fn causal() -> CausalContext {
         grant("grant"),
         trace("trace"),
     )
+}
+
+fn mutating_causal(key: &str) -> CausalContext {
+    causal()
+        .with_session_id("session-a")
+        .with_workspace_id("workspace-a")
+        .with_idempotency_key(key)
 }
 
 #[test]
@@ -521,6 +565,392 @@ async fn sync_invocation_succeeds_and_records_revisions() {
 }
 
 #[tokio::test]
+async fn invocation_ledger_records_success_error_and_full_causality() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    catalog
+        .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
+        .unwrap();
+
+    let parent = super::ids::InvocationId::new("parent-invocation").unwrap();
+    let trigger = TriggerId::new("trigger-a").unwrap();
+    let invocation = Invocation::new_sync(
+        fid("alpha::read"),
+        json!({"x": 1}),
+        causal()
+            .with_session_id("session-a")
+            .with_workspace_id("workspace-a")
+            .with_parent_invocation(parent.clone())
+            .with_trigger_id(trigger.clone()),
+    );
+    let result = catalog.invoke_sync(invocation).await;
+    assert!(result.error.is_none());
+
+    let missing = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::missing"),
+            json!({}),
+            causal(),
+        ))
+        .await;
+    assert!(missing.error.is_some());
+
+    let records = catalog.invocations();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].function_id.as_str(), "alpha::read");
+    assert_eq!(records[0].actor_id, actor("agent"));
+    assert_eq!(records[0].authority_grant_id, grant("grant"));
+    assert_eq!(records[0].trace_id, trace("trace"));
+    assert_eq!(records[0].parent_invocation_id, Some(parent));
+    assert_eq!(records[0].trigger_id, Some(trigger));
+    assert_eq!(records[0].delivery_mode, DeliveryMode::Sync);
+    assert_eq!(records[0].catalog_revision, catalog.revision());
+    assert_eq!(records[0].function_revision, FunctionRevision(1));
+    assert!(records[0].succeeded);
+    assert!(!records[1].succeeded);
+    assert!(matches!(
+        records[1].error,
+        Some(EngineError::NotFound {
+            kind: "function",
+            ..
+        })
+    ));
+}
+
+#[tokio::test]
+async fn idempotency_replays_or_rejects_duplicates_without_reinvoking_handler() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    catalog
+        .register_function(
+            write_function("alpha::write", "w1"),
+            Some(Arc::new(CountingHandler {
+                calls: calls.clone(),
+            })),
+            true,
+        )
+        .unwrap();
+
+    let first = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::write"),
+            json!({"x": 1}),
+            mutating_causal("same-key"),
+        ))
+        .await;
+    assert_eq!(first.value.as_ref().unwrap()["call"], 1);
+
+    let replay = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::write"),
+            json!({"x": 1}),
+            mutating_causal("same-key"),
+        ))
+        .await;
+    assert_eq!(replay.value.as_ref().unwrap()["call"], 1);
+    assert_eq!(replay.replayed_from, Some(first.invocation_id.clone()));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let conflict = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::write"),
+            json!({"x": 2}),
+            mutating_causal("same-key"),
+        ))
+        .await;
+    assert!(matches!(
+        conflict.error,
+        Some(EngineError::IdempotencyConflict { .. })
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let records = catalog.invocations();
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0].idempotency_key.as_deref(), Some("same-key"));
+    assert_eq!(records[1].replayed_from, Some(first.invocation_id));
+    assert!(!records[2].succeeded);
+}
+
+#[tokio::test]
+async fn idempotency_reject_and_noop_policies_are_enforced() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    catalog
+        .register_function(
+            write_function("alpha::reject", "w1").with_idempotency(reject_idempotency()),
+            Some(Arc::new(CountingHandler {
+                calls: calls.clone(),
+            })),
+            true,
+        )
+        .unwrap();
+    catalog
+        .register_function(
+            write_function("alpha::noop", "w1").with_idempotency(noop_idempotency()),
+            Some(Arc::new(CountingHandler {
+                calls: calls.clone(),
+            })),
+            true,
+        )
+        .unwrap();
+
+    let first_reject = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::reject"),
+            json!({"x": 1}),
+            mutating_causal("reject-key"),
+        ))
+        .await;
+    assert!(first_reject.error.is_none());
+    let duplicate_reject = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::reject"),
+            json!({"x": 1}),
+            mutating_causal("reject-key"),
+        ))
+        .await;
+    assert!(matches!(
+        duplicate_reject.error,
+        Some(EngineError::IdempotencyConflict { .. })
+    ));
+
+    let first_noop = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::noop"),
+            json!({"x": 1}),
+            mutating_causal("noop-key"),
+        ))
+        .await;
+    assert!(first_noop.error.is_none());
+    let duplicate_noop = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::noop"),
+            json!({"x": 1}),
+            mutating_causal("noop-key"),
+        ))
+        .await;
+    assert_eq!(duplicate_noop.value, Some(Value::Null));
+    assert_eq!(duplicate_noop.replayed_from, Some(first_noop.invocation_id));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn schema_validation_checks_request_and_response_payloads() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    let schema = json!({
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+            "name": {"type": "string"},
+            "count": {"type": "integer"}
+        },
+        "additionalProperties": false
+    });
+    catalog
+        .register_function(
+            read_function("alpha::schema", "w1")
+                .with_request_schema(schema)
+                .with_response_schema(json!({
+                    "type": "object",
+                    "required": ["echo"],
+                    "properties": {"echo": {"type": "object"}},
+                    "additionalProperties": true
+                })),
+            Some(handler()),
+            true,
+        )
+        .unwrap();
+
+    let missing = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::schema"),
+            json!({"count": 1}),
+            causal(),
+        ))
+        .await;
+    assert!(matches!(
+        missing.error,
+        Some(EngineError::SchemaViolation {
+            direction: "request",
+            ..
+        })
+    ));
+
+    let wrong_type = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::schema"),
+            json!({"name": "ok", "count": 1.25}),
+            causal(),
+        ))
+        .await;
+    assert!(matches!(
+        wrong_type.error,
+        Some(EngineError::SchemaViolation {
+            direction: "request",
+            ..
+        })
+    ));
+
+    let valid = catalog
+        .invoke_sync(Invocation::new_sync(
+            fid("alpha::schema"),
+            json!({"name": "ok", "count": 1}),
+            causal(),
+        ))
+        .await;
+    assert!(valid.error.is_none());
+
+    let invalid_schema = read_function("alpha::invalid_schema", "w1")
+        .with_request_schema(json!({"type": "definitely-not-json-schema"}));
+    assert!(matches!(
+        catalog.register_function(invalid_schema, Some(handler()), true),
+        Err(EngineError::InvalidSchema { .. })
+    ));
+}
+
+#[test]
+fn inspect_and_promotion_are_visibility_and_owner_checked() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    let function = FunctionDefinition::new(
+        fid("alpha::session"),
+        wid("w1"),
+        "session function",
+        VisibilityScope::Session,
+        EffectClass::PureRead,
+    )
+    .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a"));
+    catalog
+        .register_function(function, Some(handler()), true)
+        .unwrap();
+
+    let matching_session = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"))
+        .with_session_id("session-a");
+    let other_session = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"))
+        .with_session_id("session-b");
+    assert!(
+        catalog
+            .inspect_function(&fid("alpha::session"), Some(&matching_session))
+            .is_ok()
+    );
+    assert!(matches!(
+        catalog.inspect_function(&fid("alpha::session"), Some(&other_session)),
+        Err(EngineError::PolicyViolation(message)) if message.contains("not visible")
+    ));
+
+    assert!(matches!(
+        catalog.promote_function_visibility(
+            &fid("alpha::session"),
+            &wid("other"),
+            VisibilityScope::Workspace,
+            Some("workspace-a".to_owned())
+        ),
+        Err(EngineError::OwnerMismatch { .. })
+    ));
+    assert!(matches!(
+        catalog.promote_function_visibility(
+            &fid("alpha::session"),
+            &wid("w1"),
+            VisibilityScope::Session,
+            None
+        ),
+        Err(EngineError::InvalidVisibilityPromotion { .. })
+    ));
+    let revision = catalog
+        .promote_function_visibility(
+            &fid("alpha::session"),
+            &wid("w1"),
+            VisibilityScope::Workspace,
+            Some("workspace-a".to_owned()),
+        )
+        .unwrap();
+    assert_eq!(revision, FunctionRevision(2));
+    let promoted = catalog.function(&fid("alpha::session")).unwrap();
+    assert_eq!(promoted.visibility, VisibilityScope::Workspace);
+    assert_eq!(
+        promoted.provenance.workspace_id.as_deref(),
+        Some("workspace-a")
+    );
+    assert!(promoted.provenance.session_id.is_none());
+    assert_eq!(
+        catalog.changes().last().unwrap().kind,
+        CatalogChangeKind::VisibilityChanged
+    );
+
+    let workspace_actor = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"))
+        .with_workspace_id("workspace-a");
+    assert!(
+        catalog
+            .inspect_function(&fid("alpha::session"), Some(&workspace_actor))
+            .is_ok()
+    );
+    assert!(catalog.inspect_worker(&wid("w1")).is_ok());
+}
+
+#[test]
+fn unregister_function_removes_targeting_triggers_and_revisions_remain_monotonic() {
+    let mut catalog = LiveCatalog::new();
+    catalog
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    catalog
+        .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
+        .unwrap();
+    catalog
+        .register_trigger_type(
+            TriggerTypeDefinition::new(TriggerTypeId::new("cron").unwrap(), wid("w1"), "cron"),
+            true,
+        )
+        .unwrap();
+    catalog
+        .register_trigger(
+            TriggerDefinition::new(
+                TriggerId::new("t1").unwrap(),
+                wid("w1"),
+                TriggerTypeId::new("cron").unwrap(),
+                fid("alpha::read"),
+                grant("grant"),
+            ),
+            true,
+        )
+        .unwrap();
+    let before = catalog.revision();
+
+    catalog
+        .unregister_function(&fid("alpha::read"), &wid("w1"))
+        .unwrap();
+
+    assert!(catalog.function(&fid("alpha::read")).is_none());
+    assert!(
+        catalog
+            .inspect_trigger(&TriggerId::new("t1").unwrap())
+            .is_err()
+    );
+    assert_eq!(catalog.revision().0, before.0 + 2);
+    assert_eq!(
+        catalog.changes()[catalog.changes().len() - 2].kind,
+        CatalogChangeKind::TriggerUnregistered
+    );
+    assert_eq!(
+        catalog.changes().last().unwrap().kind,
+        CatalogChangeKind::FunctionUnregistered
+    );
+}
+
+#[tokio::test]
 async fn invocation_returns_structured_errors() {
     let mut catalog = LiveCatalog::new();
     catalog
@@ -628,7 +1058,7 @@ async fn invocation_enforces_authority_health_and_idempotency_key() {
         .invoke_sync(Invocation::new_sync(
             fid("alpha::write"),
             json!({}),
-            causal().with_scope("write").with_idempotency_key("write-1"),
+            mutating_causal("write-1").with_scope("write"),
         ))
         .await;
     assert!(ok.error.is_none());
@@ -646,7 +1076,7 @@ async fn invocation_enforces_authority_health_and_idempotency_key() {
         .invoke_sync(Invocation::new_sync(
             fid("alpha::write"),
             json!({}),
-            causal().with_scope("write").with_idempotency_key("write-2"),
+            mutating_causal("write-2").with_scope("write"),
         ))
         .await;
     assert!(matches!(

@@ -161,7 +161,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `llm` | LLM abstraction + model registry | `Provider` trait, `ProviderFactory`, `ProviderStreamOptions` |
 | `mcp` | Model Context Protocol integration | MCP client/server types |
 | `tools` | Tool implementations | `TronTool` trait, `ToolRegistry`, per-tool structs |
-| `engine` | Live capability catalog foundation | `LiveCatalog`, `FunctionDefinition`, `WorkerDefinition`, `Invocation` |
+| `engine` | Live capability catalog foundation | `LiveCatalog`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord` |
 | `cron` | Automation scheduler | Cron job runner, schedule parser |
 | `prompt_library` | Prompt history + snippets (SQLite-backed) | `store::record_prompt`, `store::list_history`, `Snippet` |
 | `worktree` | Git worktree isolation | Worktree create/cleanup helpers |
