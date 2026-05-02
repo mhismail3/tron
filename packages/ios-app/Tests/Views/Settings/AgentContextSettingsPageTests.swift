@@ -24,7 +24,35 @@ struct AgentContextSettingsPageTests {
         #expect(ServerSettingsCategory.context.icon == "gauge.with.dots.needle.67percent")
         #expect(ServerSettingsCategory.context.subtitle == "Compaction, memory retention, skills, and rules")
         #expect(ServerSettingsCategory.mcpServers.title == "MCP")
-        #expect(MainSettingsListLayout.categorySpacing == 8)
+        #expect(MainSettingsGridDestination.surfaceRow == [
+            .server,
+            .app,
+            .providers,
+        ])
+        #expect(MainSettingsGridDestination.surfaceRow.map(\.title) == [
+            "Server",
+            "App",
+            "Providers",
+        ])
+        #expect(MainSettingsGridDestination.behaviorRow == [
+            .agent,
+            .context,
+            .mcpServers,
+        ])
+        #expect(MainSettingsGridDestination.behaviorRow.map(\.title) == [
+            "Agent",
+            "Context",
+            "MCP",
+        ])
+        #expect(MainSettingsGridLayout.columnCount == 3)
+        #expect(MainSettingsGridLayout.columnSpacing == 8)
+        #expect(MainSettingsGridLayout.rowSpacing == 8)
+        #expect(MainSettingsGridLayout.destinationTileMinHeight == 98)
+        #expect(MainSettingsGridLayout.dangerTileMinHeight == 78)
+        #expect(MainSettingsGridLayout.iconSize == TronTypography.sizeXL)
+        #expect(MainSettingsGridLayout.iconFrameSize == 24)
+        #expect(MainSettingsGridLayout.destinationTitleSize == TronTypography.sizeLargeTitle)
+        #expect(MainSettingsGridLayout.dangerTitleSize == TronTypography.sizeBody3)
         #expect(MainSettingsFooterLayout.horizontalPadding == 20)
         #expect(MainSettingsFooterLayout.textLeadingPadding == 8)
         #expect(MainSettingsFooterLayout.topPadding == 10)
@@ -105,8 +133,8 @@ struct AgentContextSettingsPageTests {
         #expect(ContextCompactionSetting.allCases.map(\.description).allSatisfy { !$0.isEmpty })
     }
 
-    @Test("main settings danger zone puts clear prompt history first")
-    func mainSettingsDangerZonePutsClearPromptHistoryFirst() {
+    @Test("main settings danger row puts clear prompt history first")
+    func mainSettingsDangerRowPutsClearPromptHistoryFirst() {
         #expect(SettingsDangerZoneAction.order == [
             .clearPromptHistory,
             .archiveAllSessions,

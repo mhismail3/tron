@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-02 (new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-05-02 (new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, onboarding handoff, and foreground connection recovery)
 
 ## Overview
 
@@ -270,30 +270,36 @@ visible.
 | Reusable component | `Views/Components/` |
 
 Settings pages live under `Views/Settings/Pages/` and are launched from the
-main `SettingsView` by `ServerSettingsCategory`. Server-backed settings are
-grouped by behavior owner: Servers covers pairing/security/transcription/updates,
-Providers covers auth credentials, Agent covers execution lifecycle including
-hooks, prompt-history capture/retention, queued-message delivery, and protected
-branches, Context covers compaction/memory/skills/rules, and MCP covers external
-tools. Low-level hook `add_context` budgeting stays an internal server fuse,
-not an end-user Agent setting. Source-control action sheets expose merge, push,
-branch, and upstream choices at the moment of action rather than through a
-separate source-control settings destination. Destructive cross-cutting actions
-such as clearing prompt history stay in the main Settings Danger Zone. The main
-settings sheet keeps its container, sheet presenters, lifecycle hooks, and alert
-presenters in separate computed view sections so SwiftUI's type checker remains
-stable under Xcode 26 while the UI stays declarative. Sheets that summarize
-server-backed behavior start with `SettingsInfoCard` and derive the mostly-static
-title plus dynamic description through small helpers in `SettingsSupport.swift`
-so copy and grouping rules are covered by focused tests. Main-sheet icon strings
-live in the same support file, and server-backed
-destination summary cards reuse their `ServerSettingsCategory` icons so the
-launcher row and destination stay visually aligned. The main settings feedback
-footer is pinned with a bottom safe-area inset rather than placed inside the
-scroll content, so app/version copy and the diagnostics action remain reachable
-while the cards scroll independently. The feedback button lets native
-interactive glass own the pressed border, matching chips and avoiding a nested
-manual stroke.
+main `SettingsView` grid. The root sheet supports medium and large detents and
+starts at medium on iPhone. Its first grid row launches the surface-oriented
+settings: Server, App, and Providers. Its second row launches agent-behavior
+settings: Agent, Context, and MCP. The third row holds the destructive actions
+without a separate Danger Zone header, while keeping those tiles error-red. All
+main-grid icons use the larger settings tile size; the surface and behavior
+tiles use taller containers with larger bold emerald labels, while the
+destructive row uses shorter containers and keeps its compact red label style.
+Server-backed settings are grouped by behavior owner: Servers covers
+pairing/security/transcription/updates, Providers covers auth credentials, Agent
+covers execution lifecycle including hooks, prompt-history capture/retention,
+queued-message delivery, and protected branches, Context covers
+compaction/memory/skills/rules, and MCP covers external tools. Low-level hook
+`add_context` budgeting stays an internal server fuse, not an end-user Agent
+setting. Source-control action sheets expose merge, push, branch, and upstream
+choices at the moment of action rather than through a separate source-control
+settings destination. The main settings sheet keeps its container, sheet
+presenters, lifecycle hooks, and alert presenters in separate computed view
+sections so SwiftUI's type checker remains stable under Xcode 26 while the UI
+stays declarative. Sheets that summarize server-backed behavior start with
+`SettingsInfoCard` and derive the mostly-static title plus dynamic description
+through small helpers in `SettingsSupport.swift` so copy and grouping rules are
+covered by focused tests. Main-sheet icon strings live in the same support file,
+and server-backed destination summary cards reuse their `ServerSettingsCategory`
+icons so the launcher tile and destination stay visually aligned. The main
+settings feedback footer is pinned with a bottom safe-area inset rather than
+placed inside the scroll content, so app/version copy and the diagnostics action
+remain reachable while the cards scroll independently. The feedback button lets
+native interactive glass own the pressed border, matching chips and avoiding a
+nested manual stroke.
 When the active paired server cannot be reached, Settings keeps local paired
 server management visible but hides server-backed controls until the connection
 returns and settings reload. The Servers sheet turns its top summary card

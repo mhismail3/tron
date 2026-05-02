@@ -89,7 +89,7 @@ struct SettingsView: View {
 
     private var settingsView: some View {
         settingsWithAlerts
-            .adaptivePresentationDetents([.large])
+            .adaptivePresentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
             .tint(.tronEmerald)
     }
@@ -106,8 +106,6 @@ struct SettingsView: View {
         } content: {
             mainSettingsSection
                 .cardEntrance(visible: cardsVisible, index: 0)
-            dangerZoneCard
-                .cardEntrance(visible: cardsVisible, index: 1)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             pinnedFooterView
@@ -252,69 +250,96 @@ struct SettingsView: View {
     // MARK: - Main Sections
 
     private var mainSettingsSection: some View {
-        VStack(alignment: .leading, spacing: MainSettingsListLayout.categorySpacing) {
-            serverSettingsSection
-            appSettingsSection
-        }
-    }
-
-    private var appSettingsSection: some View {
-        VStack(alignment: .leading, spacing: MainSettingsListLayout.categorySpacing) {
-            SettingsCard(accent: MainSettingsLocalCategoryStyle.accent, interactive: true) {
-                categoryRow(
-                    icon: MainSettingsLocalCategoryStyle.appIcon,
-                    label: "App",
-                    subtitle: "Appearance, notifications, and local behavior",
-                    accent: MainSettingsLocalCategoryStyle.accent
-                ) {
-                    activePage = .app
+        VStack(alignment: .leading, spacing: MainSettingsGridLayout.rowSpacing) {
+            LazyVGrid(columns: mainSettingsGridColumns, spacing: MainSettingsGridLayout.rowSpacing) {
+                ForEach(MainSettingsGridDestination.surfaceRow, id: \.self) { destination in
+                    mainSettingsDestinationTile(destination)
                 }
+
+                ForEach(MainSettingsGridDestination.behaviorRow, id: \.self) { destination in
+                    mainSettingsDestinationTile(destination)
+                }
+
+                ForEach(SettingsDangerZoneAction.order, id: \.self) { action in
+                    dangerActionTile(action)
+                }
+            }
+
+            if hasPairedServers && !serverSettingsReady {
+                serverUnavailableCard
             }
         }
     }
 
-    private var serverSettingsSection: some View {
-        VStack(alignment: .leading, spacing: MainSettingsListLayout.categorySpacing) {
-            if !hasPairedServers {
-                noServerCard
-            } else {
-                if serverSettingsReady {
-                    serverSettingsCategories
-                } else {
-                    serverManagementCard
-                    serverUnavailableCard
-                }
-            }
-        }
+    private var mainSettingsGridColumns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: MainSettingsGridLayout.columnSpacing),
+            count: MainSettingsGridLayout.columnCount
+        )
     }
 
-    private var noServerCard: some View {
-        SettingsCard(interactive: true) {
-            Button(action: { startOnboarding() }) {
-                HStack(spacing: 10) {
-                    Image(systemName: "plus.circle")
-                        .font(TronTypography.sans(size: TronTypography.sizeXL))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 22)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(SettingsLabels.connectToNewServer)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronTextPrimary)
-                        Text("Pair this iPhone with a Mac before editing server settings.")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    private func mainSettingsDestinationTile(_ destination: MainSettingsGridDestination) -> some View {
+        let enabled = isMainSettingsDestinationEnabled(destination)
+        return SettingsCard(
+            accent: mainSettingsDestinationAccent(destination),
+            interactive: enabled
+        ) {
+            Button {
+                openMainSettingsDestination(destination)
+            } label: {
+                mainSettingsTileContent(
+                    icon: destination.icon,
+                    title: destination.title,
+                    accent: mainSettingsDestinationAccent(destination),
+                    labelColor: mainSettingsDestinationAccent(destination),
+                    minHeight: MainSettingsGridLayout.destinationTileMinHeight,
+                    titleSize: MainSettingsGridLayout.destinationTitleSize,
+                    titleWeight: .bold
+                )
             }
             .buttonStyle(.plain)
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.4)
+            .accessibilityHint(destination.accessibilityHint)
+        }
+    }
+
+    private func isMainSettingsDestinationEnabled(_ destination: MainSettingsGridDestination) -> Bool {
+        switch destination {
+        case .server, .app:
+            return true
+        case .providers, .agent, .context, .mcpServers:
+            return serverSettingsReady
+        }
+    }
+
+    private func mainSettingsDestinationAccent(_ destination: MainSettingsGridDestination) -> Color {
+        switch destination {
+        case .app:
+            return MainSettingsLocalCategoryStyle.accent
+        default:
+            return .tronEmerald
+        }
+    }
+
+    private func openMainSettingsDestination(_ destination: MainSettingsGridDestination) {
+        switch destination {
+        case .server:
+            if hasPairedServers {
+                activePage = .server
+            } else {
+                startOnboarding()
+            }
+        case .app:
+            activePage = .app
+        case .providers:
+            activePage = .providers
+        case .agent:
+            activePage = .agent
+        case .context:
+            activePage = .context
+        case .mcpServers:
+            activePage = .mcpServers
         }
     }
 
@@ -353,184 +378,111 @@ struct SettingsView: View {
                     .buttonStyle(.bordered)
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                .padding(.leading, MainSettingsListLayout.unavailableActionLeadingPadding)
+                .padding(.leading, MainSettingsGridLayout.unavailableActionLeadingPadding)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
         }
     }
 
-    private var serverSettingsCategories: some View {
-        VStack(spacing: MainSettingsListLayout.categorySpacing) {
-            if let error = settingsState.loadError {
-                SettingsCard(accent: .tronError) {
-                    Text(error)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronError)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 12)
-                }
+    private func dangerActionTile(_ action: SettingsDangerZoneAction) -> some View {
+        let enabled = isDangerActionEnabled(action)
+        return SettingsCard(accent: .tronError, interactive: enabled) {
+            Button {
+                performDangerAction(action)
+            } label: {
+                mainSettingsTileContent(
+                    icon: action.icon,
+                    title: action.title,
+                    accent: .tronError,
+                    labelColor: .tronError,
+                    minHeight: MainSettingsGridLayout.dangerTileMinHeight,
+                    titleSize: MainSettingsGridLayout.dangerTitleSize,
+                    titleWeight: .medium,
+                    showsProgress: isDangerActionInProgress(action)
+                )
             }
-
-            serverManagementCard
-
-            ForEach(ServerSettingsCategory.serverBackedOrder.filter { $0 != .server }, id: \.self) { category in
-                SettingsCard(interactive: true) {
-                    categoryRow(icon: category.icon, label: category.title, subtitle: category.subtitle) {
-                        activePage = settingsPage(for: category)
-                    }
-                }
-            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.4)
         }
     }
 
-    private var serverManagementCard: some View {
-        SettingsCard(interactive: true) {
-            categoryRow(
-                icon: ServerSettingsCategory.server.icon,
-                label: ServerSettingsCategory.server.title,
-                subtitle: ServerSettingsCategory.server.subtitle
-            ) {
-                activePage = .server
-            }
+    private func isDangerActionEnabled(_ action: SettingsDangerZoneAction) -> Bool {
+        switch action {
+        case .clearPromptHistory:
+            return serverSettingsReady && !isClearingPromptHistory
+        case .archiveAllSessions:
+            return !eventStoreManager.sessions.isEmpty && !isArchivingAll
+        case .resetAllSettings:
+            return true
         }
     }
 
-    private func settingsPage(for category: ServerSettingsCategory) -> SettingsPage {
-        switch category {
-        case .server:
-            return .server
-        case .providers:
-            return .providers
-        case .agent:
-            return .agent
-        case .context:
-            return .context
-        case .mcpServers:
-            return .mcpServers
+    private func isDangerActionInProgress(_ action: SettingsDangerZoneAction) -> Bool {
+        switch action {
+        case .clearPromptHistory:
+            return isClearingPromptHistory
+        case .archiveAllSessions:
+            return isArchivingAll
+        case .resetAllSettings:
+            return false
         }
     }
 
-    private func categoryRow(
+    private func performDangerAction(_ action: SettingsDangerZoneAction) {
+        switch action {
+        case .clearPromptHistory:
+            showClearPromptHistoryConfirmation = true
+        case .archiveAllSessions:
+            showArchiveAllConfirmation = true
+        case .resetAllSettings:
+            showingResetAlert = true
+        }
+    }
+
+    private func mainSettingsTileContent(
         icon: String,
-        label: String,
-        subtitle: String,
-        accent: Color = .tronEmerald,
-        action: @escaping () -> Void
+        title: String,
+        accent: Color,
+        labelColor: Color = .tronTextPrimary,
+        minHeight: CGFloat,
+        titleSize: CGFloat = MainSettingsGridLayout.dangerTitleSize,
+        titleWeight: Font.Weight = .medium,
+        showsProgress: Bool = false
     ) -> some View {
-        Button(action: action) {
-            HStack(alignment: .center, spacing: 10) {
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .font(TronTypography.sans(size: MainSettingsGridLayout.iconSize))
                     .foregroundStyle(accent)
-                    .frame(width: 18)
+                    .frame(
+                        width: MainSettingsGridLayout.iconFrameSize,
+                        height: MainSettingsGridLayout.iconFrameSize,
+                        alignment: .leading
+                    )
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(label)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(subtitle)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Spacer(minLength: 4)
 
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.tronTextMuted)
+                Text(title)
+                    .font(TronTypography.sans(size: titleSize, weight: titleWeight))
+                    .foregroundStyle(labelColor)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
 
-    // MARK: - Danger Zone Card
-
-    private var dangerZoneCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Danger Zone", color: .tronError)
-
-            VStack(spacing: 8) {
-                SettingsCard(accent: .tronError, interactive: true) {
-                    Button {
-                        showClearPromptHistoryConfirmation = true
-                    } label: {
-                        HStack {
-                            Image(systemName: SettingsDangerZoneAction.clearPromptHistory.icon)
-                                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                .foregroundStyle(.tronError)
-                                .frame(width: 18)
-                            Text(SettingsDangerZoneAction.clearPromptHistory.title)
-                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                                .foregroundStyle(.tronError)
-                            Spacer()
-                            if isClearingPromptHistory {
-                                ProgressView()
-                                    .tint(.tronError)
-                                    .scaleEffect(0.7)
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 12)
-                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!serverSettingsReady || isClearingPromptHistory)
-                    .opacity(!serverSettingsReady || isClearingPromptHistory ? 0.4 : 1)
-                }
-
-                SettingsCard(accent: .tronError, interactive: true) {
-                    Button {
-                        showArchiveAllConfirmation = true
-                    } label: {
-                        HStack {
-                            Image(systemName: SettingsDangerZoneAction.archiveAllSessions.icon)
-                                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                .foregroundStyle(.tronError)
-                                .frame(width: 18)
-                            Text(SettingsDangerZoneAction.archiveAllSessions.title)
-                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                                .foregroundStyle(.tronError)
-                            Spacer()
-                            if isArchivingAll {
-                                ProgressView()
-                                    .tint(.tronError)
-                                    .scaleEffect(0.7)
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 12)
-                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(eventStoreManager.sessions.isEmpty || isArchivingAll)
-                    .opacity(eventStoreManager.sessions.isEmpty || isArchivingAll ? 0.4 : 1)
-                }
-
-                SettingsCard(accent: .tronError, interactive: true) {
-                    Button {
-                        showingResetAlert = true
-                    } label: {
-                        SettingsRow(
-                            icon: SettingsDangerZoneAction.resetAllSettings.icon,
-                            label: SettingsDangerZoneAction.resetAllSettings.title,
-                            accentColor: .tronError,
-                            labelColor: .tronError
-                        ) {
-                            EmptyView()
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
+            if showsProgress {
+                ProgressView()
+                    .tint(accent)
+                    .scaleEffect(0.7)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var pinnedFooterView: some View {
@@ -538,7 +490,7 @@ struct SettingsView: View {
             .padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)
             .padding(.top, MainSettingsFooterLayout.topPadding)
             .padding(.bottom, MainSettingsFooterLayout.bottomPadding)
-            .cardEntrance(visible: cardsVisible, index: 2)
+            .cardEntrance(visible: cardsVisible, index: 1)
     }
 
     private var footerView: some View {

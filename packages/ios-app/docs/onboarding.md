@@ -195,12 +195,18 @@ Provider credentials are written through `auth.*` RPCs, so secrets land
 in `auth.json`, not `settings.json`.
 
 Server settings and app settings are intentionally separate. Settings backed
-by `~/.tron/system/settings.json` live in the server-backed settings rows and
-are shown only after the active server connects and `settings.get` returns real
-values. Device-only preferences such as onboarding completion, paired servers,
-active server id, appearance, dashboard presentation, and bearer tokens live in
-iOS `UserDefaults`/Keychain; App and Feedback use cyan-tinted cards in the main
-sheet. When the user switches Macs, the app
+by `~/.tron/system/settings.json` live behind the server-backed settings grid
+tiles and are enabled only after the active server connects and `settings.get`
+returns real values. The main Settings sheet starts at the medium detent and
+uses a 3x3 launcher grid: Server, App, and Providers for settings surfaces;
+Agent, Context, and MCP for agent behavior; then Clear Prompt History, Archive
+All Sessions, and Reset All Settings as the red destructive row with no separate
+Danger Zone header. All nine tiles use larger icons; the green surface and
+behavior tiles are slightly taller with larger bold emerald labels, while the
+destructive row is slightly shorter and keeps compact red label styling.
+Device-only preferences such as onboarding completion,
+paired servers, active server id, appearance, dashboard presentation, and bearer
+tokens live in iOS `UserDefaults`/Keychain. When the user switches Macs, the app
 clears server-backed controls immediately and reloads them from the newly active
 Mac.
 The Servers sheet starts with a dynamic summary card, then groups settings as:
@@ -243,8 +249,8 @@ context-management behavior: individual compaction controls, memory
 auto-retain, retain model, and standalone rule discovery. Hooks and Prompt
 Library no longer appear as separate Settings destinations; their
 non-destructive controls live inside Agent. Clearing prompt history is a
-destructive server action and therefore lives in the main Settings Danger Zone
-above Archive All Sessions and Reset All Settings.
+destructive server action and therefore lives in the main Settings destructive
+grid row before Archive All Sessions and Reset All Settings.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system.ping`. The server emits a

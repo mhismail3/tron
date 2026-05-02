@@ -80,9 +80,81 @@ enum MainSettingsLocalCategoryStyle {
     static let appIcon = "paintbrush"
 }
 
-enum MainSettingsListLayout {
-    static let categorySpacing: CGFloat = 8
+enum MainSettingsGridLayout {
+    static let columnCount = 3
+    static let columnSpacing: CGFloat = 8
+    static let rowSpacing: CGFloat = 8
+    static let destinationTileMinHeight: CGFloat = 98
+    static let dangerTileMinHeight: CGFloat = 78
+    static let iconSize: CGFloat = TronTypography.sizeXL
+    static let iconFrameSize: CGFloat = 24
+    static let destinationTitleSize: CGFloat = TronTypography.sizeLargeTitle
+    static let dangerTitleSize: CGFloat = TronTypography.sizeBody3
     static let unavailableActionLeadingPadding: CGFloat = 28
+}
+
+enum MainSettingsGridDestination: Hashable, Sendable {
+    case server
+    case app
+    case providers
+    case agent
+    case context
+    case mcpServers
+
+    static let surfaceRow: [Self] = [
+        .server,
+        .app,
+        .providers,
+    ]
+
+    static let behaviorRow: [Self] = [
+        .agent,
+        .context,
+        .mcpServers,
+    ]
+
+    var icon: String {
+        switch self {
+        case .server:
+            return ServerSettingsCategory.server.icon
+        case .app:
+            return MainSettingsLocalCategoryStyle.appIcon
+        case .providers:
+            return ServerSettingsCategory.providers.icon
+        case .agent:
+            return ServerSettingsCategory.agent.icon
+        case .context:
+            return ServerSettingsCategory.context.icon
+        case .mcpServers:
+            return ServerSettingsCategory.mcpServers.icon
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .server:
+            return "Server"
+        case .app:
+            return "App"
+        case .providers:
+            return ServerSettingsCategory.providers.title
+        case .agent:
+            return ServerSettingsCategory.agent.title
+        case .context:
+            return ServerSettingsCategory.context.title
+        case .mcpServers:
+            return ServerSettingsCategory.mcpServers.title
+        }
+    }
+
+    var accessibilityHint: String {
+        switch self {
+        case .server, .app, .providers:
+            return "Configure settings for app surfaces."
+        case .agent, .context, .mcpServers:
+            return "Configure settings for agent behavior."
+        }
+    }
 }
 
 enum MainSettingsFooterLayout {
