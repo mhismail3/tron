@@ -57,6 +57,44 @@ struct ConnectionManagerTests {
         #expect(await fired.wasFulfilled)
     }
 
+    @Test("runOnReconnect can wait for the next connected transition")
+    func hookCanWaitForFutureReconnectWhenAlreadyConnected() async {
+        let (manager, provider) = makeSUT(initialState: .connected)
+        let fired = ManualExpectation()
+
+        manager.runOnReconnect(label: "x", fireIfAlreadyConnected: false) {
+            await fired.fulfill()
+        }
+
+        await waitForStateSync()
+        #expect(await fired.wasFulfilled == false)
+
+        provider.connectionState = .reconnecting(attempt: 1, nextRetrySeconds: 1)
+        await waitForStateSync()
+        #expect(await fired.wasFulfilled == false)
+
+        provider.connectionState = .connected
+        await fired.waitForFulfillment(timeout: .seconds(1))
+        #expect(await fired.wasFulfilled)
+    }
+
+    @Test("future reconnect hook fires if a reconnect edge collapses before sampling")
+    func hookFiresAfterRapidReconnectEdge() async {
+        let (manager, provider) = makeSUT(initialState: .connected)
+        let fired = ManualExpectation()
+
+        manager.runOnReconnect(label: "x", fireIfAlreadyConnected: false) {
+            await fired.fulfill()
+        }
+
+        await waitForStateSync()
+        provider.connectionState = .reconnecting(attempt: 1, nextRetrySeconds: 0)
+        provider.connectionState = .connected
+
+        await fired.waitForFulfillment(timeout: .seconds(1))
+        #expect(await fired.wasFulfilled)
+    }
+
     @Test("runOnReconnect holds hook while disconnected, fires on .connected")
     func hookHeldUntilConnected() async {
         let (manager, provider) = makeSUT(initialState: .disconnected)
@@ -98,7 +136,7 @@ struct ConnectionManagerTests {
         let (manager, provider) = makeSUT(initialState: .disconnected)
         let counter = Counter()
 
-        manager.runOnReconnect(label: "x") { await counter.increment() }
+        manager.runOnReconnect(label: "x") { counter.increment() }
 
         // Disconnect → connect cycle 1
         provider.connectionState = .connected
@@ -112,7 +150,7 @@ struct ConnectionManagerTests {
         await waitForStateSync()
         try? await Task.sleep(for: .milliseconds(50))
 
-        #expect(await counter.value == 1)
+        #expect(counter.value == 1)
     }
 
     @Test("multiple different-label hooks all fire on reconnect")
@@ -249,38 +287,17 @@ final class Counter {
 /// Mirror of AsyncExpectation but reused here to avoid cross-suite conflicts.
 actor ManualExpectation {
     private var fulfilled = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
 
     var wasFulfilled: Bool { fulfilled }
 
     func fulfill() {
         fulfilled = true
-        let toResume = waiters
-        waiters.removeAll()
-        for continuation in toResume { continuation.resume() }
     }
 
     func waitForFulfillment(timeout: Duration) async {
-        if fulfilled { return }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { [self] in
-                await withCheckedContinuation { continuation in
-                    Task { await self.register(continuation) }
-                }
-            }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-            }
-            await group.next()
-            group.cancelAll()
-        }
-    }
-
-    private func register(_ continuation: CheckedContinuation<Void, Never>) {
-        if fulfilled {
-            continuation.resume()
-        } else {
-            waiters.append(continuation)
+        let deadline = ContinuousClock.now + timeout
+        while !fulfilled, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
         }
     }
 }

@@ -148,27 +148,15 @@ final class ErrorHandler {
     /// Classify an error into a dedup key for toast suppression. Connection-class errors
     /// all collapse to a single key so storms don't flood the banner stack.
     static func classifyDedupKey(for error: Error) -> String? {
-        if let ws = error as? WebSocketError {
-            switch ws {
-            case .notConnected, .timeout, .connectionFailed:
-                return "connection.transient"
-            case .invalidResponse, .encodingError, .decodingError:
-                return nil
-            case .unauthorized:
-                // Re-pair is a single, distinct CTA — keep it on its own
-                // key so the toast doesn't collapse into the transient
-                // connection bucket and lose its specific copy.
-                return "connection.unauthorized"
-            }
+        if case .unauthorized = error as? WebSocketError {
+            // Re-pair is a single, distinct CTA — keep it on its own key so the toast doesn't
+            // collapse into the transient connection bucket and lose its specific copy.
+            return "connection.unauthorized"
         }
-        if let rpc = error as? RPCClientError {
-            switch rpc {
-            case .connectionNotEstablished, .noActiveSession:
-                return "connection.transient"
-            case .invalidURL:
-                return nil
-            }
+        if ConnectionErrorClassifier.isTransientTransport(error) {
+            return ConnectionErrorClassifier.transientDedupKey
         }
+
         return nil
     }
 

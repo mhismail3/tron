@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-01 (new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings revamp, local paired servers, server-owned settings, provider status cards, and onboarding handoff)
+> Last verified: 2026-05-01 (new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings revamp, local paired servers, server-owned settings, provider status cards, onboarding handoff, and foreground connection recovery)
 
 ## Overview
 
@@ -207,6 +207,25 @@ dependencies.eventStoreManager
 |------|--------------|
 | Persistent | Never (eventDatabase, pushNotificationService) |
 | Connection-based | Server change (rpcClient, skillStore) |
+
+Foreground/background connection handling is owned by `TronMobileApp` and the
+network services rather than by individual views. SwiftUI `scenePhase` changes
+call `DependencyContainer.setBackgroundState(_:)`, which pauses WebSocket
+heartbeats while inactive and resets paused reconnect attempts to `.disconnected`
+so the next foreground transition can kick a fresh retry. On foreground return,
+the app requests a session-list refresh, verifies any apparently connected
+socket with URLSession's native WebSocket ping, and manually retries only when
+the connection state machine says retrying is appropriate.
+
+`SessionRefreshService` is the gatekeeper for `session.list` refreshes. It
+debounces foreground refreshes, re-checks connectivity after the debounce, and
+registers a single reconnect hook through `ConnectionManager` when refresh work
+finds the socket offline or reconnecting. Native URLSession/POSIX transport
+errors such as `NSURLErrorNetworkConnectionLost` or `ECONNABORTED` are
+classified by `ConnectionErrorClassifier` and deferred to the reconnect flow
+instead of being shown as session-refresh error banners. Non-transport
+application errors still flow through `ErrorHandler` so real failures remain
+visible.
 
 ## File Placement Guidelines
 

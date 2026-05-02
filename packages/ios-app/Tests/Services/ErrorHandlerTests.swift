@@ -1,4 +1,5 @@
 import Testing
+import Darwin
 import Foundation
 
 @testable import TronMobile
@@ -70,6 +71,27 @@ struct ErrorHandlerTests {
         let (handler, toast) = makeSUT()
         handler.handle(RPCClientError.connectionNotEstablished, context: "x")
         handler.handle(RPCClientError.connectionNotEstablished, context: "y")
+        #expect(toast.toasts.count == 1)
+        #expect(toast.toasts[0].dedupKey == "connection.transient")
+    }
+
+    @Test("handle maps native socket aborts to connection.transient")
+    func nativeSocketAbortDedupKey() {
+        let (handler, toast) = makeSUT()
+        let abort = NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(ECONNABORTED),
+            userInfo: [NSLocalizedDescriptionKey: "Software caused connection abort"]
+        )
+        let lost = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorNetworkConnectionLost,
+            userInfo: nil
+        )
+
+        handler.handle(abort, context: "Session refresh")
+        handler.handle(lost, context: "Session refresh")
+
         #expect(toast.toasts.count == 1)
         #expect(toast.toasts[0].dedupKey == "connection.transient")
     }
@@ -213,5 +235,16 @@ struct ErrorHandlerTests {
         #expect(ErrorHandler.classifyDedupKey(for: RPCClientError.connectionNotEstablished) == "connection.transient")
         #expect(ErrorHandler.classifyDedupKey(for: RPCClientError.noActiveSession) == "connection.transient")
         #expect(ErrorHandler.classifyDedupKey(for: RPCClientError.invalidURL) == nil)
+    }
+
+    @Test("classifyDedupKey handles native transient transport errors")
+    func classifyDedupKeyNativeTransport() {
+        let abort = NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(ECONNABORTED),
+            userInfo: nil
+        )
+
+        #expect(ErrorHandler.classifyDedupKey(for: abort) == "connection.transient")
     }
 }

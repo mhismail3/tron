@@ -11,7 +11,9 @@ import Foundation
 /// - **any non-connected state** → register a hook with `ConnectionManager` under label
 ///   `"session-refresh"`. Repeated requests replace the hook (coalesce by label).
 /// - **`.foreground` reason** carries a short debounce (default 1s) so rapid Control Center /
-///   notification-center swipes during foreground return don't each trigger an RPC.
+///   notification-center swipes during foreground return don't each trigger an RPC. The
+///   connection is re-checked after the debounce because foregrounding may discover a stale
+///   socket and start a reconnect while the debounce is sleeping.
 @MainActor
 final class SessionRefreshService {
 
@@ -90,14 +92,28 @@ final class SessionRefreshService {
         startOrCoalesce()
     }
 
+    /// Defer a failed refresh until a future connected transition.
+    ///
+    /// Used when an RPC began while the transport looked connected but URLSession reported
+    /// native socket churn (for example `ECONNABORTED` during foreground return). Waiting for
+    /// a future reconnect edge avoids immediately retrying against the same stale socket.
+    func deferUntilReconnect() {
+        foregroundDebounceTask?.cancel()
+        foregroundDebounceTask = nil
+        registerReconnectHook(fireIfAlreadyConnected: false)
+    }
+
     // MARK: - Internals
 
-    private func registerReconnectHook() {
+    private func registerReconnectHook(fireIfAlreadyConnected: Bool = true) {
         guard let manager = connectionManager else {
             // No manager attached — nothing else we can do; caller will try again next time.
             return
         }
-        manager.runOnReconnect(label: Self.hookLabel) { [weak self] in
+        manager.runOnReconnect(
+            label: Self.hookLabel,
+            fireIfAlreadyConnected: fireIfAlreadyConnected
+        ) { [weak self] in
             guard let self else { return }
             self.startOrCoalesce()
         }
@@ -112,6 +128,10 @@ final class SessionRefreshService {
                 return
             }
             guard !Task.isCancelled, let self else { return }
+            guard self.isConnectedCheck() else {
+                self.registerReconnectHook()
+                return
+            }
             self.startOrCoalesce()
         }
     }

@@ -414,6 +414,10 @@ final class WebSocketService {
             logger.verbose("Message sent successfully for \(method) id=\(requestId)", category: .websocket)
         } catch {
             logger.error("Failed to send message for \(method): \(error.localizedDescription)", category: .websocket)
+            if ConnectionErrorClassifier.requiresConnectionRecovery(error) {
+                await handleSendTransportFailure(error, method: method)
+                throw WebSocketError.connectionFailed(error.localizedDescription)
+            }
             throw error
         }
 
@@ -468,6 +472,12 @@ final class WebSocketService {
     }
 
     // MARK: - Receive Loop
+
+    private func handleSendTransportFailure(_ error: Error, method: String) async {
+        guard isConnectedFlag else { return }
+        logger.warning("Send failure indicates connection loss for \(method): \(error.localizedDescription)", category: .websocket)
+        await handleDisconnect()
+    }
 
     private func receiveLoop() async {
         logger.verbose("Receive loop running...", category: .websocket)

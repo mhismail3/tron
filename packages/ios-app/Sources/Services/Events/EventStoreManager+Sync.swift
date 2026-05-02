@@ -50,14 +50,22 @@ extension EventStoreManager {
             loadSessions()
             seedProcessingStateFromSessions()
             logger.info("Session list refreshed: \(self.sessions.count) sessions", category: .session)
-        } catch let error as WebSocketError where error == .notConnected || error == .timeout {
-            // Transport-level transient failures: the pill/banner already surfaces connection
-            // state, so don't toast. The coordinator's `runOnReconnect` hook will retry when
-            // the connection returns.
-            logger.info("Session refresh skipped: \(error.localizedDescription). Will retry on reconnect.", category: .session)
-        } catch let error as RPCClientError where error == .connectionNotEstablished {
-            logger.info("Session refresh skipped: connection not established. Will retry on reconnect.", category: .session)
         } catch {
+            if ConnectionErrorClassifier.isTransientTransport(error) {
+                // Transport-level foreground churn is owned by the connection state machine.
+                // Session refresh is opportunistic, so do not show a red error toast for a
+                // socket that is already reconnecting or about to reconnect.
+                let shouldRetryOnReconnect =
+                    ConnectionErrorClassifier.requiresConnectionRecovery(error) ||
+                    !rpcClient.connectionState.isConnected
+                if shouldRetryOnReconnect {
+                    logger.info("Session refresh deferred until reconnect: \(error.localizedDescription)", category: .session)
+                    refreshService.deferUntilReconnect()
+                } else {
+                    logger.info("Session refresh skipped after transient transport error: \(error.localizedDescription)", category: .session)
+                }
+                return
+            }
             logger.error("Session list refresh failed: \(error.localizedDescription)", category: .session)
             ErrorHandler.shared.handle(error, context: "Session refresh")
         }

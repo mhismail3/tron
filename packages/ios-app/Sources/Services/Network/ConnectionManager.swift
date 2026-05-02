@@ -6,7 +6,8 @@ import Foundation
 /// - Mirrors `ConnectionStateProvider.connectionState` into an `@Observable` `state` property
 ///   so all consumers have a single source of truth.
 /// - Offers `runOnReconnect(label:_:)` — a dedup'd, single-shot hook that fires once on the
-///   next `.connected` transition (or immediately if already connected).
+///   next `.connected` transition (or immediately if already connected, unless the caller
+///   asks to wait for a future reconnect edge).
 /// - Forwards `manualRetry()` to the underlying transport.
 ///
 /// Replaces the scattered ad-hoc `rpcClient.connectionState` observers throughout the app.
@@ -48,13 +49,18 @@ final class ConnectionManager {
 
     /// Register a single-shot closure keyed by `label`.
     ///
-    /// - If `state.isConnected` is currently true, the block runs immediately (on a new Task).
-    /// - Otherwise, the block is stored and fires on the next `.disconnected → .connected`
+    /// - If `state.isConnected` is currently true and `fireIfAlreadyConnected` is true, the
+    ///   block runs immediately (on a new Task).
+    /// - Otherwise, the block is stored and fires on the next non-connected → `.connected`
     ///   transition.
     /// - Re-registering the same `label` replaces any pending block (coalesce).
     /// - Once fired, the registration is cleared — further reconnects do not re-invoke it.
-    func runOnReconnect(label: String, _ block: @escaping @MainActor () async -> Void) {
-        if state.isConnected {
+    func runOnReconnect(
+        label: String,
+        fireIfAlreadyConnected: Bool = true,
+        _ block: @escaping @MainActor () async -> Void
+    ) {
+        if fireIfAlreadyConnected && state.isConnected {
             Task { await block() }
             return
         }
@@ -76,6 +82,7 @@ final class ConnectionManager {
     private func startObserving() {
         observationTask?.cancel()
         observationTask = Task { [weak self] in
+            var hasInstalledObservation = false
             while !Task.isCancelled {
                 guard let self, let provider = self.provider else { return }
 
@@ -84,8 +91,14 @@ final class ConnectionManager {
                 let currentState = provider.connectionState
                 if self.state != currentState {
                     self.applyStateChange(currentState)
+                } else if hasInstalledObservation && currentState.isConnected {
+                    // Observation can wake for a rapid connected -> reconnecting -> connected
+                    // cycle after the provider has already returned to `.connected`. Hooks that
+                    // explicitly asked for a future reconnect edge should still run.
+                    self.drainHooks()
                 }
 
+                hasInstalledObservation = true
                 await withCheckedContinuation { continuation in
                     withObservationTracking {
                         _ = provider.connectionState

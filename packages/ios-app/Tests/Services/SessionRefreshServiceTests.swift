@@ -45,6 +45,28 @@ struct SessionRefreshServiceTests {
         return (service, counter, state, mockClock)
     }
 
+    private func makeSUTWithConnectionManager(
+        isConnected: Bool,
+        providerState: ConnectionState,
+        foregroundDebounce: Duration = .milliseconds(50),
+        clock: MockAsyncClock? = nil
+    ) -> (SessionRefreshService, RefreshCounter, StateHolder, MockConnectionStateProvider, ConnectionManager, MockAsyncClock) {
+        let counter = RefreshCounter()
+        let state = StateHolder(isConnected)
+        let provider = MockConnectionStateProvider()
+        provider.connectionState = providerState
+        let connectionManager = ConnectionManager(provider: provider)
+        let mockClock = clock ?? MockAsyncClock(mode: .instant)
+        let service = SessionRefreshService(
+            performRefresh: { await counter.perform() },
+            isConnected: { state.isConnected },
+            clock: mockClock,
+            foregroundDebounce: foregroundDebounce,
+            connectionManager: connectionManager
+        )
+        return (service, counter, state, provider, connectionManager, mockClock)
+    }
+
     private func yieldAsync(_ count: Int = 5) async {
         for _ in 0..<count {
             try? await Task.sleep(for: .milliseconds(20))
@@ -167,6 +189,57 @@ struct SessionRefreshServiceTests {
 
         clock.advance(by: .milliseconds(500))
         await yieldAsync()
+        #expect(counter.calls == 1)
+    }
+
+    @Test("foreground debounce re-checks connectivity before refreshing")
+    func foregroundDebounceRechecksConnectivity() async {
+        let clock = MockAsyncClock(mode: .manual)
+        let (service, counter, state, provider, manager, _) = makeSUTWithConnectionManager(
+            isConnected: true,
+            providerState: .connected,
+            foregroundDebounce: .milliseconds(500),
+            clock: clock
+        )
+
+        service.request(reason: .foreground)
+        state.isConnected = false
+        provider.connectionState = .disconnected
+        await yieldAsync()
+        #expect(manager.state == .disconnected)
+
+        clock.advance(by: .milliseconds(500))
+        await yieldAsync()
+        #expect(counter.calls == 0)
+
+        state.isConnected = true
+        provider.connectionState = .connected
+        await yieldAsync(10)
+        #expect(manager.state == .connected)
+        #expect(counter.calls == 1)
+    }
+
+    @Test("transient refresh failures wait for a future reconnect edge")
+    func transientFailureDefersUntilFutureReconnect() async {
+        let (service, counter, _, provider, manager, _) = makeSUTWithConnectionManager(
+            isConnected: true,
+            providerState: .connected
+        )
+
+        service.deferUntilReconnect()
+        service.deferUntilReconnect()
+        await yieldAsync()
+        #expect(manager.state == .connected)
+        #expect(counter.calls == 0)
+
+        provider.connectionState = .reconnecting(attempt: 1, nextRetrySeconds: 1)
+        await yieldAsync()
+        #expect(manager.state == .reconnecting(attempt: 1, nextRetrySeconds: 1))
+        #expect(counter.calls == 0)
+
+        provider.connectionState = .connected
+        await yieldAsync(10)
+        #expect(manager.state == .connected)
         #expect(counter.calls == 1)
     }
 
