@@ -6,8 +6,8 @@ import Foundation
 /// Behavioral tests for `WebSocketService`'s backoff swap.
 ///
 /// These tests exercise the backoff integration without doing real network I/O:
-/// - Confirm the default policy maps to the new 10-attempt / exponential schedule.
-/// - Confirm the `deploy-restarting` path is untouched by the swap (still patient 10×3s).
+/// - Confirm the default policy maps to the 3-attempt / exponential schedule.
+/// - Confirm foreground verification, idle heartbeat, and initial open checks use bounded timing.
 /// - Confirm the failure message matches the new "tap to retry" user-facing copy.
 ///
 /// True end-to-end reconnect timing tests would be slow (30s+) and brittle — those are
@@ -38,17 +38,28 @@ struct WebSocketServiceBackoffTests {
         #expect(ws.connectionState == .disconnected)
     }
 
+    @Test("foreground verification ping is bounded")
+    func foregroundVerificationPingIsBounded() {
+        #expect(WebSocketService.connectionVerificationTimeout == 3.0)
+        #expect(WebSocketService.connectionVerificationTimeout < 30.0)
+    }
+
+    @Test("initial websocket open timeout allows slower handshakes without using RPC timeout")
+    func initialWebSocketOpenTimeoutIsBounded() {
+        #expect(WebSocketService.connectionOpenTimeout == 10.0)
+        #expect(WebSocketService.connectionOpenTimeout > WebSocketService.connectionVerificationTimeout)
+        #expect(WebSocketService.connectionOpenTimeout < 30.0)
+    }
+
+    @Test("foreground heartbeat detects idle disconnects quickly")
+    func foregroundHeartbeatDetectsIdleDisconnectsQuickly() {
+        #expect(WebSocketService.heartbeatInterval == 5.0)
+        #expect(WebSocketService.heartbeatInterval < 30.0)
+        #expect(WebSocketService.connectionVerificationTimeout < WebSocketService.heartbeatInterval)
+    }
+
     @Test(".failed reason after exhaustion uses tap-to-retry copy")
     func failedReasonCopy() {
-        // This is a static string assertion — the user-facing copy changed as part of the
-        // backoff swap, so we lock it in.
-        let expected = "Connection lost — tap to retry"
-        // We can't easily exhaust backoff without real I/O; instead, validate the constant
-        // appears in the source by exercising manualRetry from a failed state (no-op).
-        let ws = makeSUT()
-        // Default state is disconnected; manualRetry is a no-op that just logs.
-        Task { await ws.manualRetry() }
-        // Keep expected string available to protect against unintentional copy drift.
-        _ = expected
+        #expect(WebSocketService.failedAfterExhaustionReason == "Connection lost — tap to retry")
     }
 }

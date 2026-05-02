@@ -24,10 +24,10 @@ struct ConnectionSettingsPage: View {
         SettingsPageContainer(title: "Servers") {
             serverInfoCard
             pairedServersSection
-            if settingsState.isLoaded {
+            if settingsState.isLoaded && !activeServerUnavailable {
                 loadedServerBackedSettingsSections
-            } else {
-                serverBackedSettingsUnavailableSection
+            } else if !activeServerUnavailable {
+                serverBackedSettingsLoadingOrUnavailableSection
             }
         }
         .alert("Forget this server?", isPresented: removalAlertBinding, presenting: serverPendingRemoval) { server in
@@ -49,9 +49,10 @@ struct ConnectionSettingsPage: View {
 
     private var serverInfoCard: some View {
         SettingsInfoCard(
-            icon: "server.rack",
+            icon: activeServerUnavailable ? "wifi.exclamationmark" : "server.rack",
             title: ServerSettingsSummary.title(for: summaryContext),
-            description: ServerSettingsSummary.description(for: summaryContext)
+            description: ServerSettingsSummary.description(for: summaryContext),
+            accent: activeServerUnavailable ? .tronWarning : .tronEmerald
         )
     }
 
@@ -59,6 +60,7 @@ struct ConnectionSettingsPage: View {
         ServerSettingsSummary.Context(
             activeServerLabel: dependencies.pairedServerStore.activeServer?.label,
             pairedServerCount: dependencies.pairedServerStore.servers.count,
+            activeServerUnavailable: activeServerUnavailable,
             isLoaded: settingsState.isLoaded,
             loadError: settingsState.loadError,
             transcriptionEnabled: settingsState.transcriptionEnabled,
@@ -66,6 +68,11 @@ struct ConnectionSettingsPage: View {
             updateChannel: settingsState.updateChannel,
             updateFrequency: settingsState.updateFrequency
         )
+    }
+
+    private var activeServerUnavailable: Bool {
+        dependencies.pairedServerStore.activeServer != nil
+            && !dependencies.rpcClient.connectionState.isConnected
     }
 
     private var pairedServersSection: some View {
@@ -84,6 +91,11 @@ struct ConnectionSettingsPage: View {
 
     private func pairedServerRow(_ server: PairedServer) -> some View {
         let selected = dependencies.pairedServerStore.activeServer?.id == server.id
+        let presentation = PairedServerRowPresentation.resolve(
+            isSelected: selected,
+            activeServerUnavailable: activeServerUnavailable,
+            lastKnownStatus: server.lastKnownStatus
+        )
 
         return ZStack(alignment: .trailing) {
             SettingsCard(interactive: false) {
@@ -108,10 +120,10 @@ struct ConnectionSettingsPage: View {
 
                         Spacer()
 
-                        if let status = server.lastKnownStatus, !status.isEmpty {
+                        if let status = presentation.status {
                             Text(status)
                                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                                .foregroundStyle(status == "Connected" ? .tronSuccess : .tronTextMuted)
+                                .foregroundStyle(statusColor(for: presentation.statusTone))
                         }
 
                         Color.clear
@@ -129,7 +141,7 @@ struct ConnectionSettingsPage: View {
 
             // Keep Menu outside SettingsCard's glassEffect tree. iOS 26 can
             // temporarily flatten ancestor glass to white when a Menu closes.
-            manageServerMenu(server)
+            manageServerMenu(server, presentation: presentation)
                 .padding(.trailing, 12)
         }
     }
@@ -161,7 +173,7 @@ struct ConnectionSettingsPage: View {
         }
     }
 
-    private func manageServerMenu(_ server: PairedServer) -> some View {
+    private func manageServerMenu(_ server: PairedServer, presentation: PairedServerRowPresentation) -> some View {
         ZStack {
             Image(systemName: "ellipsis.circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody))
@@ -171,30 +183,9 @@ struct ConnectionSettingsPage: View {
                 .accessibilityHidden(true)
 
             Menu {
-                Button {
-                    reconnect(server)
-                } label: {
-                    Label(PairedServerMenuAction.reconnect.title, systemImage: PairedServerMenuAction.reconnect.systemImage)
+                ForEach(presentation.menuEntries) { entry in
+                    menuButton(entry, for: server)
                 }
-                Button {
-                    startOnboarding(prefill: server)
-                } label: {
-                    Label(PairedServerMenuAction.setUp.title, systemImage: PairedServerMenuAction.setUp.systemImage)
-                }
-                Button(role: .destructive) {
-                    serverPendingRemoval = server
-                } label: {
-                    Label {
-                        Text(PairedServerMenuAction.forget.title)
-                            .foregroundStyle(.tronError)
-                    } icon: {
-                        Image(systemName: PairedServerMenuAction.forget.systemImage)
-                            .symbolRenderingMode(.monochrome)
-                            .foregroundStyle(.tronError)
-                            .tint(.tronError)
-                    }
-                }
-                .tint(.tronError)
             } label: {
                 Color.clear
                     .frame(width: PairedServerMenuLayout.hitTargetSize, height: PairedServerMenuLayout.hitTargetSize)
@@ -204,6 +195,50 @@ struct ConnectionSettingsPage: View {
             .accessibilityLabel("Manage \(server.label)")
         }
         .frame(width: PairedServerMenuLayout.hitTargetSize, height: PairedServerMenuLayout.hitTargetSize)
+    }
+
+    @ViewBuilder
+    private func menuButton(_ entry: PairedServerMenuEntry, for server: PairedServer) -> some View {
+        switch entry.action {
+        case .reconnect:
+            Button {
+                reconnect(server)
+            } label: {
+                Label(entry.title, systemImage: entry.systemImage)
+            }
+        case .setUp:
+            Button {
+                startOnboarding(prefill: server)
+            } label: {
+                Label(entry.title, systemImage: entry.systemImage)
+            }
+        case .forget:
+            Button(role: .destructive) {
+                serverPendingRemoval = server
+            } label: {
+                Label {
+                    Text(entry.title)
+                        .foregroundStyle(.tronError)
+                } icon: {
+                    Image(systemName: entry.systemImage)
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(.tronError)
+                        .tint(.tronError)
+                }
+            }
+            .tint(.tronError)
+        }
+    }
+
+    private func statusColor(for tone: PairedServerRowStatusTone) -> Color {
+        switch tone {
+        case .success:
+            return .tronSuccess
+        case .warning:
+            return .tronWarning
+        case .muted:
+            return .tronTextMuted
+        }
     }
 
     private var loadedServerBackedSettingsSections: some View {
@@ -222,22 +257,22 @@ struct ConnectionSettingsPage: View {
         }
     }
 
-    private var serverBackedSettingsUnavailableSection: some View {
+    private var serverBackedSettingsLoadingOrUnavailableSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "Server Controls")
 
             SettingsCard(accent: .tronWarning) {
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "wifi.exclamationmark")
+                    Image(systemName: settingsState.loadError == nil ? "hourglass" : "wifi.exclamationmark")
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronWarning)
                         .frame(width: 18)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Server settings unavailable")
+                        Text(settingsState.loadError == nil ? "Loading server settings" : "Server settings unavailable")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
-                        Text(settingsState.loadError ?? "Connect to the active server before editing transcription or update settings.")
+                        Text(settingsState.loadError ?? SettingsLabels.loadingServerSettingsDescription)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)

@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-01 (new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings revamp, local paired servers, server-owned settings, provider status cards, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-05-02 (new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, onboarding handoff, and foreground connection recovery)
 
 ## Overview
 
@@ -213,9 +213,28 @@ network services rather than by individual views. SwiftUI `scenePhase` changes
 call `DependencyContainer.setBackgroundState(_:)`, which pauses WebSocket
 heartbeats while inactive and resets paused reconnect attempts to `.disconnected`
 so the next foreground transition can kick a fresh retry. On foreground return,
-the app requests a session-list refresh, verifies any apparently connected
-socket with URLSession's native WebSocket ping, and manually retries only when
-the connection state machine says retrying is appropriate.
+the app verifies any apparently connected socket with a bounded URLSession
+WebSocket ping before issuing notification or session-list RPC refreshes, and
+manually retries through the same path as the status pill when the connection
+state machine says retrying is appropriate. New WebSocket tasks also stay in
+`.connecting` until URLSession reports that the WebSocket upgrade opened, so a
+sleeping Mac cannot be reported as connected just because a task was resumed.
+Foreground ping failures and ping timeouts transition the stale socket out of
+`.connected` so the status pill and settings sheets immediately render the
+reconnecting or unavailable state instead of waiting on server-backed RPC
+timeouts. While foregrounded, the WebSocket heartbeat pings every five seconds
+with the same bounded verification timeout, and URLSession's WebSocket close
+delegate feeds remote closes into the reconnect state machine. Failed WebSocket
+upgrade completions also resume the open wait immediately, leaving the 10-second
+open timeout as a fallback instead of the primary failure signal. If a failed
+open leaves an `RPCClient` wrapper with a disconnected transport, the next
+`connect()` discards that stale transport instead of treating it as an active
+connection.
+`ConnectionToastPolicy` bridges app-level connection state into the global
+toast banner stack: when an active paired server becomes disconnected,
+reconnecting, failed, or unauthorized, a sticky deduplicated banner appears
+above the dashboard with the appropriate repair affordance, and it is dismissed
+as soon as the active server reconnects or no active server remains.
 
 `SessionRefreshService` is the gatekeeper for `session.list` refreshes. It
 debounces foreground refreshes, re-checks connectivity after the debounce, and
@@ -263,6 +282,15 @@ scroll content, so app/version copy and the diagnostics action remain reachable
 while the cards scroll independently. The feedback button lets native
 interactive glass own the pressed border, matching chips and avoiding a nested
 manual stroke.
+When the active paired server cannot be reached, Settings keeps local paired
+server management visible but hides server-backed controls until the connection
+returns and settings reload. The Servers sheet turns its top summary card
+warning-yellow, reports `<server name> not available`, overrides stale row
+metadata with an `Unavailable` status for the selected server, and limits that
+row's menu to Retry and Forget. Settings verifies the live socket before loading
+server-backed controls, so a half-open connection is demoted before the sheet can
+get stuck on loading copy. The main dashboard owns the global unreachable-server
+banner; Settings owns the persistent in-sheet warning surfaces.
 Static status rows such as the user hook directory keep their path/value in the
 trailing position and show a small empty-state placeholder when the server has
 no listable detail to return.

@@ -59,6 +59,8 @@ struct TronMobileApp: App {
                 }
             }
             .onChange(of: container.rpcClient.connectionState) { oldState, newState in
+                handleConnectionBannerTransition(to: newState)
+
                 // When connection is established, register pending device token
                 guard newState.isConnected && !oldState.isConnected else { return }
                 guard let token = container.pushNotificationService.deviceToken else { return }
@@ -119,6 +121,8 @@ struct TronMobileApp: App {
                 // When returning to foreground, handle reconnection and refresh session list
                 if newPhase == .active && oldPhase != .active {
                     Task {
+                        await recoverForegroundConnection()
+
                         // Sync badge with server unread count
                         await container.notificationStore.refresh()
                         if container.notificationStore.unreadCount == 0 {
@@ -135,33 +139,6 @@ struct TronMobileApp: App {
                         // Session-list refresh is requested unconditionally — the central
                         // SessionRefreshService coalesces and defers to reconnect if offline.
                         container.eventStoreManager.requestSessionRefresh(reason: .foreground)
-
-                        switch container.rpcClient.connectionState {
-                        case .connected:
-                            // Verify the connection is still alive — force-reconnect if dead.
-                            let isAlive = await container.verifyConnection()
-                            if !isAlive {
-                                TronLogger.shared.info("Connection dead on foreground return - reconnecting", category: .rpc)
-                                await container.forceReconnect()
-                            }
-                        case .deployRestarting:
-                            // Server restart flow owns its own reconnect budget — don't interfere.
-                            TronLogger.shared.debug("Deploy-restart reconnect in progress on foreground return", category: .rpc)
-                        case .disconnected, .failed, .connecting, .reconnecting:
-                            // Any non-connected/non-deploy state on foreground return is
-                            // treated as "kick a fresh retry". This covers the case where
-                            // the reconnect Task was paused during backgrounding and the
-                            // state is stale; manualRetry() resets the attempt counter and
-                            // cancels any lingering task before spawning a new one.
-                            TronLogger.shared.info("Triggering manualRetry on foreground return (state: \(container.rpcClient.connectionState))", category: .rpc)
-                            await container.manualRetry()
-                        case .unauthorized:
-                            // .unauthorized is a parked state — auto-retrying on
-                            // foreground would just re-trigger 401. The user must
-                            // tap the pill (or open the re-pair sheet) to provide
-                            // a fresh token first; only then does manualRetry fire.
-                            TronLogger.shared.info("Skipping foreground auto-retry while unauthorized — awaiting user re-pair", category: .rpc)
-                        }
                     }
                 }
             }
@@ -319,6 +296,71 @@ struct TronMobileApp: App {
         container.pushNotificationService.registerIfAuthorized()
         if let token = container.pushNotificationService.deviceToken {
             await registerDeviceToken(token)
+        }
+    }
+
+    private func handleConnectionBannerTransition(to state: ConnectionState) {
+        let hasActiveServer = container.pairedServerStore.activeServer != nil
+        if ConnectionToastPolicy.shouldDismiss(for: state, hasActiveServer: hasActiveServer) {
+            ToastCenter.shared.dismiss(dedupKey: ConnectionToastPolicy.dedupKey)
+            return
+        }
+
+        guard let presentation = ConnectionToastPolicy.presentation(
+            for: state,
+            hasActiveServer: hasActiveServer
+        ) else {
+            return
+        }
+
+        let retryHandler: (@MainActor () async -> Void)?
+        if presentation.includesRetry {
+            let container = container
+            retryHandler = {
+                await container.manualRetry()
+            }
+        } else {
+            retryHandler = nil
+        }
+
+        ToastCenter.shared.push(
+            presentation.message,
+            severity: presentation.severity,
+            dedupKey: ConnectionToastPolicy.dedupKey,
+            autoDismiss: presentation.autoDismiss,
+            retryHandler: retryHandler
+        )
+    }
+
+    private func recoverForegroundConnection() async {
+        switch container.rpcClient.connectionState {
+        case .connected:
+            // Verify the connection before any foreground RPC refresh. A Mac
+            // sleep can leave URLSession's WebSocket half-open; without this,
+            // notification/session refreshes wait on stale server timeouts
+            // before the UI sees the disconnected state.
+            let isAlive = await container.verifyConnection()
+            if !isAlive {
+                TronLogger.shared.info("Connection dead on foreground return - retrying", category: .rpc)
+                await container.manualRetry()
+            }
+        case .deployRestarting:
+            // Server restart flow owns its own reconnect budget — don't interfere.
+            TronLogger.shared.debug("Deploy-restart reconnect in progress on foreground return", category: .rpc)
+        case .disconnected, .failed, .connecting, .reconnecting:
+            // Any non-connected/non-deploy state on foreground return is
+            // treated as "kick a fresh retry". This covers the case where
+            // the reconnect Task was paused during backgrounding and the
+            // state is stale; manualRetry() resets the attempt counter and
+            // cancels any lingering task before spawning a new one.
+            TronLogger.shared.info("Triggering manualRetry on foreground return (state: \(container.rpcClient.connectionState))", category: .rpc)
+            await container.manualRetry()
+        case .unauthorized:
+            // .unauthorized is a parked state — auto-retrying on foreground
+            // would just re-trigger 401. The user must tap the pill (or open
+            // the re-pair sheet) to provide a fresh token first; only then
+            // does manualRetry fire.
+            TronLogger.shared.info("Skipping foreground auto-retry while unauthorized — awaiting user re-pair", category: .rpc)
         }
     }
 }

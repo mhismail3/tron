@@ -50,6 +50,32 @@ struct SettingsView: View {
             && settingsState.isLoaded
     }
 
+    private var activeServerUnavailable: Bool {
+        dependencies.pairedServerStore.activeServer != nil
+            && !rpcClient.connectionState.isConnected
+    }
+
+    private var serverUnavailableDescription: String {
+        if activeServerUnavailable {
+            return SettingsLabels.connectedServerUnavailableDescription
+        }
+        return settingsState.loadError ?? SettingsLabels.loadingServerSettingsDescription
+    }
+
+    private var serverUnavailableTitle: String {
+        if activeServerUnavailable || settingsState.loadError != nil {
+            return "Server settings unavailable"
+        }
+        return "Loading server settings"
+    }
+
+    private var serverUnavailableIcon: String {
+        if activeServerUnavailable || settingsState.loadError != nil {
+            return "wifi.exclamationmark"
+        }
+        return "hourglass"
+    }
+
     private var selectedModelDisplayName: String {
         if let model = settingsState.availableModels.first(where: { $0.id == defaultModelValue }) {
             return model.formattedModelName
@@ -129,6 +155,14 @@ struct SettingsView: View {
             .onChange(of: dependencies.activeServerSelectionVersion) {
                 settingsState.clearServerSnapshot()
                 Task { await loadServerSettingsIfAvailable() }
+            }
+            .onChange(of: rpcClient.connectionState) { oldState, newState in
+                guard hasPairedServers else { return }
+                if newState.isConnected {
+                    Task { await loadServerSettingsIfAvailable() }
+                } else if oldState.isConnected {
+                    settingsState.clearServerSnapshot()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { _ in
                 dismiss()
@@ -288,15 +322,15 @@ struct SettingsView: View {
         SettingsCard(accent: .tronWarning) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: settingsState.isLoadingModels ? "hourglass" : "wifi.exclamationmark")
+                    Image(systemName: serverUnavailableIcon)
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronWarning)
                         .frame(width: 18)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Server settings unavailable")
+                        Text(serverUnavailableTitle)
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
-                        Text(settingsState.loadError ?? "Connect to the active server before editing its settings.")
+                        Text(serverUnavailableDescription)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -319,6 +353,7 @@ struct SettingsView: View {
                     .buttonStyle(.bordered)
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                .padding(.leading, MainSettingsListLayout.unavailableActionLeadingPadding)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
@@ -556,6 +591,20 @@ struct SettingsView: View {
             return
         }
         let client = rpcClient
+        guard client.connectionState.isConnected else {
+            settingsState.clearServerSnapshot()
+            return
+        }
+        let isAlive = await client.verifyConnection()
+        guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+              dependencies.rpcClient === client else {
+            return
+        }
+        guard isAlive else {
+            settingsState.clearServerSnapshot()
+            await dependencies.manualRetry()
+            return
+        }
         await settingsState.reload(using: client) {
             dependencies.pairedServerStore.activeServer?.id == activeServer.id
                 && dependencies.rpcClient === client

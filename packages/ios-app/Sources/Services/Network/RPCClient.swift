@@ -16,6 +16,21 @@ enum RPCClientError: Error, LocalizedError {
     }
 }
 
+enum RPCClientConnectionPolicy {
+    static func shouldSkipConnect(state: ConnectionState) -> Bool {
+        switch state {
+        case .connected, .connecting, .reconnecting, .deployRestarting:
+            return true
+        case .disconnected, .failed, .unauthorized:
+            return false
+        }
+    }
+
+    static func shouldDiscardExistingTransport(hasTransport: Bool, state: ConnectionState) -> Bool {
+        hasTransport && !shouldSkipConnect(state: state)
+    }
+}
+
 // MARK: - RPC Client
 
 @Observable
@@ -178,25 +193,22 @@ final class RPCClient: RPCTransport {
     // MARK: - Connection
 
     func connect() async {
-        // Prevent duplicate connections - check if WebSocket already exists.
-        // This prevents race conditions where multiple connect() calls happen
-        // before the first one completes (common during app startup when
-        // multiple views call connect() simultaneously).
-        if webSocket != nil {
-            logger.debug("Already connected, skipping connect", category: .rpc)
+        // Also check connection state to prevent races during state transitions.
+        // If we're already connecting or reconnecting, don't start another connection.
+        if RPCClientConnectionPolicy.shouldSkipConnect(state: connectionState) {
+            logger.debug("Connection already in progress (\(connectionState)), skipping", category: .rpc)
             return
         }
 
-        // Also check connection state to prevent races during state transitions.
-        // If we're already connecting or reconnecting, don't start another connection.
-        switch connectionState {
-        case .connected, .connecting, .reconnecting, .deployRestarting:
-            logger.debug("Connection already in progress (\(connectionState)), skipping", category: .rpc)
-            return
-        case .disconnected, .failed, .unauthorized:
-            // .unauthorized → user re-paired; allow a fresh connect with the
-            // new bearer token resolved by the provider closure on upgrade.
-            break
+        if RPCClientConnectionPolicy.shouldDiscardExistingTransport(
+            hasTransport: webSocket != nil,
+            state: connectionState
+        ) {
+            logger.debug("Discarding stale WebSocket before connect (state: \(connectionState))", category: .rpc)
+            observationTask?.cancel()
+            observationTask = nil
+            webSocket?.disconnect()
+            webSocket = nil
         }
 
         // Set connecting state BEFORE creating WebSocket to prevent concurrent attempts.
@@ -206,20 +218,7 @@ final class RPCClient: RPCTransport {
 
         logger.info("Initializing connection to \(self.serverURL.absoluteString)", category: .rpc)
 
-        let ws = WebSocketService(serverURL: serverURL, bearerTokenProvider: bearerTokenProvider)
-        self.webSocket = ws
-
-        // Observe connection state via @Observable property
-        startConnectionStateObservation()
-
-        // Set event handler callback — receives pre-extracted type and sessionId
-        ws.onEvent = { [weak self] data, eventType, _ in
-            if let eventType {
-                self?.handleEventData(data, preExtractedType: eventType)
-            }
-            // RPC responses (eventType == nil) already handled by WebSocketService via pendingRequests
-        }
-
+        let ws = installWebSocket()
         await ws.connect()
 
         // Sync state immediately — the observation task may not have run yet,
@@ -265,6 +264,24 @@ final class RPCClient: RPCTransport {
         }
     }
 
+    private func installWebSocket() -> WebSocketService {
+        let ws = WebSocketService(serverURL: serverURL, bearerTokenProvider: bearerTokenProvider)
+        self.webSocket = ws
+
+        // Observe connection state via @Observable property.
+        startConnectionStateObservation()
+
+        // Set event handler callback — receives pre-extracted type and sessionId.
+        ws.onEvent = { [weak self] data, eventType, _ in
+            if let eventType {
+                self?.handleEventData(data, preExtractedType: eventType)
+            }
+            // RPC responses (eventType == nil) already handled by WebSocketService via pendingRequests.
+        }
+
+        return ws
+    }
+
     func reconnect() async {
         await disconnect()
         try? await Task.sleep(for: .milliseconds(500))
@@ -283,38 +300,14 @@ final class RPCClient: RPCTransport {
         return await ws.verifyConnection()
     }
 
-    /// Force reconnect - cleans up existing connection and creates fresh one.
-    /// Use this when returning to foreground and connection is dead.
-    func forceReconnect() async {
-        logger.info("Force reconnecting...", category: .rpc)
-
-        // Clean up existing connection
-        observationTask?.cancel()
-        observationTask = nil
-        webSocket?.disconnect()
-        webSocket = nil
-        connectionState = .disconnected
-
-        // Small delay for cleanup
-        try? await Task.sleep(for: .milliseconds(100))
-
-        // Connect fresh
-        await connect()
-    }
-
     /// Manual retry triggered from UI - resets backoff and attempts connection immediately.
     /// Use this when user taps the reconnection pill.
     func manualRetry() async {
         logger.info("Manual retry triggered from UI", category: .rpc)
 
-        // If webSocket exists, delegate to its manualRetry (handles cancellation of in-progress reconnection)
-        if let ws = webSocket {
-            await ws.manualRetry()
-        } else {
-            // WebSocket was cleaned up (nil) - create fresh connection
-            // This can happen if disconnect() or forceReconnect() was called
-            await connect()
-        }
+        let ws = webSocket ?? installWebSocket()
+        await ws.manualRetry()
+        connectionState = ws.connectionState
     }
 
     // MARK: - Event Handling

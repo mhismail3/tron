@@ -8,6 +8,8 @@ import SwiftUI
 enum SettingsLabels {
     static let providers = "Providers"
     static let connectToNewServer = "Connect to a new server"
+    static let connectedServerUnavailableDescription = ConnectionStatusCopy.connectedServerUnavailableDescription
+    static let loadingServerSettingsDescription = "Loading server settings from the active server."
     static let transcriptionSidecar = "Transcription Sidecar"
     static let updates = "Updates"
 }
@@ -80,6 +82,7 @@ enum MainSettingsLocalCategoryStyle {
 
 enum MainSettingsListLayout {
     static let categorySpacing: CGFloat = 8
+    static let unavailableActionLeadingPadding: CGFloat = 28
 }
 
 enum MainSettingsFooterLayout {
@@ -573,6 +576,7 @@ enum ServerSettingsSummary {
     struct Context: Equatable, Sendable {
         let activeServerLabel: String?
         let pairedServerCount: Int
+        let activeServerUnavailable: Bool
         let isLoaded: Bool
         let loadError: String?
         let transcriptionEnabled: Bool
@@ -583,6 +587,9 @@ enum ServerSettingsSummary {
 
     static func title(for context: Context) -> String {
         if let label = cleaned(context.activeServerLabel), !label.isEmpty {
+            if context.activeServerUnavailable {
+                return "\(label) not available"
+            }
             return "Manage \(label)"
         }
         return context.pairedServerCount == 0 ? "Connect a Mac" : "Choose a server"
@@ -599,11 +606,15 @@ enum ServerSettingsSummary {
             return "Choose one of your \(count) paired \(mac) to load its server-backed settings."
         }
 
+        if context.activeServerUnavailable {
+            return SettingsLabels.connectedServerUnavailableDescription
+        }
+
         guard context.isLoaded else {
             if let error = cleaned(context.loadError), !error.isEmpty {
                 return "\(label) is paired, but settings are unavailable: \(error)"
             }
-            return "\(label) is paired. Connect to load transcription and update settings."
+            return "\(label) is connected. Loading transcription and update settings."
         }
 
         let transcription = "Local transcription is \(context.transcriptionEnabled ? "on" : "off")"
@@ -637,6 +648,74 @@ enum ServerSettingsSummary {
         }
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "on the selected schedule" : trimmed
+    }
+
+    private static func cleaned(_ value: String?) -> String? {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum PairedServerRowStatusTone: Equatable, Sendable {
+    case success
+    case warning
+    case muted
+}
+
+struct PairedServerMenuEntry: Equatable, Identifiable, Sendable {
+    let action: PairedServerMenuAction
+    let title: String
+
+    var id: PairedServerMenuAction { action }
+    var systemImage: String { action.systemImage }
+}
+
+struct PairedServerRowPresentation: Equatable, Sendable {
+    let status: String?
+    let statusTone: PairedServerRowStatusTone
+    let menuEntries: [PairedServerMenuEntry]
+
+    static func resolve(
+        isSelected: Bool,
+        activeServerUnavailable: Bool,
+        lastKnownStatus: String?
+    ) -> Self {
+        let menuEntries = resolvedMenuEntries(
+            isSelected: isSelected,
+            activeServerUnavailable: activeServerUnavailable
+        )
+
+        if isSelected {
+            if activeServerUnavailable {
+                return Self(status: "Unavailable", statusTone: .warning, menuEntries: menuEntries)
+            }
+            return Self(status: "Connected", statusTone: .success, menuEntries: menuEntries)
+        }
+
+        if let status = cleaned(lastKnownStatus), !status.isEmpty {
+            return Self(
+                status: status,
+                statusTone: status == "Connected" ? .success : .muted,
+                menuEntries: menuEntries
+            )
+        }
+
+        return Self(status: nil, statusTone: .muted, menuEntries: menuEntries)
+    }
+
+    private static func resolvedMenuEntries(
+        isSelected: Bool,
+        activeServerUnavailable: Bool
+    ) -> [PairedServerMenuEntry] {
+        if isSelected && activeServerUnavailable {
+            return [
+                PairedServerMenuEntry(action: .reconnect, title: "Retry"),
+                PairedServerMenuEntry(action: .forget, title: PairedServerMenuAction.forget.title),
+            ]
+        }
+
+        return PairedServerMenuAction.allCases.map {
+            PairedServerMenuEntry(action: $0, title: $0.title)
+        }
     }
 
     private static func cleaned(_ value: String?) -> String? {

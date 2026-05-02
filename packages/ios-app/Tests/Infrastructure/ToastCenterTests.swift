@@ -52,6 +52,16 @@ struct ToastCenterTests {
         #expect(sut.toasts[0].message == "b")
     }
 
+    @Test("dismiss by dedupKey removes matching toasts")
+    func dismissByDedupKeyRemovesMatches() async {
+        let (sut, _) = makeSUT()
+        sut.push("a", dedupKey: "connection")
+        sut.push("b", dedupKey: "other")
+        sut.dismiss(dedupKey: "connection")
+        #expect(sut.toasts.count == 1)
+        #expect(sut.toasts[0].message == "b")
+    }
+
     @Test("dismissAll empties the queue")
     func dismissAllEmpties() async {
         let (sut, _) = makeSUT()

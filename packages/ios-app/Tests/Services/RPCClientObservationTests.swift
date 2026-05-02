@@ -36,4 +36,25 @@ struct RPCClientObservationTests {
         await rpc.disconnect()
         #expect(rpc.connectionState == .disconnected)
     }
+
+    @Test("Connect policy discards stale disconnected transports")
+    func testConnectPolicyDiscardsStaleDisconnectedTransport() {
+        #expect(RPCClientConnectionPolicy.shouldSkipConnect(state: .disconnected) == false)
+        #expect(RPCClientConnectionPolicy.shouldDiscardExistingTransport(
+            hasTransport: true,
+            state: .disconnected
+        ))
+    }
+
+    @Test("Connect policy preserves active in-flight transports")
+    func testConnectPolicyPreservesActiveTransport() {
+        #expect(RPCClientConnectionPolicy.shouldSkipConnect(state: .connected))
+        #expect(RPCClientConnectionPolicy.shouldSkipConnect(state: .connecting))
+        #expect(RPCClientConnectionPolicy.shouldSkipConnect(state: .reconnecting(attempt: 1, nextRetrySeconds: 2)))
+        #expect(RPCClientConnectionPolicy.shouldSkipConnect(state: .deployRestarting(remainingSeconds: 3)))
+        #expect(RPCClientConnectionPolicy.shouldDiscardExistingTransport(
+            hasTransport: true,
+            state: .connected
+        ) == false)
+    }
 }

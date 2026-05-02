@@ -308,12 +308,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         return await rpcClient.verifyConnection()
     }
 
-    /// Force reconnect to the server
-    func forceReconnect() async {
-        guard pairedServerStore.activeServer != nil else { return }
-        await rpcClient.forceReconnect()
-    }
-
     /// Manual retry triggered from UI
     func manualRetry() async {
         guard pairedServerStore.activeServer != nil else { return }

@@ -209,6 +209,18 @@ description text below each container. Transcription, paired-device token
 enforcement, and update checks all live in this sheet because they are active
 Mac server settings; update controls sit at the bottom after security under one
 Updates header.
+When the active paired server is unreachable, the Servers sheet keeps paired
+server rows visible for local switching and removal, turns the summary card
+warning-yellow with `<server name> not available`, and hides server-backed
+controls including the `Server Controls` header until the Mac reconnects and
+`settings.get` succeeds. The selected unreachable row overrides stale
+`Connected` metadata with `Unavailable`; its ellipsis menu is reduced to Retry
+and Forget.
+The dashboard also surfaces a sticky, deduplicated banner for the active paired
+server when connection state moves to disconnected, reconnecting, failed, or
+unauthorized. The banner clears automatically on reconnect; Settings keeps its
+own persistent warning cards so users still see the unavailable state even after
+dismissing the banner.
 The Agent and Context settings sheets follow the same top summary-card pattern
 and divide server settings by ownership. Agent owns execution and lifecycle
 behavior: quick-session defaults, hook model/error/context budgets,
@@ -288,6 +300,9 @@ The paired-server ellipsis menu is scoped to the selected server row and offers
 is only used for adding a fresh server. The menu hit target is overlaid outside
 the row's glass card so the native menu presentation does not disturb the
 card's Liquid Glass rendering when it closes.
+If the selected server is currently unreachable, that row's menu temporarily
+shows only "Retry" and "Forget" so setup actions do not imply server-backed
+settings are available.
 
 Forgetting an offline server is safe because it is local-only. Optional status
 snapshots such as last connected time and last known status can remain local

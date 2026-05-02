@@ -17,7 +17,7 @@ final class ToastCenter {
 
     // MARK: - Types
 
-    enum Severity: Sendable {
+    enum Severity: Sendable, Equatable {
         case info, warning, error
 
         fileprivate var defaultAutoDismiss: Duration {
@@ -137,6 +137,18 @@ final class ToastCenter {
         dismissTasks[id]?.cancel()
         dismissTasks.removeValue(forKey: id)
         toasts.removeAll { $0.id == id }
+    }
+
+    /// Dismiss every visible toast for a deduplication key.
+    /// Used by app-level state banners that should clear as soon as the
+    /// underlying state recovers.
+    func dismiss(dedupKey: String) {
+        let ids = toasts
+            .filter { $0.dedupKey == dedupKey }
+            .map(\.id)
+        for id in ids {
+            dismiss(id)
+        }
     }
 
     /// Dismiss every toast and cancel every pending auto-dismiss timer.

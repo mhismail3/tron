@@ -1,7 +1,8 @@
 import Foundation
 
-// ARCHITECTURE: ~634 lines — connection state machine (7 states), reconnection strategies
-// (normal + deploy-aware), heartbeat loop, message routing, and background state management.
+// ARCHITECTURE: ~966 lines — connection state machine (7 states), reconnection strategies
+// (normal + deploy-aware), bounded ping verification, heartbeat loop, message
+// routing, and background state management.
 // These are tightly coupled transport concerns that share connection state. Pragmatic trigger:
 // if a third reconnection strategy is needed.
 
@@ -96,6 +97,40 @@ enum WebSocketError: Error, LocalizedError, Sendable, Equatable {
 /// `WebSocketService` transitions to `ConnectionState.unauthorized`.
 typealias BearerTokenProvider = @MainActor () -> String?
 
+private final class SingleResumeContinuationBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    init(_ continuation: CheckedContinuation<Void, Error>) {
+        self.continuation = continuation
+    }
+
+    func resume() {
+        resume(.success(()))
+    }
+
+    func resume(throwing error: Error) {
+        resume(.failure(error))
+    }
+
+    private func resume(_ result: Result<Void, Error>) {
+        lock.lock()
+        guard let continuation else {
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        lock.unlock()
+
+        switch result {
+        case .success:
+            continuation.resume()
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
+    }
+}
+
 // MARK: - WebSocket Service
 
 @Observable
@@ -115,9 +150,16 @@ final class WebSocketService {
     private let backoff = BackoffPolicy()
 
     private let requestTimeout: TimeInterval = 30.0
+    nonisolated static let connectionVerificationTimeout: TimeInterval = 3.0
+    nonisolated static let connectionOpenTimeout: TimeInterval = 10.0
+    nonisolated static let heartbeatInterval: TimeInterval = 5.0
+    nonisolated static let failedAfterExhaustionReason = "Connection lost — tap to retry"
 
     /// Task for reconnection (can be cancelled for manual retry)
     private var reconnectTask: Task<Void, Never>?
+    private var openedWebSocketTask: URLSessionWebSocketTask?
+    private var openContinuation: SingleResumeContinuationBox?
+    private var openTimeoutTask: Task<Void, Never>?
 
     private var pendingRequests: [String: CheckedContinuation<Data, Error>] = [:]
     private var timeoutTasks: [String: Task<Void, Never>] = [:]
@@ -194,6 +236,11 @@ final class WebSocketService {
         deployRestartExpectedMs = 0
 
         isConnectedFlag = false
+        openedWebSocketTask = nil
+        openTimeoutTask?.cancel()
+        openTimeoutTask = nil
+        openContinuation?.resume(throwing: WebSocketError.unauthorized(reason))
+        openContinuation = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         urlSession?.invalidateAndCancel()
@@ -251,18 +298,33 @@ final class WebSocketService {
         let request = makeUpgradeRequest()
 
         logger.verbose("Creating WebSocket task...", category: .websocket)
-        webSocketTask = session.webSocketTask(with: request)
-        webSocketTask?.maximumMessageSize = 150 * 1024 * 1024  // 150MB — matches server limit; covers 15-min voice notes at 48kHz (~115MB base64)
-        webSocketTask?.resume()
+        let task = session.webSocketTask(with: request)
+        webSocketTask = task
+        openedWebSocketTask = nil
+        task.maximumMessageSize = 150 * 1024 * 1024  // 150MB — matches server limit; covers 15-min voice notes at 48kHz (~115MB base64)
+        task.resume()
         logger.verbose("WebSocket task resumed", category: .websocket)
 
-        // Mark as connected optimistically - the receive loop will detect failures quickly
-        // Note: We do NOT reset reconnectAttempts here because we don't know if connection is real yet.
-        // It gets reset after a successful ping verifies the connection, or on manual retry.
+        do {
+            try await waitForOpen(on: task, timeout: Self.connectionOpenTimeout)
+        } catch {
+            if case .unauthorized = connectionState {
+                return
+            }
+            logger.warning("WebSocket did not open: \(error.localizedDescription)", category: .websocket)
+            cleanupDeadConnection(error: error)
+            return
+        }
+
+        guard webSocketTask === task else {
+            logger.debug("Connection verified after socket was torn down", category: .websocket)
+            return
+        }
+
         isConnectedFlag = true
         connectionState = .connected
-        logger.logWebSocketState("Connected", details: "Successfully connected to \(serverURL.host ?? "unknown")")
-        logger.info("Connected successfully to \(self.serverURL.absoluteString)", category: .websocket)
+        logger.logWebSocketState("Connected", details: "Verified connection to \(serverURL.host ?? "unknown")")
+        logger.info("Connection verified for \(self.serverURL.absoluteString)", category: .websocket)
 
         receiveTask = Task { [weak self] in
             await self?.receiveLoop()
@@ -275,12 +337,46 @@ final class WebSocketService {
         logger.verbose("Heartbeat loop started", category: .websocket)
     }
 
+    func markWebSocketOpened(_ task: URLSessionWebSocketTask) {
+        guard webSocketTask === task else { return }
+        openedWebSocketTask = task
+        openTimeoutTask?.cancel()
+        openTimeoutTask = nil
+        openContinuation?.resume()
+        openContinuation = nil
+        logger.debug("WebSocket upgrade opened", category: .websocket)
+    }
+
+    func markWebSocketClosed(_ task: URLSessionWebSocketTask, closeCode: URLSessionWebSocketTask.CloseCode) async {
+        guard webSocketTask === task, isConnectedFlag else { return }
+        logger.warning("WebSocket closed by server (code: \(closeCode.rawValue))", category: .websocket)
+        await handleDisconnect()
+    }
+
+    func markWebSocketOpenFailed(_ task: URLSessionTask, error: Error) {
+        guard let socketTask = task as? URLSessionWebSocketTask,
+              webSocketTask === socketTask,
+              openContinuation != nil else {
+            return
+        }
+        logger.warning("WebSocket open failed: \(error.localizedDescription)", category: .websocket)
+        openTimeoutTask?.cancel()
+        openTimeoutTask = nil
+        openContinuation?.resume(throwing: error)
+        openContinuation = nil
+    }
+
     func disconnect() {
         logger.logWebSocketState("Disconnecting")
         logger.info("Disconnecting from server", category: .websocket)
         isConnectedFlag = false
         isDeployRestarting = false
         deployRestartExpectedMs = 0
+        openedWebSocketTask = nil
+        openTimeoutTask?.cancel()
+        openTimeoutTask = nil
+        openContinuation?.resume(throwing: WebSocketError.notConnected)
+        openContinuation = nil
 
         // Cancel all background tasks
         pingTask?.cancel()
@@ -358,26 +454,75 @@ final class WebSocketService {
         }
 
         do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                task.sendPing { error in
-                    if let error = error {
-                        continuation.resume(throwing: error)
-                    } else {
-                        continuation.resume()
-                    }
-                }
-            }
+            try await sendPing(on: task, timeout: Self.connectionVerificationTimeout)
             logger.debug("Connection verification: alive", category: .websocket)
             return true
         } catch {
             logger.warning("Connection verification failed: \(error.localizedDescription)", category: .websocket)
-            // Connection is dead - clean up stale state
-            isConnectedFlag = false
-            connectionState = .disconnected
-            webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
-            webSocketTask = nil
+            cleanupDeadConnection(error: error)
             return false
         }
+    }
+
+    private func sendPing(on task: URLSessionWebSocketTask, timeout: TimeInterval) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let box = SingleResumeContinuationBox(continuation)
+
+            let timeoutTask = Task {
+                try? await Task.sleep(for: .seconds(timeout))
+                guard !Task.isCancelled else { return }
+                box.resume(throwing: WebSocketError.timeout)
+            }
+
+            task.sendPing { error in
+                timeoutTask.cancel()
+                if let error {
+                    box.resume(throwing: error)
+                } else {
+                    box.resume()
+                }
+            }
+        }
+    }
+
+    private func waitForOpen(on task: URLSessionWebSocketTask, timeout: TimeInterval) async throws {
+        if openedWebSocketTask === task { return }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let box = SingleResumeContinuationBox(continuation)
+            openContinuation = box
+            openTimeoutTask?.cancel()
+            openTimeoutTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(timeout))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard let self, self.openContinuation === box else { return }
+                    self.openContinuation = nil
+                    self.openTimeoutTask = nil
+                    box.resume(throwing: WebSocketError.timeout)
+                }
+            }
+        }
+    }
+
+    private func cleanupDeadConnection(error: Error) {
+        isConnectedFlag = false
+        connectionState = .disconnected
+        openedWebSocketTask = nil
+        openTimeoutTask?.cancel()
+        openTimeoutTask = nil
+        openContinuation?.resume(throwing: error)
+        openContinuation = nil
+        webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
+        webSocketTask = nil
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
+        sessionDelegate = nil
+        pingTask?.cancel()
+        pingTask = nil
+        receiveTask?.cancel()
+        receiveTask = nil
+        failPendingRequests(error: WebSocketError.connectionFailed(error.localizedDescription))
     }
 
     // MARK: - Request/Response
@@ -557,11 +702,11 @@ final class WebSocketService {
     // MARK: - Heartbeat
 
     private func heartbeatLoop() async {
-        logger.verbose("Heartbeat loop running (interval: 30s)...", category: .websocket)
+        logger.verbose("Heartbeat loop running (interval: \(String(format: "%.0f", Self.heartbeatInterval))s)...", category: .websocket)
         var pingCount = 0
 
         while isConnectedFlag {
-            try? await Task.sleep(for: .seconds(30))
+            try? await Task.sleep(for: .seconds(Self.heartbeatInterval))
             guard isConnectedFlag else { break }
 
             // Skip pings when in background to save battery and radio wake-ups
@@ -572,16 +717,11 @@ final class WebSocketService {
 
             pingCount += 1
             do {
-                let pingStart = CFAbsoluteTimeGetCurrent()
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    webSocketTask?.sendPing { error in
-                        if let error = error {
-                            continuation.resume(throwing: error)
-                        } else {
-                            continuation.resume()
-                        }
-                    }
+                guard let task = webSocketTask else {
+                    throw WebSocketError.notConnected
                 }
+                let pingStart = CFAbsoluteTimeGetCurrent()
+                try await sendPing(on: task, timeout: Self.connectionVerificationTimeout)
                 let pingDuration = (CFAbsoluteTimeGetCurrent() - pingStart) * 1000
                 logger.verbose("Ping #\(pingCount) successful (\(String(format: "%.1f", pingDuration))ms)", category: .websocket)
 
@@ -592,6 +732,8 @@ final class WebSocketService {
                 }
             } catch {
                 logger.warning("Ping #\(pingCount) failed: \(error.localizedDescription)", category: .websocket)
+                await handleDisconnect()
+                break
             }
         }
         logger.verbose("Heartbeat loop exited after \(pingCount) pings", category: .websocket)
@@ -620,8 +762,19 @@ final class WebSocketService {
     private func handleDisconnect() async {
         logger.warning("Handling disconnect...", category: .websocket)
         isConnectedFlag = false
+        if !isDeployRestarting {
+            connectionState = .disconnected
+        }
+        openedWebSocketTask = nil
+        openTimeoutTask?.cancel()
+        openTimeoutTask = nil
+        openContinuation?.resume(throwing: WebSocketError.notConnected)
+        openContinuation = nil
         webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
         webSocketTask = nil
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
+        sessionDelegate = nil
 
         failPendingRequests(error: WebSocketError.connectionFailed("Disconnected"))
 
@@ -653,7 +806,7 @@ final class WebSocketService {
         // Check if we've exhausted all attempts
         if reconnectAttempts > backoff.maxAttempts {
             logger.warning("Max reconnection attempts (\(backoff.maxAttempts)) exhausted - entering read-only mode", category: .websocket)
-            connectionState = .failed(reason: "Connection lost — tap to retry")
+            connectionState = .failed(reason: Self.failedAfterExhaustionReason)
             return
         }
 
@@ -679,7 +832,9 @@ final class WebSocketService {
         await connect()
 
         // If connect() didn't succeed (isConnectedFlag still false), try next attempt
-        if !isConnectedFlag && !isInBackground && !Task.isCancelled {
+        if isConnectedFlag {
+            reconnectAttempts = 0
+        } else if !isInBackground && !Task.isCancelled {
             await startReconnection()
         }
     }
@@ -796,6 +951,27 @@ final class WebSocketSessionDelegate: NSObject, URLSessionWebSocketDelegate, @un
     @MainActor
     private func owner() -> WebSocketService? { ownerRef }
 
+    func urlSession(
+        _ session: URLSession,
+        webSocketTask: URLSessionWebSocketTask,
+        didOpenWithProtocol protocol: String?
+    ) {
+        Task { @MainActor in
+            owner()?.markWebSocketOpened(webSocketTask)
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        webSocketTask: URLSessionWebSocketTask,
+        didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
+        reason: Data?
+    ) {
+        Task { @MainActor in
+            await owner()?.markWebSocketClosed(webSocketTask, closeCode: closeCode)
+        }
+    }
+
     /// URLSession exposes failed WebSocket upgrade responses most reliably
     /// through task metrics. A 401 means the bearer token is
     /// wrong/missing/rotated — route to `markUnauthorized` so the state
@@ -817,6 +993,10 @@ final class WebSocketSessionDelegate: NSObject, URLSessionWebSocketDelegate, @un
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let response = task.response {
             record(response: response)
+        }
+        guard let error else { return }
+        Task { @MainActor in
+            owner()?.markWebSocketOpenFailed(task, error: error)
         }
     }
 
