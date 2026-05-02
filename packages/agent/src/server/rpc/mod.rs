@@ -20,6 +20,10 @@
 //! [`context::RpcContext::run_blocking`], which enforces concurrency
 //! limits and drains through server shutdown.
 //!
+//! The context also owns the shared engine host handle. WP4 wires that host into
+//! startup as infrastructure only; no production RPC method invokes engine
+//! capabilities until a later compatibility-mirror package.
+//!
 //! # INVARIANT: no per-client rate limiting (L7, trusted-local)
 //!
 //! The RPC layer does NOT rate-limit inbound calls per client,

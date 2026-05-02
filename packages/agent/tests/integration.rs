@@ -83,6 +83,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
+        engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         skill_registry,
         memory_registry: Arc::new(parking_lot::Mutex::new(
             tron::runtime::memory::MemoryRegistry::new(),
@@ -376,6 +377,7 @@ async fn boot_server_with_provider_and_handles(
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
+        engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         skill_registry,
         memory_registry: Arc::new(parking_lot::Mutex::new(
             tron::runtime::memory::MemoryRegistry::new(),

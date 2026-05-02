@@ -8,6 +8,7 @@
 //! ```text
 //! tron::core          Foundation types, errors, branded IDs, message model
 //! tron::settings      Settings schema, layered loading, global singleton
+//! tron::engine        Live capability fabric, host lifecycle, engine ledger
 //! tron::events        SQLite event store, migrations, session reconstruction
 //! tron::llm           Provider trait, model registry, SSE streaming, auth
 //! tron::tools         Tool trait, registry, filesystem/bash/web/subagent tools
@@ -310,6 +311,22 @@ fn init_database(
         let _ = tron::events::run_migrations(&conn).context("Failed to run migrations")?;
     }
     Ok((pool, db_path, db_lock))
+}
+
+/// Resolve the engine ledger path from the event-store database path.
+fn init_engine_ledger_path(event_db_path: &Path) -> PathBuf {
+    tron::engine::engine_ledger_path_for_event_db(event_db_path)
+}
+
+/// Initialize the server-owned live capability engine host.
+fn init_engine_host(db_path: &Path) -> Result<tron::engine::EngineHostHandle> {
+    let engine_ledger_path = init_engine_ledger_path(db_path);
+    tron::engine::EngineHostHandle::open_sqlite(&engine_ledger_path).with_context(|| {
+        format!(
+            "Failed to initialize engine host ledger at {}",
+            engine_ledger_path.display()
+        )
+    })
 }
 
 /// Initialize tracing with SQLite persistence and start the periodic flush task.
@@ -802,6 +819,7 @@ async fn init_worktree(
 /// Build the RPC context that holds all shared state for RPC handlers.
 fn build_rpc_context(
     services: ServiceState,
+    engine_host: tron::engine::EngineHostHandle,
     settings_path: PathBuf,
     profile_runtime: Arc<tron::runtime::ProfileRuntime>,
     origin: String,
@@ -813,6 +831,7 @@ fn build_rpc_context(
         orchestrator: services.orchestrator.clone(),
         session_manager: services.session_manager.clone(),
         event_store: services.event_store.clone(),
+        engine_host,
         skill_registry: services.skill_registry,
         memory_registry: services.memory_registry,
         settings_path,
@@ -934,6 +953,7 @@ async fn main() -> Result<()> {
         !args.quiet,
     )?;
     let event_store = Arc::new(EventStore::new(pool));
+    let engine_host = init_engine_host(&db_path)?;
 
     // Opportunistic prompt-history prune on startup. Fire-and-forget: runtime
     // must not block on this. Skipped entirely unless retention is configured.
@@ -983,6 +1003,7 @@ async fn main() -> Result<()> {
     let profile_runtime_for_watcher = profile_runtime.clone();
     let rpc_context = build_rpc_context(
         services,
+        engine_host,
         settings_path,
         profile_runtime,
         origin.clone(),

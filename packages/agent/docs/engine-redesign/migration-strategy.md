@@ -158,6 +158,30 @@ Acceptance:
 - Focused engine tests cover host bootstrap, discovery/inspect, watch,
   delegated invocation, and promotion edge cases.
 
+## Phase 1.9: server-owned engine host lifecycle
+
+Make the engine host a real server-owned dependency without exposing it to
+production clients yet.
+
+Deliverables:
+
+- `EngineHostHandle` wraps `EngineHost` in a cloneable async mutex for future
+  adapters.
+- Server startup opens `engine-ledger.sqlite` next to the resolved event-store
+  database and fails closed if the host cannot bootstrap.
+- `RpcContext` carries a non-optional engine host handle. Production contexts
+  use the SQLite ledger; tests use an in-memory host.
+- No production RPC methods, tools, runtime paths, or clients invoke engine
+  functions in this phase.
+
+Acceptance:
+
+- Custom event DB paths derive custom sibling engine-ledger paths.
+- SQLite engine host reopen preserves watchable catalog-change audit records.
+- Test helper contexts and hand-built server contexts always include an engine
+  host.
+- RPC method registration count and wire behavior remain unchanged.
+
 ## Phase 2: RPC compatibility mirror
 
 Expose current RPC handlers through engine functions while keeping the existing

@@ -141,9 +141,9 @@ must have idempotency contracts.
 
 ## Settings and auth
 
-Settings remain a typed `TronSettings` tree loaded from
-`~/.tron/system/settings.json`, with defaults, strict validation, and iOS parity
-requirements.
+Settings remain a typed `TronSettings` tree loaded from the active profile plus
+the sparse `~/.tron/profiles/user/profile.toml` `[settings]` overlay, with
+defaults, strict validation, and iOS parity requirements.
 
 Engine mapping:
 

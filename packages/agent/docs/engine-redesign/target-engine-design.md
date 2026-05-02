@@ -207,6 +207,12 @@ the meta-function is stable, but the target function's current revision,
 visibility, health, schema, authority, and idempotency policy are checked at
 the child invocation.
 
+Server startup owns this surface through an `EngineHostHandle`. The handle uses
+the SQLite engine ledger at `engine-ledger.sqlite` beside the resolved event DB
+path, and future adapters receive the handle through `RpcContext`. This makes
+the engine lifecycle real without adding a client-facing API before the
+compatibility mirror exists.
+
 Agents choose catalog-change subscriptions by task/session:
 
 - worker spawned by this session became ready;

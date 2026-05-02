@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::engine::EngineHostHandle;
 use crate::events::EventStore;
 use crate::llm::ProviderHealthTracker;
 use crate::llm::provider::ProviderFactory;
@@ -189,6 +190,8 @@ pub struct RpcContext {
     pub session_manager: Arc<SessionManager>,
     /// Event store for direct event queries.
     pub event_store: Arc<EventStore>,
+    /// Shared live capability engine host.
+    pub engine_host: EngineHostHandle,
     /// Skill registry (read/write).
     pub skill_registry: Arc<RwLock<SkillRegistry>>,
     /// User-memory registry. Loads `~/.tron/memory/MEMORY.md` + the
@@ -390,6 +393,17 @@ mod tests {
         let ctx = make_test_context();
         let result = ctx.event_store.list_workspaces();
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn context_has_engine_host() {
+        let ctx = make_test_context();
+        let host = ctx.engine_host.lock().await;
+        assert!(
+            host.catalog()
+                .function(&crate::engine::FunctionId::new("engine::discover").unwrap())
+                .is_some()
+        );
     }
 
     #[tokio::test]

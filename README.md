@@ -678,7 +678,9 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 ## Database Schema
 
-All data lives in a single SQLite file: `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/events/sqlite/migrations/v001_schema.sql`; existing installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
+Event/session data lives in `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/events/sqlite/migrations/v001_schema.sql`; existing installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
+
+The Phase 1 engine host owns a separate SQLite ledger at `~/.tron/internal/database/engine-ledger.sqlite`. That schema is initialized by `packages/agent/src/engine/ledger.rs`, not by the event-store migration runner. It currently stores engine invocation records, idempotency reservations/results, and catalog-change audit records; live catalog definitions are still in memory.
 
 ### Tables
 
@@ -902,7 +904,7 @@ The deploy process (`scripts/tron::cmd_deploy`) is retained for local contributo
 
 ### Install Directory
 
-All paths in the tree below are resolved through helpers in `packages/agent/src/core/foundation/paths.rs`. To rename a directory, change the constant in `dirs::*` there and every call site updates automatically.
+Base directories in the tree below are resolved through helpers in `packages/agent/src/core/foundation/paths.rs`. To rename a directory, change the constant in `dirs::*` there and every call site updates automatically. The engine ledger file is derived from the resolved event DB path in `packages/agent/src/engine/host.rs`.
 
 ```
 ~/.tron/
@@ -948,6 +950,7 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
     +-- database/                  SQLite event store and audit records
     |   +-- log.db                 Events, sessions, tasks, journals, automation state, profile/context audit
     |   +-- log.db.lock            OS-level flock sidecar; one Tron process owns it while running
+    |   +-- engine-ledger.sqlite   Engine invocation, idempotency, and catalog-change ledger
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output
     +-- run/                       Mutable runtime state and local contributor artifacts
     |   +-- auth.lock              Auth-file refresh lock

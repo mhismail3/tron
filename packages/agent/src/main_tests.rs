@@ -140,6 +140,51 @@ fn ensure_parent_dir_creates_nested() {
     assert!(path.parent().unwrap().exists());
 }
 
+#[test]
+fn engine_ledger_path_is_derived_from_resolved_event_db_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let event_db = dir.path().join("system").join("database").join("log.db");
+    assert_eq!(
+        init_engine_ledger_path(&event_db),
+        dir.path()
+            .join("system")
+            .join("database")
+            .join("engine-ledger.sqlite")
+    );
+}
+
+#[tokio::test]
+async fn init_engine_host_bootstraps_sqlite_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let event_db = dir.path().join("database").join("log.db");
+    ensure_parent_dir(&event_db).unwrap();
+    let handle = init_engine_host(&event_db).unwrap();
+    let host = handle.lock().await;
+    assert!(
+        host.catalog()
+            .function(&tron::engine::FunctionId::new("engine::discover").unwrap())
+            .is_some()
+    );
+    assert!(init_engine_ledger_path(&event_db).exists());
+}
+
+#[test]
+fn init_engine_host_fails_when_ledger_parent_is_not_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let not_dir = dir.path().join("database");
+    std::fs::write(&not_dir, b"not a directory").unwrap();
+    let event_db = not_dir.join("log.db");
+    let err = match init_engine_host(&event_db) {
+        Ok(_) => panic!("engine host init should fail"),
+        Err(err) => err,
+    };
+    assert!(
+        err.to_string()
+            .contains("Failed to initialize engine host ledger"),
+        "{err:#}"
+    );
+}
+
 #[tokio::test]
 async fn factory_unknown_model_returns_unsupported_model_error() {
     let settings = TronSettings::default();
@@ -402,6 +447,7 @@ async fn server_boots_and_responds() {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
+        engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         skill_registry,
         memory_registry: Arc::new(parking_lot::Mutex::new(
             tron::runtime::memory::MemoryRegistry::new(),
@@ -670,6 +716,7 @@ async fn server_graceful_shutdown() {
         orchestrator,
         session_manager,
         event_store,
+        engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
         memory_registry: Arc::new(parking_lot::Mutex::new(
             tron::runtime::memory::MemoryRegistry::new(),

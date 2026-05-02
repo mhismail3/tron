@@ -1053,6 +1053,7 @@ mod tests {
             orchestrator: orch,
             session_manager: mgr.clone(),
             event_store: store,
+            engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
             skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
             memory_registry: Arc::new(parking_lot::Mutex::new(
                 crate::runtime::memory::MemoryRegistry::new(),

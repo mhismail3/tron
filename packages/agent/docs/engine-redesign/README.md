@@ -131,7 +131,7 @@ Tron sources analyzed:
 - `packages/agent/src/events/types/generated.rs`
 - `packages/agent/src/settings/types/mod.rs`
 
-Local runtime facts sampled directly from `~/.tron/system/database/log.db`:
+Local runtime facts sampled directly from `~/.tron/internal/database/log.db`:
 
 - Tables: `sessions`, `events`, `blobs`, `branches`, `logs`,
   `device_tokens`, `notification_read_state`, `cron_jobs`, `cron_runs`,
@@ -157,10 +157,11 @@ self-modifying agent workflows safe and debuggable.
 
 ## Phase 1 source map
 
-The first in-repo implementation lives in `packages/agent/src/engine/` and is
-deliberately isolated from production RPC, tools, runtime orchestration, and
-client traffic. The module proves the live fabric contracts before any existing
-workflow is migrated:
+The first in-repo implementation lives in `packages/agent/src/engine/`. The
+module proves the live fabric contracts before any existing workflow is
+migrated; WP4 wires the host into server startup as owned infrastructure while
+keeping production RPC, tools, runtime orchestration, and client traffic
+unchanged:
 
 - `ids.rs` defines validated IDs for workers, functions, triggers, invocations,
   actors, authority grants, and traces.
@@ -169,11 +170,13 @@ workflow is migrated:
   catalog-change records. Catalog changes now carry subject kind, change
   class, visibility, and scope metadata so cursor watch can filter historical
   changes without leaking session/internal capabilities.
-- `host.rs` owns the first agent-facing `EngineHost` boundary. It bootstraps
-  the reserved system `engine` worker, registers privileged `engine::*`
-  meta-capabilities as real catalog functions, and executes live discovery,
-  scoped inspection, cursor watch, delegated invocation, and promotion without
-  exposing those built-ins to ordinary worker replacement.
+- `host.rs` owns the first agent-facing `EngineHost` boundary and cloneable
+  `EngineHostHandle`. It bootstraps the reserved system `engine` worker,
+  registers privileged `engine::*` meta-capabilities as real catalog functions,
+  derives a sibling `engine-ledger.sqlite` path from the resolved event DB, and
+  executes live discovery, scoped inspection, cursor watch, delegated
+  invocation, and promotion without exposing those built-ins to ordinary worker
+  replacement.
 - `ledger.rs` defines the pluggable engine-ledger boundary plus in-memory and
   isolated SQLite implementations for catalog-change audit records,
   invocation records, and idempotency reservations/results. Its SQLite schema
@@ -233,16 +236,18 @@ Implemented:
   target idempotency checks;
 - fail-closed catalog registration/promotion paths that write durable
   catalog-change records before mutating live definitions;
+- server-owned `EngineHostHandle` startup using a SQLite engine ledger beside
+  the resolved event-store database, with test contexts defaulting to an
+  in-memory host;
 - cleanup of triggers that target an unregistered function.
 
 Still deferred:
 
-- production event-store migration and server startup wiring for the engine
-  host/ledger;
+- production RPC/tool/runtime/client adapters that invoke engine functions;
 - queue and void delivery execution;
 - external worker protocol, sandbox workers, and worker reconnect semantics;
 - trigger firing/runtime loop detection;
-- RPC/tool/runtime/client adapters.
+- reconstruction of live catalog definitions from durable ledger state.
 
 ## iii reuse note
 

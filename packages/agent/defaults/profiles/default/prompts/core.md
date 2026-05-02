@@ -130,7 +130,7 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 
 | Name | Path | Contents |
 |------|------|----------|
-| DATABASE | `~/.tron/internal/database/` | `log.db` — SQLite event store, sessions, automation state, audit |
+| DATABASE | `~/.tron/internal/database/` | `log.db` for events/sessions/automation state/audit; `engine-ledger.sqlite` for engine invocation/idempotency/catalog-change records |
 | ACTIVE_PROFILE | `~/.tron/profiles/active.toml` | Selects the active execution profile |
 | DEFAULT_PROFILE | `~/.tron/profiles/default/` | Managed default execution spec and prompt files |
 | USER_PROFILE | `~/.tron/profiles/user/` | Sparse user profile, settings, prompt, and container overrides |

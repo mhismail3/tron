@@ -5,13 +5,19 @@
 //! visible as normal catalog functions while executing them through privileged
 //! host code that cannot be replaced by ordinary workers.
 
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
 use serde_json::{Value, json};
+use tokio::sync::{Mutex, MutexGuard};
 
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, WorkerId};
 use super::invocation::{CausalContext, Invocation, InvocationResult};
-use super::ledger::{EngineLedgerStore, IdempotencyReservation, StoredEngineError};
+use super::ledger::{
+    EngineLedgerStore, IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
+};
 use super::registry::{InvocationIdempotencyDecision, LiveCatalog};
 use super::types::{
     CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, DeliveryMode,
@@ -36,6 +42,49 @@ const WATCH_MAX_LIMIT: usize = 500;
 /// Host for the in-process live capability engine.
 pub struct EngineHost {
     catalog: LiveCatalog,
+}
+
+/// Cloneable owner for the live capability engine host.
+#[derive(Clone)]
+pub struct EngineHostHandle {
+    inner: Arc<Mutex<EngineHost>>,
+}
+
+impl EngineHostHandle {
+    /// Create an in-memory engine host for tests and isolated adapters.
+    pub fn new_in_memory() -> Result<Self> {
+        Ok(Self::from_host(EngineHost::new()?))
+    }
+
+    /// Open a SQLite-backed engine host.
+    pub fn open_sqlite(path: impl AsRef<Path>) -> Result<Self> {
+        let store = SqliteEngineLedgerStore::open(path.as_ref())?;
+        Ok(Self::from_host(EngineHost::with_ledger_store(Box::new(
+            store,
+        ))?))
+    }
+
+    /// Wrap an initialized host.
+    #[must_use]
+    fn from_host(host: EngineHost) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(host)),
+        }
+    }
+
+    /// Lock the host for mutation or discovery.
+    pub async fn lock(&self) -> MutexGuard<'_, EngineHost> {
+        self.inner.lock().await
+    }
+}
+
+/// Engine ledger path colocated with the resolved event database.
+#[must_use]
+pub fn engine_ledger_path_for_event_db(event_db_path: &Path) -> PathBuf {
+    event_db_path.parent().map_or_else(
+        || PathBuf::from("engine-ledger.sqlite"),
+        |parent| parent.join("engine-ledger.sqlite"),
+    )
 }
 
 /// Cursor-pull request for catalog changes.

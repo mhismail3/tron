@@ -1308,6 +1308,7 @@ async fn commit_test_context_async() -> (
         orchestrator: orch,
         session_manager: mgr,
         event_store: store,
+        engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         skill_registry: Arc::new(parking_lot::RwLock::new(SkillRegistry::new())),
         memory_registry: Arc::new(parking_lot::Mutex::new(
             crate::runtime::memory::MemoryRegistry::new(),

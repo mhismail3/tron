@@ -109,6 +109,7 @@ mod tests {
             orchestrator: orch,
             session_manager: mgr,
             event_store: store,
+            engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
             skill_registry: Arc::new(parking_lot::RwLock::new(
                 crate::skills::registry::SkillRegistry::new(),
             )),

@@ -171,6 +171,7 @@ pub fn make_test_context() -> RpcContext {
         orchestrator: orch,
         session_manager: mgr,
         event_store: store,
+        engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
         memory_registry: Arc::new(Mutex::new(MemoryRegistry::new())),
         settings_path,

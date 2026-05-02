@@ -1538,6 +1538,61 @@ fn engine_host_bootstrap_registers_reserved_meta_capabilities_once() {
     assert_eq!(host.catalog().revision(), initial_revision);
 }
 
+#[tokio::test]
+async fn engine_host_handle_bootstraps_in_memory_host() {
+    let handle = super::host::EngineHostHandle::new_in_memory().unwrap();
+    let host = handle.lock().await;
+    assert!(host.catalog().worker(&wid("engine")).is_some());
+    for id in [
+        "engine::discover",
+        "engine::inspect",
+        "engine::watch",
+        "engine::invoke",
+        "engine::promote",
+    ] {
+        assert!(host.catalog().function(&fid(id)).is_some(), "{id}");
+    }
+}
+
+#[test]
+fn engine_ledger_path_is_sibling_of_event_database() {
+    let db_path = std::path::Path::new("/tmp/tron/system/database/log.db");
+    assert_eq!(
+        super::host::engine_ledger_path_for_event_db(db_path),
+        std::path::PathBuf::from("/tmp/tron/system/database/engine-ledger.sqlite")
+    );
+    assert_eq!(
+        super::host::engine_ledger_path_for_event_db(std::path::Path::new("log.db")),
+        std::path::PathBuf::from("engine-ledger.sqlite")
+    );
+}
+
+#[tokio::test]
+async fn sqlite_engine_host_handle_reopens_watchable_catalog_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let ledger_path = dir.path().join("engine-ledger.sqlite");
+    {
+        let handle = super::host::EngineHostHandle::open_sqlite(&ledger_path).unwrap();
+        let mut host = handle.lock().await;
+        host.catalog_mut()
+            .register_worker(worker("w1", "alpha"), true)
+            .unwrap();
+    }
+
+    let reopened = super::host::EngineHostHandle::open_sqlite(&ledger_path).unwrap();
+    let host = reopened.lock().await;
+    let changes = host
+        .catalog()
+        .catalog_changes_after(CatalogRevision(0), 100)
+        .unwrap();
+    assert!(
+        changes
+            .iter()
+            .any(|change| change.subject_id == "engine::discover")
+    );
+    assert!(changes.iter().any(|change| change.subject_id == "w1"));
+}
+
 #[test]
 fn engine_host_bootstrap_repairs_stale_system_meta_contracts() {
     let mut catalog = LiveCatalog::new();

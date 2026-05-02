@@ -16,6 +16,8 @@
 //! - session capabilities can be explicitly promoted to workspace/system scope;
 //! - `EngineHost` exposes privileged `engine::*` meta-capabilities for live
 //!   discovery, inspection, cursor watch, delegated invocation, and promotion;
+//! - `EngineHostHandle` gives server startup a cloneable owner for the host
+//!   without exposing new RPC or client behavior yet;
 //! - Phase 1 executes only in-process synchronous calls.
 //!
 //! ## Module Position
@@ -40,7 +42,10 @@ pub mod types;
 
 pub use discovery::{ActorContext, ActorKind, FunctionQuery};
 pub use errors::{EngineError, Result};
-pub use host::{EngineHost, EngineWatchRequest, EngineWatchResponse};
+pub use host::{
+    EngineHost, EngineHostHandle, EngineWatchRequest, EngineWatchResponse,
+    engine_ledger_path_for_event_db,
+};
 pub use ids::{
     ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
     WorkerId,
