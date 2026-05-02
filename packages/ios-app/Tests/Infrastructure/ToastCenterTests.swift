@@ -83,6 +83,35 @@ struct ToastCenterTests {
         #expect(sut.toasts[0].message == "msg A")
     }
 
+    @Test("duplicate replacement swaps keyed toast content")
+    func duplicateReplacementUpdatesVisibleToast() async {
+        let (sut, _) = makeSUT()
+        sut.push("msg A", severity: .warning, dedupKey: "k1")
+        sut.push("msg B", severity: .error, dedupKey: "k1", duplicatePolicy: .replace)
+
+        #expect(sut.toasts.count == 1)
+        #expect(sut.toasts[0].message == "msg B")
+        #expect(sut.toasts[0].severity == .error)
+    }
+
+    @Test("duplicate replacement cancels the replaced toast timer")
+    func duplicateReplacementCancelsOldTimer() async {
+        let (sut, clock) = makeSUT()
+        sut.push("msg A", dedupKey: "k1", autoDismiss: .after(.seconds(2)))
+        await yieldForAsync()
+
+        sut.push("msg B", dedupKey: "k1", duplicatePolicy: .replace, autoDismiss: .after(.seconds(5)))
+        await yieldForAsync()
+
+        clock.advance(by: .seconds(2))
+        await yieldForAsync()
+        #expect(sut.toasts.map(\.message) == ["msg B"])
+
+        clock.advance(by: .seconds(3))
+        await yieldForAsync()
+        #expect(sut.toasts.isEmpty)
+    }
+
     @Test("push without dedupKey allows duplicates")
     func noDedupKeyAllowsDuplicates() async {
         let (sut, _) = makeSUT()

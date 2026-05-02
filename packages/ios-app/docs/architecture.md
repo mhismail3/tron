@@ -216,7 +216,12 @@ so the next foreground transition can kick a fresh retry. On foreground return,
 the app verifies any apparently connected socket with a bounded URLSession
 WebSocket ping before issuing notification or session-list RPC refreshes, and
 manually retries through the same path as the status pill when the connection
-state machine says retrying is appropriate. New WebSocket tasks also stay in
+state machine says retrying is appropriate. Normal automatic recovery uses one
+short two-second WebSocket-open probe; if that probe cannot connect, the
+transport parks in the user-retryable failed/not-connected state instead of
+cycling through repeated reconnect windows. Deploy-aware reconnect remains more
+patient because `server.restarting` is an explicit signal that the Mac is
+expected to come back. New WebSocket tasks also stay in
 `.connecting` until URLSession reports that the WebSocket upgrade opened, so a
 sleeping Mac cannot be reported as connected just because a task was resumed.
 Foreground ping failures and ping timeouts transition the stale socket out of
@@ -232,9 +237,14 @@ open leaves an `RPCClient` wrapper with a disconnected transport, the next
 connection.
 `ConnectionToastPolicy` bridges app-level connection state into the global
 toast banner stack: when an active paired server becomes disconnected,
-reconnecting, failed, or unauthorized, a sticky deduplicated banner appears
-above the dashboard with the appropriate repair affordance, and it is dismissed
-as soon as the active server reconnects or no active server remains.
+reconnecting, failed, or unauthorized, a deduplicated banner appears below the
+dashboard toolbar with the appropriate repair affordance. Disconnected and
+reconnecting banners are warning-yellow, failed banners are error-red, and all
+retryable connection banners auto-dismiss after a short interval. Unauthorized
+re-pair banners remain sticky because the stored credential must be repaired.
+All connection banners clear as soon as the active server reconnects or no
+active server remains, and reconnecting countdown ticks keep the same semantic
+banner so they do not reset the auto-dismiss timer.
 
 `SessionRefreshService` is the gatekeeper for `session.list` refreshes. It
 debounces foreground refreshes, re-checks connectivity after the debounce, and

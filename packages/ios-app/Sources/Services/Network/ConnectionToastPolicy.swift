@@ -8,8 +8,18 @@ enum ConnectionStatusCopy {
 
 enum ConnectionToastPolicy {
     static let dedupKey = "connection.active-server-unavailable"
+    static let retryableAutoDismiss: ToastCenter.AutoDismiss = .after(.seconds(6))
+
+    /// Semantic banner identity. Reconnecting countdown ticks should not count as new banners.
+    enum Kind: Equatable, Sendable {
+        case unavailable
+        case reconnecting
+        case failed
+        case unauthorized
+    }
 
     struct Presentation: Equatable, Sendable {
+        let kind: Kind
         let message: String
         let severity: ToastCenter.Severity
         let autoDismiss: ToastCenter.AutoDismiss
@@ -20,22 +30,33 @@ enum ConnectionToastPolicy {
         guard hasActiveServer else { return nil }
 
         switch state {
-        case .disconnected, .failed:
+        case .disconnected:
             return Presentation(
+                kind: .unavailable,
                 message: ConnectionStatusCopy.connectedServerUnavailableDescription,
                 severity: .warning,
-                autoDismiss: .sticky,
+                autoDismiss: retryableAutoDismiss,
+                includesRetry: true
+            )
+        case .failed:
+            return Presentation(
+                kind: .failed,
+                message: ConnectionStatusCopy.connectedServerUnavailableDescription,
+                severity: .error,
+                autoDismiss: retryableAutoDismiss,
                 includesRetry: true
             )
         case .reconnecting:
             return Presentation(
+                kind: .reconnecting,
                 message: ConnectionStatusCopy.reconnectingActiveServer,
                 severity: .warning,
-                autoDismiss: .sticky,
+                autoDismiss: retryableAutoDismiss,
                 includesRetry: true
             )
         case .unauthorized:
             return Presentation(
+                kind: .unauthorized,
                 message: ConnectionStatusCopy.repairActiveServerPairing,
                 severity: .error,
                 autoDismiss: .sticky,

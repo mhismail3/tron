@@ -8,11 +8,18 @@ import SwiftUI
 /// text/icons, smooth enter/exit transitions. Each toast is individually tappable (dismiss),
 /// drag-up-to-dismiss, and supports an optional Retry button.
 @available(iOS 26.0, *)
+enum ToastBannerLayout {
+    static let horizontalPadding: CGFloat = 12
+    static let topPadding: CGFloat = 88
+    static let verticalSpacing: CGFloat = 8
+}
+
+@available(iOS 26.0, *)
 struct ToastBannerStack: View {
     @Bindable var toastCenter: ToastCenter
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: ToastBannerLayout.verticalSpacing) {
             ForEach(toastCenter.toasts) { toast in
                 SingleToastBanner(toast: toast, onDismiss: {
                     toastCenter.dismiss(toast.id)
@@ -21,8 +28,8 @@ struct ToastBannerStack: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .top)
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
+        .padding(.horizontal, ToastBannerLayout.horizontalPadding)
+        .padding(.top, ToastBannerLayout.topPadding)
         .animation(.smooth(duration: 0.3), value: toastCenter.toasts)
     }
 }

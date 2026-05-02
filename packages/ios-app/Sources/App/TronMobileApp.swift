@@ -13,6 +13,7 @@ struct TronMobileApp: App {
     @State private var appearanceSettings = AppearanceSettings.shared
 
     @State private var initializer = AppInitializer()
+    @State private var connectionBannerKind: ConnectionToastPolicy.Kind?
 
     // Onboarding state — owned per-launch; survives across the sheet
     // because @State preserves its initial value for the lifetime of
@@ -302,6 +303,7 @@ struct TronMobileApp: App {
     private func handleConnectionBannerTransition(to state: ConnectionState) {
         let hasActiveServer = container.pairedServerStore.activeServer != nil
         if ConnectionToastPolicy.shouldDismiss(for: state, hasActiveServer: hasActiveServer) {
+            connectionBannerKind = nil
             ToastCenter.shared.dismiss(dedupKey: ConnectionToastPolicy.dedupKey)
             return
         }
@@ -310,8 +312,13 @@ struct TronMobileApp: App {
             for: state,
             hasActiveServer: hasActiveServer
         ) else {
+            connectionBannerKind = nil
+            ToastCenter.shared.dismiss(dedupKey: ConnectionToastPolicy.dedupKey)
             return
         }
+
+        guard connectionBannerKind != presentation.kind else { return }
+        connectionBannerKind = presentation.kind
 
         let retryHandler: (@MainActor () async -> Void)?
         if presentation.includesRetry {
@@ -327,6 +334,7 @@ struct TronMobileApp: App {
             presentation.message,
             severity: presentation.severity,
             dedupKey: ConnectionToastPolicy.dedupKey,
+            duplicatePolicy: .replace,
             autoDismiss: presentation.autoDismiss,
             retryHandler: retryHandler
         )

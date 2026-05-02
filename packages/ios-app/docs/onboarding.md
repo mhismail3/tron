@@ -216,11 +216,18 @@ controls including the `Server Controls` header until the Mac reconnects and
 `settings.get` succeeds. The selected unreachable row overrides stale
 `Connected` metadata with `Unavailable`; its ellipsis menu is reduced to Retry
 and Forget.
-The dashboard also surfaces a sticky, deduplicated banner for the active paired
-server when connection state moves to disconnected, reconnecting, failed, or
-unauthorized. The banner clears automatically on reconnect; Settings keeps its
-own persistent warning cards so users still see the unavailable state even after
-dismissing the banner.
+The dashboard also surfaces a deduplicated banner for the active paired server
+when connection state moves to disconnected, reconnecting, failed, or
+unauthorized. Disconnected and reconnecting banners are warning-yellow,
+failed banners are error-red, and all retryable connection banners auto-dismiss
+after a short interval. Unauthorized re-pair banners remain sticky because the
+stored credential must be repaired. The banner appears below the floating
+toolbar buttons and clears automatically on reconnect. Settings keeps its own
+persistent warning cards so users still see the unavailable state even after
+dismissing the banner. Normal reconnect does one short two-second automatic
+probe before settling into the not-connected/Retry state; only deploy-aware
+server restart handling keeps trying because the server has announced it is
+coming back.
 The Agent and Context settings sheets follow the same top summary-card pattern
 and divide server settings by ownership. Agent owns execution and lifecycle
 behavior: quick-session defaults, hook model/error/context budgets,

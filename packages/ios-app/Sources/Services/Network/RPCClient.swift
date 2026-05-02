@@ -300,7 +300,7 @@ final class RPCClient: RPCTransport {
         return await ws.verifyConnection()
     }
 
-    /// Manual retry triggered from UI - resets backoff and attempts connection immediately.
+    /// Manual retry triggered from UI — runs one short connection probe immediately.
     /// Use this when user taps the reconnection pill.
     func manualRetry() async {
         logger.info("Manual retry triggered from UI", category: .rpc)

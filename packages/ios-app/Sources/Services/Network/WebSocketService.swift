@@ -1,7 +1,7 @@
 import Foundation
 
 // ARCHITECTURE: ~966 lines — connection state machine (7 states), reconnection strategies
-// (normal + deploy-aware), bounded ping verification, heartbeat loop, message
+// (single normal probe + deploy-aware), bounded ping verification, heartbeat loop, message
 // routing, and background state management.
 // These are tightly coupled transport concerns that share connection state. Pragmatic trigger:
 // if a third reconnection strategy is needed.
@@ -12,7 +12,7 @@ enum ConnectionState: Equatable, Sendable {
     case disconnected
     case connecting
     case connected
-    case reconnecting(attempt: Int, nextRetrySeconds: Int)  // Enhanced with countdown
+    case reconnecting(attempt: Int, nextRetrySeconds: Int)
     case deployRestarting(remainingSeconds: Int)  // Server deploying, patient reconnection
     case failed(reason: String)
     /// Server rejected the WS upgrade with HTTP 401 — bearer token is missing,
@@ -146,12 +146,13 @@ final class WebSocketService {
     private var isConnectedFlag = false
     private var reconnectAttempts = 0
 
-    /// Reconnection backoff policy — exponential 2s / 4s / 8s across 3 attempts (14s total).
-    private let backoff = BackoffPolicy()
+    /// Normal reconnect policy — one short automatic probe before parking in `.failed`.
+    private let reconnectPolicy = ReconnectProbePolicy()
 
     private let requestTimeout: TimeInterval = 30.0
     nonisolated static let connectionVerificationTimeout: TimeInterval = 3.0
     nonisolated static let connectionOpenTimeout: TimeInterval = 10.0
+    nonisolated static let automaticReconnectProbeTimeout: TimeInterval = ReconnectProbePolicy().probeTimeout
     nonisolated static let heartbeatInterval: TimeInterval = 5.0
     nonisolated static let failedAfterExhaustionReason = "Connection lost — tap to retry"
 
@@ -182,7 +183,7 @@ final class WebSocketService {
     // MARK: - Deploy Restart State
 
     /// Set when the server broadcasts `server.restarting` before a deploy shutdown.
-    /// Triggers patient reconnection instead of the normal 3-attempt reconnect.
+    /// Triggers patient reconnection instead of the normal short reconnect probe.
     private var isDeployRestarting = false
 
     /// Expected total restart time in milliseconds (from server event).
@@ -257,6 +258,18 @@ final class WebSocketService {
     // MARK: - Connection Management
 
     func connect() async {
+        await connect(
+            openTimeout: Self.connectionOpenTimeout,
+            stateOnStart: .connecting,
+            stateOnFailure: .disconnected
+        )
+    }
+
+    private func connect(
+        openTimeout: TimeInterval,
+        stateOnStart: ConnectionState,
+        stateOnFailure: ConnectionState
+    ) async {
         // Prevent concurrent connection attempts (race condition guard)
         guard !isConnectionInProgress else {
             logger.debug("Connection already in progress, skipping", category: .websocket)
@@ -272,7 +285,7 @@ final class WebSocketService {
         isConnectionInProgress = true
         defer { isConnectionInProgress = false }
 
-        connectionState = .connecting
+        connectionState = stateOnStart
         logger.logWebSocketState("Connecting", details: serverURL.absoluteString)
         logger.info("Connecting to \(self.serverURL.absoluteString)", category: .websocket)
 
@@ -306,13 +319,13 @@ final class WebSocketService {
         logger.verbose("WebSocket task resumed", category: .websocket)
 
         do {
-            try await waitForOpen(on: task, timeout: Self.connectionOpenTimeout)
+            try await waitForOpen(on: task, timeout: openTimeout)
         } catch {
             if case .unauthorized = connectionState {
                 return
             }
             logger.warning("WebSocket did not open: \(error.localizedDescription)", category: .websocket)
-            cleanupDeadConnection(error: error)
+            cleanupDeadConnection(error: error, stateAfterCleanup: stateOnFailure)
             return
         }
 
@@ -322,6 +335,7 @@ final class WebSocketService {
         }
 
         isConnectedFlag = true
+        reconnectAttempts = 0
         connectionState = .connected
         logger.logWebSocketState("Connected", details: "Verified connection to \(serverURL.host ?? "unknown")")
         logger.info("Connection verified for \(self.serverURL.absoluteString)", category: .websocket)
@@ -403,12 +417,9 @@ final class WebSocketService {
     /// Note: We only pause heartbeats for a live `.connected` socket — reconnecting is
     /// expensive so we don't want to tear that down on every backgrounding.
     ///
-    /// When backgrounding MID-RECONNECT however, we must clean up: the reconnect Task's
-    /// countdown loop guards on `!isInBackground` and exits silently, leaving the state
-    /// frozen at e.g. `.reconnecting(attempt: 2, nextRetrySeconds: 2)`. If we then return
-    /// to foreground, the scene-phase handler would see `.reconnecting` and believe a
-    /// reconnect is already in flight when nothing is actually running. Cancel the Task
-    /// and reset to `.disconnected` so the foreground handler triggers a fresh retry.
+    /// When backgrounding mid-reconnect, cancel the probe and reset to `.disconnected` so the
+    /// foreground handler can decide whether to run a fresh probe instead of assuming work is
+    /// still in flight.
     func setBackgroundState(_ inBackground: Bool) {
         guard isInBackground != inBackground else { return }
         isInBackground = inBackground
@@ -505,9 +516,12 @@ final class WebSocketService {
         }
     }
 
-    private func cleanupDeadConnection(error: Error) {
+    private func cleanupDeadConnection(
+        error: Error,
+        stateAfterCleanup: ConnectionState = .disconnected
+    ) {
         isConnectedFlag = false
-        connectionState = .disconnected
+        connectionState = stateAfterCleanup
         openedWebSocketTask = nil
         openTimeoutTask?.cancel()
         openTimeoutTask = nil
@@ -763,7 +777,9 @@ final class WebSocketService {
         logger.warning("Handling disconnect...", category: .websocket)
         isConnectedFlag = false
         if !isDeployRestarting {
-            connectionState = .disconnected
+            connectionState = isInBackground
+                ? .disconnected
+                : .reconnecting(attempt: 1, nextRetrySeconds: 0)
         }
         openedWebSocketTask = nil
         openTimeoutTask?.cancel()
@@ -790,57 +806,61 @@ final class WebSocketService {
                 await self?.startDeployReconnection()
             }
         } else {
-            // Start persistent reconnection in a tracked task
+            // Start the single normal reconnect probe in a tracked task.
             reconnectTask = Task { [weak self] in
                 await self?.startReconnection()
             }
         }
     }
 
-    /// Exponential reconnection across `backoff.maxAttempts` attempts.
-    /// After all attempts exhausted, sets state to .failed for read-only mode.
-    /// User can tap the pill to trigger `manualRetry()` which resets the attempt counter.
+    /// Run one short automatic reconnect probe.
+    /// After that probe fails, park in `.failed` so the user sees "not connected"
+    /// until they manually retry or a deploy-aware reconnect is explicitly active.
     private func startReconnection() async {
+        guard !isConnectedFlag && !isInBackground && !Task.isCancelled else { return }
         reconnectAttempts += 1
 
-        // Check if we've exhausted all attempts
-        if reconnectAttempts > backoff.maxAttempts {
-            logger.warning("Max reconnection attempts (\(backoff.maxAttempts)) exhausted - entering read-only mode", category: .websocket)
+        guard reconnectAttempts <= reconnectPolicy.maxAutomaticAttempts else {
+            logger.warning("Automatic reconnect probe budget exhausted - entering read-only mode", category: .websocket)
+            reconnectAttempts = 0
             connectionState = .failed(reason: Self.failedAfterExhaustionReason)
             return
         }
 
-        // Delay scales exponentially per attempt (2s, 4s, 8s — no jitter).
-        let delaySeconds = Int(backoff.delay(forAttempt: reconnectAttempts).rounded(.up))
-        logger.info("Reconnecting in \(delaySeconds)s (attempt \(reconnectAttempts)/\(backoff.maxAttempts))", category: .websocket)
+        let reconnectingState = ConnectionState.reconnecting(
+            attempt: reconnectAttempts,
+            nextRetrySeconds: 0
+        )
+        logger.info(
+            "Starting reconnect probe \(reconnectAttempts)/\(reconnectPolicy.maxAutomaticAttempts) (timeout: \(reconnectPolicy.probeTimeout)s)",
+            category: .websocket
+        )
 
-        // Countdown loop - updates UI every second
-        var remainingSeconds = delaySeconds
-        while remainingSeconds > 0 && !isConnectedFlag && !isInBackground && !Task.isCancelled {
-            connectionState = .reconnecting(attempt: reconnectAttempts, nextRetrySeconds: remainingSeconds)
-            try? await Task.sleep(for: .seconds(1))
-            remainingSeconds -= 1
-        }
+        await connect(
+            openTimeout: reconnectPolicy.probeTimeout,
+            stateOnStart: reconnectingState,
+            stateOnFailure: reconnectingState
+        )
 
-        // Check if we should continue (cancelled, connected, or in background)
-        guard !isConnectedFlag && !isInBackground && !Task.isCancelled else { return }
-
-        // Update to show 0 seconds remaining / attempting
-        connectionState = .reconnecting(attempt: reconnectAttempts, nextRetrySeconds: 0)
-
-        // Attempt to connect
-        await connect()
-
-        // If connect() didn't succeed (isConnectedFlag still false), try next attempt
         if isConnectedFlag {
             reconnectAttempts = 0
-        } else if !isInBackground && !Task.isCancelled {
-            await startReconnection()
+            return
         }
+
+        if case .unauthorized = connectionState {
+            reconnectAttempts = 0
+            return
+        }
+
+        guard !isInBackground && !Task.isCancelled else { return }
+
+        logger.warning("Reconnect probe failed - entering read-only mode", category: .websocket)
+        reconnectAttempts = 0
+        connectionState = .failed(reason: Self.failedAfterExhaustionReason)
     }
 
     /// Deploy-aware reconnection — waits for the server to restart, then reconnects with more patience.
-    /// Uses 10 attempts (vs 3 for normal) with 3s delays (vs 5s) since we know the server is coming back.
+    /// Uses 10 attempts because `server.restarting` told us the server is expected to come back.
     private func startDeployReconnection() async {
         let maxDeployAttempts = 10
         let deployRetryDelay: TimeInterval = 3.0
@@ -897,7 +917,7 @@ final class WebSocketService {
         }
     }
 
-    /// Manual retry triggered from UI - resets attempt counter for fresh backoff
+    /// Manual retry triggered from UI — runs one short connection probe.
     func manualRetry() async {
         guard !isConnectedFlag && !isConnectionInProgress else {
             logger.debug("Manual retry ignored - already connected or connecting", category: .websocket)
@@ -915,13 +935,14 @@ final class WebSocketService {
         connectionState = .connecting
         logger.info("Manual retry triggered", category: .websocket)
 
-        await connect()
+        await connect(
+            openTimeout: reconnectPolicy.probeTimeout,
+            stateOnStart: .connecting,
+            stateOnFailure: .failed(reason: Self.failedAfterExhaustionReason)
+        )
 
-        // If connection failed, start persistent reconnection in tracked task
-        if !isConnectedFlag && !isInBackground {
-            reconnectTask = Task { [weak self] in
-                await self?.startReconnection()
-            }
+        if case .unauthorized = connectionState {
+            return
         }
     }
 }

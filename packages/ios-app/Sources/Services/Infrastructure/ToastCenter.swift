@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Features:
 /// - Severity levels (`info`/`warning`/`error`) with default auto-dismiss durations.
-/// - `dedupKey`-based suppression — repeat pushes of the same transient error collapse to one.
+/// - `dedupKey`-based suppression or replacement for app-level state banners.
 /// - Overflow trimming with preference for retry toasts (to keep actionable signals visible).
 /// - Optional retry handler → toast shows a Retry button and is sticky by default.
 ///
@@ -37,6 +37,14 @@ final class ToastCenter {
         case sticky
         /// Auto-dismiss after the given duration.
         case after(Duration)
+    }
+
+    /// Behavior when pushing a toast whose `dedupKey` is already visible.
+    enum DuplicatePolicy: Sendable, Equatable {
+        /// Ignore the new push and keep the visible toast unchanged.
+        case suppress
+        /// Remove the visible toast for that key and show the new one.
+        case replace
     }
 
     struct Toast: Identifiable, Equatable {
@@ -86,13 +94,16 @@ final class ToastCenter {
 
     // MARK: - Public API
 
-    /// Push a new toast. Duplicate-key pushes are silently dropped while a toast with that key
-    /// is still visible. Overflow past `maxVisible` trims the oldest non-retry toast.
+    /// Push a new toast. Duplicate-key pushes are suppressed by default while a toast with that
+    /// key is still visible. App-level state banners can opt into replacement when the underlying
+    /// state changed and the visible message/action must change with it. Overflow past
+    /// `maxVisible` trims the oldest non-retry toast.
     ///
     /// - Parameters:
     ///   - message: User-facing text.
     ///   - severity: Visual/semantic severity. Defaults to `.error`.
     ///   - dedupKey: Optional key used to suppress duplicates.
+    ///   - duplicatePolicy: Whether duplicate-key pushes suppress or replace a visible toast.
     ///   - autoDismiss: Dismissal timing policy. `.standard` uses severity defaults
     ///     (info 2s / warning 3s / error 4s) unless `retryHandler` is non-nil (→ sticky).
     ///   - retryHandler: Optional callback for a Retry button. Makes `.standard` mean sticky.
@@ -100,11 +111,24 @@ final class ToastCenter {
         _ message: String,
         severity: Severity = .error,
         dedupKey: String? = nil,
+        duplicatePolicy: DuplicatePolicy = .suppress,
         autoDismiss: AutoDismiss = .standard,
         retryHandler: (@MainActor () async -> Void)? = nil
     ) {
-        if let key = dedupKey, toasts.contains(where: { $0.dedupKey == key }) {
-            return
+        if let key = dedupKey {
+            let duplicateIds = toasts
+                .filter { $0.dedupKey == key }
+                .map(\.id)
+            if !duplicateIds.isEmpty {
+                switch duplicatePolicy {
+                case .suppress:
+                    return
+                case .replace:
+                    for id in duplicateIds {
+                        dismiss(id)
+                    }
+                }
+            }
         }
 
         let resolvedDismiss: Duration? = {

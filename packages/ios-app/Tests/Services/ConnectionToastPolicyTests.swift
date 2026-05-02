@@ -23,8 +23,9 @@ struct ConnectionToastPolicyTests {
 
         #expect(presentation?.message == ConnectionStatusCopy.connectedServerUnavailableDescription)
         #expect(presentation?.severity == .warning)
-        #expect(presentation?.autoDismiss == .sticky)
+        #expect(presentation?.autoDismiss == ConnectionToastPolicy.retryableAutoDismiss)
         #expect(presentation?.includesRetry == true)
+        #expect(presentation?.kind == .unavailable)
     }
 
     @Test("reconnecting active server shows retryable reconnecting toast")
@@ -36,8 +37,38 @@ struct ConnectionToastPolicyTests {
 
         #expect(presentation?.message == ConnectionStatusCopy.reconnectingActiveServer)
         #expect(presentation?.severity == .warning)
-        #expect(presentation?.autoDismiss == .sticky)
+        #expect(presentation?.autoDismiss == ConnectionToastPolicy.retryableAutoDismiss)
         #expect(presentation?.includesRetry == true)
+        #expect(presentation?.kind == .reconnecting)
+    }
+
+    @Test("reconnecting countdown ticks keep one semantic banner kind")
+    func reconnectingCountdownKeepsStableKind() {
+        let first = ConnectionToastPolicy.presentation(
+            for: .reconnecting(attempt: 1, nextRetrySeconds: 5),
+            hasActiveServer: true
+        )
+        let nextTick = ConnectionToastPolicy.presentation(
+            for: .reconnecting(attempt: 1, nextRetrySeconds: 4),
+            hasActiveServer: true
+        )
+
+        #expect(first?.kind == .reconnecting)
+        #expect(nextTick?.kind == .reconnecting)
+    }
+
+    @Test("failed active server shows action-required error toast")
+    func failedShowsErrorToast() {
+        let presentation = ConnectionToastPolicy.presentation(
+            for: .failed(reason: "Request timed out"),
+            hasActiveServer: true
+        )
+
+        #expect(presentation?.message == ConnectionStatusCopy.connectedServerUnavailableDescription)
+        #expect(presentation?.severity == .error)
+        #expect(presentation?.autoDismiss == ConnectionToastPolicy.retryableAutoDismiss)
+        #expect(presentation?.includesRetry == true)
+        #expect(presentation?.kind == .failed)
     }
 
     @Test("connecting suppresses startup banner flash")
@@ -57,5 +88,6 @@ struct ConnectionToastPolicyTests {
         #expect(presentation?.severity == .error)
         #expect(presentation?.autoDismiss == .sticky)
         #expect(presentation?.includesRetry == false)
+        #expect(presentation?.kind == .unauthorized)
     }
 }
