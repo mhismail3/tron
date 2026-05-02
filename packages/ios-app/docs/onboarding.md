@@ -220,10 +220,12 @@ The dashboard also surfaces a deduplicated banner for the active paired server
 when connection state moves to disconnected, reconnecting, failed, or
 unauthorized. Disconnected and reconnecting banners are warning-yellow,
 failed banners are error-red, and all retryable connection banners auto-dismiss
-after a short interval. Unauthorized re-pair banners remain sticky because the
-stored credential must be repaired. The banner appears below the floating
-toolbar buttons and clears automatically on reconnect. Settings keeps its own
-persistent warning cards so users still see the unavailable state even after
+after four seconds. The disconnected/failed banner says `Not Connected`; the
+reconnecting banner says `Reconnecting`. Unauthorized re-pair banners remain
+sticky because the stored credential must be repaired. The banner appears as a
+compact centered pill near the top safe area, sizes to its content up to a
+fixed maximum width, and clears automatically on reconnect. Settings keeps its
+own persistent warning cards so users still see the unavailable state even after
 dismissing the banner. Normal reconnect does one short two-second automatic
 probe before settling into the not-connected/Retry state; only deploy-aware
 server restart handling keeps trying because the server has announced it is

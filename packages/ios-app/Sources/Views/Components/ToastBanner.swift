@@ -10,8 +10,11 @@ import SwiftUI
 @available(iOS 26.0, *)
 enum ToastBannerLayout {
     static let horizontalPadding: CGFloat = 12
-    static let topPadding: CGFloat = 88
+    static let topPadding: CGFloat = 8
+    static let maxWidth: CGFloat = 300
     static let verticalSpacing: CGFloat = 8
+    static let pillCornerRadius: CGFloat = 22
+    static let contentFontSize: CGFloat = TronTypography.sizeBody3
 }
 
 @available(iOS 26.0, *)
@@ -27,6 +30,7 @@ struct ToastBannerStack: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .frame(maxWidth: ToastBannerLayout.maxWidth)
         .frame(maxWidth: .infinity, alignment: .top)
         .padding(.horizontal, ToastBannerLayout.horizontalPadding)
         .padding(.top, ToastBannerLayout.topPadding)
@@ -48,11 +52,10 @@ private struct SingleToastBanner: View {
                 .foregroundStyle(color)
 
             Text(toast.message)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(Color.primary)
+                .font(TronTypography.sans(size: ToastBannerLayout.contentFontSize, weight: .semibold))
+                .foregroundStyle(color)
                 .multilineTextAlignment(.leading)
                 .lineLimit(3)
-                .frame(maxWidth: .infinity, alignment: .leading)
 
             if let handler = toast.retryHandler {
                 Button {
@@ -60,7 +63,7 @@ private struct SingleToastBanner: View {
                     Task { await handler() }
                 } label: {
                     Text("Retry")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .font(TronTypography.sans(size: ToastBannerLayout.contentFontSize, weight: .semibold))
                         .foregroundStyle(color)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
@@ -75,7 +78,7 @@ private struct SingleToastBanner: View {
         .padding(.vertical, 10)
         .glassEffect(
             .regular.tint(color.opacity(0.25)),
-            in: .rect(cornerRadius: 14)
+            in: .rect(cornerRadius: ToastBannerLayout.pillCornerRadius)
         )
         .offset(y: dragOffset)
         .gesture(
@@ -107,7 +110,7 @@ private struct SingleToastBanner: View {
 
     @ViewBuilder
     private func iconFor(severity: ToastCenter.Severity) -> some View {
-        let size = TronTypography.sizeBodySM
+        let size = ToastBannerLayout.contentFontSize
         switch severity {
         case .info:
             Image(systemName: "info.circle.fill")

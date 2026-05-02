@@ -21,11 +21,16 @@ struct ConnectionToastPolicyTests {
     func disconnectedShowsUnavailableToast() {
         let presentation = ConnectionToastPolicy.presentation(for: .disconnected, hasActiveServer: true)
 
-        #expect(presentation?.message == ConnectionStatusCopy.connectedServerUnavailableDescription)
+        #expect(presentation?.message == ConnectionStatusCopy.activeServerNotConnectedBanner)
         #expect(presentation?.severity == .warning)
         #expect(presentation?.autoDismiss == ConnectionToastPolicy.retryableAutoDismiss)
         #expect(presentation?.includesRetry == true)
         #expect(presentation?.kind == .unavailable)
+    }
+
+    @Test("retryable connection banners auto-dismiss after four seconds")
+    func retryableBannersAutoDismissAfterFourSeconds() {
+        #expect(ConnectionToastPolicy.retryableAutoDismiss == .after(.seconds(4)))
     }
 
     @Test("reconnecting active server shows retryable reconnecting toast")
@@ -35,7 +40,7 @@ struct ConnectionToastPolicyTests {
             hasActiveServer: true
         )
 
-        #expect(presentation?.message == ConnectionStatusCopy.reconnectingActiveServer)
+        #expect(presentation?.message == ConnectionStatusCopy.activeServerReconnectingBanner)
         #expect(presentation?.severity == .warning)
         #expect(presentation?.autoDismiss == ConnectionToastPolicy.retryableAutoDismiss)
         #expect(presentation?.includesRetry == true)
@@ -64,7 +69,7 @@ struct ConnectionToastPolicyTests {
             hasActiveServer: true
         )
 
-        #expect(presentation?.message == ConnectionStatusCopy.connectedServerUnavailableDescription)
+        #expect(presentation?.message == ConnectionStatusCopy.activeServerNotConnectedBanner)
         #expect(presentation?.severity == .error)
         #expect(presentation?.autoDismiss == ConnectionToastPolicy.retryableAutoDismiss)
         #expect(presentation?.includesRetry == true)

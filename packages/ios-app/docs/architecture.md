@@ -237,11 +237,13 @@ open leaves an `RPCClient` wrapper with a disconnected transport, the next
 connection.
 `ConnectionToastPolicy` bridges app-level connection state into the global
 toast banner stack: when an active paired server becomes disconnected,
-reconnecting, failed, or unauthorized, a deduplicated banner appears below the
-dashboard toolbar with the appropriate repair affordance. Disconnected and
-reconnecting banners are warning-yellow, failed banners are error-red, and all
-retryable connection banners auto-dismiss after a short interval. Unauthorized
-re-pair banners remain sticky because the stored credential must be repaired.
+reconnecting, failed, or unauthorized, a deduplicated compact pill appears near
+the top safe area with the appropriate repair affordance and hugs its content
+up to a fixed maximum width. Disconnected/failed banners say `Not Connected`;
+reconnecting banners say `Reconnecting`. Disconnected and reconnecting banners
+are warning-yellow, failed banners are error-red, and all retryable connection
+banners auto-dismiss after four seconds. Unauthorized re-pair banners remain
+sticky because the stored credential must be repaired.
 All connection banners clear as soon as the active server reconnects or no
 active server remains, and reconnecting countdown ticks keep the same semantic
 banner so they do not reset the auto-dismiss timer.

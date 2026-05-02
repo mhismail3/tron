@@ -576,6 +576,7 @@
 		A6FF0CA8C277543C8A7D0E2F /* ErrorPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF5274343CE2A3872EBFBC6 /* ErrorPlugin.swift */; };
 		A73C32F028EC1DF7026345A1 /* CommandToolDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 824F28682A9C3D09741C68AA /* CommandToolDetailSheet.swift */; };
 		A82D93CB7365F2D5317B989F /* InputHistoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744FA401B3D1D597D5427351 /* InputHistoryStoreTests.swift */; };
+		A8862614C0C883476C188E98 /* ToastBannerLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3987A8647A11E3F4F1437B2A /* ToastBannerLayoutTests.swift */; };
 		A8DF365AA74313FA722F0B49 /* ToolResultNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89A21F2C8295D305E962466F /* ToolResultNote.swift */; };
 		A922BB32EE90C7F249AB8F4D /* SubagentSpawnedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE88DEE3F08070A2E1884468 /* SubagentSpawnedPlugin.swift */; };
 		A950E54356B7A1FE57F1592A /* APNsEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E4B32B05D2AE93114B9534B /* APNsEnvironment.swift */; };
@@ -1078,6 +1079,7 @@
 		38B48561A985D4D19269729A /* FolderCreationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderCreationTests.swift; sourceTree = "<group>"; };
 		393AD46FAE358E76760BB9D0 /* JobBackgroundedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobBackgroundedPlugin.swift; sourceTree = "<group>"; };
 		393C89DB821923F90B216AFE /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		3987A8647A11E3F4F1437B2A /* ToastBannerLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastBannerLayoutTests.swift; sourceTree = "<group>"; };
 		39A5A64462586B615B431492 /* RPCDomainClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCDomainClient.swift; sourceTree = "<group>"; };
 		3A26519A8458DB5FAB4229CC /* ProvidersStatusHelpersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersStatusHelpersTests.swift; sourceTree = "<group>"; };
 		3ACFA2E1D7E2775277E8E1C4 /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Fonts; path = Sources/Resources/Fonts; sourceTree = SOURCE_ROOT; };
@@ -2221,6 +2223,7 @@
 			isa = PBXGroup;
 			children = (
 				8548353C7D76178EEFD10906 /* RecentWorkspacesTests.swift */,
+				3987A8647A11E3F4F1437B2A /* ToastBannerLayoutTests.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -4749,6 +4752,7 @@
 				3BA0B87462C7B912147DE959 /* ThinkingIndicatorTests.swift in Sources */,
 				D2B846A2AAFF509FF7BD50D8 /* ThinkingRepositoryTests.swift in Sources */,
 				7767531E78883F4ED05C16B2 /* ThinkingStateTests.swift in Sources */,
+				A8862614C0C883476C188E98 /* ToastBannerLayoutTests.swift in Sources */,
 				681814866D9741A502BC88C1 /* ToastCenterTests.swift in Sources */,
 				A01888E4143551FAF00D8042 /* TokenFormatterTests.swift in Sources */,
 				005F0EAD1650D21207B9E1EB /* TokenRecordParsingTests.swift in Sources */,

@@ -2,13 +2,14 @@ import Foundation
 
 enum ConnectionStatusCopy {
     static let connectedServerUnavailableDescription = "The connected server can't be reached."
-    static let reconnectingActiveServer = "Reconnecting to the connected server."
+    static let activeServerNotConnectedBanner = "Not Connected"
+    static let activeServerReconnectingBanner = "Reconnecting"
     static let repairActiveServerPairing = "Re-pair this server to reconnect."
 }
 
 enum ConnectionToastPolicy {
     static let dedupKey = "connection.active-server-unavailable"
-    static let retryableAutoDismiss: ToastCenter.AutoDismiss = .after(.seconds(6))
+    static let retryableAutoDismiss: ToastCenter.AutoDismiss = .after(.seconds(4))
 
     /// Semantic banner identity. Reconnecting countdown ticks should not count as new banners.
     enum Kind: Equatable, Sendable {
@@ -33,7 +34,7 @@ enum ConnectionToastPolicy {
         case .disconnected:
             return Presentation(
                 kind: .unavailable,
-                message: ConnectionStatusCopy.connectedServerUnavailableDescription,
+                message: ConnectionStatusCopy.activeServerNotConnectedBanner,
                 severity: .warning,
                 autoDismiss: retryableAutoDismiss,
                 includesRetry: true
@@ -41,7 +42,7 @@ enum ConnectionToastPolicy {
         case .failed:
             return Presentation(
                 kind: .failed,
-                message: ConnectionStatusCopy.connectedServerUnavailableDescription,
+                message: ConnectionStatusCopy.activeServerNotConnectedBanner,
                 severity: .error,
                 autoDismiss: retryableAutoDismiss,
                 includesRetry: true
@@ -49,7 +50,7 @@ enum ConnectionToastPolicy {
         case .reconnecting:
             return Presentation(
                 kind: .reconnecting,
-                message: ConnectionStatusCopy.reconnectingActiveServer,
+                message: ConnectionStatusCopy.activeServerReconnectingBanner,
                 severity: .warning,
                 autoDismiss: retryableAutoDismiss,
                 includesRetry: true
