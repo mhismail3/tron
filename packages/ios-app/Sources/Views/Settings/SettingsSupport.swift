@@ -85,11 +85,18 @@ enum MainSettingsGridLayout {
     static let columnSpacing: CGFloat = 8
     static let rowSpacing: CGFloat = 8
     static let destinationTileMinHeight: CGFloat = 98
-    static let dangerTileMinHeight: CGFloat = 78
-    static let iconSize: CGFloat = TronTypography.sizeXL
-    static let iconFrameSize: CGFloat = 24
-    static let destinationTitleSize: CGFloat = TronTypography.sizeLargeTitle
-    static let dangerTitleSize: CGFloat = TronTypography.sizeBody3
+    static let dangerTileMinHeight: CGFloat = 0
+    static let dividerHeight: CGFloat = 1
+    static let dividerHorizontalPadding: CGFloat = 2
+    static let dividerVerticalPadding: CGFloat = 6
+    static let dividerOpacity = 0.22
+    static let iconSize: CGFloat = TronTypography.sizeLargeTitle
+    static let iconFrameSize: CGFloat = 22
+    static let destinationTitleSize: CGFloat = TronTypography.sizeTitle
+    static let destinationDescriptionSize: CGFloat = TronTypography.sizeSM
+    static let destinationDescriptionTopPadding: CGFloat = 6
+    static let destinationDescriptionOpacity = 0.68
+    static let dangerTitleSize: CGFloat = TronTypography.sizeBodySM
     static let unavailableActionLeadingPadding: CGFloat = 28
 }
 
@@ -144,6 +151,23 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return ServerSettingsCategory.context.title
         case .mcpServers:
             return ServerSettingsCategory.mcpServers.title
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .server:
+            return "Paired servers, transcription, updates"
+        case .app:
+            return "Appearance, notifications, local behavior"
+        case .providers:
+            return "OAuth login and API keys"
+        case .agent:
+            return "Hooks, prompts, queueing"
+        case .context:
+            return "Compaction, memory, skills"
+        case .mcpServers:
+            return "External tool servers"
         }
     }
 

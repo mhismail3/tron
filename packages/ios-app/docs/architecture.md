@@ -275,9 +275,11 @@ starts at medium on iPhone. Its first grid row launches the surface-oriented
 settings: Server, App, and Providers. Its second row launches agent-behavior
 settings: Agent, Context, and MCP. The third row holds the destructive actions
 without a separate Danger Zone header, while keeping those tiles error-red. All
-main-grid icons use the larger settings tile size; the surface and behavior
-tiles use taller containers with larger bold emerald labels, while the
-destructive row uses shorter containers and keeps its compact red label style.
+main-grid icons use the shared settings tile size. A thin muted divider separates
+the green destination rows from the destructive actions. The surface and behavior
+tiles use taller containers with left-aligned emerald titles, top-right icons,
+and smaller softer descriptive copy below, while the destructive row sizes to its
+two-line red labels and top-right icons.
 Server-backed settings are grouped by behavior owner: Servers covers
 pairing/security/transcription/updates, Providers covers auth credentials, Agent
 covers execution lifecycle including hooks, prompt-history capture/retention,

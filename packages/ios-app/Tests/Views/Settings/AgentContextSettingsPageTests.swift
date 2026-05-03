@@ -34,6 +34,11 @@ struct AgentContextSettingsPageTests {
             "App",
             "Providers",
         ])
+        #expect(MainSettingsGridDestination.surfaceRow.map(\.description) == [
+            "Paired servers, transcription, updates",
+            "Appearance, notifications, local behavior",
+            "OAuth login and API keys",
+        ])
         #expect(MainSettingsGridDestination.behaviorRow == [
             .agent,
             .context,
@@ -44,15 +49,27 @@ struct AgentContextSettingsPageTests {
             "Context",
             "MCP",
         ])
+        #expect(MainSettingsGridDestination.behaviorRow.map(\.description) == [
+            "Hooks, prompts, queueing",
+            "Compaction, memory, skills",
+            "External tool servers",
+        ])
         #expect(MainSettingsGridLayout.columnCount == 3)
         #expect(MainSettingsGridLayout.columnSpacing == 8)
         #expect(MainSettingsGridLayout.rowSpacing == 8)
         #expect(MainSettingsGridLayout.destinationTileMinHeight == 98)
-        #expect(MainSettingsGridLayout.dangerTileMinHeight == 78)
-        #expect(MainSettingsGridLayout.iconSize == TronTypography.sizeXL)
-        #expect(MainSettingsGridLayout.iconFrameSize == 24)
-        #expect(MainSettingsGridLayout.destinationTitleSize == TronTypography.sizeLargeTitle)
-        #expect(MainSettingsGridLayout.dangerTitleSize == TronTypography.sizeBody3)
+        #expect(MainSettingsGridLayout.dangerTileMinHeight == 0)
+        #expect(MainSettingsGridLayout.dividerHeight == 1)
+        #expect(MainSettingsGridLayout.dividerHorizontalPadding == 2)
+        #expect(MainSettingsGridLayout.dividerVerticalPadding == 6)
+        #expect(MainSettingsGridLayout.dividerOpacity == 0.22)
+        #expect(MainSettingsGridLayout.iconSize == TronTypography.sizeLargeTitle)
+        #expect(MainSettingsGridLayout.iconFrameSize == 22)
+        #expect(MainSettingsGridLayout.destinationTitleSize == TronTypography.sizeTitle)
+        #expect(MainSettingsGridLayout.destinationDescriptionSize == TronTypography.sizeSM)
+        #expect(MainSettingsGridLayout.destinationDescriptionTopPadding == 6)
+        #expect(MainSettingsGridLayout.destinationDescriptionOpacity == 0.68)
+        #expect(MainSettingsGridLayout.dangerTitleSize == TronTypography.sizeBodySM)
         #expect(MainSettingsFooterLayout.horizontalPadding == 20)
         #expect(MainSettingsFooterLayout.textLeadingPadding == 8)
         #expect(MainSettingsFooterLayout.topPadding == 10)

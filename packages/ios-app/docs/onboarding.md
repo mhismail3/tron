@@ -201,9 +201,11 @@ returns real values. The main Settings sheet starts at the medium detent and
 uses a 3x3 launcher grid: Server, App, and Providers for settings surfaces;
 Agent, Context, and MCP for agent behavior; then Clear Prompt History, Archive
 All Sessions, and Reset All Settings as the red destructive row with no separate
-Danger Zone header. All nine tiles use larger icons; the green surface and
-behavior tiles are slightly taller with larger bold emerald labels, while the
-destructive row is slightly shorter and keeps compact red label styling.
+Danger Zone header. All nine tiles share the same compact icon size; the green
+surface and behavior tiles are slightly taller with left-aligned emerald titles,
+top-right icons, and short softer descriptive copy. A thin muted divider separates
+those destination rows from the destructive row, which sizes to its two-line red
+labels and top-right icons.
 Device-only preferences such as onboarding completion,
 paired servers, active server id, appearance, dashboard presentation, and bearer
 tokens live in iOS `UserDefaults`/Keychain. When the user switches Macs, the app

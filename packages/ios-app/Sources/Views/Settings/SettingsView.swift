@@ -259,7 +259,11 @@ struct SettingsView: View {
                 ForEach(MainSettingsGridDestination.behaviorRow, id: \.self) { destination in
                     mainSettingsDestinationTile(destination)
                 }
+            }
 
+            mainSettingsDivider
+
+            LazyVGrid(columns: mainSettingsGridColumns, spacing: MainSettingsGridLayout.rowSpacing) {
                 ForEach(SettingsDangerZoneAction.order, id: \.self) { action in
                     dangerActionTile(action)
                 }
@@ -269,6 +273,14 @@ struct SettingsView: View {
                 serverUnavailableCard
             }
         }
+    }
+
+    private var mainSettingsDivider: some View {
+        Rectangle()
+            .fill(Color.tronTextMuted.opacity(MainSettingsGridLayout.dividerOpacity))
+            .frame(height: MainSettingsGridLayout.dividerHeight)
+            .padding(.horizontal, MainSettingsGridLayout.dividerHorizontalPadding)
+            .padding(.vertical, MainSettingsGridLayout.dividerVerticalPadding)
     }
 
     private var mainSettingsGridColumns: [GridItem] {
@@ -287,14 +299,12 @@ struct SettingsView: View {
             Button {
                 openMainSettingsDestination(destination)
             } label: {
-                mainSettingsTileContent(
+                mainSettingsDestinationTileContent(
                     icon: destination.icon,
                     title: destination.title,
+                    description: destination.description,
                     accent: mainSettingsDestinationAccent(destination),
-                    labelColor: mainSettingsDestinationAccent(destination),
-                    minHeight: MainSettingsGridLayout.destinationTileMinHeight,
-                    titleSize: MainSettingsGridLayout.destinationTitleSize,
-                    titleWeight: .bold
+                    minHeight: MainSettingsGridLayout.destinationTileMinHeight
                 )
             }
             .buttonStyle(.plain)
@@ -385,6 +395,52 @@ struct SettingsView: View {
         }
     }
 
+    private func mainSettingsDestinationTileContent(
+        icon: String,
+        title: String,
+        description: String,
+        accent: Color,
+        minHeight: CGFloat
+    ) -> some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .font(TronTypography.sans(size: MainSettingsGridLayout.destinationTitleSize, weight: .bold))
+                    .foregroundStyle(accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.trailing, MainSettingsGridLayout.iconFrameSize + 8)
+
+                Text(description)
+                    .font(TronTypography.sans(size: MainSettingsGridLayout.destinationDescriptionSize, weight: .medium))
+                    .foregroundStyle(.tronTextMuted.opacity(MainSettingsGridLayout.destinationDescriptionOpacity))
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.72)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, MainSettingsGridLayout.destinationDescriptionTopPadding)
+
+                Spacer(minLength: 0)
+            }
+
+            VStack {
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: MainSettingsGridLayout.iconSize))
+                    .foregroundStyle(accent)
+                    .frame(
+                        width: MainSettingsGridLayout.iconFrameSize,
+                        height: MainSettingsGridLayout.iconFrameSize,
+                        alignment: .leading
+                    )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
     private func dangerActionTile(_ action: SettingsDangerZoneAction) -> some View {
         let enabled = isDangerActionEnabled(action)
         return SettingsCard(accent: .tronError, interactive: enabled) {
@@ -452,7 +508,20 @@ struct SettingsView: View {
         showsProgress: Bool = false
     ) -> some View {
         ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(TronTypography.sans(size: titleSize, weight: titleWeight))
+                .foregroundStyle(labelColor)
+                .lineLimit(2)
+                .minimumScaleFactor(0.76)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, MainSettingsGridLayout.iconFrameSize + 8)
+
+            if showsProgress {
+                ProgressView()
+                    .tint(accent)
+                    .scaleEffect(0.7)
+            } else {
                 Image(systemName: icon)
                     .font(TronTypography.sans(size: MainSettingsGridLayout.iconSize))
                     .foregroundStyle(accent)
@@ -461,22 +530,6 @@ struct SettingsView: View {
                         height: MainSettingsGridLayout.iconFrameSize,
                         alignment: .leading
                     )
-
-                Spacer(minLength: 4)
-
-                Text(title)
-                    .font(TronTypography.sans(size: titleSize, weight: titleWeight))
-                    .foregroundStyle(labelColor)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.78)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if showsProgress {
-                ProgressView()
-                    .tint(accent)
-                    .scaleEffect(0.7)
             }
         }
         .padding(.horizontal, 12)
