@@ -6,7 +6,36 @@ struct DiagnosticsBundleAttachment: Equatable, Sendable {
     let data: Data
     let mimeType: String
     let fileName: String
+    let logSummary: DiagnosticsBundleLogSummary
 }
+
+struct DiagnosticsBundleLogSummary: Equatable, Sendable {
+    let iosLogCount: Int
+    let serverLogCount: Int
+    let earliestLogTimestamp: Date?
+    let latestLogTimestamp: Date?
+
+    init(
+        iosLogCount: Int,
+        serverLogCount: Int,
+        earliestLogTimestamp: Date?,
+        latestLogTimestamp: Date?
+    ) {
+        self.iosLogCount = iosLogCount
+        self.serverLogCount = serverLogCount
+        self.earliestLogTimestamp = earliestLogTimestamp
+        self.latestLogTimestamp = latestLogTimestamp
+    }
+
+    init(iosLogCount: Int, serverLogCount: Int, timestamps: [Date]) {
+        self.iosLogCount = iosLogCount
+        self.serverLogCount = serverLogCount
+        self.earliestLogTimestamp = timestamps.min()
+        self.latestLogTimestamp = timestamps.max()
+    }
+}
+
+typealias DiagnosticsIOSLogsProvider = () -> [(Date, LogCategory, LogLevel, String)]
 
 @MainActor
 struct DiagnosticsBundleBuilder {
@@ -23,11 +52,13 @@ struct DiagnosticsBundleBuilder {
     let activeServer: PairedServer?
     let metricKitStore: MetricKitDiagnosticsStore
     let now: () -> Date
+    let iosLogsProvider: DiagnosticsIOSLogsProvider
 
     init(
         dependencies: DependencyContainer,
         metricKitStore: MetricKitDiagnosticsStore = .shared,
-        now: @escaping () -> Date = { Date() }
+        now: @escaping () -> Date = { Date() },
+        iosLogsProvider: DiagnosticsIOSLogsProvider? = nil
     ) {
         self.eventDatabase = dependencies.eventDatabase
         self.eventStoreManager = dependencies.eventStoreManager
@@ -35,6 +66,9 @@ struct DiagnosticsBundleBuilder {
         self.activeServer = dependencies.pairedServerStore.activeServer
         self.metricKitStore = metricKitStore
         self.now = now
+        self.iosLogsProvider = iosLogsProvider ?? {
+            TronLogger.shared.getRecentLogs(count: Self.maxIOSLogs, level: nil, category: nil)
+        }
     }
 
     init(
@@ -43,7 +77,8 @@ struct DiagnosticsBundleBuilder {
         rpcClient: RPCClient,
         activeServer: PairedServer?,
         metricKitStore: MetricKitDiagnosticsStore,
-        now: @escaping () -> Date = { Date() }
+        now: @escaping () -> Date = { Date() },
+        iosLogsProvider: DiagnosticsIOSLogsProvider? = nil
     ) {
         self.eventDatabase = eventDatabase
         self.eventStoreManager = eventStoreManager
@@ -51,13 +86,23 @@ struct DiagnosticsBundleBuilder {
         self.activeServer = activeServer
         self.metricKitStore = metricKitStore
         self.now = now
+        self.iosLogsProvider = iosLogsProvider ?? {
+            TronLogger.shared.getRecentLogs(count: Self.maxIOSLogs, level: nil, category: nil)
+        }
     }
 
     func build() async throws -> DiagnosticsBundleAttachment {
         let generatedAt = now()
         let redactor = DiagnosticsRedactor()
-        let iosLogs = buildIOSLogs(redactor: redactor)
-        let serverLogs = await buildServerLogs(redactor: redactor)
+        let iosLogSnapshot = buildIOSLogs(redactor: redactor)
+        let serverLogSnapshot = await buildServerLogs(redactor: redactor)
+        let iosLogs = iosLogSnapshot.entries
+        let serverLogs = serverLogSnapshot.entries
+        let logSummary = DiagnosticsBundleLogSummary(
+            iosLogCount: iosLogs.count,
+            serverLogCount: serverLogs.count,
+            timestamps: iosLogSnapshot.timestamps + serverLogSnapshot.timestamps
+        )
         let sessions = await selectedSessions()
         let sessionSummaries = sessions.map(DiagnosticsSessionSummary.init(session:))
         let eventSnapshot = await buildEventSummaries(for: sessions, redactor: redactor)
@@ -114,12 +159,14 @@ struct DiagnosticsBundleBuilder {
         return DiagnosticsBundleAttachment(
             data: data,
             mimeType: "application/json",
-            fileName: "tron-diagnostics-\(Self.fileNameFormatter.string(from: generatedAt)).json"
+            fileName: "tron-diagnostics-\(Self.fileNameFormatter.string(from: generatedAt)).json",
+            logSummary: logSummary
         )
     }
 
-    private func buildIOSLogs(redactor: DiagnosticsRedactor) -> [DiagnosticsIOSLogEntry] {
-        TronLogger.shared.getRecentLogs(count: Self.maxIOSLogs, level: nil, category: nil).map { entry in
+    private func buildIOSLogs(redactor: DiagnosticsRedactor) -> DiagnosticsIOSLogsResult {
+        let includedEntries = Array(iosLogsProvider().sorted { $0.0 < $1.0 }.suffix(Self.maxIOSLogs))
+        let logs = includedEntries.map { entry in
             DiagnosticsIOSLogEntry(
                 timestamp: Self.isoFormatter.string(from: entry.0),
                 category: entry.1.rawValue,
@@ -127,39 +174,103 @@ struct DiagnosticsBundleBuilder {
                 message: redactor.redactMessage(entry.3)
             )
         }
+        return DiagnosticsIOSLogsResult(
+            entries: logs,
+            timestamps: includedEntries.map(\.0)
+        )
     }
 
-    private func buildServerLogs(redactor: DiagnosticsRedactor) async -> [DiagnosticsServerLogEntry] {
-        guard rpcClient.connectionState.isConnected else { return [] }
+    private func buildServerLogs(redactor: DiagnosticsRedactor) async -> DiagnosticsServerLogsResult {
+        guard rpcClient.connectionState.isConnected else {
+            return DiagnosticsServerLogsResult(entries: [], timestamps: [])
+        }
         do {
             let result = try await rpcClient.misc.recentLogs(limit: Self.maxServerLogs)
-            return result.entries.prefix(Self.maxServerLogs).map { entry in
-                DiagnosticsServerLogEntry(
-                    idHash: DiagnosticsHash.hash(String(entry.id)),
-                    timestamp: entry.timestamp,
-                    level: entry.level,
-                    component: entry.component,
-                    message: redactor.redactMessage(entry.message),
-                    originHash: DiagnosticsHash.hash(entry.origin),
-                    sessionIdHash: DiagnosticsHash.hash(entry.sessionId),
-                    errorMessage: entry.errorMessage.map(redactor.redactMessage)
-                )
-            }
+            let includedEntries = Array(result.entries.prefix(Self.maxServerLogs))
+            return DiagnosticsServerLogsResult(
+                entries: includedEntries.map { entry in
+                    DiagnosticsServerLogEntry(
+                        idHash: DiagnosticsHash.hash(String(entry.id)),
+                        timestamp: entry.timestamp,
+                        level: entry.level,
+                        component: entry.component,
+                        message: redactor.redactMessage(entry.message),
+                        originHash: DiagnosticsHash.hash(entry.origin),
+                        sessionIdHash: DiagnosticsHash.hash(entry.sessionId),
+                        errorMessage: entry.errorMessage.map(redactor.redactMessage)
+                    )
+                },
+                timestamps: includedEntries.compactMap { Self.parseLogTimestamp($0.timestamp) }
+            )
         } catch {
-            return [
-                DiagnosticsServerLogEntry(
-                    idHash: nil,
-                    timestamp: Self.isoFormatter.string(from: now()),
-                    level: "warning",
-                    component: "ios.diagnostics",
-                    message: "logs.recent failed: \(redactor.redactMessage(error.localizedDescription))",
-                    originHash: nil,
-                    sessionIdHash: nil,
-                    errorMessage: nil
-                )
-            ]
+            return DiagnosticsServerLogsResult(
+                entries: [
+                    DiagnosticsServerLogEntry(
+                        idHash: nil,
+                        timestamp: Self.isoFormatter.string(from: now()),
+                        level: "warning",
+                        component: "ios.diagnostics",
+                        message: "logs.recent failed: \(redactor.redactMessage(error.localizedDescription))",
+                        originHash: nil,
+                        sessionIdHash: nil,
+                        errorMessage: nil
+                    )
+                ],
+                timestamps: []
+            )
         }
     }
+
+    private static func parseLogTimestamp(_ value: String) -> Date? {
+        isoFormatter.date(from: value) ?? fractionalISOFormatter.date(from: value)
+    }
+
+    private struct DiagnosticsIOSLogsResult {
+        let entries: [DiagnosticsIOSLogEntry]
+        let timestamps: [Date]
+    }
+
+    private struct DiagnosticsServerLogsResult {
+        let entries: [DiagnosticsServerLogEntry]
+        let timestamps: [Date]
+    }
+
+    private static func connectionStateName(_ state: ConnectionState) -> String {
+        switch state {
+        case .disconnected: return "disconnected"
+        case .connecting: return "connecting"
+        case .connected: return "connected"
+        case .reconnecting: return "reconnecting"
+        case .deployRestarting: return "deploy_restarting"
+        case .failed: return "failed"
+        case .unauthorized: return "unauthorized"
+        }
+    }
+
+    private static func levelLabel(_ level: LogLevel) -> String {
+        switch level {
+        case .verbose: return "verbose"
+        case .debug: return "debug"
+        case .info: return "info"
+        case .warning: return "warning"
+        case .error: return "error"
+        case .none: return "none"
+        }
+    }
+
+    nonisolated(unsafe) private static let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+
+    nonisolated(unsafe) private static let fractionalISOFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
 
     private func selectedSessions() async -> [CachedSession] {
         let sessions = (try? await eventDatabase.sessions.getAll()) ?? eventStoreManager.sessions
@@ -207,31 +318,6 @@ struct DiagnosticsBundleBuilder {
 
         return DiagnosticsEventSnapshot(events: summaries, truncated: truncated)
     }
-
-    private static func connectionStateName(_ state: ConnectionState) -> String {
-        switch state {
-        case .disconnected: return "disconnected"
-        case .connecting: return "connecting"
-        case .connected: return "connected"
-        case .reconnecting: return "reconnecting"
-        case .deployRestarting: return "deploy_restarting"
-        case .failed: return "failed"
-        case .unauthorized: return "unauthorized"
-        }
-    }
-
-    private static func levelLabel(_ level: LogLevel) -> String {
-        switch level {
-        case .verbose: return "verbose"
-        case .debug: return "debug"
-        case .info: return "info"
-        case .warning: return "warning"
-        case .error: return "error"
-        case .none: return "none"
-        }
-    }
-
-    nonisolated(unsafe) private static let isoFormatter = ISO8601DateFormatter()
 
     private static let fileNameFormatter: DateFormatter = {
         let formatter = DateFormatter()

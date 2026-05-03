@@ -150,6 +150,33 @@ struct SourceGuardTests {
         #expect(!appEntry.contains("if #available(iOS 26.0, *)"))
     }
 
+    @Test("feedback recipient has tracked non-placeholder default")
+    func testFeedbackRecipientConfigDefault() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let baseConfig = try String(
+            contentsOf: iosRoot.appendingPathComponent("Configuration/Base.xcconfig"),
+            encoding: .utf8
+        )
+        let expected = "tron@" + "mh" + "is" + "mail.com"
+        let line = try #require(
+            baseConfig
+                .split(separator: "\n")
+                .first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("TRON_FEEDBACK_EMAIL =") }
+        )
+        let value = line
+            .split(separator: "=", maxSplits: 1)
+            .last?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        #expect(value == expected)
+        #expect(value?.isEmpty == false)
+        #expect(value?.contains("$(") == false)
+    }
+
     @Test("iOS 26 cleanup hooks stay removed")
     func testIOS26CleanupHooksStayRemoved() throws {
         let fileURL = URL(fileURLWithPath: #filePath)

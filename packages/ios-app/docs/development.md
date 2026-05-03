@@ -92,12 +92,15 @@ builds a redacted `tron-diagnostics-<timestamp>.json` attachment that includes
 bounded iOS logs, `logs.recent(limit: 1000)` when connected, local session and
 event summaries, and MetricKit payloads.
 
-Mail delivery uses `TRON_FEEDBACK_EMAIL` from build/runtime configuration. Keep
-the value out of git by setting it in `Configuration/Local.xcconfig`, which is
-ignored. If the value is blank or Mail is unavailable, the app presents the
-share sheet so the user can save or attach the JSON manually. Release builds
-must keep `DEBUG_INFORMATION_FORMAT = dwarf-with-dsym`; App Store/TestFlight
-crashes are retrieved through Apple's Xcode Organizer diagnostics path.
+Mail delivery uses the tracked `TRON_FEEDBACK_EMAIL` build setting and opens
+the native Mail composer with the support recipient, subject, body, and JSON
+attachment filled in. The body names the attachment and describes the actual
+included log time range when parseable timestamps are available. If Mail is not
+configured, or the recipient config is missing, Settings shows an alert instead
+of a share sheet because iOS public APIs do not reliably attach files through a
+default-mail-app handoff. Release builds must keep
+`DEBUG_INFORMATION_FORMAT = dwarf-with-dsym`; App Store/TestFlight crashes are
+retrieved through Apple's Xcode Organizer diagnostics path.
 
 ## TestFlight Release CI
 

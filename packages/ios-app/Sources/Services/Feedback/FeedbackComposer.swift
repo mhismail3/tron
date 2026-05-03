@@ -12,11 +12,6 @@ struct FeedbackComposer {
     let appVersion: String
     let buildNumber: String
 
-    private let redactor = DiagnosticsRedactor()
-
-    /// Default tail size matches plan §F "last 200 lines of logs".
-    static let defaultLogTailLimit = 200
-
     func subject() -> String {
         "Tron feedback — \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))"
     }
@@ -30,30 +25,11 @@ struct FeedbackComposer {
         return trimmed
     }
 
-    /// Formats a sequence of log entries as one line per entry with
-    /// ISO8601 timestamp, category name, level, and redacted message.
-    /// Entries are assumed to be newest-last (ascending by time).
-    func formatLogs(
-        _ entries: [(Date, LogCategory, LogLevel, String)],
-        tailLimit: Int = defaultLogTailLimit
-    ) -> String {
-        let slice = Array(entries.suffix(tailLimit))
-        let formatter = Self.isoFormatter
-
-        return slice.map { entry in
-            let ts = formatter.string(from: entry.0)
-            let cat = entry.1.rawValue
-            let level = Self.levelLabel(entry.2)
-            let message = redactor.redactMessage(entry.3)
-            return "\(ts) [\(cat)] \(level) \(message)"
-        }.joined(separator: "\n")
-    }
-
     /// Full body: user notes, environment block, and attachment note.
     func assembleBody(
         userNotes: String,
         attachmentFileName: String?,
-        logs: [(Date, LogCategory, LogLevel, String)] = []
+        logSummary: DiagnosticsBundleLogSummary
     ) -> String {
         var parts: [String] = []
 
@@ -62,6 +38,11 @@ struct FeedbackComposer {
             parts.append("")
         }
 
+        parts.append(diagnosticsSummarySentence(logSummary))
+        parts.append(
+            "Included log entries: iOS \(logSummary.iosLogCount), server \(logSummary.serverLogCount)"
+        )
+        parts.append("")
         parts.append("---")
         parts.append("App version: \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))")
         parts.append("Platform: iOS")
@@ -73,48 +54,49 @@ struct FeedbackComposer {
             parts.append("No diagnostics attachment was generated.")
         }
 
-        if !logs.isEmpty {
-            parts.append("")
-            parts.append("Recent logs preview (last \(Self.defaultLogTailLimit)):")
-            parts.append(formatLogs(logs))
-        }
-
         return parts.joined(separator: "\n")
     }
 
     // MARK: - Helpers
 
-    // ISO8601DateFormatter is thread-safe for `string(from:)` per its
-    // documentation, but Swift 6 flags it as non-Sendable. The formatter
-    // is never mutated after construction and we only call a read-only
-    // method; mark unsafe is the idiomatic workaround used elsewhere in
-    // this codebase (mirrors LogEntry's formatter in TronLogger).
-    nonisolated(unsafe) private static let isoFormatter: ISO8601DateFormatter = {
+    private func diagnosticsSummarySentence(_ logSummary: DiagnosticsBundleLogSummary) -> String {
+        if let earliest = logSummary.earliestLogTimestamp,
+           let latest = logSummary.latestLogTimestamp {
+            let start = Self.bodyTimestampFormatter.string(from: earliest)
+            let end = Self.bodyTimestampFormatter.string(from: latest)
+            return "Attached is a JSON diagnostics bundle with recent Tron logs from \(start) to \(end)."
+        }
+        return "Attached is a JSON diagnostics bundle with recent Tron diagnostics."
+    }
+
+    nonisolated(unsafe) private static let bodyTimestampFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = TimeZone(secondsFromGMT: 0)
         return f
     }()
-
-    private static func levelLabel(_ level: LogLevel) -> String {
-        switch level {
-        case .verbose: return "VERBOSE"
-        case .debug: return "DEBUG"
-        case .info: return "INFO"
-        case .warning: return "WARNING"
-        case .error: return "ERROR"
-        case .none: return "NONE"
-        }
-    }
 }
 
 enum FeedbackDeliveryRoute: Equatable, Sendable {
     case mail(recipient: String)
-    case shareSheet
+    case mailUnavailable(message: String)
 }
 
 enum FeedbackDeliveryPlanner {
+    static let missingRecipientMessage = "Feedback email is not configured."
+    static let mailUnavailableMessage = "Mail is not configured on this device. "
+        + "Configure a Mail account to send diagnostics."
+
     static func route(configuredRecipient: String?, canSendMail: Bool) -> FeedbackDeliveryRoute {
-        guard let configuredRecipient, canSendMail else { return .shareSheet }
-        return .mail(recipient: configuredRecipient)
+        guard let recipient = configuredRecipient?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !recipient.isEmpty,
+              !recipient.contains("$(")
+        else {
+            return .mailUnavailable(message: missingRecipientMessage)
+        }
+        guard canSendMail else {
+            return .mailUnavailable(message: mailUnavailableMessage)
+        }
+        return .mail(recipient: recipient)
     }
 }

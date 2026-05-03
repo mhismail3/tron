@@ -24,7 +24,6 @@ struct SettingsView: View {
     @State private var activePage: SettingsPage?
     @State private var cardsVisible = false
     @State private var feedbackMailDraft: FeedbackMailDraft?
-    @State private var feedbackShareDraft: FeedbackShareDraft?
     @State private var feedbackResultMessage: String?
     @State private var isPreparingFeedback = false
 
@@ -134,12 +133,6 @@ struct SettingsView: View {
                     attachments: draft.attachments
                 ) {
                     feedbackMailDraft = nil
-                }
-            }
-            .sheet(item: $feedbackShareDraft) { draft in
-                FeedbackShareView(activityItems: [draft.fileURL]) {
-                    try? FileManager.default.removeItem(at: draft.fileURL)
-                    feedbackShareDraft = nil
                 }
             }
     }
@@ -705,7 +698,8 @@ struct SettingsView: View {
                 )
                 let body = composer.assembleBody(
                     userNotes: "",
-                    attachmentFileName: attachment.fileName
+                    attachmentFileName: attachment.fileName,
+                    logSummary: attachment.logSummary
                 )
 
                 switch FeedbackDeliveryPlanner.route(
@@ -719,26 +713,13 @@ struct SettingsView: View {
                         recipient: recipient,
                         attachments: [mailAttachment]
                     )
-                case .shareSheet:
-                    let fileURL = try writeFeedbackAttachment(attachment)
-                    feedbackShareDraft = FeedbackShareDraft(fileURL: fileURL)
+                case .mailUnavailable(let message):
+                    feedbackResultMessage = message
                 }
             } catch {
                 feedbackResultMessage = "Could not prepare diagnostics: \(error.localizedDescription)"
             }
         }
-    }
-
-    private func writeFeedbackAttachment(_ attachment: DiagnosticsBundleAttachment) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TronFeedback", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-        let fileURL = directory.appendingPathComponent(attachment.fileName)
-        try attachment.data.write(to: fileURL, options: [.atomic])
-        return fileURL
     }
 
     private func updateServerSetting(_ build: () -> ServerSettingsUpdate) {
@@ -799,11 +780,6 @@ private struct FeedbackMailDraft: Identifiable {
     let body: String
     let recipient: String
     let attachments: [FeedbackMailAttachment]
-}
-
-private struct FeedbackShareDraft: Identifiable {
-    let id = UUID()
-    let fileURL: URL
 }
 
 #if DEBUG

@@ -69,46 +69,11 @@ struct FeedbackMailView: UIViewControllerRepresentable {
 }
 
 /// Helper so the Settings page can display a "Mail isn't configured"
-/// fallback when `canSendMail()` is false. Returns `true` if the
-/// device has a configured mail account.
+/// alert when `canSendMail()` is false. Returns `true` if the device
+/// has a configured mail account.
 enum FeedbackMailAvailability {
     @MainActor
     static func canSendMail() -> Bool {
         MFMailComposeViewController.canSendMail()
-    }
-}
-
-struct FeedbackShareView: UIViewControllerRepresentable {
-    let activityItems: [Any]
-    let onDismiss: @MainActor () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onDismiss: onDismiss)
-    }
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(
-            activityItems: activityItems,
-            applicationActivities: nil
-        )
-        controller.completionWithItemsHandler = { _, _, _, _ in
-            Task { @MainActor in
-                context.coordinator.onDismiss()
-            }
-        }
-        return controller
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {
-        // No-op — activity items are fixed for each presentation.
-    }
-
-    @MainActor
-    final class Coordinator {
-        let onDismiss: @MainActor () -> Void
-
-        init(onDismiss: @escaping @MainActor () -> Void) {
-            self.onDismiss = onDismiss
-        }
     }
 }

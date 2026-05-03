@@ -65,10 +65,14 @@ struct DiagnosticsBundleBuilderTests {
         try await harness.database.events.insert(makeEvent(sequence: 0))
 
         let fixedDate = try #require(ISO8601DateFormatter().date(from: "2026-04-29T21:00:00Z"))
-        let attachment = try await harness.builder(now: { fixedDate }).build()
+        let attachment = try await harness.builder(now: { fixedDate }, iosLogs: []).build()
 
         #expect(attachment.mimeType == "application/json")
         #expect(attachment.fileName == "tron-diagnostics-20260429-210000Z.json")
+        #expect(attachment.logSummary.iosLogCount == 0)
+        #expect(attachment.logSummary.serverLogCount == 0)
+        #expect(attachment.logSummary.earliestLogTimestamp == nil)
+        #expect(attachment.logSummary.latestLogTimestamp == nil)
 
         let object = try JSONSerialization.jsonObject(with: attachment.data) as? [String: Any]
         let manifest = object?["manifest"] as? [String: Any]
@@ -77,6 +81,25 @@ struct DiagnosticsBundleBuilderTests {
         let json = String(data: attachment.data, encoding: .utf8) ?? ""
         #expect(!json.contains("secret prompt body"))
         #expect(!json.contains("/Users/alice"))
+        await harness.cleanup()
+    }
+
+    @Test("builder reports metadata from actual included local log timestamps")
+    func builderReportsIncludedLogMetadata() async throws {
+        let harness = try await makeHarness()
+        let first = try #require(ISO8601DateFormatter().date(from: "2026-04-29T21:00:00Z"))
+        let last = try #require(ISO8601DateFormatter().date(from: "2026-04-29T21:15:30Z"))
+        let logs: [(Date, LogCategory, LogLevel, String)] = [
+            (first, .general, .info, "local one"),
+            (last, .network, .warning, "local two"),
+        ]
+
+        let attachment = try await harness.builder(iosLogs: logs).build()
+
+        #expect(attachment.logSummary.iosLogCount == 2)
+        #expect(attachment.logSummary.serverLogCount == 0)
+        #expect(attachment.logSummary.earliestLogTimestamp == first)
+        #expect(attachment.logSummary.latestLogTimestamp == last)
         await harness.cleanup()
     }
 
@@ -98,10 +121,16 @@ struct DiagnosticsBundleBuilderTests {
         await harness.cleanup()
     }
 
-    @Test("delivery planner falls back to share sheet without Mail or recipient")
+    @Test("delivery planner is mail-only without Mail or recipient")
     func deliveryPlannerFallbacks() {
-        #expect(FeedbackDeliveryPlanner.route(configuredRecipient: nil, canSendMail: true) == .shareSheet)
-        #expect(FeedbackDeliveryPlanner.route(configuredRecipient: "feedback@example.invalid", canSendMail: false) == .shareSheet)
+        #expect(
+            FeedbackDeliveryPlanner.route(configuredRecipient: nil, canSendMail: true)
+                == .mailUnavailable(message: FeedbackDeliveryPlanner.missingRecipientMessage)
+        )
+        #expect(
+            FeedbackDeliveryPlanner.route(configuredRecipient: "feedback@example.invalid", canSendMail: false)
+                == .mailUnavailable(message: FeedbackDeliveryPlanner.mailUnavailableMessage)
+        )
         #expect(
             FeedbackDeliveryPlanner.route(configuredRecipient: "feedback@example.invalid", canSendMail: true)
                 == .mail(recipient: "feedback@example.invalid")
@@ -177,14 +206,18 @@ private struct DiagnosticsHarness {
     let rpcClient: RPCClient
     let metricKitStore: MetricKitDiagnosticsStore
 
-    func builder(now: @escaping () -> Date = { Date() }) -> DiagnosticsBundleBuilder {
+    func builder(
+        now: @escaping () -> Date = { Date() },
+        iosLogs: [(Date, LogCategory, LogLevel, String)] = []
+    ) -> DiagnosticsBundleBuilder {
         DiagnosticsBundleBuilder(
             eventDatabase: database,
             eventStoreManager: eventStoreManager,
             rpcClient: rpcClient,
             activeServer: nil,
             metricKitStore: metricKitStore,
-            now: now
+            now: now,
+            iosLogsProvider: { iosLogs }
         )
     }
 

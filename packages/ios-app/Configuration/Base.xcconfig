@@ -3,7 +3,7 @@
 // Deployment
 IPHONEOS_DEPLOYMENT_TARGET = 26.0
 SWIFT_VERSION = 6.0
-TRON_FEEDBACK_EMAIL =
+TRON_FEEDBACK_EMAIL = tron@mhismail.com
 
 // App info lives in project.yml and is generated from VERSION.env.
 #include? "Local.xcconfig"

@@ -36,7 +36,7 @@ Sources/
 │   ├── Events/             # Event store, sync
 │   ├── Audio/              # Recording, transcription
 │   ├── Diagnostics/        # Local MetricKit store + redacted feedback bundle builder
-│   ├── Feedback/           # Mail/share envelope for explicit diagnostics bundles
+│   ├── Feedback/           # Native Mail envelope for explicit diagnostics bundles
 │   ├── Notifications/      # Push notifications
 │   ├── Observability/      # DiagnosticsRedactor shared with Mac
 │   ├── Onboarding/         # Pairing validator/probe/persistor
@@ -301,7 +301,10 @@ settings feedback footer is pinned with a bottom safe-area inset rather than
 placed inside the scroll content, so app/version copy and the diagnostics action
 remain reachable while the cards scroll independently. The feedback button lets
 native interactive glass own the pressed border, matching chips and avoiding a
-nested manual stroke.
+nested manual stroke. Send Feedback is mail-only: it builds the redacted
+diagnostics JSON, opens the native Mail composer with the tracked support
+recipient and attachment, and shows an alert when Mail is unavailable because
+iOS does not reliably attach files through a default-mail-app handoff.
 When the active paired server cannot be reached, Settings keeps local paired
 server management visible but hides server-backed controls until the connection
 returns and settings reload. The Servers sheet turns its top summary card
