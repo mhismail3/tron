@@ -279,7 +279,10 @@ main-grid icons use the shared settings tile size. A thin muted divider separate
 the green destination rows from the destructive actions. The surface and behavior
 tiles use taller containers with left-aligned emerald titles, top-right icons,
 and smaller softer descriptive copy below, while the destructive row sizes to its
-two-line red labels and top-right icons.
+two-line red labels and top-right icons. When paired server settings are not
+available, the main grid hides the server-backed destination tiles, stretches App
+and Server across a two-column row, and places the persistent unavailable card
+where the second green row normally sits.
 Server-backed settings are grouped by behavior owner: Servers covers
 pairing/security/transcription/updates, Providers covers auth credentials, Agent
 covers execution lifecycle including hooks, prompt-history capture/retention,
@@ -307,7 +310,11 @@ recipient and attachment, and shows an alert when Mail is unavailable because
 iOS does not reliably attach files through a default-mail-app handoff.
 When the active paired server cannot be reached, Settings keeps local paired
 server management visible but hides server-backed controls until the connection
-returns and settings reload. The Servers sheet turns its top summary card
+returns and settings reload. The main sheet keeps App and Server visible,
+removes Providers, Agent, Context, and MCP from the launcher grid, moves the
+warning card above the destructive row, and disables destructive server-coupled
+actions such as clearing prompt history and archiving all sessions. The Servers
+sheet turns its top summary card
 warning-yellow, reports `<server name> not available`, overrides stale row
 metadata with an `Unavailable` status for the selected server, and limits that
 row's menu to Retry and Forget. Settings verifies the live socket before loading

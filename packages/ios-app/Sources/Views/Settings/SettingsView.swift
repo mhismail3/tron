@@ -54,6 +54,10 @@ struct SettingsView: View {
             && !rpcClient.connectionState.isConnected
     }
 
+    private var showsServerUnavailableFallback: Bool {
+        hasPairedServers && !serverSettingsReady
+    }
+
     private var serverUnavailableDescription: String {
         if activeServerUnavailable {
             return SettingsLabels.connectedServerUnavailableDescription
@@ -244,26 +248,27 @@ struct SettingsView: View {
 
     private var mainSettingsSection: some View {
         VStack(alignment: .leading, spacing: MainSettingsGridLayout.rowSpacing) {
-            LazyVGrid(columns: mainSettingsGridColumns, spacing: MainSettingsGridLayout.rowSpacing) {
-                ForEach(MainSettingsGridDestination.surfaceRow, id: \.self) { destination in
+            LazyVGrid(columns: mainSettingsDestinationGridColumns, spacing: MainSettingsGridLayout.rowSpacing) {
+                ForEach(
+                    MainSettingsGridDestination.visibleDestinations(
+                        serverSettingsUnavailable: showsServerUnavailableFallback
+                    ),
+                    id: \.self
+                ) { destination in
                     mainSettingsDestinationTile(destination)
                 }
+            }
 
-                ForEach(MainSettingsGridDestination.behaviorRow, id: \.self) { destination in
-                    mainSettingsDestinationTile(destination)
-                }
+            if showsServerUnavailableFallback {
+                serverUnavailableCard
             }
 
             mainSettingsDivider
 
-            LazyVGrid(columns: mainSettingsGridColumns, spacing: MainSettingsGridLayout.rowSpacing) {
+            LazyVGrid(columns: mainSettingsDangerGridColumns, spacing: MainSettingsGridLayout.rowSpacing) {
                 ForEach(SettingsDangerZoneAction.order, id: \.self) { action in
                     dangerActionTile(action)
                 }
-            }
-
-            if hasPairedServers && !serverSettingsReady {
-                serverUnavailableCard
             }
         }
     }
@@ -276,10 +281,22 @@ struct SettingsView: View {
             .padding(.vertical, MainSettingsGridLayout.dividerVerticalPadding)
     }
 
-    private var mainSettingsGridColumns: [GridItem] {
+    private var mainSettingsDestinationGridColumns: [GridItem] {
+        mainSettingsGridColumns(
+            count: MainSettingsGridLayout.destinationColumnCount(
+                serverSettingsUnavailable: showsServerUnavailableFallback
+            )
+        )
+    }
+
+    private var mainSettingsDangerGridColumns: [GridItem] {
+        mainSettingsGridColumns(count: MainSettingsGridLayout.columnCount)
+    }
+
+    private func mainSettingsGridColumns(count: Int) -> [GridItem] {
         Array(
             repeating: GridItem(.flexible(), spacing: MainSettingsGridLayout.columnSpacing),
-            count: MainSettingsGridLayout.columnCount
+            count: count
         )
     }
 
@@ -458,14 +475,12 @@ struct SettingsView: View {
     }
 
     private func isDangerActionEnabled(_ action: SettingsDangerZoneAction) -> Bool {
-        switch action {
-        case .clearPromptHistory:
-            return serverSettingsReady && !isClearingPromptHistory
-        case .archiveAllSessions:
-            return !eventStoreManager.sessions.isEmpty && !isArchivingAll
-        case .resetAllSettings:
-            return true
-        }
+        action.isEnabled(
+            hasSessions: !eventStoreManager.sessions.isEmpty,
+            serverSettingsReady: serverSettingsReady,
+            serverSettingsUnavailable: showsServerUnavailableFallback,
+            isInProgress: isDangerActionInProgress(action)
+        )
     }
 
     private func isDangerActionInProgress(_ action: SettingsDangerZoneAction) -> Bool {

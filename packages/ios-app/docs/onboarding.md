@@ -207,7 +207,11 @@ Danger Zone header. All nine tiles share the same compact icon size; the green
 surface and behavior tiles are slightly taller with left-aligned emerald titles,
 top-right icons, and short softer descriptive copy. A thin muted divider separates
 those destination rows from the destructive row, which sizes to its two-line red
-labels and top-right icons.
+labels and top-right icons. When the paired server is unavailable or
+server-backed settings have not loaded, the launcher collapses to a two-column
+App and Server row, hides Providers, Agent, Context, and MCP, and shows the
+server-unavailable card immediately below that row before the destructive
+actions.
 Device-only preferences such as onboarding completion,
 paired servers, active server id, appearance, dashboard presentation, and bearer
 tokens live in iOS `UserDefaults`/Keychain. When the user switches Macs, the app
@@ -225,7 +229,10 @@ warning-yellow with `<server name> not available`, and hides server-backed
 controls including the `Server Controls` header until the Mac reconnects and
 `settings.get` succeeds. The selected unreachable row overrides stale
 `Connected` metadata with `Unavailable`; its ellipsis menu is reduced to Retry
-and Forget.
+and Forget. The main Settings sheet also disables destructive server-coupled
+actions while in this unavailable state: Clear Prompt History and Archive All
+Sessions are unavailable, while Reset All Settings remains available for local
+app preferences.
 The dashboard also surfaces a deduplicated banner for the active paired server
 when connection state moves to disconnected, reconnecting, failed, or
 unauthorized. Disconnected and reconnecting banners are warning-yellow,

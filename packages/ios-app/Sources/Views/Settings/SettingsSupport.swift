@@ -82,6 +82,7 @@ enum MainSettingsLocalCategoryStyle {
 
 enum MainSettingsGridLayout {
     static let columnCount = 3
+    static let unavailableColumnCount = 2
     static let columnSpacing: CGFloat = 8
     static let rowSpacing: CGFloat = 8
     static let destinationTileMinHeight: CGFloat = 98
@@ -98,6 +99,10 @@ enum MainSettingsGridLayout {
     static let destinationDescriptionOpacity = 0.68
     static let dangerTitleSize: CGFloat = TronTypography.sizeBodySM
     static let unavailableActionLeadingPadding: CGFloat = 28
+
+    static func destinationColumnCount(serverSettingsUnavailable: Bool) -> Int {
+        serverSettingsUnavailable ? unavailableColumnCount : columnCount
+    }
 }
 
 enum MainSettingsGridDestination: Hashable, Sendable {
@@ -119,6 +124,15 @@ enum MainSettingsGridDestination: Hashable, Sendable {
         .context,
         .mcpServers,
     ]
+
+    static let unavailableRow: [Self] = [
+        .app,
+        .server,
+    ]
+
+    static func visibleDestinations(serverSettingsUnavailable: Bool) -> [Self] {
+        serverSettingsUnavailable ? unavailableRow : surfaceRow + behaviorRow
+    }
 
     var icon: String {
         switch self {
@@ -357,6 +371,22 @@ enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
             return "archivebox"
         case .resetAllSettings:
             return "arrow.trianglehead.counterclockwise"
+        }
+    }
+
+    func isEnabled(
+        hasSessions: Bool,
+        serverSettingsReady: Bool,
+        serverSettingsUnavailable: Bool,
+        isInProgress: Bool
+    ) -> Bool {
+        switch self {
+        case .clearPromptHistory:
+            return serverSettingsReady && !isInProgress
+        case .archiveAllSessions:
+            return hasSessions && !serverSettingsUnavailable && !isInProgress
+        case .resetAllSettings:
+            return true
         }
     }
 }

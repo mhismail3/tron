@@ -54,7 +54,26 @@ struct AgentContextSettingsPageTests {
             "Compaction, memory, skills",
             "External tool servers",
         ])
+        #expect(MainSettingsGridDestination.unavailableRow == [
+            .app,
+            .server,
+        ])
+        #expect(MainSettingsGridDestination.visibleDestinations(serverSettingsUnavailable: false) == [
+            .app,
+            .server,
+            .providers,
+            .agent,
+            .context,
+            .mcpServers,
+        ])
+        #expect(MainSettingsGridDestination.visibleDestinations(serverSettingsUnavailable: true) == [
+            .app,
+            .server,
+        ])
         #expect(MainSettingsGridLayout.columnCount == 3)
+        #expect(MainSettingsGridLayout.unavailableColumnCount == 2)
+        #expect(MainSettingsGridLayout.destinationColumnCount(serverSettingsUnavailable: false) == 3)
+        #expect(MainSettingsGridLayout.destinationColumnCount(serverSettingsUnavailable: true) == 2)
         #expect(MainSettingsGridLayout.columnSpacing == 8)
         #expect(MainSettingsGridLayout.rowSpacing == 8)
         #expect(MainSettingsGridLayout.destinationTileMinHeight == 98)
@@ -162,6 +181,36 @@ struct AgentContextSettingsPageTests {
             "Archive All Sessions",
             "Reset All Settings",
         ])
+        #expect(SettingsDangerZoneAction.clearPromptHistory.isEnabled(
+            hasSessions: true,
+            serverSettingsReady: false,
+            serverSettingsUnavailable: true,
+            isInProgress: false
+        ) == false)
+        #expect(SettingsDangerZoneAction.archiveAllSessions.isEnabled(
+            hasSessions: true,
+            serverSettingsReady: false,
+            serverSettingsUnavailable: true,
+            isInProgress: false
+        ) == false)
+        #expect(SettingsDangerZoneAction.archiveAllSessions.isEnabled(
+            hasSessions: true,
+            serverSettingsReady: false,
+            serverSettingsUnavailable: false,
+            isInProgress: false
+        ))
+        #expect(SettingsDangerZoneAction.archiveAllSessions.isEnabled(
+            hasSessions: false,
+            serverSettingsReady: true,
+            serverSettingsUnavailable: false,
+            isInProgress: false
+        ) == false)
+        #expect(SettingsDangerZoneAction.resetAllSettings.isEnabled(
+            hasSessions: false,
+            serverSettingsReady: false,
+            serverSettingsUnavailable: true,
+            isInProgress: true
+        ))
     }
 
     @Test("agent summary describes execution lifecycle and prompt library state")
