@@ -19,6 +19,17 @@ enum ProviderAuthActionItem: Equatable, Identifiable, Sendable {
         provider.supportsOAuth ? [.oauthLogin, .addApiKey] : [.addApiKey]
     }
 
+    static func visibleItems(for provider: ProviderInfo, providerAuth: ProviderAuthInfo?) -> [Self] {
+        items(for: provider).filter { item in
+            switch item {
+            case .oauthLogin:
+                return !ProviderStatusHelpers.hasRefreshableOAuth(providerAuth)
+            case .addApiKey:
+                return true
+            }
+        }
+    }
+
     var title: String {
         switch self {
         case .oauthLogin:
@@ -49,6 +60,7 @@ enum ProviderAuthActionItem: Equatable, Identifiable, Sendable {
 
 enum ProviderCredentialStatusAction {
     static let title = "Clear"
+    static let icon = "xmark"
     static let confirmationTitle = "Clear credential?"
     static let confirmationButtonTitle = "Clear"
 }
@@ -125,7 +137,7 @@ enum ProviderCredentialClearPillStyle {
 
 struct ProviderCredentialClearPillLabel: View {
     var body: some View {
-        Text(ProviderCredentialStatusAction.title)
+        Image(systemName: ProviderCredentialStatusAction.icon)
             .font(TronTypography.sans(size: ProviderCredentialClearPillStyle.fontSize, weight: .semibold))
             .foregroundStyle(.tronError)
             .padding(.horizontal, ProviderCredentialClearPillStyle.horizontalPadding)

@@ -180,14 +180,16 @@ fields visible for correction or retry.
 The Providers settings sheet starts with a dynamic summary card computed from
 the loaded `AuthState`. Each model provider then uses cards for current
 credential status and provider-specific details such as Google Cloud OAuth
-configuration, followed by leading-aligned OAuth/API-key buttons. API-key-only
+configuration, followed by leading-aligned OAuth/API-key buttons. OAuth login
+buttons are hidden when the provider already has a usable or refreshable OAuth
+account, and reappear for expired non-refreshable accounts. API-key-only
 providers and search services use the same native Add API Key alert: provider
 alerts collect a label plus the key, while service alerts collect only the
 single service key. Failed saves re-present the alert with the draft intact so
 typed secrets are not lost. Masked server-returned hints never share a
 container with unsaved secret entry fields. Credential status cards keep OAuth
 state and masked key hints in the trailing monospace slot next to an explicit
-small red Clear pill. The Services group uses a stronger spaced header than
+small red X icon button. The Services group uses a stronger spaced header than
 individual provider rows so the sheet reads as two clear sections: model
 providers first, then search services.
 
@@ -198,7 +200,7 @@ Server settings and app settings are intentionally separate. Settings backed
 by `~/.tron/system/settings.json` live behind the server-backed settings grid
 tiles and are enabled only after the active server connects and `settings.get`
 returns real values. The main Settings sheet starts at the medium detent and
-uses a 3x3 launcher grid: Server, App, and Providers for settings surfaces;
+uses a 3x3 launcher grid: App, Server, and Providers for settings surfaces;
 Agent, Context, and MCP for agent behavior; then Clear Prompt History, Archive
 All Sessions, and Reset All Settings as the red destructive row with no separate
 Danger Zone header. All nine tiles share the same compact icon size; the green

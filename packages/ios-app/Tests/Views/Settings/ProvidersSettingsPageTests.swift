@@ -1,8 +1,12 @@
 import Testing
+import Foundation
 @testable import TronMobile
 
 @Suite("Providers Page Tests")
 struct ProvidersSettingsPageTests {
+    private func providerInfo(json: String) throws -> ProviderAuthInfo {
+        try JSONDecoder().decode(ProviderAuthInfo.self, from: Data(json.utf8))
+    }
 
     @Test("provider settings copy matches current label")
     func providerSettingsCopyMatchesCurrentLabel() {
@@ -119,6 +123,23 @@ struct ProvidersSettingsPageTests {
         #expect(ProviderAuthActionItem.items(for: minimax) == [.addApiKey])
         #expect(ProviderAuthActionItem.oauthLogin.title == "OAuth Login")
         #expect(ProviderAuthActionItem.addApiKey.title == "Add API Key")
+    }
+
+    @Test("provider auth actions hide refreshable OAuth login")
+    func providerAuthActionsHideRefreshableOAuthLogin() throws {
+        let anthropic = ProviderInfo.modelProviders.first { $0.id == "anthropic" }!
+        let minimax = ProviderInfo.modelProviders.first { $0.id == "minimax" }!
+        let activeOAuth = try providerInfo(
+            json: #"{"accounts":[{"label":"work","expiresAt":0,"isExpired":false,"hasRefreshToken":true}]}"#
+        )
+        let deadOAuth = try providerInfo(
+            json: #"{"accounts":[{"label":"old","expiresAt":0,"isExpired":true,"hasRefreshToken":false}]}"#
+        )
+
+        #expect(ProviderAuthActionItem.visibleItems(for: anthropic, providerAuth: nil) == [.oauthLogin, .addApiKey])
+        #expect(ProviderAuthActionItem.visibleItems(for: anthropic, providerAuth: activeOAuth) == [.addApiKey])
+        #expect(ProviderAuthActionItem.visibleItems(for: anthropic, providerAuth: deadOAuth) == [.oauthLogin, .addApiKey])
+        #expect(ProviderAuthActionItem.visibleItems(for: minimax, providerAuth: activeOAuth) == [.addApiKey])
     }
 
     @Test("provider auth action buttons are leading aligned")

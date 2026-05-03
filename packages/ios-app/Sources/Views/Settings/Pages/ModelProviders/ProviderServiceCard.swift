@@ -64,7 +64,6 @@ struct ProviderServiceCard: View {
     private var serviceActionButtons: some View {
         ProviderAuthActionButtons(
             items: [.addApiKey],
-            isDisabled: { _ in false },
             onSelect: { _ in showAddApiKeyPrompt = true }
         )
         .providerApiKeyAlert(isPresented: $showAddApiKeyPrompt, scope: apiKeyPromptScope) { draft in

@@ -109,8 +109,8 @@ enum MainSettingsGridDestination: Hashable, Sendable {
     case mcpServers
 
     static let surfaceRow: [Self] = [
-        .server,
         .app,
+        .server,
         .providers,
     ]
 

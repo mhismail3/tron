@@ -29,10 +29,7 @@ struct ModelProviderSection: View {
         accountRows.map { .account($0.account) } + apiKeyRows.map { .apiKey($0.key) }
     }
     private var actionItems: [ProviderAuthActionItem] {
-        ProviderAuthActionItem.items(for: provider)
-    }
-    private var oauthLoginDisabled: Bool {
-        provider.supportsOAuth && ProviderStatusHelpers.hasRefreshableOAuth(providerAuth)
+        ProviderAuthActionItem.visibleItems(for: provider, providerAuth: providerAuth)
     }
     private var apiKeyPromptScope: ProviderApiKeyPromptScope {
         .provider(id: provider.id, displayName: provider.displayName)
@@ -82,7 +79,6 @@ struct ModelProviderSection: View {
     private var providerActionButtons: some View {
         ProviderAuthActionButtons(
             items: actionItems,
-            isDisabled: { item in item == .oauthLogin && oauthLoginDisabled },
             onSelect: { item in
                 switch item {
                 case .oauthLogin:
@@ -177,22 +173,17 @@ struct ProviderSectionHeader: View {
 
 struct ProviderAuthActionButtons: View {
     let items: [ProviderAuthActionItem]
-    let isDisabled: (ProviderAuthActionItem) -> Bool
     let onSelect: (ProviderAuthActionItem) -> Void
 
     var body: some View {
         HStack(spacing: 8) {
             ForEach(items) { item in
-                let disabled = isDisabled(item)
-
                 Button {
-                    guard !disabled else { return }
                     onSelect(item)
                 } label: {
-                    ProviderAuthActionButtonLabel(item: item, isDisabled: disabled)
+                    ProviderAuthActionButtonLabel(item: item)
                 }
                 .buttonStyle(.plain)
-                .disabled(disabled)
                 .accessibilityLabel(item.accessibilityLabel)
             }
 
@@ -205,11 +196,6 @@ struct ProviderAuthActionButtons: View {
 
 private struct ProviderAuthActionButtonLabel: View {
     let item: ProviderAuthActionItem
-    let isDisabled: Bool
-
-    private var foreground: Color {
-        isDisabled ? .tronTextMuted : .tronEmerald
-    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -218,16 +204,15 @@ private struct ProviderAuthActionButtonLabel: View {
             Text(item.title)
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
         }
-        .foregroundStyle(foreground)
+        .foregroundStyle(.tronEmerald)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(foreground.opacity(isDisabled ? 0.06 : 0.12), in: Capsule())
+        .background(.tronEmerald.opacity(0.12), in: Capsule())
         .overlay {
             Capsule()
-                .stroke(foreground.opacity(isDisabled ? 0.12 : 0.2), lineWidth: 1)
+                .stroke(.tronEmerald.opacity(0.2), lineWidth: 1)
         }
         .contentShape(Capsule())
-        .opacity(isDisabled ? 0.55 : 1)
     }
 }
 

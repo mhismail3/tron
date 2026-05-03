@@ -25,18 +25,18 @@ struct AgentContextSettingsPageTests {
         #expect(ServerSettingsCategory.context.subtitle == "Compaction, memory retention, skills, and rules")
         #expect(ServerSettingsCategory.mcpServers.title == "MCP")
         #expect(MainSettingsGridDestination.surfaceRow == [
-            .server,
             .app,
+            .server,
             .providers,
         ])
         #expect(MainSettingsGridDestination.surfaceRow.map(\.title) == [
-            "Server",
             "App",
+            "Server",
             "Providers",
         ])
         #expect(MainSettingsGridDestination.surfaceRow.map(\.description) == [
-            "Paired servers, transcription, updates",
             "Appearance, notifications, local behavior",
+            "Paired servers, transcription, updates",
             "OAuth login and API keys",
         ])
         #expect(MainSettingsGridDestination.behaviorRow == [

@@ -272,7 +272,7 @@ visible.
 Settings pages live under `Views/Settings/Pages/` and are launched from the
 main `SettingsView` grid. The root sheet supports medium and large detents and
 starts at medium on iPhone. Its first grid row launches the surface-oriented
-settings: Server, App, and Providers. Its second row launches agent-behavior
+settings: App, Server, and Providers. Its second row launches agent-behavior
 settings: Agent, Context, and MCP. The third row holds the destructive actions
 without a separate Danger Zone header, while keeping those tiles error-red. All
 main-grid icons use the shared settings tile size. A thin muted divider separates

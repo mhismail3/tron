@@ -83,6 +83,7 @@ struct ProviderStatusHelpersTests {
     @Test("credential status rows use explicit clear action copy")
     func credentialStatusRowsUseExplicitClearActionCopy() {
         #expect(ProviderCredentialStatusAction.title == "Clear")
+        #expect(ProviderCredentialStatusAction.icon == "xmark")
         #expect(ProviderCredentialStatusAction.confirmationTitle == "Clear credential?")
         #expect(ProviderCredentialStatusAction.confirmationButtonTitle == "Clear")
     }
