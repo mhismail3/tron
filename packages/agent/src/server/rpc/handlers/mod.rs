@@ -391,6 +391,7 @@ mod tests {
         assert!(reg.has_method("mcp.status"));
         assert!(reg.has_method("mcp.addServer"));
         assert!(reg.has_method("mcp.reload"));
+        assert!(reg.has_method("codexApp.status"));
         assert!(reg.has_method("system.checkForUpdates"));
         assert!(reg.has_method("system.getUpdateStatus"));
         assert!(!reg.has_method("system.probePermissions"));
@@ -402,8 +403,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            165,
-            "expected 165 methods, got {}",
+            166,
+            "expected 166 methods, got {}",
             reg.methods().len()
         );
     }

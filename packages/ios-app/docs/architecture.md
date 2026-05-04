@@ -168,13 +168,16 @@ a draft full-screen thread view, tapping an existing thread routes to a full
 detail view on iPhone, and iPad uses the same dashboard/detail split. The
 dashboard auto-connects, auto-loads `thread/list`, and keeps polling managed
 server status while disconnected so a restarted Codex child recovers without
-manual refresh. Detail views render text messages and Codex tool items as one
-chronological transcript, show the newest resumed history window first, keep
-older decoded entries outside the SwiftUI list until Load Earlier Entries is
-tapped, and re-anchor after prepending older batches. Failed/disabled server
-lifecycle states stay inside the dashboard as retryable connection states;
-manual server configuration lives in the main Settings sheet instead of an
-in-dashboard settings subpage.
+manual refresh. Foreground transitions in Codex mode also recover the dedicated
+Codex WebSocket: the view model disconnects the stale direct socket, refreshes
+managed status through Tron RPC, reconnects, reloads `thread/list`, and resumes
+the selected thread without replaying any turn. Detail views render text
+messages and Codex tool items as one chronological transcript, show the newest
+resumed history window first, keep older decoded entries outside the SwiftUI
+list until Load Earlier Entries is tapped, and re-anchor after prepending older
+batches. Failed/disabled server lifecycle states stay inside the dashboard as
+retryable connection states; manual server configuration lives in the main
+Settings sheet instead of an in-dashboard settings subpage.
 
 ### Live Events
 
@@ -248,22 +251,25 @@ dependencies.eventStoreManager
 |------|--------------|
 | Persistent | Never (eventDatabase, pushNotificationService) |
 | Connection-based | Server change (rpcClient, skillStore) |
-| Codex mode | Active paired server change (Codex endpoint/client only) |
+| Codex mode | Active paired server change; foreground recovery resets the direct Codex WebSocket only |
 
-Foreground/background connection handling is owned by `TronMobileApp` and the
-network services rather than by individual views. SwiftUI `scenePhase` changes
-call `DependencyContainer.setBackgroundState(_:)`, which pauses WebSocket
-heartbeats while inactive and resets paused reconnect attempts to `.disconnected`
-so the next foreground transition can kick a fresh retry. On foreground return,
-the app verifies any apparently connected socket with a bounded URLSession
-WebSocket ping before issuing notification or session-list RPC refreshes, and
-manually retries through the same path as the status pill when the connection
-state machine says retrying is appropriate. Normal automatic recovery uses one
-short two-second WebSocket-open probe; if that probe cannot connect, the
-transport parks in the user-retryable failed/not-connected state instead of
-cycling through repeated reconnect windows. Deploy-aware reconnect remains more
-patient because `server.restarting` is an explicit signal that the Mac is
-expected to come back. New WebSocket tasks also stay in
+Foreground/background handling for the primary Tron RPC socket is owned by
+`TronMobileApp` and the network services rather than by session views. SwiftUI
+`scenePhase` changes call `DependencyContainer.setBackgroundState(_:)`, which
+pauses WebSocket heartbeats while inactive and resets paused reconnect attempts
+to `.disconnected` so the next foreground transition can kick a fresh retry. On
+foreground return, the app verifies any apparently connected socket with a
+bounded URLSession WebSocket ping before issuing notification or session-list RPC
+refreshes, and manually retries through the same path as the status pill when
+the connection state machine says retrying is appropriate. Codex mode owns a
+small mode-scoped foreground hook because its Codex WebSocket bypasses
+`WebSocketService`; that hook refreshes only the direct Codex transport and does
+not mutate Tron session state. Normal automatic recovery uses one short
+two-second WebSocket-open probe; if that probe cannot connect, the transport
+parks in the user-retryable failed/not-connected state instead of cycling
+through repeated reconnect windows. Deploy-aware reconnect remains more patient
+because `server.restarting` is an explicit signal that the Mac is expected to
+come back. New WebSocket tasks also stay in
 `.connecting` until URLSession reports that the WebSocket upgrade opened, so a
 sleeping Mac cannot be reported as connected just because a task was resumed.
 Foreground ping failures and ping timeouts transition the stale socket out of

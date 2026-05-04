@@ -27,6 +27,7 @@ struct CodexAppModeView: View {
 
     @Environment(\.dependencies) private var dependencies
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var compactPath: [CodexRoute] = []
 
     private var accent: Color { .tronInfo }
@@ -57,6 +58,10 @@ struct CodexAppModeView: View {
         .onChange(of: activeServerSelectionVersion) { _, _ in
             compactPath.removeAll()
             configureViewModel()
+        }
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            guard oldPhase != .active, newPhase == .active else { return }
+            Task { await viewModel.recoverForeground() }
         }
         .task(id: activeServerSelectionVersion) {
             await viewModel.runDashboardAutoRefresh()

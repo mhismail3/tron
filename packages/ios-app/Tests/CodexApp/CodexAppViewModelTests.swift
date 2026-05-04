@@ -142,6 +142,40 @@ struct CodexAppViewModelTests {
         #expect(viewModel.state.threads.map(\.id) == ["thr_auto"])
     }
 
+    @Test("foreground recovery reconnects stale Codex socket and reloads selected thread")
+    func foregroundRecoveryReconnectsStaleSocket() async throws {
+        let fake = FakeCodexTransport()
+        fake.results["thread/list"] = threadSummaryResult(id: "thr_focus", title: "Focus Thread")
+        fake.results["thread/resume"] = [
+            "thread": AnyCodable(threadPayload(id: "thr_focus", messageCount: 3))
+        ]
+        let viewModel = CodexAppViewModel(
+            transportFactory: { _, _ in fake }
+        )
+        viewModel.configure(activeServer: server(), serverStatusProvider: { status() })
+        try await Task.sleep(for: .milliseconds(25))
+        try await viewModel.openThread("thr_focus")
+
+        let connectCountBeforeForeground = fake.connectCount
+        let listCountBeforeForeground = fake.sentMethods.filter { $0 == "thread/list" }.count
+        let resumeCountBeforeForeground = fake.sentMethods.filter { $0 == "thread/resume" }.count
+        fake.failNextSend(
+            method: "thread/list",
+            error: CodexTransportError.requestFailed("socket closed while app was backgrounded")
+        )
+
+        await viewModel.recoverForeground()
+
+        #expect(viewModel.connectionState == .connected)
+        #expect(fake.disconnectCount >= 2)
+        #expect(fake.connectCount >= connectCountBeforeForeground + 2)
+        #expect(fake.sentMethods.filter { $0 == "thread/list" }.count >= listCountBeforeForeground + 2)
+        #expect(fake.sentMethods.filter { $0 == "thread/resume" }.count >= resumeCountBeforeForeground + 1)
+        #expect(viewModel.state.selectedThreadId == "thr_focus")
+        #expect(viewModel.state.messages.last?.content.textContent == "message 2")
+        #expect(viewModel.state.errorMessage == nil)
+    }
+
     @Test("configure rejects running server status that omits a required bearer token")
     func configureRejectsMissingManagedToken() async throws {
         let viewModel = CodexAppViewModel(
@@ -333,9 +367,12 @@ private final class FakeCodexTransport: CodexAppTransporting {
     var sentMethods: [String] = []
     var sentResponses: [CodexJSONRPCServerResponse] = []
     var results: [String: [String: AnyCodable]] = [:]
+    var failures: [String: [Error]] = [:]
+    var connectCount = 0
     var disconnectCount = 0
 
     func connect() async throws {
+        connectCount += 1
         connectionState = .connected
     }
 
@@ -346,6 +383,12 @@ private final class FakeCodexTransport: CodexAppTransporting {
 
     func send(method: String, params: [String: AnyCodable]?, timeout: TimeInterval?) async throws -> [String: AnyCodable] {
         sentMethods.append(method)
+        if var methodFailures = failures[method], !methodFailures.isEmpty {
+            let failure = methodFailures.removeFirst()
+            failures[method] = methodFailures
+            connectionState = .failed(reason: failure.localizedDescription)
+            throw failure
+        }
         return results[method] ?? [:]
     }
 
@@ -355,5 +398,9 @@ private final class FakeCodexTransport: CodexAppTransporting {
 
     func respond(_ response: CodexJSONRPCServerResponse) async throws {
         sentResponses.append(response)
+    }
+
+    func failNextSend(method: String, error: Error) {
+        failures[method, default: []].append(error)
     }
 }

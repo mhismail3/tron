@@ -81,6 +81,12 @@ notifications. Selecting a thread opens a full-screen detail route on iPhone and
 the split-view detail column on iPad; the dashboard never embeds a composer or a
 half-height transcript. The `+` button opens a draft Codex thread view and the
 actual `thread/start` call is made when the first message is sent.
+When iOS foregrounds while Codex mode is visible, `CodexAppModeView` calls
+`CodexAppViewModel.recoverForeground()`: the direct Codex WebSocket is
+disconnected, managed server status is refreshed through Tron RPC, `thread/list`
+is reloaded, and the selected thread is resumed as a read-only snapshot. The
+foreground path never replays `turn/start`, so a stale socket can be replaced
+without duplicating user work.
 Resuming an existing thread renders one chronological transcript stream, so text
 messages and command/file/tool items keep the same order Codex returned. The
 detail view starts from the newest history window and scrolls to the bottom after

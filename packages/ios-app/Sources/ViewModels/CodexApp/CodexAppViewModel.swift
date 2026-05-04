@@ -190,6 +190,41 @@ final class CodexAppViewModel {
     }
 
     func refreshDashboard() async {
+        await refreshDashboard(forceManagedStatusRefresh: false, reconnectOnRequestFailure: true)
+    }
+
+    func recoverForeground() async {
+        guard activeServer != nil, serverStatusProvider != nil else { return }
+        let selectedThreadId = state.selectedThreadId
+        let shouldResumeSelectedThread = selectedThreadId != nil && !state.isDraftingNewThread
+
+        if client != nil {
+            await client?.disconnect()
+            syncConnectionState()
+        }
+
+        await refreshDashboard(forceManagedStatusRefresh: true, reconnectOnRequestFailure: true)
+
+        guard shouldResumeSelectedThread, let selectedThreadId else { return }
+        do {
+            if !connectionState.isConnected {
+                try await connect()
+            }
+            try await resumeThread(selectedThreadId)
+        } catch {
+            do {
+                try await reconnectAfterTransportFailure(error)
+                try await resumeThread(selectedThreadId)
+            } catch {
+                recordConnectionError(error)
+            }
+        }
+    }
+
+    private func refreshDashboard(
+        forceManagedStatusRefresh: Bool,
+        reconnectOnRequestFailure: Bool
+    ) async {
         guard !dashboardRefreshInFlight else { return }
         dashboardRefreshInFlight = true
         isRefreshingDashboard = true
@@ -199,7 +234,7 @@ final class CodexAppViewModel {
         }
 
         do {
-            if activeEndpoint == nil || client == nil {
+            if forceManagedStatusRefresh || activeEndpoint == nil || client == nil {
                 try await refreshManagedServerStatus()
                 guard activeEndpoint != nil, client != nil else {
                     return
@@ -208,12 +243,15 @@ final class CodexAppViewModel {
             if !connectionState.isConnected {
                 try await connect()
             }
-            try await loadThreads()
-        } catch {
-            state.errorMessage = CodexAppSecretRedactor.redact(error.localizedDescription, token: activeBearerToken)
-            if !connectionState.isConnected {
-                connectionState = .failed(reason: state.errorMessage ?? error.localizedDescription)
+            do {
+                try await loadThreads()
+            } catch {
+                guard reconnectOnRequestFailure else { throw error }
+                try await reconnectAfterTransportFailure(error)
+                try await loadThreads()
             }
+        } catch {
+            recordConnectionError(error)
         }
     }
 
@@ -238,7 +276,8 @@ final class CodexAppViewModel {
         do {
             try await loadThreads()
         } catch {
-            state.errorMessage = CodexAppSecretRedactor.redact(error.localizedDescription, token: activeBearerToken)
+            syncConnectionState()
+            await refreshDashboard(forceManagedStatusRefresh: false, reconnectOnRequestFailure: true)
         }
     }
 
@@ -280,6 +319,7 @@ final class CodexAppViewModel {
         defer { isLoadingThreads = false }
         let response = try await client.listThreads()
         CodexAppReducer.apply(.threadsLoaded(response.threads.map(\.summary)), to: &state)
+        state.errorMessage = nil
     }
 
     func prepareNewThread() {
@@ -337,6 +377,7 @@ final class CodexAppViewModel {
         guard let client else { throw CodexTransportError.notConnected }
         let response = try await client.resumeThread(threadId: threadId)
         CodexAppReducer.apply(.threadResumed(response.thread), to: &state)
+        state.errorMessage = nil
     }
 
     func archiveThread(_ threadId: String) async throws {
@@ -418,6 +459,26 @@ final class CodexAppViewModel {
     private func syncConnectionState() {
         if let transport {
             connectionState = transport.connectionState
+        }
+    }
+
+    private func reconnectAfterTransportFailure(_ error: Error) async throws {
+        state.errorMessage = CodexAppSecretRedactor.redact(error.localizedDescription, token: activeBearerToken)
+        if client != nil {
+            await client?.disconnect()
+            syncConnectionState()
+        }
+        try await refreshManagedServerStatus()
+        guard client != nil else { throw CodexTransportError.notConnected }
+        try await connect()
+    }
+
+    private func recordConnectionError(_ error: Error) {
+        let redacted = CodexAppSecretRedactor.redact(error.localizedDescription, token: activeBearerToken)
+        state.errorMessage = redacted
+        syncConnectionState()
+        if !connectionState.isConnected {
+            connectionState = .failed(reason: redacted)
         }
     }
 }
