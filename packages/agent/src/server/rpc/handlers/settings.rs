@@ -15,6 +15,27 @@ fn settings_error(error: crate::settings::SettingsError) -> RpcError {
     }
 }
 
+async fn refresh_codex_app_server_if_needed(ctx: &RpcContext, updates: &Value) {
+    if updates.pointer("/server/codexAppServer").is_none() {
+        return;
+    }
+
+    let Some(manager) = &ctx.codex_app_server else {
+        return;
+    };
+
+    let settings = crate::settings::get_settings();
+    if let Err(error) = manager
+        .reconfigure(settings.server.codex_app_server.clone())
+        .await
+    {
+        tracing::warn!(
+            error = %error,
+            "Codex App Server settings were saved, but runtime reconfiguration failed"
+        );
+    }
+}
+
 /// Get current settings.
 pub struct GetSettingsHandler;
 
@@ -41,12 +62,28 @@ impl MethodHandler for ResetSettingsHandler {
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let _operation_guard = crate::settings::SettingsStore::operation_lock().await;
         let settings_path = ctx.settings_path.clone();
-        ctx.run_blocking("settings.resetToDefaults", move || {
-            crate::settings::SettingsStore::new(settings_path)
-                .reset()
-                .map_err(settings_error)
-        })
-        .await
+        let result = ctx
+            .run_blocking("settings.resetToDefaults", move || {
+                crate::settings::SettingsStore::new(settings_path)
+                    .reset()
+                    .map_err(settings_error)
+            })
+            .await?;
+
+        if let Some(manager) = &ctx.codex_app_server {
+            let settings = crate::settings::get_settings();
+            if let Err(error) = manager
+                .reconfigure(settings.server.codex_app_server.clone())
+                .await
+            {
+                tracing::warn!(
+                    error = %error,
+                    "settings reset saved defaults, but Codex App Server reconfiguration failed"
+                );
+            }
+        }
+
+        Ok(result)
     }
 }
 
@@ -58,6 +95,7 @@ impl MethodHandler for UpdateSettingsHandler {
     #[instrument(skip(self, ctx), fields(method = "settings.update"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let updates = require_param(params.as_ref(), "settings")?.clone();
+        let codex_updates = updates.clone();
         let has_mcp_changes = updates.get("mcp").is_some();
         let settings_path = ctx.settings_path.clone();
 
@@ -92,6 +130,7 @@ impl MethodHandler for UpdateSettingsHandler {
             }
             drop(router_guard);
             mcp::broadcast_status_changed(ctx).await;
+            refresh_codex_app_server_if_needed(ctx, &codex_updates).await;
             return Ok(serde_json::json!({ "success": true }));
         }
 
@@ -103,6 +142,8 @@ impl MethodHandler for UpdateSettingsHandler {
         })
         .await?;
 
+        refresh_codex_app_server_if_needed(ctx, &codex_updates).await;
+
         Ok(serde_json::json!({ "success": true }))
     }
 }
@@ -110,9 +151,18 @@ impl MethodHandler for UpdateSettingsHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::codex_app::{
+        CodexAppServerChild, CodexAppServerExit, CodexAppServerLaunchSpec, CodexAppServerManager,
+        CodexAppServerSpawner, CodexAppServerState,
+    };
     use crate::server::rpc::handlers::test_helpers::make_test_context;
+    use crate::settings::CodexAppServerSettings;
+    use async_trait::async_trait;
     use serde_json::json;
+    use std::io;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     struct SettingsTestGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
@@ -143,6 +193,58 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         ctx.settings_path = dir.path().join("settings.json");
         (ctx, dir)
+    }
+
+    #[derive(Default)]
+    struct SettingsFakeSpawner {
+        specs: Mutex<Vec<CodexAppServerLaunchSpec>>,
+    }
+
+    #[async_trait]
+    impl CodexAppServerSpawner for SettingsFakeSpawner {
+        async fn spawn(
+            &self,
+            spec: CodexAppServerLaunchSpec,
+        ) -> io::Result<Box<dyn CodexAppServerChild>> {
+            self.specs.lock().unwrap().push(spec);
+            Ok(Box::new(SettingsFakeChild))
+        }
+    }
+
+    struct SettingsFakeChild;
+
+    #[async_trait]
+    impl CodexAppServerChild for SettingsFakeChild {
+        fn id(&self) -> Option<u32> {
+            Some(456)
+        }
+
+        fn try_wait(&mut self) -> io::Result<Option<CodexAppServerExit>> {
+            Ok(None)
+        }
+
+        async fn terminate(&mut self, _timeout: Duration) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn attach_codex_manager(
+        ctx: &mut crate::server::rpc::context::RpcContext,
+        token_dir: &tempfile::TempDir,
+    ) -> (Arc<CodexAppServerManager>, Arc<SettingsFakeSpawner>) {
+        let spawner = Arc::new(SettingsFakeSpawner::default());
+        let manager = Arc::new(
+            CodexAppServerManager::with_deps(
+                CodexAppServerSettings::default(),
+                token_dir.path().join("codex-token"),
+                spawner.clone(),
+                Duration::ZERO,
+                Duration::from_millis(1),
+            )
+            .unwrap(),
+        );
+        ctx.codex_app_server = Some(manager.clone());
+        (manager, spawner)
     }
 
     #[tokio::test]
@@ -410,6 +512,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_settings_reconfigures_codex_app_server_runtime() {
+        let _guard = settings_test_guard().await;
+        let (mut ctx, dir) = make_ctx_with_temp_settings();
+        let (manager, spawner) = attach_codex_manager(&mut ctx, &dir);
+
+        let _ = UpdateSettingsHandler
+            .handle(
+                Some(json!({"settings": {"server": {"codexAppServer": {"port": 4517}}}})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let status = manager.status().await;
+        assert_eq!(status.state, CodexAppServerState::Running);
+        assert_eq!(status.endpoint.unwrap().port, 4517);
+        assert_eq!(spawner.specs.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn reset_settings_returns_defaults() {
         let _guard = settings_test_guard().await;
         let (ctx, _dir) = make_ctx_with_temp_settings();
@@ -428,6 +550,28 @@ mod tests {
         assert!(result.is_object());
         // heartbeatIntervalMs should be back to default (30_000)
         assert_eq!(result["server"]["heartbeatIntervalMs"], 30_000);
+    }
+
+    #[tokio::test]
+    async fn reset_settings_reconfigures_codex_app_server_to_defaults() {
+        let _guard = settings_test_guard().await;
+        let (mut ctx, dir) = make_ctx_with_temp_settings();
+        let (manager, spawner) = attach_codex_manager(&mut ctx, &dir);
+
+        let _ = UpdateSettingsHandler
+            .handle(
+                Some(json!({"settings": {"server": {"codexAppServer": {"port": 4518}}}})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let _ = ResetSettingsHandler.handle(None, &ctx).await.unwrap();
+
+        let status = manager.status().await;
+        assert_eq!(status.state, CodexAppServerState::Running);
+        assert_eq!(status.endpoint.unwrap().port, 4500);
+        assert_eq!(spawner.specs.lock().unwrap().len(), 2);
     }
 
     #[tokio::test]

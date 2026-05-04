@@ -538,11 +538,12 @@ dev_start_background() {
     create_app_bundle "$DEV_BUNDLE" "$dev_src"
     codesign_bundle "$DEV_BUNDLE"
 
-    RUST_LOG="${RUST_LOG:-debug,ort=error}" "$DEV_BINARY" \
+    RUST_LOG="${RUST_LOG:-debug,ort=error}" nohup "$DEV_BINARY" \
         --port "$PROD_PORT" --quiet ${log_level:+--log-level "$log_level"} \
         >/dev/null 2>&1 &
 
     local pid=$!
+    disown "$pid" 2>/dev/null || true
     sleep 2
 
     if kill -0 "$pid" 2>/dev/null; then

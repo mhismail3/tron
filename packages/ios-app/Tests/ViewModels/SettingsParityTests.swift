@@ -54,6 +54,13 @@ final class SettingsParityTests: XCTestCase {
         "mcpSchemaRefreshTtlMs",
         // Transcription (ConnectionSettingsPage.swift)
         "transcriptionEnabled",
+        // Codex App Server (ConnectionSettingsPage.swift)
+        "codexAppServerEnabled",
+        "codexAppServerPort",
+        "codexAppServerPreferredCwd",
+        "codexAppServerPreferredModel",
+        "codexAppServerApprovalPolicy",
+        "codexAppServerSandboxMode",
         // Update checks (ConnectionSettingsPage.swift)
         "updateEnabled",
         "updateChannel",

@@ -35,6 +35,8 @@
 //! 5. `agent.ready` is emitted AFTER `agent.complete` (iOS send button)
 //! 6. Compaction always runs before ledger writing (deterministic DB ordering)
 //! 7. Production DB target is strictly `~/.tron/system/database/log.db`
+//! 8. Server shutdown is signal-owned (`SIGINT`/`SIGTERM` on Unix) so managed
+//!    children such as `codex app-server` are stopped before Tron exits.
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -206,6 +208,40 @@ fn format_listening_log(
     format!(
         "Tron agent listening on http://{addr} ({method_count} RPC methods registered){trust_note}"
     )
+}
+
+#[cfg(unix)]
+fn shutdown_signal_names() -> &'static [&'static str] {
+    &["SIGINT", "SIGTERM"]
+}
+
+#[cfg(not(unix))]
+fn shutdown_signal_names() -> &'static [&'static str] {
+    &["SIGINT"]
+}
+
+async fn wait_for_shutdown_signal() -> Result<&'static str> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .context("Failed to listen for sigterm")?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                result.context("Failed to listen for ctrl-c")?;
+                Ok("SIGINT")
+            }
+            _ = terminate.recv() => Ok("SIGTERM"),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .context("Failed to listen for ctrl-c")?;
+        Ok("SIGINT")
+    }
 }
 
 fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
@@ -448,6 +484,7 @@ struct ServiceState {
     job_manager: Arc<dyn tron::tools::traits::JobManagerOps>,
     output_buffer_registry: Arc<tron::runtime::orchestrator::output_buffer::OutputBufferRegistry>,
     transcription_engine: Arc<std::sync::OnceLock<Arc<tron::transcription::MlxEngine>>>,
+    codex_app_server: Arc<tron::server::codex_app::CodexAppServerManager>,
 }
 
 /// Build core services: orchestrator, session manager, providers, tools, subagent manager.
@@ -544,6 +581,12 @@ async fn init_services(
     let hook_abort_tracker = Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new());
 
     let transcription_engine = Arc::new(std::sync::OnceLock::new());
+    let codex_app_server = Arc::new(
+        tron::server::codex_app::CodexAppServerManager::new(
+            settings.server.codex_app_server.clone(),
+        )
+        .context("Failed to initialize Codex App Server lifecycle manager")?,
+    );
 
     Ok(ServiceState {
         event_store,
@@ -559,6 +602,7 @@ async fn init_services(
         job_manager,
         output_buffer_registry,
         transcription_engine,
+        codex_app_server,
     })
 }
 
@@ -789,6 +833,7 @@ fn build_rpc_context(
         shutdown_coordinator: None,
         origin,
         cron_scheduler: Some(cron.scheduler.clone()),
+        codex_app_server: Some(services.codex_app_server.clone()),
         worktree_coordinator,
         device_request_broker: None,
         context_artifacts: Arc::new(
@@ -949,6 +994,21 @@ async fn main() -> Result<()> {
     let metrics_handle = tron::server::metrics::install_recorder();
     let server = TronServer::new(config, registry, rpc_context, metrics_handle);
     register_blocking_supervisor_shutdown(server.shutdown());
+    if let Some(codex_app_server) = server.rpc_context().codex_app_server.clone() {
+        if let Err(error) = codex_app_server.start().await {
+            tracing::warn!(
+                error = %error,
+                "managed Codex App Server did not start; Tron will continue and surface status via codexApp.status"
+            );
+        }
+        server.shutdown().register_phase_hook(
+            tron::server::shutdown::ShutdownPhase::Tools,
+            "codex-app-server",
+            move || async move {
+                codex_app_server.stop().await;
+            },
+        );
+    }
     register_transcription_sidecar(
         settings.server.transcription.enabled,
         server.shutdown(),
@@ -1023,11 +1083,13 @@ async fn main() -> Result<()> {
     );
 
     // Wait for shutdown signal
-    tokio::signal::ctrl_c()
-        .await
-        .context("Failed to listen for ctrl-c")?;
+    tracing::debug!(
+        signals = ?shutdown_signal_names(),
+        "waiting for shutdown signal"
+    );
+    let shutdown_signal = wait_for_shutdown_signal().await?;
 
-    tracing::info!("Shutting down...");
+    tracing::info!(signal = shutdown_signal, "Shutting down...");
     let mut shutdown_handles: Vec<tokio::task::JoinHandle<()>> = vec![
         server_handle,
         bridge_handle,

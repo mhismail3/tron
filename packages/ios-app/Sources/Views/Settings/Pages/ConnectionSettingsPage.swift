@@ -63,6 +63,7 @@ struct ConnectionSettingsPage: View {
             activeServerUnavailable: activeServerUnavailable,
             isLoaded: settingsState.isLoaded,
             loadError: settingsState.loadError,
+            codexAppServerEnabled: settingsState.codexAppServerEnabled,
             transcriptionEnabled: settingsState.transcriptionEnabled,
             updateEnabled: settingsState.updateEnabled,
             updateChannel: settingsState.updateChannel,
@@ -250,6 +251,8 @@ struct ConnectionSettingsPage: View {
     @ViewBuilder
     private func serverBackedSection(_ section: ConnectionSettingsServerBackedSection) -> some View {
         switch section {
+        case .codexAppServer:
+            codexAppServerSection
         case .transcriptionSidecar:
             transcriptionSection
         case .updates:
@@ -281,6 +284,114 @@ struct ConnectionSettingsPage: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 14)
             }
+        }
+    }
+
+    private var codexAppServerSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: ConnectionSettingsServerBackedSection.codexAppServer.title)
+
+            SettingsCard {
+                SettingsRow(icon: "terminal", label: "Managed server") {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { settingsState.codexAppServerEnabled },
+                            set: { newValue in
+                                settingsState.codexAppServerEnabled = newValue
+                                updateServerSetting {
+                                    ServerSettingsUpdate(server: .init(codexAppServer: .init(enabled: newValue)))
+                                }
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .tint(.tronInfo)
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "number", label: "Port") {
+                    Stepper(value: Binding(
+                        get: { settingsState.codexAppServerPort },
+                        set: { newValue in
+                            let clamped = min(max(newValue, 1), 65_535)
+                            settingsState.codexAppServerPort = clamped
+                            updateServerSetting {
+                                ServerSettingsUpdate(server: .init(codexAppServer: .init(port: clamped)))
+                            }
+                        }
+                    ), in: 1...65_535) {
+                        Text("\(settingsState.codexAppServerPort)")
+                            .font(TronTypography.codeSM)
+                            .foregroundStyle(.tronTextSecondary)
+                    }
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "folder", label: "Cwd") {
+                    TextField("Codex default", text: Binding(
+                        get: { settingsState.codexAppServerPreferredCwd },
+                        set: { settingsState.codexAppServerPreferredCwd = $0 }
+                    ))
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(TronTypography.codeSM)
+                    .onSubmit {
+                        updateServerSetting {
+                            ServerSettingsUpdate(server: .init(codexAppServer: .init(preferredCwd: settingsState.codexAppServerPreferredCwd)))
+                        }
+                    }
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "cpu", label: "Model") {
+                    TextField("Codex default", text: Binding(
+                        get: { settingsState.codexAppServerPreferredModel },
+                        set: { settingsState.codexAppServerPreferredModel = $0 }
+                    ))
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(TronTypography.codeSM)
+                    .onSubmit {
+                        updateServerSetting {
+                            ServerSettingsUpdate(server: .init(codexAppServer: .init(preferredModel: settingsState.codexAppServerPreferredModel)))
+                        }
+                    }
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "checkmark.shield", label: "Approvals") {
+                    SettingsCycleToggle(
+                        options: [
+                            ("onRequest", "On Request"),
+                            ("unlessTrusted", "Unless Trusted"),
+                            ("never", "Never"),
+                        ],
+                        current: settingsState.codexAppServerApprovalPolicy
+                    ) { newValue in
+                        settingsState.codexAppServerApprovalPolicy = newValue
+                        updateServerSetting {
+                            ServerSettingsUpdate(server: .init(codexAppServer: .init(approvalPolicy: newValue)))
+                        }
+                    }
+                }
+                SettingsRowDivider()
+                SettingsRow(icon: "shippingbox", label: "Sandbox") {
+                    SettingsCycleToggle(
+                        options: [
+                            ("readOnly", "Read Only"),
+                            ("workspaceWrite", "Workspace Write"),
+                            ("dangerFullAccess", "Full Access"),
+                        ],
+                        current: settingsState.codexAppServerSandboxMode
+                    ) { newValue in
+                        settingsState.codexAppServerSandboxMode = newValue
+                        updateServerSetting {
+                            ServerSettingsUpdate(server: .init(codexAppServer: .init(sandboxMode: newValue)))
+                        }
+                    }
+                }
+            }
+
+            SettingsCaption(text: "Tron Server starts, supervises, restarts, and stops Codex App Server. Endpoint changes take effect immediately and Codex mode refreshes from the active server.")
         }
     }
 

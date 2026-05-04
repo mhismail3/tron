@@ -7,6 +7,7 @@
 - Xcode 26+ with iOS 26 SDK
 - XcodeGen (`brew install xcodegen`)
 - Tron server running locally
+- Optional for Codex mode: current Codex CLI with WebSocket `app-server` support installed on the paired Tron server machine
 
 ### Project Generation
 
@@ -21,6 +22,33 @@ open TronMobile.xcodeproj
 The app connects to the Tron server:
 - **Beta**: `localhost:8082` (run `tron start beta` or `tron dev`)
 - **Production**: `localhost:8080` (run `tron start`)
+
+### Codex App Server Mode
+
+Codex mode is separate from Tron agent sessions, but its server lifecycle is
+owned by the paired Tron server. Start or restart the Tron server after
+installing a current Codex CLI; when `server.codexAppServer.enabled` is true,
+the server launches `codex app-server`, writes the capability token under
+`~/.tron/system/run/codex-app-server-token`, and reports the live endpoint via
+`codexApp.status`.
+
+For local verification:
+
+```bash
+# from the repository root
+scripts/tron dev
+# Then open Codex mode in the paired iOS app. The dashboard should connect,
+# load threads automatically, and open selected threads as full-screen detail
+# views on iPhone.
+```
+
+Use a Tailscale/private address for device testing. If the status page shows a
+failed Codex server, verify `codex` is on the LaunchAgent shell `PATH`, the CLI
+supports `app-server --listen ... --ws-auth capability-token --ws-token-file`,
+and the configured port is free. The Codex dashboard now stays on the thread
+list flow when the managed server is failed or restarting; it shows a retryable
+connection state and polls `codexApp.status` until the server reports a running
+endpoint.
 
 ## Build Configurations
 
@@ -49,6 +77,7 @@ xcodebuild test \
 
 ```
 Tests/
+├── CodexApp/          # Codex JSON-RPC, reducer, managed-status, view-model tests
 ├── ViewModels/        # ViewModel tests
 ├── Services/          # Service tests
 ├── Core/              # Event plugin tests

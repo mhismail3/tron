@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. A Rust server handles LLM communication, tool execution, and event-sourced session persistence. A native iOS app provides a real-time chat interface with streaming, session management, and push notifications.
+Tron is a local-first AI coding agent that runs as a persistent background service. A Rust server handles LLM communication, tool execution, and event-sourced session persistence. A native iOS app provides a real-time chat interface with streaming, session management, push notifications, and a separate direct Codex App Server mode.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, tools, RPC methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -38,10 +38,9 @@ This README is the single, canonical reference for the project and is expected t
 |                              iOS App (SwiftUI)                              |
 |                           packages/ios-app                                  |
 |              MVVM  -  Coordinators  -  Event Plugins  -  Swift 6            |
-+------------------------------------+----------------------------------------+
-                                     | WebSocket (JSON-RPC 2.0)
-                                     | Port 9847
-                                     v
++-------------------------------+---------------------------------------------+
+                                | WebSocket (JSON-RPC 2.0), port 9847
+                                v
 +-----------------------------------------------------------------------------+
 |                          Rust Agent Server                                  |
 |                         packages/agent                                      |
@@ -62,6 +61,17 @@ This README is the single, canonical reference for the project and is expected t
 |   - Session state reconstruction via ancestor traversal                     |
 |   - SQLite-backed sessions, events, branches, cron, prompts, and devices    |
 +-----------------------------------------------------------------------------+
+
++-----------------------------------------------------------------------------+
+| Optional Codex mode                                                         |
+| iOS discovers endpoint via Tron RPC -> Codex App Server WS -> managed child |
++-----------------------------------------------------------------------------+
+
+Optional Codex mode connects the iOS app directly to a `codex app-server`
+process on the active paired machine, but Tron Server owns that child process,
+its bearer token file, and its lifecycle. iOS discovers the live endpoint via
+authenticated `codexApp.status`, then uses a dedicated Codex JSON-RPC transport
+that does not route turns through the Tron agent.
 ```
 
 ### Data Path
@@ -132,6 +142,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
   |
   +-- server           Axum HTTP/WS, RPC handlers, event bridge, APNS
   |                    +-- onboarding      Bearer token + `.onboarded` sentinel lifecycle
+  |                    +-- codex_app       Managed `codex app-server` child lifecycle
   |                    +-- websocket       WS upgrade handler + mandatory bearer-auth middleware
   |                    +-- updater         GitHub Releases poller + notify-only update state
   |
@@ -155,6 +166,7 @@ core               Foundation: errors, IDs, paths, retry, text, content, ...
 | `runtime` | Agent execution + orchestration | `TronAgent`, `Orchestrator`, `SessionManager`, `ContextManager` |
 | `server` | HTTP/WS + RPC dispatch | `TronServer`, `MethodRegistry`, `RpcContext`, `EventBridge` |
 | `server::onboarding` | Bearer token + first-run sentinel | `load_or_create_bearer_token()`, `mark_onboarded()` |
+| `server::codex_app` | Managed Codex App Server child process | `CodexAppServerManager`, `CodexAppServerStatus` |
 | `server::websocket` | WS upgrade + bearer-auth middleware | `BearerTokenStore`, `verify_bearer_header()` |
 | `server::updater` | GitHub Releases checks + update notifications | `SchedulerDeps`, `UpdaterState`, `UpdateDecision` |
 
@@ -231,7 +243,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 
 | Command | Description |
 |---------|-------------|
-| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` background). Stops the installed `com.tron.server` job before binding port `9847` and restores it through `/Applications/Tron.app` on exit. |
+| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` background via `nohup`). Stops the installed `com.tron.server` job before binding port `9847` and restores it through `/Applications/Tron.app` on exit/stop. |
 | `tron ci` | CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc` |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
@@ -308,7 +320,7 @@ Source-control operations (sync main, push, switch branches, finalize a session 
 
 ## RPC API
 
-Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **165 methods** across three groups.
+Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **166 methods** across three groups.
 
 ### Connection
 
@@ -340,11 +352,12 @@ These fields are additive; older clients that ignore them continue to work uncha
 - `system.checkForUpdates` returns `{ available: false, disabled: true, channel, currentVersion }` when `server.update.enabled` is `false` (the safe default) — no GitHub fetch is performed.
 - `system.getUpdateStatus` is a pure read of `settings.server.update` + `~/.tron/system/run/updater-state.json`; it always succeeds and exposes `enabled: false` plus null `latestAvailableVersion` for un-opted-in users.
 
-### Core (63)
+### Core (64)
 
 | Group | Count | Methods |
 |-------|------:|---------|
 | `system` | 6 | `system.ping`, `system.getInfo`, `system.getDiagnostics`, `system.shutdown`, `system.checkForUpdates`, `system.getUpdateStatus` |
+| `codexApp` | 1 | `codexApp.status` |
 | `blob` | 1 | `blob.get` |
 | `session` | 13 | `session.create`, `session.resume`, `session.list`, `session.delete`, `session.fork`, `session.getHead`, `session.getState`, `session.getHistory`, `session.reconstruct`, `session.archive`, `session.unarchive`, `session.archiveOlderThan`, `session.export` |
 | `agent` | 10 | `agent.prompt`, `agent.abort`, `agent.abortTool`, `agent.status`, `agent.queuePrompt`, `agent.dequeuePrompt`, `agent.clearQueue`, `agent.deliverSubagentResults`, `agent.submitConfirmation`, `agent.submitAnswers` |
@@ -471,6 +484,14 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
     "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
     "transcription": { "enabled": false },
     "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
+    "codexAppServer": {             // Tron-owned codex app-server child process
+      "enabled": true,              // Starts with Tron Server and stops during Tron shutdown
+      "port": 4500,                 // ws://0.0.0.0:<port>, authenticated with a token file
+      "preferredCwd": null,         // Optional default cwd for new Codex threads
+      "preferredModel": null,       // Optional default model for new Codex threads
+      "approvalPolicy": "onRequest",// "onRequest" | "unlessTrusted" | "never"
+      "sandboxMode": "workspaceWrite" // "readOnly" | "workspaceWrite" | "dangerFullAccess"
+    },
     "update": {                     // User-mode update checks. All fields off / safest by default.
       "enabled": false,             // Master switch — false means the scheduler never runs + no GitHub API traffic
       "channel": "stable",          // "stable" ignores pre-release tags; "beta" includes them
@@ -691,9 +712,11 @@ packages/ios-app/Sources/
 +-- Models/               Data models, RPC codables, event types
 +-- Protocols/            Coordinator and view model protocols
 +-- Services/             Network (RPC client, WebSocket, deep links), paired servers, audio,
-+                         push notifications, local diagnostics, feedback composer, Keychain tokens
-+-- ViewModels/           Chat view models, handlers, managers, @Observable state, OnboardingState
-+-- Views/                SwiftUI views (chat, tools, voice notes, settings, Onboarding/, ...)
++                         Codex App Server client, push notifications, local diagnostics,
++                         feedback composer, Keychain tokens
++-- ViewModels/           Chat and Codex view models, handlers, managers, @Observable state,
++                         OnboardingState
++-- Views/                SwiftUI views (chat, Codex, tools, voice notes, settings, Onboarding/, ...)
 +-- Theme/                Colors, typography, design tokens
 +-- Utilities/            Shared helpers
 +-- Extensions/           Type extensions
@@ -711,6 +734,7 @@ packages/ios-app/Sources/
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
+- **Codex mode**: A separate top-level iOS mode connects directly to the Tron-managed `codex app-server` on the active paired machine. Tron Server owns process startup/shutdown, settings, and the token file; iOS discovers the live endpoint through authenticated `codexApp.status` and does not use the Tron agent session/event pipeline. The Codex dashboard mirrors the regular session flow: it auto-connects, auto-loads `thread/list`, opens existing threads as full chat pages, and uses the main Server settings sheet for Codex lifecycle/configuration controls.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages are not available until a pairing probe, `settings.get`, and setup hydration succeed.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `settings.json`.
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings.get` response and best-effort `auth.get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
@@ -722,6 +746,7 @@ packages/ios-app/Sources/
 ```
 Live:    WebSocket -> RPCClient -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewModel -> ChatView
+Codex:   RPCClient.codexAppServer.status -> Codex App Server WS -> CodexJSONRPCTransport -> CodexAppClient -> CodexAppViewModel -> Codex mode UI
 ```
 
 ### Build Configurations
@@ -740,6 +765,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 - `events.md` — Event plugin system
 - `apns.md` — Push notification setup
 - `onboarding.md` — First-run onboarding sheet, QR/deep-link handling, local paired servers, and bearer persistence
+- `codex-app-server.md` — Server-owned Codex App Server lifecycle, security, transport, and tests
 
 ---
 
@@ -881,6 +907,7 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   |   +-- journals/             Streaming journals for crash recovery of partial LLM output
 |   +-- run/                      Mutable runtime state and local contributor artifacts
 |   |   +-- auth.lock             Auth-file refresh lock
+|   |   +-- codex-app-server-token Managed Codex App Server capability token (mode 600)
 |   |   +-- .mac-wrapper.*.lock   Per-wrapper menu app lock
 |   |   +-- .onboarded            First-run sentinel; presence drives `system.getInfo.paired`
 |   |   +-- mac-app-version.json  Last app build whose menu-bar launch finalized the server

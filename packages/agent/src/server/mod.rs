@@ -16,6 +16,7 @@
 //! | Module        | Purpose                                                                            |
 //! |---------------|------------------------------------------------------------------------------------|
 //! | `config`      | `ServerConfig` (host/port + heartbeat/buffer tuning)                               |
+//! | `codex_app`   | Server-owned `codex app-server` child lifecycle + iOS discovery status             |
 //! | `cron_adapters` | Server transport adapters for cron WebSocket/APNS callbacks                      |
 //! | `device`      | iOS push-device registry; APNs token storage                                       |
 //! | `disk`        | Disk-space probes for health diagnostics                                           |
@@ -31,6 +32,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod codex_app;
 #[path = "app/config.rs"]
 pub mod config;
 pub mod cron_adapters;

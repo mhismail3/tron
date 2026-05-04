@@ -19,6 +19,7 @@ use crate::transcription::MlxEngine;
 use metrics::{counter, histogram};
 use parking_lot::{Mutex, RwLock};
 
+use crate::server::codex_app::CodexAppServerManager;
 use crate::server::device::DeviceRequestBroker;
 use crate::server::rpc::errors::RpcError;
 use crate::server::rpc::session_context::ContextArtifactsService;
@@ -213,6 +214,11 @@ pub struct RpcContext {
     pub origin: String,
     /// Cron scheduler (None = cron not available).
     pub cron_scheduler: Option<std::sync::Arc<crate::cron::CronScheduler>>,
+    /// Server-owned Codex App Server lifecycle manager.
+    ///
+    /// `None` in isolated tests and embedded contexts; production installs one
+    /// during daemon startup and exposes it through `codexApp.status`.
+    pub codex_app_server: Option<Arc<CodexAppServerManager>>,
     /// Worktree coordinator for session isolation (None = isolation disabled).
     pub worktree_coordinator: Option<std::sync::Arc<crate::worktree::WorktreeCoordinator>>,
     /// Device request broker for iOS request/response round-trips.

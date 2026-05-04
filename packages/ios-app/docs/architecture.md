@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-02 (new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-05-04 (Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, onboarding handoff, and foreground connection recovery)
 
 ## Overview
 
@@ -12,6 +12,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Voice transcription input
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
+- A separate Codex mode that connects directly to a Tron-managed `codex app-server` on the active paired machine without using Tron agent sessions
 
 ## Directory Structure
 
@@ -27,11 +28,13 @@ Sources/
 │       └── Payloads/       # Shared Decodable structs
 ├── Database/               # SQLite event database, queries
 ├── Models/                 # Data models, event transformers
+│   ├── CodexApp/           # Direct Codex App Server protocol models
 │   ├── Events/             # Event types and registry
 │   ├── Features/           # Feature-specific models
 │   ├── Messages/           # Message models
 │   └── RPC/                # RPC types and codables
 ├── Services/               # Network, state management
+│   ├── CodexApp/           # Codex endpoint store, token store, JSON-RPC transport/client
 │   ├── Network/            # RPC, WebSocket (with Bearer auth), deep links
 │   ├── Events/             # Event store, sync
 │   ├── Audio/              # Recording, transcription
@@ -45,11 +48,13 @@ Sources/
 │   ├── Settings/           # PairedServerStore (local server list + active id)
 │   └── Storage/            # KeychainItem + PairedServerTokenStore
 ├── ViewModels/             # View state management
+│   ├── CodexApp/           # Codex mode state reducer and view model
 │   ├── Chat/               # ChatViewModel and extensions
 │   ├── Handlers/           # Event handling coordinators
 │   ├── Managers/           # Specialized state managers
 │   └── State/              # @Observable state objects
 └── Views/                  # SwiftUI views
+    ├── CodexApp/           # Codex dashboard, full-screen thread detail, setup/status, approvals
     ├── Chat/               # Core chat interface
     ├── Tools/              # Tool chips + detail sheets
     ├── Components/         # Reusable UI components
@@ -132,8 +137,44 @@ final class SubagentState {
 | `ViewModels/Chat/ChatViewModel.swift` | Main chat state |
 | `Services/Network/RPCClient.swift` | WebSocket RPC |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
+| `Services/CodexApp/CodexJSONRPCTransport.swift` | Direct Codex App Server JSON-RPC transport |
+| `ViewModels/CodexApp/CodexAppViewModel.swift` | Codex mode setup, connection, thread, turn, and approval state |
 
 ## Data Flow
+
+### Codex App Server Mode
+
+```
+Codex mode UI
+    ↓
+CodexAppViewModel + CodexAppReducer
+    ↓
+CodexAppClient
+    ↓
+CodexJSONRPCTransport
+    ↓
+Tron-managed codex app-server on the active paired machine
+```
+
+Codex mode does not use Tron sessions, the Tron agent turn pipeline, or
+`EventRegistry`/`EventStoreManager`. It does use authenticated Tron RPC for
+discovery: `CodexAppModeView` asks `RPCClient.codexAppServer.status()` for the
+server-owned endpoint, bearer token, lifecycle state, and thread defaults. The
+iOS view model keeps that data in memory only; Codex endpoint configuration and
+the WebSocket bearer token are owned by Tron Server.
+
+The UI mirrors the core session flow: a dashboard lists Codex threads, `+` opens
+a draft full-screen thread view, tapping an existing thread routes to a full
+detail view on iPhone, and iPad uses the same dashboard/detail split. The
+dashboard auto-connects, auto-loads `thread/list`, and keeps polling managed
+server status while disconnected so a restarted Codex child recovers without
+manual refresh. Detail views render text messages and Codex tool items as one
+chronological transcript, show the newest resumed history window first, keep
+older decoded entries outside the SwiftUI list until Load Earlier Entries is
+tapped, and re-anchor after prepending older batches. Failed/disabled server
+lifecycle states stay inside the dashboard as retryable connection states;
+manual server configuration lives in the main Settings sheet instead of an
+in-dashboard settings subpage.
 
 ### Live Events
 
@@ -207,6 +248,7 @@ dependencies.eventStoreManager
 |------|--------------|
 | Persistent | Never (eventDatabase, pushNotificationService) |
 | Connection-based | Server change (rpcClient, skillStore) |
+| Codex mode | Active paired server change (Codex endpoint/client only) |
 
 Foreground/background connection handling is owned by `TronMobileApp` and the
 network services rather than by individual views. SwiftUI `scenePhase` changes

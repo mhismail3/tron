@@ -207,6 +207,7 @@ impl MethodRegistry {
                 | "system.getDiagnostics"
                 | "agent.status"
                 | "browser.getStatus"
+                | "codexApp.status"
                 | "cron.status"
                 | "context.shouldCompact"
                 | "context.canAcceptTurn"

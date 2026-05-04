@@ -112,6 +112,10 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var mcp: MCPClient = MCPClient(transport: self)
 
+    /// Server-owned Codex App Server lifecycle discovery.
+    @ObservationIgnored
+    lazy var codexAppServer: CodexAppServerClient = CodexAppServerClient(transport: self)
+
     /// Blob storage client (for Display tool image loading).
     @ObservationIgnored
     lazy var blob: BlobClient = BlobClient(transport: self)

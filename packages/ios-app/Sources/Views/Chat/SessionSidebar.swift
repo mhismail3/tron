@@ -5,6 +5,7 @@ import SwiftUI
 /// Navigation mode for the main view
 enum NavigationMode: String, CaseIterable {
     case agents = "Sessions"
+    case codex = "Codex"
     case voiceNotes = "Voice Notes"
     case automations = "Automations"
     case sandboxes = "Sandboxes"
@@ -12,6 +13,7 @@ enum NavigationMode: String, CaseIterable {
     var icon: String {
         switch self {
         case .agents: "cpu"
+        case .codex: "terminal"
         case .voiceNotes: "waveform"
         case .automations: "clock.badge.checkmark"
         case .sandboxes: "shippingbox"
@@ -200,14 +202,15 @@ struct FloatingNewSessionButton: View {
     let action: () -> Void
     var onLongPress: (() -> Void)? = nil
     var size: CGFloat = 44
+    var accent: Color = .tronEmerald
 
     var body: some View {
         Image(systemName: "plus")
             .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-            .foregroundStyle(.tronEmerald)
+            .foregroundStyle(accent)
             .frame(width: size, height: size)
             .contentShape(Circle())
-            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.25)).interactive(), in: .circle)
+            .glassEffect(.regular.tint(accent.opacity(0.25)).interactive(), in: .circle)
             .onTapGesture { action() }
             .onLongPressGesture(minimumDuration: 0.5) {
                 let generator = UIImpactFeedbackGenerator(style: .medium)

@@ -37,6 +37,13 @@ pub struct ServerSettings {
     /// 100.x.y.z" without shelling out to the `tailscale` binary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tailscale_ip: Option<String>,
+    /// Server-owned Codex App Server lifecycle/configuration.
+    ///
+    /// When enabled, Tron starts `codex app-server` during daemon startup,
+    /// stops it during daemon shutdown, and exposes the direct WebSocket
+    /// endpoint to authenticated iOS clients via `codexApp.status`.
+    #[serde(default)]
+    pub codex_app_server: CodexAppServerSettings,
 }
 
 impl Default for ServerSettings {
@@ -50,6 +57,7 @@ impl Default for ServerSettings {
             transcription: TranscriptionSettings::default(),
             update: UpdateSettings::default(),
             tailscale_ip: None,
+            codex_app_server: CodexAppServerSettings::default(),
         }
     }
 }
@@ -71,8 +79,98 @@ impl ServerSettings {
                 Self::MAX_HEARTBEAT_INTERVAL_MS
             )));
         }
+        self.codex_app_server.validate_strict()?;
         Ok(())
     }
+}
+
+/// Server-owned Codex App Server process settings.
+///
+/// These settings intentionally describe the managed child process and the
+/// defaults Tron iOS should pass when it starts Codex threads. The bearer token
+/// is not a setting; it is generated under `~/.tron/system/run/` at runtime.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CodexAppServerSettings {
+    /// Whether Tron should start and supervise `codex app-server`.
+    pub enabled: bool,
+    /// WebSocket listener port for the managed app-server.
+    pub port: u16,
+    /// Optional default working directory for new Codex threads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_cwd: Option<String>,
+    /// Optional default model for new Codex threads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_model: Option<String>,
+    /// Default approval policy for new Codex threads.
+    pub approval_policy: CodexAppApprovalPolicy,
+    /// Default sandbox mode for new Codex threads.
+    pub sandbox_mode: CodexAppSandboxMode,
+}
+
+impl Default for CodexAppServerSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: 4500,
+            preferred_cwd: None,
+            preferred_model: None,
+            approval_policy: CodexAppApprovalPolicy::OnRequest,
+            sandbox_mode: CodexAppSandboxMode::WorkspaceWrite,
+        }
+    }
+}
+
+impl CodexAppServerSettings {
+    /// Host the managed Codex app-server binds. Wildcard is deliberate:
+    /// authenticated iOS devices connect over the same private network/Tailscale
+    /// path they already use for Tron.
+    pub const LISTEN_HOST: &'static str = "0.0.0.0";
+    /// Listener scheme currently supported by `codex app-server`.
+    pub const SCHEME: &'static str = "ws";
+    /// No path segment for the managed direct app-server listener.
+    pub const PATH: &'static str = "";
+
+    /// Validate invariants that cannot be safely corrected at runtime.
+    pub fn validate_strict(&self) -> crate::settings::Result<()> {
+        if self.port == 0 {
+            return Err(crate::settings::SettingsError::InvalidValue(
+                "server.codexAppServer.port must be between 1 and 65535".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Build the WebSocket listen URL passed to `codex app-server`.
+    pub fn listen_url(&self) -> String {
+        format!("{}://{}:{}", Self::SCHEME, Self::LISTEN_HOST, self.port)
+    }
+}
+
+/// Codex approval policy wire values.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CodexAppApprovalPolicy {
+    /// Ask when Codex needs a privileged command or file change.
+    #[default]
+    OnRequest,
+    /// Ask only for untrusted operations when supported by the Codex CLI.
+    UnlessTrusted,
+    /// Never ask. Dangerous and intended only for explicitly trusted local use.
+    Never,
+}
+
+/// Codex sandbox mode wire values.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CodexAppSandboxMode {
+    /// Read-only filesystem access.
+    ReadOnly,
+    /// Writes are allowed in the current workspace.
+    #[default]
+    WorkspaceWrite,
+    /// Full host access. Dangerous and intended only for explicitly trusted use.
+    DangerFullAccess,
 }
 
 /// User-mode update-check configuration.

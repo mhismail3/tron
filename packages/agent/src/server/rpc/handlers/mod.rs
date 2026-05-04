@@ -29,6 +29,7 @@ pub mod agent_subagent;
 pub mod auth;
 pub mod blob;
 pub mod browser;
+pub mod codex_app;
 pub mod context;
 pub mod cron;
 pub mod device;
@@ -78,6 +79,11 @@ fn register_core(registry: &mut MethodRegistry) {
     // System — user-mode update checks/downloads.
     registry.register("system.checkForUpdates", system::CheckForUpdatesHandler);
     registry.register("system.getUpdateStatus", system::GetUpdateStatusHandler);
+
+    // Codex App Server lifecycle discovery. Codex traffic remains direct iOS
+    // -> managed `codex app-server`; this RPC only returns the server-owned
+    // endpoint/token/status.
+    registry.register("codexApp.status", codex_app::CodexAppStatusHandler);
 
     // Blob
     registry.register("blob.get", blob::GetBlobHandler);
