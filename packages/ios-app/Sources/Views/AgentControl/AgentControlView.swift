@@ -263,9 +263,7 @@ struct AgentControlView: View {
         isLoading = true
         errorMessage = nil
 
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
-            cardsVisible = true
-        }
+        cardsVisible = true
 
         async let contextTask: Void = loadContext()
         async let changesTask: Void = loadChanges()
@@ -409,4 +407,3 @@ struct AgentControlView: View {
         }
     }
 }
-

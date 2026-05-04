@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-04 (Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-05-04 (Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
 
 ## Overview
 
@@ -230,6 +230,16 @@ into the selected workspace and starts in the cloned repository. Imports
 preserve the imported model and do not force the sheet's selected model. While
 switching workspaces, the worktree card keeps its previous visibility until the
 new git-repo probe resolves, then animates any actual appear/disappear change.
+
+### Agent Control Sheet
+
+The chat input-bar pill opens `AgentControlView`, a medium/large detent sheet
+that summarizes context, model, source control, analytics, and history. Its card
+containers use the shared `CardEntranceModifier` from `Views/Components/` for a
+short opacity/vertical-offset reveal. The modifier owns that entrance animation
+directly and clears inherited sheet transactions before applying it, so iOS 26
+Liquid Glass container bounds do not inherit presentation springs or stretch
+during the sheet's own open animation.
 
 ## Dependency Injection
 
