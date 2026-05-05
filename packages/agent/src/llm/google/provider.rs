@@ -366,24 +366,14 @@ impl GoogleProvider {
 
     /// Build system instruction from context.
     fn build_system_instruction(context: &Context) -> Option<SystemInstruction> {
-        let mut parts_text = Vec::new();
-
-        if let Some(ref sp) = context.system_prompt {
-            parts_text.push(sp.clone());
-        }
-
         let context_parts = compose_context_parts(context);
-        if !context_parts.is_empty() {
-            parts_text.push(context_parts.join("\n\n"));
-        }
-
-        if parts_text.is_empty() {
+        if context_parts.is_empty() {
             return None;
         }
 
         Some(SystemInstruction {
             parts: vec![SystemPart {
-                text: parts_text.join("\n\n"),
+                text: context_parts.join("\n\n"),
             }],
         })
     }
@@ -470,6 +460,15 @@ impl Provider for GoogleProvider {
 
     fn model(&self) -> &str {
         &self.config.model
+    }
+
+    fn audit_payload(
+        &self,
+        context: &Context,
+        options: &ProviderStreamOptions,
+    ) -> ProviderResult<serde_json::Value> {
+        let gen_config = self.build_generation_config(options);
+        Ok(self.build_request_body(context, &gen_config))
     }
 
     #[instrument(skip_all, fields(provider = "google", model = %self.config.model))]
@@ -782,6 +781,11 @@ mod tests {
         let si = GoogleProvider::build_system_instruction(&context).unwrap();
         assert_eq!(si.parts.len(), 1);
         assert!(si.parts[0].text.contains("You are helpful."));
+        assert_eq!(
+            si.parts[0].text.matches("You are helpful.").count(),
+            1,
+            "system prompt must be included exactly once"
+        );
     }
 
     // ── Request body construction ─────────────────────────────────────

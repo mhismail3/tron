@@ -4,8 +4,8 @@
 //! persistent memory. It runs as an async background task (non-blocking)
 //! and acts as a smart router:
 //!
-//! - **Always** writes a journal entry to `~/.tron/workspace/memory/sessions/`
-//! - **Conditionally** updates core memories in `~/.tron/workspace/memory/rules/`
+//! - **Always** writes a journal entry to `~/.tron/memory/sessions/`
+//! - **Conditionally** updates core memories in `~/.tron/memory/rules/`
 //! - **Conditionally** creates argument docs in `~/.tron/workspace/knowledge/arguments/`
 //!
 //! The summarizer uses Sonnet 4.6 and produces structured output with `<journal>`,
@@ -45,7 +45,6 @@ use crate::events::{
     AppendOptions, EventStore, event_rows_to_session_events, reconstruct_from_events,
 };
 use crate::runtime::agent::event_emitter::EventEmitter;
-use crate::runtime::context::system_prompts::MEMORY_RETAIN_SUMMARIZER_PROMPT;
 use crate::runtime::orchestrator::subagent_manager::{SubagentManager, SubsessionConfig};
 use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::RpcError;
@@ -106,7 +105,7 @@ impl RetainDeps {
 // =============================================================================
 
 /// Trigger a memory retain: summarize session history since the last boundary
-/// and write to `~/.tron/workspace/memory/sessions/{session_id}.md`.
+/// and write to `~/.tron/memory/sessions/{session_id}.md`.
 ///
 /// This handler is non-blocking — it emits `MemoryUpdating` immediately,
 /// spawns the summarizer as a background task, and returns. The background
@@ -954,7 +953,9 @@ async fn run_summarizer(
             parent_session_id: parent_session_id.to_owned(),
             task,
             model: Some("claude-sonnet-4-6".to_string()),
-            system_prompt: MEMORY_RETAIN_SUMMARIZER_PROMPT.to_owned(),
+            system_prompt: crate::runtime::context::instruction_prompts::summarizer_prompt(
+                "memory-retain",
+            ),
             working_directory: working_directory.to_owned(),
             inherit_tools: false,
             max_turns: 1,
@@ -985,12 +986,12 @@ fn keyword_summary(session_id: &str) -> String {
 // File path helpers
 // =============================================================================
 
-/// Return the path for a session's journal file: `~/.tron/workspace/memory/sessions/{session_id}.md`.
+/// Return the path for a session's journal file: `~/.tron/memory/sessions/{session_id}.md`.
 fn session_file_path(session_id: &str) -> std::path::PathBuf {
     crate::core::paths::memory_sessions_dir().join(format!("{session_id}.md"))
 }
 
-/// Return the path for a core memory file: `~/.tron/workspace/memory/rules/{filename}`.
+/// Return the path for a core memory file: `~/.tron/memory/rules/{filename}`.
 fn core_memory_file_path(filename: &str) -> std::path::PathBuf {
     crate::core::paths::memory_rules_dir().join(filename)
 }
@@ -1092,7 +1093,7 @@ fn split_title_and_body(journal_text: &str) -> (String, String) {
     (title, rest.trim_start().to_owned())
 }
 
-/// Write a session journal entry to `~/.tron/workspace/memory/sessions/{session_id}.md`.
+/// Write a session journal entry to `~/.tron/memory/sessions/{session_id}.md`.
 ///
 /// Creates the file with YAML frontmatter on first write; appends a new
 /// timestamped section on subsequent writes.

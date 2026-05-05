@@ -14,6 +14,7 @@ use crate::events::sqlite::row_types::{EventRow, SessionRow};
 use crate::events::types::EventType;
 
 mod auxiliary;
+mod constitution;
 mod event_log;
 mod locking;
 mod session_lifecycle;

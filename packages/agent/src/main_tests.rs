@@ -613,6 +613,24 @@ fn server_registers_all_rpc_methods() {
     assert!(registry.methods().len() >= 50);
 }
 
+#[test]
+fn readme_rpc_count_matches_registry() {
+    let mut registry = MethodRegistry::new();
+    tron::server::rpc::handlers::register_all(&mut registry);
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("agent crate should live under packages/agent");
+    let readme_path = repo_root.join("README.md");
+    let readme = std::fs::read_to_string(&readme_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", readme_path.display()));
+    let expected = format!("**{} methods**", registry.methods().len());
+    assert!(
+        readme.contains(&expected),
+        "README RPC total must be derived from register_all; expected marker `{expected}`"
+    );
+}
+
 #[tokio::test]
 async fn server_graceful_shutdown() {
     let dir = tempfile::tempdir().unwrap();
@@ -692,7 +710,7 @@ async fn server_graceful_shutdown() {
 // goal is twofold: (a) the clap parse tree exists exactly as documented,
 // and (b) the dispatch helper writes a fresh token to disk and prints
 // it on stdout. The end-to-end path uses the public `onboarding`
-// helpers, so the on-disk side effect lands in `~/.tron/system/`; the
+// helpers, so the on-disk side effect lands in `~/.tron/profiles/`; the
 // tests below avoid that by exercising the helper directly with a temp
 // path. The clap layer is tested in isolation.
 
@@ -734,7 +752,7 @@ fn cli_auth_unknown_action_fails() {
 
 #[test]
 fn run_subcommand_auth_rotate_writes_token_to_default_path() {
-    // The default path for `auth.json` is under `~/.tron/system/`,
+    // The default path for `auth.json` is under `~/.tron/profiles/`,
     // which would clobber the user's real token on a dev machine. The
     // test writes through the lower-level `rotate_bearer_token` helper
     // with a temp path instead — same code path the dispatch hits, just
@@ -769,19 +787,31 @@ fn startup_ensures_bearer_token_exists() {
 }
 
 #[test]
-fn ordinary_startup_creates_only_required_system_dirs() {
-    assert_eq!(
-        startup_system_subdirs(),
-        &[tron::core::paths::dirs::DB, tron::core::paths::dirs::RUN],
-        "ordinary startup should create only database/ and run/"
-    );
+fn ordinary_startup_delegates_to_constitution_seeders() {
+    let source = include_str!("main.rs");
+    assert!(source.contains("ensure_tron_home"));
+    assert!(!source.contains("startup_system_subdirs"));
 }
 
 #[test]
-fn ordinary_startup_creates_run_dir_for_ephemeral_locks() {
+fn constitution_startup_creates_internal_run_for_ephemeral_locks() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path().join(".tron");
+    tron::core::constitution::ensure_tron_home_at(&home).expect("seed Constitution home");
+
     assert!(
-        startup_system_subdirs().contains(&tron::core::paths::dirs::RUN),
-        "run/ holds runtime locks that normal server startup may create"
+        home.join(tron::core::paths::dirs::INTERNAL)
+            .join(tron::core::paths::dirs::RUN)
+            .exists(),
+        "internal/run/ holds runtime locks that normal server startup may create"
+    );
+    assert!(
+        home.join(tron::core::paths::dirs::PROFILES)
+            .join(tron::core::profile::DEFAULT_PROFILE)
+            .join(tron::core::paths::dirs::SETTINGS)
+            .join(tron::core::paths::files::DEFAULTS_JSON)
+            .exists(),
+        "default settings defaults must be seeded for auditable defaults"
     );
 }
 

@@ -61,12 +61,6 @@ static SSE_OPTIONS: crate::llm::SseParserOptions = crate::llm::SseParserOptions 
     process_remaining_buffer: false,
 };
 
-/// Default system instructions for the Codex endpoint.
-///
-/// The `ChatGPT` backend validates these instructions exactly -- they cannot be
-/// modified. Loaded from `codex-instructions.md` at compile time.
-const DEFAULT_INSTRUCTIONS: &str = include_str!("prompts/codex-instructions.md");
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -507,7 +501,12 @@ impl OpenAIProvider {
         ResponsesRequest {
             model: openai_request_model_id(&self.config.model),
             input,
-            instructions: Some(DEFAULT_INSTRUCTIONS.to_string()),
+            instructions: Some(
+                crate::runtime::context::instruction_prompts::provider_prompt(
+                    "openai",
+                    "codex-instructions",
+                ),
+            ),
             stream: true,
             store: false,
             temperature: options.temperature,
@@ -617,6 +616,14 @@ impl Provider for OpenAIProvider {
             || crate::llm::model_context_window(&self.config.model),
             |profile| profile.context_window,
         )
+    }
+
+    fn audit_payload(
+        &self,
+        context: &Context,
+        options: &ProviderStreamOptions,
+    ) -> ProviderResult<serde_json::Value> {
+        serde_json::to_value(self.build_request(context, options)).map_err(ProviderError::Json)
     }
 
     #[instrument(skip_all, fields(provider = "openai", model = %self.config.model))]

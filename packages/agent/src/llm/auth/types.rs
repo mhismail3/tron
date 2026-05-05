@@ -1,6 +1,6 @@
 //! Core authentication types.
 //!
-//! Mirrors the TypeScript `AuthStorage` schema stored in `~/.tron/system/auth.json`.
+//! Mirrors the TypeScript `AuthStorage` schema stored in `~/.tron/profiles/auth.json`.
 
 use std::collections::HashMap;
 
@@ -197,7 +197,7 @@ where
     Ok(keys)
 }
 
-/// Top-level auth storage schema (`~/.tron/system/auth.json`).
+/// Top-level auth storage schema (`~/.tron/profiles/auth.json`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthStorage {

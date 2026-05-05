@@ -13,7 +13,7 @@ struct ServerProcessProbeTests {
     @Test("recognizes tron dev command lines")
     func devCommandRecognition() {
         #expect(ServerProcessProbe.isDevServerCommand(
-            "/Users/example/.tron/system/run/Tron-Dev.app/Contents/MacOS/tron --port 9847"
+            "/Users/example/.tron/internal/run/Tron-Dev.app/Contents/MacOS/tron --port 9847"
         ))
         #expect(!ServerProcessProbe.isDevServerCommand(
             "/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron --port 9847"

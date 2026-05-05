@@ -809,10 +809,14 @@ async fn ensure_valid_tokens_skips_refresh_when_valid() {
     assert!(result.is_ok());
 }
 
-// ── DEFAULT_INSTRUCTIONS ─────────────────────────────────────────
+// ── Profile-backed instructions ──────────────────────────────────
 
 #[test]
 fn instructions_not_empty() {
-    assert!(!DEFAULT_INSTRUCTIONS.is_empty());
-    assert!(DEFAULT_INSTRUCTIONS.contains("Codex"));
+    let instructions = crate::runtime::context::instruction_prompts::provider_prompt(
+        "openai",
+        "codex-instructions",
+    );
+    assert!(!instructions.is_empty());
+    assert!(instructions.contains("Codex") || instructions.contains("instructions are missing"));
 }

@@ -1,7 +1,7 @@
 # SQL Query Patterns
 
 ```bash
-DB="$HOME/.tron/system/database/log.db"
+DB="$HOME/.tron/internal/database/log.db"
 # Always use read-only mode for safety:
 sqlite3 "$DB" "PRAGMA query_only = ON;"
 ```
@@ -290,7 +290,7 @@ FROM device_tokens ORDER BY last_used_at DESC;
 ## sqlite3 Quick Reference
 
 ```bash
-sqlite3 "$HOME/.tron/system/database/log.db"
+sqlite3 "$HOME/.tron/internal/database/log.db"
 
 .mode column
 .headers on

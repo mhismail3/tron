@@ -33,7 +33,7 @@
 //! ## Streaming Journal (Crash Recovery)
 //!
 //! Each active LLM turn writes streaming deltas to a journal file at
-//! `~/.tron/system/database/journals/{session_id}/turn_{n}.wal`. On normal
+//! `~/.tron/internal/database/journals/{session_id}/turn_{n}.wal`. On normal
 //! completion the journal is deleted. If the server crashes mid-turn, orphaned
 //! journals are recovered on next startup by `recovery::recover_incomplete_turns`,
 //! which persists partial content as assistant messages before accepting connections.

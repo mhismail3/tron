@@ -70,9 +70,6 @@ BENCH_GATE_ITERATIONS=50
 BENCH_GATE_MAX_P95_REGRESSION_PCT=15
 BENCH_GATE_MAX_MEAN_REGRESSION_PCT=35
 
-# Deploy lock (workspace-only, prevents concurrent deploys)
-DEPLOY_LOCK_FILE="$TRON_HOME/deploy.lock"
-
 #=============================================================================
 # WORKSPACE-ONLY UTILITIES
 #=============================================================================
@@ -177,7 +174,7 @@ deploy_transcription_sidecar() {
     # Copies worker.py and requirements.txt from the repo into the canonical
     # sidecar directory. The Rust agent (see src/core/foundation/paths.rs —
     # transcription_dir()) reads from the same path. Keep these in sync.
-    local dst="$HOME/.tron/system/transcription"
+    local dst="$HOME/.tron/internal/transcription"
     local src="$PROJECT_DIR/packages/agent/src/transcription/sidecar"
     mkdir -p "$dst"
     cp "$src/worker.py" "$dst/"
@@ -770,6 +767,7 @@ cmd_deploy() {
     fi
 
     # Write lock
+    mkdir -p "$(dirname "$DEPLOY_LOCK_FILE")"
     echo "$$" > "$DEPLOY_LOCK_FILE"
     trap 'rm -f "$DEPLOY_LOCK_FILE"' EXIT
 
@@ -1354,7 +1352,6 @@ cmd_bench() {
 
 AUTO_DEPLOY_PLIST_NAME="com.tron.auto-deploy"
 AUTO_DEPLOY_PLIST_PATH="$HOME/Library/LaunchAgents/$AUTO_DEPLOY_PLIST_NAME.plist"
-AUTO_DEPLOY_PAUSE_FILE="$TRON_HOME/auto-deploy.pause"
 AUTO_DEPLOY_LOG="$CONTRIBUTOR_DIR/auto-deploy.log"
 AUTO_DEPLOY_LAUNCHD_LOG="$CONTRIBUTOR_DIR/auto-deploy-launchd.log"
 AUTO_DEPLOY_SCRIPT="$SCRIPT_DIR/auto-deploy"
@@ -1454,7 +1451,7 @@ auto_deploy_uninstall() {
     fi
 
     rm -f "$AUTO_DEPLOY_PAUSE_FILE"
-    rm -f "$TRON_HOME/auto-deploy.lock"
+    rm -f "$AUTO_DEPLOY_LOCK_FILE"
     print_success "Auto-deploy uninstalled"
 }
 
@@ -1493,6 +1490,7 @@ auto_deploy_status() {
 }
 
 auto_deploy_pause() {
+    mkdir -p "$(dirname "$AUTO_DEPLOY_PAUSE_FILE")"
     touch "$AUTO_DEPLOY_PAUSE_FILE"
     print_success "Auto-deploy paused"
     echo "  Resume with: tron auto-deploy resume"
@@ -1524,9 +1522,6 @@ auto_deploy_logs() {
 # All subcommands are thin wrappers over the existing agent RPCs and
 # filesystem sentinels; the agent itself owns the check/install pipeline.
 #=============================================================================
-
-SELF_UPDATE_PAUSE_FILE="$TRON_HOME/auto-update.pause"
-SELF_UPDATE_STATE_FILE="$TRON_HOME/system/run/updater-state.json"
 
 cmd_self_update() {
     local subcmd="${1:-status}"
@@ -1596,7 +1591,7 @@ self_update_check() {
         | tail -5
     echo ""
     print_info "If no events appear above, the scheduler either hasn't fired yet or"
-    print_info "server.update.enabled is false. Check settings.json:server.update.enabled."
+    print_info "server.update.enabled is false. Check the active profile setting server.update.enabled."
 }
 
 self_update_pause() {

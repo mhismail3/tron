@@ -406,7 +406,7 @@ struct LoadedMemory: Codable {
 }
 
 /// User-memory wire format. Server populates this every turn from
-/// `~/.tron/workspace/memory/MEMORY.md` + the listing of `rules/*.md`.
+/// `~/.tron/memory/MEMORY.md` + the listing of `rules/*.md`.
 ///
 /// See `runtime::memory::MemoryRegistry` for the load path and
 /// `Views/AgentControl/MemorySection.swift` for the UI that renders it.

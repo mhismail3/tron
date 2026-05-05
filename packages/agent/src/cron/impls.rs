@@ -115,9 +115,9 @@ impl crate::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor {
             .ok_or_else(|| CronError::Execution(format!("workspace not found: {wid}")))?;
             ws.path
         } else {
-            let cron_dir = crate::core::paths::cron_dir();
-            std::fs::create_dir_all(&cron_dir)?;
-            cron_dir.to_string_lossy().into_owned()
+            let automations_dir = crate::core::paths::automations_dir();
+            std::fs::create_dir_all(&automations_dir)?;
+            automations_dir.to_string_lossy().into_owned()
         };
 
         // 1. Create provider (with retry for transient errors)

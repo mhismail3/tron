@@ -238,7 +238,7 @@ fn has_hidden_mkdir(command: &str) -> bool {
 ///
 /// INVARIANT (L14, trusted-local): this compares **lexical paths** via
 /// [`normalize_path`] — it does NOT resolve symlinks. A symlink
-/// `/tmp/bypass -> /Users/me/.tron/system` outside any protected-path
+/// `/tmp/bypass -> /Users/me/.tron/internal` outside any protected-path
 /// prefix will slip past the check even though a write through the
 /// symlink ends up inside the protected path.
 ///
@@ -322,24 +322,24 @@ mod tests {
     #[test]
     fn test_is_path_within_exact() {
         assert!(is_path_within(
-            "/Users/test/.tron/system",
-            "/Users/test/.tron/system"
+            "/Users/test/.tron/internal",
+            "/Users/test/.tron/internal"
         ));
     }
 
     #[test]
     fn test_is_path_within_child() {
         assert!(is_path_within(
-            "/Users/test/.tron/system/database/log.db",
-            "/Users/test/.tron/system"
+            "/Users/test/.tron/internal/database/log.db",
+            "/Users/test/.tron/internal"
         ));
     }
 
     #[test]
     fn test_is_path_within_glob() {
         assert!(is_path_within(
-            "/Users/test/.tron/system/database/log.db",
-            "/Users/test/.tron/system/**"
+            "/Users/test/.tron/internal/database/log.db",
+            "/Users/test/.tron/internal/**"
         ));
     }
 
@@ -347,7 +347,7 @@ mod tests {
     fn test_is_path_not_within() {
         assert!(!is_path_within(
             "/Users/test/projects/foo.js",
-            "/Users/test/.tron/system"
+            "/Users/test/.tron/internal"
         ));
     }
 
@@ -355,7 +355,7 @@ mod tests {
     fn test_is_path_partial_prefix_not_within() {
         assert!(!is_path_within(
             "/Users/test/.tron/systems/other",
-            "/Users/test/.tron/system"
+            "/Users/test/.tron/internal"
         ));
     }
 

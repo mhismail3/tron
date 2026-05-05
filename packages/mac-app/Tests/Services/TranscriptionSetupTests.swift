@@ -9,7 +9,7 @@ struct TranscriptionResourceInstallerTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let source = tmp.appendingPathComponent("bundle/Transcription", isDirectory: true)
-        let destination = tmp.appendingPathComponent("system/transcription", isDirectory: true)
+        let destination = tmp.appendingPathComponent("internal/transcription", isDirectory: true)
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(
             at: destination.appendingPathComponent("models/hf", isDirectory: true),
@@ -31,7 +31,7 @@ struct TranscriptionResourceInstallerTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let source = tmp.appendingPathComponent("bundle/Transcription", isDirectory: true)
-        let destination = tmp.appendingPathComponent("system/transcription", isDirectory: true)
+        let destination = tmp.appendingPathComponent("internal/transcription", isDirectory: true)
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try Data("worker".utf8).write(to: source.appendingPathComponent("worker.py"))
 
@@ -57,8 +57,8 @@ struct TranscriptionSetupCoordinatorTests {
         try Data("worker".utf8).write(to: source.appendingPathComponent("worker.py"))
         try Data("parakeet-mlx\n".utf8).write(to: source.appendingPathComponent("requirements.txt"))
         let manager = MockLaunchAgentManager()
-        let settingsPath = tmp.appendingPathComponent("system/settings.json", isDirectory: false)
-        let destination = tmp.appendingPathComponent("system/transcription", isDirectory: true)
+        let settingsPath = tmp.appendingPathComponent("profiles/user/settings.json", isDirectory: false)
+        let destination = tmp.appendingPathComponent("internal/transcription", isDirectory: true)
 
         let result = await TranscriptionSetupCoordinator.apply(
             enabled: false,
@@ -95,8 +95,8 @@ struct TranscriptionSetupCoordinatorTests {
         let result = await TranscriptionSetupCoordinator.apply(
             enabled: true,
             sidecarSource: source,
-            sidecarDestination: tmp.appendingPathComponent("system/transcription", isDirectory: true),
-            settingsPath: tmp.appendingPathComponent("system/settings.json", isDirectory: false),
+            sidecarDestination: tmp.appendingPathComponent("internal/transcription", isDirectory: true),
+            settingsPath: tmp.appendingPathComponent("profiles/user/settings.json", isDirectory: false),
             bearerToken: "token",
             launchAgentManager: manager,
             label: TronPaths.launchAgentLabel,

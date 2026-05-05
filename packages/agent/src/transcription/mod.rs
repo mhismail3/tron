@@ -14,7 +14,7 @@
 //! ```
 //!
 //! The app bundle ships only `worker.py` and `requirements.txt`. The Mac
-//! wrapper copies those files into `~/.tron/system/transcription/` during
+//! wrapper copies those files into `~/.tron/internal/transcription/` during
 //! first-run setup; the Python venv and HuggingFace cache are created there
 //! by the sidecar only after transcription is enabled.
 //!

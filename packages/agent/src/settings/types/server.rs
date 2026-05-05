@@ -88,7 +88,7 @@ impl ServerSettings {
 ///
 /// These settings intentionally describe the managed child process and the
 /// defaults Tron iOS should pass when it starts Codex threads. The bearer token
-/// is not a setting; it is generated under `~/.tron/system/run/` at runtime.
+/// is not a setting; it is generated under `~/.tron/internal/run/` at runtime.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CodexAppServerSettings {

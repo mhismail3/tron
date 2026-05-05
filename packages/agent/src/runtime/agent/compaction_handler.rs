@@ -499,9 +499,9 @@ impl CompactionHandler {
                 manager: manager.clone(),
                 parent_session_id: session_id.to_owned(),
                 working_directory: context_manager.get_working_directory().to_owned(),
-                system_prompt:
-                    crate::runtime::context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
-                        .to_string(),
+                system_prompt: crate::runtime::context::instruction_prompts::summarizer_prompt(
+                    "compaction",
+                ),
                 model: None,
             };
             let summarizer = crate::runtime::context::llm_summarizer::LlmSummarizer::new(spawner);

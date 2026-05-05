@@ -3,7 +3,7 @@
 ## Database
 
 ```bash
-DB="$HOME/.tron/system/database/log.db"
+DB="$HOME/.tron/internal/database/log.db"
 sqlite3 "$DB" "PRAGMA query_only = ON;"  # safety: read-only
 ```
 
@@ -225,7 +225,7 @@ Stored in `events.type`. Each has a typed JSON payload.
 
 ## Settings Schema
 
-Settings live at `~/.tron/system/settings.json`. All keys are camelCase. Missing fields get defaults.
+Settings live at `~/.tron/profiles/user/settings.json`. All keys are camelCase. Missing fields get defaults from `~/.tron/profiles/default/settings/defaults.json`.
 
 ### Root Sections
 
@@ -290,11 +290,11 @@ Settings live at `~/.tron/system/settings.json`. All keys are camelCase. Missing
 
 | Path | Purpose |
 |------|---------|
-| `~/.tron/system/run/auth.lock` | Auth serialization lock |
-| `~/.tron/system/run/.mac-wrapper.<bundle-id>.lock` | Per-wrapper Mac menu app lock |
-| `~/.tron/system/run/.onboarded` | First-run sentinel |
-| `~/.tron/system/run/updater-state.json` | Update-check scheduler state |
-| `~/.tron/system/database/log.db.lock` | SQLite process lock beside `log.db` |
+| `~/.tron/internal/run/auth.lock` | Auth serialization lock |
+| `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` | Per-wrapper Mac menu app lock |
+| `~/.tron/internal/run/.onboarded` | First-run sentinel |
+| `~/.tron/internal/run/updater-state.json` | Update-check scheduler state |
+| `~/.tron/internal/database/log.db.lock` | SQLite process lock beside `log.db` |
 
 ## Health Endpoints
 

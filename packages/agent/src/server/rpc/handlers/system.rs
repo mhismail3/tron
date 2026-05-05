@@ -110,10 +110,10 @@ impl MethodHandler for PingHandler {
 ///   `host:port` together; previously the port had to be inferred from the
 ///   active preset, which broke when the user typed the host without a port.
 /// - `tailscaleIp` — the cached Tailscale IPv4 from
-///   `~/.tron/system/settings.json:server.tailscaleIp`. Surfaced as a
+///   `~/.tron/profiles/user/settings.json:server.tailscaleIp`. Surfaced as a
 ///   recommended host on the iOS pairing screen. Optional — `null` when the
 ///   server hasn't been wrapped by `Tron.app` yet.
-/// - `paired` — `true` once the `~/.tron/system/run/.onboarded` sentinel
+/// - `paired` — `true` once the `~/.tron/internal/run/.onboarded` sentinel
 ///   exists. Lets iOS distinguish "fresh server, run wizard" from
 ///   "established server, just verify the bearer token."
 ///

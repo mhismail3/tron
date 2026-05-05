@@ -1,4 +1,4 @@
-//! Context assembly, compaction, rules, and system prompts.
+//! Context assembly, compaction, rules, and profile-backed instruction prompts.
 //!
 //! ## Submodules
 //!
@@ -15,7 +15,7 @@
 //! | `rules_discovery` | Finds `.claude/rules/` files in project directories |
 //! | `rules_index` | Path-indexed rule lookup for context assembly |
 //! | `rules_tracker` | Tracks which rules are active per session |
-//! | `system_prompts` | System prompt template and assembly |
+//! | `instruction_prompts` | Active-profile prompt loading and emergency repair fallback |
 //! | `token_estimator` | Token counting and context budget calculations |
 //! | `path_extractor` | Extracts workspace paths from session context |
 //! | `constants` | Token limits, compaction thresholds |
@@ -28,14 +28,17 @@
 //!
 //! ## Key Invariant
 //!
-//! Compaction uses a multi-signal trigger (token threshold, progress signals,
-//! turn count fallback) to decide when to compact context.
+//! All normal prompt text is loaded from `~/.tron/profiles/` and compiled
+//! into typed profile context blocks before provider adaptation. Compaction
+//! uses a multi-signal trigger (token threshold, progress signals, turn count
+//! fallback) to decide when to compact context.
 
 pub mod compaction_engine;
 pub mod compaction_trigger;
 pub mod constants;
 pub mod context_manager;
 pub mod context_snapshot_builder;
+pub mod instruction_prompts;
 pub mod llm_summarizer;
 pub mod loader;
 pub mod local_policy;
@@ -45,6 +48,5 @@ pub mod rules_discovery;
 pub mod rules_index;
 pub mod rules_tracker;
 pub mod summarizer;
-pub mod system_prompts;
 pub mod token_estimator;
 pub mod types;

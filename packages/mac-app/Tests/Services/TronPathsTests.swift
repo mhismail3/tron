@@ -49,14 +49,14 @@ struct TronPathsTests {
         #expect(bin.hasSuffix("/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"))
     }
 
-    @Test("runtime locks live in system/run")
+    @Test("runtime locks live in internal/run")
     func runDirShape() {
-        #expect(TronPaths.runDir.path.hasSuffix("/system/run"))
+        #expect(TronPaths.runDir.path.hasSuffix("/internal/run"))
     }
 
     @Test("database lock stays beside log.db")
     func databaseLockShape() {
-        #expect(TronPaths.databaseLockPath.path.hasSuffix("/system/database/log.db.lock"))
+        #expect(TronPaths.databaseLockPath.path.hasSuffix("/internal/database/log.db.lock"))
     }
 
     @Test("LaunchAgent plist is bundled in Contents/Library/LaunchAgents")
@@ -65,39 +65,39 @@ struct TronPathsTests {
         #expect(plist.contains("/Contents/Library/LaunchAgents/com.tron.server.plist"))
     }
 
-    @Test("auth.json lives in system/")
+    @Test("auth.json lives in profiles/")
     func bearerTokenShape() {
         let tok = TronPaths.bearerTokenPath.path
-        #expect(tok.hasSuffix("/system/auth.json"))
+        #expect(tok.hasSuffix("/profiles/auth.json"))
     }
 
-    @Test("onboarded sentinel lives in system/run/")
+    @Test("onboarded sentinel lives in internal/run/")
     func onboardedShape() {
         let s = TronPaths.onboardedMarkerPath.path
-        #expect(s.hasSuffix("/system/run/.onboarded"))
+        #expect(s.hasSuffix("/internal/run/.onboarded"))
     }
 
-    @Test("runtime uninstall files live in system/run/")
+    @Test("runtime uninstall files live in internal/run/")
     func runtimeUninstallFilesShape() {
-        #expect(TronPaths.updaterStatePath.path.hasSuffix("/system/run/updater-state.json"))
-        #expect(TronPaths.macAppVersionMarkerPath.path.hasSuffix("/system/run/mac-app-version.json"))
-        #expect(TronPaths.authLockPath.path.hasSuffix("/system/run/auth.lock"))
-        #expect(TronPaths.macWrapperLockPath.path.contains("/system/run/.mac-wrapper."))
+        #expect(TronPaths.updaterStatePath.path.hasSuffix("/internal/run/updater-state.json"))
+        #expect(TronPaths.macAppVersionMarkerPath.path.hasSuffix("/internal/run/mac-app-version.json"))
+        #expect(TronPaths.authLockPath.path.hasSuffix("/internal/run/auth.lock"))
+        #expect(TronPaths.macWrapperLockPath.path.contains("/internal/run/.mac-wrapper."))
         #expect(TronPaths.macWrapperLockPath.path.hasSuffix(".lock"))
         #expect(TronPaths.macWrapperLockFileName(bundleIdentifier: "com.tron.mac") == ".mac-wrapper.com.tron.mac.lock")
         #expect(TronPaths.macWrapperLockFileName(bundleIdentifier: "com.tron.mac.dev") == ".mac-wrapper.com.tron.mac.dev.lock")
         #expect(TronPaths.macWrapperLockFileName(bundleIdentifier: "com/tron/mac") == ".mac-wrapper.com-tron-mac.lock")
     }
 
-    @Test("settings.json lives in system/")
+    @Test("settings.json lives in the user profile")
     func settingsShape() {
         let s = TronPaths.settingsPath.path
-        #expect(s.hasSuffix("/system/settings.json"))
+        #expect(s.hasSuffix("/profiles/user/settings.json"))
     }
 
-    @Test("transcription sidecar files live under system/transcription")
+    @Test("transcription sidecar files live under internal/transcription")
     func transcriptionShape() {
-        #expect(TronPaths.transcriptionDir.path.hasSuffix("/system/transcription"))
+        #expect(TronPaths.transcriptionDir.path.hasSuffix("/internal/transcription"))
         #expect(TronPaths.transcriptionResourceDir.path.hasSuffix("/Contents/Resources/Transcription")
                 || TronPaths.transcriptionResourceDir.path.contains("/Resources/Transcription"))
     }

@@ -70,7 +70,7 @@ Identify recurring patterns:
 
 ## Report Output
 
-Write to: `~/.tron/workspace/explore/YYYY-MM-DD-<slug>/report.md`
+Write to: `~/.tron/workspace/reports/explore/YYYY-MM-DD-<slug>/report.md`
 
 Generate the timestamp from current time, slug from project name.
 
@@ -134,7 +134,7 @@ Technical debt, unusual patterns, areas of note.
 ## Completion
 
 When done:
-1. Write the report to `~/.tron/workspace/explore/<timestamp>-<slug>/report.md`
+1. Write the report to `~/.tron/workspace/reports/explore/<timestamp>-<slug>/report.md`
 2. Return a summary: report path, project name, languages, architecture pattern, 1-2 sentence key insight
 
 ## Gotchas

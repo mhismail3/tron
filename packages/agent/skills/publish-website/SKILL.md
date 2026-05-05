@@ -17,9 +17,9 @@ This skill needs three values to know where your site lives:
 | `local_repo` | Local clone path | `~/Workspace/my-website` |
 | `github_handle` | GitHub user/org that owns the repo | `your-username` |
 
-These live in `~/.tron/workspace/memory/rules/publish-website.md` (auto-listed in your memory footer). Workflow:
+These live in `~/.tron/memory/rules/publish-website.md` (auto-listed in your memory footer). Workflow:
 
-1. Read `~/.tron/workspace/memory/rules/publish-website.md`.
+1. Read `~/.tron/memory/rules/publish-website.md`.
 2. If the file doesn't exist or lacks any of the fields above, ask the user and save them. Write the file with YAML frontmatter:
    ```yaml
    ---

@@ -1,10 +1,9 @@
 //! Schema migration runner for the event store database.
 //!
-//! Tron ships a single consolidated `v001_schema.sql` — no step-by-step
-//! upgrade chain, no `requires_fk_off` table rebuilds, no backward-compat
-//! machinery. A fresh DB runs v001 once and never migrates again. If the
-//! schema ever needs to evolve, add a `v002_*.sql` and a second entry in
-//! [`MIGRATIONS`]; the runner will apply any pending versions in order.
+//! Tron ships a consolidated `v001_schema.sql` for fresh databases, plus
+//! small additive follow-up migrations for installs that already recorded v001.
+//! There are no table-rebuild migrations or backward-compat branches; each
+//! appended migration is idempotent and moves version N-1 to N.
 //!
 //! The `schema_version` table tracks which migrations have been applied.
 //! Running the migrator is idempotent: already-applied versions are skipped.
@@ -36,13 +35,19 @@ struct Migration {
 
 /// All migrations in version order.
 ///
-/// Today this is a single consolidated v001. Future evolution appends new
-/// entries; never edit v001's SQL after the fact.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    description: "Consolidated schema — all core tables, indexes, and CHECK constraints",
-    sql: include_str!("v001_schema.sql"),
-}];
+/// Migrations in application order.
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        description: "Consolidated schema — all core tables, indexes, and CHECK constraints",
+        sql: include_str!("v001_schema.sql"),
+    },
+    Migration {
+        version: 2,
+        description: "Constitution audit tables for migrated v001 databases",
+        sql: include_str!("v002_constitution_audit.sql"),
+    },
+];
 
 /// Result of running migrations.
 #[derive(Debug)]
@@ -263,8 +268,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 1);
-        assert_eq!(result.max_version_applied, 1);
+        assert_eq!(result.applied, 2);
+        assert_eq!(result.max_version_applied, 2);
 
         let tables: Vec<String> = conn
             .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -277,6 +282,9 @@ mod tests {
         let expected = [
             "blobs",
             "branches",
+            "constitution_context_blocks",
+            "constitution_home_audit",
+            "constitution_resolution_audit",
             "cron_jobs",
             "cron_runs",
             "device_tokens",
@@ -320,7 +328,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 1);
+        assert_eq!(first.applied, 2);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -338,12 +346,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 1);
+        assert_eq!(current_version(&conn).unwrap(), 2);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 1);
+        assert_eq!(latest_version(), 2);
     }
 
     #[test]
@@ -362,6 +370,20 @@ mod tests {
         assert_eq!(version, 1);
         assert!(
             desc.contains("Consolidated"),
+            "description missing expected text: {desc}"
+        );
+
+        let (version, desc): (u32, String) = conn
+            .query_row(
+                "SELECT version, description FROM schema_version WHERE version = 2",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(version, 2);
+        assert!(
+            desc.contains("Constitution"),
             "description missing expected text: {desc}"
         );
     }

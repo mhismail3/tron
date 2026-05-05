@@ -7,7 +7,7 @@
 Produces a structured diagnostic report written to `~/.tron/workspace/reports/`.
 
 ```bash
-DB="$HOME/.tron/system/database/log.db"
+DB="$HOME/.tron/internal/database/log.db"
 ```
 
 ## Step 1: Identify the Active Session

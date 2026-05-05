@@ -4,6 +4,18 @@ import Foundation
 /// with. Mirrors `packages/agent/src/core/foundation/paths.rs` exports
 /// for user data and the macOS bundle layout for app-owned artifacts.
 enum TronPaths {
+    private enum HomeComponent {
+        static let internalDir = "internal"
+        static let profilesDir = "profiles"
+        static let userProfileDir = "user"
+        static let runDir = "run"
+        static let databaseDir = "database"
+        static let authFile = "auth.json"
+        static let settingsFile = "settings.json"
+        static let transcriptionDir = "transcription"
+        static let skillsDir = "skills"
+    }
+
     static let tronDataDirEnv = "TRON_DATA_DIR"
     static let tronHomeNameEnv = "TRON_HOME_NAME"
     static let isolatedInstallModeEnv = "TRON_MAC_INSTALL_MODE"
@@ -33,11 +45,13 @@ enum TronPaths {
         return homeDirectory.appendingPathComponent(".tron", isDirectory: true)
     }()
 
-    static var systemDir: URL { tronHome.appendingPathComponent("system", isDirectory: true) }
-    static var runDir: URL { systemDir.appendingPathComponent("run", isDirectory: true) }
+    static var internalDir: URL { tronHome.appendingPathComponent(HomeComponent.internalDir, isDirectory: true) }
+    static var profilesDir: URL { tronHome.appendingPathComponent(HomeComponent.profilesDir, isDirectory: true) }
+    static var userProfileDir: URL { profilesDir.appendingPathComponent(HomeComponent.userProfileDir, isDirectory: true) }
+    static var runDir: URL { internalDir.appendingPathComponent(HomeComponent.runDir, isDirectory: true) }
     static var databaseLockPath: URL {
-        systemDir
-            .appendingPathComponent("database", isDirectory: true)
+        internalDir
+            .appendingPathComponent(HomeComponent.databaseDir, isDirectory: true)
             .appendingPathComponent("log.db.lock", isDirectory: false)
     }
 
@@ -58,7 +72,7 @@ enum TronPaths {
     }
 
     static var bearerTokenPath: URL {
-        systemDir.appendingPathComponent("auth.json", isDirectory: false)
+        profilesDir.appendingPathComponent(HomeComponent.authFile, isDirectory: false)
     }
 
     static var onboardedMarkerPath: URL {
@@ -82,11 +96,11 @@ enum TronPaths {
     }
 
     static var settingsPath: URL {
-        systemDir.appendingPathComponent("settings.json", isDirectory: false)
+        userProfileDir.appendingPathComponent(HomeComponent.settingsFile, isDirectory: false)
     }
 
     static var transcriptionDir: URL {
-        systemDir.appendingPathComponent("transcription", isDirectory: true)
+        internalDir.appendingPathComponent(HomeComponent.transcriptionDir, isDirectory: true)
     }
 
     static var transcriptionResourceDir: URL {
@@ -95,7 +109,7 @@ enum TronPaths {
     }
 
     static var skillsDir: URL {
-        tronHome.appendingPathComponent("skills", isDirectory: true)
+        tronHome.appendingPathComponent(HomeComponent.skillsDir, isDirectory: true)
     }
 
     static var managedSkillsResourceDir: URL {

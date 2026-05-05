@@ -860,11 +860,11 @@ mod tests {
     #[test]
     fn stale_pid_parser_matches_only_managed_listener_for_same_token_file() {
         let settings = CodexAppServerSettings::default();
-        let token_path = PathBuf::from("/tmp/tron-test/system/run/codex-app-server-token");
+        let token_path = PathBuf::from("/tmp/tron-test/internal/run/codex-app-server-token");
         let spec = CodexAppServerLaunchSpec::from_settings(&settings, token_path);
         let processes = r#"
-          123 codex app-server --listen ws://0.0.0.0:4500 --ws-auth capability-token --ws-token-file /tmp/tron-test/system/run/codex-app-server-token
-          124 codex app-server --listen ws://0.0.0.0:4501 --ws-auth capability-token --ws-token-file /tmp/tron-test/system/run/codex-app-server-token
+          123 codex app-server --listen ws://0.0.0.0:4500 --ws-auth capability-token --ws-token-file /tmp/tron-test/internal/run/codex-app-server-token
+          124 codex app-server --listen ws://0.0.0.0:4501 --ws-auth capability-token --ws-token-file /tmp/tron-test/internal/run/codex-app-server-token
           125 codex app-server --analytics-default-enabled
           126 /bin/zsh -c ps -axo pid,command
         "#;

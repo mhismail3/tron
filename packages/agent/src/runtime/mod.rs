@@ -7,7 +7,7 @@
 //! - **Tool executor**: Pre/post hooks, guardrails, cancellation token support
 //! - **Stream processor**: Consumes `Stream<StreamEvent>`, accumulates content blocks
 //! - **Agent runner**: High-level: skill injection, user content building, interrupt handling
-//! - **Memory**: User-memory loader for `~/.tron/workspace/memory/MEMORY.md` + `rules/*.md` (fingerprint-gated, per-turn).
+//! - **Memory**: User-memory loader for `~/.tron/memory/MEMORY.md` + `rules/*.md` (fingerprint-gated, per-turn).
 //! - **Orchestrator**: Multi-session management with event broadcasting
 //!
 //! ## Module Position

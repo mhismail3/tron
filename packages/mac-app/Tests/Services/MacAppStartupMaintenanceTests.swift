@@ -13,7 +13,7 @@ struct MacAppStartupMaintenanceTests {
         serverProcess: ServerProcessInfo? = nil,
         launchAgentManager: MockLaunchAgentManager = MockLaunchAgentManager()
     ) -> EnvironmentSetup {
-        let marker = tmp.appendingPathComponent("system/run/mac-app-version.json", isDirectory: false)
+        let marker = tmp.appendingPathComponent("internal/run/mac-app-version.json", isDirectory: false)
         if let recordedVersion {
             try? MacAppVersionMarkerStore.write(recordedVersion, at: marker)
         }
@@ -22,14 +22,14 @@ struct MacAppStartupMaintenanceTests {
             applicationBundle: tmp.appendingPathComponent("Tron.app", isDirectory: true),
             serverHelperBundle: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app", isDirectory: true),
             serverHelperBinary: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron", isDirectory: false),
-            bearerTokenPath: tmp.appendingPathComponent("system/auth.json", isDirectory: false),
-            onboardedMarkerPath: tmp.appendingPathComponent("system/run/.onboarded", isDirectory: false),
-            settingsPath: tmp.appendingPathComponent("system/settings.json", isDirectory: false),
+            bearerTokenPath: tmp.appendingPathComponent("profiles/auth.json", isDirectory: false),
+            onboardedMarkerPath: tmp.appendingPathComponent("internal/run/.onboarded", isDirectory: false),
+            settingsPath: tmp.appendingPathComponent("profiles/user/settings.json", isDirectory: false),
             launchAgentPlistPath: tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist", isDirectory: false),
             launchAgentLabel: "com.tron.server",
             serverPort: 9847,
             canManageLaunchAgent: canManageLaunchAgent,
-            wrapperLockPath: tmp.appendingPathComponent("system/run/.mac-wrapper.com.tron.mac.lock", isDirectory: false),
+            wrapperLockPath: tmp.appendingPathComponent("internal/run/.mac-wrapper.com.tron.mac.lock", isDirectory: false),
             onboardedSentinelExists: { onboarded },
             readBearerToken: { nil },
             readTailscaleIPFromSettings: { nil },
@@ -61,7 +61,7 @@ struct MacAppStartupMaintenanceTests {
     func versionMarkerRoundTrips() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
-        let marker = tmp.appendingPathComponent("system/run/mac-app-version.json")
+        let marker = tmp.appendingPathComponent("internal/run/mac-app-version.json")
         let version = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
 
         try MacAppVersionMarkerStore.write(version, at: marker)
@@ -124,7 +124,7 @@ struct MacAppStartupMaintenanceTests {
             serverProcess: ServerProcessInfo(
                 pid: 42,
                 uptime: "00:01",
-                command: "\(tmp.path)/system/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
+                command: "\(tmp.path)/internal/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
                 isDevServer: true
             ),
             launchAgentManager: mock

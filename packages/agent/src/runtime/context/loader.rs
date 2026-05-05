@@ -296,7 +296,7 @@ impl ContextLoader {
 /// File names to search for global rules (in priority order).
 const GLOBAL_RULE_NAMES: &[&str] = &["CLAUDE.md", "claude.md", "AGENTS.md", "agents.md"];
 
-/// Load global rules from `~/.tron/workspace/memory/rules/` directory.
+/// Load global rules from `~/.tron/memory/rules/` directory.
 ///
 /// Searches for CLAUDE.md, claude.md, AGENTS.md, agents.md in priority order.
 /// Returns `None` if no file is found or all files are empty.

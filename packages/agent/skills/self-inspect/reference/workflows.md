@@ -3,15 +3,15 @@
 All workflows use direct sqlite3 queries and system commands. Set `DB` first:
 
 ```bash
-DB="$HOME/.tron/system/database/log.db"
+DB="$HOME/.tron/internal/database/log.db"
 ```
 
 ## Workflow 1: Installation Health Check
 
 1. `curl -s http://localhost:9847/health/deep | jq .` — full server health with subsystem checks
 2. `sqlite3 "$DB" "SELECT (SELECT COUNT(*) FROM sessions) as sessions, (SELECT COUNT(*) FROM events) as events, (SELECT COUNT(*) FROM logs) as logs;"` — database stats
-3. `cat ~/.tron/system/settings.json | jq .` — verify settings
-4. `du -sh ~/.tron/system/ ~/.tron/workspace/ ~/.tron/skills/ ~/.claude/skills/ 2>/dev/null` — disk usage (both skill roots; `~/.claude/skills/` may not exist on fresh Macs)
+3. `cat ~/.tron/profiles/user/settings.json | jq .` — verify sparse settings overrides
+4. `du -sh ~/.tron/internal/ ~/.tron/workspace/ ~/.tron/skills/ ~/.claude/skills/ 2>/dev/null` — disk usage (both skill roots; `~/.claude/skills/` may not exist on fresh Macs)
 
 ## Workflow 2: Investigate a Failed Session
 
@@ -107,11 +107,11 @@ DB="$HOME/.tron/system/database/log.db"
 
 1. Check configured providers (redacted):
    ```bash
-   cat ~/.tron/system/auth.json | jq 'del(.. | .accessToken?, .refreshToken?, .apiKey?, .clientSecret?)'
+   cat ~/.tron/profiles/auth.json | jq 'del(.. | .accessToken?, .refreshToken?, .apiKey?, .clientSecret?)'
    ```
 2. Check default provider/model:
    ```bash
-   cat ~/.tron/system/settings.json | jq '.server | {defaultModel, defaultProvider}'
+   cat ~/.tron/profiles/user/settings.json | jq '.server | {defaultModel, defaultProvider}'
    ```
 3. Search logs for auth errors:
    ```sql
@@ -143,8 +143,8 @@ FROM sessions GROUP BY origin;
 2. Verify key files exist:
    ```bash
    ls -la /Applications/Tron.app/Contents/Library/LoginItems/Tron\ Server.app/Contents/MacOS/tron
-   ls -la ~/.tron/system/database/log.db
-   ls -la ~/.tron/system/run
-   ls -la ~/.tron/system/settings.json
-   ls -la ~/.tron/system/auth.json
+   ls -la ~/.tron/internal/database/log.db
+   ls -la ~/.tron/internal/run
+   ls -la ~/.tron/profiles/user/settings.json
+   ls -la ~/.tron/profiles/auth.json
    ```

@@ -72,7 +72,7 @@ try {
   shadcnComponents = shadcnImpl.shadcnComponents;
 } catch (err) {
   console.error(`Failed to load json-render packages: ${err.message}`);
-  console.error("Run: cd ~/.tron/tools/json-render && npm install");
+  console.error("Run: cd ~/.tron/skills/generate && npm install");
   process.exit(1);
 }
 

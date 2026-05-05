@@ -313,46 +313,46 @@ fn pattern_target_argument_missing_not_triggered() {
 }
 
 #[test]
-fn path_write_to_tron_system_blocked() {
+fn path_write_to_tron_home_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
     let eval = engine.evaluate(&make_write_ctx(&format!(
-        "{home}/.tron/system/settings.json"
+        "{home}/.tron/profiles/user/settings.json"
     )));
     assert!(eval.blocked);
     assert!(
         eval.triggered_rules
             .iter()
-            .any(|r| r.rule_id == "core.tron-system-protection")
+            .any(|r| r.rule_id == "core.tron-home-protection")
     );
 }
 
 #[test]
-fn path_edit_tron_system_db_blocked() {
+fn path_edit_tron_home_db_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
     let eval = engine.evaluate(&make_edit_ctx(&format!(
-        "{home}/.tron/system/{}/prod.db",
+        "{home}/.tron/internal/{}/prod.db",
         crate::core::paths::dirs::DB
     )));
     assert!(eval.blocked);
     assert!(
         eval.triggered_rules
             .iter()
-            .any(|r| r.rule_id == "core.tron-system-protection")
+            .any(|r| r.rule_id == "core.tron-home-protection")
     );
 }
 
 #[test]
-fn path_write_tron_system_auth_blocked() {
+fn path_write_tron_home_auth_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
-    let eval = engine.evaluate(&make_write_ctx(&format!("{home}/.tron/system/auth.json")));
+    let eval = engine.evaluate(&make_write_ctx(&format!("{home}/.tron/profiles/auth.json")));
     assert!(eval.blocked);
     assert!(
         eval.triggered_rules
             .iter()
-            .any(|r| r.rule_id == "core.tron-system-protection")
+            .any(|r| r.rule_id == "core.tron-home-protection")
     );
 }
 
@@ -416,20 +416,20 @@ fn path_normal_mkdir_not_blocked() {
 }
 
 #[test]
-fn path_bash_tee_to_tron_system_blocked() {
+fn path_bash_tee_to_tron_home_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
-    let cmd = format!("echo test | tee {home}/.tron/system/settings.json");
+    let cmd = format!("echo test | tee {home}/.tron/profiles/user/settings.json");
     let eval = engine.evaluate(&make_bash_ctx(&cmd));
     assert!(eval.blocked);
 }
 
 #[test]
-fn path_bash_cp_to_tron_system_db_blocked() {
+fn path_bash_cp_to_tron_home_db_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
     let cmd = format!(
-        "cp foo.db {home}/.tron/system/{}/prod.db",
+        "cp foo.db {home}/.tron/internal/{}/prod.db",
         crate::core::paths::dirs::DB
     );
     let eval = engine.evaluate(&make_bash_ctx(&cmd));
@@ -437,10 +437,10 @@ fn path_bash_cp_to_tron_system_db_blocked() {
 }
 
 #[test]
-fn path_bash_redirect_to_tron_system_auth_blocked() {
+fn path_bash_redirect_to_tron_home_auth_blocked() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
-    let cmd = format!("echo '{{}}' > {home}/.tron/system/auth.json");
+    let cmd = format!("echo '{{}}' > {home}/.tron/profiles/auth.json");
     let eval = engine.evaluate(&make_bash_ctx(&cmd));
     assert!(eval.blocked);
 }
@@ -1684,7 +1684,7 @@ fn integration_read_tool_not_affected_by_path_protection() {
     let home = crate::core::paths::home_dir();
     let mut engine = default_engine();
     let eval = engine.evaluate(&make_read_ctx(&format!(
-        "{home}/.tron/system/run/server.log"
+        "{home}/.tron/internal/run/server.log"
     )));
     assert!(!eval.blocked);
 }

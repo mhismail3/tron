@@ -15,12 +15,12 @@ use super::constants::{
     CHARS_PER_TOKEN, TOOL_RESULT_MAX_CHARS, TOOL_RESULT_MIN_TOKENS, Thresholds,
 };
 use super::context_snapshot_builder::{ContextSnapshotBuilder, SnapshotDeps};
+use super::instruction_prompts;
 use super::local_policy;
 use super::message_store::MessageStore;
 use super::rules_index::RulesIndex;
 use super::rules_tracker::RulesTracker;
 use super::summarizer::Summarizer;
-use super::system_prompts;
 use super::token_estimator;
 use super::types::{
     CompactionPreview, CompactionResult, ContextManagerConfig, ContextSnapshot,
@@ -97,9 +97,9 @@ impl ContextManager {
 
         let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
             if is_local {
-                system_prompts::TRON_LOCAL_PROMPT.to_owned()
+                instruction_prompts::default_prompt("local")
             } else {
-                system_prompts::TRON_CORE_PROMPT.to_owned()
+                instruction_prompts::default_prompt("core")
             }
         });
 

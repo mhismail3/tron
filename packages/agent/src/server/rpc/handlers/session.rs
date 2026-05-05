@@ -193,7 +193,7 @@ impl MethodHandler for ArchiveOlderThanHandler {
 /// Full session dump — session row plus every event — under a stable
 /// `format: "tron.session.v1"` envelope. Backs the "Export" user action
 /// so users can back up or inspect a session offline without touching
-/// `~/.tron/system/database/` directly.
+/// `~/.tron/internal/database/` directly.
 pub struct ExportSessionHandler;
 
 #[async_trait]

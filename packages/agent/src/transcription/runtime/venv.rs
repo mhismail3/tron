@@ -1,7 +1,7 @@
 //! Python venv management for the parakeet-mlx transcription sidecar.
 //!
 //! Handles Python discovery, venv creation, and package installation.
-//! All sidecar paths (`~/.tron/system/transcription/...`) are resolved
+//! All sidecar paths (`~/.tron/internal/transcription/...`) are resolved
 //! through [`crate::core::paths`] — do not hardcode them here.
 
 use std::path::PathBuf;

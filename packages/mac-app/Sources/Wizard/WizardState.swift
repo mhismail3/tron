@@ -59,7 +59,7 @@ final class WizardState {
 
     /// User's first-run choice for local voice transcription. Fresh
     /// installs default off because enabling it downloads the Parakeet
-    /// model into `~/.tron/system/transcription/models/hf/`.
+    /// model into `~/.tron/internal/transcription/models/hf/`.
     var transcriptionEnabledSelection = false
 
     /// Outcome of applying the transcription preference. The wizard

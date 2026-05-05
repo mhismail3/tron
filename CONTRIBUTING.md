@@ -33,8 +33,8 @@ matching README section in the same commit. The exhaustive list lives in
 
 ## Development workflow
 
-Tron uses a **takeover model**: a long-running production server lives at
-`~/.tron/system/Tron.app/Contents/MacOS/tron` (loaded via `launchd`). When you
+Tron uses a **takeover model**: a long-running production server lives inside
+`/Applications/Tron.app` and is registered through ServiceManagement. When you
 run `tron dev`, the dev binary takes over port 9847 from the prod server until
 you stop it.
 
@@ -75,7 +75,7 @@ build `TronMac.app` (the bundle name follows the XcodeGen target); Debug uses
 bundle ID `com.tron.mac.dev` (lives in DerivedData), Release uses
 `com.tron.mac` and ships as a notarized DMG (`Tron.app` to the end user). This
 is wholly separate from `tron dev`'s headless agent at
-`~/.tron/system/deployment/Tron-Dev.app` (`com.tron.agent`) — see
+`~/.tron/internal/run/Tron-Dev.app` (`com.tron.agent`) — see
 [`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants).
 
 ```bash
@@ -158,9 +158,10 @@ The repo's regression guards (`paths.rs:workspace_has_no_personal_info_literals`
 - Hardcoded GitHub handles other than the canonical `mhismail3`.
 - Encoded forms of the same (`-Users-<my-username>-…` from Claude-Code-style paths).
 
-User-specific values belong in `~/.tron/workspace/memory/MEMORY.md` (auto-loaded
-into every session) or `~/.tron/workspace/memory/rules/`. Secrets go through
-the `vault` skill — never paste them anywhere in the tree.
+User-specific values belong in `~/.tron/memory/MEMORY.md` (auto-loaded
+into every session) or `~/.tron/memory/rules/`. Skill-owned secrets go through
+the `vault` skill at `~/.tron/workspace/vault/`; Tron-owned provider auth lives
+in `~/.tron/profiles/auth.json`. Never paste secrets anywhere in the tree.
 
 If you legitimately need to write your username (e.g. as a test fixture), add
 your file path to the allowlist in `scripts/personal-info-guard.sh` AND

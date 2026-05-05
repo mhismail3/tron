@@ -6,12 +6,12 @@
 
 `Tron.app` is the macOS SwiftUI wrapper around the headless Rust agent. It has two runtime modes:
 
-- **Wizard mode** — shown on first launch, before `~/.tron/system/run/.onboarded` exists. Walks the user through Tailscale, Login Item registration, permissions, optional local transcription setup, and pairing-info display.
+- **Wizard mode** — shown on first launch, before `~/.tron/internal/run/.onboarded` exists. Walks the user through Tailscale, Login Item registration, permissions, optional local transcription setup, and pairing-info display.
 - **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system.ping` and exposes status + copy actions + diagnostics. Passive poll/menu-open refreshes never overwrite an explicit busy action such as "Restarting"; the action handler owns the final status refresh when the command exits.
 
 The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side.
 
-`Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. The release binary is produced by `cargo build --release --bin tron` and staged into the bundled helper app at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron`; the helper is signed before the outer app. The app bundle also carries managed skills under `Contents/Resources/Skills/` and the transcription sidecar source files (`worker.py`, `requirements.txt`) under `Contents/Resources/Transcription/`; the venv and model cache are mutable user data under `~/.tron/system/transcription/` after the user enables transcription. See [development.md](./development.md) for the build pipeline.
+`Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. The release binary is produced by `cargo build --release --bin tron` and staged into the bundled helper app at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron`; the helper is signed before the outer app. The app bundle also carries managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the transcription sidecar source files (`worker.py`, `requirements.txt`) under `Contents/Resources/Transcription/`; the venv and model cache are mutable user data under `~/.tron/internal/transcription/` after the user enables transcription. See [development.md](./development.md) for the build pipeline.
 
 ## Directory Structure
 
@@ -28,11 +28,12 @@ packages/mac-app/
 │   │   ├── MenuBarActionHandler.swift # routes menu-item descriptors → side effects (subprocess, NSWorkspace, notifications)
 │   │   ├── MenuBarController.swift    # NSStatusItem lifecycle + poller task + custom header view
 │   │   └── MenuBarItemBuilder.swift   # Pure builder: snapshot → [MenuItemDescriptor]
-│   ├── Resources/                  # bundled Library tree + AppIcon.icns + fonts + transcription source files
+│   ├── Resources/                  # bundled Library tree, defaults, skills, AppIcon.icns, fonts, transcription source files
 │   │   ├── Fonts/
 │   │   │   └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
+│   │   ├── Constitution/           # copied from packages/agent/defaults/
 │   │   └── Transcription/
-│   │       ├── worker.py           # copied to ~/.tron/system/transcription/ by the wizard step
+│   │       ├── worker.py           # copied to ~/.tron/internal/transcription/ by the wizard step
 │   │       └── requirements.txt
 │   ├── Theme/
 │   │   ├── TronColors.swift        # emerald palette + shared gradients
@@ -118,7 +119,7 @@ Low-density steps are deliberately top-biased rather than perfectly centered: Ta
 
 ### Single-instance lock via POSIX `fcntl`
 
-`SingleInstanceLock.acquire()` opens `~/.tron/system/run/.mac-wrapper.<bundle-id>.lock` and tries `fcntl(F_SETLK, F_WRLCK)`. A second instance of the same wrapper build fails, `AppDelegate` logs + `NSApp.terminate(nil)`. Release (`com.tron.mac`) and Debug companion (`com.tron.mac.dev`) intentionally use different lock files so their menu icons can coexist while they observe the same production server. Locks are automatically released on process exit (kernel drops fd locks with the process). Re-acquire from the same process is idempotent (returns true if a valid `fileDescriptor` is already held). The headless agent has its own per-process lock at `~/.tron/system/database/log.db.lock`.
+`SingleInstanceLock.acquire()` opens `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` and tries `fcntl(F_SETLK, F_WRLCK)`. A second instance of the same wrapper build fails, `AppDelegate` logs + `NSApp.terminate(nil)`. Release (`com.tron.mac`) and Debug companion (`com.tron.mac.dev`) intentionally use different lock files so their menu icons can coexist while they observe the same production server. Locks are automatically released on process exit (kernel drops fd locks with the process). Re-acquire from the same process is idempotent (returns true if a valid `fileDescriptor` is already held). The headless agent has its own per-process lock at `~/.tron/internal/database/log.db.lock`.
 
 **XCTest bypass**: `AppDelegate.applicationDidFinishLaunching` checks for `XCTestSessionIdentifier` in the process environment and skips `SingleInstanceLock.acquire()` entirely when it's set. Without this, `xcodebuild test` would fail to launch the test host whenever a real `Tron.app` is running on the same machine — a routine state for any contributor who dogfoods. The bypass is benign in production because Xcode never sets that env var outside test runs.
 
@@ -168,7 +169,7 @@ modal appears over the pane. Screen Recording first checks the current process
 with `CGPreflightScreenCaptureAccess()`. If that process still has the stale
 pre-relaunch answer after a Settings change, the wizard starts the same wrapper
 executable once as a quiet child process and reads the fresh result from
-`~/.tron/system/run/`. Any wizard-opened Settings pane starts a short-lived
+`~/.tron/internal/run/`. Any wizard-opened Settings pane starts a short-lived
 fast-probe watcher until that specific permission turns green. App activation,
 Re-check, and the watcher never restart the server. Once all three rows are
 green and the user presses Continue, the wizard restarts the helper once so
@@ -179,7 +180,7 @@ are settled. Default settings keep `server.transcription.enabled = false`,
 so a fresh server logs `transcription sidecar disabled` instead of trying to
 download a model. Applying the step copies only `worker.py` and
 `requirements.txt` from the signed app bundle into
-`~/.tron/system/transcription/`, making later iOS Settings enablement safe.
+`~/.tron/internal/transcription/`, making later iOS Settings enablement safe.
 If the user enables the toggle, the wrapper writes
 `server.transcription.enabled = true` into `settings.json`, restarts
 `com.tron.server`, and waits for `system.ping`. The helper then owns the
@@ -311,15 +312,15 @@ and/or `auth.json`; databases and workspace files are still preserved.
 - **Uninstall preserves user data.** Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` unregister the SMAppService agent and clear runtime state. Default Debug companion mode refuses to uninstall production. Menu-bar uninstall may remove `settings.json` and/or `auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
 - **A loaded LaunchAgent label is not proof that the correct helper is running.** Registration inspects `launchctl print` for the loaded job's parent bundle identifier and event-trigger executable before deciding whether to reuse, repair, or fail. Missing/mismatched helper executables are stale registrations and manager builds repair them; default Debug companion builds never repair or own production registration.
 - **Permission checks are wrapper-owned and probe-only.** The Permissions step records when it opened System Settings only to decide whether to show the visible "Checking permissions..." activity state on return. App activation, Re-check, and the gear-button watcher call native wrapper probes without `launchctl kickstart`, and transient `.probeUnavailable` snapshots preserve the last concrete badge state instead of turning the page gray. The only permission-time restart is the one-time helper restart after all rows are green and the user presses Continue.
-- **Transcription is opt-in user data.** `worker.py` and `requirements.txt` ship read-only in the app bundle, and the wizard copies them to `~/.tron/system/transcription/` when the user applies the Transcription step. The app bundle never contains the Python venv or Parakeet model cache, and skipping the step leaves the server setting false.
-- **App bundles are immutable at runtime.** Mutable files live under `~/.tron`; ephemeral locks live under `~/.tron/system/run`; `Tron.app` is only replaced by a new notarized DMG.
+- **Transcription is opt-in user data.** `worker.py` and `requirements.txt` ship read-only in the app bundle, and the wizard copies them to `~/.tron/internal/transcription/` when the user applies the Transcription step. The app bundle never contains the Python venv or Parakeet model cache, and skipping the step leaves the server setting false.
+- **App bundles are immutable at runtime.** Mutable files live under `~/.tron`; ephemeral locks live under `~/.tron/internal/run`; `Tron.app` is only replaced by a new notarized DMG.
 - **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth.json`, `settings.json`, `run/.onboarded`) or a WS RPC call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
-- **Production uses one port (`9847`) and one LaunchAgent label (`com.tron.server`).** The DMG-installed `Tron.app` (`com.tron.mac`), local Release copies, the default Xcode Debug companion (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/system/run/Tron-Dev.app` (`com.tron.agent`) all target the production `~/.tron` data tree. Debug companion observes production but does not manage its Login Item; `tron dev` is the explicit server takeover path and stops the production LaunchAgent before binding 9847. The isolated install scheme is the exception by design: it uses `com.tron.server.dev`, port `9848`, and `~/.tron-dev`.
+- **Production uses one port (`9847`) and one LaunchAgent label (`com.tron.server`).** The DMG-installed `Tron.app` (`com.tron.mac`), local Release copies, the default Xcode Debug companion (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/internal/run/Tron-Dev.app` (`com.tron.agent`) all target the production `~/.tron` data tree. Debug companion observes production but does not manage its Login Item; `tron dev` is the explicit server takeover path and stops the production LaunchAgent before binding 9847. The isolated install scheme is the exception by design: it uses `com.tron.server.dev`, port `9848`, and `~/.tron-dev`.
 - **TronPaths is the single source of truth.** If any path is referenced elsewhere, that's a bug. See `packages/agent/src/core/foundation/paths.rs` for the Rust-side mirror.
 
 ## Workflows & Variants
 
-Production workflows operate against the same `~/.tron/system/` data tree and share `port 9847` + `com.tron.server` LaunchAgent. The isolated install workflow uses its own data tree, label, and port so reinstall testing can happen while production remains installed.
+Production workflows operate against the same `~/.tron/internal/` data tree and share `port 9847` + `com.tron.server` LaunchAgent. The isolated install workflow uses its own data tree, label, and port so reinstall testing can happen while production remains installed.
 
 ### The five workflows
 
@@ -329,7 +330,7 @@ Production workflows operate against the same `~/.tron/system/` data tree and sh
 | **2. Local Release test** | Contributors validating a Release build without the DMG wrapper | `Tron.app` (Release build copied into place) | `com.tron.mac` | `/Applications/Tron.app` | Same runtime shape as Production, usually not notarized | Same installed-release helper path inside `/Applications/Tron.app` |
 | **3. Debug companion (default Xcode Run)** | Contributors testing wrapper UI while production stays installed | `TronMac.app` (Debug build, Xcode/xcodebuild) | `com.tron.mac.dev` | `~/Library/Developer/Xcode/DerivedData/TronMac-*/Build/Products/Debug/TronMac.app` | Same SwiftUI wrapper as Production with a debug-profile bundled helper and transcription source files | Observes the production server on port 9847; does not register or mutate `com.tron.server` |
 | **4. Isolated install test** | Contributors testing first-run/reinstall flows from Xcode | `TronMac.app` with `TRON_MAC_INSTALL_MODE=isolated` | `com.tron.mac.dev` | DerivedData | Debug wrapper and helper, separate install target | Registers `com.tron.server.dev`, runs port 9848, uses `~/.tron-dev` via `TRON_HOME_NAME=.tron-dev` |
-| **5. Agent dev (`tron dev`)** | Contributors iterating on the Rust agent without wrapper UI | `Tron-Dev.app` (no SwiftUI — just a `.app` bundle wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/system/run/Tron-Dev.app` | Headless Rust agent only (no menu bar, no wizard) | Takes over port 9847 in-process; the production LaunchAgent is stopped first |
+| **5. Agent dev (`tron dev`)** | Contributors iterating on the Rust agent without wrapper UI | `Tron-Dev.app` (no SwiftUI — just a `.app` bundle wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/internal/run/Tron-Dev.app` | Headless Rust agent only (no menu bar, no wizard) | Takes over port 9847 in-process; the production LaunchAgent is stopped first |
 
 > **Naming guard.** `TronMac.app` (workflows 3 and 4's build product) and `Tron-Dev.app` (workflow 5's agent bundle) are unrelated. `TronMac.app` is the wrapper UI compiled in Debug mode; `Tron-Dev.app` is just the Rust agent recompiled in dev. They share neither code nor purpose.
 
@@ -339,7 +340,7 @@ Production workflows operate against the same `~/.tron/system/` data tree and sh
 
 - **Port `9847`** — the production WS bind. Always exclusive — see "Mutual exclusion" below. Workflow 4 uses `9848`.
 - **LaunchAgent label `com.tron.server`** — the launchd job that owns the installed production server. Workflows 1 and 2 register it through `SMAppService`; workflow 3 observes it; workflow 5 stops it before binding the port itself. Workflow 4 registers only `com.tron.server.dev`.
-- **`~/.tron/system/`** data tree — production settings, auth, sessions, log database, and `run/` state. Workflows 1, 2, 3, and 5 use it. Workflow 4 uses `~/.tron-dev`.
+- **`~/.tron/` Constitution home** — production profiles/auth, memory, workspace data, log database, and `internal/run/` state. Workflows 1, 2, 3, and 5 use it. Workflow 4 uses `~/.tron-dev`.
 - **`auth.json.bearerToken`** — bearer issued by the agent on first start. Same token regardless of which workflow started the agent.
 - **`~/.tron/skills/`** — managed skills synced from the wrapper's bundled `Contents/Resources/Skills/` by production install/menu-bar start paths, and from `packages/agent/skills/` by `tron install` / `tron dev`. Same-name user-owned directories without `.managed` are preserved; stale `.managed` directories disappear when the bundled set no longer contains them.
 - **Release identity** — `VERSION.env` is the only hand-edited release source.
@@ -352,14 +353,14 @@ Production workflows operate against the same `~/.tron/system/` data tree and sh
 
 | Layer | Guard | What it prevents |
 |---|---|---|
-| Wrapper instance | `~/.tron/system/run/.mac-wrapper.<bundle-id>.lock` (`fcntl(F_SETLK, F_WRLCK)`) | More than one copy of the same SwiftUI wrapper. Release and Debug companion use different lock files and may coexist. |
-| Agent instance | `~/.tron/system/database/log.db.lock` (cross-process exclusive `flock`) | Two Rust agents running at once. Server refuses to start if held. |
+| Wrapper instance | `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` (`fcntl(F_SETLK, F_WRLCK)`) | More than one copy of the same SwiftUI wrapper. Release and Debug companion use different lock files and may coexist. |
+| Agent instance | `~/.tron/internal/database/log.db.lock` (cross-process exclusive `flock`) | Two Rust agents running at once. Server refuses to start if held. |
 | Port `9847` | OS-level bind | Workflow 5 starting `tron dev` on top of workflow 1/2's running agent — `tron dev` first calls `launchctl bootout` on `com.tron.server`, then binds. |
 | LaunchAgent | `SMAppService.register` / `unregister` | One Login Item agent per session is enforced by ServiceManagement; `requiresApproval` is surfaced to the user. |
 
 Wrapper ownership is explicit: installed Release owns production registration; default Debug is companion-only and never installs or repairs the production Login Item. The isolated install scheme is the Debug path that may register a server, but only under `com.tron.server.dev` and `~/.tron-dev`. Production and local Release testing share the same bundle ID/path, so they are intentionally indistinguishable at runtime.
 
-If no LaunchAgent owns `com.tron.server` but port `9847` is already bound or `~/.tron/system/database/log.db.lock` is held, registration stops with an "another Tron server is running" error. The app never chooses an alternate port and never treats a direct dev server as a successful install.
+If no LaunchAgent owns `com.tron.server` but port `9847` is already bound or `~/.tron/internal/database/log.db.lock` is held, registration stops with an "another Tron server is running" error. The app never chooses an alternate port and never treats a direct dev server as a successful install.
 
 **Result**: a contributor can have the production DMG installed, run the default Xcode Debug wrapper for UI work, and switch to `tron dev` to iterate on the agent without uninstalling anything. Both wrappers observe the production port. While `tron dev` owns the port the menu bar shows `Dev Server active`; quitting `tron dev` calls `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which syncs bundled managed skills, registers/starts through `SMAppService`, and exits without showing the wizard. The same menu-bar startup sync is what makes a replaced `/Applications/Tron.app` refresh managed skills after a DMG update. Managed-skill sync is serialized within the wrapper process and skips directories whose bundled and installed contents already match, so an idle menu-bar launch does not rewrite `~/.tron/skills/`.
 
@@ -381,6 +382,6 @@ The wrapper (workflow 1 or 2) does not need to be relaunched — its `ServerStat
 
 ### One production install path
 
-The wizard is the production install path. It validates `/Applications/Tron.app`, syncs bundled managed skills into `~/.tron/skills/`, registers the bundled LaunchAgent through `SMAppService`, and lets the helper generate `bearerToken` inside `~/.tron/system/auth.json` on first start. `scripts/tron` remains contributor tooling and is not used by the distributed Mac app.
+The wizard is the production install path. It validates `/Applications/Tron.app`, syncs bundled managed skills into `~/.tron/skills/`, registers the bundled LaunchAgent through `SMAppService`, and lets the helper generate `bearerToken` inside `~/.tron/profiles/auth.json` on first start. `scripts/tron` remains contributor tooling and is not used by the distributed Mac app.
 
 See [development.md](./development.md) for local dev + CI commands and the [README "Mac App" section](../../../README.md#mac-app-tronapp) for end-user-facing documentation.

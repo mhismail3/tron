@@ -17,9 +17,9 @@ struct DiagnosticsRedactorTests {
     @Test("redacts local paths to placeholders")
     func redactsHomePath() {
         let r = DiagnosticsRedactor()
-        let out = r.redactMessage("load /Users/alice/.tron/system/settings.json")
+        let out = r.redactMessage("load /Users/alice/.tron/profiles/user/settings.json")
         #expect(!out.contains("/Users/alice"))
-        #expect(!out.contains(".tron/system/settings.json"))
+        #expect(!out.contains(".tron/profiles/user/settings.json"))
         #expect(out.contains("[redacted:path]"))
     }
 

@@ -17,8 +17,21 @@ BIN_DIR="$HOME/.local/bin"
 # `/Applications/Tron.app` and is registered by the Swift wrapper via SMAppService;
 # these bundles are only for shell-script development flows.
 TRON_BUNDLE_ID="com.tron.agent"
-RUN_DIR="$TRON_HOME/system/run"
+RUN_DIR="$TRON_HOME/internal/run"
+PROFILES_DIR="$TRON_HOME/profiles"
+USER_PROFILE_DIR="$PROFILES_DIR/user"
+DEFAULT_PROFILE_DIR="$PROFILES_DIR/default"
+SETTINGS_FILE="$USER_PROFILE_DIR/settings.json"
+CONTAINERS_FILE="$USER_PROFILE_DIR/containers.json"
+WORKSPACE_DIR="$TRON_HOME/workspace"
+WORKSPACE_VAULT_DIR="$WORKSPACE_DIR/vault"
+WORKSPACE_KNOWLEDGE_DIR="$WORKSPACE_DIR/knowledge"
 CONTRIBUTOR_DIR="$RUN_DIR"
+DEPLOY_LOCK_FILE="$RUN_DIR/deploy.lock"
+AUTO_DEPLOY_PAUSE_FILE="$RUN_DIR/auto-deploy.pause"
+AUTO_DEPLOY_LOCK_FILE="$RUN_DIR/auto-deploy.lock"
+SELF_UPDATE_PAUSE_FILE="$RUN_DIR/auto-update.pause"
+SELF_UPDATE_STATE_FILE="$RUN_DIR/updater-state.json"
 INSTALLED_BUNDLE="$CONTRIBUTOR_DIR/Tron-Deploy.app"
 INSTALLED_BINARY="$INSTALLED_BUNDLE/Contents/MacOS/tron"
 DEV_BUNDLE="$RUN_DIR/Tron-Dev.app"
@@ -40,13 +53,13 @@ PROD_PORT=9847
 
 # File paths
 DEPLOYED_COMMIT_FILE="$CONTRIBUTOR_DIR/deployed-commit"
-ONBOARDED_MARKER_PATH="$TRON_HOME/system/run/.onboarded"
+ONBOARDED_MARKER_PATH="$RUN_DIR/.onboarded"
 
 # Database
-DB_PATH="$TRON_HOME/system/database/log.db"
+DB_PATH="$TRON_HOME/internal/database/log.db"
 
 # OAuth
-AUTH_FILE="$TRON_HOME/system/auth.json"
+AUTH_FILE="$PROFILES_DIR/auth.json"
 
 # Anthropic OAuth
 ANTHROPIC_OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
@@ -159,27 +172,33 @@ confirm_action() {
 }
 
 ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/system/{database,run}
-    mkdir -p "$TRON_HOME"/workspace/{knowledge,automations,scratch}
-    mkdir -p "$TRON_HOME"/workspace/memory/{rules,sessions}
+    mkdir -p "$TRON_HOME"/internal/{database,run}
+    mkdir -p "$DEFAULT_PROFILE_DIR" "$USER_PROFILE_DIR"
+    mkdir -p "$USER_PROFILE_DIR/prompts"
+    mkdir -p "$DEFAULT_PROFILE_DIR"/{prompts,summarizers,subagents,providers,context,tools,settings}
+    mkdir -p "$TRON_HOME"/memory/{rules,sessions}
+    mkdir -p "$WORKSPACE_DIR"/{inbox,projects,automations,plans,reports,artifacts,scratch,labs,archive}
+    mkdir -p "$WORKSPACE_KNOWLEDGE_DIR" "$WORKSPACE_VAULT_DIR"
+    mkdir -p "$WORKSPACE_DIR"/artifacts/{renders,screenshots,exports}
     mkdir -p "$TRON_HOME"/skills
-    mkdir -p "$TRON_HOME/workspace/voice notes"
+    mkdir -p "$WORKSPACE_DIR/inbox/voice-notes"
 }
 
 ensure_default_configs() {
-    # settings.json is intentionally not created here. The Rust settings
-    # loader supplies compiled defaults when the file is absent; the file is
-    # reserved for sparse user/app overrides written through settings.update.
+    # settings.json is intentionally not created here. The Rust profile seeder
+    # writes default/settings/defaults.json; profiles/user/settings.json
+    # is reserved for sparse user/app overrides written through settings.update.
 
-    if [ ! -f "$TRON_HOME/system/auth.json" ]; then
-        cat > "$TRON_HOME/system/auth.json" << 'EOF'
+    if [ ! -f "$AUTH_FILE" ]; then
+        mkdir -p "$(dirname "$AUTH_FILE")"
+        cat > "$AUTH_FILE" << 'EOF'
 {
   "version": 1,
   "providers": {},
   "lastUpdated": ""
 }
 EOF
-        chmod 600 "$TRON_HOME/system/auth.json"
+        chmod 600 "$AUTH_FILE"
         print_success "Created auth.json"
     fi
 }
@@ -354,7 +373,7 @@ create_app_bundle() {
     # Delete the entire .app bundle, not just its contents. macOS App
     # Management TCC protects files *inside* .app bundles from modification
     # by non-authorized processes (launchd agents). But deleting the .app
-    # itself is a parent-directory operation on ~/.tron/system/, which is
+    # itself is a parent-directory operation on ~/.tron/internal/, which is
     # not protected. codesign_bundle re-signs the new bundle afterward.
     rm -rf "$bundle_path"
 
@@ -904,8 +923,8 @@ cmd_uninstall() {
                 echo "Usage: tron uninstall [--reset-settings] [--reset-credentials]"
                 echo ""
                 echo "Removes the LaunchAgent, CLI entrypoint, runtime bundles, and Mac onboarding marker."
-                echo "Preserves ~/.tron/system/database and ~/.tron/workspace. Optional flags remove"
-                echo "~/.tron/system/settings.json and/or ~/.tron/system/auth.json."
+                echo "Preserves ~/.tron/internal/database and ~/.tron/workspace. Optional flags remove"
+                echo "~/.tron/profiles/user/settings.json and/or ~/.tron/profiles/auth.json."
                 return 0
                 ;;
             *)
@@ -950,7 +969,7 @@ cmd_uninstall() {
 
     if [ "$reset_settings" = true ]; then
         print_status "Removing settings..."
-        rm -f "$TRON_HOME/system/settings.json"
+        rm -f "$SETTINGS_FILE"
     fi
 
     if [ "$reset_credentials" = true ]; then

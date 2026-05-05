@@ -390,7 +390,7 @@ struct WizardVisualLayoutTests {
 
         #expect(TranscriptionStepContent.toggleTitle == "Enable local transcription")
         #expect(source.contains("state.transcriptionEnabledSelection"))
-        #expect(source.contains("~/.tron/system/transcription/models/hf"))
+        #expect(source.contains("~/.tron/internal/transcription/models/hf"))
         #expect(shell.contains("setup.applyTranscriptionPreference"))
         #expect(shell.contains("case .transcription:"))
         #expect(shell.contains("transcriptionPrimaryLabel"))

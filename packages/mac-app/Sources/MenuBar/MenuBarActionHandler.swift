@@ -257,7 +257,7 @@ final class MenuBarActionHandler {
         alert.informativeText = """
         This unregisters the Tron Server Login Item.
 
-        Your workspace files in ~/.tron/workspace/ and your conversation history in ~/.tron/system/database/ are preserved.
+        Your workspace files in ~/.tron/workspace/ and your conversation history in ~/.tron/internal/database/ are preserved.
         """
         alert.alertStyle = .warning
         let resetOptionsStack = NSStackView()
@@ -270,13 +270,13 @@ final class MenuBarActionHandler {
             target: nil,
             action: nil
         )
-        resetSettingsCheckbox.toolTip = "Also removes ~/.tron/system/settings.json. The database is never removed."
+        resetSettingsCheckbox.toolTip = "Also removes ~/.tron/profiles/user/settings.json. The database is never removed."
         let resetCredentialsCheckbox = NSButton(
             checkboxWithTitle: "Reset saved credentials",
             target: nil,
             action: nil
         )
-        resetCredentialsCheckbox.toolTip = "Also removes ~/.tron/system/auth.json. The database is never removed."
+        resetCredentialsCheckbox.toolTip = "Also removes ~/.tron/profiles/auth.json. The database is never removed."
 
         resetSettingsCheckbox.sizeToFit()
         resetCredentialsCheckbox.sizeToFit()

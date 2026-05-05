@@ -261,6 +261,18 @@ impl Provider for MiniMaxProvider {
         &self.config.model
     }
 
+    fn audit_payload(
+        &self,
+        context: &Context,
+        options: &ProviderStreamOptions,
+    ) -> ProviderResult<serde_json::Value> {
+        let sanitized = sanitize_messages(context.messages.to_vec());
+        let mut messages = convert_messages(&sanitized);
+        Self::strip_images(&mut messages);
+        serde_json::to_value(self.build_request(context, options, messages))
+            .map_err(ProviderError::Json)
+    }
+
     #[instrument(skip_all, fields(provider = "minimax", model = %self.config.model))]
     async fn stream(
         &self,

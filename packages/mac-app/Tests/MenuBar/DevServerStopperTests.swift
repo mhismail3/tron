@@ -34,7 +34,7 @@ struct DevServerStopperTests {
                     return ServerProcessInfo(
                         pid: 24_680,
                         uptime: "00:00:09",
-                        command: "/Users/example/.tron/system/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
+                        command: "/Users/example/.tron/internal/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
                         isDevServer: true
                     )
                 }
@@ -62,7 +62,7 @@ struct DevServerStopperTests {
                 ServerProcessInfo(
                     pid: 24_680,
                     uptime: "00:00:09",
-                    command: "/Users/example/.tron/system/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
+                    command: "/Users/example/.tron/internal/run/Tron-Dev.app/Contents/MacOS/tron --port 9847",
                     isDevServer: true
                 )
             },

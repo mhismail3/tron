@@ -69,7 +69,7 @@ gws docs +write --document DOC_ID --text 'Summary of the week...'
 gws drive files update --params '{"fileId":"DOC_ID","addParents":"FOLDER_ID"}'
 
 # 4. Share it
-gws drive permissions create --params '{"fileId":"DOC_ID"}' --json '{"role":"reader","type":"user","emailAddress":"moose@example.com"}'
+gws drive permissions create --params '{"fileId":"DOC_ID"}' --json '{"role":"reader","type":"user","emailAddress":"user@example.com"}'
 ```
 
 ## Export

@@ -61,12 +61,12 @@ const TOKEN_BYTE_LEN: usize = 32;
 /// a multiple of 4.
 const ENCODED_TOKEN_LEN: usize = 43;
 
-/// Default file path for the bearer token: `~/.tron/system/auth.json`.
+/// Default file path for the bearer token: `~/.tron/profiles/auth.json`.
 pub fn bearer_token_path() -> PathBuf {
     crate::core::paths::auth_path()
 }
 
-/// Default file path for the first-run sentinel: `~/.tron/system/run/.onboarded`.
+/// Default file path for the first-run sentinel: `~/.tron/internal/run/.onboarded`.
 pub fn onboarded_marker_path() -> PathBuf {
     crate::core::paths::onboarded_marker_path()
 }
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn mark_onboarded_creates_parent_directory() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let nested = dir.path().join("nested/system/run/.onboarded");
+        let nested = dir.path().join("nested/internal/run/.onboarded");
         assert!(!nested.parent().unwrap().exists());
         mark_onboarded(&nested).expect("mark with missing parent");
         assert!(nested.exists());
@@ -475,24 +475,24 @@ mod tests {
     // ── Path helpers ──
 
     #[test]
-    fn bearer_token_path_lives_under_system_dir() {
+    fn bearer_token_path_lives_under_profiles_dir() {
         let p = bearer_token_path();
         let s = p.to_string_lossy();
         assert!(s.ends_with("/auth.json"), "got: {s}");
         assert!(
-            s.contains("/.tron/system/"),
-            "must live under ~/.tron/system/, got: {s}"
+            s.contains("/.tron/profiles/"),
+            "must live under ~/.tron/profiles/, got: {s}"
         );
     }
 
     #[test]
-    fn onboarded_marker_path_lives_under_system_dir() {
+    fn onboarded_marker_path_lives_under_internal_dir() {
         let p = onboarded_marker_path();
         let s = p.to_string_lossy();
         assert!(s.ends_with("/run/.onboarded"), "got: {s}");
         assert!(
-            s.contains("/.tron/system/run/"),
-            "must live under ~/.tron/system/run/, got: {s}"
+            s.contains("/.tron/internal/run/"),
+            "must live under ~/.tron/internal/run/, got: {s}"
         );
     }
 }

@@ -168,7 +168,7 @@ Proactively offer to store credentials when:
 
 ## When NOT to Use Vault
 
-- **Tron's own LLM provider tokens** — those belong in `~/.tron/system/auth.json`
+- **Tron's own LLM provider tokens** — those belong in `~/.tron/profiles/auth.json`
 - **Temporary session values** that expire within the conversation
 - **Public configuration** — non-secret environment variables
 - **User-managed .env files** — don't duplicate what the user already manages

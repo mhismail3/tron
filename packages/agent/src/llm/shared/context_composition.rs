@@ -9,6 +9,10 @@
 //! - [`compose_context_parts_grouped`] — split into stable (1h cache TTL) and
 //!   volatile (5m cache TTL) groups for Anthropic prompt caching
 
+use crate::core::constitution::{
+    ContextBlock, ContextCacheClass, ContextSensitivity, ProviderSurface, TronHome,
+    context_block_for_text,
+};
 use crate::core::messages::Context;
 
 /// Compose context fields into an ordered array of text parts.
@@ -24,76 +28,212 @@ use crate::core::messages::Context;
 /// 8. `job_results_context` (completed background processes + subagents)
 /// 9. `working_directory` (appended as `"Current working directory: <path>"`)
 pub fn compose_context_parts(context: &Context) -> Vec<String> {
-    let mut parts = Vec::new();
+    compose_context_blocks(context)
+        .into_iter()
+        .map(|block| block.text)
+        .collect()
+}
+
+/// Compile context fields into typed Constitution context blocks.
+///
+/// This is the provider-independent audit shape. Provider adapters may flatten
+/// the text, split by cache class, or apply provider-specific cache controls,
+/// but the compiled block identities and ordering stay stable.
+pub fn compose_context_blocks(context: &Context) -> Vec<ContextBlock> {
+    let mut blocks = Vec::new();
 
     if let Some(ref sp) = context.system_prompt
         && !sp.is_empty()
     {
-        parts.push(sp.clone());
+        blocks.push(context_block_for_text(
+            "system.prompt",
+            "System Prompt",
+            TronHome::Profiles,
+            sp.clone(),
+            ContextCacheClass::Foundation,
+            10,
+        ));
     }
 
     if let Some(ref rules) = context.rules_content
         && !rules.is_empty()
     {
-        parts.push(format!("# Project Rules\n\n{rules}"));
+        blocks.push(context_block_for_text(
+            "project.rules",
+            "Project Rules",
+            TronHome::Workspace,
+            format!("# Project Rules\n\n{rules}"),
+            ContextCacheClass::Session,
+            20,
+        ));
     }
 
     if let Some(ref memory) = context.memory_content
         && !memory.is_empty()
     {
-        parts.push(memory.clone());
+        blocks.push(context_block_for_text(
+            "memory.root",
+            "Memory",
+            TronHome::Memory,
+            memory.clone(),
+            ContextCacheClass::Session,
+            30,
+        ));
     }
 
     if let Some(ref dynamic) = context.dynamic_rules_context
         && !dynamic.is_empty()
     {
-        parts.push(format!("# Active Rules\n\n{dynamic}"));
+        blocks.push(context_block_for_text(
+            "dynamic.rules",
+            "Active Rules",
+            TronHome::Profiles,
+            format!("# Active Rules\n\n{dynamic}"),
+            ContextCacheClass::Turn,
+            40,
+        ));
     }
 
     if let Some(ref skill_index) = context.skill_index_context
         && !skill_index.is_empty()
     {
-        parts.push(skill_index.clone());
+        blocks.push(context_block_for_text(
+            "skills.index",
+            "Skill Index",
+            TronHome::Skills,
+            skill_index.clone(),
+            ContextCacheClass::Session,
+            50,
+        ));
     }
 
     if let Some(ref activation) = context.skill_activation_context
         && !activation.is_empty()
     {
-        parts.push(activation.clone());
+        blocks.push(context_block_for_text(
+            "skills.activation",
+            "Skill Activation",
+            TronHome::Skills,
+            activation.clone(),
+            ContextCacheClass::Turn,
+            60,
+        ));
     }
 
     if let Some(ref skills) = context.skill_context
         && !skills.is_empty()
     {
-        parts.push(skills.clone());
+        blocks.push(context_block_for_text(
+            "skills.active",
+            "Active Skill Context",
+            TronHome::Skills,
+            skills.clone(),
+            ContextCacheClass::Turn,
+            70,
+        ));
     }
 
     if let Some(ref removal) = context.skill_removal_context
         && !removal.is_empty()
     {
-        parts.push(removal.clone());
+        blocks.push(context_block_for_text(
+            "skills.removal",
+            "Skill Removal",
+            TronHome::Skills,
+            removal.clone(),
+            ContextCacheClass::Turn,
+            80,
+        ));
     }
 
     if let Some(ref jobs) = context.job_results_context
         && !jobs.is_empty()
     {
-        parts.push(jobs.clone());
+        blocks.push(context_block_for_text(
+            "jobs.results",
+            "Job Results",
+            TronHome::Workspace,
+            jobs.clone(),
+            ContextCacheClass::Turn,
+            90,
+        ));
     }
 
     // Environment details: server origin + working directory
     if let Some(ref origin) = context.server_origin
         && !origin.is_empty()
     {
-        parts.push(format!("Server: {origin}"));
+        blocks.push(context_block_for_text(
+            "environment.server",
+            "Server Origin",
+            TronHome::Internal,
+            format!("Server: {origin}"),
+            ContextCacheClass::Session,
+            100,
+        ));
     }
 
     if let Some(ref wd) = context.working_directory
         && !wd.is_empty()
     {
-        parts.push(format!("Current working directory: {wd}"));
+        blocks.push(context_block_for_text(
+            "environment.workingDirectory",
+            "Working Directory",
+            TronHome::Workspace,
+            format!("Current working directory: {wd}"),
+            ContextCacheClass::Session,
+            110,
+        ));
     }
 
-    parts
+    blocks
+}
+
+/// Compile the complete provider-independent audit view of an LLM request.
+///
+/// Unlike [`compose_context_parts`], this includes non-instruction provider
+/// surfaces such as tool schemas and conversation messages. It is used only for
+/// Constitution audit/replay and must not feed back into prompt text assembly.
+pub fn compose_context_audit_blocks(context: &Context) -> Vec<ContextBlock> {
+    let mut blocks = compose_context_blocks(context);
+
+    if let Some(ref tools) = context.tools
+        && !tools.is_empty()
+    {
+        if let Ok(text) = serde_json::to_string(tools) {
+            let mut block = context_block_for_text(
+                "tools.schemas",
+                "Tool Schemas",
+                TronHome::Profiles,
+                text,
+                ContextCacheClass::Session,
+                120,
+            );
+            block.provider_surface = ProviderSurface::Tool;
+            block.inclusion_reason = "available tools attached to provider request".into();
+            blocks.push(block);
+        }
+    }
+
+    if !context.messages.is_empty()
+        && let Ok(text) = serde_json::to_string(&context.messages)
+    {
+        let mut block = context_block_for_text(
+            "conversation.messages",
+            "Conversation Messages",
+            TronHome::Workspace,
+            text,
+            ContextCacheClass::Turn,
+            130,
+        );
+        block.provider_surface = ProviderSurface::Message;
+        block.sensitivity = ContextSensitivity::Private;
+        block.inclusion_reason = "conversation history attached to provider request".into();
+        blocks.push(block);
+    }
+
+    blocks.sort_by_key(|block| block.precedence);
+    blocks
 }
 
 /// Context parts split by cache stability.
@@ -118,74 +258,13 @@ pub struct GroupedContextParts {
 pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
     let mut stable = Vec::new();
     let mut volatile = Vec::new();
-
-    // Stable parts
-    if let Some(ref sp) = context.system_prompt
-        && !sp.is_empty()
-    {
-        stable.push(sp.clone());
-    }
-
-    if let Some(ref rules) = context.rules_content
-        && !rules.is_empty()
-    {
-        stable.push(format!("# Project Rules\n\n{rules}"));
-    }
-
-    if let Some(ref memory) = context.memory_content
-        && !memory.is_empty()
-    {
-        stable.push(memory.clone());
-    }
-
-    if let Some(ref skill_index) = context.skill_index_context
-        && !skill_index.is_empty()
-    {
-        stable.push(skill_index.clone());
-    }
-
-    // Environment details: server origin + working directory
-    if let Some(ref origin) = context.server_origin
-        && !origin.is_empty()
-    {
-        stable.push(format!("Server: {origin}"));
-    }
-
-    if let Some(ref wd) = context.working_directory
-        && !wd.is_empty()
-    {
-        stable.push(format!("Current working directory: {wd}"));
-    }
-
-    // Volatile parts
-    if let Some(ref dynamic) = context.dynamic_rules_context
-        && !dynamic.is_empty()
-    {
-        volatile.push(format!("# Active Rules\n\n{dynamic}"));
-    }
-
-    if let Some(ref activation) = context.skill_activation_context
-        && !activation.is_empty()
-    {
-        volatile.push(activation.clone());
-    }
-
-    if let Some(ref skills) = context.skill_context
-        && !skills.is_empty()
-    {
-        volatile.push(skills.clone());
-    }
-
-    if let Some(ref removal) = context.skill_removal_context
-        && !removal.is_empty()
-    {
-        volatile.push(removal.clone());
-    }
-
-    if let Some(ref jobs) = context.job_results_context
-        && !jobs.is_empty()
-    {
-        volatile.push(jobs.clone());
+    for block in compose_context_blocks(context) {
+        match block.cache_class {
+            ContextCacheClass::Foundation
+            | ContextCacheClass::Profile
+            | ContextCacheClass::Session => stable.push(block.text),
+            ContextCacheClass::Turn | ContextCacheClass::None => volatile.push(block.text),
+        }
     }
 
     GroupedContextParts { stable, volatile }
@@ -299,6 +378,42 @@ mod tests {
         let parts = compose_context_parts(&ctx);
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0], "Hello");
+    }
+
+    #[test]
+    fn audit_blocks_include_tools_and_messages_without_flattening() {
+        let ctx = Context {
+            messages: vec![crate::core::messages::Message::user("hello")].into(),
+            tools: Some(vec![crate::core::tools::Tool {
+                name: "read".into(),
+                description: "Read a file".into(),
+                parameters: crate::core::tools::ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
+            }]),
+            system_prompt: Some("System".into()),
+            ..Default::default()
+        };
+
+        let flat = compose_context_parts(&ctx);
+        assert_eq!(flat, vec!["System"]);
+
+        let blocks = compose_context_audit_blocks(&ctx);
+        assert!(
+            blocks.iter().any(|block| block.id == "tools.schemas"
+                && block.provider_surface == ProviderSurface::Tool)
+        );
+        assert!(
+            blocks
+                .iter()
+                .any(|block| block.id == "conversation.messages"
+                    && block.provider_surface == ProviderSurface::Message
+                    && block.sensitivity == ContextSensitivity::Private)
+        );
     }
 
     // ── compose_context_parts_grouped ────────────────────────────────────

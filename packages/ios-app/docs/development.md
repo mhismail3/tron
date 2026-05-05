@@ -29,7 +29,7 @@ Codex mode is separate from Tron agent sessions, but its server lifecycle is
 owned by the paired Tron server. Start or restart the Tron server after
 installing a current Codex CLI; when `server.codexAppServer.enabled` is true,
 the server launches `codex app-server`, writes the capability token under
-`~/.tron/system/run/codex-app-server-token`, and reports the live endpoint via
+`~/.tron/internal/run/codex-app-server-token`, and reports the live endpoint via
 `codexApp.status`.
 
 For local verification:

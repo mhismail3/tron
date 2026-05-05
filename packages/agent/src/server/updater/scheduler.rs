@@ -12,9 +12,10 @@
 //! - **No network if `server.update.enabled == false`.** Tick returns
 //!   immediately with `skipped_disabled = true` so a flipped master
 //!   switch silences the scheduler without needing to respawn it.
-//! - **No work while paused.** The `~/.tron/auto-update.pause` sentinel
-//!   mirrors the contributor `auto-deploy.pause` convention. Present ->
-//!   tick returns `skipped_paused = true` before talking to GitHub.
+//! - **No work while paused.** The `~/.tron/internal/run/auto-update.pause`
+//!   sentinel mirrors the contributor `internal/run/auto-deploy.pause`
+//!   convention. Present -> tick returns `skipped_paused = true` before
+//!   talking to GitHub.
 //! - **No event spam.** Duplicate `update_available` broadcasts for the
 //!   same resolved version are suppressed via the `latest_available_version`
 //!   column of [`UpdaterState`] — the event fires once per transition
@@ -71,10 +72,10 @@ pub struct SchedulerDeps {
     /// session log.
     pub broadcast: Arc<BroadcastManager>,
     /// Path to `updater-state.json`. Typically
-    /// `~/.tron/system/run/updater-state.json`.
+    /// `~/.tron/internal/run/updater-state.json`.
     pub state_path: PathBuf,
     /// Path to the pause sentinel. Typically
-    /// `~/.tron/auto-update.pause`.
+    /// `~/.tron/internal/run/auto-update.pause`.
     pub pause_path: PathBuf,
     /// Current running binary version (normally
     /// `env!("CARGO_PKG_VERSION")`). Accepted as a parameter so tests

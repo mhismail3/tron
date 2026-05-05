@@ -11,6 +11,7 @@
 //! - **Errors**: [`errors::TronError`] hierarchy via `thiserror`, RPC error codes
 //! - **Events**: [`events::StreamEvent`] for LLM streaming, [`events::TronEvent`] for agent lifecycle
 //! - **Retry**: [`retry::RetryConfig`] and backoff calculation
+//! - **Profile Home**: [`constitution`] home migration/recovery and [`profile`] execution specs
 //! - **`AskUserQuestion`**: [`ask_user_question::AskUserQuestion`] interactive tool types
 //! - **Memory**: [`memory::SessionMemory`]
 //!
@@ -24,6 +25,8 @@
 pub mod ask_user_question;
 #[path = "foundation/constants.rs"]
 pub mod constants;
+#[path = "foundation/constitution.rs"]
+pub mod constitution;
 #[path = "protocol/content.rs"]
 pub mod content;
 #[path = "protocol/document_extractor.rs"]
@@ -40,6 +43,8 @@ pub mod memory;
 pub mod messages;
 #[path = "foundation/paths.rs"]
 pub mod paths;
+#[path = "foundation/profile.rs"]
+pub mod profile;
 #[path = "foundation/retry.rs"]
 pub mod retry;
 #[path = "foundation/text.rs"]

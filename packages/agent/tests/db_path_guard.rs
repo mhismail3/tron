@@ -8,6 +8,13 @@ use tron::settings::db_path_policy::{
     validate_production_db_path_for_home,
 };
 
+fn repo_relative(path: &Path) -> String {
+    path.strip_prefix(repo_root())
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -26,6 +33,32 @@ fn setup_home() -> (tempfile::TempDir, PathBuf) {
 fn file_signature(path: &Path) -> (u64, SystemTime) {
     let meta = std::fs::metadata(path).unwrap();
     (meta.len(), meta.modified().unwrap())
+}
+
+fn collect_text_files(path: &Path, files: &mut Vec<PathBuf>) {
+    if path.is_file() {
+        files.push(path.to_path_buf());
+        return;
+    }
+
+    for entry in std::fs::read_dir(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    {
+        let entry = entry.unwrap();
+        let child = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if child.is_dir()
+            && matches!(
+                name.as_ref(),
+                "target" | ".build" | "DerivedData" | "node_modules"
+            )
+        {
+            continue;
+        }
+        if child.is_dir() || child.is_file() {
+            collect_text_files(&child, files);
+        }
+    }
 }
 
 #[test]
@@ -121,7 +154,7 @@ fn startup_migrations_only_touch_log_db() {
 }
 
 #[test]
-fn contributor_scripts_keep_runtime_artifacts_under_system_run() {
+fn contributor_scripts_keep_runtime_artifacts_under_internal_run() {
     let root = repo_root();
     let scripts = [
         root.join("scripts/tron-lib.sh"),
@@ -141,9 +174,81 @@ fn contributor_scripts_keep_runtime_artifacts_under_system_run() {
     }
 
     let tron_lib = std::fs::read_to_string(root.join("scripts/tron-lib.sh")).unwrap();
-    assert!(tron_lib.contains("RUN_DIR=\"$TRON_HOME/system/run\""));
+    assert!(tron_lib.contains("RUN_DIR=\"$TRON_HOME/internal/run\""));
     assert!(tron_lib.contains("CONTRIBUTOR_DIR=\"$RUN_DIR\""));
     assert!(tron_lib.contains("DEV_BUNDLE=\"$RUN_DIR/Tron-Dev.app\""));
+}
+
+#[test]
+fn legacy_tron_home_paths_are_migration_only() {
+    let root = repo_root();
+    let scan_roots = [
+        root.join("AGENTS.md"),
+        root.join(".claude"),
+        root.join("README.md"),
+        root.join("CONTRIBUTING.md"),
+        root.join("packages/agent/defaults"),
+        root.join("packages/agent/docs"),
+        root.join("packages/agent/skills"),
+        root.join("packages/agent/src"),
+        root.join("packages/ios-app/Sources"),
+        root.join("packages/mac-app/Sources"),
+        root.join("packages/mac-app/docs"),
+        root.join("scripts"),
+    ];
+    let old_patterns = [
+        "~/.tron/system/",
+        ".tron/system/",
+        "system/database",
+        "system/settings.json",
+        "system/auth.json",
+        "system/run",
+        "system/transcription",
+        "workspace/memory",
+        "workspace/renders",
+        "workspace/screenshots",
+        "~/.tron/settings",
+        "~/.tron/knowledge/",
+        "~/.tron/vault/",
+        "~/.tron/instructions",
+        "~/.tron/user",
+        "master-default",
+        "~/.tron/auto-update.pause",
+        "~/.tron/auto-deploy.pause",
+        "~/.tron/deploy.lock",
+        "~/.tron/auto-deploy.lock",
+        "~/.tron/tools/json-render",
+    ];
+    let migration_only_files = ["packages/agent/src/core/foundation/constitution.rs"];
+
+    let mut files = Vec::new();
+    for scan_root in scan_roots {
+        if scan_root.exists() {
+            collect_text_files(&scan_root, &mut files);
+        }
+    }
+
+    let mut violations = Vec::new();
+    for file in files {
+        let relative = repo_relative(&file);
+        let Ok(body) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        if migration_only_files.contains(&relative.as_str()) {
+            continue;
+        }
+        for pattern in old_patterns {
+            if body.contains(pattern) {
+                violations.push(format!("{relative}: contains {pattern}"));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "old Tron Home paths must stay confined to migration/repair surfaces:\n{}",
+        violations.join("\n")
+    );
 }
 
 #[test]

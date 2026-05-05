@@ -11,7 +11,7 @@ A persistent, compounding knowledge base built on two active layers: **sources**
 
 ## Paths
 
-All paths below are derived from the system prompt's PATH REFERENCE. This section is the single source of truth for this skill.
+All paths below are derived from the Constitution path reference. This section is the single source of truth for this skill.
 
 | Alias | Path |
 |-------|------|

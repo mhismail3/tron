@@ -1,7 +1,7 @@
 //! Streaming journal — per-turn append-only WAL for crash recovery.
 //!
 //! Each active LLM turn writes streaming deltas (text, thinking, tool calls) to a
-//! journal file at `~/.tron/system/database/journals/{session_id}/turn_{n}.wal`.
+//! journal file at `~/.tron/internal/database/journals/{session_id}/turn_{n}.wal`.
 //! On normal completion the journal is deleted. If the server crashes mid-turn,
 //! orphaned journals are discovered on next startup and their content is persisted
 //! as partial assistant messages.
@@ -272,7 +272,7 @@ impl StreamingJournal {
         Ok(results)
     }
 
-    /// Path for a specific journal: `~/.tron/system/database/journals/{session_id}/turn_{n}.wal`
+    /// Path for a specific journal: `~/.tron/internal/database/journals/{session_id}/turn_{n}.wal`
     pub fn journal_path(session_id: &str, turn: u32) -> PathBuf {
         paths::journals_dir()
             .join(session_id)

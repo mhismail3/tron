@@ -3,7 +3,7 @@
 //! A single Tron installation must not be driven by two processes at once.
 //! The in-process `with_session_write_lock` serializes writers within a single
 //! daemon, but two daemons (e.g. a stray `tron dev` alongside the launchd
-//! service) can both connect to the same `~/.tron/system/database/log.db`,
+//! service) can both connect to the same `~/.tron/internal/database/log.db`,
 //! each believing it is the sole writer. SQLite's own locking serializes the
 //! individual writes but does NOT prevent both processes from independently
 //! allocating the same `(session_id, sequence)` and racing on the UNIQUE

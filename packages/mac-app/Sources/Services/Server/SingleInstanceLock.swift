@@ -6,7 +6,7 @@ import AppKit
 /// companion can run side by side.
 ///
 /// Implementation: exclusive `fcntl(F_SETLK, F_WRLCK)` advisory lock on
-/// `~/.tron/system/run/.mac-wrapper.<bundle-id>.lock`. The kernel cleans up the lock on
+/// `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock`. The kernel cleans up the lock on
 /// process exit (including crash), so we don't have to worry about
 /// stale lockfiles. The PID is written to the file body so `tron
 /// status` can report "held by PID 12345".

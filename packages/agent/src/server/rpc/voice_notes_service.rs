@@ -1,4 +1,4 @@
-//! Voice notes service: storage and listing for `~/.tron/workspace/voice notes/`.
+//! Voice notes service: storage and listing for `~/.tron/workspace/inbox/voice-notes/`.
 
 use serde_json::Value;
 
@@ -135,8 +135,8 @@ mod tests {
     fn notes_dir_points_to_voice_notes() {
         let dir = notes_dir();
         assert!(
-            dir.ends_with(".tron/workspace/voice notes"),
-            "expected .tron/workspace/voice notes dir, got: {dir}"
+            dir.ends_with(".tron/workspace/inbox/voice-notes"),
+            "expected .tron/workspace/inbox/voice-notes dir, got: {dir}"
         );
     }
 

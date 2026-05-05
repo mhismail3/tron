@@ -47,7 +47,7 @@ TRON_RELAY_SECRET="<same HMAC secret set in Wrangler>"
 TRON_RELAY_ENVIRONMENT=production
 ```
 
-Developers testing push delivery locally may export the same variables before building/running `tron`. They are never read from `~/.tron/system/auth.json`.
+Developers testing push delivery locally may export the same variables before building/running `tron`. They are never read from `~/.tron/profiles/auth.json`.
 
 For Xcode Mac wrapper dogfood, prefer `packages/mac-app/.env.local`: copy `packages/mac-app/.env.local.example`, fill in the same relay values, then run `packages/mac-app/scripts/bundle-agent.sh`. The bundle script reads only the relay keys from that ignored file before Cargo compiles the staged helper.
 

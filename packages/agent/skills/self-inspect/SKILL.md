@@ -28,35 +28,35 @@ Whenever you debug or investigate a session — for ANY reason — you MUST writ
 | Investigation workflows | Read `reference/workflows.md` |
 | Server health | `curl -s http://localhost:9847/health \| jq .` |
 | Deep health check | `curl -s http://localhost:9847/health/deep \| jq .` |
-| Settings | `cat ~/.tron/system/settings.json \| jq .` |
-| Auth providers | `cat ~/.tron/system/auth.json \| jq 'del(.. \| .accessToken?, .refreshToken?, .apiKey?, .clientSecret?)'` |
+| Settings | `cat ~/.tron/profiles/user/settings.json \| jq .` |
+| Auth providers | `cat ~/.tron/profiles/auth.json \| jq 'del(.. \| .accessToken?, .refreshToken?, .apiKey?, .clientSecret?)'` |
 
 ## ~/.tron/ Directory Layout
 
 ```
 ~/.tron/
-├── system/                        # Operational state
+├── internal/                      # Runtime state, DB, locks, journals
+│   ├── database/log.db            # Main SQLite database
+│   ├── run/                       # .onboarded, updater-state.json, locks
+│   └── transcription/             # Speech-to-text sidecar
+├── profiles/                      # Agent execution specs and built-in auth
+│   ├── active.toml
+│   ├── auth.toml
 │   ├── auth.json                  # OAuth tokens, API keys, bearerToken
-│   ├── settings.json              # All configuration
-│   ├── run/                       # Runtime state (.onboarded, updater-state.json, locks)
-│   ├── database/
-│   │   └── log.db                 # Main SQLite database
-│   └── transcription/             # Speech-to-text sidecar (worker.py, venv/, models/hf/)
+│   ├── default/
+│   └── user/
 ├── skills/                        # Installed skills (SKILL.md per skill)
-├── memory/                        # Agent memory and working state
-│   ├── rules/SYSTEM.md            # System identity and operational rules
-│   ├── knowledge/                 # Long-term knowledge base
-│   ├── sessions/log.md            # Session completion notes
-│   ├── cron/                      # Cron job working files
-│   └── scratch/                   # Temporary files and experiments
-└── user/
-    └── voice/                     # Voice I/O files
+├── memory/                        # Durable user/world/environment continuity
+└── workspace/                     # Active work, artifacts, experiments
+    ├── automations/
+    ├── knowledge/
+    └── vault/
 ```
 
 ## Quick Access
 
 ```bash
-DB="$HOME/.tron/system/database/log.db"
+DB="$HOME/.tron/internal/database/log.db"
 
 # Recent sessions
 sqlite3 "$DB" "SELECT id, title, origin, datetime(last_activity_at) as last_active, event_count, printf('\$%.4f', total_cost) as cost FROM sessions ORDER BY last_activity_at DESC LIMIT 10;"

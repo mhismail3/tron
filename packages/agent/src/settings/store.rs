@@ -1,7 +1,7 @@
 //! Strict settings persistence.
 //!
 //! `SettingsStore` owns sparse user settings writes for
-//! `~/.tron/system/settings.json`. Reads never silently repair malformed files:
+//! `~/.tron/profiles/user/settings.json`. Reads never silently repair malformed files:
 //! missing means defaults, but invalid JSON, non-object roots, and failed
 //! writes are surfaced to callers so user settings are not accidentally erased.
 
@@ -78,7 +78,7 @@ impl SettingsStore {
         let _guard = write_lock().lock();
         let current = self.read_sparse_json_locked()?;
         let merged = deep_merge(current, updates);
-        validate_sparse_settings(&merged)?;
+        validate_sparse_settings(&merged, &self.path)?;
 
         self.write_json_locked(&merged)?;
         crate::settings::reload_settings_from_path(&self.path)?;
@@ -88,7 +88,7 @@ impl SettingsStore {
     /// Replace the sparse settings file with a fully validated object.
     pub fn replace_sparse_value(&self, value: Value) -> Result<()> {
         let _guard = write_lock().lock();
-        validate_sparse_settings(&value)?;
+        validate_sparse_settings(&value, &self.path)?;
         self.write_json_locked(&value)?;
         crate::settings::reload_settings_from_path(&self.path)?;
         Ok(())
@@ -139,9 +139,10 @@ fn ensure_object(value: &Value) -> Result<()> {
     }
 }
 
-fn validate_sparse_settings(value: &Value) -> Result<()> {
+fn validate_sparse_settings(value: &Value, path: &Path) -> Result<()> {
     ensure_object(value)?;
-    let defaults = serde_json::to_value(TronSettings::default())?;
+    let defaults =
+        serde_json::to_value(crate::settings::loader::load_settings_defaults_for(path)?)?;
     let effective = deep_merge(defaults, value.clone());
     let validated: TronSettings = serde_json::from_value(effective)?;
     validated.validate_strict()?;

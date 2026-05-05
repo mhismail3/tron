@@ -258,7 +258,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron install` | Contributor-only shell install for workspace testing. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
 | `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `settings.json` and/or `auth.json`. |
 | `tron auto-deploy` | Contributor-only auto-deploy watcher (`install`, `uninstall`, `status`, `pause`, `resume`, `logs`). Refuses to run outside a git repo — for DMG users, see `tron self-update` instead. |
-| `tron self-update` | User-mode GitHub Releases updater (`check`, `status`, `pause`, `resume`, `logs`, `reset`). Opt-in via `server.update.enabled`; gated by `~/.tron/auto-update.pause` sentinel. |
+| `tron self-update` | User-mode GitHub Releases updater (`check`, `status`, `pause`, `resume`, `logs`, `reset`). Opt-in via `server.update.enabled`; gated by `~/.tron/internal/run/auto-update.pause` sentinel. |
 
 ### Runtime
 
@@ -305,7 +305,7 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 | `GetConfirmation` | Ask the user to confirm a high-stakes action before proceeding. |
 | `NotifyApp` | Send a push notification to iOS through the Cloudflare relay, or use the stub delegate when relay config is absent. |
 | `WebFetch` | Fetch and extract content from a URL. Uses an LLM subagent summarizer for large pages. |
-| `WebSearch` | Search the web via the Brave Search API. Registered even before a Brave key exists; calls return a structured credential error until `services.brave` is set in `~/.tron/system/auth.json`. |
+| `WebSearch` | Search the web via the Brave Search API. Registered even before a Brave key exists; calls return a structured credential error until `services.brave` is set in `~/.tron/profiles/auth.json`. |
 | `Display` | Render rich content (images, streams) for iOS clients via blob storage and `DisplayFrame` events. |
 | `ComputerUse` | Screenshot, click, type, keypress, scroll, window management. |
 | `McpSearch` | Meta-tool that searches across all configured MCP server tool catalogs by keyword. Registered with an empty result set when no MCP servers are configured. |
@@ -314,13 +314,13 @@ Tools are registered by `packages/agent/src/tool_factory.rs::create_tool_registr
 | `ManageJob` | Inspect, signal, and clean up background jobs (Bash backgrounded processes + subagents). |
 | `Wait` | Block until specified background jobs complete or hit a timeout. |
 
-Source-control operations (sync main, push, switch branches, finalize a session into main, resolve merge conflicts) are driven by the user via the iOS Source Control sheet — the agent does not have typed git tools. When a session has a worktree, the agent is told (via a system-prompt block in `runtime/context/system_prompts::GIT_WORKFLOW_PROMPT`) that it can inspect state and make commits via `Bash git …` but must defer destructive / publishing operations to the user.
+Source-control operations (sync main, push, switch branches, finalize a session into main, resolve merge conflicts) are driven by the user via the iOS Source Control sheet — the agent does not have typed git tools. When a session has a worktree, the agent is told through the profile-backed `profiles/default/prompts/git-workflow.md` block that it can inspect state and make commits via `Bash git …` but must defer destructive / publishing operations to the user.
 
 ---
 
 ## RPC API
 
-Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **166 methods** across three groups.
+Tron RPC over WebSocket. The full registration list is in `packages/agent/src/server/rpc/handlers/mod.rs` (`register_core`, `register_capabilities`, `register_platform`) — that file is the source of truth. The current registration totals **167 methods** across three groups.
 
 ### Connection
 
@@ -343,16 +343,16 @@ Messages use the server's WebSocket RPC framing. Request IDs are strings and are
 
 - `port` — WebSocket listening port (mirrors the `--port` CLI flag).
 - `tailscaleIp` — cached `server.tailscaleIp` from `settings.json`, or `null` if unset. The Mac pairing wizard resolves Tailscale live on fresh installs, then writes this cache for later wrapper/menu-bar reads and future server settings reloads.
-- `paired` — `true` once `~/.tron/system/run/.onboarded` exists. The sentinel is touched by the Mac wizard at the end of its install flow OR on the first successful WS auth.
+- `paired` — `true` once `~/.tron/internal/run/.onboarded` exists. The sentinel is touched by the Mac wizard at the end of its install flow OR on the first successful WS auth.
 
 These fields are additive; older clients that ignore them continue to work unchanged.
 
 `system.checkForUpdates` / `system.getUpdateStatus` drive user-mode GitHub Releases checks (see "Deployment → User-mode update checks"). Each has a deliberately tame default response so iOS + Mac menu-bar UIs render a meaningful empty state instead of a spurious error:
 
 - `system.checkForUpdates` returns `{ available: false, disabled: true, channel, currentVersion }` when `server.update.enabled` is `false` (the safe default) — no GitHub fetch is performed.
-- `system.getUpdateStatus` is a pure read of `settings.server.update` + `~/.tron/system/run/updater-state.json`; it always succeeds and exposes `enabled: false` plus null `latestAvailableVersion` for un-opted-in users.
+- `system.getUpdateStatus` is a pure read of `settings.server.update` + `~/.tron/internal/run/updater-state.json`; it always succeeds and exposes `enabled: false` plus null `latestAvailableVersion` for un-opted-in users.
 
-### Core (64)
+### Core (65)
 
 | Group | Count | Methods |
 |-------|------:|---------|
@@ -362,7 +362,7 @@ These fields are additive; older clients that ignore them continue to work uncha
 | `session` | 13 | `session.create`, `session.resume`, `session.list`, `session.delete`, `session.fork`, `session.getHead`, `session.getState`, `session.getHistory`, `session.reconstruct`, `session.archive`, `session.unarchive`, `session.archiveOlderThan`, `session.export` |
 | `agent` | 10 | `agent.prompt`, `agent.abort`, `agent.abortTool`, `agent.status`, `agent.queuePrompt`, `agent.dequeuePrompt`, `agent.clearQueue`, `agent.deliverSubagentResults`, `agent.submitConfirmation`, `agent.submitAnswers` |
 | `model` / `config` | 3 | `model.list`, `model.switch`, `config.setReasoningLevel` |
-| `context` | 8 | `context.getSnapshot`, `context.getDetailedSnapshot`, `context.shouldCompact`, `context.previewCompaction`, `context.confirmCompaction`, `context.canAcceptTurn`, `context.clear`, `context.compact` |
+| `context` | 9 | `context.getSnapshot`, `context.getDetailedSnapshot`, `context.getAuditTrace`, `context.shouldCompact`, `context.previewCompaction`, `context.confirmCompaction`, `context.canAcceptTurn`, `context.clear`, `context.compact` |
 | `events` | 5 | `events.getHistory`, `events.getSince`, `events.subscribe`, `events.unsubscribe`, `events.append` |
 | `settings` | 3 | `settings.get`, `settings.update`, `settings.resetToDefaults` |
 | `auth` | 9 | `auth.get`, `auth.update`, `auth.clear`, `auth.oauthBegin`, `auth.oauthComplete`, `auth.renameAccount`, `auth.setActive`, `auth.removeAccount`, `auth.removeApiKey` |
@@ -456,17 +456,17 @@ The `EventBridge` also routes browser CDP frames and `Display` tool frames when 
 
 ## Settings
 
-**Location:** `~/.tron/system/settings.json`
+**Location:** `~/.tron/profiles/`
 
 Settings are loaded from three layers (highest priority last):
 
-1. **Compiled defaults** (`TronSettings::default()`)
-2. **User file** (`~/.tron/system/settings.json`, deep-merged over defaults)
+1. **Managed defaults** (`~/.tron/profiles/default/settings/defaults.json`)
+2. **User file** (`~/.tron/profiles/user/settings.json`, deep-merged over defaults)
 3. **Environment variables** (`TRON_*` overrides)
 
 Settings are server-authoritative. The iOS app reads the effective merged values via `settings.get` and writes sparse user overrides via `settings.update` / `settings.resetToDefaults`. Missing files use defaults, but malformed or non-object JSON returns an RPC error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then swapped into the cached `Arc<TronSettings>`.
 
-`settings.json` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed. Built-in defaults stay in `TronSettings::default()` and appear in `settings.get` after the user file is deep-merged over them. iOS device-only preferences live in iOS storage/Keychain, not in the server settings file.
+`defaults.json` is the auditable profile-seeded baseline from `packages/agent/defaults/profiles/default/settings/defaults.json` or the bundled Mac app `Contents/Resources/Constitution/profiles/default/settings/defaults.json`. `profiles/user/settings.json` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed. If the managed default is missing or corrupt, startup restores it from compiled defaults; malformed user settings fail fast. iOS device-only preferences live in iOS storage/Keychain, not in the server settings file.
 
 The schema is defined in `packages/agent/src/settings/types/`. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
 
@@ -568,7 +568,7 @@ The schema is defined in `packages/agent/src/settings/types/`. All field names a
 
 ## Authentication
 
-**Storage:** `~/.tron/system/auth.json` (mode 600)
+**Storage:** `~/.tron/profiles/auth.json` (mode 600)
 
 The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/llm/auth/types.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
 
@@ -603,11 +603,11 @@ OpenAI uses the `openai-codex` provider key for both auth modes. ChatGPT OAuth c
 
 ### WebSocket Bearer Token
 
-**Storage:** `~/.tron/system/auth.json` top-level `bearerToken` (mode 600, atomic writes)
+**Storage:** `~/.tron/profiles/auth.json` top-level `bearerToken` (mode 600, atomic writes)
 
 Stored beside provider auth in the same secure file. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
 
-The token is generated during first server startup and written as `bearerToken` inside `~/.tron/system/auth.json`. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS pairing step.
+The token is generated during first server startup and written as `bearerToken` inside `~/.tron/profiles/auth.json`. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS pairing step.
 
 ```bash
 # Rotate the token (forces every paired iOS device to pair again)
@@ -618,7 +618,7 @@ tron auth rotate
 
 Rotation is serialized through a process-wide mutex and the on-disk write is atomic (`tempfile + sync_all + rename`), so a concurrent rotate from the menu bar and CLI cannot corrupt the file. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
 
-The first-run sentinel `~/.tron/system/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported to iOS via the `paired` field of `system.getInfo` (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
+The first-run sentinel `~/.tron/internal/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported to iOS via the `paired` field of `system.getInfo` (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
 
 See [`packages/agent/src/server/onboarding/mod.rs`](packages/agent/src/server/onboarding/mod.rs) for the full token + sentinel lifecycle.
 
@@ -627,6 +627,8 @@ See [`packages/agent/src/server/onboarding/mod.rs`](packages/agent/src/server/on
 ## Context and Compaction
 
 The context system manages the LLM's input window. Each turn assembles: system prompt + rules + skills + conversation history + tool results.
+
+For the full source-grounded map of what can enter model context, how it is constructed, where it is persisted, and which Constitution/config surfaces are still incomplete, see [`packages/agent/docs/context-architecture.md`](packages/agent/docs/context-architecture.md).
 
 ### Compaction Pipeline
 
@@ -672,7 +674,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 ## Database Schema
 
-All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. The schema is a single consolidated migration, `packages/agent/src/events/sqlite/migrations/v001_schema.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. There is no migration chain to replay — the project's policy is "develop against v001, delete `~/.tron/system/database/log.db` when the schema changes before release, add v002+ only after the first release." The runner verifies each applied migration with `PRAGMA foreign_key_check` and refuses to commit if any dangling reference would be left behind.
+All data lives in a single SQLite file: `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/events/sqlite/migrations/v001_schema.sql`; existing v001 installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
 
 ### Tables
 
@@ -691,6 +693,9 @@ All data lives in a single SQLite file: `~/.tron/system/database/log.db`. WAL mo
 | `cron_runs` | Per-run history for cron jobs (status, started/completed timestamps, output, exit code) |
 | `prompt_history` | Deduplicated interactive-prompt history keyed by normalized text hash (use_count, first/last_used_at, char_count) |
 | `prompt_snippets` | User-authored reusable prompt snippets (`name`, `text`, timestamps) |
+| `constitution_home_audit` | Audited creates, updates, moves, deletes, seeds, repairs, and external edits for files under `~/.tron/` |
+| `constitution_resolution_audit` | Settings, instruction, context, provider-payload, vault, automation, and outcome resolution records with effective hashes and blob refs |
+| `constitution_context_blocks` | Typed model-context blocks for replay: source home/path/blob, hash, sensitivity, cache class, inclusion reason, precedence, and provider surface |
 
 The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. Prompt history and cron state live in their dedicated tables; session/task views are reconstructed from the canonical event log.
 
@@ -773,11 +778,11 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles a signed helper at `Contents/Library/LoginItems/Tron Server.app`, a bundled LaunchAgent plist, managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. The wizard registers the helper through `SMAppService`, syncs bundled managed skills into `~/.tron/skills/`, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that polls `system.ping` every 30s.
 
 ```
 packages/mac-app/Sources/
-+-- TronMacApp.swift           App entry: branches on ~/.tron/system/run/.onboarded sentinel
++-- TronMacApp.swift           App entry: branches on ~/.tron/internal/run/.onboarded sentinel
 +-- EnvironmentSetup.swift     Dev vs release bundle-ID wiring, log paths, shared state root
 +-- Wizard/                    First-run flow
 |   +-- WizardState.swift      @Observable state machine + `WizardStep` enum
@@ -806,7 +811,7 @@ packages/mac-app/Sources/
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
 3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system.ping` answers. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles `requiresApproval` by opening Login Items settings, and polls `system.ping` while ignoring initial `connection.established` frames.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, labels the exact app entry to enable for each permission, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after wizard-opened Settings panes, and keeps Re-check as a non-restarting probe.
-5. **Transcription** — opt-in step for local voice transcription. The step copies `worker.py` and `requirements.txt` from the signed app bundle into `~/.tron/system/transcription/` so the setting can be enabled later. Enabling writes `server.transcription.enabled = true`, restarts the helper once, and lets the Parakeet model download into `~/.tron/system/transcription/models/hf/` when the sidecar starts. Skipping writes `enabled = false` and does not restart the server.
+5. **Transcription** — opt-in step for local voice transcription. The step copies `worker.py` and `requirements.txt` from the signed app bundle into `~/.tron/internal/transcription/` so the setting can be enabled later. Enabling writes `server.transcription.enabled = true`, restarts the helper once, and lets the Parakeet model download into `~/.tron/internal/transcription/models/hf/` when the sidecar starts. Skipping writes `enabled = false` and does not restart the server.
 6. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open fallbacks. TestFlight then owns beta availability and update selection.
 7. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it to `settings.json`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
 8. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
@@ -823,12 +828,12 @@ packages/mac-app/Sources/
 | Show logs | Opens the native logs window backed by the read-only `logs.recent` RPC |
 | Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
 | Check for updates | Opens the latest GitHub Release |
-| Uninstall Tron | Confirm dialog + `SMAppService.unregister`; clears `system/run/` runtime state; optional checkboxes remove `settings.json` and/or `auth.json`. The database and workspace are always preserved. |
+| Uninstall Tron | Confirm dialog + `SMAppService.unregister`; clears `internal/run/` runtime state; optional checkboxes remove `profiles/user/settings.json` and/or `profiles/auth.json`. The database and workspace are always preserved. |
 | Quit Tron | Quits wrapper; server keeps running via LaunchAgent |
 
 ### Variants & Workflows
 
-The wrapper coexists with local Release testing, Xcode Debug UI dogfood, an isolated Xcode install sandbox, and the `tron dev` agent-only workflow. Production workflows share `port 9847` and the `~/.tron/system/` data tree; the isolated install scheme deliberately uses `port 9848`, `~/.tron-dev`, and `com.tron.server.dev`.
+The wrapper coexists with local Release testing, Xcode Debug UI dogfood, an isolated Xcode install sandbox, and the `tron dev` agent-only workflow. Production workflows share `port 9847` and the `~/.tron/internal/` data tree; the isolated install scheme deliberately uses `port 9848`, `~/.tron-dev`, and `com.tron.server.dev`.
 
 | Workflow | Build product | Bundle ID | Lives at | What it is |
 |---|---|---|---|---|
@@ -836,14 +841,14 @@ The wrapper coexists with local Release testing, Xcode Debug UI dogfood, an isol
 | **Local Release test** (Xcode Release copied into place) | `Tron.app` | `com.tron.mac` | `/Applications/Tron.app` | Same installed-release path as the DMG; useful for validating local changes before packaging |
 | **Debug companion** (default Xcode Run) | `TronMac.app` | `com.tron.mac.dev` | `~/Library/Developer/Xcode/DerivedData/.../Build/Products/Debug/TronMac.app` | SwiftUI wrapper dogfood that coexists with `/Applications/Tron.app`; it observes the production server but does not register, pause, restart, or uninstall it |
 | **Isolated install test** (`TronMac Isolated Install` scheme) | `TronMac.app` | `com.tron.mac.dev` | DerivedData | First-run/reinstall sandbox with separate LaunchAgent label, port, and data root |
-| **Agent dev** (`tron dev`) | `Tron-Dev.app` (no SwiftUI — just a `.app` wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/system/run/Tron-Dev.app` | Headless agent only — used by contributors iterating on the Rust server without rebuilding the wrapper |
+| **Agent dev** (`tron dev`) | `Tron-Dev.app` (no SwiftUI — just a `.app` wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/internal/run/Tron-Dev.app` | Headless agent only — used by contributors iterating on the Rust server without rebuilding the wrapper |
 
 Mutual exclusion:
-- Duplicate wrappers of the same bundle ID — guarded by `~/.tron/system/run/.mac-wrapper.<bundle-id>.lock` (`fcntl(F_SETLK, F_WRLCK)`). Release and Debug companion wrappers intentionally use different lock files so their menu icons can coexist.
-- Production agents — guarded by `~/.tron/system/database/log.db.lock` (cross-process exclusive `flock`).
+- Duplicate wrappers of the same bundle ID — guarded by `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` (`fcntl(F_SETLK, F_WRLCK)`). Release and Debug companion wrappers intentionally use different lock files so their menu icons can coexist.
+- Production agents — guarded by `~/.tron/internal/database/log.db.lock` (cross-process exclusive `flock`).
 - LaunchAgent ownership — installed Release is authoritative for `com.tron.server` and repairs stale Debug/DerivedData registrations before restart; default Xcode Debug is companion-only. The `TronMac Isolated Install` scheme owns `com.tron.server.dev` on port `9848` with `TRON_HOME_NAME=.tron-dev`.
 - Port `9847` — `tron dev` calls `launchctl bootout com.tron.server` before binding, so the installed helper is paused while dev-mode runs.
-- Direct server guard — if no LaunchAgent owns the service but port `9847` is already bound or `system/database/log.db.lock` is held, the app reports another Tron server instead of registering a second helper or choosing a different port.
+- Direct server guard — if no LaunchAgent owns the service but port `9847` is already bound or `internal/database/log.db.lock` is held, the app reports another Tron server instead of registering a second helper or choosing a different port.
 
 A contributor can have the DMG installed AND run the default Xcode Debug wrapper for menu/wizard UI work; both menu icons can coexist and both observe the production server. Running `tron dev` is still the explicit server-takeover path for Rust-agent iteration: the wrapper's menu bar keeps pinging port 9847, reports the `Tron-Dev.app` PID/uptime, and shows `Dev Server active` while dev owns the port. Quitting `tron dev` restarts the installed helper by invoking `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which re-enters the same `SMAppService` registration path used by the app. Pre-onboarding production cleanup uses the installed app's paired internal command `--tron-uninstall-and-quit` so stale Login Item registrations are removed by `SMAppService.unregister` instead of only being booted out of launchd; Debug companion command mode refuses to uninstall production. See [`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants) for the full breakdown including the on-disk artifacts each workflow shares.
 
@@ -864,7 +869,7 @@ The Mac wizard surfaces three system permissions after the server is installed. 
 | Screen Recording | ComputerUse screenshots and visual inspection | Yes | Wrapper `CGPreflightScreenCaptureAccess()` plus a fresh wrapper probe process |
 | Accessibility | ComputerUse mouse/keyboard control | Yes | `AXIsProcessTrusted()` in the wrapper |
 
-The install step validates the signed `Tron Server.app`, registers the bundled LaunchAgent through `SMAppService`, and waits for the first heartbeat. Ordinary agent startup does not probe TCC or open System Settings, so macOS permission prompts cannot appear while the user is still on the install step. The LaunchAgent's `AssociatedBundleIdentifiers` lists the wrapper bundle IDs, so macOS presents the helper's privacy grants under the responsible wrapper app: `Tron.app` in Release and `TronMac.app` in Debug. All three wizard rows therefore name the wrapper app, not `Tron Server.app`. The settings buttons only open System Settings; they never call prompt APIs that would create a second modal over the already-open pane. Screen Recording additionally shows a small draggable wrapper-app icon for the macOS case where the row is not inserted automatically; the row copy tells the user to drag that icon into the list. Re-check/app activation use native non-prompting probes. Screen Recording probes the current wrapper first; if macOS still reports the current process as stale after a Settings change, the wizard starts the same wrapper executable once as a quiet child probe and reads that fresh process result from `~/.tron/system/run/`. Once all three rows are green, Continue restarts the helper one time so launch-time-applied grants are visible to the server before pairing.
+The install step validates the signed `Tron Server.app`, registers the bundled LaunchAgent through `SMAppService`, and waits for the first heartbeat. Ordinary agent startup does not probe TCC or open System Settings, so macOS permission prompts cannot appear while the user is still on the install step. The LaunchAgent's `AssociatedBundleIdentifiers` lists the wrapper bundle IDs, so macOS presents the helper's privacy grants under the responsible wrapper app: `Tron.app` in Release and `TronMac.app` in Debug. All three wizard rows therefore name the wrapper app, not `Tron Server.app`. The settings buttons only open System Settings; they never call prompt APIs that would create a second modal over the already-open pane. Screen Recording additionally shows a small draggable wrapper-app icon for the macOS case where the row is not inserted automatically; the row copy tells the user to drag that icon into the list. Re-check/app activation use native non-prompting probes. Screen Recording probes the current wrapper first; if macOS still reports the current process as stale after a Settings change, the wizard starts the same wrapper executable once as a quiet child probe and reads that fresh process result from `~/.tron/internal/run/`. Once all three rows are green, Continue restarts the helper one time so launch-time-applied grants are visible to the server before pairing.
 
 ---
 
@@ -887,7 +892,7 @@ The deploy process (`scripts/tron::cmd_deploy`) is retained for local contributo
 3. Builds the release binary (`cargo build --release`).
 4. Runs `cargo test`. Failures prompt for continuation unless `--ci`.
 5. Under `--ci`, also runs the benchmark gate.
-6. Uses contributor-only artifacts directly under `~/.tron/system/run/`.
+6. Uses contributor-only artifacts directly under `~/.tron/internal/run/`.
 7. Syncs managed skills and transcription support.
 8. Runs local health checks for the contributor server.
 
@@ -897,57 +902,75 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 
 ```
 ~/.tron/
++-- profiles/                     Agent execution specs and built-in auth
+|   +-- active.toml                Active profile pointer
+|   +-- auth.toml                  Readable credential-profile registry
+|   +-- auth.json                  LLM provider OAuth tokens + API keys + bearerToken (mode 600)
+|   +-- default/            Managed, restorable default execution profile
+|   |   +-- profile.toml           Complete default profile spec
+|   |   +-- prompts/               Core, chat, local, and git workflow prompts
+|   |   +-- context/               Context block assembly policy
+|   |   +-- providers/             Provider-specific presentation defaults
+|   |   +-- summarizers/           Compaction and retention prompts
+|   |   +-- subagents/             Subagent prompts
+|   |   +-- tools/                 Tool presentation policy
+|   |   +-- settings/              Managed settings defaults
+|   +-- user/                      Sparse user profile/settings/prompt overrides
+|       +-- settings.json          Sparse user settings overrides
+|       +-- containers.json        Container configuration
 +-- skills/                       Global skills (SKILL.md files); managed entries have a .managed sentinel
-+-- system/
-|   +-- settings.json             Sparse user settings overrides (optional; deep-merged over compiled defaults)
-|   +-- auth.json                 LLM provider OAuth tokens + API keys + bearerToken (mode 600)
-|   +-- database/                 SQLite event store
-|   |   +-- log.db                Events, sessions, tasks, journals, cron state
-|   |   +-- log.db.lock           OS-level flock sidecar; one Tron process owns it while running
-|   |   +-- journals/             Streaming journals for crash recovery of partial LLM output
-|   +-- run/                      Mutable runtime state and local contributor artifacts
-|   |   +-- auth.lock             Auth-file refresh lock
-|   |   +-- codex-app-server-token Managed Codex App Server capability token (mode 600)
-|   |   +-- .mac-wrapper.*.lock   Per-wrapper menu app lock
-|   |   +-- .onboarded            First-run sentinel; presence drives `system.getInfo.paired`
-|   |   +-- mac-app-version.json  Last app build whose menu-bar launch finalized the server
-|   |   +-- updater-state.json    Update-check scheduler state (lastCheckAt, latestAvailableVersion, latestDownloadUrl)
-|   |   +-- Tron-Dev.app          Optional `tron dev` headless agent bundle
-|   |   +-- Tron-Deploy.app       Optional contributor shell-service bundle
-|   |   +-- tron-cli              Optional contributor CLI shim symlinked from `~/.local/bin/tron`
-|   |   +-- tron-lib.sh           Optional contributor CLI helper library
-|   |   +-- *.log, *.json, *.bak  Optional contributor run logs, sentinels, and rollback backup
-|   +-- transcription/            Speech-to-text sidecar, created by the Mac wizard transcription step or contributor tooling
-|       +-- worker.py             parakeet-mlx Python worker copied from the signed app bundle or repo source
-|       +-- requirements.txt      Pip deps for the venv, copied with worker.py
-|       +-- venv/                 Auto-created when enabled and the sidecar starts
-|       +-- models/hf/            HuggingFace model cache (HF_HOME), populated by the first enabled sidecar run
-+-- workspace/                    User working area (mounted into agent context)
-    +-- vault/                    AES-256-CBC encrypted credential store (entries/, index.json, .master-key)
-    +-- knowledge/                Long-term notes and research
-    +-- memory/                   User-memory root (auto-injected into every session)
-    |   +-- MEMORY.md             Canonical single-file root (name, email, preferences)
-    |   +-- rules/                Detail files (listed in context, read on demand)
-    |   |   +-- SYSTEM.md         Optional global system-prompt override
-    |   |   +-- *.md              User-curated detail files (user-preferences.md, publish-website.md, ...)
-    |   +-- sessions/             Auto-generated session retain summaries
-    +-- reports/                  Analysis and investigation reports
-    +-- automations/              Cron job working directories + automations.json
-    +-- scratch/                  Downloads, temp files, experiments
-    +-- screenshots/              Saved screenshots from the computer-use tool
-    +-- plans/                    Plan files written during plan mode
-    +-- renders/                  Generated artifacts (PDFs, images, ...)
-    +-- voice notes/              Voice note recordings
++-- memory/                       Durable user/agent continuity
+|   +-- MEMORY.md                  Canonical single-file root (name, preferences, active projects)
+|   +-- rules/                     Detail files listed in context, read on demand
+|   +-- sessions/                  Auto-generated retain summaries
++-- workspace/                    Active work and generated artifacts
+|   +-- inbox/
+|   |   +-- voice-notes/           Transcribed voice notes
+|   +-- projects/                  Project-local active work
+|   +-- automations/               Cron job definitions and working directories
+|   +-- plans/                     Plan files and TODOs
+|   +-- reports/                   Analysis and investigation reports
+|   +-- artifacts/
+|   |   +-- renders/               Rendered pages displayed in chat
+|   |   +-- screenshots/           Saved screenshots from the computer-use tool
+|   |   +-- exports/               Exported artifacts
+|   +-- scratch/                   Downloads, temp files, experiments
+|   +-- labs/                      Manifested experimental spaces
+|   +-- archive/                   Retired workspace material
+|   +-- knowledge/                 Curated wiki/research experiment
+|   +-- vault/                     Skill-owned local fast secret storage
++-- internal/                     Tron-owned runtime machinery
+    +-- database/                  SQLite event store and audit records
+    |   +-- log.db                 Events, sessions, tasks, journals, automation state, Constitution audit
+    |   +-- log.db.lock            OS-level flock sidecar; one Tron process owns it while running
+    |   +-- journals/              Streaming journals for crash recovery of partial LLM output
+    +-- run/                       Mutable runtime state and local contributor artifacts
+    |   +-- auth.lock              Auth-file refresh lock
+    |   +-- auto-deploy.lock       Contributor deploy concurrency lock
+    |   +-- auto-deploy.pause      Contributor deploy pause sentinel
+    |   +-- auto-update.pause      User-mode updater pause sentinel
+    |   +-- codex-app-server-token Managed Codex App Server capability token (mode 600)
+    |   +-- deploy.lock            Manual deploy concurrency lock
+    |   +-- .mac-wrapper.*.lock    Per-wrapper menu app lock
+    |   +-- .onboarded             First-run sentinel; presence drives `system.getInfo.paired`
+    |   +-- mac-app-version.json   Last app build whose menu-bar launch finalized the server
+    |   +-- updater-state.json     Update-check scheduler state
+    |   +-- Tron-Dev.app           Optional `tron dev` headless agent bundle
+    +-- transcription/             Speech-to-text sidecar
+        +-- worker.py              parakeet-mlx Python worker
+        +-- requirements.txt       Pip deps for the venv
+        +-- venv/                  Auto-created when enabled and the sidecar starts
+        +-- models/hf/             HuggingFace model cache (HF_HOME)
 ```
 
 Notes:
-- `~/.tron/user/` is reserved (`paths::user_dir()`) but not currently populated.
-- Credentials for external CLIs (Google Workspace, etc.) live in `workspace/vault/`. See the relevant skills for the materialization pattern.
-- Additional sentinels at the root of `~/.tron/` toggle worker behavior: `auto-deploy.pause` (contributor-only watcher) and `auto-update.pause` (DMG-user self-updater). Both are managed by the respective `pause`/`resume` CLI subcommands.
+- The five top-level homes are the primitives: behavior in `profiles`, capabilities in `skills`, continuity in `memory`, active substrate in `workspace`, and runtime machinery in `internal`.
+- Credentials for external CLIs (Google Workspace, etc.) live in `~/.tron/workspace/vault/`. Tron-owned provider auth and the bearer token live in `~/.tron/profiles/auth.json`.
+- Pause/lock sentinels live under `~/.tron/internal/run/` with the rest of the runtime machinery. They are managed by the respective CLI subcommands, not user-edited at the Tron Home root.
 
 ### Service (SMAppService)
 
-The production Mac app registers `com.tron.server` with `SMAppService.agent(plistName: "com.tron.server.plist")`. The notarized app must live at `/Applications/Tron.app`; the bundled LaunchAgent lives inside the app at `Contents/Library/LaunchAgents/com.tron.server.plist`, and its `BundleProgram` points at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` with `ProgramArguments` of `tron --port 9847 --quiet`. `AssociatedBundleIdentifiers` lists the wrapper bundle IDs (`com.tron.mac`, `com.tron.mac.dev`) so Login Items/TCC attribution follows the responsible wrapper app. No production code writes `~/Library/LaunchAgents` or copies an app bundle into `~/.tron/system/`. An enabled Login Item registration without a loaded launchd job is not treated as installed/running; the current app replaces that registration through SMAppService and still waits for the server heartbeat. If `launchctl print` reveals a stale event trigger pointing at a missing/mismatched helper executable, a stale parent bundle build number for the same installed app, or a Debug/DerivedData parent owns the production label, the installed app boots it out, unregisters the stale registration, and re-registers `/Applications/Tron.app` before restarting.
+The production Mac app registers `com.tron.server` with `SMAppService.agent(plistName: "com.tron.server.plist")`. The notarized app must live at `/Applications/Tron.app`; the bundled LaunchAgent lives inside the app at `Contents/Library/LaunchAgents/com.tron.server.plist`, and its `BundleProgram` points at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` with `ProgramArguments` of `tron --port 9847 --quiet`. `AssociatedBundleIdentifiers` lists the wrapper bundle IDs (`com.tron.mac`, `com.tron.mac.dev`) so Login Items/TCC attribution follows the responsible wrapper app. No production code writes `~/Library/LaunchAgents` or copies an app bundle into `~/.tron/internal/`. An enabled Login Item registration without a loaded launchd job is not treated as installed/running; the current app replaces that registration through SMAppService and still waits for the server heartbeat. If `launchctl print` reveals a stale event trigger pointing at a missing/mismatched helper executable, a stale parent bundle build number for the same installed app, or a Debug/DerivedData parent owns the production label, the installed app boots it out, unregisters the stale registration, and re-registers `/Applications/Tron.app` before restarting.
 
 Local Release builds use the same path rule: copy the built `Tron.app` to `/Applications/Tron.app` before testing install/registration. If a DMG build is already installed, the local Release build replaces that same slot; reopen `/Applications/Tron.app` and restart/resume the helper so the wrapper repairs SMAppService before launchd executes the bundled server. Default Debug Xcode builds use bundle ID `com.tron.mac.dev`, may run from DerivedData, and are companion-only: they can show the menu bar and observe the production server, but server pause/restart/uninstall/install actions are disabled. Use the `TronMac Isolated Install` scheme when testing the first-run/reinstall wizard from Xcode; it registers `com.tron.server.dev`, runs on port `9848`, and stores data under `~/.tron-dev`. For agent-only iteration, `tron dev` stops the production LaunchAgent, binds port `9847`, and later restores the installed helper through the wrapper's internal `--tron-start-server-and-quit` command so ServiceManagement remains the only production registration path.
 
@@ -992,7 +1015,7 @@ Safety invariants (all test-covered):
 
 - No app-bundle mutation: runtime files stay outside `Tron.app`, and replacing the app is a user-visible DMG install.
 - Skipped if a dev server has taken over port 9847 (same guard as `auto-deploy`).
-- Pause-able via `~/.tron/auto-update.pause` sentinel; `tron self-update pause|resume` manages it.
+- Pause-able via `~/.tron/internal/run/auto-update.pause` sentinel; `tron self-update pause|resume` manages it.
 
 **Contrast with `tron auto-deploy`**: the latter is contributor-only, pulls from `origin/main`, and refuses to run outside a git repo. Users on DMG-installed builds use `tron self-update` exclusively. See [CLI Reference → Deployment](#cli-reference) for the full command surface.
 
@@ -1055,7 +1078,7 @@ These constraints are enforced in code with `// INVARIANT:` markers at the enfor
 
 7. **Hook drain ordering**: Background hooks are drained before accepting a new prompt (pre-run) and before session reconstruction (resume). Prevents stale hook state from interfering.
 
-8. **Production DB guard**: Startup validates the database path is `~/.tron/system/database/log.db` only. Rejects alternate filenames, wrong directories, and symlinked paths.
+8. **Production DB guard**: Startup validates the database path is `~/.tron/internal/database/log.db` only. Rejects alternate filenames, wrong directories, and symlinked paths.
 
 9. **Single-process DB ownership**: Startup takes an OS-level `flock(2)` on `log.db.lock` before opening the connection pool. A second `tron` process pointed at the same database aborts with a clear error naming the holder's PID, instead of silently racing on `(session_id, sequence)` writes. Released on process exit (normal or abnormal). Enforced by `events/sqlite/process_lock.rs::acquire_database_lock` called from `init_database` in `main.rs`.
 

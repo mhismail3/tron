@@ -3,11 +3,11 @@
 //! Configuration management with layered sources for the Tron agent.
 //!
 //! Settings are loaded from three layers (in priority order):
-//! 1. **Compiled defaults** — [`TronSettings::default()`]
-//! 2. **User file** — `~/.tron/system/settings.json` (deep-merged over defaults)
+//! 1. **Managed defaults** — `~/.tron/profiles/default/settings/defaults.json`
+//! 2. **User file** — `~/.tron/profiles/user/settings.json` (deep-merged over defaults)
 //! 3. **Environment variables** — `TRON_*` overrides (highest priority)
 //!
-//! Settings are server-authoritative: `~/.tron/system/settings.json` stores
+//! Settings are server-authoritative: `~/.tron/profiles/user/settings.json` stores
 //! sparse user overrides. iOS reads/writes the effective server settings via
 //! `settings.get`, `settings.update`, and `settings.resetToDefaults`.
 //! Device-only iOS preferences stay in the app's local storage, not here.
@@ -28,7 +28,7 @@
 //!
 //! ## Module Position
 //!
-//! Depends on: (none — standalone schema + loader).
+//! Depends on: core foundation paths/Constitution defaults.
 //! Depended on by: events, runtime, server.
 
 #![deny(unsafe_code)]
@@ -42,7 +42,9 @@ pub mod types;
 
 pub use errors::{Result, SettingsError};
 pub use loader::{
-    deep_merge, load_settings, load_settings_from_path, settings_path, tron_home_dir,
+    deep_merge, load_settings, load_settings_defaults_for, load_settings_from_path,
+    seed_settings_defaults, seed_settings_defaults_at, settings_defaults_path, settings_path,
+    tron_home_dir,
 };
 pub use store::SettingsStore;
 pub use types::*;
@@ -72,9 +74,9 @@ fn settings_slot() -> &'static ArcSwapOption<TronSettings> {
 
 /// Get the global settings instance.
 ///
-/// On first call, loads settings from `~/.tron/system/settings.json` with env var
+/// On first call, loads settings from `~/.tron/profiles/user/settings.json` with env var
 /// overrides. On subsequent calls, returns the cached value. Missing settings
-/// files use compiled defaults; malformed settings fail fast.
+/// files use managed defaults; malformed settings fail fast.
 ///
 /// Returns an `Arc` so callers hold a consistent snapshot even if another
 /// thread reloads settings concurrently. The underlying read is lock-free

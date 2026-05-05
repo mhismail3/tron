@@ -45,6 +45,7 @@ r2d2_sqlite = "0.25"
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
+toml = "0.8"
 
 # Logging / Tracing
 tracing = "0.1"

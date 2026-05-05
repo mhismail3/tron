@@ -74,13 +74,14 @@ pub fn deep_health_check(
         // 2. Settings
         check_settings(
             &tron_home
-                .join(crate::core::paths::dirs::SYSTEM)
+                .join(crate::core::paths::dirs::PROFILES)
+                .join(crate::core::profile::USER_PROFILE)
                 .join(crate::core::paths::files::SETTINGS_JSON),
         ),
         // 3. Auth
         check_auth(
             &tron_home
-                .join(crate::core::paths::dirs::SYSTEM)
+                .join(crate::core::paths::dirs::PROFILES)
                 .join(crate::core::paths::files::AUTH_JSON),
         ),
         // 4. Skills
@@ -410,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn deep_health_checks_canonical_system_settings_path() {
+    fn deep_health_checks_canonical_constitution_settings_path() {
         let pool =
             crate::events::new_in_memory(&crate::events::ConnectionConfig::default()).unwrap();
         {
@@ -419,10 +420,13 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("settings.json"), "{}").unwrap();
-        let system_dir = dir.path().join(crate::core::paths::dirs::SYSTEM);
-        std::fs::create_dir_all(&system_dir).unwrap();
+        let settings_dir = dir
+            .path()
+            .join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::USER_PROFILE);
+        std::fs::create_dir_all(&settings_dir).unwrap();
         std::fs::write(
-            system_dir.join(crate::core::paths::files::SETTINGS_JSON),
+            settings_dir.join(crate::core::paths::files::SETTINGS_JSON),
             "{broken",
         )
         .unwrap();
@@ -447,10 +451,13 @@ mod tests {
             crate::events::run_migrations(&conn).unwrap();
         }
         let dir = tempfile::tempdir().unwrap();
-        let system_dir = dir.path().join(crate::core::paths::dirs::SYSTEM);
-        std::fs::create_dir_all(&system_dir).unwrap();
+        let settings_dir = dir
+            .path()
+            .join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::USER_PROFILE);
+        std::fs::create_dir_all(&settings_dir).unwrap();
         std::fs::write(
-            system_dir.join(crate::core::paths::files::SETTINGS_JSON),
+            settings_dir.join(crate::core::paths::files::SETTINGS_JSON),
             serde_json::json!({"server": {"auth": {"enforced": true}}}).to_string(),
         )
         .unwrap();

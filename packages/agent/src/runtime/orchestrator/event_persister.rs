@@ -35,6 +35,7 @@ type WorkerStartGate = ();
 /// to a single consumer task, guaranteeing linear `parent_id` threading.
 pub struct EventPersister {
     tx: mpsc::Sender<PersistRequest>,
+    event_store: Arc<EventStore>,
     /// Handle to the background worker task. Crate-visible so sibling test
     /// modules can simulate worker death (see `turn_runner::persistence`
     /// tests that verify no-broadcast-on-persist-failure).
@@ -162,8 +163,33 @@ impl EventPersister {
         worker_start_gate: Option<WorkerStartGate>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(capacity);
-        let worker_handle = tokio::spawn(persist_worker(rx, event_store, worker_start_gate));
-        Self { tx, worker_handle }
+        let worker_handle =
+            tokio::spawn(persist_worker(rx, event_store.clone(), worker_start_gate));
+        Self {
+            tx,
+            event_store,
+            worker_handle,
+        }
+    }
+
+    /// Record Constitution context-resolution audit metadata.
+    pub fn record_constitution_context_resolution(
+        &self,
+        input: &crate::events::sqlite::repositories::constitution::ContextResolutionAudit<'_>,
+    ) -> Result<String, RuntimeError> {
+        self.event_store
+            .record_constitution_context_resolution(input)
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))
+    }
+
+    /// Record Constitution provider-payload audit metadata.
+    pub fn record_constitution_provider_payload(
+        &self,
+        input: &crate::events::sqlite::repositories::constitution::ProviderPayloadAudit<'_>,
+    ) -> Result<String, RuntimeError> {
+        self.event_store
+            .record_constitution_provider_payload(input)
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))
     }
 
     #[cfg(test)]

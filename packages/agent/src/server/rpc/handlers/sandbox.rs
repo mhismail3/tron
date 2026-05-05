@@ -333,9 +333,9 @@ mod tests {
 
     fn write_containers_file(dir: &std::path::Path, content: &str) -> PathBuf {
         use crate::core::paths::{dirs, files};
-        let artifacts = dir.join(".tron").join(dirs::SYSTEM);
-        std::fs::create_dir_all(&artifacts).unwrap();
-        let path = artifacts.join(files::CONTAINERS_JSON);
+        let profile = dir.join(".tron").join(dirs::PROFILES).join("user");
+        std::fs::create_dir_all(&profile).unwrap();
+        let path = profile.join(files::CONTAINERS_JSON);
         std::fs::write(&path, content).unwrap();
         path
     }

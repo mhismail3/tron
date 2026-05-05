@@ -1,6 +1,6 @@
 import Foundation
 
-/// Reads the bearer token from `bearerToken` in `~/.tron/system/auth.json`.
+/// Reads the bearer token from `bearerToken` in `~/.tron/profiles/auth.json`.
 /// This is the same file written by the Rust agent's `server::onboarding`
 /// module through the shared auth-storage atomic writer.
 ///
@@ -80,7 +80,7 @@ enum BearerTokenReader {
     }
 }
 
-/// Reads `server.tailscaleIp` from `~/.tron/system/settings.json`.
+/// Reads `server.tailscaleIp` from `~/.tron/profiles/user/settings.json`.
 /// Mirrors the iOS-side decoding in `RPCTypes+Settings.swift` (only the
 /// field we care about; everything else is ignored).
 enum ServerSettingsReader {
@@ -105,7 +105,7 @@ enum ServerSettingsReader {
 
 /// Writes the wrapper-owned pairing cache into `settings.json`.
 ///
-/// The Rust agent can boot entirely from compiled defaults, so a fresh
+/// The Rust agent can boot from Constitution-seeded defaults, so a fresh
 /// install must not need this file before pairing. The Mac wrapper only
 /// creates/updates the minimal `server.tailscaleIp` key after it has
 /// resolved the current live Tailscale address, preserving any settings

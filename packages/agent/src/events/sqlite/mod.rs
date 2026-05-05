@@ -1,13 +1,13 @@
 //! `SQLite` backend for the event store.
 //!
 //! Provides connection pooling, schema migrations, and repository implementations
-//! for all database operations. The schema is a single consolidated migration
-//! (`migrations/v001_schema.sql`) that creates every table and index the agent
-//! needs. Constraints (`CHECK`, `UNIQUE`, `FOREIGN KEY`, `COALESCE`-nullable unique
-//! indexes) are declared inline on `CREATE TABLE` — no triggers and no FTS virtual
-//! tables. Pre-release policy: when the schema needs to change, edit `v001_schema.sql`
-//! and delete `~/.tron/system/database/log.db` to start fresh; post-release,
-//! additive migrations (`v002_*.sql`, …) get appended to the runner registry.
+//! for all database operations, including Constitution audit ledgers for home
+//! mutations, settings/instruction/context/provider resolution, and rendered
+//! context-block replay. Fresh databases start from consolidated
+//! `migrations/v001_schema.sql`; existing v001 installs receive additive
+//! follow-up migrations such as `v002_constitution_audit.sql`. Constraints
+//! (`CHECK`, `UNIQUE`, `FOREIGN KEY`, `COALESCE`-nullable unique indexes) are
+//! declared inline on `CREATE TABLE` — no triggers and no FTS virtual tables.
 //!
 //! # Architecture
 //!

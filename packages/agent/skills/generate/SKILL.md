@@ -59,14 +59,14 @@ This outputs the complete json-render system prompt including all 36 available c
 ### 2. Create output directory
 
 ```bash
-mkdir -p ~/.tron/workspace/renders/<slug-name>
+mkdir -p ~/.tron/workspace/artifacts/renders/<slug-name>
 ```
 
 Use a descriptive slug (e.g., `todo-app`, `sales-dashboard`, `user-profile`).
 
 ### 3. Write the JSON spec
 
-Write your spec to `~/.tron/workspace/renders/<slug-name>/spec.json`.
+Write your spec to `~/.tron/workspace/artifacts/renders/<slug-name>/spec.json`.
 
 The spec format uses `root` (element ID), `elements` (map of ID → component), and optionally `state`:
 
@@ -102,7 +102,7 @@ The spec format uses `root` (element ID), `elements` (map of ID → component), 
 ### 4. Render to HTML
 
 ```bash
-node ~/.tron/skills/generate/render.mjs ~/.tron/workspace/renders/<slug-name>/spec.json ~/.tron/workspace/renders/<slug-name>/index.html
+node ~/.tron/skills/generate/render.mjs ~/.tron/workspace/artifacts/renders/<slug-name>/spec.json ~/.tron/workspace/artifacts/renders/<slug-name>/index.html
 ```
 
 This produces a standalone HTML file with:
@@ -124,7 +124,7 @@ Rules:
 Pick a port (start at 8170, increment if in use). Use `python3` (always on macOS, no npm needed):
 
 ```bash
-python3 -m http.server 8170 --directory ~/.tron/workspace/renders/<slug-name> > /tmp/tron-serve-<slug-name>.log 2>&1 & echo $! > /tmp/tron-serve-<slug-name>.pid && echo "started pid=$(cat /tmp/tron-serve-<slug-name>.pid)"
+python3 -m http.server 8170 --directory ~/.tron/workspace/artifacts/renders/<slug-name> > /tmp/tron-serve-<slug-name>.log 2>&1 & echo $! > /tmp/tron-serve-<slug-name>.pid && echo "started pid=$(cat /tmp/tron-serve-<slug-name>.pid)"
 ```
 
 This backgrounds the server immediately and prints the PID. The Bash call returns instantly.
@@ -142,10 +142,10 @@ Expect `200`. If the port was taken (connection refused), kill the old PID, pick
 **CRITICAL: The iOS device CANNOT reach `localhost` on the Mac server. You MUST use the Tailscale IP. NEVER pass `localhost` to the Display tool — the WebView runs on the phone.**
 
 ```bash
-python3 -c "import json; print(json.load(open('$HOME/.tron/system/settings.json')).get('server',{}).get('tailscaleIp',''))"
+python3 -c "import json; print(json.load(open('$HOME/.tron/profiles/user/settings.json')).get('server',{}).get('tailscaleIp',''))"
 ```
 
-If the Tailscale IP is empty or missing, tell the user: "Tailscale IP is not configured. The UI won't load on your device. Set `server.tailscaleIp` in `~/.tron/system/settings.json`."
+If the Tailscale IP is empty or missing, tell the user: "Tailscale IP is not configured. The UI won't load on your device. Set `server.tailscaleIp` in `~/.tron/profiles/user/settings.json`."
 
 The display URL is: `http://<tailscale-ip>:<port>`
 
@@ -203,7 +203,7 @@ Or kill by port:
 kill $(lsof -t -i:<port>) 2>/dev/null
 ```
 
-Render files persist at `~/.tron/workspace/renders/<name>/` across sessions.
+Render files persist at `~/.tron/workspace/artifacts/renders/<name>/` across sessions.
 
 **Always clean up servers when done.** If the user ends the conversation or you're finished with the UI, stop the server.
 

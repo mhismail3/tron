@@ -208,6 +208,43 @@ impl Orchestrator {
         trace!(session_id, start, "sequence counter initialized");
     }
 
+    /// Get a session sequence counter and advance it to at least `floor`.
+    ///
+    /// Prompt runs call this before attaching the shared counter to an agent.
+    /// The DB can legitimately have newer persisted events than an in-memory
+    /// counter after session resume, external persistence, or an earlier
+    /// failed append. Advancing, never resetting, preserves live broadcast
+    /// ordering while preventing duplicate persisted `(session_id, sequence)`
+    /// rows.
+    pub fn ensure_sequence_counter_at_least(&self, session_id: &str, floor: i64) -> Arc<AtomicI64> {
+        let counter = match self.sequence_counters.entry(session_id.to_string()) {
+            dashmap::mapref::entry::Entry::Occupied(entry) => Arc::clone(entry.get()),
+            dashmap::mapref::entry::Entry::Vacant(entry) => {
+                let counter = Arc::new(AtomicI64::new(floor));
+                entry.insert(Arc::clone(&counter));
+                trace!(session_id, floor, "sequence counter initialized");
+                return counter;
+            }
+        };
+
+        let mut current = counter.load(Ordering::SeqCst);
+        while current < floor {
+            match counter.compare_exchange(current, floor, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => {
+                    trace!(
+                        session_id,
+                        from = current,
+                        to = floor,
+                        "sequence counter advanced"
+                    );
+                    break;
+                }
+                Err(next) => current = next,
+            }
+        }
+        counter
+    }
+
     /// Atomically increment and return the next sequence number for a session.
     ///
     /// Returns 1-based sequences (first call after init(0) returns 1).
@@ -868,6 +905,38 @@ mod tests {
         // Re-init to a higher value (e.g., after DB sync)
         orch.init_sequence_counter("s1", 100);
         assert_eq!(orch.next_sequence("s1").unwrap(), 101);
+    }
+
+    #[test]
+    fn ensure_sequence_counter_advances_stale_counter() {
+        let orch = make_orchestrator();
+        orch.init_sequence_counter("s1", 2);
+
+        let counter = orch.ensure_sequence_counter_at_least("s1", 155);
+
+        assert_eq!(counter.load(Ordering::SeqCst), 155);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 156);
+    }
+
+    #[test]
+    fn ensure_sequence_counter_never_rewinds_live_counter() {
+        let orch = make_orchestrator();
+        orch.init_sequence_counter("s1", 200);
+
+        let counter = orch.ensure_sequence_counter_at_least("s1", 155);
+
+        assert_eq!(counter.load(Ordering::SeqCst), 200);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 201);
+    }
+
+    #[test]
+    fn ensure_sequence_counter_initializes_missing_counter() {
+        let orch = make_orchestrator();
+
+        let counter = orch.ensure_sequence_counter_at_least("s1", 42);
+
+        assert_eq!(counter.load(Ordering::SeqCst), 42);
+        assert_eq!(orch.next_sequence("s1").unwrap(), 43);
     }
 
     // ── Retain concurrency guard tests ──

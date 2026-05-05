@@ -191,7 +191,7 @@ pub struct RpcContext {
     pub event_store: Arc<EventStore>,
     /// Skill registry (read/write).
     pub skill_registry: Arc<RwLock<SkillRegistry>>,
-    /// User-memory registry. Loads `~/.tron/workspace/memory/MEMORY.md` + the
+    /// User-memory registry. Loads `~/.tron/memory/MEMORY.md` + the
     /// listing of `rules/*.md` files into every turn's context. `Mutex` (not
     /// `RwLock`) because `content()` mutates the cache on fingerprint mismatch
     /// — see `runtime::memory` module docs for the full invariant set.
@@ -225,7 +225,7 @@ pub struct RpcContext {
     pub device_request_broker: Option<Arc<DeviceRequestBroker>>,
     /// Shared rules/memory/rules-index artifact cache for session and prompt loading.
     pub context_artifacts: Arc<ContextArtifactsService>,
-    /// Path to auth JSON file (`~/.tron/system/auth.json`).
+    /// Path to auth JSON file (`~/.tron/profiles/auth.json`).
     pub auth_path: PathBuf,
     /// Broadcast manager for pushing events to WebSocket clients.
     pub broadcast_manager: Option<Arc<BroadcastManager>>,
@@ -253,7 +253,7 @@ pub struct RpcContext {
     /// can render the connection display ("Tailscale 100.x:9847") without
     /// re-parsing user input. Initialized from config and updated after bind.
     pub ws_port: Arc<AtomicU16>,
-    /// Path to the first-run sentinel (`~/.tron/system/run/.onboarded`). Stored on
+    /// Path to the first-run sentinel (`~/.tron/internal/run/.onboarded`). Stored on
     /// the context so tests can inject a temp path; production sets it to
     /// [`crate::server::onboarding::onboarded_marker_path`]. Drives the `paired`
     /// field returned by `system.getInfo`.
@@ -265,7 +265,7 @@ pub struct RpcContext {
     /// [`crate::server::updater::MockReleaseFetcher`] so RPC tests can
     /// exercise the happy + sad paths offline.
     pub release_fetcher: Option<Arc<dyn crate::server::updater::ReleaseFetcher>>,
-    /// Path to the updater state file (`~/.tron/system/run/updater-state.json`).
+    /// Path to the updater state file (`~/.tron/internal/run/updater-state.json`).
     /// Atomic reads/writes go through [`crate::server::updater::read_update_state`]
     /// / [`crate::server::updater::write_update_state`]. Tests inject a
     /// tempdir path; production sets it to

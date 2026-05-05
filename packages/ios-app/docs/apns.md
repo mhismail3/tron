@@ -11,7 +11,7 @@ iOS App -> Tron Server -> Cloudflare Worker relay -> api.push.apple.com
                              (owns APNs signing credentials)
 ```
 
-The local server never reads Apple `.p8` keys and never creates an APNs config directory under `~/.tron/system/`. If relay config is absent, `NotifyApp` falls back to the stub delegate and reports that push delivery is disabled.
+The local server never reads Apple `.p8` keys and never creates an APNs config directory under `~/.tron/internal/`. If relay config is absent, `NotifyApp` falls back to the stub delegate and reports that push delivery is disabled.
 
 ## Relay Configuration
 
@@ -23,7 +23,7 @@ Distributed server builds receive the relay URL and HMAC secret as compile-time 
 | `TRON_RELAY_SECRET` | Build time, runtime override allowed | HMAC shared secret used to sign relay requests |
 | `TRON_RELAY_ENVIRONMENT` | Runtime optional | Default APNs environment for relay metadata; token rows still carry their own environment |
 
-Release users do not configure these values. The Mac DMG workflow reads `TRON_RELAY_URL` and `TRON_RELAY_SECRET` from GitHub Actions secrets while building the bundled server, and uses `TRON_RELAY_ENVIRONMENT=production`. Developer builds may set the same variables in the shell before launching or bundling `tron` when testing push delivery. Relay config is never read from `~/.tron/system/auth.json`.
+Release users do not configure these values. The Mac DMG workflow reads `TRON_RELAY_URL` and `TRON_RELAY_SECRET` from GitHub Actions secrets while building the bundled server, and uses `TRON_RELAY_ENVIRONMENT=production`. Developer builds may set the same variables in the shell before launching or bundling `tron` when testing push delivery. Relay config is never read from `~/.tron/profiles/auth.json`.
 
 ## Relay Deployment
 

@@ -1,6 +1,6 @@
 //! Auth storage file I/O.
 //!
-//! Reads and writes `~/.tron/system/auth.json` with secure file permissions (0o600).
+//! Reads and writes `~/.tron/profiles/auth.json` with secure file permissions (0o600).
 
 use std::path::{Path, PathBuf};
 
@@ -421,7 +421,7 @@ pub struct AuthFileLock {
     _file: std::fs::File,
 }
 
-/// Acquire a blocking exclusive advisory lock on `{auth_path}.lock`.
+/// Acquire a blocking exclusive advisory lock for the built-in auth store.
 ///
 /// Uses `flock(2)` to coordinate token refresh across multiple Tron server
 /// processes on the same machine. The lock file is created if absent (0o600).
@@ -430,12 +430,7 @@ pub struct AuthFileLock {
 pub fn acquire_auth_file_lock(auth_path: &Path) -> std::io::Result<AuthFileLock> {
     use std::os::unix::io::AsRawFd;
 
-    // Place the lock in system/run/ with the rest of Tron's mutable runtime
-    // state.
-    let lock_path = auth_path
-        .parent()
-        .unwrap_or(auth_path)
-        .join("run/auth.lock");
+    let lock_path = auth_file_lock_path(auth_path);
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -457,6 +452,28 @@ pub fn acquire_auth_file_lock(auth_path: &Path) -> std::io::Result<AuthFileLock>
     }
 
     Ok(AuthFileLock { _file: lock_file })
+}
+
+fn auth_file_lock_path(auth_path: &Path) -> std::path::PathBuf {
+    let Some(parent) = auth_path.parent() else {
+        return auth_path.with_extension("lock");
+    };
+
+    if parent.file_name().and_then(|name| name.to_str()) == Some("profiles")
+        && let Some(home) = parent.parent()
+    {
+        return crate::core::paths::auth_lock_path_for_home(home);
+    }
+
+    if parent.file_name().and_then(|name| name.to_str()) == Some("vault")
+        && let Some(workspace) = parent.parent()
+        && workspace.file_name().and_then(|name| name.to_str()) == Some("workspace")
+        && let Some(home) = workspace.parent()
+    {
+        return crate::core::paths::auth_lock_path_for_home(home);
+    }
+
+    parent.join("run/auth.lock")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -482,8 +499,8 @@ mod tests {
 
     #[test]
     fn auth_file_path_construction() {
-        let p = auth_file_path(Path::new("/home/user/.tron/system"));
-        assert_eq!(p, PathBuf::from("/home/user/.tron/system/auth.json"));
+        let p = auth_file_path(Path::new("/home/user/.tron/profiles"));
+        assert_eq!(p, PathBuf::from("/home/user/.tron/profiles/auth.json"));
     }
 
     #[test]
@@ -860,10 +877,18 @@ mod tests {
 
     /// Helper: derive the lock path the same way `acquire_auth_file_lock` does.
     fn lock_path_for(auth_path: &Path) -> std::path::PathBuf {
-        auth_path
-            .parent()
-            .unwrap_or(auth_path)
-            .join("run/auth.lock")
+        auth_file_lock_path(auth_path)
+    }
+
+    #[test]
+    fn auth_lock_for_profile_auth_lives_under_internal_run() {
+        let dir = TempDir::new().unwrap();
+        let auth_path = dir.path().join(".tron/profiles/auth.json");
+
+        assert_eq!(
+            lock_path_for(&auth_path),
+            dir.path().join(".tron/internal/run/auth.lock")
+        );
     }
 
     #[allow(unsafe_code)]

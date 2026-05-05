@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tron-cli - Universal CLI entrypoint for Tron server management
 #
-# Installed to ~/.tron/system/run/tron-cli
+# Installed to ~/.tron/internal/run/tron-cli
 # Symlinked from ~/.local/bin/tron
 #
 # Handles runtime commands directly (status, start, stop, logs, uninstall, etc.)

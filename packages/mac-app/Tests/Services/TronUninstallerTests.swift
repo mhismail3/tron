@@ -18,8 +18,8 @@ struct TronUninstallerTests {
             )
             _ = FileManager.default.createFile(atPath: path.path, contents: Data("x".utf8))
         }
-        _ = FileManager.default.createFile(atPath: setup.settingsPath.path, contents: Data("settings".utf8))
-        _ = FileManager.default.createFile(atPath: setup.bearerTokenPath.path, contents: Data("auth".utf8))
+        try createFixtureFile(setup.settingsPath, contents: "settings")
+        try createFixtureFile(setup.bearerTokenPath, contents: "auth")
 
         let outcome = await TronUninstaller.unregisterAndClean(setup: setup)
 
@@ -38,12 +38,8 @@ struct TronUninstallerTests {
         defer { TestTempDir.cleanup(tmp) }
         let manager = MockLaunchAgentManager()
         let setup = makeSetup(tmp: tmp, manager: manager)
-        try FileManager.default.createDirectory(
-            at: setup.settingsPath.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        _ = FileManager.default.createFile(atPath: setup.settingsPath.path, contents: Data("settings".utf8))
-        _ = FileManager.default.createFile(atPath: setup.bearerTokenPath.path, contents: Data("auth".utf8))
+        try createFixtureFile(setup.settingsPath, contents: "settings")
+        try createFixtureFile(setup.bearerTokenPath, contents: "auth")
 
         let outcome = await TronUninstaller.unregisterAndClean(
             setup: setup,
@@ -94,16 +90,18 @@ struct TronUninstallerTests {
     }
 
     private func makeSetup(tmp: URL, manager: MockLaunchAgentManager) -> EnvironmentSetup {
-        let system = tmp.appendingPathComponent("system", isDirectory: true)
-        let run = system.appendingPathComponent("run", isDirectory: true)
+        let internalDir = tmp.appendingPathComponent("internal", isDirectory: true)
+        let run = internalDir.appendingPathComponent("run", isDirectory: true)
+        let profiles = tmp.appendingPathComponent("profiles", isDirectory: true)
+        let userProfile = profiles.appendingPathComponent("user", isDirectory: true)
         return EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp.appendingPathComponent("Tron.app", isDirectory: true),
             serverHelperBundle: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app", isDirectory: true),
             serverHelperBinary: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"),
-            bearerTokenPath: system.appendingPathComponent("auth.json", isDirectory: false),
+            bearerTokenPath: profiles.appendingPathComponent("auth.json", isDirectory: false),
             onboardedMarkerPath: run.appendingPathComponent(".onboarded", isDirectory: false),
-            settingsPath: system.appendingPathComponent("settings.json", isDirectory: false),
+            settingsPath: userProfile.appendingPathComponent("settings.json", isDirectory: false),
             launchAgentPlistPath: tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist"),
             launchAgentLabel: "com.tron.server",
             serverPort: 9847,
@@ -123,5 +121,13 @@ struct TronUninstallerTests {
             applyTranscriptionPreference: { _ in .disabled },
             touchOnboardedSentinel: { }
         )
+    }
+
+    private func createFixtureFile(_ path: URL, contents: String) throws {
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        _ = FileManager.default.createFile(atPath: path.path, contents: Data(contents.utf8))
     }
 }

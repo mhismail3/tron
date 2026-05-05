@@ -6,7 +6,7 @@
 //! ## Core Rules (6)
 //! - `core.destructive-commands` — blocks rm -rf /, fork bombs, dd to devices, etc.
 //! - `core.tron-no-delete` — prevents deletion of files in ~/.tron
-//! - `core.tron-system-protection` — protects ~/.tron/system/** from agent writes
+//! - `core.tron-home-protection` — protects constitutional machinery from agent writes
 //! - `core.synology-drive-protection` — protects Synology Drive cloud storage
 //! - `core.system-protection` — blocks writes to OS-critical paths (/System, /usr, /etc, etc.)
 //! - `core.dotfiles-protection` — read-only access to dotfiles (~/.ssh, ~/.aws, ~/.config, etc.)
@@ -29,7 +29,7 @@ use super::types::{RuleTier, Scope, Severity};
 pub const CORE_RULE_IDS: &[&str] = &[
     "core.destructive-commands",
     "core.tron-no-delete",
-    "core.tron-system-protection",
+    "core.tron-home-protection",
     "core.synology-drive-protection",
     "core.system-protection",
     "core.dotfiles-protection",
@@ -56,7 +56,7 @@ pub fn default_rules() -> Vec<GuardrailRule> {
         // Core rules
         core_destructive_commands(),
         core_tron_no_delete(),
-        core_tron_system_protection(),
+        core_tron_home_protection(),
         core_synology_drive_protection(),
         core_system_protection(),
         core_dotfiles_protection(),
@@ -150,16 +150,28 @@ fn core_tron_no_delete() -> GuardrailRule {
     })
 }
 
-/// Core rule: Protect ~/.tron/system/ directory (db, auth, settings, runtime state).
-fn core_tron_system_protection() -> GuardrailRule {
+/// Core rule: Protect constitutional machinery from direct agent writes.
+fn core_tron_home_protection() -> GuardrailRule {
     let home = homedir();
-    let system_path = format!("{home}/.tron/system");
+    let protected_roots = [
+        // Runtime machinery and execution profile/auth state are not agent-editable.
+        "internal",
+        "profiles",
+        // Skill-owned credentials are also sensitive; use the vault skill, not direct writes.
+        "workspace/vault",
+    ]
+    .map(|segment| format!("{home}/.tron/{segment}"));
+    let mut protected_paths = Vec::new();
+    for root in protected_roots {
+        protected_paths.push(root.clone());
+        protected_paths.push(format!("{root}/**"));
+    }
 
     GuardrailRule::Path(PathRule {
         base: RuleBase {
-            id: "core.tron-system-protection".into(),
-            name: "Tron System Protection".into(),
-            description: "Protects the ~/.tron/system/ directory from agent modifications".into(),
+            id: "core.tron-home-protection".into(),
+            name: "Tron Home Protection".into(),
+            description: "Protects constitutional machinery from direct agent modifications".into(),
             severity: Severity::Block,
             scope: Scope::Global,
             tier: RuleTier::Core,
@@ -169,7 +181,7 @@ fn core_tron_system_protection() -> GuardrailRule {
             tags: vec!["security".into(), "config-protection".into()],
         },
         path_arguments: vec!["file_path".into(), "path".into(), "command".into()],
-        protected_paths: vec![system_path.clone(), format!("{system_path}/**")],
+        protected_paths,
         block_traversal: false,
         block_hidden: false,
     })
@@ -417,7 +429,7 @@ mod tests {
     fn test_is_core_rule() {
         assert!(is_core_rule("core.destructive-commands"));
         assert!(is_core_rule("core.tron-no-delete"));
-        assert!(is_core_rule("core.tron-system-protection"));
+        assert!(is_core_rule("core.tron-home-protection"));
         assert!(is_core_rule("core.synology-drive-protection"));
         assert!(is_core_rule("core.system-protection"));
         assert!(is_core_rule("core.dotfiles-protection"));

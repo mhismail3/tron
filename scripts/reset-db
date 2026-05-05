@@ -12,7 +12,7 @@ set -euo pipefail
 # Source shared library for paths
 source "$(dirname "$0")/tron-lib.sh"
 
-DB_DIR="$TRON_HOME/system/database"
+DB_DIR="$TRON_HOME/internal/database"
 
 # Tables to clear — everything except schema_version
 DATA_TABLES=(

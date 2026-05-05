@@ -31,10 +31,11 @@ source "$(dirname "$0")/tron-lib.sh"
 
 # Auto-deploy specific paths
 LOG_FILE="$CONTRIBUTOR_DIR/auto-deploy.log"
-PAUSE_FILE="$TRON_HOME/auto-deploy.pause"
-LOCK_FILE="$TRON_HOME/auto-deploy.lock"
-DEPLOY_LOCK="$TRON_HOME/deploy.lock"
+PAUSE_FILE="$AUTO_DEPLOY_PAUSE_FILE"
+LOCK_FILE="$AUTO_DEPLOY_LOCK_FILE"
+DEPLOY_LOCK="$DEPLOY_LOCK_FILE"
 BRANCH="main"
+mkdir -p "$RUN_DIR"
 
 # Server code paths that trigger a deploy
 SERVER_PATHS="^packages/agent/|^scripts/"

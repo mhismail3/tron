@@ -17,7 +17,7 @@ On daemon startup, Tron reads `settings.server.codexAppServer` and, when enabled
 launches:
 
 ```bash
-codex app-server --listen ws://0.0.0.0:<port> --ws-auth capability-token --ws-token-file ~/.tron/system/run/codex-app-server-token
+codex app-server --listen ws://0.0.0.0:<port> --ws-auth capability-token --ws-token-file ~/.tron/internal/run/codex-app-server-token
 ```
 
 The token file is generated once, stored outside settings, hardened to `0600` on

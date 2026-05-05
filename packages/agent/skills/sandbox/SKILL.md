@@ -32,7 +32,7 @@ The pattern:
 2. Exec: install dependencies, scaffold the app, write code — all in `/workspace`
 3. Exec with `--detach`: start the server **bound to 0.0.0.0**
 4. Exec: verify it's running (`curl -s http://localhost:3000`)
-5. Get the machine's Tailscale IP from `server.tailscaleIp` in `~/.tron/system/settings.json` — always use this for OpenURL, never `hostname` or `.local` addresses
+5. Get the machine's Tailscale IP from `server.tailscaleIp` in `~/.tron/profiles/user/settings.json` — always use this for OpenURL, never `hostname` or `.local` addresses
 6. OpenURL with `http://{tailscale-ip}:3000`
 7. **Keep the container running.** Don't stop or remove it — the user is actively using it. Only clean up when they ask.
 
@@ -202,7 +202,7 @@ container logs --tail 50 <name>
 
 ## 6. Registry
 
-The iOS dashboard reads container state from `~/.tron/system/containers.json`. After creating or removing a container, update this file so the dashboard stays in sync.
+The iOS dashboard reads container state from `~/.tron/profiles/user/containers.json`. After creating or removing a container, update this file so the dashboard stays in sync.
 
 **Structure:**
 ```json
@@ -253,7 +253,7 @@ container exec my-sandbox sh -c "flask run --host 0.0.0.0 --port 3000"
 - **Workspace mount**: `/workspace` inside the container maps to the host path you specify with `--volume`. Files flow both ways — write a script on the host, exec it in the container; generate output in the container, read it from the host.
 - **Each exec is a separate command.** No persistent shell session. Set environment variables per-call via `--env`.
 - **Long-running processes**: Use `--detach` for servers and daemons — the process persists in the container after exec returns. Interact via subsequent exec calls.
-- **Containers survive sessions.** The registry at `~/.tron/system/containers.json` tracks everything. Use `container list --all` to see what's running. Clean up with `container delete` when done.
+- **Containers survive sessions.** The registry at `~/.tron/profiles/user/containers.json` tracks everything. Use `container list --all` to see what's running. Clean up with `container delete` when done.
 
 ## 9. Safety Rules
 

@@ -183,6 +183,107 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     // 4. Build stream options (thinking always enabled — provider handles model-specific config)
     let stream_options = build_stream_options(run_context);
 
+    if let Some(persister) = persister {
+        let context_blocks =
+            crate::llm::context_composition::compose_context_audit_blocks(&context);
+        let profile = crate::core::constitution::active_profile_name();
+        let metadata = serde_json::json!({
+            "messageCount": context.messages.len(),
+            "toolCount": context.tools.as_ref().map_or(0, Vec::len),
+            "streamOptions": &stream_options,
+            "providerSurface": "preAdapter",
+        });
+        let audit = crate::events::sqlite::repositories::constitution::ContextResolutionAudit {
+            session_id: Some(session_id),
+            turn: Some(turn),
+            provider: Some(provider.provider_type().as_str()),
+            model: Some(provider.model()),
+            profile: profile.as_deref(),
+            blocks: &context_blocks,
+            metadata,
+        };
+        let context_resolution_id = match persister.record_constitution_context_resolution(&audit) {
+            Ok(id) => id,
+            Err(error) => {
+                let error_msg = format!("failed to audit Constitution context resolution: {error}");
+                error!(session_id, turn, error = %error_msg);
+                let _ = emitter.emit(TronEvent::TurnFailed {
+                    base: BaseEvent::now(session_id),
+                    turn,
+                    error: error_msg.clone(),
+                    code: Some("CONSTITUTION_AUDIT_FAILED".into()),
+                    category: Some("persistence".into()),
+                    recoverable: false,
+                    partial_content: None,
+                });
+                return TurnResult {
+                    success: false,
+                    error: Some(error_msg),
+                    stop_reason: Some(StopReason::Error),
+                    ..Default::default()
+                };
+            }
+        };
+
+        let provider_payload = match provider.audit_payload(&context, &stream_options) {
+            Ok(payload) => payload,
+            Err(error) => {
+                let error_msg = format!("failed to build provider payload audit: {error}");
+                error!(session_id, turn, error = %error_msg);
+                let _ = emitter.emit(TronEvent::TurnFailed {
+                    base: BaseEvent::now(session_id),
+                    turn,
+                    error: error_msg.clone(),
+                    code: Some("PROVIDER_PAYLOAD_AUDIT_FAILED".into()),
+                    category: Some("persistence".into()),
+                    recoverable: false,
+                    partial_content: None,
+                });
+                return TurnResult {
+                    success: false,
+                    error: Some(error_msg),
+                    stop_reason: Some(StopReason::Error),
+                    ..Default::default()
+                };
+            }
+        };
+        let payload_audit =
+            crate::events::sqlite::repositories::constitution::ProviderPayloadAudit {
+                session_id: Some(session_id),
+                turn: Some(turn),
+                provider: Some(provider.provider_type().as_str()),
+                model: Some(provider.model()),
+                profile: profile.as_deref(),
+                payload: &provider_payload,
+                metadata: serde_json::json!({
+                    "contextResolutionId": context_resolution_id,
+                    "exactProviderEnvelope": provider_payload
+                        .get("exactProviderEnvelope")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(true),
+                }),
+            };
+        if let Err(error) = persister.record_constitution_provider_payload(&payload_audit) {
+            let error_msg = format!("failed to audit Constitution provider payload: {error}");
+            error!(session_id, turn, error = %error_msg);
+            let _ = emitter.emit(TronEvent::TurnFailed {
+                base: BaseEvent::now(session_id),
+                turn,
+                error: error_msg.clone(),
+                code: Some("PROVIDER_PAYLOAD_AUDIT_FAILED".into()),
+                category: Some("persistence".into()),
+                recoverable: false,
+                partial_content: None,
+            });
+            return TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
+        }
+    }
+
     // 5. Stream from Provider (with retry if configured)
     let provider_name: &'static str = provider.provider_type().as_str();
     let model_name: String = provider.model().to_owned();
@@ -256,7 +357,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         Err(e) => {
             let error_msg = format!(
                 "failed to create streaming journal for crash recovery: {e}. \
-                 Check that ~/.tron/system/database/journals/ is writable."
+                 Check that ~/.tron/internal/database/journals/ is writable."
             );
             error!(session_id, turn, error = %error_msg);
             let _ = emitter.emit(TronEvent::TurnFailed {

@@ -1,9 +1,11 @@
 //! Settings type definitions.
 //!
 //! All types use `#[serde(rename_all = "camelCase")]` to match the TypeScript
-//! JSON wire format. Each type implements [`Default`] with production default
-//! values. Types marked with `#[serde(default)]` allow partial JSON — missing
-//! fields get their default value during deserialization.
+//! JSON wire format. Each type implements [`Default`] with the emergency
+//! fallback values that must stay in parity with the bundled
+//! `profiles/default/settings/defaults.json`. Types marked with `#[serde(default)]`
+//! allow partial JSON — missing fields get their default value during
+//! deserialization.
 
 mod api;
 mod context;
@@ -33,8 +35,9 @@ use serde::{Deserialize, Serialize};
 
 /// Root settings type for the Tron agent.
 ///
-/// Loaded from `~/.tron/system/settings.json` with defaults applied for
-/// missing fields. Environment variables can override specific values.
+/// Loaded from `~/.tron/profiles/default/settings/defaults.json`, then sparse
+/// `~/.tron/profiles/user/settings.json`, with defaults applied for missing fields.
+/// Environment variables can override specific values.
 ///
 /// # JSON Format
 ///

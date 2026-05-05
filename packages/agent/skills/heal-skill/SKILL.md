@@ -97,26 +97,15 @@ Tools referenced in `allowedTools`, `deniedTools`, or in the skill content must 
 
 ### 5. Validate Path References
 
-Check all `~/.tron/` paths in the skill content against the **PATH REFERENCE** table in the system prompt (core.md). That table is the single source of truth for the current directory layout.
+Check all `~/.tron/` paths in the skill content against the **PATH REFERENCE** table in the profile-backed core prompt. That table is the model-visible summary of the current directory layout.
 
-**Stale path translations** (common in older skills):
-
-| Old path | Current path |
-|----------|-------------|
-| `~/.tron/database/tron.db` | `~/.tron/system/database/log.db` (DATABASE) |
-| `~/.tron/settings.json` | `~/.tron/system/settings.json` (SETTINGS) |
-| `~/.tron/auth.json` | `~/.tron/system/auth.json` (AUTH) |
-| `~/.tron/tron` (binary) | `/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` (production helper binary) |
-| `~/.tron/artifacts/` | *(remove; no production artifacts directory)* |
-| `~/.tron/artifacts/deployment/` | *(remove; no production artifacts directory)* |
-| `~/.tron/knowledge/` | `~/.tron/workspace/knowledge/` (KNOWLEDGE) |
-| `~/.tron/database/` | `~/.tron/system/database/` (DATABASE) |
+Do not maintain a second translation table inside the skill. If a skill contains a path that disagrees with the prompt's **PATH REFERENCE** table or `core::foundation::paths`, replace it with the canonical named path from that source of truth. Remove obsolete production-artifact, deployment, and pre-profile-first home references instead of translating them ad hoc.
 
 ### 6. Validate Database References
 
 If the skill contains SQL queries or references database tables, verify against the actual schema.
 
-**Existing tables** (in `~/.tron/system/database/log.db`):
+**Existing tables** (in `~/.tron/internal/database/log.db`):
 `sessions`, `events`, `blobs`, `branches`, `logs`, `workspaces`, `cron_jobs`, `cron_runs`, `device_tokens`, `notification_read_state`, `schema_version`
 
 **Tables that do NOT exist** (remove any references):
@@ -261,7 +250,7 @@ Tools:
   [PASS] "Bash" is valid
 
 Paths:
-  [FAIL] ~/.tron/database/tron.db → should be ~/.tron/system/database/log.db
+  [FAIL] ~/.tron/database/tron.db → should be ~/.tron/internal/database/log.db
   [PASS] ~/.tron/skills/ is current
 
 Database:

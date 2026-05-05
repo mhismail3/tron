@@ -1,8 +1,8 @@
 //! User-memory loader.
 //!
 //! Discovers and injects the user-curated memory file at
-//! `~/.tron/workspace/memory/MEMORY.md` plus a listing of detail files
-//! under `~/.tron/workspace/memory/rules/*.md` into every session's context.
+//! `~/.tron/memory/MEMORY.md` plus a listing of detail files
+//! under `~/.tron/memory/rules/*.md` into every session's context.
 //!
 //! Key invariants:
 //! - **Per-turn refresh, fingerprint-gated.** Mirrors the skill-index pattern.

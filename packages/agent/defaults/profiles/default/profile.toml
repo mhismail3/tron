@@ -1,0 +1,30 @@
+version = "1"
+name = "default"
+managed = true
+inherits = []
+authProfile = "default"
+
+[prompts]
+core = "prompts/core.md"
+chat = "prompts/chat.md"
+local = "prompts/local.md"
+gitWorkflow = "prompts/git-workflow.md"
+
+[summarizers]
+compaction = "summarizers/compaction.md"
+memoryRetain = "summarizers/memory-retain.md"
+
+[subagents]
+conflictResolver = "subagents/conflict-resolver.md"
+
+[providers.openai]
+codexInstructions = "providers/openai/codex-instructions.md"
+
+[context]
+blocks = "context/context-blocks.toml"
+
+[tools]
+presentation = "tools/presentation.toml"
+
+[settings]
+defaults = "settings/defaults.json"

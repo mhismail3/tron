@@ -260,6 +260,14 @@ impl Provider for OllamaProvider {
         &self.config.model
     }
 
+    fn audit_payload(
+        &self,
+        context: &Context,
+        options: &ProviderStreamOptions,
+    ) -> ProviderResult<serde_json::Value> {
+        Ok(self.build_request_body(context, options))
+    }
+
     #[instrument(skip_all, fields(provider = "ollama", model = %self.config.model))]
     async fn stream(
         &self,

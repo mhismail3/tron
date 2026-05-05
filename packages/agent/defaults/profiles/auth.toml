@@ -1,0 +1,6 @@
+version = "1"
+default = "default"
+
+[profiles.default]
+description = "Default Tron credential profile"
+store = "auth.json"

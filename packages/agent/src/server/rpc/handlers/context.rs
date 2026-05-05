@@ -1,5 +1,6 @@
-//! Context handlers: getSnapshot, getDetailedSnapshot, shouldCompact,
-//! previewCompaction, confirmCompaction, canAcceptTurn, clear, compact.
+//! Context handlers: getSnapshot, getDetailedSnapshot, getAuditTrace,
+//! shouldCompact, previewCompaction, confirmCompaction, canAcceptTurn, clear,
+//! compact.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -40,6 +41,27 @@ impl MethodHandler for GetDetailedSnapshotHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         ContextQueryService::get_detailed_snapshot(ctx, session_id).await
+    }
+}
+
+/// Get the latest Constitution/profile audit trace for a session turn.
+pub struct GetAuditTraceHandler;
+
+#[async_trait]
+impl MethodHandler for GetAuditTraceHandler {
+    #[instrument(skip(self, ctx), fields(method = "context.getAuditTrace", session_id))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let turn = params
+            .as_ref()
+            .and_then(|value| value.get("turn"))
+            .and_then(Value::as_u64)
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| RpcError::InvalidParams {
+                message: "turn must fit in u32".into(),
+            })?;
+        ContextQueryService::get_audit_trace(ctx, session_id, turn).await
     }
 }
 
@@ -177,7 +199,7 @@ mod tests {
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
-        // System prompt is non-empty (default TRON_CORE_PROMPT), so tokens > 0
+        // System prompt is non-empty (profile default or repair prompt), so tokens > 0.
         assert!(
             result["breakdown"]["systemPrompt"].as_u64().unwrap() > 0,
             "system prompt tokens should be > 0"
@@ -257,6 +279,72 @@ mod tests {
         assert!(result["systemPromptContent"].is_string());
         assert!(result["toolsContent"].is_array());
         assert!(result["addedSkills"].is_array());
+    }
+
+    #[tokio::test]
+    async fn get_audit_trace_returns_blocks_and_redacted_payload() {
+        let (ctx, sid) = ctx_with_session();
+        let blocks = vec![crate::core::constitution::context_block_for_text(
+            "system.prompt",
+            "System Prompt",
+            crate::core::constitution::TronHome::Profiles,
+            "You are Tron.",
+            crate::core::constitution::ContextCacheClass::Foundation,
+            10,
+        )];
+        let context_id = ctx
+            .event_store
+            .record_constitution_context_resolution(
+                &crate::events::sqlite::repositories::constitution::ContextResolutionAudit {
+                    session_id: Some(&sid),
+                    turn: Some(1),
+                    provider: Some("openai"),
+                    model: Some("gpt-test"),
+                    profile: Some("default"),
+                    blocks: &blocks,
+                    metadata: json!({"source": "test"}),
+                },
+            )
+            .unwrap();
+        ctx.event_store
+            .record_constitution_provider_payload(
+                &crate::events::sqlite::repositories::constitution::ProviderPayloadAudit {
+                    session_id: Some(&sid),
+                    turn: Some(1),
+                    provider: Some("openai"),
+                    model: Some("gpt-test"),
+                    profile: Some("default"),
+                    payload: &json!({
+                        "model": "gpt-test",
+                        "authorization": "Bearer secret-token",
+                        "input": [{"role": "developer", "content": "You are Tron."}],
+                    }),
+                    metadata: json!({"contextResolutionId": context_id}),
+                },
+            )
+            .unwrap();
+
+        let result = GetAuditTraceHandler
+            .handle(Some(json!({"sessionId": sid, "turn": 1})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["contextResolution"]["profile"].as_str(),
+            Some("default")
+        );
+        assert_eq!(
+            result["contextBlocks"][0]["blockId"].as_str(),
+            Some("system.prompt")
+        );
+        assert_eq!(
+            result["providerPayload"]["redactedPreview"]["authorization"].as_str(),
+            Some("[REDACTED]")
+        );
+        assert_eq!(
+            result["cachePolicy"][0]["cacheClass"].as_str(),
+            Some("foundation")
+        );
     }
 
     #[tokio::test]

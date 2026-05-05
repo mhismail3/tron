@@ -87,6 +87,15 @@ targets:
           ditto "$SKILLS_SRC" "$SKILLS_DST"
           find "$SKILLS_DST" -name node_modules -type d -prune -exec rm -rf {} +
           find "$SKILLS_DST" -name .DS_Store -type f -delete
+          CONSTITUTION_SRC="$SRCROOT/../agent/defaults"
+          CONSTITUTION_DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/Constitution"
+          test -f "$CONSTITUTION_SRC/profiles/active.toml" \
+            && test -f "$CONSTITUTION_SRC/profiles/default/profile.toml" \
+            && test -f "$CONSTITUTION_SRC/profiles/default/settings/defaults.json" \
+            || { echo "Missing Constitution defaults at $CONSTITUTION_SRC" >&2; exit 1; }
+          rm -rf "$CONSTITUTION_DST"
+          mkdir -p "$CONSTITUTION_DST"
+          ditto "$CONSTITUTION_SRC" "$CONSTITUTION_DST"
           HELPER="$DST/LoginItems/Tron Server.app"
           if [ -d "$HELPER" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
             SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"

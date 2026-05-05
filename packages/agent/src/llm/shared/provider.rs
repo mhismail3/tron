@@ -13,6 +13,7 @@ use crate::core::events::StreamEvent;
 use async_trait::async_trait;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Typed effort / reasoning enums
@@ -239,6 +240,25 @@ pub trait Provider: Send + Sync {
     /// compaction follows the same profile that request construction uses.
     fn context_window(&self) -> u64 {
         crate::llm::model_context_window(self.model())
+    }
+
+    /// Provider request envelope for Constitution audit/replay.
+    ///
+    /// Providers override this when they can expose their exact wire payload.
+    /// The default is a provider-independent adapter-input snapshot so custom
+    /// providers still produce an audit record instead of disappearing.
+    fn audit_payload(
+        &self,
+        context: &crate::core::messages::Context,
+        options: &ProviderStreamOptions,
+    ) -> ProviderResult<Value> {
+        Ok(json!({
+            "provider": self.provider_type().as_str(),
+            "model": self.model(),
+            "exactProviderEnvelope": false,
+            "context": context,
+            "options": options,
+        }))
     }
 
     /// Stream a response from the LLM.

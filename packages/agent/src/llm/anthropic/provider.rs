@@ -390,6 +390,21 @@ impl Provider for AnthropicProvider {
         &self.config.model
     }
 
+    fn audit_payload(
+        &self,
+        context: &Context,
+        options: &ProviderStreamOptions,
+    ) -> ProviderResult<serde_json::Value> {
+        let sanitized = sanitize_messages(context.messages.to_vec());
+        let mut messages = convert_messages(&sanitized);
+        if self.last_api_call_ms > 0 && is_cache_cold(self.last_api_call_ms, DEFAULT_TTL_MS) {
+            messages = prune_tool_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
+        }
+        Self::apply_cache_to_last_user_message(&mut messages);
+        serde_json::to_value(self.build_request(context, options, messages))
+            .map_err(ProviderError::Json)
+    }
+
     #[instrument(skip_all, fields(provider = "anthropic", model = %self.config.model))]
     async fn stream(
         &self,

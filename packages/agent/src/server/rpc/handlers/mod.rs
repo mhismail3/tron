@@ -134,6 +134,7 @@ fn register_core(registry: &mut MethodRegistry) {
         "context.getDetailedSnapshot",
         context::GetDetailedSnapshotHandler,
     );
+    registry.register("context.getAuditTrace", context::GetAuditTraceHandler);
     registry.register("context.shouldCompact", context::ShouldCompactHandler);
     registry.register(
         "context.previewCompaction",
@@ -403,8 +404,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            166,
-            "expected 166 methods, got {}",
+            167,
+            "expected 167 methods, got {}",
             reg.methods().len()
         );
     }

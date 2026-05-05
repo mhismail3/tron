@@ -407,9 +407,9 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
     }
 
     let stop_reason = if state.tool_calls.is_empty() {
-        "stop"
+        "end_turn"
     } else {
-        "tool_calls"
+        "tool_use"
     };
 
     StreamEvent::Done {
@@ -763,7 +763,7 @@ mod tests {
             assert_eq!(message.content.len(), 1);
             assert_eq!(message.token_usage.as_ref().unwrap().input_tokens, 100);
             assert_eq!(message.token_usage.as_ref().unwrap().output_tokens, 50);
-            assert_eq!(stop_reason, "stop");
+            assert_eq!(stop_reason, "end_turn");
         }
     }
 
@@ -803,7 +803,7 @@ mod tests {
             .iter()
             .find(|e| matches!(e, StreamEvent::Done { .. }));
         if let Some(StreamEvent::Done { stop_reason, .. }) = done {
-            assert_eq!(stop_reason, "tool_calls");
+            assert_eq!(stop_reason, "tool_use");
         }
     }
 
@@ -894,7 +894,7 @@ mod tests {
             .iter()
             .find(|e| matches!(e, StreamEvent::Done { .. }));
         if let Some(StreamEvent::Done { stop_reason, .. }) = done {
-            assert_eq!(stop_reason, "tool_calls");
+            assert_eq!(stop_reason, "tool_use");
         }
     }
 

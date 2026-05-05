@@ -197,7 +197,7 @@ Provider credentials are written through `auth.*` RPCs, so secrets land
 in `auth.json`, not `settings.json`.
 
 Server settings and app settings are intentionally separate. Settings backed
-by `~/.tron/system/settings.json` live behind the server-backed settings grid
+by `~/.tron/profiles/user/settings.json` live behind the server-backed settings grid
 tiles and are enabled only after the active server connects and `settings.get`
 returns real values. The main Settings sheet starts at the medium detent and
 uses a 3x3 launcher grid: App, Server, and Providers for settings surfaces;

@@ -10,7 +10,7 @@ deniedTools: [SpawnSubagent]
 
 Production Mac distribution is a notarized DMG. The installed app lives at `/Applications/Tron.app`, the server helper lives inside that app at `Contents/Library/LoginItems/Tron Server.app`, and registration is owned by `SMAppService`.
 
-There is no production `/deploy/status` or `/deploy/restart` API. Do not try to restart the server through HTTP deploy endpoints, do not copy app bundles into `~/.tron/system/`, and do not place runtime locks in `~/.tron/system/deployment/`.
+There is no production `/deploy/status` or `/deploy/restart` API. Do not try to restart the server through HTTP deploy endpoints, do not copy app bundles into `~/.tron/internal/`, and keep contributor runtime locks/artifacts in `~/.tron/internal/run/`.
 
 ## Supported Checks
 
@@ -41,12 +41,12 @@ xcodebuild test -scheme TronMac -destination 'platform=macOS'
 | Distributed app | `/Applications/Tron.app` |
 | Server helper | `/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app` |
 | Bundled LaunchAgent plist | `/Applications/Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist` |
-| Settings | `~/.tron/system/settings.json` |
-| Auth | `~/.tron/system/auth.json` |
-| Bearer token | `~/.tron/system/auth.json` (`bearerToken`) |
-| Runtime locks | `~/.tron/system/run/` |
-| Database | `~/.tron/system/database/log.db` |
-| Contributor deploy artifacts | `~/.tron/system/deployment/` |
+| Settings | `~/.tron/profiles/user/settings.json` |
+| Auth | `~/.tron/profiles/auth.json` |
+| Bearer token | `~/.tron/profiles/auth.json` (`bearerToken`) |
+| Runtime locks | `~/.tron/internal/run/` |
+| Database | `~/.tron/internal/database/log.db` |
+| Contributor runtime artifacts | `~/.tron/internal/run/` |
 
 ## Diagnostics
 
@@ -55,4 +55,4 @@ curl -s http://localhost:9847/health | jq .
 curl -s http://localhost:9847/health/deep | jq .
 ```
 
-Use `logs.recent` over WebSocket or direct SQLite queries against `~/.tron/system/database/log.db` for recent logs. The Mac app does not shell out to a bundled runtime CLI.
+Use `logs.recent` over WebSocket or direct SQLite queries against `~/.tron/internal/database/log.db` for recent logs. The Mac app does not shell out to a bundled runtime CLI.

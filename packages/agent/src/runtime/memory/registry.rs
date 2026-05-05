@@ -1,6 +1,6 @@
 //! In-memory registry for user-memory content.
 //!
-//! Caches the rendered content of `~/.tron/workspace/memory/MEMORY.md`
+//! Caches the rendered content of `~/.tron/memory/MEMORY.md`
 //! plus the listing of detail files under `rules/`. Re-reads only when
 //! the filesystem fingerprint (mtime of `MEMORY.md` + every `rules/*.md`)
 //! changes. See [`MemoryFingerprint`] for scope and [`MemoryRegistry`]
@@ -289,11 +289,11 @@ fn render_content(memory_md: Option<&str>, rule_files: &[MemoryRuleFile]) -> Str
     // Always append the rules listing (even when empty — keeps the agent
     // aware that the location exists).
     out.push_str("\n## Detail files (not auto-loaded — Read on demand)\n\n");
-    out.push_str("Path: `~/.tron/workspace/memory/rules/`\n\n");
+    out.push_str("Path: `~/.tron/memory/rules/`\n\n");
     if rule_files.is_empty() {
         out.push_str(
             "_No detail files yet. When you learn a larger topic about the user, \
-                      create `~/.tron/workspace/memory/rules/<topic>.md` with YAML frontmatter \
+                      create `~/.tron/memory/rules/<topic>.md` with YAML frontmatter \
                       (`description: <one-line>`)._\n",
         );
     } else {
@@ -314,7 +314,7 @@ fn render_content(memory_md: Option<&str>, rule_files: &[MemoryRuleFile]) -> Str
 fn bootstrap_stub() -> &'static str {
     "# MEMORY.md is empty\n\
      \n\
-     You have no user-memory file yet at `~/.tron/workspace/memory/MEMORY.md`. \
+     You have no user-memory file yet at `~/.tron/memory/MEMORY.md`. \
      When you learn user-specific info (name, email, preferences, active projects, \
      tools they use), create this file and record it. See the 'YOUR HUMAN' section \
      of your system prompt for the discipline. Secrets (API keys, tokens, passwords) \
@@ -416,9 +416,9 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::tempdir;
 
-    /// Create a memory-dir layout for tests: `<home>/.tron/workspace/memory/`.
+    /// Create a memory-dir layout for tests: `<home>/.tron/memory/`.
     fn make_memory_root(home: &std::path::Path) -> PathBuf {
-        let mem = home.join(".tron/workspace/memory");
+        let mem = home.join(".tron/memory");
         std::fs::create_dir_all(mem.join("rules")).unwrap();
         std::fs::create_dir_all(mem.join("sessions")).unwrap();
         mem
@@ -433,7 +433,7 @@ mod tests {
         let home_str = home.path().to_str().unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
         std::fs::write(
-            home.path().join(".tron/workspace/memory/MEMORY.md"),
+            home.path().join(".tron/memory/MEMORY.md"),
             "# Personal\n- Name: Alice\n",
         )
         .unwrap();
@@ -448,8 +448,7 @@ mod tests {
         let home_str = home.path().to_str().unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
         std::fs::write(
-            home.path()
-                .join(".tron/workspace/memory/rules/user-preferences.md"),
+            home.path().join(".tron/memory/rules/user-preferences.md"),
             "---\ndescription: prefs\n---\nbody\n",
         )
         .unwrap();
@@ -465,14 +464,13 @@ mod tests {
         make_memory_root(home.path());
         let home_str = home.path().to_str().unwrap();
         std::fs::write(
-            home.path().join(".tron/workspace/memory/MEMORY.md"),
+            home.path().join(".tron/memory/MEMORY.md"),
             "# Personal\n- Name: Alice\n",
         )
         .unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
         std::fs::write(
-            home.path()
-                .join(".tron/workspace/memory/sessions/sess_abc.md"),
+            home.path().join(".tron/memory/sessions/sess_abc.md"),
             "journal\n",
         )
         .unwrap();
@@ -488,15 +486,11 @@ mod tests {
         let home = tempdir().unwrap();
         make_memory_root(home.path());
         let home_str = home.path().to_str().unwrap();
-        std::fs::write(home.path().join(".tron/workspace/memory/MEMORY.md"), "root").unwrap();
+        std::fs::write(home.path().join(".tron/memory/MEMORY.md"), "root").unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
+        std::fs::write(home.path().join(".tron/memory/rules/.DS_Store"), "junk").unwrap();
         std::fs::write(
-            home.path().join(".tron/workspace/memory/rules/.DS_Store"),
-            "junk",
-        )
-        .unwrap();
-        std::fs::write(
-            home.path().join(".tron/workspace/memory/rules/readme.txt"),
+            home.path().join(".tron/memory/rules/readme.txt"),
             "not a rule",
         )
         .unwrap();
@@ -512,12 +506,11 @@ mod tests {
         let home = tempdir().unwrap();
         make_memory_root(home.path());
         let home_str = home.path().to_str().unwrap();
-        std::fs::write(home.path().join(".tron/workspace/memory/MEMORY.md"), "root").unwrap();
+        std::fs::write(home.path().join(".tron/memory/MEMORY.md"), "root").unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
-        std::fs::create_dir_all(home.path().join(".tron/workspace/memory/rules/nested")).unwrap();
+        std::fs::create_dir_all(home.path().join(".tron/memory/rules/nested")).unwrap();
         std::fs::write(
-            home.path()
-                .join(".tron/workspace/memory/rules/nested/sub.md"),
+            home.path().join(".tron/memory/rules/nested/sub.md"),
             "nested content",
         )
         .unwrap();
@@ -532,7 +525,7 @@ mod tests {
         let home = tempdir().unwrap();
         make_memory_root(home.path());
         let home_str = home.path().to_str().unwrap();
-        let md = home.path().join(".tron/workspace/memory/MEMORY.md");
+        let md = home.path().join(".tron/memory/MEMORY.md");
         std::fs::write(&md, "v1").unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
         std::fs::remove_file(&md).unwrap();
@@ -545,7 +538,7 @@ mod tests {
         let home = tempdir().unwrap();
         make_memory_root(home.path());
         let home_str = home.path().to_str().unwrap();
-        let rule = home.path().join(".tron/workspace/memory/rules/foo.md");
+        let rule = home.path().join(".tron/memory/rules/foo.md");
         std::fs::write(&rule, "v1").unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
         std::fs::remove_file(&rule).unwrap();
@@ -558,7 +551,7 @@ mod tests {
         let home = tempdir().unwrap();
         make_memory_root(home.path());
         let home_str = home.path().to_str().unwrap();
-        let rules = home.path().join(".tron/workspace/memory/rules");
+        let rules = home.path().join(".tron/memory/rules");
         std::fs::write(rules.join("foo.md"), "v1").unwrap();
         let fp0 = MemoryFingerprint::compute_for_home(home_str);
         std::fs::rename(rules.join("foo.md"), rules.join("bar.md")).unwrap();
@@ -571,7 +564,7 @@ mod tests {
     #[test]
     fn fingerprint_when_memory_root_is_absent() {
         let home = tempdir().unwrap();
-        // Do NOT create .tron/workspace/memory at all.
+        // Do NOT create .tron/memory at all.
         let home_str = home.path().to_str().unwrap();
         let fp = MemoryFingerprint::compute_for_home(home_str);
         // Repeated calls must be stable.
@@ -618,7 +611,7 @@ mod tests {
         let mut reg = MemoryRegistry::new();
         let out = reg.content(home.path().to_str().unwrap()).to_string();
         assert!(out.contains("MEMORY.md is empty"), "output: {out}");
-        assert!(out.contains("~/.tron/workspace/memory/MEMORY.md"));
+        assert!(out.contains("~/.tron/memory/MEMORY.md"));
     }
 
     #[test]
@@ -672,7 +665,7 @@ mod tests {
         std::fs::create_dir_all(home.path().join(".tron/workspace")).unwrap();
         std::os::unix::fs::symlink(
             dotfiles.path().join("memory"),
-            home.path().join(".tron/workspace/memory"),
+            home.path().join(".tron/memory"),
         )
         .unwrap();
         let mut reg = MemoryRegistry::new();

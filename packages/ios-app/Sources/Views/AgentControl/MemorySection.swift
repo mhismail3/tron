@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Memory Section (standalone container)
 //
-// Renders the user-memory snapshot loaded from ~/.tron/workspace/memory/
+// Renders the user-memory snapshot loaded from ~/.tron/memory/
 // MEMORY.md plus the listing of rules/*.md detail files. Positioned under
 // the "System Instructions" section in the Agent Control context sheet.
 //

@@ -1,8 +1,8 @@
 //! Settings loading with deep merge and environment variable overrides.
 //!
 //! Loading flow:
-//! 1. Start with compiled [`TronSettings::default()`]
-//! 2. If `~/.tron/system/settings.json` exists, deep-merge user values over defaults
+//! 1. Start with `~/.tron/profiles/default/settings/defaults.json`
+//! 2. If `~/.tron/profiles/user/settings.json` exists, deep-merge user values over defaults
 //! 3. Apply environment variable overrides (highest priority)
 //!
 //! Deep merge rules:
@@ -10,10 +10,11 @@
 //! - Arrays and primitives are replaced entirely by source
 //! - Null values in source are skipped (preserving target)
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::settings::errors::Result;
 use crate::settings::types::TronSettings;
@@ -23,14 +24,70 @@ pub fn tron_home_dir() -> PathBuf {
     crate::core::paths::tron_home()
 }
 
-/// Resolve the path to the settings file (`~/.tron/system/settings.json`).
+/// Resolve the sparse settings override path (`~/.tron/profiles/user/settings.json`).
 pub fn settings_path() -> PathBuf {
     crate::core::paths::settings_path()
 }
 
-/// Resolve the path to the auth file (`~/.tron/system/auth.json`).
+/// Resolve the managed default settings file inside `profiles/default`.
+pub fn settings_defaults_path() -> PathBuf {
+    crate::core::paths::settings_defaults_path()
+}
+
+/// Resolve the built-in auth file (`~/.tron/profiles/auth.json`).
 pub fn auth_path() -> PathBuf {
     crate::core::paths::auth_path()
+}
+
+/// Repair-seed the default profile settings file if it is missing.
+pub fn seed_settings_defaults() -> Result<Option<PathBuf>> {
+    seed_settings_defaults_at(&crate::core::paths::tron_home())
+}
+
+/// Repair-seed `<home>/profiles/default/settings/defaults.json` if it is missing.
+///
+/// Normal startup gets this file from the Constitution first-seed bundle.
+/// This helper remains available for explicit repair and tests.
+pub fn seed_settings_defaults_at(home: &Path) -> Result<Option<PathBuf>> {
+    let path = home
+        .join(crate::core::paths::dirs::PROFILES)
+        .join(crate::core::profile::DEFAULT_PROFILE)
+        .join(crate::core::paths::dirs::SETTINGS)
+        .join(crate::core::paths::files::DEFAULTS_JSON);
+    if path.exists() {
+        return Ok(None);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut defaults = bundled_settings_defaults_bytes()?;
+    if !defaults.ends_with(b"\n") {
+        defaults.push(b'\n');
+    }
+    let parent = path.parent().ok_or_else(|| {
+        crate::settings::errors::SettingsError::InvalidValue(
+            "settings defaults path must have a parent directory".to_string(),
+        )
+    })?;
+    let mut temp = tempfile::Builder::new()
+        .prefix(".defaults.")
+        .suffix(".tmp")
+        .tempfile_in(parent)?;
+    temp.write_all(&defaults)?;
+    temp.as_file_mut().sync_all()?;
+    temp.persist(&path)
+        .map_err(|error| crate::settings::errors::SettingsError::Io(error.error))?;
+    Ok(Some(path))
+}
+
+fn bundled_settings_defaults_bytes() -> Result<Vec<u8>> {
+    if let Some(path) =
+        crate::core::constitution::bundled_default_file("profiles/default/settings/defaults.json")
+    {
+        return Ok(std::fs::read(path)?);
+    }
+    warn!("bundled settings/defaults.json is missing; seeding emergency compiled defaults");
+    Ok(serde_json::to_string_pretty(&TronSettings::default())?.into_bytes())
 }
 
 /// Load settings from the default path with env var overrides.
@@ -43,16 +100,19 @@ pub fn load_settings() -> Result<TronSettings> {
 /// If the file does not exist, returns defaults. If the file contains
 /// invalid JSON, returns an error.
 pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
+    let defaults = load_settings_defaults_for(path)?;
     let mut settings = if path.exists() {
         debug!(?path, "loading settings from file");
         let content = std::fs::read_to_string(path)?;
         let user: Value = serde_json::from_str(&content)?;
-        let defaults = serde_json::to_value(TronSettings::default())?;
-        let merged = deep_merge(defaults, user);
+        let merged = deep_merge(serde_json::to_value(defaults)?, user);
         serde_json::from_value(merged)?
     } else {
-        debug!(?path, "settings file not found, using defaults");
-        TronSettings::default()
+        debug!(
+            ?path,
+            "settings file not found, using Constitution defaults"
+        );
+        defaults
     };
 
     settings.validate_strict()?;
@@ -60,6 +120,52 @@ pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
     settings.validate();
     settings.validate_strict()?;
     Ok(settings)
+}
+
+/// Load the managed defaults that correspond to a sparse settings path.
+pub fn load_settings_defaults_for(settings_path: &Path) -> Result<TronSettings> {
+    let path = defaults_path_for_settings_path(settings_path);
+    if !path.exists() {
+        warn!(
+            ?path,
+            "settings defaults are missing; using emergency compiled defaults"
+        );
+        return Ok(TronSettings::default());
+    }
+
+    debug!(?path, "loading settings defaults");
+    let content = std::fs::read_to_string(&path)?;
+    let mut defaults: TronSettings = serde_json::from_str(&content)?;
+    defaults.validate_strict()?;
+    defaults.validate();
+    defaults.validate_strict()?;
+    Ok(defaults)
+}
+
+fn defaults_path_for_settings_path(settings_path: &Path) -> PathBuf {
+    if settings_path.file_name().and_then(|name| name.to_str())
+        != Some(crate::core::paths::files::SETTINGS_JSON)
+    {
+        return settings_defaults_path();
+    }
+
+    if let Some(user_dir) = settings_path.parent()
+        && user_dir.file_name().and_then(|name| name.to_str())
+            == Some(crate::core::profile::USER_PROFILE)
+        && let Some(profiles_dir) = user_dir.parent()
+        && profiles_dir.file_name().and_then(|name| name.to_str())
+            == Some(crate::core::paths::dirs::PROFILES)
+    {
+        return profiles_dir
+            .join(crate::core::profile::DEFAULT_PROFILE)
+            .join(crate::core::paths::dirs::SETTINGS)
+            .join(crate::core::paths::files::DEFAULTS_JSON);
+    }
+
+    // Test/custom settings paths use a sibling defaults.json when present.
+    // If absent, load_settings_defaults_for falls back to emergency compiled
+    // defaults rather than reading the user's real Tron Home.
+    settings_path.with_file_name(crate::core::paths::files::DEFAULTS_JSON)
 }
 
 /// Recursive deep merge of two JSON values.
@@ -328,6 +434,78 @@ mod tests {
             defaults.context.compactor.max_tokens
         );
         assert!(settings.guardrails.is_none());
+    }
+
+    #[test]
+    fn seed_settings_defaults_writes_full_default_file_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let seeded = seed_settings_defaults_at(dir.path()).unwrap();
+        let path = dir
+            .path()
+            .join(crate::core::paths::dirs::PROFILES)
+            .join(crate::core::profile::DEFAULT_PROFILE)
+            .join(crate::core::paths::dirs::SETTINGS)
+            .join("defaults.json");
+
+        assert_eq!(seeded.as_deref(), Some(path.as_path()));
+        assert!(path.exists());
+        let parsed: TronSettings =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            parsed.server.default_model,
+            TronSettings::default().server.default_model
+        );
+
+        let second = seed_settings_defaults_at(dir.path()).unwrap();
+        assert!(second.is_none(), "seeding must preserve existing defaults");
+    }
+
+    #[test]
+    fn bundled_settings_defaults_match_emergency_defaults() {
+        let bundled: TronSettings =
+            serde_json::from_slice(&bundled_settings_defaults_bytes().unwrap()).unwrap();
+        let bundled_value = serde_json::to_value(bundled).unwrap();
+        let emergency_value = serde_json::to_value(TronSettings::default()).unwrap();
+
+        assert_eq!(
+            bundled_value, emergency_value,
+            "bundled settings/defaults.json must preserve current behavior"
+        );
+    }
+
+    #[test]
+    fn load_uses_managed_defaults_before_sparse_user_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let defaults_path = dir.path().join("defaults.json");
+        let settings_path = dir.path().join("settings.json");
+        std::fs::write(
+            &defaults_path,
+            r#"{"server": {"defaultModel": "managed-default", "heartbeatIntervalMs": 45000}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &settings_path,
+            r#"{"server": {"defaultProvider": "openai"}}"#,
+        )
+        .unwrap();
+
+        let settings = load_settings_from_path(&settings_path).unwrap();
+
+        assert_eq!(settings.server.default_model, "managed-default");
+        assert_eq!(settings.server.default_provider, "openai");
+        assert_eq!(settings.server.heartbeat_interval_ms, 45_000);
+    }
+
+    #[test]
+    fn malformed_managed_defaults_fail_fast() {
+        let dir = tempfile::tempdir().unwrap();
+        let defaults_path = dir.path().join("defaults.json");
+        let settings_path = dir.path().join("settings.json");
+        std::fs::write(&defaults_path, "{broken").unwrap();
+
+        let err = load_settings_from_path(&settings_path).unwrap_err();
+
+        assert!(matches!(err, SettingsError::Json(_)));
     }
 
     #[test]

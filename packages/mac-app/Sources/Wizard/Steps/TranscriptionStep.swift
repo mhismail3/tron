@@ -86,5 +86,5 @@ struct TranscriptionStep: View {
 enum TranscriptionStepContent {
     static let intro = "Voice transcription runs locally on this Mac. It uses Apple's MLX stack and downloads a Parakeet model the first time it starts."
     static let toggleTitle = "Enable local transcription"
-    static let toggleBody = "The model cache stays under ~/.tron/system/transcription/models/hf and can be added later from Settings."
+    static let toggleBody = "The model cache stays under ~/.tron/internal/transcription/models/hf and can be added later from Settings."
 }

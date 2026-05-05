@@ -6,6 +6,7 @@
 
 pub mod blob;
 pub mod branch;
+pub mod constitution;
 pub mod device_token;
 pub mod event;
 pub mod session;

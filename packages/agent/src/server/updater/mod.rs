@@ -18,10 +18,10 @@
 //!   Mode `0o644` (non-secret); atomic writes via the same
 //!   `tempfile + sync_all + rename` pattern used for `auth.json`
 //!   so readers never observe a torn file.
-//! - **`auto-update.pause`** sentinel at
+//! - **`internal/run/auto-update.pause`** sentinel at
 //!   [`crate::core::paths::auto_update_pause_path()`]. Mirrors the
-//!   contributor `auto-deploy.pause` convention: the file's presence
-//!   blocks update actions without mutating settings.
+//!   contributor `internal/run/auto-deploy.pause` convention: the
+//!   file's presence blocks update actions without mutating settings.
 //! - **Updater state primitives** — `UpdaterState` (and its serde layout);
 //!   `compare_versions` (semver-lite for the CARGO_PKG_VERSION
 //!   convention used by the project, including `-beta.N` pre-releases);
@@ -135,7 +135,7 @@ pub fn resume(path: &Path) -> io::Result<()> {
 // UpdaterState (persisted JSON)
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Durable state written to `~/.tron/system/run/updater-state.json`.
+/// Durable state written to `~/.tron/internal/run/updater-state.json`.
 ///
 /// Read on every server start, written on every successful check or
 /// install attempt. Fields are individually optional so the on-disk
@@ -1048,7 +1048,7 @@ mod tests {
     #[test]
     fn state_write_creates_parent_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let nested = dir.path().join("nested/system/run/updater-state.json");
+        let nested = dir.path().join("nested/internal/run/updater-state.json");
         write_update_state(&nested, &UpdaterState::default()).unwrap();
         assert!(nested.exists());
     }
@@ -1325,15 +1325,15 @@ mod tests {
     // ── Path helpers ──
 
     #[test]
-    fn default_state_path_under_system() {
+    fn default_state_path_under_internal() {
         let s = updater_state_path().to_string_lossy().into_owned();
         assert!(s.ends_with("/run/updater-state.json"));
-        assert!(s.contains("/.tron/system/"));
+        assert!(s.contains("/.tron/internal/"));
     }
 
     #[test]
     fn default_pause_path_at_tron_home() {
         let s = pause_sentinel_path().to_string_lossy().into_owned();
-        assert!(s.ends_with("/.tron/auto-update.pause"));
+        assert!(s.ends_with("/.tron/internal/run/auto-update.pause"));
     }
 }

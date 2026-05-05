@@ -11,7 +11,7 @@ Manage scheduled automations (cron jobs) stored in AUTOMATIONS. The scheduler wa
 
 ## Paths
 
-All paths below are derived from the system prompt's PATH REFERENCE (AUTOMATIONS = `~/.tron/workspace/automations/`).
+All paths below are derived from the Constitution path reference (AUTOMATIONS = `~/.tron/workspace/automations/`).
 
 | Alias | Path |
 |-------|------|

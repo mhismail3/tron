@@ -243,7 +243,7 @@ fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
 
 /// RAII guard that removes the test-specific streaming-journal directory when
 /// the test finishes (success, failure, or panic). Tests that run through the
-/// turn_runner create `~/.tron/system/database/journals/<session_id>/` and
+/// turn_runner create `~/.tron/internal/database/journals/<session_id>/` and
 /// expect StreamingJournal::finalize_and_delete to remove it — but a panic
 /// between create and finalize leaves orphan directories. Combined with
 /// shared session IDs, orphan dirs caused inter-test races.

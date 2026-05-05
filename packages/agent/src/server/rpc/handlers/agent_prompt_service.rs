@@ -157,14 +157,11 @@ pub fn spawn_prompt_run(
         hook_abort_tracker: ctx.hook_abort_tracker.clone(),
         sequence_counter: {
             let sid = &request.session_id;
-            // Ensure counter is initialized (idempotent for already-initialized sessions).
-            // On first prompt after create, it was already initialized to 0 in session.create.
-            // On resume, re-initialize from DB max to pick up any externally-persisted events.
-            if ctx.orchestrator.get_sequence_counter(sid).is_none() {
-                let max_seq = ctx.event_store.get_max_sequence(sid).unwrap_or(0);
-                ctx.orchestrator.init_sequence_counter(sid, max_seq);
-            }
-            ctx.orchestrator.get_sequence_counter(sid)
+            let max_seq = ctx.event_store.get_max_sequence(sid).unwrap_or(0);
+            Some(
+                ctx.orchestrator
+                    .ensure_sequence_counter_at_least(sid, max_seq),
+            )
         },
         server_origin: ctx.origin.clone(),
         run_id,
@@ -541,7 +538,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 .as_ref()
                 .map(|branch| format!(" (based on {branch})"))
                 .unwrap_or_default(),
-            crate::runtime::context::system_prompts::GIT_WORKFLOW_PROMPT,
+            crate::runtime::context::instruction_prompts::default_prompt("git-workflow"),
         );
         Some(match memory {
             Some(memory) => format!("{memory}{worktree_context}"),
@@ -586,11 +583,11 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         working_directory: Some(working_dir.clone()),
         server_origin: Some(server_origin),
         system_prompt: if is_chat {
-            Some(crate::runtime::context::system_prompts::TRON_CHAT_PROMPT.to_string())
+            Some(crate::runtime::context::instruction_prompts::default_prompt("chat"))
         } else {
-            // Precedence: project .tron/SYSTEM.md > global ~/.tron/workspace/memory/rules/SYSTEM.md > embedded
-            crate::runtime::context::system_prompts::load_system_prompt_from_file(&working_dir)
-                .or_else(crate::runtime::context::system_prompts::load_global_system_prompt)
+            // Precedence: project override > constitutional user profile override > seeded default.
+            crate::runtime::context::instruction_prompts::load_system_prompt_from_file(&working_dir)
+                .or_else(crate::runtime::context::instruction_prompts::load_global_system_prompt)
                 .map(|loaded| loaded.content)
         },
         enable_thinking: true,
@@ -1096,7 +1093,8 @@ fn drain_prompt_queue(
                 .unwrap_or_default(),
         });
 
-    let sequence_counter = orchestrator.get_sequence_counter(session_id);
+    let max_seq = event_store.get_max_sequence(session_id).unwrap_or(0);
+    let sequence_counter = Some(orchestrator.ensure_sequence_counter_at_least(session_id, max_seq));
 
     let plan = PromptRunPlan {
         started_run,

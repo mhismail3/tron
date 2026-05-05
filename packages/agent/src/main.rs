@@ -34,7 +34,7 @@
 //! 4. Session writes are serialized per-session via in-process locks
 //! 5. `agent.ready` is emitted AFTER `agent.complete` (iOS send button)
 //! 6. Compaction always runs before ledger writing (deterministic DB ordering)
-//! 7. Production DB target is strictly `~/.tron/system/database/log.db`
+//! 7. Production DB target is strictly `~/.tron/internal/database/log.db`
 //! 8. Server shutdown is signal-owned (`SIGINT`/`SIGTERM` on Unix) so managed
 //!    children such as `codex app-server` are stopped before Tron exits.
 
@@ -140,8 +140,8 @@ enum Command {
 #[derive(clap::Subcommand, Debug)]
 enum AuthAction {
     /// Generate a fresh bearer token, persist it to
-    /// `~/.tron/system/auth.json` as `bearerToken` (atomic, 0o600), and print it to
-    /// stdout. After this completes, every paired iOS device must
+    /// `~/.tron/profiles/auth.json` as `bearerToken` (atomic, 0o600), and print it
+    /// to stdout. After this completes, every paired iOS device must
     /// re-pair (their cached token is invalidated).
     ///
     /// Safe to run while the server is up — `BearerTokenStore`'s mtime
@@ -252,43 +252,16 @@ fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the auth file path (`~/.tron/system/auth.json`).
+/// Resolve the auth file path (`~/.tron/profiles/auth.json`).
 fn auth_path() -> PathBuf {
     tron::settings::loader::auth_path()
 }
 
-/// System subdirectories created on ordinary server startup.
-///
-/// Contributor-only directories are intentionally excluded so ordinary
-/// startup only creates runtime data required by the installed server.
-fn startup_system_subdirs() -> &'static [&'static str] {
-    use tron::core::paths::dirs;
-    &[dirs::DB, dirs::RUN]
-}
-
-/// Ensure `~/.tron/` directory structure exists and seed the system prompt.
-fn init_directories() {
-    use tron::core::paths::dirs;
-    let tron_home = tron::settings::tron_home_dir();
-    let system = tron_home.join(dirs::SYSTEM);
-    for subdir in startup_system_subdirs() {
-        let _ = std::fs::create_dir_all(system.join(subdir));
-    }
-    for subdir in &[
-        dirs::KNOWLEDGE,
-        dirs::REPORTS,
-        dirs::CRON,
-        dirs::SCRATCH,
-        dirs::SCREENSHOTS,
-    ] {
-        let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(subdir));
-    }
-    let _ = std::fs::create_dir_all(tron_home.join(dirs::WORKSPACE).join(dirs::VOICE_NOTES));
-    let _ = std::fs::create_dir_all(tron_home.join(dirs::SKILLS));
-    // Memory workspace: rules (SYSTEM.md, core memories) + sessions (journals)
-    let memory = tron_home.join(dirs::WORKSPACE).join(dirs::MEMORY);
-    let _ = std::fs::create_dir_all(memory.join(dirs::RULES));
-    let _ = std::fs::create_dir_all(memory.join(dirs::SESSIONS));
+/// Ensure `~/.tron/` obeys the Tron Constitution.
+fn init_directories() -> Result<()> {
+    tron::core::constitution::ensure_tron_home()
+        .context("Failed to initialize Tron Constitution home")?;
+    Ok(())
 }
 
 /// Open the SQLite database, run migrations, and return the pool + resolved path.
@@ -333,7 +306,7 @@ fn init_database(
         // reconstructed from damaged data.
         tron::events::check_integrity(&conn).context(
             "Database integrity check failed. The event store may be corrupt; \
-             restore from a backup or investigate ~/.tron/system/database/log.db.",
+             restore from a backup or investigate ~/.tron/internal/database/log.db.",
         )?;
         let _ = tron::events::run_migrations(&conn).context("Failed to run migrations")?;
     }
@@ -908,7 +881,7 @@ async fn main() -> Result<()> {
 
     // CLI subcommands short-circuit before touching the database, the
     // logging subsystem, or the network. They do their own minimal
-    // filesystem work (e.g. atomic writes under `~/.tron/system/`) and
+    // filesystem work (e.g. atomic writes under `~/.tron/internal/`) and
     // exit. This keeps `tron auth rotate` safe to invoke while the
     // server is running — the daemon's own `init_*` calls stay
     // confined to the long-running process.
@@ -917,7 +890,7 @@ async fn main() -> Result<()> {
     }
 
     // Phase 1: Pre-database filesystem operations
-    init_directories();
+    init_directories()?;
     let bearer_token_path = tron::server::onboarding::bearer_token_path();
     let _bearer_token = initialize_bearer_token_at(&bearer_token_path)?;
 

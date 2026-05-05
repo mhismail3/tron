@@ -101,7 +101,7 @@ struct TestHostView: View {
 
 /// Top-level switcher between Wizard and Menu Bar modes.
 ///
-/// Decision rule: presence of the `~/.tron/system/run/.onboarded` sentinel.
+/// Decision rule: presence of the `~/.tron/internal/run/.onboarded` sentinel.
 /// - Missing → wizard window.
 /// - Present → window dismisses; AppDelegate transforms the process to
 ///   `.accessory` and installs the menu bar item.
