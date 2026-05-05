@@ -10,7 +10,8 @@ extension EventStoreManager {
         workspaceId: String,
         model: String,
         workingDirectory: String,
-        source: String? = nil
+        source: String? = nil,
+        profile: String? = nil
     ) async throws {
         let now = DateParser.now
 
@@ -39,6 +40,7 @@ extension EventStoreManager {
             serverOrigin: serverOrigin
         )
         session.source = source
+        session.profile = profile
 
         try await eventDB.sessions.insert(session)
         loadSessions()

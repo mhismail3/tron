@@ -947,20 +947,31 @@ async fn run_summarizer(
     transcript: String,
 ) -> SummarizerOutcome {
     let task = format!("Summarize the provided session transcript:\n\n{transcript}");
+    let process = crate::core::profile::active_process_spec("memoryRetain");
 
     match manager
         .spawn_subsession(SubsessionConfig {
             parent_session_id: parent_session_id.to_owned(),
             task,
-            model: Some("claude-sonnet-4-6".to_string()),
-            system_prompt: crate::runtime::context::instruction_prompts::summarizer_prompt(
-                "memory-retain",
+            model: None,
+            system_prompt: crate::runtime::context::instruction_prompts::process_prompt(
+                "memoryRetain",
             ),
             working_directory: working_directory.to_owned(),
-            inherit_tools: false,
-            max_turns: 1,
-            max_depth: 0,
-            blocking_timeout_ms: Some(60_000),
+            timeout_ms: process
+                .as_ref()
+                .and_then(|p| p.timeout_ms)
+                .unwrap_or(30_000),
+            inherit_tools: process
+                .as_ref()
+                .and_then(|p| p.inherit_tools)
+                .unwrap_or(false),
+            max_turns: process.as_ref().and_then(|p| p.max_turns).unwrap_or(1),
+            max_depth: process.as_ref().and_then(|p| p.max_depth).unwrap_or(0),
+            blocking_timeout_ms: process
+                .as_ref()
+                .and_then(|p| p.blocking_timeout_ms)
+                .or(Some(30_000)),
             ..SubsessionConfig::default()
         })
         .await

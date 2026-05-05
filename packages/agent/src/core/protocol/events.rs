@@ -700,6 +700,9 @@ tron_events! {
         /// Session source (e.g. "chat" for persistent chat sessions).
         #[serde(skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        /// Execution profile selected for the session.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        profile: Option<String>,
         /// Session title (e.g. "Chat" for persistent chat sessions).
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
@@ -1968,6 +1971,7 @@ mod tests {
                 model: "m".into(),
                 working_directory: "/tmp".into(),
                 source: None,
+                profile: None,
                 title: None,
             },
             TronEvent::SessionArchived { base: base.clone() },

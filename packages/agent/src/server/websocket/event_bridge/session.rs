@@ -103,6 +103,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
             model,
             working_directory,
             source,
+            profile,
             title,
             ..
         } => Some(global(
@@ -119,6 +120,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<BridgedEvent> {
                 "lastActivity": base.timestamp,
                 "isActive": true,
                 "source": source,
+                "profile": profile,
             })),
         )),
         TronEvent::SessionForked { new_session_id, .. } => Some(global(

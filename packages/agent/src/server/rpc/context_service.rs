@@ -47,7 +47,14 @@ pub(crate) fn build_context_manager_for_session(
     };
 
     let settings = crate::settings::get_settings();
-    let is_chat = session.source.as_deref() == Some("chat");
+    let profile_name = session.profile.as_str();
+    let _resolved_profile =
+        crate::core::profile::resolve_profile_at(&crate::core::paths::tron_home(), profile_name)
+            .map_err(|error| RpcError::Internal {
+                message: format!("invalid session profile `{profile_name}`: {error}"),
+            })?;
+    let is_chat = profile_name == crate::core::profile::CHAT_PROFILE
+        || session.source.as_deref() == Some("chat");
     let artifacts = if is_chat {
         SessionContextArtifacts::default()
     } else {
@@ -60,14 +67,29 @@ pub(crate) fn build_context_manager_for_session(
     let compactor_settings = &settings.context.compactor;
     let mut context_manager = ContextManager::new(ContextManagerConfig {
         model: state.model.clone(),
-        system_prompt: if is_chat {
-            Some(crate::runtime::context::instruction_prompts::default_prompt("chat"))
-        } else {
+        system_prompt: if profile_name == crate::core::profile::NORMAL_PROFILE {
             crate::runtime::context::instruction_prompts::load_system_prompt_from_file(
                 &session.working_directory,
             )
             .or_else(crate::runtime::context::instruction_prompts::load_global_system_prompt)
             .map(|loaded| loaded.content)
+            .or_else(|| {
+                Some(
+                    crate::runtime::context::instruction_prompts::entrypoint_prompt(
+                        profile_name,
+                        "main",
+                        "core",
+                    ),
+                )
+            })
+        } else {
+            Some(
+                crate::runtime::context::instruction_prompts::entrypoint_prompt(
+                    profile_name,
+                    "main",
+                    "core",
+                ),
+            )
         },
         working_directory: state.working_directory.clone(),
         tools: tool_definitions,
@@ -163,7 +185,7 @@ pub(crate) fn build_summarizer(
             manager: manager.clone(),
             parent_session_id: session_id.to_owned(),
             working_directory: working_directory.to_owned(),
-            system_prompt: crate::runtime::context::instruction_prompts::summarizer_prompt(
+            system_prompt: crate::runtime::context::instruction_prompts::process_prompt(
                 "compaction",
             ),
             model: None,

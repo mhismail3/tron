@@ -143,6 +143,10 @@ pub fn load_settings_defaults_for(settings_path: &Path) -> Result<TronSettings> 
 }
 
 fn defaults_path_for_settings_path(settings_path: &Path) -> PathBuf {
+    if settings_path == crate::core::paths::settings_path() {
+        return settings_defaults_path();
+    }
+
     if settings_path.file_name().and_then(|name| name.to_str())
         != Some(crate::core::paths::files::SETTINGS_JSON)
     {

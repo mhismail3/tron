@@ -67,6 +67,8 @@ pub struct ToolExecutionContext<'a> {
     /// Provider type of the active model. Used to enforce the local-model
     /// tool allow-list at the execution boundary (see `local_policy`).
     pub provider_type: Provider,
+    /// Optional execution spec selected by the current session profile.
+    pub execution_spec: Option<&'a crate::core::profile::AgentExecutionSpec>,
     /// Optional persister for durable progress events. When `Some`, long-running
     /// tools can call `ctx.emit_progress(...)` to surface incremental status
     /// (Bash heartbeat, WebFetch bytes, subagent turn count) as persisted
@@ -119,15 +121,23 @@ pub async fn execute_tool(
     // schemas; if the model hallucinates a call to a hidden tool, refuse
     // execution here so the gate is enforced at the execution boundary (not
     // only at schema-rendering time).
-    if local_policy::is_local_provider(ctx.provider_type)
-        && !local_policy::is_local_tool(&tool_name)
+    let context_policy = ctx
+        .execution_spec
+        .map(|spec| {
+            local_policy::ContextPolicy::from_entrypoint_with_spec(ctx.provider_type, spec, "main")
+        })
+        .unwrap_or_else(|| local_policy::ContextPolicy::from_provider(ctx.provider_type));
+    let allowed_tools = context_policy.tool_filter();
+    if context_policy.is_local()
+        && let Some(allowed) = allowed_tools.as_ref()
+        && !allowed.iter().any(|allowed| allowed == &tool_name)
     {
         warn!(tool_name, "tool not available for local model");
         return ToolExecutionResult {
             tool_call_id,
             result: crate::core::tools::error_result(format!(
                 "Tool '{tool_name}' is not available for local models. Use one of: {}.",
-                local_policy::LOCAL_MODEL_TOOLS.join(", ")
+                allowed.join(", ")
             )),
             duration_ms: duration_ceil_ms(start.elapsed()),
             blocked_by_hook: false,
@@ -504,6 +514,7 @@ mod tests {
                 output_buffer_registry: None,
                 sequence_counter: None,
                 provider_type: Provider::Anthropic,
+                execution_spec: None,
                 event_persister: None,
                 turn: 0,
                 tool_abort_registry: None,
@@ -524,6 +535,7 @@ mod tests {
                 output_buffer_registry: None,
                 sequence_counter: None,
                 provider_type: $provider,
+                execution_spec: None,
                 event_persister: None,
                 turn: 0,
                 tool_abort_registry: None,
@@ -1120,7 +1132,8 @@ mod tests {
     // ── Local-model tool allow-list ──
 
     /// Stand-in for a cloud-only tool (e.g. SpawnSubagent) not on the local
-    /// allow-list. Uses a name that is definitely not in LOCAL_MODEL_TOOLS.
+    /// allow-list. Uses a name that is definitely not in the profile's local
+    /// tool policy.
     struct CloudOnlyTool;
 
     #[async_trait]
@@ -1324,6 +1337,7 @@ mod tests {
             output_buffer_registry: None,
             sequence_counter: None,
             provider_type: Provider::Anthropic,
+            execution_spec: None,
             event_persister: None,
             turn: 0,
             tool_abort_registry: Some(abort_registry),

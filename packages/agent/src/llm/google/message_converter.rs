@@ -300,6 +300,7 @@ mod tests {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
+            hook_context: None,
             server_origin: None,
         }
     }

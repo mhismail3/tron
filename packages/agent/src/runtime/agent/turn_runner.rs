@@ -186,19 +186,44 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     if let Some(persister) = persister {
         let context_blocks =
             crate::llm::context_composition::compose_context_audit_blocks(&context);
-        let profile = crate::core::constitution::active_profile_name();
+        let resolved_profile = run_context.resolved_profile.clone().or_else(|| {
+            crate::core::profile::resolve_active_profile()
+                .ok()
+                .map(Arc::new)
+        });
+        let active_profile_name = run_context
+            .profile_name
+            .clone()
+            .or_else(|| {
+                resolved_profile
+                    .as_ref()
+                    .map(|profile| profile.name.clone())
+            })
+            .or_else(crate::core::constitution::active_profile_name);
+        let profile = active_profile_name.as_deref();
+        let (context_policy_id, tool_policy_id, cache_policy_id) =
+            resolved_turn_policy_ids(resolved_profile.as_deref(), provider.provider_type());
         let metadata = serde_json::json!({
             "messageCount": context.messages.len(),
             "toolCount": context.tools.as_ref().map_or(0, Vec::len),
             "streamOptions": &stream_options,
             "providerSurface": "preAdapter",
+            "profileChain": resolved_profile
+                .as_ref()
+                .map(|profile| profile.profile_chain.clone())
+                .unwrap_or_default(),
+            "profileSpecHash": resolved_profile
+                .as_ref()
+                .map(|profile| profile.spec_hash.clone()),
+            "contextPolicy": context_policy_id,
+            "toolPolicy": tool_policy_id,
         });
         let audit = crate::events::sqlite::repositories::constitution::ContextResolutionAudit {
             session_id: Some(session_id),
             turn: Some(turn),
             provider: Some(provider.provider_type().as_str()),
             model: Some(provider.model()),
-            profile: profile.as_deref(),
+            profile,
             blocks: &context_blocks,
             metadata,
         };
@@ -253,10 +278,14 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 turn: Some(turn),
                 provider: Some(provider.provider_type().as_str()),
                 model: Some(provider.model()),
-                profile: profile.as_deref(),
+                profile,
                 payload: &provider_payload,
                 metadata: serde_json::json!({
                     "contextResolutionId": context_resolution_id,
+                    "profileSpecHash": resolved_profile
+                        .as_ref()
+                        .map(|profile| profile.spec_hash.clone()),
+                    "cachePolicy": cache_policy_id,
                     "exactProviderEnvelope": provider_payload
                         .get("exactProviderEnvelope")
                         .and_then(serde_json::Value::as_bool)
@@ -593,6 +622,10 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         output_buffer_registry,
         sequence_counter,
         provider_type: provider.provider_type(),
+        execution_spec: run_context
+            .resolved_profile
+            .as_deref()
+            .map(|profile| &profile.spec),
         tool_abort_registry,
     })
     .await;
@@ -704,99 +737,138 @@ fn build_turn_context(
     server_origin: Option<&str>,
     provider_type: crate::core::messages::Provider,
 ) -> Context {
-    let is_local = local_policy::is_local_provider(provider_type);
+    let context_policy = run_context
+        .resolved_profile
+        .as_deref()
+        .map(|profile| {
+            local_policy::ContextPolicy::from_entrypoint_with_spec(
+                provider_type,
+                &profile.spec,
+                "main",
+            )
+        })
+        .unwrap_or_else(|| local_policy::ContextPolicy::from_provider(provider_type));
+    let is_local = context_policy.is_local();
 
     // Set volatile token estimates for accurate snapshots.
-    // Local models: skill tokens flow through (user can manually add skills),
-    // but job_results are stripped (no background job tools for local).
-    if is_local {
-        context_manager.set_volatile_tokens(
-            run_context.volatile_tokens.skill_context,
-            run_context.volatile_tokens.skill_removal,
-            0,
-        );
+    let job_result_tokens = if context_policy.strip_job_results() {
+        0
     } else {
-        context_manager.set_volatile_tokens(
-            run_context.volatile_tokens.skill_context,
-            run_context.volatile_tokens.skill_removal,
-            run_context.volatile_tokens.job_results,
-        );
-    }
+        run_context.volatile_tokens.job_results
+    };
+    context_manager.set_volatile_tokens(
+        run_context.volatile_tokens.skill_context,
+        run_context.volatile_tokens.skill_removal,
+        job_result_tokens,
+    );
     // Set server origin for environment token estimation
     context_manager.set_server_origin(server_origin.map(String::from));
 
     let mut context = context_manager.build_base_context();
     context.messages = context_manager.get_messages_arc();
+    context.hook_context.clone_from(&run_context.hook_context);
 
-    // Tool schemas: reduced set with condensed definitions for local models
-    context.tools = if is_local {
-        Some(registry.local_definitions(local_policy::LOCAL_MODEL_TOOLS))
-    } else {
-        Some(registry.definitions())
+    // Tool schemas follow the active context/tool policy.
+    context.tools = match context_policy.tool_filter() {
+        Some(tool_names) => Some(registry.local_definitions_for_names(&tool_names)),
+        None => Some(registry.definitions()),
     };
 
-    if is_local {
-        // Local models: skip memory, skill index, and job results.
-        // Keep skill context/activation/removal — users can manually @mention skills.
-        // Truncate rules to the most important prefix.
+    context
+        .skill_activation_context
+        .clone_from(&run_context.skill_activation_context);
+    context.skill_context.clone_from(&run_context.skill_context);
+    context
+        .skill_removal_context
+        .clone_from(&run_context.skill_removal_context);
+    context.dynamic_rules_context = run_context
+        .dynamic_rules_context
+        .clone()
+        .or(context.dynamic_rules_context);
+
+    if context_policy.strip_memory() {
         context.memory_content = None;
+    }
+    if context_policy.strip_skill_index() {
         context.skill_index_context = None;
-        context
-            .skill_activation_context
-            .clone_from(&run_context.skill_activation_context);
-        context.skill_context.clone_from(&run_context.skill_context);
-        context
-            .skill_removal_context
-            .clone_from(&run_context.skill_removal_context);
-        context.job_results_context = None;
-        if let Some(ref rules) = context.rules_content {
-            context.rules_content = Some(local_policy::truncate_rules_for_local(rules));
-        }
-        // Dynamic rules are short and path-relevant — keep them.
-        context.dynamic_rules_context = run_context
-            .dynamic_rules_context
-            .clone()
-            .or(context.dynamic_rules_context);
     } else {
-        // Cloud models: full context assembly
         context
             .skill_index_context
             .clone_from(&run_context.skill_index_context);
-        context
-            .skill_activation_context
-            .clone_from(&run_context.skill_activation_context);
-        context.skill_context.clone_from(&run_context.skill_context);
-        context
-            .skill_removal_context
-            .clone_from(&run_context.skill_removal_context);
+    }
+    if context_policy.strip_job_results() {
+        context.job_results_context = None;
+    } else {
         context
             .job_results_context
             .clone_from(&run_context.job_results);
-        context.dynamic_rules_context = run_context
-            .dynamic_rules_context
-            .clone()
-            .or(context.dynamic_rules_context);
+    }
+    if context_policy.rules_truncation().is_some()
+        && let Some(ref rules) = context.rules_content
+    {
+        context.rules_content = Some(context_policy.truncate_rules(rules));
     }
 
     context.server_origin = server_origin.map(String::from);
 
     if is_local {
+        let truncation_suffix = context_policy
+            .spec()
+            .rules_truncation_suffix
+            .clone()
+            .unwrap_or_else(local_policy::rules_truncation_suffix);
         let rules_truncated = context
             .rules_content
             .as_ref()
-            .is_some_and(|r| r.ends_with(local_policy::LOCAL_RULES_TRUNCATION_SUFFIX));
+            .is_some_and(|r| r.ends_with(&truncation_suffix));
         debug!(
             provider = "ollama",
-            tool_count = local_policy::LOCAL_MODEL_TOOLS.len(),
-            memory_stripped = true,
-            skill_index_stripped = true,
-            job_results_stripped = true,
+            tool_count = context_policy.tool_filter().map_or(0, |tools| tools.len()),
+            memory_stripped = context_policy.strip_memory(),
+            skill_index_stripped = context_policy.strip_skill_index(),
+            job_results_stripped = context_policy.strip_job_results(),
             rules_truncated,
             "local-model turn context"
         );
     }
 
     context
+}
+
+fn resolved_turn_policy_ids(
+    resolved_profile: Option<&crate::core::profile::ResolvedProfile>,
+    provider_type: crate::core::messages::Provider,
+) -> (String, String, String) {
+    let bundled_default;
+    let spec = if let Some(profile) = resolved_profile {
+        &profile.spec
+    } else {
+        bundled_default = crate::core::profile::bundled_default_execution_spec();
+        &bundled_default
+    };
+    let entrypoint = spec
+        .entrypoints
+        .get("main")
+        .or_else(|| spec.entrypoints.get("chat"));
+    let context_policy =
+        crate::runtime::context::local_policy::ContextPolicy::from_entrypoint_with_spec(
+            provider_type,
+            spec,
+            "main",
+        );
+    let context_policy_id = context_policy.id().to_string();
+    let tool_policy_id = context_policy
+        .tool_policy_id()
+        .map(String::from)
+        .or_else(|| entrypoint.map(|entrypoint| entrypoint.tool_policy.clone()))
+        .or_else(|| spec.tool_policies.keys().next().cloned())
+        .expect("bundled default profile must define a tool policy");
+    let cache_policy_id = entrypoint
+        .map(|entrypoint| entrypoint.cache_policy.clone())
+        .or_else(|| spec.cache_policies.keys().next().cloned())
+        .expect("bundled default profile must define a cache policy");
+
+    (context_policy_id, tool_policy_id, cache_policy_id)
 }
 
 #[cfg(test)]

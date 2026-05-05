@@ -43,15 +43,12 @@ use crate::worktree::types::ConflictedFile;
 /// the reconciler may observe an in-flight merge state.
 const CANCEL_DRAIN_MS: u64 = 30_000;
 
-/// Restricted tool allowlist for the conflict resolver subagent.
-///
-/// Any tool not in this list is stripped from the inherited tool
-/// registry before the subagent starts — new tools added to the
-/// top-level registry never silently leak into the restricted resolver.
-pub const CONFLICT_RESOLVER_ALLOWED_TOOLS: &[&str] = &["Read", "Edit", "Write", "Bash"];
-
-/// Default maximum number of LLM turns for a conflict-resolver session.
-pub const DEFAULT_MAX_TURNS: u32 = 40;
+/// Fallback tool allowlist used only if profile recovery is in progress.
+const FALLBACK_ALLOWED_TOOLS: &[&str] = &["Read", "Edit", "Write", "Bash"];
+/// Fallback maximum number of LLM turns used only during profile recovery.
+const FALLBACK_MAX_TURNS: u32 = 40;
+/// Fallback wall-clock cap used only during profile recovery.
+const FALLBACK_TIMEOUT_MS: u64 = 15 * 60 * 1000;
 
 /// System prompt for the conflict-resolver subagent.
 ///
@@ -65,7 +62,7 @@ pub fn build_prompt(
     conflicts: &[ConflictedFile],
 ) -> String {
     let base_prompt =
-        crate::runtime::context::instruction_prompts::subagent_prompt("conflict-resolver");
+        crate::runtime::context::instruction_prompts::process_prompt("conflictResolver");
     let mut out = String::with_capacity(base_prompt.len() + 512);
     out.push_str(&base_prompt);
     out.push_str("\n\n## Current Merge\n\n");
@@ -173,11 +170,17 @@ pub async fn spawn(
         strategy_label,
     );
 
+    let process = crate::core::profile::active_process_spec("conflictResolver");
     let working_directory = info.worktree_path.to_string_lossy().to_string();
-    let allowed: Vec<String> = CONFLICT_RESOLVER_ALLOWED_TOOLS
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
+    let allowed: Vec<String> = process
+        .as_ref()
+        .and_then(|p| p.allowed_tools.clone())
+        .unwrap_or_else(|| {
+            FALLBACK_ALLOWED_TOOLS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect()
+        });
 
     let config = SubsessionConfig {
         parent_session_id: parent_session_id.to_string(),
@@ -193,12 +196,24 @@ pub async fn spawn(
         // at typical 15–20 s/turn, but still well below the prior
         // hardcoded 30 min which allowed runaway resolvers to keep
         // burning the model budget after they were clearly stuck.
-        timeout_ms: 15 * 60 * 1000,
-        blocking_timeout_ms: None, // non-blocking — RPC returns immediately
-        max_turns: DEFAULT_MAX_TURNS,
-        max_depth: 0,
-        inherit_tools: true,
-        denied_tools: vec![],
+        timeout_ms: process
+            .as_ref()
+            .and_then(|p| p.timeout_ms)
+            .unwrap_or(FALLBACK_TIMEOUT_MS),
+        blocking_timeout_ms: None,
+        max_turns: process
+            .as_ref()
+            .and_then(|p| p.max_turns)
+            .unwrap_or(FALLBACK_MAX_TURNS),
+        max_depth: process.as_ref().and_then(|p| p.max_depth).unwrap_or(0),
+        inherit_tools: process
+            .as_ref()
+            .and_then(|p| p.inherit_tools)
+            .unwrap_or(true),
+        denied_tools: process
+            .as_ref()
+            .map(|p| p.denied_tools.clone())
+            .unwrap_or_default(),
         allowed_tools: Some(allowed),
         reasoning_level: None,
         spawn_type: SpawnType::Subsession,
@@ -425,13 +440,10 @@ mod tests {
         // Guard rail — any change to the allowlist is a conscious one.
         // The resolver drives git entirely through Bash; no typed git
         // tools exist in the registry.
-        assert_eq!(
-            CONFLICT_RESOLVER_ALLOWED_TOOLS,
-            &["Read", "Edit", "Write", "Bash"],
-        );
+        assert_eq!(FALLBACK_ALLOWED_TOOLS, &["Read", "Edit", "Write", "Bash"],);
         // Must NOT expose SpawnSubagent to prevent recursive resolver
         // spawning.
-        assert!(!CONFLICT_RESOLVER_ALLOWED_TOOLS.contains(&"SpawnSubagent"));
+        assert!(!FALLBACK_ALLOWED_TOOLS.contains(&"SpawnSubagent"));
     }
 
     // ─── wait_or_cancel: wall-clock timeout tests (M9) ─────────────────

@@ -674,7 +674,7 @@ Async lifecycle hooks execute before/after tool calls and around prompts:
 
 ## Database Schema
 
-All data lives in a single SQLite file: `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/events/sqlite/migrations/v001_schema.sql`; existing v001 installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
+All data lives in a single SQLite file: `~/.tron/internal/database/log.db`. WAL mode with 5 s busy timeout for concurrent access. Fresh databases start from consolidated `packages/agent/src/events/sqlite/migrations/v001_schema.sql`; existing installs receive additive follow-up migrations such as `v002_constitution_audit.sql`, `v003_profile_migrations.sql`, and `v004_session_profile.sql`, registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
 
 ### Tables
 
@@ -682,7 +682,7 @@ All data lives in a single SQLite file: `~/.tron/internal/database/log.db`. WAL 
 |-------|---------|
 | `schema_version` | Migration version tracking |
 | `workspaces` | Project/directory contexts (id, path, name, timestamps) |
-| `sessions` | Session metadata: head pointer, title, model, token counts, tags, fork lineage, spawn metadata, optional `use_worktree` per-session worktree override |
+| `sessions` | Session metadata: head pointer, title, model, execution `profile`, token counts, tags, fork lineage, spawn metadata, optional `use_worktree` per-session worktree override |
 | `events` | Immutable append-only event log. Denormalized columns (`role`, `tool_name`, `tool_call_id`, `turn`, token counts, `model`, `latency_ms`, `stop_reason`, `provider_type`, `cost`, ...) extracted from payloads for indexed queries |
 | `blobs` | Content-addressable deduplicated storage (hash, compressed content, MIME type, ref count) |
 | `branches` | Named positions in the event tree (root + head pointer per branch) |
@@ -696,6 +696,7 @@ All data lives in a single SQLite file: `~/.tron/internal/database/log.db`. WAL 
 | `constitution_home_audit` | Audited creates, updates, moves, deletes, seeds, repairs, and external edits for files under `~/.tron/` |
 | `constitution_resolution_audit` | Settings, instruction, context, provider-payload, vault, automation, and outcome resolution records with effective hashes and blob refs |
 | `constitution_context_blocks` | Typed model-context blocks for replay: source home/path/blob, hash, sensitivity, cache class, inclusion reason, precedence, and provider surface |
+| `profile_migrations` | Temporary profile-schema/layout migration ledger used to prove when v1/v2 migration code can be retired |
 
 The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. Prompt history and cron state live in their dedicated tables; session/task views are reconstructed from the canonical event log.
 
@@ -906,15 +907,20 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   +-- active.toml                Active profile pointer
 |   +-- auth.toml                  Readable credential-profile registry
 |   +-- auth.json                  LLM provider OAuth tokens + API keys + bearerToken (mode 600)
-|   +-- default/            Managed, restorable default execution profile
-|   |   +-- profile.toml           Complete default profile spec
-|   |   +-- prompts/               Core, chat, local, and git workflow prompts
+|   +-- default/                   Managed, restorable base AgentExecutionSpec/manual
+|   |   +-- profile.toml           Complete typed AgentExecutionSpec v2
+|   |   +-- prompts/               Main, chat, local, workflow, and process prompts
+|   |   |   +-- processes/         Summarizer, hook, automation, and subagent process prompts
 |   |   +-- context/               Context block assembly policy
 |   |   +-- providers/             Provider-specific presentation defaults
-|   |   +-- summarizers/           Compaction and retention prompts
-|   |   +-- subagents/             Subagent prompts
 |   |   +-- tools/                 Tool presentation policy
 |   |   +-- settings/              Managed settings defaults
+|   +-- normal/                    Managed standard workspace/session profile
+|   |   +-- profile.toml           Inherits default; profileClass = "normal"
+|   +-- chat/                      Managed quick-chat profile
+|   |   +-- profile.toml           Inherits default; maps main entrypoint to chat prompt
+|   +-- local/                     Managed local-provider profile
+|   |   +-- profile.toml           Inherits default; maps main entrypoint to local prompt/context/tools
 |   +-- user/                      Sparse user profile/settings/prompt overrides
 |       +-- settings.json          Sparse user settings overrides
 |       +-- containers.json        Container configuration
@@ -941,7 +947,7 @@ All paths in the tree below are resolved through helpers in `packages/agent/src/
 |   +-- vault/                     Skill-owned local fast secret storage
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  SQLite event store and audit records
-    |   +-- log.db                 Events, sessions, tasks, journals, automation state, Constitution audit
+    |   +-- log.db                 Events, sessions, tasks, journals, automation state, profile/context audit
     |   +-- log.db.lock            OS-level flock sidecar; one Tron process owns it while running
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output
     +-- run/                       Mutable runtime state and local contributor artifacts

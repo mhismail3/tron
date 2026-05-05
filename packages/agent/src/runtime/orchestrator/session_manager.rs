@@ -117,7 +117,14 @@ impl SessionManager {
         title: Option<&str>,
         source: Option<&str>,
     ) -> Result<String, RuntimeError> {
-        self.create_session_with_worktree_override(model, workspace_path, title, source, None)
+        self.create_session_with_profile_and_worktree_override(
+            model,
+            workspace_path,
+            title,
+            source,
+            None,
+            None,
+        )
     }
 
     /// Like [`create_session`] but accepts a per-session worktree override:
@@ -133,6 +140,28 @@ impl SessionManager {
         source: Option<&str>,
         use_worktree: Option<bool>,
     ) -> Result<String, RuntimeError> {
+        self.create_session_with_profile_and_worktree_override(
+            model,
+            workspace_path,
+            title,
+            source,
+            None,
+            use_worktree,
+        )
+    }
+
+    /// Like [`create_session_with_worktree_override`] but records the selected
+    /// execution profile for prompt/context/tool policy resolution.
+    #[instrument(skip(self), fields(model, working_dir = workspace_path))]
+    pub fn create_session_with_profile_and_worktree_override(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        source: Option<&str>,
+        profile: Option<&str>,
+        use_worktree: Option<bool>,
+    ) -> Result<String, RuntimeError> {
         let result = self
             .event_store
             .create_session_with_worktree_override(
@@ -142,6 +171,7 @@ impl SessionManager {
                 None,
                 self.origin.as_deref(),
                 source,
+                profile,
                 use_worktree,
             )
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
@@ -344,7 +374,20 @@ impl SessionManager {
         spawn_type: &str,
         spawn_task: &str,
     ) -> Result<String, RuntimeError> {
-        let session_id = self.create_session(model, workspace_path, title, None)?;
+        let parent_profile = self
+            .event_store
+            .get_session(spawning_session_id)
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?
+            .map(|session| session.profile);
+
+        let session_id = self.create_session_with_profile_and_worktree_override(
+            model,
+            workspace_path,
+            title,
+            None,
+            parent_profile.as_deref(),
+            None,
+        )?;
 
         let _ = self
             .event_store
@@ -468,6 +511,28 @@ mod tests {
         assert!(!sid.is_empty());
         assert!(mgr.is_active(&sid));
         assert_eq!(mgr.active_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_subagent_session_inherits_parent_profile() {
+        let mgr = make_manager();
+        let parent = mgr
+            .create_session_with_profile_and_worktree_override(
+                "test-model",
+                "/tmp",
+                Some("parent"),
+                None,
+                Some(crate::core::profile::CHAT_PROFILE),
+                None,
+            )
+            .unwrap();
+
+        let child = mgr
+            .create_session_for_subagent("test-model", "/tmp", Some("child"), &parent, "task", "do")
+            .unwrap();
+
+        let child_row = mgr.event_store.get_session(&child).unwrap().unwrap();
+        assert_eq!(child_row.profile, crate::core::profile::CHAT_PROFILE);
     }
 
     #[tokio::test]

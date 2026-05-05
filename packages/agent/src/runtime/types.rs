@@ -231,12 +231,21 @@ pub struct RunContext {
     /// Completed background job results to inject (unified processes + subagents).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job_results: Option<String>,
+    /// Session execution profile name used for this turn.
+    #[serde(skip)]
+    pub profile_name: Option<String>,
+    /// Resolved profile used for this turn's prompt/context/tool policies.
+    #[serde(skip)]
+    pub resolved_profile: Option<Arc<crate::core::profile::ResolvedProfile>>,
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,
     /// Dynamic rules context from path-scoped files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_rules_context: Option<String>,
+    /// Hook-injected context, kept separate for audit/context policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_context: Option<String>,
     /// Override user message content (e.g., multimodal blocks with images).
     /// When set, `run()` uses this instead of creating a text-only message.
     #[serde(skip)]

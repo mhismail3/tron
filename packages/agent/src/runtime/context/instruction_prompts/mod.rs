@@ -23,16 +23,32 @@ pub fn default_prompt(name: &str) -> String {
     read_instruction_file(crate::core::paths::default_prompt_path(name))
 }
 
-/// Read a managed/default summarizer prompt from the active profile.
+/// Read an entrypoint prompt through an explicit profile inheritance chain.
 #[must_use]
-pub fn summarizer_prompt(name: &str) -> String {
-    read_instruction_file(crate::core::paths::default_summarizer_prompt_path(name))
+pub fn entrypoint_prompt(profile_name: &str, entrypoint: &str, fallback_name: &str) -> String {
+    let home = crate::core::paths::tron_home();
+    let fallback = crate::core::paths::default_profile_dir()
+        .join(crate::core::paths::dirs::PROMPTS)
+        .join(format!("{fallback_name}.md"));
+    let path = crate::core::profile::resolve_profile_at(&home, profile_name)
+        .ok()
+        .and_then(|profile| {
+            profile
+                .spec
+                .entrypoint_prompt(entrypoint)
+                .map(str::to_owned)
+        })
+        .and_then(|relative| {
+            crate::core::profile::resolve_profile_file_at(&home, profile_name, &relative).ok()
+        })
+        .unwrap_or(fallback);
+    read_instruction_file(path)
 }
 
-/// Read a managed/default subagent prompt from the active profile.
+/// Read a managed/default process prompt from the active profile.
 #[must_use]
-pub fn subagent_prompt(name: &str) -> String {
-    read_instruction_file(crate::core::paths::default_subagent_prompt_path(name))
+pub fn process_prompt(name: &str) -> String {
+    read_instruction_file(crate::core::paths::default_process_prompt_path(name))
 }
 
 /// Read a managed/default provider prompt from the active profile.

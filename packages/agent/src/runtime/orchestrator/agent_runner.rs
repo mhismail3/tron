@@ -175,11 +175,40 @@ mod tests {
         }
     }
 
-    fn make_agent() -> TronAgent {
-        TronAgent::new(
+    struct JournalCleanup {
+        session_id: String,
+    }
+
+    impl JournalCleanup {
+        fn new(session_id: &str) -> Self {
+            Self {
+                session_id: session_id.to_owned(),
+            }
+        }
+    }
+
+    impl Drop for JournalCleanup {
+        fn drop(&mut self) {
+            let dir = crate::core::paths::journals_dir().join(&self.session_id);
+            if dir.exists() {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+        }
+    }
+
+    fn unique_test_session_id() -> String {
+        format!("agent-runner-test-{}", uuid::Uuid::now_v7())
+    }
+
+    fn make_agent_with_provider(
+        provider: Arc<dyn crate::llm::provider::Provider>,
+    ) -> (TronAgent, JournalCleanup) {
+        let session_id = unique_test_session_id();
+        let cleanup = JournalCleanup::new(&session_id);
+        let agent = TronAgent::new(
             AgentConfig::default(),
             AgentDeps {
-                provider: Arc::new(MockProvider),
+                provider,
                 registry: ToolRegistry::new(),
                 guardrails: None,
                 hooks: None,
@@ -198,13 +227,18 @@ mod tests {
                 job_manager: None,
                 output_buffer_registry: None,
             },
-            "test-session".into(),
-        )
+            session_id,
+        );
+        (agent, cleanup)
+    }
+
+    fn make_agent() -> (TronAgent, JournalCleanup) {
+        make_agent_with_provider(Arc::new(MockProvider))
     }
 
     #[tokio::test]
     async fn run_agent_emits_complete_then_ready() {
-        let mut agent = make_agent();
+        let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
@@ -241,7 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_agent_with_skill_context() {
-        let mut agent = make_agent();
+        let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
 
         let ctx = RunContext {
@@ -255,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_agent_with_process_results() {
-        let mut agent = make_agent();
+        let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
 
         let ctx = RunContext {
@@ -269,7 +303,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_agent_no_duplicate_agent_end() {
-        let mut agent = make_agent();
+        let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
@@ -318,30 +352,7 @@ mod tests {
             }
         }
 
-        let mut agent = TronAgent::new(
-            AgentConfig::default(),
-            AgentDeps {
-                provider: Arc::new(ErrorProvider),
-                registry: ToolRegistry::new(),
-                guardrails: None,
-                hooks: None,
-                context_manager: ContextManager::new(ContextManagerConfig {
-                    model: "mock".into(),
-                    system_prompt: None,
-                    working_directory: None,
-                    tools: vec![],
-                    rules_content: None,
-                    compaction: crate::runtime::context::types::CompactionConfig::default(),
-                }),
-                subagent_manager: None,
-                compaction_trigger_config:
-                    crate::runtime::context::types::CompactionTriggerConfig::default(),
-                process_manager: None,
-                job_manager: None,
-                output_buffer_registry: None,
-            },
-            "test-session".into(),
-        );
+        let (mut agent, _journal) = make_agent_with_provider(Arc::new(ErrorProvider));
 
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
@@ -407,30 +418,7 @@ mod tests {
             }
         }
 
-        let mut agent = TronAgent::new(
-            AgentConfig::default(),
-            AgentDeps {
-                provider: Arc::new(MultiEventProvider),
-                registry: ToolRegistry::new(),
-                guardrails: None,
-                hooks: None,
-                context_manager: ContextManager::new(ContextManagerConfig {
-                    model: "mock".into(),
-                    system_prompt: None,
-                    working_directory: None,
-                    tools: vec![],
-                    rules_content: None,
-                    compaction: crate::runtime::context::types::CompactionConfig::default(),
-                }),
-                subagent_manager: None,
-                compaction_trigger_config:
-                    crate::runtime::context::types::CompactionTriggerConfig::default(),
-                process_manager: None,
-                job_manager: None,
-                output_buffer_registry: None,
-            },
-            "test-session".into(),
-        );
+        let (mut agent, _journal) = make_agent_with_provider(Arc::new(MultiEventProvider));
 
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
@@ -475,7 +463,7 @@ mod tests {
     async fn forward_task_aborted_on_timeout() {
         // Verify run_agent completes promptly even if the forward task
         // would otherwise hang (the abort path prevents leaking tasks).
-        let mut agent = make_agent();
+        let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
 
         let result = tokio::time::timeout(
@@ -499,7 +487,7 @@ mod tests {
 
     #[tokio::test]
     async fn forward_task_completes_within_timeout_no_abort() {
-        let mut agent = make_agent();
+        let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 

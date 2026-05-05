@@ -63,6 +63,8 @@ pub struct SessionRow {
     pub origin: Option<String>,
     /// Session source (e.g. "cron"). NULL for user-created sessions.
     pub source: Option<String>,
+    /// Execution profile selected for this session (e.g. "normal", "chat", "local").
+    pub profile: String,
     /// Per-session worktree override. NULL = defer to global isolation mode;
     /// Some(true) = force-isolate; Some(false) = force-passthrough.
     pub use_worktree: Option<bool>,

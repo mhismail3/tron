@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::paths::{self, dirs, files};
-use super::profile::{DEFAULT_PROFILE, USER_PROFILE};
+use super::profile::{CHAT_PROFILE, DEFAULT_PROFILE, LOCAL_PROFILE, NORMAL_PROFILE, USER_PROFILE};
 
 const LEGACY_DEFAULT_PROFILE: &str = "master-default";
 
@@ -125,6 +125,17 @@ pub struct SeedReport {
     pub migrated: Vec<(PathBuf, PathBuf)>,
 }
 
+impl SeedReport {
+    /// Whether startup observed legacy layout/profile input that required the
+    /// temporary migrator. A non-empty migration list is the retirement signal:
+    /// after live installs restart without this becoming true, the migrator can
+    /// be removed and pre-v2 homes can fail diagnostically instead.
+    #[must_use]
+    pub fn legacy_input_observed(&self) -> bool {
+        !self.migrated.is_empty()
+    }
+}
+
 #[derive(Clone, Copy)]
 enum DefaultKind {
     Text,
@@ -155,6 +166,9 @@ const MANAGED_DEFAULTS: &[ManagedDefault] = &[
     managed_default!("profiles/auth.toml", DefaultKind::Toml, false),
     managed_default!("profiles/auth.json", DefaultKind::Json, false),
     managed_default!("profiles/default/profile.toml", DefaultKind::Toml, true),
+    managed_default!("profiles/normal/profile.toml", DefaultKind::Toml, true),
+    managed_default!("profiles/chat/profile.toml", DefaultKind::Toml, true),
+    managed_default!("profiles/local/profile.toml", DefaultKind::Toml, true),
     managed_default!("profiles/default/prompts/core.md", DefaultKind::Text, true),
     managed_default!("profiles/default/prompts/chat.md", DefaultKind::Text, true),
     managed_default!("profiles/default/prompts/local.md", DefaultKind::Text, true),
@@ -164,17 +178,22 @@ const MANAGED_DEFAULTS: &[ManagedDefault] = &[
         true
     ),
     managed_default!(
-        "profiles/default/summarizers/compaction.md",
+        "profiles/default/prompts/processes/compaction.md",
         DefaultKind::Text,
         true
     ),
     managed_default!(
-        "profiles/default/summarizers/memory-retain.md",
+        "profiles/default/prompts/processes/memory-retain.md",
         DefaultKind::Text,
         true
     ),
     managed_default!(
-        "profiles/default/subagents/conflict-resolver.md",
+        "profiles/default/prompts/processes/conflict-resolver.md",
+        DefaultKind::Text,
+        true
+    ),
+    managed_default!(
+        "profiles/default/prompts/processes/web-fetch-summarizer.md",
         DefaultKind::Text,
         true
     ),
@@ -217,6 +236,8 @@ pub fn ensure_tron_home_at(home: &Path) -> io::Result<SeedReport> {
     }
 
     recover_managed_defaults(home, &mut report)?;
+    migrate_profile_v1_to_v2(home, &mut report)?;
+    quarantine_v1_profile_prompt_roots(home, &mut report)?;
     validate_active_profile(home)?;
     Ok(report)
 }
@@ -233,15 +254,16 @@ fn profile_first_dirs(home: &Path) -> Vec<PathBuf> {
         home.join(dirs::SKILLS),
         home.join(dirs::PROFILES),
         home.join(dirs::PROFILES).join(DEFAULT_PROFILE),
+        home.join(dirs::PROFILES).join(NORMAL_PROFILE),
+        home.join(dirs::PROFILES).join(CHAT_PROFILE),
+        home.join(dirs::PROFILES).join(LOCAL_PROFILE),
         home.join(dirs::PROFILES)
             .join(DEFAULT_PROFILE)
             .join(dirs::PROMPTS),
         home.join(dirs::PROFILES)
             .join(DEFAULT_PROFILE)
-            .join(dirs::SUMMARIZERS),
-        home.join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join(dirs::SUBAGENTS),
+            .join(dirs::PROMPTS)
+            .join("processes"),
         home.join(dirs::PROFILES)
             .join(DEFAULT_PROFILE)
             .join(dirs::PROVIDERS),
@@ -342,24 +364,367 @@ fn managed_default_valid(path: &Path, kind: DefaultKind) -> bool {
                 return value
                     .get("active")
                     .and_then(toml::Value::as_str)
-                    .is_some_and(|active| !active.trim().is_empty());
+                    .is_some_and(|active| !active.trim().is_empty() && active != DEFAULT_PROFILE);
             }
             if path.file_name().and_then(|name| name.to_str()) == Some(files::PROFILE_TOML)
-                && path
+                && let Some(profile_name) = path
                     .parent()
                     .and_then(Path::file_name)
                     .and_then(|name| name.to_str())
-                    == Some(DEFAULT_PROFILE)
+                && [DEFAULT_PROFILE, NORMAL_PROFILE, CHAT_PROFILE, LOCAL_PROFILE]
+                    .contains(&profile_name)
             {
                 return value
                     .get("name")
                     .and_then(toml::Value::as_str)
-                    .is_some_and(|name| name == DEFAULT_PROFILE);
+                    .is_some_and(|name| name == profile_name)
+                    && value
+                        .get("version")
+                        .and_then(toml::Value::as_str)
+                        .is_some_and(|version| version == super::profile::CURRENT_PROFILE_VERSION);
             }
             true
         }
         DefaultKind::Json => serde_json::from_str::<serde_json::Value>(&content).is_ok(),
     }
+}
+
+fn migrate_profile_v1_to_v2(home: &Path, report: &mut SeedReport) -> io::Result<()> {
+    let profiles_dir = home.join(dirs::PROFILES);
+    if !profiles_dir.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(&profiles_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let profile_dir = entry.path();
+        let profile_name = entry.file_name().to_string_lossy().into_owned();
+        let profile_path = profile_dir.join(files::PROFILE_TOML);
+        let Ok(content) = fs::read_to_string(&profile_path) else {
+            continue;
+        };
+        let Ok(mut value) = toml::from_str::<toml::Value>(&content) else {
+            continue;
+        };
+        if value
+            .get("version")
+            .and_then(toml::Value::as_str)
+            .is_some_and(|version| version == super::profile::CURRENT_PROFILE_VERSION)
+        {
+            continue;
+        }
+
+        rewrite_profile_v1_value(&mut value, &profile_name);
+        move_profile_v1_process_prompts(&profile_dir, &mut value, report)?;
+        write_toml_value(&profile_path, &value)?;
+        report
+            .migrated
+            .push((profile_path.clone(), profile_path.clone()));
+    }
+    Ok(())
+}
+
+fn rewrite_profile_v1_value(value: &mut toml::Value, profile_name: &str) {
+    let Some(table) = value.as_table_mut() else {
+        return;
+    };
+    table.insert(
+        "version".to_string(),
+        toml::Value::String(super::profile::CURRENT_PROFILE_VERSION.to_string()),
+    );
+    if profile_name != DEFAULT_PROFILE && !table.contains_key("inherits") {
+        table.insert(
+            "inherits".to_string(),
+            toml::Value::Array(vec![toml::Value::String(DEFAULT_PROFILE.to_string())]),
+        );
+    }
+
+    if let Some(toml::Value::Table(prompts)) = table.remove("prompts") {
+        let entrypoints = table
+            .entry("entrypoints")
+            .or_insert_with(|| toml::Value::Table(Default::default()));
+        if let toml::Value::Table(entrypoints) = entrypoints {
+            for (old_key, value) in prompts {
+                let entrypoint = match old_key.as_str() {
+                    "core" => "main",
+                    "gitWorkflow" => "gitWorkflow",
+                    other => other,
+                };
+                if let Some(prompt) = value.as_str() {
+                    let mut entry = default_entrypoint_table(prompt);
+                    if entrypoint == "local" {
+                        entry.insert(
+                            "contextPolicy".into(),
+                            toml::Value::String("localDefault".into()),
+                        );
+                        entry.insert(
+                            "toolPolicy".into(),
+                            toml::Value::String("localModel".into()),
+                        );
+                    }
+                    entrypoints.insert(entrypoint.to_string(), toml::Value::Table(entry));
+                }
+            }
+        }
+    }
+
+    if let Some(toml::Value::Table(summarizers)) = table.remove("summarizers") {
+        insert_v1_processes(table, summarizers, "summarizer");
+    }
+    if let Some(toml::Value::Table(subagents)) = table.remove("subagents") {
+        insert_v1_processes(table, subagents, "subagent");
+    }
+    if let Some(toml::Value::Table(providers)) = table.remove("providers")
+        && let Some(toml::Value::Table(openai)) = providers.get("openai")
+        && let Some(prompt) = openai
+            .get("codexInstructions")
+            .and_then(toml::Value::as_str)
+    {
+        let provider_policies = table
+            .entry("providerPolicies")
+            .or_insert_with(|| toml::Value::Table(Default::default()));
+        if let toml::Value::Table(provider_policies) = provider_policies {
+            let mut policy = toml::value::Table::new();
+            policy.insert("prompt".into(), toml::Value::String(prompt.to_string()));
+            policy.insert(
+                "systemPromptSurface".into(),
+                toml::Value::String("toolClarification".into()),
+            );
+            policy.insert("toolClarification".into(), toml::Value::Boolean(true));
+            policy.insert("cachePolicy".into(), toml::Value::String("default".into()));
+            policy.insert(
+                "allowDuplicateSystemPrompt".into(),
+                toml::Value::Boolean(false),
+            );
+            provider_policies.insert("openaiCodex".into(), toml::Value::Table(policy));
+        }
+    }
+    if let Some(toml::Value::Table(context)) = table.remove("context")
+        && let Some(blocks) = context.get("blocks").and_then(toml::Value::as_str)
+    {
+        let context_policies = table
+            .entry("contextPolicies")
+            .or_insert_with(|| toml::Value::Table(Default::default()));
+        if let toml::Value::Table(context_policies) = context_policies {
+            let mut policy = toml::value::Table::new();
+            policy.insert("blocks".into(), toml::Value::String(blocks.to_string()));
+            policy.insert("toolPolicy".into(), toml::Value::String("default".into()));
+            context_policies.insert("cloudDefault".into(), toml::Value::Table(policy));
+        }
+    }
+    if let Some(toml::Value::Table(tools)) = table.remove("tools")
+        && let Some(presentation) = tools.get("presentation").and_then(toml::Value::as_str)
+    {
+        let tool_policies = table
+            .entry("toolPolicies")
+            .or_insert_with(|| toml::Value::Table(Default::default()));
+        if let toml::Value::Table(tool_policies) = tool_policies {
+            let mut policy = toml::value::Table::new();
+            policy.insert(
+                "manifest".into(),
+                toml::Value::String(presentation.to_string()),
+            );
+            tool_policies.insert("default".into(), toml::Value::Table(policy));
+        }
+    }
+    if let Some(toml::Value::Table(settings)) = table.remove("settings") {
+        let mut new_settings = toml::value::Table::new();
+        if let Some(defaults) = settings.get("defaults").and_then(toml::Value::as_str) {
+            new_settings.insert("defaults".into(), toml::Value::String(defaults.to_string()));
+        }
+        new_settings.insert(
+            "userOverridesProfile".into(),
+            toml::Value::String(USER_PROFILE.to_string()),
+        );
+        table.insert("settings".into(), toml::Value::Table(new_settings));
+    }
+    table.entry("auth").or_insert_with(|| {
+        let mut auth = toml::value::Table::new();
+        auth.insert(
+            "registry".into(),
+            toml::Value::String(files::AUTH_TOML.into()),
+        );
+        auth.insert(
+            "rawStore".into(),
+            toml::Value::String(files::AUTH_JSON.into()),
+        );
+        toml::Value::Table(auth)
+    });
+}
+
+fn default_entrypoint_table(prompt: &str) -> toml::value::Table {
+    let mut entry = toml::value::Table::new();
+    entry.insert("prompt".into(), toml::Value::String(prompt.to_string()));
+    entry.insert(
+        "modelPolicy".into(),
+        toml::Value::String("sessionDefault".into()),
+    );
+    entry.insert(
+        "contextPolicy".into(),
+        toml::Value::String("cloudDefault".into()),
+    );
+    entry.insert(
+        "localContextPolicy".into(),
+        toml::Value::String("localDefault".into()),
+    );
+    entry.insert("toolPolicy".into(), toml::Value::String("default".into()));
+    entry.insert(
+        "permissionPolicy".into(),
+        toml::Value::String("main".into()),
+    );
+    entry.insert(
+        "providerPolicy".into(),
+        toml::Value::String("default".into()),
+    );
+    entry.insert("cachePolicy".into(), toml::Value::String("default".into()));
+    entry.insert("auditPolicy".into(), toml::Value::String("default".into()));
+    entry
+}
+
+fn insert_v1_processes(table: &mut toml::value::Table, refs: toml::value::Table, kind: &str) {
+    let processes = table
+        .entry("processes")
+        .or_insert_with(|| toml::Value::Table(Default::default()));
+    let toml::Value::Table(processes) = processes else {
+        return;
+    };
+    for (id, value) in refs {
+        let Some(prompt) = value.as_str() else {
+            continue;
+        };
+        let mut process = toml::value::Table::new();
+        process.insert("kind".into(), toml::Value::String(kind.to_string()));
+        process.insert("prompt".into(), toml::Value::String(prompt.to_string()));
+        process.insert(
+            "modelPolicy".into(),
+            toml::Value::String(
+                if kind == "summarizer" {
+                    "settingsSubagent"
+                } else {
+                    "inheritParent"
+                }
+                .into(),
+            ),
+        );
+        process.insert(
+            "contextPolicy".into(),
+            toml::Value::String(
+                if kind == "summarizer" {
+                    "minimalTransform"
+                } else {
+                    "cloudDefault"
+                }
+                .into(),
+            ),
+        );
+        process.insert(
+            "toolPolicy".into(),
+            toml::Value::String(
+                if kind == "summarizer" {
+                    "none"
+                } else {
+                    "subagentInherited"
+                }
+                .into(),
+            ),
+        );
+        process.insert(
+            "permissionPolicy".into(),
+            toml::Value::String(
+                if kind == "summarizer" {
+                    "lockedDown"
+                } else {
+                    "child"
+                }
+                .into(),
+            ),
+        );
+        let output_contract = match id.as_str() {
+            "compaction" => "compactionSummary",
+            "memoryRetain" => "memoryRetention",
+            _ => "plainText",
+        };
+        process.insert(
+            "outputContract".into(),
+            toml::Value::String(output_contract.into()),
+        );
+        process.insert("auditPolicy".into(), toml::Value::String("default".into()));
+        processes.insert(id, toml::Value::Table(process));
+    }
+}
+
+fn move_profile_v1_process_prompts(
+    profile_dir: &Path,
+    value: &mut toml::Value,
+    report: &mut SeedReport,
+) -> io::Result<()> {
+    let Some(processes) = value
+        .get_mut("processes")
+        .and_then(toml::Value::as_table_mut)
+    else {
+        return Ok(());
+    };
+    for (_, process) in processes.iter_mut() {
+        let Some(prompt): Option<String> = process
+            .get("prompt")
+            .and_then(toml::Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let Some(file_name) = Path::new(&prompt)
+            .file_name()
+            .and_then(|name| name.to_str())
+        else {
+            continue;
+        };
+        if !(prompt.starts_with("summarizers/") || prompt.starts_with("subagents/")) {
+            continue;
+        }
+        let new_prompt = format!("prompts/processes/{file_name}");
+        move_path(
+            &profile_dir.join(&prompt),
+            &profile_dir.join(&new_prompt),
+            &mut report.migrated,
+        )?;
+        if let Some(table) = process.as_table_mut() {
+            table.insert("prompt".into(), toml::Value::String(new_prompt));
+        }
+    }
+    Ok(())
+}
+
+fn quarantine_v1_profile_prompt_roots(home: &Path, report: &mut SeedReport) -> io::Result<()> {
+    let profiles_dir = home.join(dirs::PROFILES);
+    if !profiles_dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&profiles_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let profile_name = entry.file_name().to_string_lossy().into_owned();
+        for legacy_dir in ["summarizers", "subagents"] {
+            let path = entry.path().join(legacy_dir);
+            if !path.exists() {
+                continue;
+            }
+            remove_empty_dir(&path)?;
+            if path.exists() {
+                let quarantine = home
+                    .join(dirs::WORKSPACE)
+                    .join(dirs::ARCHIVE)
+                    .join("profile-migration")
+                    .join(format!("{profile_name}-{legacy_dir}"));
+                move_path(&path, &quarantine, &mut report.migrated)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_active_profile(home: &Path) -> io::Result<()> {
@@ -886,6 +1251,28 @@ mod tests {
         assert!(
             home.join(dirs::PROFILES)
                 .join(DEFAULT_PROFILE)
+                .join(dirs::PROMPTS)
+                .join("processes")
+                .join("compaction.md")
+                .exists()
+        );
+        assert!(
+            !home
+                .join(dirs::PROFILES)
+                .join(DEFAULT_PROFILE)
+                .join("summarizers")
+                .exists()
+        );
+        assert!(
+            !home
+                .join(dirs::PROFILES)
+                .join(DEFAULT_PROFILE)
+                .join("subagents")
+                .exists()
+        );
+        assert!(
+            home.join(dirs::PROFILES)
+                .join(DEFAULT_PROFILE)
                 .join(dirs::SETTINGS)
                 .join(files::DEFAULTS_JSON)
                 .exists()
@@ -1005,7 +1392,7 @@ mod tests {
         assert!(!home.join("profiles").join(LEGACY_DEFAULT_PROFILE).exists());
         assert!(home.join("profiles").join(DEFAULT_PROFILE).exists());
         let active = fs::read_to_string(home.join("profiles").join(files::ACTIVE_TOML)).unwrap();
-        assert!(active.contains("active = \"default\""));
+        assert!(active.contains("active = \"normal\""));
         let default_profile = fs::read_to_string(
             home.join("profiles")
                 .join(DEFAULT_PROFILE)
@@ -1044,5 +1431,54 @@ mod tests {
         assert!(home.join("profiles").join(DEFAULT_PROFILE).exists());
         assert!(!home.join("profiles").join(LEGACY_DEFAULT_PROFILE).exists());
         assert!(!home.join("workspace/archive/profile-migration").exists());
+    }
+
+    #[test]
+    fn v1_profile_fields_migrate_to_v2_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        ensure_tron_home_at(&home).unwrap();
+        let user = home.join(dirs::PROFILES).join(USER_PROFILE);
+        fs::create_dir_all(user.join("summarizers")).unwrap();
+        fs::create_dir_all(user.join("subagents")).unwrap();
+        fs::write(user.join("summarizers/compaction.md"), "custom compaction").unwrap();
+        fs::write(
+            user.join("subagents/conflict-resolver.md"),
+            "custom resolver",
+        )
+        .unwrap();
+        fs::write(
+            user.join(files::PROFILE_TOML),
+            r#"
+version = "1"
+name = "user"
+authProfile = "default"
+inherits = ["default"]
+
+[summarizers]
+compaction = "summarizers/compaction.md"
+
+[subagents]
+conflictResolver = "subagents/conflict-resolver.md"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            home.join(dirs::PROFILES).join(files::ACTIVE_TOML),
+            "active = \"user\"\n",
+        )
+        .unwrap();
+
+        ensure_tron_home_at(&home).unwrap();
+
+        let profile = fs::read_to_string(user.join(files::PROFILE_TOML)).unwrap();
+        assert!(profile.contains("version = \"2\""));
+        assert!(profile.contains("[processes.compaction]"));
+        assert!(profile.contains("[processes.conflictResolver]"));
+        assert!(user.join("prompts/processes/compaction.md").exists());
+        assert!(user.join("prompts/processes/conflict-resolver.md").exists());
+        assert!(!user.join("summarizers").exists());
+        assert!(!user.join("subagents").exists());
+        crate::core::profile::resolve_profile_at(&home, USER_PROFILE).unwrap();
     }
 }

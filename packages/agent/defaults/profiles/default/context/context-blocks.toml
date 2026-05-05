@@ -64,6 +64,13 @@ cacheClass = "turn"
 providerSurface = "instructions"
 
 [[blocks]]
+id = "hooks.addContext"
+name = "Hook Context"
+home = "workspace"
+cacheClass = "turn"
+providerSurface = "instructions"
+
+[[blocks]]
 id = "environment.server"
 name = "Server Origin"
 home = "internal"

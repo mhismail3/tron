@@ -22,7 +22,7 @@ final class DatabaseSchemaTests: XCTestCase {
         }
     }
 
-    // MARK: - D3: is_chat column is gone
+    // MARK: - Session columns
 
     /// Fresh install: sessions table must not contain the dead is_chat column.
     /// The column was always written as 0 and never read — removed in schema v11.
@@ -87,6 +87,53 @@ final class DatabaseSchemaTests: XCTestCase {
         let columns = try await sessionsColumns(actor: actor)
         XCTAssertFalse(columns.contains("is_chat"),
                        "is_chat should be dropped by v11 migration, got columns: \(columns)")
+        await actor.close()
+    }
+
+    /// Existing install: schema v11 predates the session profile column, so
+    /// opening it must run the v12 migration before repositories read sessions.
+    func testExistingInstallAddsProfileColumnOnVersionBump() async throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
+            XCTFail("sqlite3_open failed")
+            return
+        }
+        let createSQL = """
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                root_event_id TEXT,
+                head_event_id TEXT,
+                title TEXT,
+                latest_model TEXT NOT NULL,
+                working_directory TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_activity_at TEXT NOT NULL,
+                archived_at TEXT,
+                event_count INTEGER DEFAULT 0,
+                message_count INTEGER DEFAULT 0,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                last_turn_input_tokens INTEGER DEFAULT 0,
+                cache_read_tokens INTEGER DEFAULT 0,
+                cache_creation_tokens INTEGER DEFAULT 0,
+                cost REAL DEFAULT 0,
+                is_fork INTEGER DEFAULT 0,
+                server_origin TEXT,
+                activity_lines_json TEXT,
+                source TEXT
+            )
+        """
+        XCTAssertEqual(sqlite3_exec(db, createSQL, nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(db, "PRAGMA user_version = 11", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(db)
+
+        let actor = DatabaseActor(dbPath: dbPath)
+        try await actor.open()
+
+        let columns = try await sessionsColumns(actor: actor)
+        XCTAssertTrue(columns.contains("profile"),
+                      "profile should be added by v12 migration, got columns: \(columns)")
         await actor.close()
     }
 

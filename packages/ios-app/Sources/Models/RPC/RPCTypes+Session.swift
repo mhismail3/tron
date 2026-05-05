@@ -8,6 +8,7 @@ struct SessionCreateParams: Encodable {
     let contextFiles: [String]?
     let title: String?
     let source: String?
+    let profile: String?
     /// Per-session worktree override. `nil` defers to the global isolation mode;
     /// `true` forces an isolated worktree; `false` forces passthrough.
     let useWorktree: Bool?
@@ -18,6 +19,7 @@ struct SessionCreateParams: Encodable {
         contextFiles: [String]? = nil,
         title: String? = nil,
         source: String? = nil,
+        profile: String? = nil,
         useWorktree: Bool? = nil
     ) {
         self.workingDirectory = workingDirectory
@@ -25,6 +27,7 @@ struct SessionCreateParams: Encodable {
         self.contextFiles = contextFiles
         self.title = title
         self.source = source
+        self.profile = profile
         self.useWorktree = useWorktree
     }
 }
@@ -68,6 +71,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let lastAssistantResponse: String?
     /// Session source (e.g. "cron" for automation sessions)
     let source: String?
+    /// Execution profile selected for the session.
+    let profile: String?
     /// Per-session worktree override. `nil` = inherit global isolation mode;
     /// `true` = force isolation; `false` = force passthrough.
     let useWorktree: Bool?
@@ -189,4 +194,3 @@ struct ForkWorktreeInfo: Decodable {
     let baseCommit: String?  // Can be null for non-isolated sessions
     let path: String
 }
-

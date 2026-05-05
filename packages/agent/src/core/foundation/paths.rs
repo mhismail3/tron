@@ -90,10 +90,6 @@ pub mod dirs {
 
     /// Prompt files referenced by a profile.
     pub const PROMPTS: &str = "prompts";
-    /// Summarizer prompt files referenced by a profile.
-    pub const SUMMARIZERS: &str = "summarizers";
-    /// Subagent prompt files referenced by a profile.
-    pub const SUBAGENTS: &str = "subagents";
     /// Hook behavior/prompt files referenced by a profile.
     pub const HOOKS: &str = "hooks";
     /// Provider presentation files referenced by a profile.
@@ -445,21 +441,36 @@ pub fn tron_binary_path() -> PathBuf {
 
 /// `~/.tron/profiles/user/settings.json`
 pub fn settings_path() -> PathBuf {
-    profiles_dir()
-        .join(crate::core::profile::USER_PROFILE)
-        .join(files::SETTINGS_JSON)
+    let profile = crate::core::profile::resolve_active_profile()
+        .ok()
+        .map(|resolved| resolved.spec.settings.user_overrides_profile)
+        .filter(|profile| !profile.trim().is_empty())
+        .unwrap_or_else(|| crate::core::profile::USER_PROFILE.to_string());
+    profiles_dir().join(profile).join(files::SETTINGS_JSON)
 }
 
-/// `~/.tron/profiles/default/settings/defaults.json`
+/// Active profile managed settings defaults.
 pub fn settings_defaults_path() -> PathBuf {
-    default_profile_dir()
+    let fallback = default_profile_dir()
         .join(dirs::SETTINGS)
-        .join(files::DEFAULTS_JSON)
+        .join(files::DEFAULTS_JSON);
+    let relative = crate::core::profile::resolve_active_profile()
+        .ok()
+        .map(|profile| profile.spec.settings.defaults);
+    profile_file_from_spec(relative, fallback)
 }
 
 /// `~/.tron/profiles/auth.json`
 pub fn auth_path() -> PathBuf {
-    profiles_dir().join(files::AUTH_JSON)
+    let fallback = profiles_dir().join(files::AUTH_JSON);
+    let relative = crate::core::profile::resolve_active_profile()
+        .ok()
+        .map(|profile| profile.spec.auth.raw_store);
+    let Some(relative) = relative else {
+        return fallback;
+    };
+    let path = profiles_dir().join(relative);
+    if path.is_file() { path } else { fallback }
 }
 
 /// `~/.tron/profiles/auth.json` — WebSocket bearer-token storage and provider auth.
@@ -586,31 +597,37 @@ pub fn default_prompt_path(name: &str) -> PathBuf {
     let fallback = default_profile_dir()
         .join(dirs::PROMPTS)
         .join(format!("{name}.md"));
+    let entrypoint = match name {
+        "core" => "main",
+        "git-workflow" => "gitWorkflow",
+        other => other,
+    };
     let relative = crate::core::profile::resolve_active_profile()
         .ok()
-        .and_then(|profile| profile.spec.prompts.get(name).cloned());
+        .and_then(|profile| {
+            profile
+                .spec
+                .entrypoint_prompt(entrypoint)
+                .map(str::to_owned)
+        });
     profile_file_from_spec(relative, fallback)
 }
 
-/// Active profile summarizer prompt, falling back to `default`.
-pub fn default_summarizer_prompt_path(name: &str) -> PathBuf {
+/// Active profile process prompt, falling back to `default`.
+pub fn default_process_prompt_path(name: &str) -> PathBuf {
+    let fallback_name = match name {
+        "memoryRetain" => "memory-retain",
+        "conflictResolver" => "conflict-resolver",
+        "webFetchSummarizer" => "web-fetch-summarizer",
+        other => other,
+    };
     let fallback = default_profile_dir()
-        .join(dirs::SUMMARIZERS)
-        .join(format!("{name}.md"));
+        .join(dirs::PROMPTS)
+        .join("processes")
+        .join(format!("{fallback_name}.md"));
     let relative = crate::core::profile::resolve_active_profile()
         .ok()
-        .and_then(|profile| profile.spec.summarizers.get(name).cloned());
-    profile_file_from_spec(relative, fallback)
-}
-
-/// Active profile subagent prompt, falling back to `default`.
-pub fn default_subagent_prompt_path(name: &str) -> PathBuf {
-    let fallback = default_profile_dir()
-        .join(dirs::SUBAGENTS)
-        .join(format!("{name}.md"));
-    let relative = crate::core::profile::resolve_active_profile()
-        .ok()
-        .and_then(|profile| profile.spec.subagents.get(name).cloned());
+        .and_then(|profile| profile.spec.process_prompt(name).map(str::to_owned));
     profile_file_from_spec(relative, fallback)
 }
 
@@ -622,7 +639,16 @@ pub fn default_provider_prompt_path(provider: &str, name: &str) -> PathBuf {
         .join(format!("{name}.md"));
     let relative = crate::core::profile::resolve_active_profile()
         .ok()
-        .and_then(|profile| profile.spec.providers.get(provider)?.get(name).cloned());
+        .and_then(|profile| {
+            if name == "codexInstructions" && provider == "openai" {
+                profile
+                    .spec
+                    .provider_prompt("openaiCodex")
+                    .map(str::to_owned)
+            } else {
+                profile.spec.provider_prompt(provider).map(str::to_owned)
+            }
+        });
     profile_file_from_spec(relative, fallback)
 }
 

@@ -419,6 +419,11 @@ pub struct Context {
     /// Dynamic rules context from path-scoped files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_rules_context: Option<String>,
+    /// Context injected by hooks. This is audited as its own context block even
+    /// when provider parity requires the text to remain folded into the user
+    /// message for now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_context: Option<String>,
     /// Server origin (e.g. `"localhost:9847"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_origin: Option<String>,
@@ -804,6 +809,7 @@ mod tests {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
+            hook_context: None,
             server_origin: None,
         };
         let json = serde_json::to_string(&ctx).unwrap();

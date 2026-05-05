@@ -181,6 +181,13 @@ struct SessionCreateParamsUseWorktreeTests {
         let raw = json["useWorktree"]
         #expect(raw == nil || raw is NSNull)
     }
+
+    @Test("profile encodes when supplied")
+    func profileEncodes() {
+        let params = SessionCreateParams(workingDirectory: "/tmp", profile: "local")
+        let json = encode(params)
+        #expect(json["profile"] as? String == "local")
+    }
 }
 
 @Suite("SessionInfo useWorktree decoding")

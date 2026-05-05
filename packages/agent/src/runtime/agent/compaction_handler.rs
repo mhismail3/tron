@@ -60,6 +60,7 @@ impl crate::runtime::context::llm_summarizer::SubsessionSpawner for SubagentMana
         &self,
         task: &str,
     ) -> crate::runtime::context::llm_summarizer::SubsessionResult {
+        let process = crate::core::profile::active_process_spec("compaction");
         match self
             .manager
             .spawn_subsession(SubsessionConfig {
@@ -68,10 +69,25 @@ impl crate::runtime::context::llm_summarizer::SubsessionSpawner for SubagentMana
                 model: self.model.clone(),
                 system_prompt: self.system_prompt.clone(),
                 working_directory: self.working_directory.clone(),
-                inherit_tools: false,
-                max_turns: 1,
-                max_depth: 0,
-                reasoning_level: Some(ReasoningLevel::Medium),
+                timeout_ms: process
+                    .as_ref()
+                    .and_then(|p| p.timeout_ms)
+                    .unwrap_or(30_000),
+                blocking_timeout_ms: process
+                    .as_ref()
+                    .and_then(|p| p.blocking_timeout_ms)
+                    .or(Some(30_000)),
+                inherit_tools: process
+                    .as_ref()
+                    .and_then(|p| p.inherit_tools)
+                    .unwrap_or(false),
+                max_turns: process.as_ref().and_then(|p| p.max_turns).unwrap_or(1),
+                max_depth: process.as_ref().and_then(|p| p.max_depth).unwrap_or(0),
+                reasoning_level: process
+                    .as_ref()
+                    .and_then(|p| p.reasoning.as_deref())
+                    .and_then(ReasoningLevel::from_str_loose)
+                    .or(Some(ReasoningLevel::Medium)),
                 ..SubsessionConfig::default()
             })
             .await
@@ -108,18 +124,38 @@ impl crate::tools::traits::ContentSummarizer for SubagentContentSummarizer {
         task: &str,
         parent_session_id: &str,
     ) -> Result<crate::tools::traits::SummarizerResult, crate::tools::errors::ToolError> {
+        let process = crate::core::profile::active_process_spec("webFetchSummarizer");
         let result = self
             .manager
             .spawn_subsession(SubsessionConfig {
                 parent_session_id: parent_session_id.to_owned(),
                 task: task.to_owned(),
-                model: None, // defaults to SUBAGENT_MODEL (Haiku 4.5)
-                system_prompt: "You are a web content summarizer. Answer questions concisely based on the provided content.".into(),
-                working_directory: "/tmp".into(),
-                inherit_tools: false,
-                max_turns: 1,
-                max_depth: 0,
-                reasoning_level: None,
+                model: None,
+                system_prompt: crate::runtime::context::instruction_prompts::process_prompt(
+                    "webFetchSummarizer",
+                ),
+                working_directory: process
+                    .as_ref()
+                    .and_then(|p| p.working_directory.clone())
+                    .unwrap_or_else(|| "/tmp".into()),
+                timeout_ms: process
+                    .as_ref()
+                    .and_then(|p| p.timeout_ms)
+                    .unwrap_or(30_000),
+                blocking_timeout_ms: process
+                    .as_ref()
+                    .and_then(|p| p.blocking_timeout_ms)
+                    .or(Some(30_000)),
+                inherit_tools: process
+                    .as_ref()
+                    .and_then(|p| p.inherit_tools)
+                    .unwrap_or(false),
+                max_turns: process.as_ref().and_then(|p| p.max_turns).unwrap_or(1),
+                max_depth: process.as_ref().and_then(|p| p.max_depth).unwrap_or(0),
+                reasoning_level: process
+                    .as_ref()
+                    .and_then(|p| p.reasoning.as_deref())
+                    .and_then(ReasoningLevel::from_str_loose),
                 ..SubsessionConfig::default()
             })
             .await
@@ -499,7 +535,7 @@ impl CompactionHandler {
                 manager: manager.clone(),
                 parent_session_id: session_id.to_owned(),
                 working_directory: context_manager.get_working_directory().to_owned(),
-                system_prompt: crate::runtime::context::instruction_prompts::summarizer_prompt(
+                system_prompt: crate::runtime::context::instruction_prompts::process_prompt(
                     "compaction",
                 ),
                 model: None,

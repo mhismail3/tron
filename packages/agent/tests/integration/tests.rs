@@ -1651,6 +1651,38 @@ async fn wait_until_active_run(server: &Arc<TronServer>, sid: &str) {
     .expect("session should become active");
 }
 
+async fn wait_until_reconstruct_running(
+    ws: &mut WsStream,
+    sid: &str,
+    expected_run_id: &str,
+    id_start: u64,
+) -> Value {
+    let deadline = tokio::time::Instant::now() + PROMPT_STATE_TIMEOUT;
+    let mut i = 0;
+    loop {
+        let resp = rpc_call(
+            ws,
+            id_start + i,
+            "session.reconstruct",
+            Some(json!({"sessionId": sid})),
+        )
+        .await;
+        let result = &resp["result"];
+        if resp["success"] == true
+            && result["isRunning"] == true
+            && result["runId"].as_str() == Some(expected_run_id)
+        {
+            return resp;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "session {sid} did not reconstruct active run {expected_run_id}; last response: {resp}"
+        );
+        i += 1;
+        tokio::time::sleep(PROMPT_STATE_POLL).await;
+    }
+}
+
 async fn wait_until_run_cleared(server: &Arc<TronServer>, sid: &str) {
     // Prompt cleanup is usually immediate, but this integration binary runs a
     // busy WebSocket/server suite concurrently. Keep the poll interval tight so
@@ -1930,6 +1962,7 @@ async fn e2e_prompt_reject_concurrent() {
     )
     .await;
     assert_eq!(resp1["success"], true);
+    wait_until_active_run(&server, &sid).await;
 
     // Second prompt should be rejected (session busy)
     let resp2 = rpc_call(
@@ -2096,18 +2129,13 @@ async fn e2e_prompt_run_id_matches() {
     let run_id = resp["result"]["runId"].as_str().unwrap().to_string();
     assert!(!run_id.is_empty());
 
-    // session.reconstruct should show running while agent is busy
+    // session.reconstruct should show the exact active run while agent is busy.
     wait_until_active_run(&server, &sid).await;
-    let resp = rpc_call(
-        &mut ws,
-        3,
-        "session.reconstruct",
-        Some(json!({"sessionId": sid})),
-    )
-    .await;
+    let resp = wait_until_reconstruct_running(&mut ws, &sid, &run_id, 3).await;
     assert_eq!(resp["result"]["isRunning"], true);
+    assert_eq!(resp["result"]["runId"], run_id);
 
-    let abort = rpc_call(&mut ws, 4, "agent.abort", Some(json!({"sessionId": sid}))).await;
+    let abort = rpc_call(&mut ws, 100, "agent.abort", Some(json!({"sessionId": sid}))).await;
     assert_eq!(abort["result"]["aborted"], true);
     wait_until_run_cleared(&server, &sid).await;
 

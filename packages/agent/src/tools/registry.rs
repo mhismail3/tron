@@ -67,6 +67,16 @@ impl ToolRegistry {
             .collect()
     }
 
+    /// Return condensed tool schemas for local models using profile-resolved
+    /// tool names.
+    pub fn local_definitions_for_names(&self, allowed: &[String]) -> Vec<Tool> {
+        self.tools
+            .values()
+            .filter(|t| allowed.iter().any(|name| name == t.name()))
+            .map(|t| t.local_definition())
+            .collect()
+    }
+
     /// Return all tool names in registration order.
     pub fn names(&self) -> Vec<String> {
         self.tools.keys().cloned().collect()

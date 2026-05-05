@@ -274,6 +274,11 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         available == false
     }
 
+    /// Whether selecting this model should put the harness into local profile mode.
+    var isLocalProvider: Bool {
+        provider.lowercased() == "ollama" || tier.lowercased() == "local"
+    }
+
     /// Whether this model should be disabled in the picker.
     var isDisabled: Bool {
         isDeprecatedModel || isUnavailable

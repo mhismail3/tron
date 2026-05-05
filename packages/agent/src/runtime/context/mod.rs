@@ -11,7 +11,7 @@
 //! | `summarizer` | Summarizer trait and fallback implementations |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
 //! | `loader` | Loads context parts (rules, skills) from disk/DB |
-//! | `local_policy` | Local-model (Ollama) policy — `ContextPolicy` enum, tool allow-list, rules truncation |
+//! | `local_policy` | Profile-backed local-model policy adapter: provider ids, tool allow-list, rules truncation |
 //! | `rules_discovery` | Finds `.claude/rules/` files in project directories |
 //! | `rules_index` | Path-indexed rule lookup for context assembly |
 //! | `rules_tracker` | Tracks which rules are active per session |

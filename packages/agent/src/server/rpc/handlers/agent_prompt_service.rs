@@ -58,6 +58,7 @@ struct PromptRunPlan {
     server_origin: String,
     run_id: String,
     source: Option<String>,
+    profile: String,
     model: String,
     working_dir: String,
     request: PromptRequest,
@@ -166,6 +167,7 @@ pub fn spawn_prompt_run(
         server_origin: ctx.origin.clone(),
         run_id,
         source: session.source.clone(),
+        profile: session.profile.clone(),
         model: session.latest_model.clone(),
         working_dir: session.working_directory.clone(),
         request,
@@ -205,12 +207,45 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         server_origin,
         run_id,
         source,
+        profile,
         model,
         working_dir,
         request,
     } = plan;
 
-    let is_chat = !should_acquire_worktree_for_source(source.as_deref());
+    let resolved_profile = match crate::core::profile::resolve_profile_at(
+        &crate::core::paths::tron_home(),
+        &profile,
+    ) {
+        Ok(resolved) => Arc::new(resolved),
+        Err(error) => {
+            warn!(
+                session_id = %request.session_id,
+                profile = %profile,
+                error = %error,
+                "failed to resolve session profile"
+            );
+            let _ = broadcast.emit(crate::core::events::TronEvent::Error {
+                base: crate::core::events::BaseEvent::now(&request.session_id),
+                error: format!("Session profile `{profile}` is invalid: {error}"),
+                context: None,
+                code: Some("PROFILE_INVALID".into()),
+                provider: None,
+                category: Some("profile".into()),
+                suggestion: Some(
+                    "Repair the profile or create a new session with a valid profile.".into(),
+                ),
+                retryable: Some(false),
+                status_code: None,
+                error_type: Some("profile".into()),
+                model: Some(model),
+            });
+            return;
+        }
+    };
+
+    let is_chat = profile == crate::core::profile::CHAT_PROFILE
+        || !should_acquire_worktree_for_source(source.as_deref());
 
     let PromptRequest {
         session_id,
@@ -447,12 +482,25 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         .unwrap_or(working_dir);
 
     let is_resumed = !state.messages.is_empty();
-    // Local models (Ollama) use a stripped context: skip subagent/process/user-job
-    // result injection at bootstrap time. Pending results remain queued in the
-    // event store for future cloud-model turns. See `runtime/context/local_policy.rs`.
-    let is_local_model = crate::llm::models::registry::detect_provider_from_model(&model)
-        .is_some_and(crate::runtime::context::local_policy::is_local_provider);
-    let bootstrap_result = if is_local_model {
+    let context_policy = crate::llm::models::registry::detect_provider_from_model(&model)
+        .map(|provider| {
+            crate::runtime::context::local_policy::ContextPolicy::from_entrypoint_with_spec(
+                provider,
+                &resolved_profile.spec,
+                "main",
+            )
+        })
+        .unwrap_or_else(|| {
+            crate::runtime::context::local_policy::ContextPolicy::from_entrypoint_with_spec(
+                crate::core::messages::Provider::Unknown,
+                &resolved_profile.spec,
+                "main",
+            )
+        });
+    // Bootstrap result injection follows the active profile context policy.
+    // Skipped results stay queued in the event store for future turns whose
+    // profile policy allows them.
+    let bootstrap_result = if context_policy.skip_pending_jobs_bootstrap() {
         load_prompt_bootstrap_minimal(
             context_artifacts.clone(),
             event_store.clone(),
@@ -498,12 +546,9 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
     let pre_activated_rules = prompt_artifacts.pre_activated_rules;
     let resolved_ws_id = prompt_artifacts.workspace_id;
 
-    // Load user memory (MEMORY.md + rules/ listing) for this turn.
-    // Skipped for local models — ContextManager strips memory_content at turn
-    // time per the local-model policy. See `runtime::context::local_policy`.
-    let memory: Option<String> = if crate::llm::models::registry::detect_provider_from_model(&model)
-        .is_some_and(crate::runtime::context::local_policy::is_local_provider)
-    {
+    // Load user memory (MEMORY.md + rules/ listing) for this turn according to
+    // the active profile context policy.
+    let memory: Option<String> = if context_policy.strip_memory() {
         None
     } else {
         let mut reg = memory_registry.lock();
@@ -538,7 +583,11 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 .as_ref()
                 .map(|branch| format!(" (based on {branch})"))
                 .unwrap_or_default(),
-            crate::runtime::context::instruction_prompts::default_prompt("git-workflow"),
+            crate::runtime::context::instruction_prompts::entrypoint_prompt(
+                &profile,
+                "gitWorkflow",
+                "git-workflow",
+            ),
         );
         Some(match memory {
             Some(memory) => format!("{memory}{worktree_context}"),
@@ -578,18 +627,21 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
 
     let compactor_settings = &settings.context.compactor;
     let context_limit = provider.context_window();
+    let profile_prompt =
+        crate::runtime::context::instruction_prompts::entrypoint_prompt(&profile, "main", "core");
+    let system_prompt = if profile == crate::core::profile::NORMAL_PROFILE {
+        crate::runtime::context::instruction_prompts::load_system_prompt_from_file(&working_dir)
+            .or_else(crate::runtime::context::instruction_prompts::load_global_system_prompt)
+            .map(|loaded| loaded.content)
+            .or(Some(profile_prompt))
+    } else {
+        Some(profile_prompt)
+    };
     let config = AgentConfig {
         model: model.clone(),
         working_directory: Some(working_dir.clone()),
         server_origin: Some(server_origin),
-        system_prompt: if is_chat {
-            Some(crate::runtime::context::instruction_prompts::default_prompt("chat"))
-        } else {
-            // Precedence: project override > constitutional user profile override > seeded default.
-            crate::runtime::context::instruction_prompts::load_system_prompt_from_file(&working_dir)
-                .or_else(crate::runtime::context::instruction_prompts::load_global_system_prompt)
-                .map(|loaded| loaded.content)
-        },
+        system_prompt,
         enable_thinking: true,
         max_turns: settings.agent.max_turns,
         compaction: crate::runtime::context::types::CompactionConfig {
@@ -698,8 +750,8 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         }
     };
 
-    // Build skill index based on settings (skip for local models — index is stripped at turn time)
-    let skill_index_context = if is_local_model {
+    // Build skill index based on settings and the active profile context policy.
+    let skill_index_context = if context_policy.strip_skill_index() {
         None
     } else {
         let settings = crate::settings::get_settings();
@@ -732,8 +784,8 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
             .skill_removal_context
             .as_ref()
             .map_or(0, |s| s.len() as u64 / chars_per_token);
-        let jobs = if is_local_model {
-            0 // Job results stripped at turn time for local models
+        let jobs = if context_policy.strip_job_results() {
+            0
         } else {
             job_results_context
                 .as_ref()
@@ -746,7 +798,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         }
     };
 
-    let run_context = RunContext {
+    let mut run_context = RunContext {
         reasoning_level: reasoning_level
             .and_then(|level| crate::runtime::types::ReasoningLevel::from_str_loose(&level)),
         skill_index_context,
@@ -754,6 +806,8 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
         skill_context: skill_result.skill_context,
         skill_removal_context: skill_result.skill_removal_context,
         job_results: job_results_context,
+        profile_name: Some(profile.clone()),
+        resolved_profile: Some(resolved_profile.clone()),
         user_content_override,
         volatile_tokens,
         ..Default::default()
@@ -810,6 +864,7 @@ async fn execute_prompt_run(plan: PromptRunPlan) {
                 bytes = content.len(),
                 "[hooks] UserPromptSubmit injected added_context into prompt"
             );
+            run_context.hook_context = Some(content.clone());
             effective_prompt = format!(
                 "<hook-context>\n{content}\n</hook-context>\n\n{prompt}",
                 content = content,
@@ -1096,6 +1151,7 @@ fn drain_prompt_queue(
     let max_seq = event_store.get_max_sequence(session_id).unwrap_or(0);
     let sequence_counter = Some(orchestrator.ensure_sequence_counter_at_least(session_id, max_seq));
 
+    let session_row = session_manager.get_session(session_id).ok().flatten();
     let plan = PromptRunPlan {
         started_run,
         orchestrator: orchestrator.clone(),
@@ -1117,11 +1173,11 @@ fn drain_prompt_queue(
         output_buffer_registry,
         hook_abort_tracker,
         sequence_counter,
-        source: session_manager
-            .get_session(session_id)
-            .ok()
-            .flatten()
-            .and_then(|s| s.source),
+        source: session_row.as_ref().and_then(|s| s.source.clone()),
+        profile: session_row
+            .as_ref()
+            .map(|s| s.profile.clone())
+            .unwrap_or_else(|| crate::core::profile::NORMAL_PROFILE.to_string()),
         server_origin,
         run_id,
         model: model.to_string(),

@@ -8,7 +8,7 @@ enum DatabaseSchema {
     /// Current schema version. Stored as `PRAGMA user_version` after a
     /// successful migration so subsequent app launches can short-circuit
     /// the create-table / column-add IF-NOT-EXISTS dance.
-    static let version: Int32 = 11
+    static let version: Int32 = 12
 
     // MARK: - Public API
 
@@ -100,7 +100,8 @@ enum DatabaseSchema {
                 last_turn_input_tokens INTEGER DEFAULT 0,
                 cache_read_tokens INTEGER DEFAULT 0,
                 cache_creation_tokens INTEGER DEFAULT 0,
-                cost REAL DEFAULT 0
+                cost REAL DEFAULT 0,
+                profile TEXT
             )
         """)
 
@@ -154,6 +155,9 @@ enum DatabaseSchema {
 
         // Migration: Add source column for session type (e.g. "chat", "cron")
         try addColumnIfNotExists(db: db, table: "sessions", column: "source", definition: "TEXT")
+
+        // Migration: Add execution profile column for profile-backed sessions
+        try addColumnIfNotExists(db: db, table: "sessions", column: "profile", definition: "TEXT")
     }
 
     /// Migrate old sessions table schema by rebuilding the table.
@@ -236,10 +240,8 @@ enum DatabaseSchema {
         column: String,
         definition: String
     ) throws {
-        do {
+        if try !columnExists(table: table, column: column, db: db) {
             try execute(db: db, "ALTER TABLE \(table) ADD COLUMN \(column) \(definition)")
-        } catch {
-            // Column already exists, ignore the error
         }
     }
 

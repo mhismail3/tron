@@ -23,16 +23,17 @@ Tron builds model context through a layered runtime path:
 5. Tool results and assistant messages are appended back into `ContextManager`
    and persisted to the event store, so the next turn sees the updated history.
 
-The profile-first implementation makes the execution spec auditable: prompts and
-provider/context policy seed from `profiles/default`, user settings stay
-sparse in `profiles/user`, all model input is recorded as typed context blocks,
-and provider payloads are captured with redacted previews.
+The profile-first implementation makes the execution spec auditable: the
+managed `profiles/default` base defines the full AgentExecutionSpec/manual,
+managed `normal`, `chat`, and `local` child profiles select user-facing modes,
+user settings stay sparse in `profiles/user`, all model input is recorded as
+typed context blocks, and provider payloads are captured with redacted previews.
 
 ## Execution Path
 
 ```mermaid
 flowchart TD
-    Start["main.rs startup"] --> Home["ensure_tron_home / Constitution seed + migration"]
+    Start["main.rs startup"] --> Home["ensure_tron_home / profile seed + migration"]
     Home --> Settings["settings defaults + sparse user settings + env overrides"]
     Settings --> Services["EventStore, Orchestrator, ProviderFactory, ToolFactory, SkillRegistry, MemoryRegistry"]
     Services --> RPC["agent.prompt RPC handler"]
@@ -81,7 +82,8 @@ The prompt path is centered on
 - `agent.prompt` validates params, loads the session, records prompt history,
   starts a run, and spawns `execute_prompt_run`.
 - `execute_prompt_run` reconstructs session messages from events. Chat sessions
-  skip project artifacts; normal sessions load prompt bootstrap artifacts.
+  skip project artifacts and use the `chat` entrypoint prompt; normal sessions
+  use the `main` entrypoint unless the provider is local.
 - For cloud models, `load_prompt_bootstrap` gathers project/global rules,
   `RulesIndex`, pre-activated rules, and pending subagent/process/user-job
   notifications. Local models use a minimal bootstrap and leave pending results
@@ -90,10 +92,11 @@ The prompt path is centered on
   listing of direct `~/.tron/memory/rules/*.md` files.
 - If worktree isolation is active, the git worktree path, branch, and
   profile-backed `git-workflow` prompt are appended to memory content.
-- System prompt precedence for normal sessions is project `.tron/SYSTEM.md`,
-  then global `~/.tron/profiles/user/prompts/core.md`, then the
-  seeded default prompt loaded by `ContextManager`. Chat sessions directly use
-  the seeded `chat` prompt.
+- System prompt precedence for normal non-local sessions is project
+  `.tron/SYSTEM.md`, then global `~/.tron/profiles/user/prompts/core.md`, then
+  the seeded default prompt loaded by `ContextManager`. Chat sessions directly
+  use the seeded `chat` prompt. Local-provider sessions use the seeded `local`
+  prompt regardless of chat/default source.
 - `AgentFactory::create_agent` receives provider, tools, hooks, rules, memory,
   messages, rules index, and compaction settings, then builds a `ContextManager`.
 
@@ -127,12 +130,13 @@ gravity.
 - `build_turn_context` starts from `ContextManager::build_base_context`, attaches
   message history, tool schemas, server origin, skill contexts, job results, and
   dynamic rules from `RunContext`.
-- Local providers use `runtime/context/local_policy.rs`: reduced tool schemas,
-  no memory, no skill index, no job results, truncated rules, but explicit skill
-  activation/active/removal context is retained.
+- Local providers use `runtime/context/local_policy.rs` as a thin adapter over
+  the active AgentExecutionSpec: reduced tool schemas including
+  `AskUserQuestion`, no memory, no skill index, no job results, truncated rules,
+  but explicit skill activation/active/removal context is retained.
 - `compose_context_audit_blocks` compiles the provider-independent audit view.
-  It includes prompt blocks plus audit-only tool schemas and conversation
-  messages.
+  It includes prompt blocks plus audit-only hook context, tool schemas, and
+  conversation messages.
 - The provider adapter also builds an exact or near-exact provider payload via
   `Provider::audit_payload`. Audit write failures currently fail the turn before
   the model call.
@@ -149,7 +153,7 @@ gravity.
 
 | Source | Current owner | Included when | Lifecycle | Surface | Cache class | Token accounting | Control knob |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Seeded default system prompts | `~/.tron/profiles/default/prompts/*.md`; loaded by `runtime/context/instruction_prompts` and `ContextManager` | Always, unless project/global override provides core prompt; chat uses `chat`; local uses `local` default | Foundation/session | Provider instructions | Foundation | `systemPrompt` bucket | Edit profile prompt files; project `.tron/SYSTEM.md` |
+| Seeded profile system prompts | `~/.tron/profiles/default/prompts/*.md` plus `normal`/`chat`/`local` entrypoint overrides; loaded by `runtime/context/instruction_prompts` and `ContextManager` | Always, unless project/global override provides the normal core prompt; chat maps main to `chat`; local maps main to `local` | Foundation/session | Provider instructions | Foundation | `systemPrompt` bucket | Edit child profile refs/prompts; project `.tron/SYSTEM.md` |
 | Project system prompt override | `.tron/SYSTEM.md` in working directory | Normal non-chat sessions when present | Session | Provider instructions | Foundation | `systemPrompt` bucket | File contents |
 | Global user profile prompt | `~/.tron/profiles/user/prompts/core.md` | Normal non-chat sessions when project override absent | Session | Provider instructions | Foundation | `systemPrompt` bucket | File contents |
 | Project/global rules | `server/rpc/session_context.rs`, `runtime/context/loader.rs`, `rules_discovery.rs` | Normal sessions; path-scoped rules can be pre-activated or dynamically activated | Session and turn | Provider instructions | Session/turn | `rules` and dynamic-rules buckets | `settings.context.rules.*`, rules files, touched paths |
@@ -290,10 +294,12 @@ knowledge from runtime call sites:
 - Managed defaults are listed once in `constitution.rs` through a
   `managed_default!` macro whose include path and seeded path share the same
   relative source string.
-- Prompt, subagent, summarizer, provider, tools, context, settings, and auth
-  references are profile-owned. Runtime helpers resolve files from the active
-  profile and only restore managed `default` files through the canonical
-  recovery contract.
+- Prompt, process, provider, tools, context, settings, and auth references are
+  profile-owned. Runtime helpers resolve files from the active profile and only
+  restore managed `default` files through the canonical recovery contract.
+- `profile.toml` is now a typed AgentExecutionSpec v2: entrypoints, unified
+  processes, model/context/tool/permission/provider/cache/output/audit policies,
+  settings refs, and auth refs are validated before runtime starts.
 - Contributor shell paths are centralized in `scripts/tron-lib.sh`; the Mac
   wrapper resolves its data-root paths through `TronPaths.swift`; iOS settings
   remain RPC-backed instead of duplicating filesystem layout.
@@ -318,9 +324,10 @@ These findings were the original audit gaps that drove the profile-first pass.
 ## Migration Retirement Path
 
 The old-layout migration layer is intentionally temporary. It exists only in
-`core/foundation/constitution.rs::migrate_legacy_home` and is guarded by
-`legacy_tron_home_paths_are_migration_only`, which fails if old Tron Home paths
-appear anywhere outside explicit migration/repair surfaces.
+`core/foundation/constitution.rs::migrate_legacy_home` plus the temporary
+v1-to-v2 profile migrator and is guarded by path/reference tests. Runtime code
+must resolve through the v2 AgentExecutionSpec; old roots and v1 profile fields
+are allowed only in migration code, migration tests, and migration docs.
 
 Live verification before removal:
 
@@ -333,20 +340,22 @@ Live verification before removal:
 4. Confirm `context.getAuditTrace` returns profile refs, context blocks,
    provider payload refs, and redacted payload previews for a fresh turn.
 5. Confirm no new old-root directories are created after at least two clean
-   restarts, and no new `constitution_home_audit` migration/repair rows appear
-   after the first verified startup.
+   restarts, and no new `profile_migrations.legacy_input_observed = 1` rows
+   appear after the first verified startup.
 
 Removal follow-up:
 
-1. Delete `migrate_legacy_home`, `move_path`, `merge_path`, and generated
-   transcription cleanup helpers from `core/foundation/constitution.rs`.
-2. Delete legacy-layout test fixtures and update
-   `legacy_tron_home_paths_are_migration_only` so old paths are disallowed
-   everywhere except intentional repair documentation such as `heal-skill`.
+1. Delete `migrate_legacy_home`, `migrate_profile_v1_to_v2`,
+   `quarantine_v1_profile_prompt_roots`, `move_path`, `merge_path`, and the
+   generated-transcription cleanup helper from `core/foundation/constitution.rs`.
+2. Delete legacy-layout/profile-v1 test fixtures and tighten guards so old roots
+   and v1 profile fields are disallowed everywhere except intentional repair
+   documentation such as `heal-skill`.
 3. Remove stale-path translation entries from managed skills once they are no
    longer useful for user-imported legacy skills.
-4. Keep database schema migrations and audit tables; those are durable product
-   history, not the temporary filesystem migration bridge.
+4. Keep database schema migrations and audit tables, including
+   `profile_migrations`; those are durable product history, not temporary
+   runtime compatibility.
 
 ## Heavy Code Map
 
@@ -403,8 +412,9 @@ Removal follow-up:
   available by blob id through the database/blob path for trusted diagnostics.
 - Provider adapters still contain provider-specific edge behavior; profile
   provider policy is the place to move shared behavior when it becomes stable.
-- Local/cloud/chat/subagent/cron differences are spread across prompt service,
-  local policy, runtime types, settings, and orchestrator code.
+- Local/cloud/chat/subagent differences now select a stored session profile and
+  read entrypoint/process policies from the resolved spec; remaining work is to
+  move cron/custom automation call sites fully onto process profile selection.
 - Hook-injected context is folded into the user message, so it is not currently
   represented as its own typed context block.
 - Default evolution needs explicit release policy when managed defaults change

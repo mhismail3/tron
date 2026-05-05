@@ -350,7 +350,8 @@ struct ContentView: View {
                             workspaceId: created.workspaceId,
                             model: created.model,
                             workingDirectory: created.workingDirectory,
-                            source: created.source
+                            source: created.source,
+                            profile: created.profile
                         )
                     } catch {
                         logger.error("cacheNewSession failed: \(error)", category: .session)

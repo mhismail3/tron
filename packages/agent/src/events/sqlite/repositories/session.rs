@@ -46,6 +46,8 @@ pub struct CreateSessionOptions<'a> {
     pub origin: Option<&'a str>,
     /// Session source (e.g. "cron"). NULL for user-created sessions.
     pub source: Option<&'a str>,
+    /// Execution profile selected for this session.
+    pub profile: Option<&'a str>,
     /// Per-session worktree override. NULL = defer to global isolation mode;
     /// Some(true) = force-isolate; Some(false) = force-passthrough.
     pub use_worktree: Option<bool>,
@@ -191,11 +193,13 @@ impl SessionRepo {
             |t| serde_json::to_string(t).unwrap_or_else(|_| "[]".to_string()),
         );
 
+        let profile = opts.profile.unwrap_or(crate::core::profile::NORMAL_PROFILE);
+
         let _ = conn.execute(
             "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory,
              parent_session_id, fork_from_event_id, created_at, last_activity_at, tags,
-             spawning_session_id, spawn_type, spawn_task, origin, source, use_worktree)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             spawning_session_id, spawn_type, spawn_task, origin, source, profile, use_worktree)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 id,
                 opts.workspace_id,
@@ -212,6 +216,7 @@ impl SessionRepo {
                 opts.spawn_task,
                 opts.origin,
                 opts.source,
+                profile,
                 opts.use_worktree,
             ],
         )?;
@@ -244,6 +249,7 @@ impl SessionRepo {
             spawn_task: opts.spawn_task.map(String::from),
             origin: opts.origin.map(String::from),
             source: opts.source.map(String::from),
+            profile: profile.to_string(),
             use_worktree: opts.use_worktree,
         })
     }
@@ -787,6 +793,7 @@ impl SessionRepo {
             spawn_task: row.get("spawn_task")?,
             origin: row.get("origin")?,
             source: row.get("source")?,
+            profile: row.get("profile")?,
             use_worktree: row.get("use_worktree")?,
         })
     }
@@ -835,6 +842,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: None,
+                profile: None,
                 source: None,
                 use_worktree: None,
             },
@@ -851,8 +859,38 @@ mod tests {
         assert_eq!(sess.workspace_id, ws_id);
         assert_eq!(sess.latest_model, "claude-opus-4-6");
         assert_eq!(sess.title.as_deref(), Some("Test Session"));
+        assert_eq!(sess.profile, crate::core::profile::NORMAL_PROFILE);
         assert_eq!(sess.event_count, 0);
         assert!(sess.ended_at.is_none());
+    }
+
+    #[test]
+    fn create_session_with_profile_round_trips() {
+        let (conn, ws_id) = setup();
+        let sess = SessionRepo::create(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws_id,
+                model: "llama3.2",
+                working_directory: "/tmp/test",
+                title: Some("Local Session"),
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+                spawning_session_id: None,
+                spawn_type: None,
+                spawn_task: None,
+                origin: None,
+                source: None,
+                profile: Some(crate::core::profile::LOCAL_PROFILE),
+                use_worktree: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(sess.profile, crate::core::profile::LOCAL_PROFILE);
+        let fetched = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
+        assert_eq!(fetched.profile, crate::core::profile::LOCAL_PROFILE);
     }
 
     fn create_session_with_use_worktree(
@@ -874,6 +912,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: None,
+                profile: None,
                 source: None,
                 use_worktree,
             },
@@ -966,6 +1005,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: None,
+                profile: None,
                 source: None,
                 use_worktree: None,
             },
@@ -1215,6 +1255,7 @@ mod tests {
                 spawn_type: Some("query"),
                 spawn_task: Some("do something"),
                 origin: None,
+                profile: None,
                 source: None,
                 use_worktree: None,
             },
@@ -1245,6 +1286,7 @@ mod tests {
                 spawn_type: Some("query"),
                 spawn_task: None,
                 origin: None,
+                profile: None,
                 source: None,
                 use_worktree: None,
             },
@@ -1523,6 +1565,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: Some("localhost:9847"),
+                profile: None,
                 source: None,
                 use_worktree: None,
             },
@@ -1562,6 +1605,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: Some("localhost:9847"),
+                profile: None,
                 source: None,
                 use_worktree: None,
             },
@@ -1581,6 +1625,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: Some("localhost:9846"),
+                profile: None,
                 source: None,
                 use_worktree: None,
             },
@@ -1627,6 +1672,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: Some("localhost:9847"),
+                profile: None,
                 source: None,
                 use_worktree: None,
             },
@@ -1646,6 +1692,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: Some("localhost:9846"),
+                profile: None,
                 source: None,
                 use_worktree: None,
             },
@@ -1675,6 +1722,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: None,
+                profile: None,
                 source: Some("cron"),
                 use_worktree: None,
             },
@@ -1715,6 +1763,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: None,
+                profile: None,
                 source: Some("cron"),
                 use_worktree: None,
             },
@@ -1750,6 +1799,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: None,
+                profile: None,
                 source: Some("cron"),
                 use_worktree: None,
             },
@@ -1780,6 +1830,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: None,
+                profile: None,
                 source: Some("cron"),
                 use_worktree: None,
             },
@@ -1801,6 +1852,7 @@ mod tests {
                 spawn_type: Some("query"),
                 spawn_task: None,
                 origin: None,
+                profile: None,
                 source: None,
                 use_worktree: None,
             },
@@ -1839,6 +1891,7 @@ mod tests {
                 spawn_type: None,
                 spawn_task: None,
                 origin: None,
+                profile: None,
                 source: Some("cron"),
                 use_worktree: None,
             },

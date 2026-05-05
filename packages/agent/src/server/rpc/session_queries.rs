@@ -79,6 +79,7 @@ impl SessionQueryService {
                         "isRunning": is_running,
                         "isArchived": session.ended_at.is_some(),
                         "source": session.source,
+                        "profile": session.profile,
                         "eventCount": session.event_count,
                         "messageCount": session.message_count,
                         "inputTokens": session.total_input_tokens,

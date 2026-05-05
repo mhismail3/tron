@@ -2858,6 +2858,7 @@ async fn prompt_history_dedups_on_repeat() {
         .unwrap();
     // Wait for the first row before sending the second to avoid racing inserts.
     wait_for_history_count(&ctx, 1).await;
+    wait_for_run_completion(&ctx, &sid1).await;
     PromptHandler
         .handle(
             Some(json!({"sessionId": sid2, "prompt": "duplicate text"})),

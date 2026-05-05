@@ -258,10 +258,9 @@ fn auth_path() -> PathBuf {
 }
 
 /// Ensure `~/.tron/` obeys the Tron Constitution.
-fn init_directories() -> Result<()> {
+fn init_directories() -> Result<tron::core::constitution::SeedReport> {
     tron::core::constitution::ensure_tron_home()
-        .context("Failed to initialize Tron Constitution home")?;
-    Ok(())
+        .context("Failed to initialize Tron Constitution home")
 }
 
 /// Open the SQLite database, run migrations, and return the pool + resolved path.
@@ -311,6 +310,40 @@ fn init_database(
         let _ = tron::events::run_migrations(&conn).context("Failed to run migrations")?;
     }
     Ok((pool, db_path, db_lock))
+}
+
+fn record_profile_migration_report(
+    pool: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    report: &tron::core::constitution::SeedReport,
+) -> Result<()> {
+    if !report.legacy_input_observed() {
+        return Ok(());
+    }
+
+    let conn = pool
+        .get()
+        .context("Failed to get DB connection for profile migration ledger")?;
+    let details = serde_json::json!({
+        "migrated": report.migrated.iter().map(|(from, to)| {
+            serde_json::json!({
+                "from": from.display().to_string(),
+                "to": to.display().to_string(),
+            })
+        }).collect::<Vec<_>>(),
+    });
+    conn.execute(
+        "INSERT INTO profile_migrations
+         (id, source_version, target_version, result, legacy_input_observed, details_json)
+         VALUES (?1, ?2, ?3, 'applied', 1, ?4)",
+        rusqlite::params![
+            format!("profile_migration_{}", uuid::Uuid::now_v7()),
+            "pre-v2",
+            tron::core::profile::CURRENT_PROFILE_VERSION,
+            serde_json::to_string(&details)?,
+        ],
+    )
+    .context("Failed to record profile migration ledger")?;
+    Ok(())
 }
 
 /// Initialize tracing with SQLite persistence and start the periodic flush task.
@@ -890,7 +923,7 @@ async fn main() -> Result<()> {
     }
 
     // Phase 1: Pre-database filesystem operations
-    init_directories()?;
+    let seed_report = init_directories()?;
     let bearer_token_path = tron::server::onboarding::bearer_token_path();
     let _bearer_token = initialize_bearer_token_at(&bearer_token_path)?;
 
@@ -899,6 +932,7 @@ async fn main() -> Result<()> {
     // process-level lock on the event-store DB. Keep in scope explicitly so
     // compilation fails if it's ever moved out without an equivalent guard.
     let (pool, db_path, _db_lock) = init_database(args.db_path)?;
+    record_profile_migration_report(&pool, &seed_report)?;
     let settings_path = tron::settings::loader::settings_path();
     let settings = tron::settings::loader::load_settings_from_path(&settings_path)
         .context("Failed to load settings")?;

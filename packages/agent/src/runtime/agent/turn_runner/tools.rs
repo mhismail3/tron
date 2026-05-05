@@ -49,6 +49,7 @@ pub(super) struct ToolPhaseParams<'a> {
         Option<&'a Arc<crate::runtime::orchestrator::output_buffer::OutputBufferRegistry>>,
     pub sequence_counter: Option<&'a AtomicI64>,
     pub provider_type: crate::core::messages::Provider,
+    pub execution_spec: Option<&'a crate::core::profile::AgentExecutionSpec>,
     /// Optional per-tool abort registry (see `TurnParams::tool_abort_registry`).
     pub tool_abort_registry: Option<&'a Arc<ToolAbortRegistry>>,
 }
@@ -146,6 +147,7 @@ pub(super) async fn execute_tool_phase(params: ToolPhaseParams<'_>) -> ToolPhase
                     output_buffer_registry: params.output_buffer_registry,
                     sequence_counter: params.sequence_counter,
                     provider_type: params.provider_type,
+                    execution_spec: params.execution_spec,
                     event_persister: params.persister_arc,
                     turn: i64::from(params.turn),
                     tool_abort_registry: params.tool_abort_registry,

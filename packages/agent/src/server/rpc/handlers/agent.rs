@@ -9,7 +9,8 @@
 //!
 //! ## Invariants
 //!
-//! - `agent.prompt` starts exactly one orchestrator run per session and always
+//! - `agent.prompt` rejects an already-active session before slower prompt
+//!   setup, starts exactly one orchestrator run per accepted prompt, and always
 //!   releases the run guard when execution ends.
 //! - Completion should emit a best-effort `session_updated` event after SQLite
 //!   persistence flushes. The snapshot read retries transient SQLite
@@ -24,7 +25,7 @@ use tracing::instrument;
 
 use crate::server::rpc::agent_commands::AgentCommandService;
 use crate::server::rpc::context::RpcContext;
-use crate::server::rpc::errors::RpcError;
+use crate::server::rpc::errors::{RpcError, SESSION_BUSY};
 use crate::server::rpc::handlers::{opt_array, opt_string, require_string_param};
 use crate::server::rpc::registry::MethodHandler;
 #[path = "agent_prompt_runtime.rs"]
@@ -74,6 +75,21 @@ impl MethodHandler for PromptHandler {
                 }
             }
         }
+
+        // Preserve the wire contract for a running session before doing
+        // slower session/provider work that can surface less specific errors.
+        // `begin_run` below remains the atomic guard for concurrent requests
+        // that race past this preflight.
+        if let Some(active_run_id) = ctx.orchestrator.get_run_id(&session_id) {
+            return Err(RpcError::Custom {
+                code: SESSION_BUSY.into(),
+                message: format!(
+                    "Session '{session_id}' is already processing run '{active_run_id}'"
+                ),
+                details: Some(serde_json::json!({ "runId": active_run_id })),
+            });
+        }
+
         // Verify the session exists and get its details
         let session = AgentCommandService::load_prompt_session(ctx, &session_id).await?;
 

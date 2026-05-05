@@ -11,6 +11,51 @@ use crate::server::rpc::context::{RpcContext, run_blocking_task};
 use crate::server::rpc::errors::{self, RpcError};
 use crate::server::rpc::session_context::{ContextArtifactsService, RuleFileLevel};
 
+fn resolve_session_profile(
+    requested: Option<&str>,
+    model: &str,
+    source: Option<&str>,
+) -> Result<String, RpcError> {
+    let provider = crate::llm::models::registry::detect_provider_from_model(model);
+    let local_model =
+        provider.is_some_and(crate::runtime::context::local_policy::is_local_provider);
+    let mut profile = requested
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            if local_model {
+                crate::core::profile::LOCAL_PROFILE.to_string()
+            } else if source == Some("chat") {
+                crate::core::profile::CHAT_PROFILE.to_string()
+            } else {
+                crate::core::profile::NORMAL_PROFILE.to_string()
+            }
+        });
+
+    if profile == crate::core::profile::DEFAULT_PROFILE {
+        profile = crate::core::profile::NORMAL_PROFILE.to_string();
+    }
+
+    let resolved =
+        crate::core::profile::resolve_profile_at(&crate::core::paths::tron_home(), &profile)
+            .map_err(|error| RpcError::InvalidParams {
+                message: format!("invalid session profile `{profile}`: {error}"),
+            })?;
+
+    if local_model
+        && resolved.spec.profile_class.as_deref() != Some(crate::core::profile::LOCAL_PROFILE)
+    {
+        profile = crate::core::profile::LOCAL_PROFILE.to_string();
+        crate::core::profile::resolve_profile_at(&crate::core::paths::tron_home(), &profile)
+            .map_err(|error| RpcError::InvalidParams {
+                message: format!("invalid local session profile `{profile}`: {error}"),
+            })?;
+    }
+
+    Ok(profile)
+}
+
 /// Release worktree for a session if one is active.
 ///
 /// Logs and swallows errors — archive/delete must not fail due to worktree issues.
@@ -33,6 +78,7 @@ pub(crate) struct CreateSessionRequest {
     pub(crate) model: String,
     pub(crate) title: Option<String>,
     pub(crate) source: Option<String>,
+    pub(crate) profile: Option<String>,
     /// Per-session worktree override.
     /// `None` defers to the global isolation mode; `Some(true)` forces
     /// isolation, `Some(false)` forces passthrough.
@@ -51,15 +97,22 @@ impl SessionCommandService {
         let model = request.model.clone();
         let title = request.title.clone();
         let source = request.source.clone();
+        let profile = resolve_session_profile(
+            request.profile.as_deref(),
+            request.model.as_str(),
+            request.source.as_deref(),
+        )?;
         let use_worktree = request.use_worktree;
+        let profile_for_create = profile.clone();
         let session_id = ctx
             .run_blocking("session.create", move || {
                 session_manager
-                    .create_session_with_worktree_override(
+                    .create_session_with_profile_and_worktree_override(
                         &model,
                         &working_directory,
                         title.as_deref(),
                         source.as_deref(),
+                        Some(profile_for_create.as_str()),
                         use_worktree,
                     )
                     .map_err(|error| RpcError::Internal {
@@ -76,13 +129,14 @@ impl SessionCommandService {
                 model: request.model.clone(),
                 working_directory: request.working_directory.clone(),
                 source: request.source.clone(),
+                profile: Some(profile.clone()),
                 title: request.title.clone(),
             });
 
         ctx.orchestrator.init_sequence_counter(&session_id, 0);
 
         // Skip optimistic context preload for chat sessions — they don't load context artifacts
-        if request.source.as_deref() != Some("chat") {
+        if profile.as_str() != crate::core::profile::CHAT_PROFILE {
             spawn_optimistic_context_preload(ctx, &session_id, &request.working_directory);
         }
 
@@ -90,6 +144,7 @@ impl SessionCommandService {
             "sessionId": session_id,
             "model": request.model,
             "workingDirectory": request.working_directory,
+            "profile": profile,
             "createdAt": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             "isActive": true,
             "isArchived": false,

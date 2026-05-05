@@ -47,6 +47,16 @@ const MIGRATIONS: &[Migration] = &[
         description: "Constitution audit tables for migrated v001 databases",
         sql: include_str!("v002_constitution_audit.sql"),
     },
+    Migration {
+        version: 3,
+        description: "Profile migration ledger",
+        sql: include_str!("v003_profile_migrations.sql"),
+    },
+    Migration {
+        version: 4,
+        description: "Session execution profile",
+        sql: include_str!("v004_session_profile.sql"),
+    },
 ];
 
 /// Result of running migrations.
@@ -268,8 +278,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 2);
-        assert_eq!(result.max_version_applied, 2);
+        assert_eq!(result.applied, 4);
+        assert_eq!(result.max_version_applied, 4);
 
         let tables: Vec<String> = conn
             .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -291,6 +301,7 @@ mod tests {
             "events",
             "logs",
             "notification_read_state",
+            "profile_migrations",
             "prompt_history",
             "prompt_snippets",
             "schema_version",
@@ -328,7 +339,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 2);
+        assert_eq!(first.applied, 4);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -346,12 +357,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 2);
+        assert_eq!(current_version(&conn).unwrap(), 4);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 2);
+        assert_eq!(latest_version(), 4);
     }
 
     #[test]
@@ -386,6 +397,79 @@ mod tests {
             desc.contains("Constitution"),
             "description missing expected text: {desc}"
         );
+
+        let (version, desc): (u32, String) = conn
+            .query_row(
+                "SELECT version, description FROM schema_version WHERE version = 3",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(version, 3);
+        assert!(
+            desc.contains("Profile migration"),
+            "description missing expected text: {desc}"
+        );
+
+        let (version, desc): (u32, String) = conn
+            .query_row(
+                "SELECT version, description FROM schema_version WHERE version = 4",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(version, 4);
+        assert!(
+            desc.contains("Session execution profile"),
+            "description missing expected text: {desc}"
+        );
+    }
+
+    #[test]
+    fn session_profile_migration_backfills_chat_source() {
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        for migration in &MIGRATIONS[..3] {
+            apply_migration(&conn, migration).unwrap();
+        }
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, name, created_at, last_activity_at)
+             VALUES ('w1', '/tmp', 'tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions
+             (id, workspace_id, latest_model, working_directory, created_at, last_activity_at, source)
+             VALUES
+             ('normal-session', 'w1', 'm', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL),
+             ('chat-session', 'w1', 'm', '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'chat')",
+            [],
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let normal_profile: String = conn
+            .query_row(
+                "SELECT profile FROM sessions WHERE id = 'normal-session'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let chat_profile: String = conn
+            .query_row(
+                "SELECT profile FROM sessions WHERE id = 'chat-session'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(normal_profile, "normal");
+        assert_eq!(chat_profile, "chat");
     }
 
     #[test]
@@ -421,6 +505,7 @@ mod tests {
             "idx_sessions_created",
             "idx_sessions_origin",
             "idx_sessions_source",
+            "idx_sessions_profile",
             // blobs / branches / workspaces
             "idx_blobs_hash",
             "idx_branches_session",
@@ -441,6 +526,9 @@ mod tests {
             "idx_prompt_history_last_used",
             "idx_prompt_history_use_count",
             "idx_prompt_snippets_updated",
+            // profile migration retirement
+            "idx_profile_migrations_time",
+            "idx_profile_migrations_legacy",
         ];
         for idx in &expected {
             assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
@@ -836,6 +924,7 @@ mod tests {
             "spawn_task",
             "origin",
             "source",
+            "profile",
             "use_worktree",
         ];
         for col in &expected {

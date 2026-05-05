@@ -29,6 +29,7 @@ enum SessionCreatedPlugin: EventPlugin {
             let isActive: Bool?
             let parentSessionId: String?
             let source: String?
+            let profile: String?
         }
     }
 
@@ -50,6 +51,7 @@ enum SessionCreatedPlugin: EventPlugin {
         let isActive: Bool
         let parentSessionId: String?
         let source: String?
+        let profile: String?
     }
 
     // MARK: - Protocol Implementation
@@ -71,7 +73,8 @@ enum SessionCreatedPlugin: EventPlugin {
             lastActivity: event.data?.lastActivity ?? event.timestamp ?? DateParser.now,
             isActive: event.data?.isActive ?? true,
             parentSessionId: event.data?.parentSessionId,
-            source: event.data?.source
+            source: event.data?.source,
+            profile: event.data?.profile
         )
     }
 }

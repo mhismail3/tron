@@ -197,6 +197,21 @@ pub fn compose_context_blocks(context: &Context) -> Vec<ContextBlock> {
 pub fn compose_context_audit_blocks(context: &Context) -> Vec<ContextBlock> {
     let mut blocks = compose_context_blocks(context);
 
+    if let Some(ref hook_context) = context.hook_context
+        && !hook_context.is_empty()
+    {
+        let mut block = context_block_for_text(
+            "hooks.addContext",
+            "Hook Context",
+            TronHome::Workspace,
+            hook_context.clone(),
+            ContextCacheClass::Turn,
+            95,
+        );
+        block.inclusion_reason = "hook AddContext attached to user turn".into();
+        blocks.push(block);
+    }
+
     if let Some(ref tools) = context.tools
         && !tools.is_empty()
     {
@@ -292,6 +307,7 @@ mod tests {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: Some("Rule: no console.log".into()),
+            hook_context: None,
             server_origin: None,
         }
     }
@@ -330,6 +346,7 @@ mod tests {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
+            hook_context: None,
             server_origin: None,
         };
         let parts = compose_context_parts(&ctx);
@@ -351,6 +368,7 @@ mod tests {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
+            hook_context: None,
             server_origin: None,
         };
         let parts = compose_context_parts(&ctx);
@@ -373,6 +391,7 @@ mod tests {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
+            hook_context: None,
             server_origin: None,
         };
         let parts = compose_context_parts(&ctx);
@@ -455,6 +474,7 @@ mod tests {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
+            hook_context: None,
             server_origin: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
@@ -477,6 +497,7 @@ mod tests {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
+            hook_context: None,
             server_origin: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
@@ -565,6 +586,7 @@ mod tests {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: None,
+            hook_context: None,
             server_origin: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);

@@ -1206,6 +1206,7 @@ async fn reconstruct_empty_session() {
     let events = result["events"].as_array().unwrap();
     assert!(events.len() <= 1); // session.start or empty
     assert_eq!(result["isRunning"], false);
+    assert!(result["runId"].is_null());
     assert_eq!(result["agentPhase"], "idle");
     assert!(result["inFlight"].is_null());
     assert_eq!(result["hasMoreEvents"], false);
@@ -1517,6 +1518,7 @@ async fn reconstruct_running_agent_has_inflight() {
         .unwrap();
 
     assert_eq!(result["isRunning"], true);
+    assert_eq!(result["runId"], "run_1");
     assert!(!result["inFlight"].is_null());
     assert!(result["inFlight"]["contentSequence"].is_array());
     assert!(result["inFlight"]["streaming"].is_object());

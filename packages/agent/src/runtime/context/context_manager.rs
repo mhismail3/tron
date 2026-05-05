@@ -104,13 +104,13 @@ impl ContextManager {
         });
 
         // Filter tool definitions for token estimation accuracy. Local models
-        // only receive a subset of tools at turn time (see
-        // `local_policy::LOCAL_MODEL_TOOLS`), so the estimator should count
-        // only those.
+        // only receive the active profile's local tool policy at turn time, so
+        // the estimator should count only those.
         if is_local {
+            let local_tools = local_policy::local_model_tools();
             config
                 .tools
-                .retain(|t| local_policy::is_local_tool(&t.name));
+                .retain(|t| local_tools.iter().any(|name| name == &t.name));
         }
 
         let rules_content = config.rules_content.clone();
@@ -374,7 +374,7 @@ impl ContextManager {
         if let Some(api_tokens) = self.api_context_tokens {
             return api_tokens;
         }
-        let job_results = if self.is_local_model {
+        let job_results = if self.context_policy().strip_job_results() {
             0
         } else {
             self.volatile_job_results_tokens
@@ -423,6 +423,14 @@ impl ContextManager {
         self.is_local_model
     }
 
+    fn context_policy(&self) -> local_policy::ContextPolicy {
+        if self.is_local_model {
+            local_policy::ContextPolicy::local_default()
+        } else {
+            local_policy::ContextPolicy::cloud_default()
+        }
+    }
+
     #[must_use]
     /// Get the working directory (for file operations and tool context).
     pub fn get_working_directory(&self) -> &str {
@@ -460,9 +468,9 @@ impl ContextManager {
     #[must_use]
     /// Estimate skill index token count.
     ///
-    /// Returns 0 for local models since the skill index is stripped at turn time.
+    /// Returns 0 when the active context policy strips the skill index.
     pub fn estimate_skill_index_tokens(&self) -> u64 {
-        if self.is_local_model {
+        if self.context_policy().strip_skill_index() {
             return 0;
         }
         u64::from(token_estimator::estimate_rules_tokens(
@@ -473,15 +481,15 @@ impl ContextManager {
     #[must_use]
     /// Estimate token count for all loaded rules (static + dynamic).
     ///
-    /// For local models, static rules are capped at the truncation budget
-    /// since `build_turn_context` truncates them before sending.
+    /// If the active context policy truncates static rules, cap the estimate
+    /// to match what `build_turn_context` sends.
     pub fn estimate_rules_tokens(&self) -> u64 {
-        let static_rules = if self.is_local_model {
-            // Truncated to LOCAL_RULES_TRUNCATION_CHARS + suffix at turn time
-            // (see local_policy::truncate_rules_for_local). Cap the estimate
-            // to match what the model actually receives.
+        let static_rules = if self.context_policy().rules_truncation().is_some() {
+            // Truncated by the active profile's local context policy at turn
+            // time. Cap the estimate to match what the model actually
+            // receives.
             let capped = self.rules_content.as_ref().map(|r| {
-                let len = r.len().min(local_policy::LOCAL_RULES_ESTIMATION_CHARS);
+                let len = r.len().min(local_policy::rules_estimation_chars());
                 len as u64 / u64::from(CHARS_PER_TOKEN)
             });
             capped.unwrap_or(0)
@@ -511,9 +519,9 @@ impl ContextManager {
     #[must_use]
     /// Estimate memory tokens (workspace memory + session memories).
     ///
-    /// Returns 0 for local models since memory is stripped at turn time.
+    /// Returns 0 when the active context policy strips memory.
     pub fn estimate_memory_tokens(&self) -> u64 {
-        if self.is_local_model {
+        if self.context_policy().strip_memory() {
             return 0;
         }
         let base = u64::from(token_estimator::estimate_rules_tokens(
@@ -565,7 +573,11 @@ impl ContextManager {
         // Defensive coercion: local models strip job_results at turn time,
         // so tracking a non-zero estimate here would inflate compaction
         // triggers. Caller-passed values are silently ignored for local.
-        self.volatile_job_results_tokens = if self.is_local_model { 0 } else { job_results };
+        self.volatile_job_results_tokens = if self.context_policy().strip_job_results() {
+            0
+        } else {
+            job_results
+        };
         self.volatile_refreshed_at_generation = Some(self.turn_generation);
     }
 
@@ -789,7 +801,7 @@ impl ContextManager {
     /// Includes: `system_prompt`, `working_directory`, `rules_content`,
     /// `memory_content`, `dynamic_rules_context`. Callers fill in external
     /// fields (`messages`, `tools`, `skill_context`,
-    /// `job_results_context`, `server_origin`).
+    /// `job_results_context`, `hook_context`, `server_origin`).
     #[must_use]
     pub fn build_base_context(&self) -> crate::core::messages::Context {
         crate::core::messages::Context {
@@ -805,6 +817,7 @@ impl ContextManager {
             skill_removal_context: None,
             job_results_context: None,
             dynamic_rules_context: self.get_dynamic_rules_content().map(String::from),
+            hook_context: None,
             server_origin: None,
         }
     }
@@ -880,7 +893,7 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
         self.manager.volatile_skill_removal_tokens
     }
     fn get_volatile_job_results_tokens(&self) -> u64 {
-        if self.manager.is_local_model {
+        if self.manager.context_policy().strip_job_results() {
             0
         } else {
             self.manager.volatile_job_results_tokens

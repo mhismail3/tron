@@ -219,17 +219,20 @@ Pagination: older history is loaded on demand via `beforeSequence`, passing the
 
 The New Session sheet keeps shortcut paths separate from the standard workspace
 setup. Quick Chat and Claude Code import sit in a compact shortcut row at the
-top. Quick Chat creates `source: "chat"` sessions with the same workspace
-resolution used by the floating button long-press path: explicit quick-session
-workspace, current session, most recent session, then the server default. The
-main setup section is separated by a thin divider and contains recent workspace
-pills, the workspace picker, model picker, git worktree isolation when the
-selected folder is a repo, and optional GitHub cloning. The toolbar Create
-button starts a normal workspace session without cloning; Clone GitHub clones
-into the selected workspace and starts in the cloned repository. Imports
-preserve the imported model and do not force the sheet's selected model. While
-switching workspaces, the worktree card keeps its previous visibility until the
-new git-repo probe resolves, then animates any actual appear/disappear change.
+top. Quick Chat applies a sheet preset instead of immediately creating a
+session: it resolves the quick-session workspace, selects the chat profile mode,
+and restores the default cloud model.
+The main setup section is separated by a thin divider and contains recent
+workspace pills, a profile-mode card (`Normal`, `Quick Chat`, `Local`), the
+workspace picker, model picker, git worktree isolation for repo-backed default
+sessions, and optional GitHub cloning. Selecting a local provider model forces
+Local mode, and selecting Normal or Quick Chat from Local restores the default
+cloud model. The toolbar Create button starts the currently configured profile
+mode; Clone GitHub clones into the selected workspace and starts in the cloned
+repository when not in Quick Chat mode. Imports preserve
+the imported model and do not force the sheet's selected model. While switching
+workspaces, the worktree card keeps its previous visibility until the new
+git-repo probe resolves, then animates any actual appear/disappear change.
 
 ### Agent Control Sheet
 

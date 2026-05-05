@@ -116,7 +116,8 @@ final class ContentViewCoordinator {
                     workingDirectory: workspace,
                     model: dependencies.defaultModel,
                     title: "Chat",
-                    source: "chat"
+                    source: "chat",
+                    profile: "chat"
                 )
 
                 try await eventStoreManager.cacheNewSession(
@@ -124,7 +125,8 @@ final class ContentViewCoordinator {
                     workspaceId: workspace,
                     model: result.model,
                     workingDirectory: workspace,
-                    source: "chat"
+                    source: "chat",
+                    profile: "chat"
                 )
 
                 await MainActor.run {

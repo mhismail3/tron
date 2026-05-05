@@ -26,6 +26,7 @@ pub(super) struct CreateSessionInTxOptions<'a> {
     pub provider: Option<&'a str>,
     pub origin: Option<&'a str>,
     pub source: Option<&'a str>,
+    pub profile: Option<&'a str>,
     pub use_worktree: Option<bool>,
 }
 
@@ -55,6 +56,7 @@ pub(super) fn create_session_in_tx(
             spawn_task: None,
             origin: opts.origin,
             source: opts.source,
+            profile: opts.profile,
             use_worktree: opts.use_worktree,
         },
     )?;
@@ -85,6 +87,7 @@ pub(super) fn create_session_in_tx(
         "workingDirectory": opts.workspace_path,
         "model": opts.model,
         "provider": provider,
+        "profile": session.profile.clone(),
     });
     let event = SessionEvent {
         id: event_id,
@@ -216,6 +219,7 @@ impl EventStore {
             origin,
             source,
             None,
+            None,
         )
     }
 
@@ -265,6 +269,7 @@ impl EventStore {
                     provider: None,
                     origin: opts.origin,
                     source: opts.source,
+                    profile: None,
                     use_worktree: None,
                 },
             )?;
@@ -352,6 +357,7 @@ impl EventStore {
         provider: Option<&str>,
         origin: Option<&str>,
         source: Option<&str>,
+        profile: Option<&str>,
         use_worktree: Option<bool>,
     ) -> Result<CreateSessionResult> {
         self.with_global_write_lock(|| {
@@ -367,6 +373,7 @@ impl EventStore {
                     provider,
                     origin,
                     source,
+                    profile,
                     use_worktree,
                 },
             )?;
@@ -409,6 +416,7 @@ impl EventStore {
                     spawn_task: None,
                     origin: source_session.origin.as_deref(),
                     source: None,
+                    profile: Some(source_session.profile.as_str()),
                     use_worktree: None,
                 },
             )?;

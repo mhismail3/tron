@@ -349,6 +349,7 @@ mod tests {
                         spawn_type: Some("tool"),
                         spawn_task: Some("test"),
                         origin: None,
+                        profile: None,
                         source: None,
                         use_worktree: None,
                     },

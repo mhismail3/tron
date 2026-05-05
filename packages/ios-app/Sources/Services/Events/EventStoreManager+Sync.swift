@@ -143,6 +143,7 @@ extension EventStoreManager {
         session.isFork = info.isFork
         session.serverOrigin = serverOrigin
         session.source = info.source
+        session.profile = info.profile
         session.isProcessing = info.isRunning ?? false
         if let serverLines = info.activityLines {
             session.lastActivityLines = serverLines.map { $0.toActivityLine() }
@@ -180,6 +181,7 @@ extension EventStoreManager {
         session.isFork = serverInfo.isFork
         session.serverOrigin = serverOrigin
         session.source = serverInfo.source ?? existing.source
+        session.profile = serverInfo.profile ?? existing.profile
         session.isProcessing = serverInfo.isRunning ?? existing.isProcessing
         if let serverLines = serverInfo.activityLines {
             session.lastActivityLines = serverLines.map { $0.toActivityLine() }

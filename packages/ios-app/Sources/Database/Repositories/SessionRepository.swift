@@ -26,8 +26,8 @@ final class SessionRepository: @unchecked Sendable {
                  working_directory, created_at, last_activity_at, archived_at, event_count,
                  message_count, input_tokens, output_tokens, last_turn_input_tokens,
                  cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                 activity_lines_json, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 activity_lines_json, source, profile)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
 
             var stmt: OpaquePointer?
@@ -66,6 +66,7 @@ final class SessionRepository: @unchecked Sendable {
                 sqlite3_bind_null(stmt, 21)
             }
             sqliteBindOptionalText(stmt, 22, session.source)
+            sqliteBindOptionalText(stmt, 23, session.profile)
 
             guard sqlite3_step(stmt) == SQLITE_DONE else {
                 throw EventDatabaseError.insertFailed(sqliteErrorMessage(db))
@@ -87,7 +88,7 @@ final class SessionRepository: @unchecked Sendable {
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                       activity_lines_json, source
+                       activity_lines_json, source, profile
                 FROM sessions WHERE id = ?
             """
 
@@ -119,7 +120,7 @@ final class SessionRepository: @unchecked Sendable {
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                       activity_lines_json, source
+                       activity_lines_json, source, profile
                 FROM sessions ORDER BY last_activity_at DESC
             """
 
@@ -156,7 +157,7 @@ final class SessionRepository: @unchecked Sendable {
                            working_directory, created_at, last_activity_at, archived_at, event_count,
                            message_count, input_tokens, output_tokens, last_turn_input_tokens,
                            cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                           activity_lines_json, source
+                           activity_lines_json, source, profile
                     FROM sessions
                     WHERE server_origin = ?
                     ORDER BY last_activity_at DESC
@@ -167,7 +168,7 @@ final class SessionRepository: @unchecked Sendable {
                            working_directory, created_at, last_activity_at, archived_at, event_count,
                            message_count, input_tokens, output_tokens, last_turn_input_tokens,
                            cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
-                           activity_lines_json, source
+                           activity_lines_json, source, profile
                     FROM sessions ORDER BY last_activity_at DESC
                 """
             }
@@ -350,6 +351,7 @@ final class SessionRepository: @unchecked Sendable {
         }
 
         let source = sqliteGetOptionalText(stmt, 21)
+        let profile = sqliteGetOptionalText(stmt, 22)
 
         var session = CachedSession(
             id: id,
@@ -375,6 +377,7 @@ final class SessionRepository: @unchecked Sendable {
         )
         session.lastActivityLines = activityLines
         session.source = source
+        session.profile = profile
         return session
     }
 

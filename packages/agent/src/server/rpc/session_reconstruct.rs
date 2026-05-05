@@ -22,6 +22,7 @@
 //!   inFlight: {...}?,        // non-null only when agent is running
 //!   lastSequence: i64,       // highest sequence (includes non-persisted events)
 //!   isRunning: bool,
+//!   runId: string?,          // active run id, null when idle
 //!   metadata: {...},
 //!   pendingQueue: [...],     // queued messages not yet sent (pills on iOS)
 //! }
@@ -128,7 +129,8 @@ impl SessionReconstructService {
             .await?;
 
         // 2. Check agent status + get in-flight state (non-blocking)
-        let is_running = orchestrator.has_active_run(&session_id);
+        let run_id = orchestrator.get_run_id(&session_id);
+        let is_running = run_id.is_some();
         let in_flight = if is_running {
             let state = Self::build_in_flight_state(&orchestrator, &session_id);
             if let Some(ref s) = state {
@@ -187,6 +189,7 @@ impl SessionReconstructService {
             "inFlight": in_flight,
             "lastSequence": last_sequence,
             "isRunning": is_running,
+            "runId": run_id,
             // Note: "postProcessing" phase (between agent.complete and agent.ready) is not
             // tracked by the orchestrator, so reconnection during that brief window shows "idle".
             "agentPhase": if is_running { "processing" } else { "idle" },

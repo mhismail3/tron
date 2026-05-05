@@ -21,6 +21,9 @@ RUN_DIR="$TRON_HOME/internal/run"
 PROFILES_DIR="$TRON_HOME/profiles"
 USER_PROFILE_DIR="$PROFILES_DIR/user"
 DEFAULT_PROFILE_DIR="$PROFILES_DIR/default"
+NORMAL_PROFILE_DIR="$PROFILES_DIR/normal"
+CHAT_PROFILE_DIR="$PROFILES_DIR/chat"
+LOCAL_PROFILE_DIR="$PROFILES_DIR/local"
 SETTINGS_FILE="$USER_PROFILE_DIR/settings.json"
 CONTAINERS_FILE="$USER_PROFILE_DIR/containers.json"
 WORKSPACE_DIR="$TRON_HOME/workspace"
@@ -173,9 +176,10 @@ confirm_action() {
 
 ensure_tron_home() {
     mkdir -p "$TRON_HOME"/internal/{database,run}
-    mkdir -p "$DEFAULT_PROFILE_DIR" "$USER_PROFILE_DIR"
+    mkdir -p "$DEFAULT_PROFILE_DIR" "$NORMAL_PROFILE_DIR" "$CHAT_PROFILE_DIR" "$LOCAL_PROFILE_DIR" "$USER_PROFILE_DIR"
     mkdir -p "$USER_PROFILE_DIR/prompts"
-    mkdir -p "$DEFAULT_PROFILE_DIR"/{prompts,summarizers,subagents,providers,context,tools,settings}
+    mkdir -p "$DEFAULT_PROFILE_DIR"/{prompts,providers,context,tools,settings}
+    mkdir -p "$DEFAULT_PROFILE_DIR/prompts/processes"
     mkdir -p "$TRON_HOME"/memory/{rules,sessions}
     mkdir -p "$WORKSPACE_DIR"/{inbox,projects,automations,plans,reports,artifacts,scratch,labs,archive}
     mkdir -p "$WORKSPACE_KNOWLEDGE_DIR" "$WORKSPACE_VAULT_DIR"

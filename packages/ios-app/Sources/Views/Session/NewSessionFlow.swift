@@ -8,6 +8,7 @@ struct NewSessionCreated: Equatable, Sendable {
     let model: String
     let workingDirectory: String
     let source: String?
+    let profile: String
 }
 
 struct NewSessionCreateIntent: Equatable, Sendable {
@@ -21,6 +22,7 @@ struct NewSessionCreateIntent: Equatable, Sendable {
     let model: String
     let title: String?
     let source: String?
+    let profile: String
     let useWorktree: Bool?
 
     static func chat(workspace: String, model: String) -> NewSessionCreateIntent? {
@@ -33,6 +35,7 @@ struct NewSessionCreateIntent: Equatable, Sendable {
             model: model,
             title: "Chat",
             source: "chat",
+            profile: NewSessionProfileMode.chat.profileName,
             useWorktree: nil
         )
     }
@@ -40,6 +43,7 @@ struct NewSessionCreateIntent: Equatable, Sendable {
     static func project(
         workingDirectory: String,
         model: String,
+        profile: NewSessionProfileMode = .normal,
         useWorktreeOverride: Bool?
     ) -> NewSessionCreateIntent? {
         let workingDirectory = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -51,23 +55,128 @@ struct NewSessionCreateIntent: Equatable, Sendable {
             model: model,
             title: nil,
             source: nil,
+            profile: profile.profileName,
             useWorktree: useWorktreeOverride
         )
     }
 }
 
-enum NewSessionChatStartAction: Equatable, Sendable {
-    case create(NewSessionCreateIntent)
+enum NewSessionQuickChatPresetAction: Equatable, Sendable {
+    case configure(workspace: String)
     case selectWorkspace
-    case waitForModel
 
-    static func resolve(quickWorkspace: String, model: String) -> NewSessionChatStartAction {
+    static func resolve(quickWorkspace: String) -> NewSessionQuickChatPresetAction {
         let workspace = quickWorkspace.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !workspace.isEmpty else { return .selectWorkspace }
-        guard let intent = NewSessionCreateIntent.chat(workspace: workspace, model: model) else {
-            return .waitForModel
+        return .configure(workspace: workspace)
+    }
+}
+
+enum NewSessionProfileMode: String, CaseIterable, Identifiable, Sendable {
+    case normal
+    case chat
+    case local
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .normal: return "Normal"
+        case .chat: return "Quick Chat"
+        case .local: return "Local"
         }
-        return .create(intent)
+    }
+
+    var shortValue: String {
+        switch self {
+        case .normal: return "Normal"
+        case .chat: return "Chat"
+        case .local: return "Local"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .normal: return "sparkles"
+        case .chat: return "bubble.left.and.bubble.right.fill"
+        case .local: return "desktopcomputer"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .normal: return .tronEmerald
+        case .chat: return .tronCyan
+        case .local: return .tronAmber
+        }
+    }
+
+    var source: String? {
+        self == .chat ? "chat" : nil
+    }
+
+    var profileName: String {
+        rawValue
+    }
+
+    var titleOverride: String? {
+        self == .chat ? "Chat" : nil
+    }
+
+    var caption: String {
+        switch self {
+        case .normal:
+            return "Normal project/workspace session."
+        case .chat:
+            return "Fast conversation without project worktree context."
+        case .local:
+            return "Local-provider mode with compact context."
+        }
+    }
+
+    static func effective(requested: NewSessionProfileMode, selectedModel: ModelInfo?) -> NewSessionProfileMode {
+        selectedModel?.isLocalProvider == true ? .local : requested
+    }
+}
+
+enum NewSessionPreferredModel: Equatable, Sendable {
+    static func resolve(
+        defaultModel: String,
+        availableModels: [ModelInfo],
+        profile: NewSessionProfileMode
+    ) -> String {
+        let selectable = availableModels.filter { !$0.isDisabled }
+        let defaultModel = defaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if profile == .local {
+            return preferredLocalModel(from: selectable)?.id
+                ?? fallbackUnknownDefaultModel(defaultModel, availableModels: availableModels)
+        }
+
+        if let defaultMatch = selectable.first(where: { $0.id == defaultModel && !$0.isLocalProvider }) {
+            return defaultMatch.id
+        }
+        if !defaultModel.isEmpty && !availableModels.contains(where: { $0.id == defaultModel }) {
+            return defaultModel
+        }
+        return selectable.first(where: { $0.recommended == true && $0.isAnthropic })?.id
+            ?? selectable.first(where: { !$0.isLocalProvider && $0.recommended == true })?.id
+            ?? selectable.first(where: { !$0.isLocalProvider })?.id
+            ?? ""
+    }
+
+    private static func preferredLocalModel(from models: [ModelInfo]) -> ModelInfo? {
+        models.first(where: { $0.isLocalProvider && $0.recommended == true })
+            ?? models.first(where: { $0.isLocalProvider })
+    }
+
+    private static func fallbackUnknownDefaultModel(
+        _ defaultModel: String,
+        availableModels: [ModelInfo]
+    ) -> String {
+        if !defaultModel.isEmpty && !availableModels.contains(where: { $0.id == defaultModel }) {
+            return defaultModel
+        }
+        return ""
     }
 }
 
@@ -130,6 +239,8 @@ struct NewSessionFlow: View {
 
     @State private var workingDirectory = ""
     @State private var selectedModel: String = ""
+    @State private var selectedProfile: NewSessionProfileMode = .normal
+    @State private var lastNonLocalProfile: NewSessionProfileMode = .normal
     @State private var creatingMode: NewSessionMode?
     @State private var errorMessage: String?
     @State private var showWorkspaceSelector = false
@@ -161,12 +272,12 @@ struct NewSessionFlow: View {
         creatingMode != nil
     }
 
-    private var canCreateProject: Bool {
-        !isCreating && NewSessionCreateIntent.project(
-            workingDirectory: workingDirectory,
-            model: selectedModel,
-            useWorktreeOverride: useWorktreeOverride
-        ) != nil
+    private var effectiveProfile: NewSessionProfileMode {
+        NewSessionProfileMode.effective(requested: selectedProfile, selectedModel: selectedModelInfo)
+    }
+
+    private var canCreateSession: Bool {
+        !isCreating && selectedModelMatchesProfile && selectedModelIsCreatable && currentCreateIntent() != nil
     }
 
     private var cloneDestinationWorkspace: String? {
@@ -174,7 +285,11 @@ struct NewSessionFlow: View {
     }
 
     private var canCloneIntoWorkspace: Bool {
-        !isCreating && cloneDestinationWorkspace != nil && !selectedModel.isEmpty
+        !isCreating
+            && effectiveProfile != .chat
+            && cloneDestinationWorkspace != nil
+            && selectedModelMatchesProfile
+            && selectedModelIsCreatable
     }
 
     /// Inferred default state of the worktree toggle, derived from the global
@@ -211,6 +326,21 @@ struct NewSessionFlow: View {
         return URL(fileURLWithPath: quickWorkspace).lastPathComponent
     }
 
+    private var selectedModelInfo: ModelInfo? {
+        availableModels.first(where: { $0.id == selectedModel })
+    }
+
+    private var selectedModelIsCreatable: Bool {
+        if let selectedModelInfo {
+            return !selectedModelInfo.isDisabled
+        }
+        return !selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var selectedModelMatchesProfile: Bool {
+        effectiveProfile != .local || selectedModelInfo?.isLocalProvider == true
+    }
+
     /// Unique workspace paths from recent sessions, ordered by most recent activity.
     private var recentWorkspaces: [(path: String, name: String)] {
         CachedSession.recentWorkspaces(from: eventStoreManager.sortedSessions)
@@ -233,9 +363,8 @@ struct NewSessionFlow: View {
                             title: "Quick Chat",
                             caption: quickWorkspaceDisplay,
                             color: .tronCyan,
-                            isBusy: creatingMode == .chat,
-                            isDisabled: isCreating || (!quickWorkspace.isEmpty && selectedModel.isEmpty),
-                            action: startChatSession
+                            isDisabled: isCreating,
+                            action: applyQuickChatPreset
                         )
 
                         NewSessionShortcutButton(
@@ -274,7 +403,7 @@ struct NewSessionFlow: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        startProjectSession(workingDirectory: workingDirectory, mode: .project)
+                        startConfiguredSession(mode: effectiveProfile == .chat ? .chat : .project)
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark")
@@ -282,8 +411,8 @@ struct NewSessionFlow: View {
                         }
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     }
-                    .foregroundStyle(canCreateProject ? .tronEmerald : .tronTextDisabled)
-                    .disabled(!canCreateProject)
+                    .foregroundStyle(canCreateSession ? .tronEmerald : .tronTextDisabled)
+                    .disabled(!canCreateSession)
                 }
             }
             .sheet(isPresented: $showWorkspaceSelector) {
@@ -298,7 +427,7 @@ struct NewSessionFlow: View {
                     currentModelId: selectedModel,
                     reasoningLevel: selectedReasoningLevel,
                     onSelect: { model in
-                        selectedModel = model.id
+                        setSelectedModel(model.id)
                     }
                 )
             }
@@ -315,7 +444,8 @@ struct NewSessionFlow: View {
                             workspaceId: workingDirectory,
                             model: model,
                             workingDirectory: workingDirectory,
-                            source: nil
+                            source: nil,
+                            profile: NewSessionProfileMode.normal.profileName
                         ))
                     }
                 )
@@ -326,7 +456,7 @@ struct NewSessionFlow: View {
                     initialDestinationPath: cloneDestinationWorkspace,
                     onCloned: { clonedPath in
                         workingDirectory = clonedPath
-                        startProjectSession(workingDirectory: clonedPath, mode: .clone)
+                        startConfiguredSession(mode: .clone)
                     }
                 )
             }
@@ -384,6 +514,12 @@ struct NewSessionFlow: View {
                 recentWorkspaceChips
             }
 
+            NewSessionProfileCard(
+                selectedProfile: effectiveProfile,
+                isDisabled: isCreating,
+                onSelect: applyProfileSelection
+            )
+
             NewSessionSetupCard(
                 icon: "folder.fill",
                 title: "Workspace",
@@ -405,7 +541,7 @@ struct NewSessionFlow: View {
                 action: { showModelPicker = true }
             )
 
-            if workspaceIsGitRepo {
+            if workspaceIsGitRepo && effectiveProfile != .chat {
                 NewSessionWorktreeCard(
                     isOn: Binding(
                         get: { effectiveUseWorktreeForUI },
@@ -502,25 +638,77 @@ struct NewSessionFlow: View {
 
     // MARK: - Actions
 
-    private func startChatSession() {
+    private func applyQuickChatPreset() {
         errorMessage = nil
-        switch NewSessionChatStartAction.resolve(quickWorkspace: quickWorkspace, model: selectedModel) {
-        case .create(let intent):
-            createSession(intent, mode: .chat)
+        switch NewSessionQuickChatPresetAction.resolve(quickWorkspace: quickWorkspace) {
+        case .configure(let workspace):
+            workingDirectory = workspace
+            selectedModel = NewSessionPreferredModel.resolve(
+                defaultModel: defaultModel,
+                availableModels: availableModels,
+                profile: .chat
+            )
+            lastNonLocalProfile = .chat
+            selectedProfile = selectedModelInfo?.isLocalProvider == true ? .local : .chat
         case .selectWorkspace:
             showWorkspaceSelector = true
-        case .waitForModel:
-            errorMessage = "Models are still loading."
         }
     }
 
-    private func startProjectSession(workingDirectory: String, mode: NewSessionMode) {
+    private func applyProfileSelection(_ profile: NewSessionProfileMode) {
         errorMessage = nil
-        guard let intent = NewSessionCreateIntent.project(
-            workingDirectory: workingDirectory,
-            model: selectedModel,
-            useWorktreeOverride: useWorktreeOverride
-        ) else {
+        if profile != .local {
+            lastNonLocalProfile = profile
+        }
+        selectedProfile = profile
+        selectedModel = NewSessionPreferredModel.resolve(
+            defaultModel: defaultModel,
+            availableModels: availableModels,
+            profile: profile
+        )
+        if profile == .local {
+            if selectedModelInfo?.isLocalProvider != true {
+                errorMessage = "No local model is available yet."
+            }
+        } else if selectedModel.isEmpty {
+            errorMessage = "No cloud model is available yet."
+        }
+        syncProfileWithSelectedModel()
+    }
+
+    private func setSelectedModel(_ model: String) {
+        selectedModel = model
+        syncProfileWithSelectedModel()
+    }
+
+    private func syncProfileWithSelectedModel() {
+        if selectedModelInfo?.isLocalProvider == true {
+            if selectedProfile != .local {
+                lastNonLocalProfile = selectedProfile
+            }
+            selectedProfile = .local
+        } else if selectedProfile == .local {
+            selectedProfile = lastNonLocalProfile
+        }
+    }
+
+    private func currentCreateIntent() -> NewSessionCreateIntent? {
+        switch effectiveProfile {
+        case .chat:
+            return NewSessionCreateIntent.chat(workspace: workingDirectory, model: selectedModel)
+        case .normal, .local:
+            return NewSessionCreateIntent.project(
+                workingDirectory: workingDirectory,
+                model: selectedModel,
+                profile: effectiveProfile,
+                useWorktreeOverride: useWorktreeOverride
+            )
+        }
+    }
+
+    private func startConfiguredSession(mode: NewSessionMode) {
+        errorMessage = nil
+        guard let intent = currentCreateIntent() else {
             if selectedModel.isEmpty {
                 errorMessage = "Models are still loading."
             } else {
@@ -528,7 +716,15 @@ struct NewSessionFlow: View {
             }
             return
         }
-        createSession(intent, mode: mode)
+        if !selectedModelIsCreatable {
+            errorMessage = "Selected model is unavailable."
+            return
+        }
+        if !selectedModelMatchesProfile {
+            errorMessage = "Choose an available local model."
+            return
+        }
+        createSession(intent, mode: effectiveProfile == .chat ? .chat : mode)
     }
 
     private func loadModels() async {
@@ -545,21 +741,19 @@ struct NewSessionFlow: View {
             await MainActor.run {
                 availableModels = models
 
-                // Set default model - prefer the passed defaultModel if valid,
-                // otherwise use the first recommended model.
-                if let defaultMatch = models.first(where: { $0.id == defaultModel }) {
-                    selectedModel = defaultMatch.id
-                } else if let recommended = models.first(where: { $0.recommended == true && $0.isAnthropic }) {
-                    selectedModel = recommended.id
-                } else if let first = models.first {
-                    selectedModel = first.id
-                }
+                selectedModel = NewSessionPreferredModel.resolve(
+                    defaultModel: defaultModel,
+                    availableModels: models,
+                    profile: selectedProfile
+                )
+                syncProfileWithSelectedModel()
 
                 isLoadingModels = false
             }
         } catch {
             await MainActor.run {
                 selectedModel = defaultModel.isEmpty ? (availableModels.first?.id ?? "") : defaultModel
+                syncProfileWithSelectedModel()
                 isLoadingModels = false
             }
         }
@@ -583,6 +777,7 @@ struct NewSessionFlow: View {
                     model: intent.model,
                     title: intent.title,
                     source: intent.source,
+                    profile: intent.profile,
                     useWorktree: intent.useWorktree
                 )
 
@@ -597,7 +792,8 @@ struct NewSessionFlow: View {
                         workspaceId: intent.workingDirectory,
                         model: result.model,
                         workingDirectory: intent.workingDirectory,
-                        source: intent.source
+                        source: intent.source,
+                        profile: intent.profile
                     ))
                     creatingMode = nil
                 }
@@ -755,6 +951,80 @@ private struct NewSessionSetupCard: View {
         .disabled(isDisabled)
         .glassEffect(
             .regular.tint(color.opacity(0.15)).interactive(),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .opacity(isDisabled ? 0.62 : 1)
+    }
+}
+
+@available(iOS 26.0, *)
+private struct NewSessionProfileCard: View {
+    let selectedProfile: NewSessionProfileMode
+    var isDisabled: Bool = false
+    let onSelect: (NewSessionProfileMode) -> Void
+
+    private var caption: String {
+        selectedProfile.caption
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                NewSessionCardIcon(systemName: "slider.horizontal.3", color: selectedProfile.color)
+
+                Text("Profile")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
+                    .foregroundStyle(selectedProfile.color)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+
+                Spacer(minLength: 10)
+
+                Text(selectedProfile.shortValue)
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                    .foregroundStyle(isDisabled ? .tronTextDisabled : selectedProfile.color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(NewSessionProfileMode.allCases) { profile in
+                    let isSelected = profile == selectedProfile
+
+                    Button {
+                        onSelect(profile)
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: profile.icon)
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+
+                            Text(profile.title)
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                        .foregroundStyle(isDisabled ? .tronTextDisabled : profile.color)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(profile.color.opacity(isSelected ? 0.22 : 0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(profile.color.opacity(isSelected ? 0.5 : 0.18), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDisabled)
+                }
+            }
+
+            NewSessionCardCaption(caption: caption)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .glassEffect(
+            .regular.tint(selectedProfile.color.opacity(0.15)),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .opacity(isDisabled ? 0.62 : 1)

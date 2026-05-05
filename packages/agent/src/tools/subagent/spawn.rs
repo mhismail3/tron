@@ -20,9 +20,9 @@ use crate::tools::utils::validation::{
     get_optional_bool, get_optional_string, get_optional_u64, validate_required_string,
 };
 
-const DEFAULT_TIMEOUT_MS: u64 = 1_800_000; // 30 minutes
-const DEFAULT_MAX_TURNS_IN_PROCESS: u32 = 50;
-const DEFAULT_MAX_TURNS_TMUX: u32 = 100;
+const FALLBACK_TIMEOUT_MS: u64 = 300_000;
+const FALLBACK_MAX_TURNS_IN_PROCESS: u32 = 50;
+const FALLBACK_MAX_TURNS_TMUX: u32 = 100;
 
 /// The `SpawnSubagent` tool launches child agent sessions.
 pub struct SpawnSubagentTool {
@@ -36,6 +36,32 @@ impl SpawnSubagentTool {
     }
 }
 
+fn process_id_for_mode(mode: &SubagentMode) -> &'static str {
+    match mode {
+        SubagentMode::InProcess => "spawnSubagent.inProcess",
+        SubagentMode::Tmux => "spawnSubagent.tmux",
+    }
+}
+
+fn process_for_mode(mode: &SubagentMode) -> Option<crate::core::profile::ProcessSpec> {
+    crate::core::profile::active_process_spec(process_id_for_mode(mode))
+}
+
+fn default_timeout_ms_for_mode(mode: &SubagentMode) -> u64 {
+    process_for_mode(mode)
+        .and_then(|process| process.timeout_ms.or(process.blocking_timeout_ms))
+        .unwrap_or(FALLBACK_TIMEOUT_MS)
+}
+
+fn default_max_turns_for_mode(mode: &SubagentMode) -> u32 {
+    process_for_mode(mode)
+        .and_then(|process| process.max_turns)
+        .unwrap_or(match mode {
+            SubagentMode::InProcess => FALLBACK_MAX_TURNS_IN_PROCESS,
+            SubagentMode::Tmux => FALLBACK_MAX_TURNS_TMUX,
+        })
+}
+
 #[async_trait]
 impl TronTool for SpawnSubagentTool {
     fn name(&self) -> &str {
@@ -47,9 +73,10 @@ impl TronTool for SpawnSubagentTool {
     }
 
     fn definition(&self) -> Tool {
+        let default_timeout = default_timeout_ms_for_mode(&SubagentMode::InProcess);
         ToolSchemaBuilder::new(
             "SpawnSubagent",
-            "Spawn an agent to handle a specific task. Blocks for up to `timeout` milliseconds (default 5 minutes). \
+            format!("Spawn an agent to handle a specific task. Blocks for up to `timeout` milliseconds (default {default_timeout} ms). \
 If the subagent completes within the timeout, the result is returned inline. If it's still running, \
 it automatically moves to the background and results are injected on your next turn.\n\n\
 **Execution Modes:**\n\
@@ -58,12 +85,13 @@ it automatically moves to the background and results are injected on your next t
 Parameters:\n\
 - **task**: The task description for the agent (required)\n\
 - **mode**: 'inProcess' (default) or 'tmux'\n\
-- **timeout**: How long to block before auto-backgrounding in ms (default: 300000 = 5 min). Set 0 to background immediately.\n\
+- **timeout**: How long to block before auto-backgrounding in ms (default: {default_timeout}). Set 0 to background immediately.\n\
 - **model**, **systemPrompt**, **deniedTools**, **denyAllTools**, **skills**, **workingDirectory**, **maxTurns**: Optional overrides\n\
 - **deniedTools**: Array of tool names to remove from the subagent's registry\n\
 - **denyAllTools**: Set true for text-only agents (removes all tools)\n\n\
 Returns (when completed within timeout):\n\
 - Full output, token usage, duration statistics, status",
+            ),
         )
         .required_property("task", json!({"type": "string", "description": "Task/prompt for the subagent"}))
         .property("mode", json!({"type": "string", "enum": ["inProcess", "tmux"], "description": "Execution mode"}))
@@ -74,7 +102,7 @@ Returns (when completed within timeout):\n\
         .property("skills", json!({"type": "array", "items": {"type": "string"}, "description": "Skills to enable"}))
         .property("workingDirectory", json!({"type": "string", "description": "Working directory"}))
         .property("maxTurns", json!({"type": "number", "description": "Maximum turns before stopping"}))
-        .property("timeout", json!({"type": "number", "description": "How long to block before auto-backgrounding, in milliseconds (default 300000 = 5 min). Set 0 to background immediately."}))
+        .property("timeout", json!({"type": "number", "description": format!("How long to block before auto-backgrounding, in milliseconds (default {default_timeout}). Set 0 to background immediately.")}))
         .property("maxDepth", json!({"type": "number", "description": "Maximum nesting depth for child subagents (0 = no children)"}))
         .build()
     }
@@ -96,16 +124,17 @@ Returns (when completed within timeout):\n\
             }
         };
 
-        let timeout_ms = get_optional_u64(&params, "timeout").unwrap_or(DEFAULT_TIMEOUT_MS);
+        let timeout_ms = get_optional_u64(&params, "timeout")
+            .unwrap_or_else(|| default_timeout_ms_for_mode(&mode));
         let blocking_timeout_ms = if timeout_ms > 0 {
             Some(timeout_ms)
         } else {
             None
         };
         let default_turns = if mode == SubagentMode::Tmux {
-            DEFAULT_MAX_TURNS_TMUX
+            default_max_turns_for_mode(&SubagentMode::Tmux)
         } else {
-            DEFAULT_MAX_TURNS_IN_PROCESS
+            default_max_turns_for_mode(&SubagentMode::InProcess)
         };
         #[allow(clippy::cast_possible_truncation)]
         let max_turns = get_optional_u64(&params, "maxTurns").map_or(default_turns, |v| v as u32);

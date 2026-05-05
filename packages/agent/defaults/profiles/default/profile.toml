@@ -1,30 +1,586 @@
-version = "1"
+# Tron default profile, schema v2.
+#
+# This file is both the managed base AgentExecutionSpec and the manual for
+# child profiles. User-facing sessions normally select one of the managed child
+# profiles: "normal", "chat", or "local". Those children inherit this full
+# spec and override only the entrypoint decisions that differ. This file is
+# loaded as TOML with strict schema validation:
+#
+# - Unknown keys fail startup/profile resolution.
+# - References to missing prompts, manifests, policies, or auth profiles fail.
+# - File references must be relative to a profile directory or to profiles/
+#   for shared auth files. Absolute paths and ".." are rejected.
+# - Tables deep-merge through inheritance. Scalars replace parent values.
+#   Arrays replace parent arrays; there is no append/remove operator in v2.
+# - Child profile file refs are resolved through the child profile first, then
+#   its parents, then the managed default.
+#
+# To create a child profile:
+#
+#   1. Create ~/.tron/profiles/<profile-name>/profile.toml.
+#   2. Start with:
+#
+#        version = "2"
+#        name = "<profile-name>"
+#        managed = false
+#        profileClass = "custom"
+#        inherits = ["default"]
+#        authProfile = "default"
+#
+#   3. Override only the keys that differ. For long prompts, place Markdown
+#      files in the child profile and point prompt fields at those relative
+#      files. For settings/UI/server values, keep managed defaults here and use
+#      sparse JSON overrides in ~/.tron/profiles/user/settings.json.
+#   4. Select it globally by writing profiles/active.toml with:
+#
+#        active = "<profile-name>"
+#
+# Common child-profile override recipes:
+#
+# - Change only chat behavior:
+#
+#        [entrypoints.chat]
+#        prompt = "prompts/chat.md"
+#
+#   Then create ~/.tron/profiles/<profile-name>/prompts/chat.md. The child
+#   entrypoint inherits all omitted policies from default.
+#
+# - Make in-process subagents shorter-lived:
+#
+#        [processes."spawnSubagent.inProcess"]
+#        timeoutMs = 120000
+#        blockingTimeoutMs = 120000
+#        maxTurns = 25
+#
+# - Give local models a different tool set:
+#
+#        [toolPolicies.localModel]
+#        allowedTools = ["Read", "Search", "Find", "WebFetch", "AskUserQuestion"]
+#
+#   Because arrays replace parent arrays, include the complete desired list.
+#
+# - Let local models see memory while still stripping skills/job results:
+#
+#        [contextPolicies.localDefault]
+#        stripMemory = false
+#
+# - Add a locked-down custom transform:
+#
+#        [processes.myTransform]
+#        kind = "transform"
+#        prompt = "prompts/processes/my-transform.md"
+#        modelPolicy = "settingsSubagent"
+#        contextPolicy = "minimalTransform"
+#        toolPolicy = "none"
+#        permissionPolicy = "lockedDown"
+#        outputContract = "plainText"
+#        auditPolicy = "default"
+#        maxTurns = 1
+#        inheritTools = false
+#
+# The adjacent files below are also part of this managed default profile:
+#
+# - prompts/*.md: main/chat/local/git workflow behavior text.
+# - prompts/processes/*.md: model-backed child process behavior.
+# - settings/defaults.json: server, provider, UI, tool, hook, memory,
+#   automation, git, MCP, and iOS-facing defaults.
+# - context/context-blocks.toml: the allowed context block ids, homes,
+#   cache classes, and provider surfaces.
+# - tools/presentation.toml: profile-owned tool presentation rules.
+# - providers/**: provider-specific prompt/presentation policy text.
+#
+# Value reference:
+#
+# - process kind: "main", "subagent", "summarizer", "hook", "automation",
+#   "toolWorker", "transform".
+# - profileClass: "base", "normal", "chat", "local", or "custom".
+# - model policy selection: "sessionDefault" uses the session/default model,
+#   "inheritParent" uses the parent process model, and "settingsSubagent" uses
+#   the configured subagent model. The schema also permits model = "..." on a
+#   policy table; use that only where the consuming runtime path supports it.
+# - model providerClass: "any", "cloud", or "local" when present.
+# - reasoning: omit to inherit model defaults, or use "none", "low", "medium",
+#   "high", "xhigh", or "max". Providers clamp unsupported values.
+# - context cache class: "foundation", "profile", "session", "turn", "none".
+# - cache behavior: "cacheIfSupported" or "noCache".
+# - provider surface: "instructions", "message", "tool", "excluded".
+# - provider systemPromptSurface: "providerDefault" or "toolClarification".
+# - output contract kind: "plainText", "plainTextList",
+#   "compactionSummary", "memoryRetention", or "toolAnswer".
+# - resultInjection ids currently used by runtime: "nextParentTurn" and
+#   "automationLedger".
+# - fallback labels currently used by runtime: "keyword", "none", "toolError",
+#   and "abortMerge".
+# - first-party tool ids include Read, Write, Edit, Bash, Search, Find,
+#   AskUserQuestion, GetConfirmation, NotifyApp, WebFetch, WebSearch, Display,
+#   ComputerUse, SpawnSubagent, ManageJob, Wait, McpSearch, and McpCall.
+
+version = "2"
 name = "default"
 managed = true
+profileClass = "base"
 inherits = []
 authProfile = "default"
 
-[prompts]
-core = "prompts/core.md"
-chat = "prompts/chat.md"
-local = "prompts/local.md"
-gitWorkflow = "prompts/git-workflow.md"
-
-[summarizers]
-compaction = "summarizers/compaction.md"
-memoryRetain = "summarizers/memory-retain.md"
-
-[subagents]
-conflictResolver = "subagents/conflict-resolver.md"
-
-[providers.openai]
-codexInstructions = "providers/openai/codex-instructions.md"
-
-[context]
-blocks = "context/context-blocks.toml"
-
-[tools]
-presentation = "tools/presentation.toml"
-
+# Profile-owned settings.
+#
+# `defaults` points at the full managed settings JSON for this profile. That
+# JSON cannot contain comments, so this TOML file explains how it participates
+# in the harness spec. External settings RPCs and the iOS settings UI remain
+# compatible: effective settings are managed defaults plus sparse user JSON at
+# ~/.tron/profiles/user/settings.json plus supported environment overrides.
+# `userOverridesProfile` names the sparse user overlay profile.
 [settings]
 defaults = "settings/defaults.json"
+userOverridesProfile = "user"
+
+# Shared built-in auth registry/store for provider credentials owned by Tron.
+#
+# `registry` is readable TOML under profiles/. `rawStore` is the protected JSON
+# secret store under profiles/ and should be mode 0600. Profiles select a
+# declared registry entry through `authProfile`; raw secrets are never inlined
+# in profile TOML. Skill-owned credentials belong in workspace/vault, not here.
+[auth]
+registry = "auth.toml"
+rawStore = "auth.json"
+
+# Entrypoints are primary user-facing harness surfaces. Runtime currently uses:
+#
+# - main: default normal-session behavior for project/workspace-scoped sessions.
+# - chat: quick chat behavior for conversational sessions that do not acquire
+#   project worktrees or workspace-scoped context.
+# - local: local-provider variant automatically selected when a local provider
+#   such as Ollama is selected. It bundles the local prompt, stripped/truncated
+#   context policy, and local tool policy.
+# - gitWorkflow: merge/rebase/conflict workflow behavior.
+#
+# Each entrypoint selects one prompt and references policy ids defined later in
+# this file. For a child profile, override an entrypoint field only when that
+# surface should behave differently.
+[entrypoints.main]
+prompt = "prompts/core.md"
+modelPolicy = "sessionDefault"
+contextPolicy = "cloudDefault"
+localContextPolicy = "localDefault"
+toolPolicy = "default"
+permissionPolicy = "main"
+providerPolicy = "default"
+cachePolicy = "default"
+auditPolicy = "default"
+
+[entrypoints.chat]
+prompt = "prompts/chat.md"
+modelPolicy = "sessionDefault"
+contextPolicy = "cloudDefault"
+localContextPolicy = "localDefault"
+toolPolicy = "default"
+permissionPolicy = "main"
+providerPolicy = "default"
+cachePolicy = "default"
+auditPolicy = "default"
+
+[entrypoints.local]
+prompt = "prompts/local.md"
+modelPolicy = "sessionDefault"
+contextPolicy = "localDefault"
+toolPolicy = "localModel"
+permissionPolicy = "main"
+providerPolicy = "default"
+cachePolicy = "default"
+auditPolicy = "default"
+
+[entrypoints.gitWorkflow]
+prompt = "prompts/git-workflow.md"
+modelPolicy = "sessionDefault"
+contextPolicy = "cloudDefault"
+toolPolicy = "default"
+permissionPolicy = "main"
+providerPolicy = "default"
+cachePolicy = "default"
+auditPolicy = "default"
+
+# Processes are every harness-spawned child execution contract, model-backed or
+# otherwise. Summarizers are not separate primitives; they are processes with
+# kind = "summarizer". A process may be invoked automatically by the harness,
+# by a tool, by a hook, by automation, or by an LLM tool call.
+#
+# Process fields:
+#
+# - kind: one of the process kind values listed in the header.
+# - prompt: optional Markdown prompt ref, relative to the profile chain.
+# - modelPolicy/contextPolicy/toolPolicy/permissionPolicy/outputContract/
+#   auditPolicy: ids from policy tables below.
+# - timeoutMs: total wall-clock budget. Omit for runtime default; 0 means
+#   unbounded/background for the tmux-style subagent path.
+# - blockingTimeoutMs: how long the parent waits before backgrounding.
+# - blocking: true means caller waits by default; false means background.
+# - maxTurns: process turn budget.
+# - maxDepth: child nesting budget. Use 0 for no further children.
+# - inheritTools: whether this process starts from the parent tool registry.
+# - allowedTools: strict allowlist after inheritance/registration.
+# - deniedTools: denylist after inheritance/registration.
+# - workingDirectory: optional process cwd override.
+# - resultInjection: how results re-enter parent/workspace state.
+# - fallback: runtime fallback behavior label.
+# - audit: per-process audit switch; auditPolicy still defines what to record.
+[processes.compaction]
+kind = "summarizer"
+prompt = "prompts/processes/compaction.md"
+modelPolicy = "inheritParent"
+contextPolicy = "minimalTransform"
+toolPolicy = "none"
+permissionPolicy = "lockedDown"
+outputContract = "compactionSummary"
+auditPolicy = "default"
+timeoutMs = 30000
+blockingTimeoutMs = 30000
+blocking = true
+maxTurns = 1
+maxDepth = 0
+inheritTools = false
+reasoning = "medium"
+fallback = "keyword"
+audit = true
+
+[processes.memoryRetain]
+kind = "summarizer"
+prompt = "prompts/processes/memory-retain.md"
+modelPolicy = "settingsSubagent"
+contextPolicy = "minimalTransform"
+toolPolicy = "none"
+permissionPolicy = "lockedDown"
+outputContract = "memoryRetention"
+auditPolicy = "default"
+timeoutMs = 30000
+blockingTimeoutMs = 30000
+blocking = true
+maxTurns = 1
+maxDepth = 0
+inheritTools = false
+reasoning = "medium"
+fallback = "none"
+audit = true
+
+[processes.webFetchSummarizer]
+kind = "toolWorker"
+prompt = "prompts/processes/web-fetch-summarizer.md"
+modelPolicy = "settingsSubagent"
+contextPolicy = "minimalTransform"
+toolPolicy = "none"
+permissionPolicy = "lockedDown"
+outputContract = "toolAnswer"
+auditPolicy = "default"
+timeoutMs = 30000
+blockingTimeoutMs = 30000
+blocking = true
+maxTurns = 1
+maxDepth = 0
+inheritTools = false
+workingDirectory = "/tmp"
+fallback = "toolError"
+audit = true
+
+[processes.conflictResolver]
+kind = "subagent"
+prompt = "prompts/processes/conflict-resolver.md"
+modelPolicy = "settingsSubagent"
+contextPolicy = "cloudDefault"
+toolPolicy = "conflictResolver"
+permissionPolicy = "restrictedChild"
+outputContract = "plainText"
+auditPolicy = "default"
+timeoutMs = 900000
+blocking = false
+maxTurns = 40
+maxDepth = 0
+inheritTools = true
+allowedTools = ["Read", "Edit", "Write", "Bash"]
+fallback = "abortMerge"
+audit = true
+
+[processes."spawnSubagent.inProcess"]
+kind = "subagent"
+modelPolicy = "inheritParent"
+contextPolicy = "cloudDefault"
+toolPolicy = "subagentInherited"
+permissionPolicy = "child"
+outputContract = "plainText"
+auditPolicy = "default"
+timeoutMs = 300000
+blockingTimeoutMs = 300000
+blocking = true
+maxTurns = 50
+inheritTools = true
+resultInjection = "nextParentTurn"
+audit = true
+
+[processes."spawnSubagent.tmux"]
+kind = "subagent"
+modelPolicy = "inheritParent"
+contextPolicy = "cloudDefault"
+toolPolicy = "subagentInherited"
+permissionPolicy = "child"
+outputContract = "plainText"
+auditPolicy = "default"
+timeoutMs = 0
+blocking = false
+maxTurns = 100
+inheritTools = true
+resultInjection = "nextParentTurn"
+audit = true
+
+[processes."hooks.titleGen"]
+kind = "hook"
+modelPolicy = "settingsSubagent"
+contextPolicy = "minimalTransform"
+toolPolicy = "none"
+permissionPolicy = "lockedDown"
+outputContract = "plainText"
+auditPolicy = "default"
+timeoutMs = 5000
+blockingTimeoutMs = 5000
+blocking = true
+maxTurns = 1
+maxDepth = 0
+inheritTools = false
+audit = true
+
+[processes."hooks.branchName"]
+kind = "hook"
+modelPolicy = "settingsSubagent"
+contextPolicy = "minimalTransform"
+toolPolicy = "none"
+permissionPolicy = "lockedDown"
+outputContract = "plainText"
+auditPolicy = "default"
+timeoutMs = 5000
+blockingTimeoutMs = 5000
+blocking = true
+maxTurns = 1
+maxDepth = 0
+inheritTools = false
+audit = true
+
+[processes."hooks.suggestPrompts"]
+kind = "hook"
+modelPolicy = "settingsSubagent"
+contextPolicy = "minimalTransform"
+toolPolicy = "none"
+permissionPolicy = "lockedDown"
+outputContract = "plainTextList"
+auditPolicy = "default"
+timeoutMs = 5000
+blockingTimeoutMs = 5000
+blocking = true
+maxTurns = 1
+maxDepth = 0
+inheritTools = false
+audit = true
+
+[processes.automationRun]
+kind = "automation"
+modelPolicy = "sessionDefault"
+contextPolicy = "cloudDefault"
+toolPolicy = "unattended"
+permissionPolicy = "child"
+outputContract = "plainText"
+auditPolicy = "default"
+blocking = false
+inheritTools = true
+resultInjection = "automationLedger"
+audit = true
+
+# Model policies determine how an entrypoint/process chooses model/provider.
+#
+# selection values used today:
+#
+# - sessionDefault: use the session's chosen model/provider, falling back to
+#   the profile-owned settings defaults.
+# - inheritParent: child process uses its parent model/provider.
+# - settingsSubagent: use settings.agent.subagentModel/default provider policy.
+#
+# The schema also has optional `model` and `reasoning` fields for explicit
+# policy wiring. Use the three default selection modes below for parity unless
+# the runtime call site you are changing consumes explicit model policies.
+#
+# Example shape for an explicit policy when the consuming call site supports it:
+#
+#   [modelPolicies.myPinnedModel]
+#   selection = "explicit"
+#   model = "provider/model-id"
+#   providerClass = "cloud"
+#   reasoning = "high"
+[modelPolicies.sessionDefault]
+selection = "sessionDefault"
+providerClass = "any"
+
+[modelPolicies.inheritParent]
+selection = "inheritParent"
+providerClass = "any"
+
+[modelPolicies.settingsSubagent]
+selection = "settingsSubagent"
+providerClass = "any"
+
+# Context policies decide which context blocks are eligible and how local/cloud
+# differences are applied. The block manifest must include every block emitted
+# by the runtime, so provider payload audit can prove each block appears once on
+# the intended provider surface.
+#
+# Useful fields:
+#
+# - blocks: context block manifest relative to the profile chain.
+# - localProviders: provider ids that select this as a local policy.
+# - toolPolicy: tool policy that should accompany this context policy.
+# - stripMemory/stripSkillIndex/stripJobResults: remove those context blocks.
+# - skipPendingJobsBootstrap: avoid DB bootstrap for background result context.
+# - rulesTruncationChars/rulesTruncationSuffix: local-model rules budget.
+[contextPolicies.cloudDefault]
+blocks = "context/context-blocks.toml"
+toolPolicy = "default"
+
+[contextPolicies.localDefault]
+blocks = "context/context-blocks.toml"
+localProviders = ["ollama"]
+toolPolicy = "localModel"
+stripMemory = true
+stripSkillIndex = true
+stripJobResults = true
+skipPendingJobsBootstrap = true
+rulesTruncationChars = 500
+rulesTruncationSuffix = "\n\n[Truncated - full rules available via Read tool]"
+
+[contextPolicies.minimalTransform]
+toolPolicy = "none"
+stripMemory = true
+stripSkillIndex = true
+stripJobResults = true
+skipPendingJobsBootstrap = true
+
+# Tool policies control tool visibility and execution eligibility.
+#
+# Semantics:
+#
+# - manifest: optional tool presentation file for descriptions/schema policy.
+# - allowedTools: if present, only listed tools survive.
+# - deniedTools: listed tools are removed after allowlist/inheritance.
+# - exposeInteractiveTools: false hides user-blocking UI tools when a runtime
+#   path applies interactive-tool filtering, such as unattended jobs.
+# - removeSpawnToolsAtMaxDepth: hides child-spawn tools when depth is exhausted.
+#
+# Tool policy is not a security boundary by itself. It pairs with permission
+# policy and executor checks so hidden/denied tools cannot be called anyway.
+[toolPolicies.default]
+manifest = "tools/presentation.toml"
+exposeInteractiveTools = true
+removeSpawnToolsAtMaxDepth = true
+
+[toolPolicies.localModel]
+allowedTools = ["Read", "Write", "Edit", "Bash", "Search", "Find", "WebFetch", "AskUserQuestion"]
+exposeInteractiveTools = true
+removeSpawnToolsAtMaxDepth = true
+
+[toolPolicies.none]
+allowedTools = []
+exposeInteractiveTools = false
+removeSpawnToolsAtMaxDepth = true
+
+[toolPolicies.subagentInherited]
+exposeInteractiveTools = false
+removeSpawnToolsAtMaxDepth = true
+
+[toolPolicies.unattended]
+deniedTools = ["AskUserQuestion"]
+exposeInteractiveTools = false
+removeSpawnToolsAtMaxDepth = true
+
+[toolPolicies.conflictResolver]
+allowedTools = ["Read", "Edit", "Write", "Bash"]
+exposeInteractiveTools = false
+removeSpawnToolsAtMaxDepth = true
+
+# Permission policies describe privilege inheritance. Child processes should not
+# gain filesystem, model, or auth authority beyond their parent/profile unless a
+# future policy explicitly opts into that escalation.
+[permissionPolicies.main]
+inheritTools = true
+
+[permissionPolicies.child]
+inheritTools = true
+allowFilesystemEscalation = false
+allowModelEscalation = false
+allowAuthEscalation = false
+
+[permissionPolicies.restrictedChild]
+inheritTools = true
+allowFilesystemEscalation = false
+allowModelEscalation = false
+allowAuthEscalation = false
+
+[permissionPolicies.lockedDown]
+inheritTools = false
+allowFilesystemEscalation = false
+allowModelEscalation = false
+allowAuthEscalation = false
+
+# Provider policies adapt the resolved context/prompt to provider-specific API
+# surfaces without changing semantic content.
+#
+# - systemPromptSurface = "providerDefault" lets the adapter use the provider's
+#   normal system/developer/instruction slot.
+# - systemPromptSurface = "toolClarification" adds provider-specific guidance
+#   for providers that need extra tool-use instruction text.
+# - allowDuplicateSystemPrompt must normally remain false; true is only for a
+#   provider adapter that intentionally needs duplicate system text.
+[providerPolicies.default]
+systemPromptSurface = "providerDefault"
+cachePolicy = "default"
+allowDuplicateSystemPrompt = false
+
+[providerPolicies.openaiCodex]
+prompt = "providers/openai/codex-instructions.md"
+systemPromptSurface = "toolClarification"
+toolClarification = true
+cachePolicy = "default"
+allowDuplicateSystemPrompt = false
+
+# Cache policies are provider-independent intent. Provider adapters map these
+# values onto each provider's current capabilities. If a provider lacks an
+# equivalent cache feature, the payload content stays the same and only caching
+# becomes best-effort/uncached.
+[cachePolicies.default]
+foundation = "cacheIfSupported"
+profile = "cacheIfSupported"
+session = "cacheIfSupported"
+turn = "noCache"
+none = "noCache"
+
+# Output contracts name the result shape expected from a process. `required`
+# means invalid/missing output is treated as a process failure or fallback path.
+[outputContracts.plainText]
+kind = "plainText"
+required = true
+
+[outputContracts.plainTextList]
+kind = "plainTextList"
+required = true
+
+[outputContracts.compactionSummary]
+kind = "compactionSummary"
+required = true
+
+[outputContracts.memoryRetention]
+kind = "memoryRetention"
+required = true
+
+[outputContracts.toolAnswer]
+kind = "toolAnswer"
+required = true
+
+# Audit policy controls what is retained for replay/self-inspection. Redaction
+# is still enforced by the audit repositories and provider/auth layers; this
+# policy decides which kinds of refs/hashes/payload previews are recorded.
+[auditPolicy.default]
+enabled = true
+recordProviderPayload = true
+recordContextBlocks = true

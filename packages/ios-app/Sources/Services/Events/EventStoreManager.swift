@@ -344,6 +344,7 @@ final class EventStoreManager {
             serverOrigin: rpcClient.serverOrigin
         )
         newSession.source = result.source
+        newSession.profile = result.profile
 
         // Prepend new session (most recent first)
         sessions.insert(newSession, at: 0)

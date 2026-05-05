@@ -73,6 +73,9 @@ impl AgentFactory {
         config.subagent_max_depth = opts.subagent_max_depth;
 
         let mut registry = opts.tools;
+        let active_spec = crate::core::profile::active_execution_spec_or_default();
+        let default_tool_policy = active_spec.tool_policy("default");
+        let unattended_tool_policy = active_spec.tool_policy("unattended");
 
         // Remove denied tools (applies to both cron agent turns and subagents)
         for tool_name in &opts.denied_tools {
@@ -82,17 +85,32 @@ impl AgentFactory {
         // Unattended agent restrictions (subagents, cron, system subsessions)
         if opts.is_unattended {
             // Remove interactive tools (no user to interact with)
-            let interactive_tools: Vec<String> = registry
-                .list()
-                .iter()
-                .filter(|t| t.is_interactive())
-                .map(|t| t.name().to_owned())
-                .collect();
-            for name in &interactive_tools {
-                let _ = registry.remove(name);
+            if unattended_tool_policy
+                .and_then(|policy| policy.expose_interactive_tools)
+                .unwrap_or(false)
+                == false
+            {
+                let interactive_tools: Vec<String> = registry
+                    .list()
+                    .iter()
+                    .filter(|t| t.is_interactive())
+                    .map(|t| t.name().to_owned())
+                    .collect();
+                for name in &interactive_tools {
+                    let _ = registry.remove(name);
+                }
+            }
+            if let Some(policy) = unattended_tool_policy {
+                for name in &policy.denied_tools {
+                    let _ = registry.remove(name);
+                }
             }
             // Remove spawn tools when at max nesting depth
-            if opts.subagent_max_depth == 0 {
+            let remove_spawn_at_max_depth = unattended_tool_policy
+                .or(default_tool_policy)
+                .and_then(|policy| policy.remove_spawn_tools_at_max_depth)
+                .unwrap_or(true);
+            if remove_spawn_at_max_depth && opts.subagent_max_depth == 0 {
                 for name in &["SpawnSubagent", "Wait"] {
                     let _ = registry.remove(name);
                 }
